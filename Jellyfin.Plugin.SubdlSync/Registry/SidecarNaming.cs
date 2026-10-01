@@ -252,6 +252,81 @@ public static class SidecarNaming
     }
 
     /// <summary>
+    /// F-M240 (user decision 01.10.2026): the marker that makes a variant its OWN registered file.
+    /// <para>
+    /// A regular subtitle and its hearing-impaired variant are two independent files on disk
+    /// (<c>Movie.de.srt</c> and <c>Movie.de.sdh.srt</c>), so they must be two independent entries in
+    /// the download mark as well. Recording both as the plain language "DE" is what made one file
+    /// stand in for the other: a successful regular save closed the HI slot too, the mark was written
+    /// while the variant was absent, and every later check contradicted it — 31 items re-searched and
+    /// their sidecars rewritten in a single morning on the live library, 24 of them already handled
+    /// the evening before.
+    /// </para>
+    /// <para>
+    /// The token is the language plus this suffix, e.g. <c>DE:hi</c>. It is carried in the existing
+    /// comma-separated language list, so no schema change is needed and the readers that treat the
+    /// list as opaque (coverage, subset rule, reset) keep working unchanged.
+    /// </para>
+    /// </summary>
+    public const string HiTokenSuffix = ":hi";
+
+    /// <summary>
+    /// The mark token for one file: the language alone for a regular subtitle, the language plus
+    /// <see cref="HiTokenSuffix"/> for the hearing-impaired variant.
+    /// </summary>
+    /// <param name="language">Two or three letter language code.</param>
+    /// <param name="hearingImpaired">True for the variant.</param>
+    /// <returns>The token.</returns>
+    public static string Token(string language, bool hearingImpaired)
+        => hearingImpaired ? language + HiTokenSuffix : language;
+
+    /// <summary>True when the token names a hearing-impaired variant rather than a plain language.</summary>
+    /// <param name="token">Mark token.</param>
+    /// <returns>True for a variant token.</returns>
+    public static bool IsHiToken(string? token)
+        => !string.IsNullOrEmpty(token) && token.EndsWith(HiTokenSuffix, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The language a token speaks about — <c>DE</c> for both <c>DE</c> and <c>DE:hi</c>, so a
+    /// language-keyed verdict (the QA budget) can be looked up for either.
+    /// </summary>
+    /// <param name="token">Mark token.</param>
+    /// <returns>The language code.</returns>
+    public static string TokenLanguage(string token)
+        => IsHiToken(token) ? token.Substring(0, token.Length - HiTokenSuffix.Length) : token;
+
+    /// <summary>
+    /// Which mark tokens have file evidence next to the media file.
+    /// <para>
+    /// The regular token is present when ANY subtitle of that language is there — an HI-only file
+    /// still proves the language is covered, which is the rule the on-disk check has always used. The
+    /// variant token is present only when a hearing-impaired file is actually on disk.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaPath">Media file path.</param>
+    /// <returns>Tokens with file evidence.</returns>
+    public static HashSet<string> PresentTokens(string mediaPath)
+    {
+        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (_, lang, hi) in List(mediaPath))
+        {
+            if (lang == null)
+            {
+                // No language in the name and no detection has run: proves nothing (see Present).
+                continue;
+            }
+
+            found.Add(Token(lang, false));
+            if (hi)
+            {
+                found.Add(Token(lang, true));
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
     /// F-M240: languages whose hearing-impaired variant is absent from disk.
     /// <para>
     /// The download mark describes the language dimension, so a file that already carries its

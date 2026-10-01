@@ -54,6 +54,9 @@ public class DownloadRunSummary
     /// <summary>F-M234 (B): stored "file complete" marks that were proven wrong by the disk and dropped.</summary>
     public int MarksInvalidated { get; set; }
 
+    /// <summary>F-M240: complete marks NOT written because a required file (regular or the hearing-impaired variant) has no evidence yet. Informational — the item stays on its refetch clock.</summary>
+    public int MarksWithheld { get; set; }
+
     /// <summary>Gets or sets the number of languages reported "not available" for an item.</summary>
     public int NotAvailable { get; set; }
 
@@ -506,7 +509,7 @@ public sealed class DownloadPipeline : IDisposable
         // the saves the run would have made.
         string savedLabel = summary.IsDryRun ? "would have saved" : "saved";
         LogUtil.Normal(_logger, 
-            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing missing) | {Marks} complete marks invalidated | {Failed} failed | processed {Done}/{Queued} queued",
+            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing missing) | {Marks} complete marks invalidated | {Withheld} complete marks withheld | {Failed} failed | processed {Done}/{Queued} queued",
             summary.Downloaded,
             summary.SkippedNoCandidates,
             summary.NotAvailable,
@@ -516,6 +519,7 @@ public sealed class DownloadPipeline : IDisposable
             summary.SkippedNoId + summary.SkippedIdGaveUp,
             summary.SkippedNothingMissing,
             summary.MarksInvalidated,
+            summary.MarksWithheld,
             summary.Failed,
             idx,
             queuedTotal);
@@ -788,42 +792,55 @@ public sealed class DownloadPipeline : IDisposable
         // short-circuit on purpose: a settled item still has facts worth having.
         ObserveEmbeddedFacts(item, mediaHash);
 
-        if (Registry.IsSubtitlesDownloaded(mediaHash, TargetLanguages))
+        if (Registry.IsSubtitlesDownloaded(mediaHash, RequiredTokens(TargetLanguages)))
         {
             // F-M234 (B): "file complete" is a STORED verdict, not a fact about the disk. Before
-            // trusting it, ask the filesystem whether the evidence is still there. A stored language
+            // trusting it, ask the filesystem whether the evidence is still there. A stored file
             // whose subtitle is gone — and which SubDL did not settle as unavailable — proves the
             // mark was overtaken by a deletion (user deleted the .srt). Without this check the item
             // stays "complete" forever while the seeder keeps queuing it: it is skipped here on
             // every single run and nothing ever changes.
-            var missingNow = MissingLanguages(item, mediaPath, TargetLanguages);
-            var settledAway = missingNow
-                .Where(l => _qaFails.IsExhausted(item.Id.ToString(), l, _config.DownloadQaRetryLimit))
-                .ToList();
-            var stale = ContentHashRegistry.FindStaleDownloadedLanguages(TargetLanguages, missingNow, settledAway);
-
-            // F-M240 (user decision 28.09.2026): the mark answers for the LANGUAGE, but the HI
-            // switch asks for a FILE. Turn the switch on for a library that already has its
-            // subtitles and every item looks complete, so the HI variant is never fetched and the
-            // mark would have to be deleted by hand. Ask the disk instead: while the switch is on,
-            // a target language whose .sdh.srt is absent counts as stale, which makes the item due
-            // again and lets the second search (F-M241) deliver the variant. Asking the filesystem
-            // rather than storing a flag keeps it self-correcting — deleting the .sdh.srt makes the
-            // item due again, and turning the switch off needs no bookkeeping at all.
-            if (_config.DownloadHearingImpaired)
+            //
+            // F-M240 (user decision 01.10.2026): the question is asked PER REQUIRED FILE, not per
+            // language. `DE` and `DE:hi` are two independent tokens, so the regular subtitle and its
+            // variant are judged apart and the whole HI special case this block used to carry is gone
+            // — a missing variant is simply an open token like any other. That also ends the loop the
+            // special case caused: the old code marked the LANGUAGE stale while the regular file was
+            // present, so every pass re-searched, re-saved and re-marked an item whose sidecar was
+            // already on disk (31 items in one morning on the live library, 24 of them handled the
+            // evening before).
+            var settledLangs = MissingLanguages(item, mediaPath, TargetLanguages);
+            var fileEvidence = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.PresentTokens(mediaPath);
+            var storedHi = Registry.HearingImpairedLanguages(mediaPath); // F-M254: the registry verdict
+            var openTokens = new List<string>();
+            foreach (var l in TargetLanguages)
             {
-                // F-M254: read from the registry, not from the streams — see MissingHearingImpaired.
-                var storedHi = Registry.HearingImpairedLanguages(mediaPath);
-                var hiMissing = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
-                    .MissingHearingImpaired(TargetLanguages, storedHi)
-                    .Where(l => !settledAway.Contains(l, StringComparer.OrdinalIgnoreCase)
-                                && !_qaFails.IsExhausted(item.Id.ToString(), l, _config.DownloadQaRetryLimit))
-                    .ToList();
-                foreach (var l in hiMissing.Where(l => !stale.Contains(l, StringComparer.OrdinalIgnoreCase)))
+                // Regular file: the embedded-aware answer, because a language whose subtitle sits
+                // inside the container has no sidecar and is not missing.
+                if (settledLangs.Contains(l, StringComparer.OrdinalIgnoreCase))
                 {
-                    stale.Add(l);
+                    openTokens.Add(Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.Token(l, false));
+                }
+
+                // Variant: the FILE is what the switch asks for, so the regular subtitle never proves
+                // it. Either evidence counts — a variant file on disk, or the registry row a previous
+                // save or the uploader wrote (F-M254 reads the verdict, not the live streams).
+                if (_config.DownloadHearingImpaired
+                    && !fileEvidence.Contains(Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.Token(l, true))
+                    && !storedHi.Contains(l, StringComparer.OrdinalIgnoreCase))
+                {
+                    openTokens.Add(Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.Token(l, true));
                 }
             }
+
+            // A language SubDL settled as unavailable is not a lie by the mark — the mark is allowed
+            // to claim it without a file.
+            var stale = openTokens
+                .Where(t => !_qaFails.IsExhausted(
+                    item.Id.ToString(),
+                    Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.TokenLanguage(t),
+                    _config.DownloadQaRetryLimit))
+                .ToList();
 
             if (stale.Count == 0)
             {
@@ -837,7 +854,7 @@ public sealed class DownloadPipeline : IDisposable
             Registry.MarkAndFlush(() => Registry.InvalidateDownloadedMark(mediaHash));
             _searchTracker.ClearStamp(item.Id.ToString());
             summary.MarksInvalidated++;
-            LogUtil.Normal(_logger, "[SubDL-D] complete mark invalidated {File} — {Langs} no longer on disk; refetching this run.",
+            LogUtil.Normal(_logger, "[SubDL-D] complete mark invalidated {File} — {Tokens} no longer on disk; refetching this run.",
                 Path.GetFileName(mediaPath), string.Join(",", stale));
         }
 
@@ -1156,10 +1173,28 @@ public sealed class DownloadPipeline : IDisposable
             // F-M88c: nothing missing = file is complete for download purposes. F-M22: the mark is
             // written on request, not from a dry run — a dry run must not settle a file, or the next
             // real run finds it complete and never fetches what the dry run was asked to report.
+            // F-M240 (user decision 01.10.2026): the mark names the required FILES, so the
+            // hearing-impaired variant is its own entry and a missing variant keeps the mark from
+            // being written. The item stays on its refetch clock (F-M47) and is looked at again every
+            // interval — deliberately not a give-up.
             if (!_config.DownloadDryRun && mediaHash != null)
             {
-                Registry.MarkAndFlush(() => Registry.MarkSubtitlesDownloaded(mediaHash, TargetLanguages));
+                var openTokens = MissingTokens(targets, mediaPath);
+                if (openTokens.Count > 0)
+                {
+                    summary.MarksWithheld++;
+                    LogUtil.PerItem(
+                        _config.LogMode,
+                        _logger,
+                        "[SubDL-D] FILE NOT COMPLETE {File} — no file evidence for {Tokens}; mark withheld, retry on the refetch clock",
+                        Path.GetFileName(mediaPath),
+                        string.Join(",", openTokens));
+                    return;
+                }
+
+                Registry.MarkAndFlush(() => Registry.MarkSubtitlesDownloaded(mediaHash, RequiredTokens(targets)));
             }
+
             return;
         }
 
@@ -1972,8 +2007,29 @@ public sealed class DownloadPipeline : IDisposable
         // work away instead of only describing it.
         if (!_config.DownloadDryRun && mediaHash != null && missing.All(l => closedLangs.Contains(l)) && !_stopRun)
         {
-            Registry.MarkAndFlush(() => Registry.MarkSubtitlesDownloaded(mediaHash, TargetLanguages));
-            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] FILE COMPLETE {File} — all target languages settled", Path.GetFileName(mediaPath));
+            // F-M240 (user decision 01.10.2026): the mark names the required FILES. The
+            // hearing-impaired variant is its own token, and the loop above can only close the
+            // regular one — so a missing variant is checked here and keeps the mark from being
+            // written at all. That is what ends the loop: the refresh finds nothing to contradict,
+            // and the item stays on its refetch clock (F-M47) instead of being re-searched on every
+            // pass. Deliberately not a give-up and without expiry: a variant SubDL does not carry
+            // today is looked for again on the next refetch.
+            var openTokens = MissingTokens(targets, mediaPath);
+            if (openTokens.Count > 0)
+            {
+                summary.MarksWithheld++;
+                LogUtil.PerItem(
+                    _config.LogMode,
+                    _logger,
+                    "[SubDL-D] FILE NOT COMPLETE {File} — no file evidence for {Tokens}; mark withheld, retry on the refetch clock",
+                    Path.GetFileName(mediaPath),
+                    string.Join(",", openTokens));
+            }
+            else
+            {
+                Registry.MarkAndFlush(() => Registry.MarkSubtitlesDownloaded(mediaHash, RequiredTokens(targets)));
+                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] FILE COMPLETE {File} — all required files settled", Path.GetFileName(mediaPath));
+            }
         }
     }
 
@@ -2075,6 +2131,55 @@ public sealed class DownloadPipeline : IDisposable
         }
 
         return targets.Where(t => !present.Contains(t)).ToList();
+    }
+
+    /// <summary>
+    /// F-M240 (user decision 01.10.2026): the tokens the download mark must cover for this file.
+    /// <para>
+    /// A regular subtitle and its hearing-impaired variant are two independent files, so the mark has
+    /// to name them apart — <c>DE</c> and <c>DE:hi</c>. Recording both as the plain language is what
+    /// let one file settle the other: the regular save closed the HI slot as well, the mark was
+    /// written while the variant was absent, and the refresh contradicted it on every pass (31 items
+    /// in one morning on the live library, their sidecars rewritten although they were on disk).
+    /// </para>
+    /// <para>
+    /// While the HI switch is off no variant token exists, so the mark is written as before and
+    /// turning the switch off needs no bookkeeping at all. Deliberately no expiry and no give-up: a
+    /// variant SubDL does not carry today is looked for again on the next refetch, and this method is
+    /// a pure projection of the configuration.
+    /// </para>
+    /// </summary>
+    /// <param name="targets">Configured target languages.</param>
+    /// <returns>One token per required file.</returns>
+    private List<string> RequiredTokens(IReadOnlyList<string> targets)
+    {
+        var tokens = new List<string>(targets);
+        if (_config.DownloadHearingImpaired)
+        {
+            tokens.AddRange(targets.Select(l => Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.Token(l, true)));
+        }
+
+        return tokens;
+    }
+
+    /// <summary>
+    /// F-M240: which required tokens have no file evidence next to the media file.
+    /// <para>
+    /// Read from the disk through the shared reader, never from a stored flag: deleting the
+    /// <c>.sdh.srt</c> makes its token missing again and the item is revisited, which is exactly the
+    /// self-correcting behaviour the refresh relies on.
+    /// </para>
+    /// </summary>
+    /// <param name="targets">Configured target languages.</param>
+    /// <param name="mediaPath">Media file path.</param>
+    /// <returns>Tokens without file evidence.</returns>
+    private List<string> MissingTokens(IReadOnlyList<string> targets, string mediaPath)
+    {
+        var present = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.PresentTokens(mediaPath);
+        return RequiredTokens(targets)
+            .Where(t => !present.Contains(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     /// <summary>F-M44 weighted release score: group match × WeightGroup + token overlap × WeightToken + min(dl,500) × WeightDownload.</summary>

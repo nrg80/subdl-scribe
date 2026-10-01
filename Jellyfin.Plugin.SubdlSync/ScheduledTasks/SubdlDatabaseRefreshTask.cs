@@ -529,54 +529,53 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             // those files carried their only German and English subtitles INSIDE the container,
             // which the configuration counts as coverage (DownloadOnlyMissing). The pipeline has
             // always done it this way; the refresh now shares the rule instead of recomputing it.
-            var missingWhere = Jellyfin.Plugin.SubdlScribe.Registry.SubtitlePresence.CoveredLanguages(
+            var coveredLangs = Jellyfin.Plugin.SubdlScribe.Registry.SubtitlePresence.CoveredLanguages(
                 media.Path!, EmbeddedLanguagesForCoverage(db, registry, media));
-            var missingOnDisk = stored.Where(l => !missingWhere.Contains(l)).ToList();
+
+            // F-M240 (user decision 01.10.2026): the stored entries are TOKENS, one per required
+            // FILE — `DE` for the regular subtitle, `DE:hi` for the variant. The refresh therefore
+            // judges each of them against its own evidence and the whole HI special case that used to
+            // sit here is gone: a vanished `.sdh.srt` is simply an open token. The token also settles
+            // what the old language-keyed check could not tell apart — a file that still has its
+            // regular German but lost the variant used to look half-covered either way.
+            var fileEvidence = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.PresentTokens(media.Path!);
+            var openTokens = new List<string>();
+            foreach (var token in stored)
+            {
+                var lang = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.TokenLanguage(token);
+                if (Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHiToken(token))
+                {
+                    // The variant needs a variant file (or a stored HI verdict) — the regular file
+                    // never proves it, which is the entire point of the token.
+                    if (fileEvidence.Contains(token) || registry.HearingImpairedLanguages(media.Path!).Contains(lang, StringComparer.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                }
+                else if (coveredLangs.Contains(lang))
+                {
+                    continue; // sidecar or embedded track — coverage as the pipeline computes it
+                }
+
+                openTokens.Add(token);
+            }
+
             var qaFails = new Registry.QaFailTracker(db);
             var settledUnavailable = new List<string>();
             if (!string.IsNullOrEmpty(media.JellyfinItemId))
             {
-                // Built from EVERY stored language, not only from the ones missing where we looked:
-                // a language SubDL settled as unavailable has no file AND no track, so deriving
-                // this set from the missing list alone left it empty in exactly the case it exists
-                // for, and the mark was then treated as a lie.
-                settledUnavailable = stored
-                    .Where(l => qaFails.IsExhausted(media.JellyfinItemId!, l, Plugin.Instance?.Configuration.DownloadQaRetryLimit ?? 3))
+                // A language SubDL settled as unavailable may be claimed by the mark without a file,
+                // so it is not a lie. Asked PER TOKEN: the QA budget is keyed by language, and the
+                // variant shares its language's budget (F-M240).
+                settledUnavailable = openTokens
+                    .Where(t => qaFails.IsExhausted(
+                        media.JellyfinItemId!,
+                        Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.TokenLanguage(t),
+                        Plugin.Instance?.Configuration.DownloadQaRetryLimit ?? 3))
                     .ToList();
             }
 
-            var stale = Registry.ContentHashRegistry.FindStaleDownloadedLanguages(stored, missingOnDisk, settledUnavailable);
-
-            // F-M240 (user decision 01.10.2026): the mark answers for the LANGUAGE, but the HI switch
-            // asks for a FILE. While the switch is on, a target language whose hearing-impaired
-            // variant is gone makes the mark a lie just as a missing regular subtitle does — and the
-            // refresh is the only instance that walks the whole library regularly, so leaving the
-            // question to the pipeline meant it was never asked for an item the mark kept skipping.
-            // Same reader as the pipeline (F-M254): the stored rows, not the stream list, because
-            // Jellyfin caches its stream list and a container corrected this cycle still reads old.
-            if (Plugin.Instance?.Configuration.DownloadHearingImpaired == true)
-            {
-                var (storedHi, hiProbeUsable) = HearingImpairedLanguagesForCoverage(registry, media);
-                if (!hiProbeUsable)
-                {
-                    // No HI information at all — neither stored nor readable. Judging here would
-                    // drop the mark on a guess, which is the mistake this whole run just stopped
-                    // making (unknown ≠ deleted).
-                    LogUtil.Detail(_logger, "[SubDL-Refresh] HI check skipped for {Id} — no HI evidence readable.", media.Id);
-                }
-                else
-                {
-                    var hiMissing = Registry.SidecarNaming
-                        .MissingHearingImpaired(stored, storedHi)
-                        .Where(l => !settledUnavailable.Contains(l, StringComparer.OrdinalIgnoreCase))
-                        .ToList();
-
-                    foreach (var l in hiMissing.Where(l => !stale.Contains(l, StringComparer.OrdinalIgnoreCase)))
-                    {
-                        stale.Add(l);
-                    }
-                }
-            }
+            var stale = Registry.ContentHashRegistry.FindStaleDownloadedLanguages(stored, openTokens, settledUnavailable);
 
             if (stale.Count == 0)
             {
@@ -596,78 +595,6 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
         }
 
         return dropped;
-    }
-
-    /// <summary>
-    /// F-M240/F-M254: the languages whose hearing-impaired variant the file carries, plus whether
-    /// the answer can be trusted at all.
-    /// <para>
-    /// Two sources, because neither is complete on its own. The REGISTRY holds what earlier runs
-    /// observed, but a file the downloader has never touched has no row — and the download pipeline
-    /// fills that area immediately before it asks the same question, a courtesy the refresh cannot
-    /// rely on. The STREAM LIST holds what Jellyfin reports right now, but it is cached, so a
-    /// container the gate corrected this cycle still reads old.
-    /// </para>
-    /// <para>
-    /// <c>Usable</c> is false only when BOTH are empty AND the stream list could not be read: then
-    /// nothing is known, and the caller must not conclude that the variant is missing. A file
-    /// genuinely without any HI track has a readable, non-empty stream list and yields
-    /// <c>Usable = true</c> with an empty set — which is a verdict, not ignorance.
-    /// </para>
-    /// </summary>
-    /// <param name="registry">Content registry.</param>
-    /// <param name="media">The media row whose mark is being judged.</param>
-    /// <returns>The HI languages found, and whether that answer may be used.</returns>
-    private (HashSet<string> Languages, bool Usable) HearingImpairedLanguagesForCoverage(Registry.ContentHashRegistry registry, Data.MediaEntity media)
-    {
-        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        bool probeUsable = false;
-
-        if (!string.IsNullOrEmpty(media.Path))
-        {
-            foreach (var lang in registry.HearingImpairedLanguages(media.Path))
-            {
-                found.Add(lang);
-                probeUsable = true;
-            }
-        }
-
-        if (string.IsNullOrEmpty(media.JellyfinItemId) || !Guid.TryParse(media.JellyfinItemId, out var itemGuid))
-        {
-            return (found, probeUsable);
-        }
-
-        try
-        {
-            var streams = _mediaSourceManager.GetMediaStreams(itemGuid)?.ToList();
-            if (streams is { Count: > 0 })
-            {
-                probeUsable = true;
-                foreach (var s in streams)
-                {
-                    if (s.Type != MediaBrowser.Model.Entities.MediaStreamType.Subtitle || s.IsExternal
-                        || Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsForcedStream(s))
-                    {
-                        continue;
-                    }
-
-                    if (Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(s))
-                    {
-                        var mapped = Jellyfin.Plugin.SubdlScribe.Language.LanguageMapper.MapToSubdl(s.Language);
-                        if (mapped != null)
-                        {
-                            found.Add(mapped);
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            LogUtil.Detail(_logger, "[SubDL-Refresh] HI probe skipped for {Id}: {Msg}", media.Id, ex.Message);
-        }
-
-        return (found, probeUsable);
     }
 
     /// <summary>

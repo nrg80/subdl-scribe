@@ -673,6 +673,13 @@ The upload side follows the same rule: a forced track is removed from the upload
 
 A language already settled-as-unavailable (QA-exhausted) does not count as stale.
 
+**The download mark names FILES, not languages** (user decision 01.10.2026). A regular subtitle and its hearing-impaired variant are two independent files (`Movie.de.srt`, `Movie.de.sdh.srt`), so they are two independent entries: the language code alone for the regular file, the language plus `:hi` for the variant (`DE`, `DE:hi`). The suffix rides in the existing comma-separated language list — no schema change, and the readers that treat the list as opaque (coverage, the subset rule, the reset) keep working unchanged.
+
+Recording both under the plain language is what let one file stand in for the other. A successful regular save closed the variant's slot too, so the mark claimed a file that was not there; the refresh found that and dropped the mark — correctly — and the next run wrote it again. Measured on the live library: 31 items re-searched in one morning, 16 regular sidecars rewritten although they were already on disk, 24 items already handled the evening before.
+
+With tokens the whole special case disappears: the mark is written only when every required token has evidence, and the generic subset rule (`CoversLanguages`) answers the rest. Turning the switch on adds the variant tokens, so an item that already has its subtitles becomes due; turning it off removes them, so nothing has to be cleaned up. **No expiry and no give-up:** a variant SubDL does not carry today is looked for again on the next refetch, and the run line counts the withheld marks (`complete marks withheld`) for information only.
+
+Both readers judge per token: the download pipeline against disk plus the stored HI verdict (F-M254), the database refresh against disk per token — a vanished `.sdh.srt` is an open token like any other, and the language-keyed HI special case that used to sit in the refresh is gone.
 **F-M193a:** **No construct the database cannot translate may cross into a query.** A string-comparison overload, a helper-method call or any predicate without a database expression must be applied **outside** the query lambda: keep the indexed equality inside and move the rest to LINQ-to-objects afterwards.
 
  ```

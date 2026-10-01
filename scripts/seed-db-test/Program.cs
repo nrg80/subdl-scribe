@@ -136,6 +136,49 @@ internal static class Program
         Check("three sidecars recognized", loose.Count == 3,
               "-> " + string.Join(",", loose.Select(x => x.Lang + (x.HearingImpaired ? "/hi" : ""))));
         Check("the .sdh.srt reads as EN/HI", loose.Any(x => x.Lang == "EN" && x.HearingImpaired));
+
+        // ── B2) mark tokens: one entry per required FILE (F-M240) ────────────
+        // A regular subtitle and its variant are two files on disk, so they must be two
+        // entries in the mark. The failure this guards: both recorded as "DE", the regular
+        // save closed the variant's slot, and the mark claimed a file that was not there.
+        Section("B2) The mark names files: DE vs DE:hi (F-M240)");
+        Check("Token(DE, false) is the plain language", SidecarNaming.Token("DE", false) == "DE",
+              "-> " + SidecarNaming.Token("DE", false));
+        Check("Token(DE, true) carries the variant marker", SidecarNaming.Token("DE", true) == "DE:hi",
+              "-> " + SidecarNaming.Token("DE", true));
+        Check("a plain token is not read as a variant", !SidecarNaming.IsHiToken("DE"));
+        Check("a variant token is recognized", SidecarNaming.IsHiToken("DE:hi"));
+        Check("the marker is case-insensitive", SidecarNaming.IsHiToken("de:HI"));
+        Check("TokenLanguage(DE:hi) is DE", SidecarNaming.TokenLanguage("DE:hi") == "DE",
+              "-> " + SidecarNaming.TokenLanguage("DE:hi"));
+        Check("TokenLanguage(DE) is DE", SidecarNaming.TokenLanguage("DE") == "DE");
+
+        // PresentTokens reads the DISK: the .de.srt in this fixture carries no marker, so it
+        // proves the plain token and must NOT prove the variant. This is the assertion the old
+        // language-keyed code could not express at all.
+        var tokens = SidecarNaming.PresentTokens(media);
+        Check("the .de.srt proves the DE token", tokens.Contains("DE"));
+        Check("the .de.srt does NOT prove DE:hi", !tokens.Contains("DE:hi"),
+              "-> [" + string.Join(",", tokens.OrderBy(x => x)) + "]");
+        Check("the .en.sdh.srt proves EN:hi", tokens.Contains("EN:hi"));
+        Check("the .en.sdh.srt also proves EN (a variant is still the language)", tokens.Contains("EN"));
+
+        // The variant, once on disk, must prove its own token.
+        File.WriteAllText(Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.de.sdh.srt"),
+            "1\n00:00:01,000 --> 00:00:02,000\n[ TÜR ]\n");
+        var tokensAfter = SidecarNaming.PresentTokens(media);
+        Check("a .de.sdh.srt on disk proves DE:hi", tokensAfter.Contains("DE:hi"),
+              "-> [" + string.Join(",", tokensAfter.OrderBy(x => x)) + "]");
+        File.Delete(Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.de.sdh.srt"));
+
+        // The regression that started this: the subset rule must NOT let a plain set cover a
+        // variant requirement. "DE,EN" (regular only) must fail to satisfy "DE,DE:hi".
+        Check("a regular-only set does not cover the variant requirement",
+              !ContentHashRegistry.CoversLanguages(new[] { "DE", "EN" }, new[] { "DE", "DE:hi" }));
+        Check("a set with both covers the variant requirement",
+              ContentHashRegistry.CoversLanguages(new[] { "DE", "DE:hi", "EN" }, new[] { "DE", "DE:hi" }));
+        Check("a superset still covers a smaller requirement",
+              ContentHashRegistry.CoversLanguages(new[] { "DE", "DE:hi", "EN", "FR" }, new[] { "DE", "DE:hi" }));
         Check("the unlabeled .srt reads as EN", loose.Any(x => x.Lang == "EN" && !x.HearingImpaired));
 
         // ── D ───────────────────────────────────────────────────────────────
