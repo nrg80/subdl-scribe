@@ -81,6 +81,8 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
     public string Description => "Checks stored state against reality: removed media are cleaned up, a deleted subtitle loses its verdict, a vanished file drops its download mark. Compacts the database.";
 
     /// <inheritdoc />
+    // F-M227: every task this plugin schedules reports ONE category, so the dashboard shows one
+    // group instead of splitting the plugin's work.
     public string Category => "SubDL Scribe";
 
     /// <inheritdoc />

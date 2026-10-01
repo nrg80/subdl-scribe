@@ -40,6 +40,8 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 ///
 /// Fail-open: a malformed or unreadable block file must never wedge the plugin.
 /// </summary>
+/// F-M94h: ONE global run lock for all six state-mutating components. Overlap is never waited
+/// out: a caller that cannot acquire is refused at once and reschedules itself by the job spacing.
 public static class PipelineRunLock
 {
     /// <summary>Absolute file age after which any block file counts as abandoned.</summary>

@@ -1458,6 +1458,7 @@ public sealed class UploadPipeline
     /// Replaces the in-run bounded wait (old RateLimitWaitMinutes):
     /// no lock held for up to 2 h, the scheduler owns ALL waiting now.
     /// </summary>
+    /// F-M26b: the roll-over fire lands at the bucket roll-over + the job spacing (5-120, default 15).
     private void ScheduleHourlyFireIfExhausted(bool upload)
     {
         var rollover = _limiter.NextRollOverUtc;

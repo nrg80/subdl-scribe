@@ -101,7 +101,10 @@ public sealed class SubdlEventDispatcher : IDisposable
     private CycleDirection _eventDirection = CycleDirection.Both; // Direction requested by the armed event debounce
 
     // ── Queues (owned here, persisted) ──────────────────────────────────────
+    // F-M244: the seeder decides WHAT is to be done and hands it over in the item. The pipelines
+    // carry that order out rather than re-deriving it.
     private List<QueueItem> _uploadQueue = new();
+    // F-M244: the download side reads its languages from the item and does not answer again.
     private List<QueueItem> _downloadQueue = new();
 
     // Fix 13.09.2026 (user decision "kein Re-Extrakt-Loop"): item IDs whose
@@ -534,6 +537,7 @@ public sealed class SubdlEventDispatcher : IDisposable
                 if (accepted)
                 {
                     _logger.LogWarning(
+                        // F-M204: a running cycle is never widened; the overlap is answered by a reschedule.
                         "[SubDL-Dispatch] {Reason} rescheduled +{Spacing} min — cycle already running (dir {Running}, requested {Requested}).",
                         reason, spacing, _pendingDirection, dir);
                 }
@@ -844,6 +848,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             {
                 RequestUserStop($"stop marker {(upload ? "upload" : "download")}");
             }
+            // F-M207: single writer for the statistics row; the dry-run filter lives in StatusCounterDelta.
             ApplyStatusCounters(config, upSummary, downSummary);
             CleanupDirectionQueue(upload, queue, filter, retriesAtStart, upSummary, downSummary);
         }
@@ -993,6 +998,7 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// uploaded rows in the database, 743 in the display). Writing them here keeps both in step.
     /// </para>
     /// </summary>
+    /// F-M207: the ONE writer of the cumulative counters; a database reset resets them with it.
     private void ApplyStatusCounters(
         PluginConfiguration config,
         Pipeline.RunSummary? upSummary,

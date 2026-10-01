@@ -71,6 +71,7 @@ internal static class MediaNameParser
     /// instead of a closing class, so it could never match at all; every name then went
     /// through the "year anywhere" branch, which cuts at the year and left the opening
     /// bracket in the title ("The Pitt (" → 87 measured files).</summary>
+    // F-M252: accepts (YYYY) and [YYYY] at the tail; the opening bracket is not part of the title.
     private static readonly Regex TailYearPattern = new(
         @"[\.\s_\-\[\(]((?:19|20)\d{2})\)?\]?[\.\s_\-]?$",
         RegexOptions.Compiled);

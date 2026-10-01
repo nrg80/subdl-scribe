@@ -22,6 +22,8 @@ namespace Jellyfin.Plugin.SubdlScribe.Api
     /// maximum (500/h → ~2.4 min). Waiting out a configured rate pause is
     /// always legal; only a genuinely frozen run exceeds the grace.
     /// </summary>
+    /// F-M209: torn down on EVERY exit path, so a run that leaves on an exception leaves no timer
+    /// and no subscription behind.
     public sealed class RunWatchdog : IDisposable
     {
         private readonly CancellationTokenSource _cts = new();

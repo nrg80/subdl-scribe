@@ -28,9 +28,12 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 /// gated and need no marker — Jellyfin's own level column already labels them.
 /// </para>
 /// </summary>
+/// F-M224: the plugin's own log mode is the only authority, and every line is written at a level
+/// Jellyfin always passes.
 public static class LogUtil
 {
     /// <summary>Marker for a line shown at every level.</summary>
+    // F-M226: the level marker sits in front of the message, because the server column cannot carry it.
     public const string NormalTag = "[N] ";
 
     /// <summary>Marker for a line shown from Verbose on.</summary>
@@ -53,6 +56,8 @@ public static class LogUtil
     /// <param name="message">Message template.</param>
     /// <param name="args">Template arguments.</param>
 #pragma warning disable CA2254 // template comes from the call site by design
+    // F-M225: every line belongs to exactly ONE level, and the statistics never depend on
+    // logging; internals and diagnostics go to Detail, per-item work to PerItem.
     public static void Normal(ILogger? logger, string message, params object?[] args)
         => logger?.LogInformation(NormalTag + message, args);
 

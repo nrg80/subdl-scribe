@@ -231,6 +231,7 @@ public sealed class SubdlApiClient
                 // "message":"Rate Limit","retryAfterSeconds":22} — measured live with
                 // 613/2000 requests used and 0/50 downloads used, i.e. NOT the daily
                 // allowance. It must be respaced, never turned into a day-long stop.
+                // F-M62: a 429 naming neither variant is the conservative fallback, never the daily allowance.
                 if (string.Equals(errName, "rate_limit", StringComparison.OrdinalIgnoreCase))
                 {
                     bodyRateLimit = true;
@@ -379,6 +380,7 @@ public sealed class SubdlApiClient
     public string? Username { get; set; }
 
     /// <summary>Gets or sets the SubDL password (F-M19).</summary>
+    // F-M12: the SubDL account lives in the config; the password is never written to a log line.
     public string? Password { get; set; }
 
     /// <summary>Gets or sets the SubDL API key — preferred if set (F-M19).</summary>
@@ -1068,6 +1070,7 @@ public sealed class SubdlApiClient
     /// for forward compatibility, but deduplicate by UploadId and stop at the first page that adds
     /// no new id, so the returned list and the reported totals are truthful.
     /// </summary>
+    /// F-M193: /user/mySubtitles is NOT paginated, so the caller must count DISTINCT upload ids.
     public async Task<List<OwnSubtitleEntry>?> ListMySubtitlesAsync(CancellationToken ct, int maxPages = 10, Func<OwnSubtitleEntry, bool>? shouldStop = null)
     {
         string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");

@@ -112,6 +112,7 @@ public sealed class GlobalRateLimiter
     /// </para>
     /// </summary>
     /// <returns>Delay in milliseconds.</returns>
+    /// F-M26a: bare API calls are deterministic; only real transfers get the plus/minus 30 % band.
     public int InterCallPauseMs()
     {
         // (15.09.2026): when an explicit minimum pause is configured

@@ -58,6 +58,8 @@ public class SubdlDownloadTask : IScheduledTask
     public string Description => "Searches missing subtitles for the selected libraries on SubDL and downloads them as external .srt files.";
 
     /// <inheritdoc />
+    // F-M227: every task this plugin schedules reports ONE category, so the dashboard shows one
+    // group instead of splitting the plugin's work.
     public string Category => "SubDL Scribe";
 
     /// <inheritdoc />

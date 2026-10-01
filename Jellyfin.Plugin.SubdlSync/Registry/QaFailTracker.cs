@@ -86,6 +86,7 @@ public sealed class QaFailTracker
         // The language comparison runs in LINQ-to-objects, NOT inside the LiteDB query.
         // LiteDB cannot translate string.Equals(..., StringComparison.OrdinalIgnoreCase) and
         // emitted `(($.ItemId = @p0) AND (( = $.Language) = true))`, which failed the entire
+        // F-M193a: no construct the database cannot translate may cross into a query.
         // download cycle with "Invalid BsonExpression when converted from Linq expression".
         // Same pattern as ContentHashRegistry.GetRejectedCandidates; the ItemId index still
         // does the heavy lifting.
@@ -111,6 +112,7 @@ public sealed class QaFailTracker
         int recorded = 0;
         foreach (var id in subdlIds.Where(IsUploadId).Distinct())
         {
+            // F-M200: the verdict is burned here, keyed by item + language + SubDL id.
             _db.RejectedCandidates.Upsert(new RejectedCandidateEntity
             {
                 Id = SubdlDbContext.CandidateKey(itemId, language, id),

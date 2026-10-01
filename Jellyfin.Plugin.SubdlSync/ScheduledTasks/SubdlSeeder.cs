@@ -85,6 +85,7 @@ public sealed class QueueItem
 /// merges the snapshot into the persisted queues (retry counters and tombstones
 /// are preserved there).
 /// </summary>
+/// F-M38: persistent state is split by the kind of thing described (section 3.18).
 public sealed class SubdlSeeder
 {
     private readonly ILibraryManager _libraryManager;

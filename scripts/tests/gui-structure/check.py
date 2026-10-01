@@ -10,6 +10,9 @@
 # warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 # See the GNU General Public License for more details.
 
+# F-M273: the configuration page has a host-free structural regression check. The checks are
+# structural, not wording-dependent, so a comment rewrite cannot raise a false failure.
+# F-M270-F-M272: it asserts the refresh control, its single stamp writer and the cadences.
 """Structural checks for the configuration page (no Jellyfin host needed).
 
 Why this exists: three defects in this page were invisible in the browser and only showed up

@@ -38,8 +38,10 @@
                                 <button is="emby-button" type="button" class="raised" id="StopAllNow" style="background-color:#a4262c;border-color:#a4262c;color:#fff;">■ Stop all uploads &amp; downloads</button>
                             </div>
                         </div>
+                        <!-- F-M222: every required field is marked ONCE and states where to get the value. -->
                         <h3>Libraries (opt-in, <span class="subdl-required">Required</span>)</h3>
                         <div id="LibraryList" class="checkboxList"></div>
+                        <!-- F-M230: field descriptions state function plus default value, nothing else. -->
                         <div class="fieldDescription">Only selected libraries are processed. None: no upload or download. Default: None.</div>
 
                         <h3>Refetch interval</h3>
@@ -162,6 +164,9 @@
                                  that orders its own .emby-button rule after .block silently wins over
                                  the class; an inline style cannot be reordered away. display/width/
                                  box-sizing together give Save's exact footprint. -->
+                            <!-- F-M270: ONE page-wide refresh button at the end of the General tab reloads every live
+                            readout in one click. -->
+                            <!-- F-M53: manual run buttons and the statistics reset sit on the General tab. -->
                             <button is="emby-button" type="button" class="raised button-submit block emby-button" id="RefreshSubdlStatus" style="display:block;width:100%;box-sizing:border-box;background-color:#424242;border-color:#5a5a5a;color:rgba(255,255,255,0.85);">Refresh status</button>
                         </div>
 
@@ -615,8 +620,10 @@
         .subdl-tab-btn.active .itemLabelText { color: #fff; }
         #DownloadLangList { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 2px 12px; margin: 0.5em 0; }
         .subdl-prio { display: inline-block; min-width: 1.1em; margin-left: 4px; color: #00a4dc; font-weight: bold; }
+        /* F-M228: required fields use the accent blue, never red - red means destructive or failed. */
         .subdl-required { color: #00a4dc; font-weight: 600; font-size: 0.9em; }
         .subdl-req-inline { color: #00a4dc; font-weight: 600; font-size: 0.9em; }
+        /* F-M229: links use the page accent, not the browser default. */
         #SubdlSyncConfigPage a { color: #00a4dc; }
     `;
                 var el = document.createElement('style');
@@ -1059,6 +1066,8 @@ workers.forEach(function (w) {
 
                         // Refresh every 10s while the page stays open so live runs update it.
                         if (window.subdlStatsRefresh) { clearInterval(window.subdlStatsRefresh); }
+                        // F-M272: three cadences, none of them "10 s for everything"; every endpoint carries a
+                        // cache-buster.
                         window.subdlStatsRefresh = setInterval(function () {
                             subdlLoadStats();
                             subdlLoadWorkers();
@@ -1123,6 +1132,7 @@ workers.forEach(function (w) {
                 }
                 function subdlStartQuotaPoll() {
                     subdlStopQuotaPoll();
+                    // F-M272: the quota box has its own 60 s timer, stopped and restarted around Save.
                     subdlQuotaTimer = setInterval(subdlLoadQuota, 60000);
                 }
                 function subdlLoadQuota() {
@@ -1234,6 +1244,7 @@ workers.forEach(function (w) {
                         // click did not cause.
                         try {
                             var stamp = document.querySelector('#SubdlStatusTimestamp');
+                            // F-M271: the stamp has ONE writer - this click handler - and names the manual act.
                             if (stamp) { stamp.textContent = 'Manually refreshed ' + subdlFmtTime(new Date()); }
                         } catch (e) { /* the readouts matter more than the stamp */ }
                     });

@@ -68,6 +68,7 @@ public enum OshashRefreshMode
 /// its own diced weekly anchor; Weekly/Monthly/Yearly pick how often that anchor
 /// actually fires (every nth week), Never disables it entirely.
 /// </summary>
+/// F-M210a: `Never` disables, where no manual start button exists.
 public enum PruneMode
 {
     /// <summary>Database refresh disabled — no scheduled fires, manual dashboard runs only.</summary>
@@ -87,6 +88,7 @@ public enum PruneMode
 /// <summary>
 /// Log verbosity (F-M24a).
 /// </summary>
+/// F-M224: the plugin's own log mode, independent of the server's level.
 public enum LogLevelMode
 {
     /// <summary>Summary per run + errors.</summary>
@@ -334,6 +336,8 @@ public class PluginConfiguration : BasePluginConfiguration
     /// one rhythm for both directions — per-item refetch gap AND the scheduled
     /// cycle tick. GUI: General section. Migration: defaults to Weekly.
     /// </summary>
+    /// F-M210: every scheduled job is driven by its OWN setting; this one governs ONLY the pipeline
+    /// cycles.
     public UpdateInterval RefetchInterval { get; set; } = UpdateInterval.Weekly;
 
     /// <summary>

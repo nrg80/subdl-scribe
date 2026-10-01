@@ -24,6 +24,8 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// <summary>
 /// Central OSHash cache backed by LiteDB (F-M88c, F-M119).
 /// </summary>
+/// F-M61b: keyed by file path; a lookup validates size AND mtime and treats a mismatch as a miss,
+/// so a replaced file is re-hashed automatically.
 public sealed class OshashCache
 {
     private readonly SubdlDbContext _db;

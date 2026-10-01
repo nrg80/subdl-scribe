@@ -121,6 +121,8 @@ public static class RejectReason
 /// fields this build does not know, and writing would silently drop them.
 /// </para>
 /// </summary>
+/// F-M195b: structural changes are NOT migrated. An unrecognised schema version is ignored
+/// rather than rewritten; the database reset is the intended path.
 public class MetaEntity
 {
     /// <summary>Fixed primary key.</summary>
@@ -130,6 +132,7 @@ public class MetaEntity
     /// Structure version of this data file. Bumped by hand whenever the shape of the stored
     /// documents changes in a way an older build could not handle.
     /// </summary>
+    // F-M195: raised by hand whenever the stored shape changes; a higher value disables writing.
     public int SchemaVersion { get; set; }
 
     /// <summary>Plugin version that wrote this file last.</summary>
@@ -150,6 +153,10 @@ public class MetaEntity
 /// beneath the file rather than beside it.
 /// </para>
 /// </summary>
+/// F-M196: one record per video file, keyed by the media hash (OSHash). For a series episode
+/// the stored ids are the SHOW ids, never episode or season ids.
+/// F-M38: state is split by the kind of thing described - embeds live under their video file,
+/// sidecars carry their own record, and the file record holds path, ids and the derived aggregates.
 public class MediaEntity
 {
     /// <summary>Primary key: OSHash/media content hash (16 hex chars).</summary>
@@ -192,9 +199,11 @@ public class MediaEntity
     /// Only subtitle data travels to SubDL.
     /// </para>
     /// </summary>
+    // F-M88c: the upload-side completion mark; a file whose embedded side is complete is skipped.
     public DateTime? SubtitlesUploadedAt { get; set; }
 
     /// <summary>When the download side was last completed, together with the language set below.</summary>
+    // F-M151a: the download-side completion mark; the stored language set is part of the state.
     public DateTime? SubtitlesDownloadedAt { get; set; }
 
     /// <summary>
@@ -253,6 +262,9 @@ public abstract class SubtitleState
 /// row; conflating them is what made one rejected stream block all its siblings.
 /// </para>
 /// </summary>
+/// F-M197: one record per embedded subtitle stream, keyed by media hash + stream position.
+/// The position is the identity of a track: it has no name of its own, and two streams of one
+/// file can share a language (a normal and an SDH variant).
 public class EmbedTrackEntity : SubtitleState
 {
     /// <summary>
@@ -317,6 +329,8 @@ public static class DetectionOutcome
 /// in the identity.
 /// </para>
 /// </summary>
+/// F-M199: one record per loose .srt file, keyed by the normalized content hash (F-M186), so a
+/// sidecar stays known after a rename or a move, and two sidecars differing in text stay two rows.
 public class SidecarEntity : SubtitleState
 {
     /// <summary>Primary key: MD5 of the normalized content.</summary>
@@ -356,6 +370,8 @@ public class SidecarEntity : SubtitleState
 /// only identifier such a verdict has.
 /// </para>
 /// </summary>
+/// F-M200: one record per fetched-and-discarded candidate, keyed by item id + language + SubDL id.
+/// Its grain is "this remote release was burned for this file and language".
 public class RejectedCandidateEntity
 {
     /// <summary>Primary key: "&lt;item id&gt;|&lt;language&gt;|&lt;subdl id&gt;".</summary>

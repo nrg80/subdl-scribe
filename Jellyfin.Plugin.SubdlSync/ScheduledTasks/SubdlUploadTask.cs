@@ -60,6 +60,8 @@ public class SubdlUploadTask : IScheduledTask
     public string Description => "Uploads embedded text subtitles from the selected libraries to SubDL.";
 
     /// <inheritdoc />
+    // F-M227: every task this plugin schedules reports ONE category, so the dashboard shows one
+    // group instead of splitting the plugin's work.
     public string Category => "SubDL Scribe";
 
     /// <inheritdoc />

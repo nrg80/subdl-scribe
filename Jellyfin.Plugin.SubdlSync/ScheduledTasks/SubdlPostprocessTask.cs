@@ -39,6 +39,8 @@ public class SubdlPostprocessTask : IScheduledTask
 
     public string Description => "Cleans up rejected SubDL dashboard entries (max 5 pages per run).";
 
+    // F-M227: every task this plugin schedules reports ONE category, so the dashboard shows one
+    // group instead of splitting the plugin's work.
     public string Category => "SubDL Scribe";
 
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()

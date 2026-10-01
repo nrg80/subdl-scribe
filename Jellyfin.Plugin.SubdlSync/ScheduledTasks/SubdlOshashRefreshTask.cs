@@ -63,6 +63,8 @@ public class SubdlOshashRefreshTask : IScheduledTask
     public string Description => "Recomputes expired or fingerprint-changed OSHash cache entries (scheduler-driven, F-M119).";
 
     /// <inheritdoc />
+    // F-M227: every task this plugin schedules reports ONE category, so the dashboard shows one
+    // group instead of splitting the plugin's work.
     public string Category => "SubDL Scribe";
 
     /// <inheritdoc />

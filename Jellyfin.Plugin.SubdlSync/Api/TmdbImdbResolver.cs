@@ -1033,6 +1033,7 @@ public sealed class TmdbImdbResolver
     /// <param name="isSeries">True for tv series (episode), false for movie.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>(imdbId, tmdbId) — corrected/filled or (null,null) when unresolvable.</returns>
+    /// F-M28a: cross-checks and corrects Jellyfin's ids via TMDb whenever a key is configured.
     public async Task<(string? Imdb, string? Tmdb)> ResolveAndValidateIdsAsync(string? jfImdb, string? jfTmdb, string title, int? year, bool isSeries, CancellationToken ct)
     {
         if (!IsConfigured || AuthBroken)

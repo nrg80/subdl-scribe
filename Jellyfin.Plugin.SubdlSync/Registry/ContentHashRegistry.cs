@@ -34,6 +34,8 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// Two rules hold everywhere in this class:
 /// </para>
 /// <para>
+/// F-M194b: every area is keyed by a computed business key stored in the record's own id, never
+/// by a database-assigned auto id.
 /// <b>1. A row is written under a computed business key, never the database's auto id.</b>
 /// The previous implementation upserted <c>new SubtitleEntity { Id = 0 }</c>; LiteDB resolves an
 /// upsert by <c>_id</c>, so zero never matched and every write inserted. That produced 1277 rows
@@ -94,6 +96,8 @@ public sealed class ContentHashRegistry : IDisposable
     /// </summary>
     /// <param name="srtContent">Raw SRT content.</param>
     /// <returns>Lowercase 32-character hex hash.</returns>
+    /// F-M17c2: remote duplicate detection needs BOTH the canonical payload (F-M185) and this
+    /// function (F-M186); either one alone makes the comparison meaningless.
     public static string ComputeHash(string srtContent)
     {
         string normalized = NormalizeSrt(srtContent);
@@ -998,6 +1002,8 @@ public sealed class ContentHashRegistry : IDisposable
     /// </summary>
     /// <param name="contentHash">Content hash.</param>
     /// <returns>True when known.</returns>
+    /// F-M17z: any recorded outcome counts as known; a rejected row is as final as an uploaded one,
+    /// so a new rejection reason never needs a new state name.
     public bool IsContentKnown(string? contentHash)
     {
         if (string.IsNullOrEmpty(contentHash))

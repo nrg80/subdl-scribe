@@ -235,6 +235,8 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// Fields this plugin maintains itself (scheduler anchors, statistics). Everything else in
     /// the configuration belongs to the user.
     /// </summary>
+    // F-M201: the plugin persists ONLY these fields, patched into the file on disk; the rest of the
+    // document is preserved byte for byte.
     private static readonly string[] PluginOwnedFields =
     [
         "RandomDailyTime", "RandomWeeklyTime", "RandomMonthlyTime", "RandomMonthlyDay",
@@ -364,6 +366,8 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// card is a one-glance summary, not a feature list or an explanation of the id
     /// resolution design (that lives in F-M203/F-M219 and the README).
     /// </remarks>
+    /// F-M220/F-M221: this string and build.yaml must hold the same text, under 260 characters, and
+    /// must name both required keys. The card reads the DLL, not build.yaml.
     public override string Description => "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key.";
 
     /// <summary>
@@ -385,6 +389,8 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// in the same scheduler tick — the first occurrence in any log). The task itself is fine:
     /// started alone it completes normally.
     /// </para>
+    // F-M211: the shared database context is created under a lock; two contexts over one data file
+    // race the object mapper and one task is lost.
     private static readonly object SharedDbContextLock = new();
 
     /// <summary>

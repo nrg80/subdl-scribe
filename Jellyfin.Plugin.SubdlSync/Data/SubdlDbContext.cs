@@ -24,6 +24,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Data;
 /// F-M236: what a compaction attempt left behind. Three states, because two of them need different
 /// log lines and only one of them means the file actually got smaller.
 /// </summary>
+/// F-M214: compacted / recovered / broken, so a failed rebuild is visible instead of silent.
 public enum CompactOutcome
 {
     /// <summary>The rebuild finished; the file was released and shrunk.</summary>
@@ -66,6 +67,7 @@ public sealed class SubdlDbContext : IDisposable
     /// Structure version of the data file. Increase whenever the stored shape changes in a way an
     /// older build could not survive.
     /// </summary>
+    // F-M195: the schema marker the compatibility row carries.
     public const int CurrentSchemaVersion = 1;
 
     /// <summary>
@@ -288,6 +290,8 @@ public sealed class SubdlDbContext : IDisposable
     /// </summary>
     /// <returns>Compaction result: sizes before/after, collections rebuilt, and what became of the
     /// rebuild.</returns>
+    /// F-M214: a database refresh compacts in the same run; measured over data file plus journal,
+    /// because reporting the main file alone understates the starting size.
     public (long Before, long After, long Rebuilt, CompactOutcome Outcome) Compact()
     {
         long beforeTotal = 0;

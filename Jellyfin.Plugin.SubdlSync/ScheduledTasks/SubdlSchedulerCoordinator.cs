@@ -124,6 +124,8 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     /// why giving up is a warning, not an error. Reset on a real fire, and at the
     /// daily roll-over (see <see cref="ResetDailyRescheduleBudget"/>).
     /// </summary>
+    // F-M205: every reschedule is counted; after 16 the slot is refused. Log lines render {Limit},
+    // so raising the constant touches no message text.
     private const int MaxRescheduleAttempts = 16;
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _rescheduleCounts =
@@ -147,6 +149,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     /// <param name="slot">Slot label: download, upload, postprocess, dbrefresh, oshash, refetch.</param>
     /// <param name="reason">Why the reschedule happened (lock-busy, rate-limit, …) — log only.</param>
     /// <returns>True when another reschedule is still allowed.</returns>
+    /// F-M205: one counter per slot, cleared on a real fire and by the per-day budget reset (F-M208).
     public bool TryCountReschedule(string slot, string reason)
     {
         ResetDailyRescheduleBudget();
@@ -423,6 +426,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             // jitter applies to it. The old text claimed a quota reset with a
             // 30..300 min jitter that never happened here — misleading in the log.
             LogUtil.Normal(_logger, 
+                // F-M206: a respacing fire carries no jitter and must not claim a quota reset.
                 "[SubDL] Recovery fire scheduled ({Direction}): {FireAt:yyyy-MM-dd HH:mm} local — respaced by JobSpacingMinutes after lock-busy or rate-limit (no jitter).",
                 upload ? "upload" : "download",
                 TimeZoneInfo.ConvertTimeFromUtc(fireAt, TimeZoneInfo.Local));
