@@ -1,0 +1,22 @@
+docs: drop release-process scope from the requirements spec
+
+The spec described the project's publication route rather than what the plugin
+must do. Removed:
+
+- Non-Goals N-2 (OpenSubtitles upload) and N-4 (Multi-account rotation).
+- Section 6 "Publish Path" in full, and acceptance criterion A-8 - both named
+  the meta-repository route.
+- Section 9 "Milestones" in full, including the M6/M7 status paragraph.
+
+Also dropped the claim that the plugin is an official Jellyfin plugin ported
+from the Python pipeline: it is neither ported nor in the official catalog.
+
+Section numbers 7-10 move up to 6-8 so the headings stay consecutive, and the
+README no longer advertises a milestones section.
+
+Two entries also recorded the measurement that produced them, which the
+document's own convention assigns to the commit message: F-M219's search/multi
+year evidence and F-M190's explanation of why the library type is not trusted.
+Both keep the rule, lose the narrative.
+
+Docs only; no behaviour changed.

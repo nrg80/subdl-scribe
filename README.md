@@ -140,7 +140,7 @@ release. See [docs/RELEASE.md](docs/RELEASE.md) for the full reasoning.
 
 Beta — core upload/download pipelines run, queue persistence works, GUI is
 functional. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for the full
-functional specification, milestones and acceptance criteria.
+functional specification and acceptance criteria.
 
 Developed and tested on Linux/ARM64 (Raspberry Pi 5), pure managed code, no
 platform dependencies.

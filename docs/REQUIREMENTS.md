@@ -13,7 +13,7 @@ A requirement states **what must hold**: the rule, the constant, the reason it m
 
 ## 1. Objective
 
-Automatic upload of all embedded text subtitles from the Jellyfin library to SubDL.com — as an **official** Jellyfin plugin, ported from the existing Python pipeline.
+Automatic upload of all embedded text subtitles from the Jellyfin library to SubDL.com.
 
 **Core idea:** Jellyfin already knows every file and every stream. The plugin handles discovery, extraction, quality assurance and upload entirely within the media server — no external polling cron, no separate state management for file discovery.
 
@@ -155,8 +155,7 @@ Requirements carry a **release stage** tag:
   - The pre-migration XML totals are adopted **once**, guarded by the config flag `StatusCountersMigratedToDb`. The flag is required, not cosmetic: without it a restart after a database reset would re-import the old totals into the freshly emptied data file. It is listed in `PluginOwnedFields` so an automatic save cannot drop it.
   - The XML fields `StatusUploaded`/`StatusDownloaded`/`StatusStatsSinceUtc` remain in place, unread, so a downgrade still finds them. **Test: T26.**
 - **F-M219 (27.09.2026):** **The type-neutral TMDb search is the FIRST rung everywhere an id is resolved, and the year is checked on its RESULTS — never sent to it.**
-  - **`search/multi` ignores the year entirely.** Measured against TMDB on 27.09.2026: `year`, `first_air_date_year` and `primary_release_year` all return the byte-identical result list — `search/multi?query=The Office&year=1996` still leads with the 2005 US show. The typed endpoints DO honour it (`search/tv?query=The Office&first_air_date_year=2001` → exactly the 2001 UK show). A year parameter on the multi-search is therefore dead weight that reads as a filter while filtering nothing.
-  - **The year is applied when the hits are read:** a hit whose own date (`first_air_date` for tv, `release_date` for films) equals the year wins over the first hit; with no year-equal hit the first film/series hit is used, unchanged. Taking `hits[0]` alone picks by POPULARITY, not identity — "Fargo" resolves to the 2014 series when the item is the 1996 film, "The Office" to the US show when the item is the UK one. The fallback is required, not lenient: a Jellyfin year is often the IMPORT year (F-M217), so a list with no year match must still resolve.
+  - **The year must not be sent to `search/multi`.** It ignores the parameter entirely; a query that carries one reads as a filter while filtering nothing. The typed endpoints do honour it, which is why the typed search remains the second rung. **The year is applied when the hits are read:** a hit whose own date (`first_air_date` for tv, `release_date` for films) equals the year wins over the first hit; with no year-equal hit the first film/series hit is used, unchanged. Taking `hits[0]` alone picks by POPULARITY, not identity — "Fargo" resolves to the 2014 series when the item is the 1996 film, "The Office" to the US show when the item is the UK one. The fallback is required, not lenient: a Jellyfin year is often the IMPORT year (F-M217), so a list with no year match must still resolve.
   - **Both id-less resolution paths start type-neutral:** `DownloadPipeline`'s title rung and `SubdlSeeder.ResolveIdsOfAsync`. A typed search inherits whatever type Jellyfin guessed — the assumption F-M190 and F-M217 stopped trusting — so a name-detected series that Jellyfin typed as a `Movie` used to ask `search/movie` and could never match. The typed search stays the SECOND rung, where a known type plus the year is the sharper query. **Test: T36.**
   - **The seeder parses the file name before it asks TMDb** (same `MediaNameParser`, F-M217), so its title, type and season/episode no longer depend on the library's typing. The type TMDB reports is what the seeder returns.
 - **F-M222 (27.09.2026):** **Every required field is marked ONCE, in red, on the configuration page — and states where to get the value.**
@@ -327,8 +326,7 @@ Requirements carry a **release stage** tag:
 ### 3.9 Privacy / Anonymity
 - **F-M28 [B1]:** **IMDB ID mandatory — correct per media type.** For series strictly the series IMDB (tvshow, not episode) plus season and episode; for movies the movie IMDB. Resolution order: (1) Jellyfin metadata as-is; (2) TMDB id → IMDB via the TMDB REST API (required key, F-M203); (3) TMDB title search; (4) skip "no-imdb". Episode IMDB is never used. (The 15-min metadata wait was removed — F-M100: arrival runs go straight to the ladder.)
 - **F-M190 [B1]:** **ID resolution is type-free and TMDB-authoritative, and it is the standard path for every upload** — not an optional gate.
-  - **Type detection comes from the FILE NAME and from TMDB, never from the Jellyfin library type.** `MediaNameParser` reads the name (`S01E05`, `Season 1 Episode 5`, TV-recording stamps `Title_YYYYMMDD_HHMMSS`); when it reports a series while Jellyfin reports none, the item IS resolved as a series and the log records it. A later `search/multi` answer overrides the assumed type: **TMDB decides** whether the title is a film or a series.
-  - **Why:** an episode living in a library typed "movies" is imported by Jellyfin as a `Movie`, so class-based detection searches TMDB for a FILM named after the episode and finds nothing.
+  - **Type detection comes from the FILE NAME and from TMDB, never from the Jellyfin library type.** `MediaNameParser` reads the name (`S01E05`, `Season 1 Episode 5`, TV-recording stamps `Title_YYYYMMDD_HHMMSS`); when it reports a series while Jellyfin reports none, the item IS resolved as a series. A later `search/multi` answer overrides the assumed type: **TMDB decides** whether the title is a film or a series. The Jellyfin library type is never the source: an episode in a library typed "movies" is imported as a `Movie`, so class-based detection would search TMDB for a FILM named after the episode.
   - **ID arbitration (JF vs TMDB) with a report:** both IDs present → cross-validate via TMDB; on disagreement a **Normal-level** log line is emitted (`ID conflict for "<title>": Jellyfin says <tt…>, TMDB says <tt…> — using the TMDB id`) and **TMDB wins**. This must be visible without raising the log level.
   - **Fallback chain:** TMDB returns no IMDb → the Jellyfin ids are kept; Jellyfin carries only a TMDB id → the IMDb id is fetched from TMDB; **no IMDb resolvable at all → NO upload** (fail-closed).
   - **Upload payload preference:** IMDb + TMDB when both are known, IMDb alone when TMDB is missing. Neither id → no upload.
@@ -741,9 +739,7 @@ There is deliberately **no "settled"/"done" state.** The previous model kept a s
 
 ## 4. Non-Goals
 - N-1: Standalone downloader app or separate downloader plugin — integrated in SubDL Scribe.
-- N-2: OpenSubtitles upload
 - N-3: Transcoding/opening bitmap subtitles
-- N-4: Multi-account rotation
 - N-5: Changes to Jellyfin core
 
 ## 5. Non-Functional Requirements
@@ -756,14 +752,7 @@ There is deliberately **no "settled"/"done" state.** The previous model kept a s
 - **NF-7:** Cross-platform discipline in code: no hardcoded path separators, no P/Invoke, no case-sensitive file operations without normalization
 - **NF-8:** **Manual stop button** ("■ Stop all uploads & downloads", General tab): one click sends `DELETE /ScheduledTasks/Running/{taskId}` for BOTH directions.
 
-## 6. Publish Path (Official)
-1. Own GitHub repo based on `jellyfin-plugin-template` (CI GitHub Action, SemVer, GPLv3)
-2. Test operation on Pi-4 JF via self-hosted repository.json
-3. Feature-complete + stable 1.0 on the production library
-4. PR into the Jellyfin meta repository
-5. After merge: official catalog entry
-
-## 7. Acceptance Criteria
+## 6. Acceptance Criteria
 - **A-1:** New episode with embedded subs appears in JF → all text subs automatically extracted, QA-checked, uploaded, without manual intervention
 - **A-2:** Dry run on test library produces a complete status report without API calls
 - **A-3:** Corrupted/garbled subtitle stream is detected by QA and skipped
@@ -771,9 +760,8 @@ There is deliberately **no "settled"/"done" state.** The previous model kept a s
 - **A-5:** Upload error (simulated 5xx) → retry + "failed" status, no crash
 - **A-6:** State survives JF restart: already uploaded files are not processed again
 - **A-7:** Library scan is not blocked by running uploads (<1s in-scan overhead)
-- **A-8:** Meta-repository PR submitted (or documented why postponed)
 
-## 8. Test Loop / Acceptance Framework
+## 7. Test Loop / Acceptance Framework
 Every functional requirement (F-M*) gets at least one automated test case — unit test where possible, integration test against a real test JF instance where needed.
 
 ### Test Library (fixed fixtures)
@@ -902,21 +890,7 @@ Every functional requirement (F-M*) gets at least one automated test case — un
 
 - **T87:** the configuration page's structure and wiring hold without a Jellyfin host (F-M270–F-M273). `scripts/tests/gui-structure/check.py`, 63 checks, run standalone. **Asserted:** the Workers section and the Refresh button are INSIDE the `data-tab-content="general"` container and absent from the expert/upload/download sections (a section placed outside the containers stays visible under every tab); the timestamp element occurs exactly once, sits BEFORE the button in document order, and neither the quota loader nor the status loader writes it; `configPage.js` does not write it either; all four endpoints (stats, workers, status, quota) carry a cache-buster; `subdlReloadEverything` exists and covers quota, status, statistics and workers; no `window.subdlLoadQuota`/`window.subdlLoadStatus` reference exists (they are plain function declarations, so reading them off `window` yields `undefined` and the refresh silently skips two of the five readouts); the 10 s poll body reloads statistics AND workers; the quota loader renders both bars; the status loader renders the library rows; the refresh button's width is set inline; the default target languages read out of `PluginConfiguration.cs` are exactly `AR, EN, ES, FR, HI, ZH` and every code exists in the picker; exactly two backticks exist in the file (a third would swallow the embedded CSS/JS); every inline script block parses under `node --check`. **Negative control:** the pre-change page fails the tab-placement and the one-writer checks — measured while the Workers section still sat outside the tab containers and the second script still wrote the stamp.
 
-## 9. Milestones
-| # | Milestone | Content |
-|---|---|---|
-| M1 | Skeleton | Repo, template, empty config page, DLL runs on Pi-4 JF |
-| M2 | B1 — MVP | Core upload path: discovery, extraction, upload, dedup, skip filters, config |
-| M3 | B1 — Acceptance | Test fixtures T2, T5, T7 + release-gate run |
-| M3a | D — Download pipeline | Core download path: target languages, search, download, registry, external-stream storage |
-| M4 | B2 — Quality | QA pipeline, duplicate check, anti-sync, skip filters, status page + fixtures T1, T3, T4, T6, T8–T12 |
-| M5 | B2 — Parallel operation | Plugin on production library parallel to the Python pipeline, comparison report |
-| M6 | B3 — Expansion | ItemAdded real-time, content-hash duplicates, filter docs |
-| M7 | Publish | Polish repo, generate traceability matrix, meta PR |
-
-**Status 2026-09-30:** M1–M5 done. M6/M7 open. The persistent-state restructure (section 3.18) is implemented and live: five areas, the old `subtitles`/`search_meta` areas gone, embedded tracks under computed keys, four states in place. The upload and download acceptance runs against the full test library are the next gate.
-
-## 10. References
+## 8. References
 - Plugin template: github.com/jellyfin/jellyfin-plugin-template
 - Reference plugin (download): Jellyfin OpenSubtitles plugin
 - SubDL API: `https://api.subdl.com`
