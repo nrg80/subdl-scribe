@@ -7,9 +7,8 @@ Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 ## Requirements
 
 - Jellyfin **12.1.x** (targetAbi `12.1.0.0`)
-- A [SubDL](https://subdl.com) account
-- **SubDL API key** (required)
-- **TMDb API key** (required — without it series cannot be resolved)
+- A [SubDL](https://subdl.com) account with its **API key**
+- A **TMDb API key** — without it series cannot be resolved
 
 ## Installation
 
@@ -43,14 +42,13 @@ Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 
 Open **Dashboard → Plugins → SubDL Scribe** and fill in:
 
-1. **SubDL API key** — and your SubDL username, if you have one.
-2. **TMDb API key.**
-3. **Libraries** to scan.
-4. **Target languages** for the download side.
+1. **SubDL API key.**
+2. **SubDL username and password.**
+3. **TMDb API key.**
+4. **Libraries** to scan.
+5. **Target languages** for the download side.
 
-Save, then run the tasks **SubDL/TMDB — Subtitle Download** and **SubDL/TMDB — Subtitle Upload** from **Dashboard → Scheduled Tasks**, or wait for their schedule. Upload is off until you enable it on the Upload tab.
-
-The tab **General** holds credentials, library selection, rate limit and filters; **Upload** and **Download** hold the switches for each direction; **Expert** holds the scoring, quota and diagnostic knobs.
+Save.
 
 ## Build
 
