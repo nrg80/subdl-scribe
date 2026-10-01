@@ -343,7 +343,7 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
 
 ## 12. Content Registry and Identity
 
-- **F-M17z [B2]:** **Upload dedup respects the stored outcome:** any recorded outcome — uploaded, or rejected with any reason — counts as "known". With the four-state model of section 15 this is simply "a row exists", and a new rejection reason never needs a new state name.
+- **F-M17z [B2]:** **Upload dedup respects the stored outcome:** any recorded outcome — uploaded, or rejected with any reason — counts as "known". With the four-state model of 3.18 this is simply "a row exists", and a new rejection reason never needs a new state name.
 - **F-M243 [D]:** **The HI variant counts as present whether it is a file or an embedded track.** Both evidence sources answer the same question, and Jellyfin's own the hearing-impaired flag decides a stream — read through ONE detector (the hearing-impaired predicate) used by uploader and downloader alike.
  - A target language counts as having its HI variant when EITHER `<base>.<lang>.sdh.srt` exists on disk OR the item carries an embedded subtitle stream of that language whose the hearing-impaired flag is true. Only when both are absent is the language queued for an HI download.
  - The detector reads the flag first and falls back to the stream title (`sdh`, `hearing impaired`) — the same two sources F-M71 uses on the upload side, so both directions agree on what HI means. A title-only rule misses flagged-but-untitled streams; a flag-only rule misses libraries where MediaElch/TinyMediaManager set the title alone.
@@ -420,43 +420,43 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
 
 ## 15. Data Model and Persistence
 
-- **F-M38 [B1]:** **Persistent state split by the kind of thing described** (section 15). Embedded tracks live under their video file, keyed by media hash + stream position; sidecars are keyed by normalized content hash; the file's own record carries path, IDs, season/episode and the derived language aggregates. Both pipelines read and write the same store.
+- **F-M38 [B1]:** **Persistent state split by the kind of thing described** (section 3.18). Embedded tracks live under their video file, keyed by media hash + stream position; sidecars are keyed by normalized content hash; the file's own record carries path, IDs, season/episode and the derived language aggregates. Both pipelines read and write the same store.
 The plugin keeps its state in **one database file**, grouped into **five clearly separated areas**, each keyed by the thing it actually describes. "One file, five areas" is deliberate: the areas share a lifetime and are written by the same lock, but they must not be mixed, because a verdict about a video file, a stream position and a piece of subtitle text has three different identities.
-#### 15.0 Area 0 — Compatibility record (`meta`)
+#### 3.18.0 Area 0 — Compatibility record (`meta`)
 - **F-M195:** exactly **one** row (`_id = "db"`) describing the file itself: the schema version (integer, raised by hand whenever the stored shape changes), the plugin version that wrote it last, the Jellyfin version, and a timestamp.
  - A **lower** version logs a warning and raises the marker; no migration (F-M195b).
  - The row is written **once per context creation**, never per run: an audit record that rewrites itself every cycle is a write amplifier and tells nobody anything.
-#### 15.1 Area 1 — Media hash cache (`oshashes`)
-#### 15.2 Area 2 — Video files and their embedded tracks (`media`, `embeds`)
+#### 3.18.1 Area 1 — Media hash cache (`oshashes`)
+#### 3.18.2 Area 2 — Video files and their embedded tracks (`media`, `embeds`)
 - **F-M197:** one record per **embedded subtitle stream** in `embeds`, `_id` = `"<media hash>|<stream position>"`.
  - The key is media hash **plus position** because that is the identity of an embedded track: it has no name and no existence of its own. Two streams of one file can share a language (a normal and an SDH variant), so the language alone must never identify the row.
  - Fields: the language, the hearing-impaired flag, the content hash, the status, the reason field, the status stamp, the SubDL id (F-M198).
-#### 15.3 Area 3 — Sidecar files (`sidecars`)
+#### 3.18.3 Area 3 — Sidecar files (`sidecars`)
 - **F-M199:** one record per loose `.srt` file, `_id` = the **normalized content hash** (F-M186).
  - Content is the identity because that is what makes a sidecar an independent thing: the same subtitle stays known after the file is renamed or moved, and two sidecars sharing a language but differing in text stay two rows. The file name is stored for diagnosis only and plays **no part** in the key.
  - Fields: the shared subtitle state (F-M198), plus the file name, the path, the media hash and a copy of the parent metadata (the IMDb id, the TMDb id, the series flag, the season, the episode) so a sidecar can be judged without loading the file record.
  - Downloaded subtitles are stored here too: once fetched, the file on disk **is** a sidecar.
  - Sidecars deliberately carry **no stream position**: they have none. Terminality is therefore the outcome itself — there is no second "settled" marker to write. **Test: T19.**
-#### 15.4 Area 4 — Burned download candidates (`rejected_candidates`)
+#### 3.18.4 Area 4 — Burned download candidates (`rejected_candidates`)
 - **F-M200:** one record per fetched-and-discarded download candidate, `_id` = `"<item id>|<language>|<SubDL id>"`.
  - Its grain is neither a stream nor a piece of content but "this remote release was burned for this file and language", and SubDL's own id is the only identifier such a verdict has.
  - Fields: the reason field, its stamp. Capped at the newest 50 per file and language so a pathological candidate sequence cannot grow the store without bound. Cleared for a file and language when a download finally succeeds.
-#### 15.5 The four subtitle states (F-M198)
+#### 3.18.5 The four subtitle states (F-M198)
 A subtitle in area 2 or 3 is in exactly one of four states:
 - **uploaded** — sent to SubDL and accepted.
 - **rejected** — not accepted. The **reason** lives in its own field (the reason field), never in the state name: `duplicate-remote`, `duplicate-content`, `too-small`, `too-few-cues`, `lang-mismatch`, `bad-structure`, `runtime-mismatch`, `und-off`, `und-too-small`, `und-detection-failed`, `unmapped-language`, `duplicate-self-echo`, `candidate-rejected`.
 - **downloaded** — fetched from SubDL.
 - **pending** — nothing recorded yet. This is **never stored**: it is the absence of a row.
 There is deliberately **no "settled"/"done" state.** The previous model kept a separate settled row beside the outcome row, which duplicated every verdict and forced every reader to know both layers. "Is this position finished?" is answered by asking whether any of the three stored outcomes is present.
-#### 15.6 Key discipline (all areas)
+#### 3.18.6 Key discipline (all areas)
 - Composite keys are built in exactly one place per area (the embedded key, the candidate key) so writers and readers cannot drift apart on the key shape.
 - Every area has an index on its key; the query paths used by the pipelines are indexed as well (media hash, content hash, status, language).
-#### 15.7 Consequences for readers and writers
+#### 3.18.7 Consequences for readers and writers
 - `IsUploaded(mediaHash, language, hearingImpaired)` stays pair-level by design: it answers "do I still need to upload this language for this file", which is what the self-echo guard and the collector ask.
 - Per-position questions use the embedded lookup / the rejection reason / the terminal-position test — never a pair-level query.
 - A stream skipped **because its language is already uploaded** is recorded as **rejected with `duplicate-self-echo`**, not as "uploaded". It was not uploaded; claiming so would inflate the upload statistics.
 - Derived file aggregates (the language aggregate, the hearing-impaired aggregate) are recomputed whenever a track is written, in one place, so no caller can leave them stale.
-#### 15.8 Migration policy
+#### 3.18.8 Migration policy
 - **F-M195b:** structural changes are **not migrated**. The schema marker in area 0 makes the change visible and the database reset (F-M90) is the intended path; records from an unrecognised schema version are ignored rather than rewritten. The stored state is reconstructible from the media files, and a half-migrated store is worse than an empty one.
 
 ## 16. Logging, Status and Transparency
