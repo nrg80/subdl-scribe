@@ -5,3 +5,6 @@ obj/
 
 # Local build output (build.sh writes here; never commit binaries)
 out/
+# Scratch files (commit messages, notes) never belong in the repo
+__msg.txt
+__*.txt
