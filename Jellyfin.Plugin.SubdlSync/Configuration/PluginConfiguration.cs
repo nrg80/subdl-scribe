@@ -230,7 +230,7 @@ public class PluginConfiguration : BasePluginConfiguration
     // ─── F-M48 (user decision 08.09.2026): per-installation random schedule anchors ───
     // Diced ONCE by Plugin.DiceSchedulerConfig() when empty; never re-rolled by config
     // edits. Format: "HH:mm" (daily), "D HH:mm" with D=1..7 Mon..Sun (weekly),
-    // day number 1..28 + "HH:mm" (monthly), month number 1..12 + "HH:mm" (quarterly).
+    // day number 1..28 + "HH:mm" (monthly).
     // NOTE: an additional per-fire jitter (Random.Shared.Next(0, 31) minutes on top of the
     // diced anchor) was described here but is NOT implemented — no call site adds it. The
     // anti-herd function comes from the diced anchor itself plus the roll-over and
