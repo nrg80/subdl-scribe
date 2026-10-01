@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.157",
-        "changelog": "v12.1.12.157: The stamp above the refresh button reads \"Manually refreshed <time>\" instead of\n  \"Refreshed <time>\" - it is written by that button and nothing else, so the label now says so.\n  The second page script carried its own status loader that still wrote the line with a SERVER\n  timestamp labelled \"Last checked\"; that writer is gone, so the one-writer rule holds in both\n  files. A check fails the build if either file writes the stamp again.",
+        "version": "12.1.12.158",
+        "changelog": "v12.1.12.158: Four credentials, no partial operation.\n    The settings page enforced exactly one of the four credential fields: an empty TMDb\n    key refused the save, while an empty SubDL email, password or API key saved happily\n    and only surfaced later as a 404 from the login - and the page carried \"Required\"\n    over all three sections, so the label and the behaviour disagreed.\n    All four are now checked the same way and the empty one is named. They are not\n    alternatives, which the documentation claimed (\"username/password or API key\"): the\n    login pair authenticates the upload, the API key authenticates search, file download\n    and the quota read, and the TMDb key resolves the ids in both directions. A run\n    refuses to start without them, so the failure is one line at run start instead of a\n    404 halfway through.\n    Two switches existed for the ID gate and were read by no code path. They are removed\n    rather than wired up: they claimed the gate was optional, and it is what makes the\n    TMDb key load-bearing. With them go the branches that treated it as a flag.\n    Loose .srt files beside a media file now go through language detection before an\n    upload. A name without a language token used to be read as English on Jellyfin's\n    convention, so a German subtitle was uploaded as English. Such a file is the sidecar\n    counterpart of an 'und' stream now - same switch, same order (2 KB floor first),\n    same outcomes: switch off, too little text or no language found all mean skip, and a\n    detected language becomes the language. A sidecar whose language cannot be\n    established no longer counts as covering anything, so the language is still fetched.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.157-dev/Jellyfin.Plugin.SubdlSync_12.1.12.157.zip",
-        "checksum": "9dc5b8d29137dc1497b3bc0eadb2444b",
-        "timestamp": "2026-09-30T20:03:20Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.158-dev/Jellyfin.Plugin.SubdlSync_12.1.12.158.zip",
+        "checksum": "ece5b0194cc213259d571dcd87e38af0",
+        "timestamp": "2026-10-01T03:59:58Z"
       }
     ]
   }
