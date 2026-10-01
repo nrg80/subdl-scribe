@@ -23,11 +23,18 @@
 //   E3 a renamed sidecar keeps its row and its verdict (F-M278)
 //   F  observations never overwrite a verdict (F-M257/F-M259)
 //   G  edge cases: bitmap, forced, unlabeled, unreadable
+//   J  the OSHash VALUE, pinned against fixed vectors (F-M61b)
 //
 // What this does NOT cover: a full SubdlSeeder.Scan() pass, and therefore the rename itself —
 // RenameSidecar reads Plugin.Instance for the switch and moves a file, so it needs the host. This
 // suite covers the pure rule it calls (SidecarNaming.PlanTarget) and the row move that follows it
 // (MoveSidecarLocation). The scan loop is covered by the live test instance, not here.
+//
+// Section J pins the OSHash against literal vectors computed independently (Python, from the
+// published algorithm). Before it existed, the only assertion was `hash.Length > 0` — which passes
+// on any wrong implementation whose output merely LOOKS like a hash. Every downstream identity
+// (media rows, mark invalidation, seeder dedup, the tag-rewrite move) is keyed by this value, so a
+// wrong value breaks them all silently. Change the algorithm deliberately, never to make J green.
 //
 // Exit code 0 = all checks passed, 1 = at least one failed.
 
@@ -536,6 +543,99 @@ internal static class Program
         finally
         {
             try { Directory.Delete(idRoot, true); } catch { /* best effort */ }
+        }
+
+        // ── J ───────────────────────────────────────────────────────────────
+        Section("J) The OSHash VALUE, pinned against fixed vectors (F-M61b)");
+        Console.WriteLine("  Independent oracle: scripts/oshash-oracle/oshash_oracle.py (Python, written");
+        Console.WriteLine("  from the published algorithm, NOT from ComputeMediaHash). These literals are");
+        Console.WriteLine("  its output; the assertion below is that the shipped code agrees.");
+
+        string jDir = Path.Combine(Path.GetTempPath(), "subdl-oshash-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(jDir);
+        try
+        {
+            // (size, byte, expected) — the pattern is uniform, so the expected value is a pure
+            // function of size and byte and can be recomputed by hand from the algorithm.
+            (int Size, byte Byte, string Expected)[] vectors =
+            [
+                (8, 0x42, "848484848484848c"),
+                (65536, 0x42, "9090909090918000"),
+                (131072, 0x42, "9090909090928000"),
+                (200000, 0x42, "9090909090938d40"),
+            ];
+
+            foreach (var (size, fill, expected) in vectors)
+            {
+                string vp = Path.Combine(jDir, "v_" + size + "_" + fill.ToString("x2", System.Globalization.CultureInfo.InvariantCulture) + ".bin");
+                File.WriteAllBytes(vp, Enumerable.Repeat(fill, size).ToArray());
+                string got = ContentHashRegistry.ComputeMediaHash(vp) ?? "<null>";
+                Check(size + " bytes pinned to the independent oracle", got == expected, "-> " + got);
+            }
+
+            // The sizes either side of the 64 KiB window: these are where a wrong chunk size hides.
+            (int Size, byte Byte, string Expected)[] edges =
+            [
+                (65535, 0x42, "0c0c0c0c0c0cfb7b"),
+                (65537, 0x42, "9090909090918001"),
+                (131071, 0x42, "9090909090927fff"),
+                (131073, 0x42, "9090909090928001"),
+            ];
+
+            foreach (var (size, fill, expected) in edges)
+            {
+                string vp = Path.Combine(jDir, "e_" + size + ".bin");
+                File.WriteAllBytes(vp, Enumerable.Repeat(fill, size).ToArray());
+                string got = ContentHashRegistry.ComputeMediaHash(vp) ?? "<null>";
+                Check("window edge " + size + " bytes", got == expected, "-> " + got);
+            }
+
+            // A file that differs ONLY in the tail must hash differently: that is what makes the
+            // value usable as an identity at all.
+            string a = Path.Combine(jDir, "tail_a.bin");
+            string b = Path.Combine(jDir, "tail_b.bin");
+            var body = Enumerable.Repeat((byte)0x42, 200_000).ToArray();
+            File.WriteAllBytes(a, body);
+            var bodyB = (byte[])body.Clone();
+            bodyB[^1] = 0x43;
+            File.WriteAllBytes(b, bodyB);
+            string ha = ContentHashRegistry.ComputeMediaHash(a) ?? "<null>";
+            string hb = ContentHashRegistry.ComputeMediaHash(b) ?? "<null>";
+            Check("a one-byte tail change changes the hash", ha != hb, "-> " + ha + " vs " + hb);
+
+            // Same size, same first 64 KiB, different last window.
+            string c1 = Path.Combine(jDir, "head_same_1.bin");
+            string c2 = Path.Combine(jDir, "head_same_2.bin");
+            var first = Enumerable.Repeat((byte)0x42, 200_000).ToArray();
+            var second = (byte[])first.Clone();
+            second[^8] = 0x43;
+            File.WriteAllBytes(c1, first);
+            File.WriteAllBytes(c2, second);
+            Check("a last-window change changes the hash",
+                  ContentHashRegistry.ComputeMediaHash(c1) != ContentHashRegistry.ComputeMediaHash(c2));
+
+            // Empty file: the code refuses (chunk <= 0) rather than inventing a value.
+            string empty = Path.Combine(jDir, "empty.bin");
+            File.WriteAllBytes(empty, Array.Empty<byte>());
+            Check("an empty file yields null, not a made-up hash",
+                  ContentHashRegistry.ComputeMediaHash(empty) == null);
+
+            // A missing path must return null, not throw.
+            Check("a missing path yields null, not an exception",
+                  ContentHashRegistry.ComputeMediaHash(Path.Combine(jDir, "nope.bin")) == null);
+
+            // The cache must return the SAME value as the direct computation.
+            using var jdb = new SubdlDbContext(Path.Combine(jDir, "db"), null);
+            var jreg = new ContentHashRegistry(jdb, null, null);
+            string direct = ContentHashRegistry.ComputeMediaHash(a) ?? "<null>";
+            string viaCache = jreg.GetMediaHash(a) ?? "<null>";
+            string secondRead = jreg.GetMediaHash(a) ?? "<null>";
+            Check("the cache returns the same value as the direct call", viaCache == direct, "-> " + viaCache);
+            Check("a second read is stable (cache hit)", secondRead == direct, "-> " + secondRead);
+        }
+        finally
+        {
+            try { Directory.Delete(jDir, true); } catch { /* best effort */ }
         }
 
         // ── summary ─────────────────────────────────────────────────────────
