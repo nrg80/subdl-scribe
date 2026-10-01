@@ -2,10 +2,12 @@
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 11 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 31 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 20 requirements
+  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 21 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 5 requirements
+  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 11 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 2 requirements
@@ -110,12 +112,6 @@ Content is the key, not the path, and the hash is the uploader's own function. T
 
 **F-M21 [B1]:** Update interval: **manual / daily / twice daily / twice weekly / weekly / monthly**. A scheduled interval fires at the per-installation diced random anchor (F-M51); **manual** leaves no scheduled fire at all and keeps the dashboard and config-page triggers; "on new file" = F-M1a. **Default: Weekly**, shared by both directions (F-M111).
 
-**F-M22 [B1]:** **Dry-run switch, one per direction (both default off): search runs, no transfer.** The pipeline walks its full decision path — search, threshold, ranking — and reports what it WOULD do (chosen candidate per language, the numbered slots of F-M242, the hearing-impaired pick of F-M241), but fetches no file and writes nothing.
-
-**No stored verdict is written or cleared by a dry run.** A completion mark (F-M88c) says a file is settled; a dry run that sets one takes the work away instead of describing it, because the next real run reads the mark and skips the file. The same applies in the other direction: what a dry run leaves behind must not change what a later run finds.
-
-**It stops before the download call,** so no file is transferred — but searches DO cost API quota, one per language set (two while the HI switch is on, F-M241). The GUI text must name both: "without saving files" and "without API calls" are not the same claim.
-
 **F-M26b [D]:** **Hourly-cap roll-over fire is offset by the job spacing.** When the shared hourly bucket is exhausted mid-run, the run stops and a one-shot recovery fire is scheduled at the bucket roll-over **+ the job spacing** (both directions, the roll-over fire), clamped 5–120. Default 15.
 
 One knob for all spacing — the user configures it through the existing **Job spacing (minutes)** field, with no separate control to discover.
@@ -204,6 +200,22 @@ The upload chain, in the order the code applies it. Each switchable gate names i
 
 **F-M74:** **An `und` stream is resolved by detection before upload. Switchable, default on.** With the switch on, the detected language replaces the tag and the stream uploads normally; a detection that fails skips the stream. With the switch off, every `und` stream is removed from the upload set and logged. Detection needs text to work on, so a stream below the 2 KB floor (F-M16) is skipped as too little text.
 
+### 3.2 Dry Run — Upload
+
+**F-M22 [B1]:** **Dry-run switch, one per direction (both default off): the run walks its decision path, reports what it WOULD do, and writes nothing.** No file is transferred in either direction and no stored verdict is written. The two directions do not cost the same: the download dry run searches (F-M277), the upload dry run does not (F-M276).
+
+**No stored verdict is written or cleared by a dry run.** A completion mark (F-M88c) says a file is settled; a dry run that sets one takes the work away instead of describing it, because the next real run reads the mark and skips the file. The same applies in the other direction: what a dry run leaves behind must not change what a later run finds.
+
+**F-M276:** **The upload dry run walks the upload decision path up to the transfer and spends no API call.**
+
+It runs: the extraction and the quality gates of 3.1, the id resolution, and the per-file candidate list.
+
+It does not run: the login (F-M8), the duplicate pre-check — which a real run does not make either (F-M184) — and the upload transfer. No search call is made, so no search quota is spent.
+
+The report is one line per stream: `DRY-RUN would upload <neutral name>`, the neutral name being the one a real upload would send (F-M29, F-M30).
+
+The file-retry counter is recorded as a success, so a dry run neither burns a retry nor leaves the retry state stale. No completion mark is written (F-M88c).
+
 ## 4. Download Pipeline
 
 **F-M151a [B3]:** **Download-side short-circuit (the download-side completion mark):** analogous to F-M88c. The stored language set is part of the state: the mark covers the languages it was written for, and any configured language it does not cover makes the file un-done. **Subset, not equality:** a stored set that covers the configured one counts as complete (F-M234), so removing a language leaves existing marks intact. The mark is validated against the disk before it is trusted (F-M234), where "the disk" means every kind of coverage the configuration counts, the embedded tracks included, not the `.srt` files alone. A language carried inside the container is evidence exactly as a file is.
@@ -275,6 +287,20 @@ The download chain runs against each candidate in score order, before the file i
 **The same language verification runs here verbatim** (F-M15), on the downloaded bytes, with its own per-direction switch.
 
 **F-M46 [D]:** **Overall selection:** one best candidate per (item, language) by combined score from F-M43–F-M45. The keep-best count is configurable (default 1); above 1 the QA-passed candidates are saved as numbered sidecars. No candidate passing → the language counts as "not available".
+
+### 4.2 Dry Run — Download
+
+**F-M277:** **The download dry run runs the search and the selection, and stops before the fetch — the search quota IS spent.**
+
+It runs: the id quality gate (F-M151b), the searches (F-M241), the release scoring and ranking (F-M44), the FPS tolerance filter (F-M43), the skip of candidates QA-rejected in earlier runs (F-M50), and the choice of the best candidate per language.
+
+It does not run: the file fetch, the quality gates of 4.1 (language verify, minimum cue count, runtime match), the file write, the download mark and the registry write.
+
+The report names, per language, the chosen release with its score and its hearing-impaired flag, and every numbered slot with the file name it WOULD write (F-M242). While the hearing-impaired switch is on, the candidate from the hearing-impaired pool is named as well (F-M241).
+
+**It stops before the download call,** so no file is transferred — but the searches DO cost API quota, one per language set (two while the HI switch is on, F-M241). The GUI text must name both: "without saving files" and "without API calls" are not the same claim.
+
+The run's stored statistics stay untouched (F-M247).
 
 ## 5. Upload Postprocessing
 
@@ -364,7 +390,7 @@ The check runs only for files that HAVE stored rows, so it costs one stream look
 
 **It must never fail the task:** an exception is logged as a warning and swallowed. It is housekeeping, and the refresh's own work has already succeeded.
 
-**F-M237:** **A the rebuild that cannot release the pages is replaced by a rebuild from the file's own rows.**
+**F-M237:** **A rebuild that cannot release the pages is replaced by a rebuild from the file's own rows.**
 
 Rule: when the library's own the rebuild fails, rows are read out, written into a fresh file, counted against the original, and only a matching count is swapped in. Rows are never traded for a smaller file.
 
