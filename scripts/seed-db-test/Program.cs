@@ -1,0 +1,406 @@
+// SubDL Scribe — database-built test.
+//
+// Runs WITHOUT a Jellyfin host. The parts of the seeder that write the registry
+// take plain inputs (a directory, a file path, MediaStream DTOs), so they can be
+// exercised directly:
+//
+//   A  SubdlDbContext + ContentHashRegistry construct against a temp directory
+//   B  SidecarNaming.List reads loose .srt files from a path alone
+//   C  SidecarNaming.EmbeddedTracks reads MediaStream DTOs
+//   D  the three together = one database built, both areas in one answer
+//   E  the writer/reader name contract (F-M260)
+//   F  observations never overwrite a verdict (F-M257/F-M259)
+//   G  edge cases: bitmap, forced, unlabeled, unreadable
+//
+// What this does NOT cover: a full SubdlSeeder.Scan() pass. That needs
+// Plugin.Instance (static, not injectable) and IMediaSourceManager /
+// ILibraryManager — i.e. a running Jellyfin. The scan loop is covered by the
+// live test instance, not here.
+//
+// Exit code 0 = all checks passed, 1 = at least one failed.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubdlScribe.Language;
+using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubdlScribe.Registry;
+using MediaBrowser.Model.Entities;
+
+namespace SeedDbTest;
+
+internal static class Program
+{
+    private static int _failed;
+    private static int _passed;
+
+    private static void Check(string label, bool ok, string detail = "")
+    {
+        if (ok)
+        {
+            _passed++;
+        }
+        else
+        {
+            _failed++;
+        }
+
+        Console.WriteLine("  " + (ok ? "OK  " : "FAIL") + " " + label.PadRight(58) + detail);
+    }
+
+    private static void Section(string name) => Console.WriteLine("\n=== " + name + " ===");
+
+    private static MediaStream Sub(string lang, string codec = "subrip", bool hi = false,
+                                   bool forced = false, bool external = false)
+        => new()
+        {
+            Type = MediaStreamType.Subtitle,
+            Language = lang,
+            Codec = codec,
+            IsHearingImpaired = hi,
+            IsForced = forced,
+            IsExternal = external,
+            Index = 1
+        };
+
+    private static int Main()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "seed-db-test");
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, true);
+        }
+
+        Directory.CreateDirectory(root);
+
+        string mediaDir = Path.Combine(root, "media");
+        Directory.CreateDirectory(mediaDir);
+        string media = Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.mkv");
+        File.WriteAllBytes(media, Enumerable.Repeat((byte)0x42, 200_000).ToArray());
+
+        Console.WriteLine("SubDL Scribe — database built test");
+        Console.WriteLine("media: " + media);
+
+        // ── A ───────────────────────────────────────────────────────────────
+        Section("A) Registry constructs without a Jellyfin host");
+        using var db = new SubdlDbContext(Path.Combine(root, "db"), null);
+        var reg = new ContentHashRegistry(db, null, null);
+        Check("SubdlDbContext + ContentHashRegistry", reg != null);
+
+        string mediaHash = reg.GetMediaHash(media) ?? string.Empty;
+        Check("media hash computed from the real file", mediaHash.Length > 0,
+              mediaHash.Length > 12 ? "-> " + mediaHash[..12] + "..." : "");
+
+        // ── C ── (before B: the tracks are needed for D) ─────────────────────
+        Section("C) EmbeddedTracks reads plain MediaStream DTOs");
+        var streams = new List<MediaStream>
+        {
+            new() { Type = MediaStreamType.Video, Index = 0, Codec = "hevc" },
+            Sub("eng"),                                  // plain EN track
+            Sub("ger", hi: true),                        // DE with the HI flag
+            Sub("fra", codec: "pgssub"),                 // bitmap — must be skipped
+            Sub("spa", forced: true),                    // forced — must be skipped
+            Sub("ita", external: true),                  // external — not embedded
+        };
+
+        var tracks = SidecarNaming.EmbeddedTracks(streams);
+        Check("two embedded tracks survive the filters", tracks.Count == 2,
+              "-> " + string.Join(",", tracks.Select(t => "pos" + t.SubPos + ":" + t.Lang + (t.HearingImpaired ? "/hi" : ""))));
+        Check("bitmap codec skipped", !tracks.Any(t => t.Lang == "FR"));
+        Check("forced track skipped", !tracks.Any(t => t.Lang == "ES"));
+        Check("external stream skipped", !tracks.Any(t => t.Lang == "IT"));
+        Check("HI flag carried through", tracks.Any(t => t.Lang == "DE" && t.HearingImpaired));
+
+        // ── B ───────────────────────────────────────────────────────────────
+        Section("B) SidecarNaming.List reads loose files from a path alone");
+        File.WriteAllText(Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.en.sdh.srt"),
+            "1\n00:00:01,000 --> 00:00:02,000\n[ KNOCKING ]\n");
+        File.WriteAllText(Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.de.srt"),
+            "1\n00:00:01,000 --> 00:00:02,000\nHallo\n");
+        File.WriteAllText(Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.srt"),
+            "1\n00:00:01,000 --> 00:00:02,000\nUnlabeled\n");
+
+        var loose = SidecarNaming.List(media);
+        Check("three sidecars recognized", loose.Count == 3,
+              "-> " + string.Join(",", loose.Select(x => x.Lang + (x.HearingImpaired ? "/hi" : ""))));
+        Check("the .sdh.srt reads as EN/HI", loose.Any(x => x.Lang == "EN" && x.HearingImpaired));
+        Check("the unlabeled .srt reads as EN", loose.Any(x => x.Lang == "EN" && !x.HearingImpaired));
+
+        // ── D ───────────────────────────────────────────────────────────────
+        Section("D) The three together = one database built");
+        int embWritten = 0;
+        foreach (var (pos, lang, hi) in tracks)
+        {
+            if (reg.ObserveEmbed(mediaHash, pos, lang, hi))
+            {
+                embWritten++;
+            }
+        }
+
+        int sideWritten = 0;
+        foreach (var (path, lang, hi) in loose)
+        {
+            string text = File.ReadAllText(path);
+            if (reg.ObserveSidecar(ContentHashRegistry.ComputeHash(text), mediaHash, lang, hi,
+                                   Path.GetFileName(path), path))
+            {
+                sideWritten++;
+            }
+        }
+
+        Check("embed rows written", embWritten == 2, "-> " + embWritten);
+        Check("sidecar rows written", sideWritten == 3, "-> " + sideWritten);
+
+        // Both areas answer the SAME question, so the answer must merge them:
+        // DE comes from the embed side, EN from the sidecar side.
+        var hiLangs = reg.HearingImpairedLanguages(media);
+        Check("HI answer merges both areas (DE embed + EN sidecar)",
+              hiLangs.Contains("DE") && hiLangs.Contains("EN"),
+              "-> [" + string.Join(",", hiLangs.OrderBy(x => x)) + "]");
+
+        // Idempotence: the seeder calls this on every pass.
+        int embAgain = 0, sideAgain = 0;
+        foreach (var (pos, lang, hi) in tracks)
+        {
+            if (reg.ObserveEmbed(mediaHash, pos, lang, hi))
+            {
+                embAgain++;
+            }
+        }
+
+        foreach (var (path, lang, hi) in loose)
+        {
+            string text = File.ReadAllText(path);
+            if (reg.ObserveSidecar(ContentHashRegistry.ComputeHash(text), mediaHash, lang, hi,
+                                   Path.GetFileName(path), path))
+            {
+                sideAgain++;
+            }
+        }
+
+        Check("second pass writes nothing (idempotent)", embAgain == 0 && sideAgain == 0,
+              "-> emb=" + embAgain + " side=" + sideAgain);
+
+        // ── E ───────────────────────────────────────────────────────────────
+        Section("E) Writer/reader name contract (F-M260)");
+        string baseName = Path.GetFileNameWithoutExtension(media);
+        var shapes = new (string Path, string Lang, bool Hi, string Label)[]
+        {
+            (SidecarNaming.Build(media, "EN", false), "EN", false, "plain"),
+            (SidecarNaming.Build(media, "EN", true), "EN", true, "sdh"),
+            (SidecarNaming.Build(media, "EN", false, 3), "EN", false, "slot 3"),
+            (SidecarNaming.Build(media, "EN", true, 2), "EN", true, "sdh + slot 2"),
+        };
+
+        foreach (var (path, wantLang, wantHi, label) in shapes)
+        {
+            string want = label == "sdh + slot 2" ? ".en.sdh.2.srt"
+                        : label == "slot 3" ? ".en.3.srt"
+                        : label == "sdh" ? ".en.sdh.srt"
+                        : ".en.srt";
+            Check("Build: " + label + " -> " + want, path.EndsWith(want, StringComparison.Ordinal),
+                  "-> " + Path.GetFileName(path));
+
+            var parsed = SidecarNaming.Parse(Path.GetFileNameWithoutExtension(path), baseName);
+            bool ok = parsed.HasValue
+                      && parsed.Value.HearingImpaired == wantHi
+                      && string.Equals(parsed.Value.Lang, wantLang, StringComparison.OrdinalIgnoreCase);
+            Check("Parse reads back " + label, ok,
+                  parsed.HasValue ? $"-> lang={parsed.Value.Lang} hi={parsed.Value.HearingImpaired}" : "-> null");
+        }
+
+        // ── F ───────────────────────────────────────────────────────────────
+        Section("F) An observation never overwrites a verdict");
+        string verdictText = "1\n00:00:01,000 --> 00:00:02,000\nverdict\n";
+        string verdictHash = ContentHashRegistry.ComputeHash(verdictText);
+        reg.MarkSidecar(verdictHash, mediaHash, "EN", false, SubtitleStatus.Downloaded,
+                        subdlId: "12345", fileName: "Film.2026.1080p.WEB-DL.en.srt",
+                        path: Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.en.srt"));
+
+        bool changed = reg.ObserveSidecar(verdictHash, mediaHash, "EN", true);
+        var row = reg.GetSidecar(verdictHash);
+        Check("observation reports 'nothing done'", !changed);
+        Check("the verdict still stands", row != null && row.Status == SubtitleStatus.Downloaded,
+              "-> " + (row?.Status ?? "null"));
+        Check("observation did NOT flip the HI flag", row != null && !row.HearingImpaired,
+              "-> hi=" + (row?.HearingImpaired.ToString() ?? "?"));
+        Check("a decided row counts as known",
+              reg.IsContentKnown(verdictHash));
+        Console.WriteLine("       (the trap on the other side: an OBSERVATION must not count as");
+        Console.WriteLine("        knowledge, or the downloader skips a write it never made —");
+        Console.WriteLine("        covered by the observation rows above, asserted below)");
+
+        // An observation row must NOT answer IsContentKnown.
+        string obsText = "1\n00:00:01,000 --> 00:00:02,000\nobserved only\n";
+        string obsHash = ContentHashRegistry.ComputeHash(obsText);
+        reg.ObserveSidecar(obsHash, mediaHash, "FR", false);
+        Check("an observation is NOT knowledge", !reg.IsContentKnown(obsHash));
+
+        // ── G ───────────────────────────────────────────────────────────────
+        Section("G) Edge cases");
+        Check("no streams -> no tracks", SidecarNaming.EmbeddedTracks(null).Count == 0);
+        Check("empty stream list -> no tracks", SidecarNaming.EmbeddedTracks(new List<MediaStream>()).Count == 0);
+
+        var onlyVideo = new List<MediaStream> { new() { Type = MediaStreamType.Video, Index = 0, Codec = "hevc" } };
+        Check("video-only -> no tracks", SidecarNaming.EmbeddedTracks(onlyVideo).Count == 0);
+
+        string unmappable = Path.Combine(root, "empty-dir");
+        Directory.CreateDirectory(unmappable);
+        string orphan = Path.Combine(unmappable, "Nothing.mkv");
+        File.WriteAllBytes(orphan, new byte[] { 1, 2, 3 });
+        Check("no sidecars -> empty list, no throw", SidecarNaming.List(orphan).Count == 0);
+
+        // ── H ───────────────────────────────────────────────────────────────
+        Section("H) Untagged / 'und' language gate (F-M261)");
+        Console.WriteLine("  The gap: MapToSubdl has no entry for 'und', so its two-letter fallback");
+        Console.WriteLine("  invents 'UN' — and a NULL tag maps to nothing and gets no row at all.");
+        Console.WriteLine("  Either way the embedded area answers 'language absent' for a track that");
+        Console.WriteLine("  is sitting right there. Measured on Slow.Horses.S06E03: 44 tracks, all");
+        Console.WriteLine("  lang=None, holding real EN/AR/PT/BG text.");
+
+        // The two shapes that must be recognized as undecided — and the ones that must not.
+        Check("NULL tag is undecided", LanguageTagGate.IsUntagged(null));
+        Check("empty tag is undecided", LanguageTagGate.IsUntagged("   "));
+        Check("literal 'und' is undecided", LanguageTagGate.IsUntagged("und"));
+        Check("'UND' (any case) is undecided", LanguageTagGate.IsUntagged("UND"));
+        Check("'undefined' is undecided", LanguageTagGate.IsUntagged("undefined"));
+        Check("a real tag is NOT undecided", !LanguageTagGate.IsUntagged("ger"));
+        Check("'eng' is NOT undecided", !LanguageTagGate.IsUntagged("eng"));
+
+        // The defect this gate exists for: what the mapper does with the undecided shapes.
+        Check("MapToSubdl(NULL) yields no language (no row)",
+              LanguageMapper.MapToSubdl(null) == null,
+              "-> " + (LanguageMapper.MapToSubdl(null) ?? "null"));
+        Check("MapToSubdl('und') invents 'UN' — the reason 'und' must be resolved first",
+              LanguageMapper.MapToSubdl("und") == "UN",
+              "-> " + (LanguageMapper.MapToSubdl("und") ?? "null"));
+
+        // The ISO 639-2 write-back table (F-M261, second half).
+        Check("ToIso6392('EN') -> 'eng'", LanguageMapper.ToIso6392("EN") == "eng",
+              "-> " + LanguageMapper.ToIso6392("EN"));
+        Check("ToIso6392 is case-insensitive", LanguageMapper.ToIso6392("de") == "ger",
+              "-> " + LanguageMapper.ToIso6392("de"));
+        Check("ToIso6392 uses the B spelling these containers carry",
+              LanguageMapper.ToIso6392("DE") == "ger",
+              "-> " + LanguageMapper.ToIso6392("DE"));
+        Check("ToIso6392 round-trips through MapToSubdl",
+              LanguageMapper.MapToSubdl(LanguageMapper.ToIso6392("FR")) == "FR",
+              "-> " + LanguageMapper.MapToSubdl(LanguageMapper.ToIso6392("FR")));
+        Check("ToIso6392 falls back to a legal tag (never a missing one) for an unmapped code",
+              LanguageMapper.ToIso6392("XX") == "xx",
+              "-> " + (LanguageMapper.ToIso6392("XX") ?? "null"));
+        Check("ToIso6392(NULL) -> null", LanguageMapper.ToIso6392(null) == null);
+
+        // The verification rule that guards the container write. It must accept what ffmpeg
+        // writes back, and must NOT accept a wrong tag — a false OK replaces a good file.
+        Check("tag verification: exact match", FfmpegTools.LanguageTagMatches("eng", "eng"));
+        Check("tag verification: 'en' matches 'eng'", FfmpegTools.LanguageTagMatches("en", "eng"));
+        Check("tag verification: case-insensitive", FfmpegTools.LanguageTagMatches("ENG", "eng"));
+        Check("tag verification rejects a different language",
+              !FfmpegTools.LanguageTagMatches("fre", "eng"));
+        Check("tag verification rejects an empty tag",
+              !FfmpegTools.LanguageTagMatches("", "eng"));
+        Check("tag verification rejects a long name (not the same comparison)",
+              !FfmpegTools.LanguageTagMatches("English", "eng"));
+
+        // ── I ───────────────────────────────────────────────────────────────
+        Section("I) Media identity move after a tag write (F-M261)");
+        Console.WriteLine("  Writing a tag changes the file's OSHash (size + first/last 64 KB), and every");
+        Console.WriteLine("  row of a file is keyed by that hash. Without the move the file keeps TWO");
+        Console.WriteLine("  identities — measured against a real registry: two media rows, same item");
+        Console.WriteLine("  id, same path, with the marks on the dead one. Nothing prunes them either:");
+        Console.WriteLine("  PruneDeadMediaAndSubtitles only removes a row whose JELLYFIN ITEM is gone.");
+
+        string idRoot = Path.Combine(Path.GetTempPath(), "subdl-ident-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(idRoot);
+        try
+        {
+            using var idb = new SubdlDbContext(Path.Combine(idRoot, "db"), null);
+            var ireg = new ContentHashRegistry(idb, null, null);
+            const string itemId = "aabbccdd11223344aabbccdd11223344";
+            const string hOld = "aaaaaaaaaaaaaaaa";
+            const string hNew = "bbbbbbbbbbbbbbbb";
+            const string mediaPath = "/media/Film.mkv";
+
+            // State earned on the file BEFORE it was rewritten.
+            ireg.EnsureMedia(hOld, itemId, mediaPath, m =>
+            {
+                m.ImdbId = "tt1234567";
+                m.SubtitlesDownloadedAt = new DateTime(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc);
+                m.SubtitlesDownloadedLanguages = "de,en";
+            });
+            ireg.ObserveEmbed(hOld, 0, "EN", false);
+            ireg.ObserveEmbed(hOld, 2, "DE", true);
+            ireg.MarkSidecar("content-de", hOld, "DE", false, SubtitleStatus.Downloaded);
+
+            Check("before: exactly one media row", idb.Media.Count() == 1, "-> " + idb.Media.Count());
+            Check("before: two embed rows", ireg.GetEmbeds(hOld).Count == 2, "-> " + ireg.GetEmbeds(hOld).Count);
+
+            int moved = ireg.ReplaceMediaIdentity(hOld, hNew);
+
+            Check("the move reports the rows it touched", moved == 4, "-> " + moved);
+            Check("exactly ONE media row after the move", idb.Media.Count() == 1, "-> " + idb.Media.Count());
+            Check("the old key is gone", ireg.GetMedia(hOld) == null);
+            Check("the new key exists", ireg.GetMedia(hNew) != null);
+
+            var movedRow = ireg.GetMedia(hNew);
+            Check("item id travelled", movedRow?.JellyfinItemId == itemId, "-> " + (movedRow?.JellyfinItemId ?? "null"));
+            Check("path travelled", movedRow?.Path == mediaPath, "-> " + (movedRow?.Path ?? "null"));
+            Check("imdb id travelled", movedRow?.ImdbId == "tt1234567", "-> " + (movedRow?.ImdbId ?? "null"));
+            Check("the download mark travelled (this is a rename, not a re-decision)",
+                  movedRow?.SubtitlesDownloadedAt != null,
+                  "-> " + (movedRow?.SubtitlesDownloadedAt?.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) ?? "null"));
+            Check("the mark's language list travelled",
+                  movedRow?.SubtitlesDownloadedLanguages == "de,en",
+                  "-> " + (movedRow?.SubtitlesDownloadedLanguages ?? "null"));
+
+            Check("embeds travelled", ireg.GetEmbeds(hNew).Count == 2, "-> " + ireg.GetEmbeds(hNew).Count);
+            Check("no embeds left under the old key", ireg.GetEmbeds(hOld).Count == 0, "-> " + ireg.GetEmbeds(hOld).Count);
+
+            var hiRow = ireg.GetEmbeds(hNew).FirstOrDefault(x => x.SubPos == 2);
+            Check("the HI flag survived the move", hiRow?.HearingImpaired == true, "-> " + (hiRow?.HearingImpaired.ToString() ?? "?"));
+            Check("the language survived the move", hiRow?.Language == "DE", "-> " + (hiRow?.Language ?? "null"));
+
+            Check("the sidecar's parent pointer travelled",
+                  idb.Sidecars.FindAll().FirstOrDefault()?.MediaHash == hNew,
+                  "-> " + (idb.Sidecars.FindAll().FirstOrDefault()?.MediaHash ?? "none"));
+
+            // The consequence that matters. `FindByItemId` is a FindOne: with two rows carrying the
+            // same item id the winner was undefined, so the search stamp could land on the dead row.
+            Check("FindOne(itemId) is unambiguous again — and it is the LIVE row",
+                  idb.Media.FindOne(x => x.JellyfinItemId == itemId)?.Id == hNew,
+                  "-> " + (idb.Media.FindOne(x => x.JellyfinItemId == itemId)?.Id ?? "nothing"));
+
+            // Guards: an equal pair must not move anything, an empty hash must not act as one.
+            int samePair = ireg.ReplaceMediaIdentity(hNew, hNew);
+            Check("an equal pair is a no-op", samePair == 0, "-> " + samePair);
+            Check("the row is still there after the no-op", idb.Media.Count() == 1, "-> " + idb.Media.Count());
+            Check("an empty old hash is refused", ireg.ReplaceMediaIdentity(null, "cccccccccccccccc") == 0);
+            Check("an empty new hash is refused", ireg.ReplaceMediaIdentity("cccccccccccccccc", null) == 0);
+            Check("no row was created by the refusals", idb.Media.Count() == 1, "-> " + idb.Media.Count());
+
+            // Collision: both keys already carry a row. The OLD one wins — it is the row that
+            // accumulated the work on this same file (marks, ids, verdicts), while a row under the
+            // new hash can only come from a run that already saw the rewritten file and knows no
+            // more than it. What must NOT happen either way: two rows for one file.
+            ireg.EnsureMedia(hOld, itemId, mediaPath, m => m.SdId = "sd-old");
+            ireg.EnsureMedia(hNew, itemId, mediaPath, m => m.SdId = "sd-new");
+            ireg.ReplaceMediaIdentity(hOld, hNew);
+            Check("a collision does not duplicate the row", idb.Media.Count() == 1, "-> " + idb.Media.Count());
+            Check("the accumulated row wins the collision", ireg.GetMedia(hNew)?.SdId == "sd-old",
+                  "-> " + (ireg.GetMedia(hNew)?.SdId ?? "null"));
+            Check("the collision kept one identity, not two", ireg.GetMedia(hOld) == null);
+        }
+        finally
+        {
+            try { Directory.Delete(idRoot, true); } catch { /* best effort */ }
+        }
+
+        // ── summary ─────────────────────────────────────────────────────────
+        Console.WriteLine();
+        Console.WriteLine("Fehler: " + _failed + "  (bestanden: " + _passed + ")");
+        return _failed == 0 ? 0 : 1;
+    }
+}

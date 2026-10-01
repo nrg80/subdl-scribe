@@ -1,0 +1,7 @@
+# Build artifacts
+*.zip
+bin/
+obj/
+
+# Local build output (build.sh writes here; never commit binaries)
+out/

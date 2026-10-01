@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>seed-db-test</AssemblyName>
+    <RootNamespace>SeedDbTest</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <!-- Jellyfin's own assemblies. Point this elsewhere with:
+           dotnet run -p:JellyfinDir=/path/to/jellyfin -->
+    <JellyfinDir Condition="'$(JellyfinDir)' == ''">/opt/data/jf-test/jellyfin</JellyfinDir>
+    <!-- The plugin under test. Default = the normal build output, so the test
+         checks what `dotnet build` just produced. Point it at an EXTRACTED
+         release zip to check a shipped artifact instead:
+           dotnet run -p:PluginDir=/tmp/pub137 -->
+    <PluginDir Condition="'$(PluginDir)' == ''">$(MSBuildThisFileDirectory)../../Jellyfin.Plugin.SubdlSync/bin/Release/net10.0</PluginDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Jellyfin.Plugin.SubdlSync">
+      <HintPath>$(PluginDir)/Jellyfin.Plugin.SubdlSync.dll</HintPath>
+    </Reference>
+    <Reference Include="MediaBrowser.Common">
+      <HintPath>$(JellyfinDir)/MediaBrowser.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="MediaBrowser.Controller">
+      <HintPath>$(JellyfinDir)/MediaBrowser.Controller.dll</HintPath>
+    </Reference>
+    <Reference Include="MediaBrowser.Model">
+      <HintPath>$(JellyfinDir)/MediaBrowser.Model.dll</HintPath>
+    </Reference>
+    <Reference Include="LiteDB">
+      <HintPath>$(PluginDir)/LiteDB.dll</HintPath>
+    </Reference>
+    <!-- The registry's constructors take an ILogger; the plugin resolves it from
+         Jellyfin's host at runtime, so the test needs the abstraction directly. -->
+    <Reference Include="Microsoft.Extensions.Logging.Abstractions">
+      <HintPath>$(JellyfinDir)/Microsoft.Extensions.Logging.Abstractions.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

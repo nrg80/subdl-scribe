@@ -1,0 +1,1495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+
+    <title>SubDL Scribe</title>
+</head>
+<body>
+    <div id="SubdlSyncConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <div id="SubdlTabs" class="subdl-tabs">
+                    <button type="button" is="emby-button" class="subdl-tab-btn raised" data-tab="general">General</button>
+                    <button type="button" is="emby-button" class="subdl-tab-btn raised" data-tab="download">Download</button>
+                    <button type="button" is="emby-button" class="subdl-tab-btn raised" data-tab="upload">Upload</button>
+                        <button type="button" is="emby-button" class="subdl-tab-btn raised" data-tab="expert">Expert</button>
+                </div>
+
+                <form id="SubdlSyncConfigForm">
+                    <div class="subdl-tab" data-tab-content="general">
+                        <div style="display:flex; flex-direction:column; gap:0.4em; align-items:flex-start; margin-bottom:1.2em;">
+                            <div style="display:flex; gap:0.5em;">
+                                <button is="emby-button" type="button" class="raised button-submit" id="RunDownloadNow">▶ Run download now</button>
+                                <button is="emby-button" type="button" class="raised button-submit" id="RunUploadNow">▶ Run upload now</button>
+                                <button is="emby-button" type="button" class="raised" id="StopAllNow" style="background-color:#a4262c;border-color:#a4262c;color:#fff;">■ Stop all uploads &amp; downloads</button>
+                            </div>
+                        </div>
+                        <h3>Libraries (opt-in, <span class="subdl-required">Required</span>)</h3>
+                        <div id="LibraryList" class="checkboxList"></div>
+                        <div class="fieldDescription">Only selected libraries are processed. None: no upload or download. Default: None.</div>
+
+                        <h3>Refetch interval</h3>
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="RefetchInterval">Refetch interval</label>
+                            <select is="emby-select" id="RefetchInterval" name="RefetchInterval" class="emby-select-withcolor emby-select">
+                                <option value="Manual">Manual</option>
+                                <option value="Daily">Daily</option>
+                                <option value="Weekly">Weekly</option>
+                                <option value="Monthly">Monthly</option>
+                            </select>
+                            <div class="fieldDescription">Unified refetch for both directions.</div>
+                        </div>
+                        <div id="RandomScheduleInfo" style="margin-top:-0.4em; font-size:0.85em; opacity:0.8;"></div>
+
+                        <h3>SubDL/TMDb Status</h3>
+                        <div id="SubdlQuotaBox" style="margin-bottom:1em;"></div>
+                        <div id="SubdlStatusBox" style="display:flex;flex-direction:column;gap:0.8em;margin-bottom:1em;">
+                            <div class="subdl-status-row" id="SubdlLoginStatus">
+                                <span class="subdl-light"></span>
+                                <span class="subdl-label">SubDL Login</span>
+                                <span class="subdl-msg">—</span>
+                            </div>
+                            <div class="subdl-status-row" id="SubdlApiStatus">
+                                <span class="subdl-light"></span>
+                                <span class="subdl-label">SubDL API</span>
+                                <span class="subdl-msg">—</span>
+                            </div>
+                            <div class="subdl-status-row" id="TmdbApiStatus">
+                                <span class="subdl-light"></span>
+                                <span class="subdl-label">TMDb API</span>
+                                <span class="subdl-msg">—</span>
+                            </div>
+                            <h4 style="margin-top:0.8em;margin-bottom:0.3em;">Library directories</h4>
+                            <div id="SubdlDirStatusList">
+                                <div class="fieldDescription">Loading…</div>
+                            </div>
+                        </div>
+
+                        <h3>SubDL Account (<span class="subdl-required">Required</span>)</h3>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="Username">SubDL email</label>
+                            <input id="Username" name="Username" type="text" is="emby-input" />
+                            <div class="fieldDescription">Login email of your SubDL account. Register free at <a href="https://subdl.com" target="_blank" rel="noopener">subdl.com</a>, then get your API key from the account panel.</div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="Password">SubDL password</label>
+                            <input id="Password" name="Password" type="password" is="emby-input" autocomplete="new-password" />
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="ApiKey">SubDL API key</label>
+                            <input id="ApiKey" name="ApiKey" type="password" is="emby-input" autocomplete="new-password" />
+                            <div class="fieldDescription">Free key, created in your account panel &mdash; documented at <a href="https://subdl.com/api-doc" target="_blank" rel="noopener">subdl.com/api-doc</a>.</div>
+                        </div>
+
+                        <h3>TMDb (<span class="subdl-required">Required</span>)</h3>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="TmdbApiKey">TMDb API key (v3)</label>
+                            <input id="TmdbApiKey" name="TmdbApiKey" type="password" is="emby-input" autocomplete="new-password" required />
+                            <div class="fieldDescription">Resolves IMDb / TMDb ids for upload and download. Register at <a href="https://www.themoviedb.org" target="_blank" rel="noopener">themoviedb.org</a>, then request a free key at <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org/settings/api</a>.</div>
+                        </div>
+
+                        
+
+
+                        
+
+                        
+
+                        <h3>Media files</h3>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="AllocateMissingLanguageCodes" name="AllocateMissingLanguageCodes" type="checkbox" is="emby-checkbox" />
+                                <span>Allocate missing language codes to media files</span>
+                            </label>
+                            <div class="fieldDescription">A track with no language tag reads as absent, so the file is searched for a language it already carries. With this on, that language is detected offline and written into the container as a real track tag. Default: off.</div>
+                        </div>
+
+                        <h3>Statistics</h3>
+                        <div class="fieldDescription" id="StatsLine" style="margin-bottom:0.25em;">&mdash;</div>
+                        <div class="fieldDescription" id="StatsQualityLine" style="margin-bottom:0.25em;">&mdash;</div>
+                        <div class="fieldDescription" id="StatsSinceLine" style="margin-bottom:0.5em;">&mdash;</div>
+
+<div style="margin-top:0.5em;">
+                            <button is="emby-button" type="button" class="raised" id="ResetStats">Reset statistics</button>
+                        </div>
+
+                        <!-- Workers (F-M265): run status, not a setting — same genre as Statistics, so it
+                             lives on the General tab with it. It used to sit OUTSIDE the tab containers
+                             (after the download tab closed), and subdlShowTab() only toggles elements
+                             with class="subdl-tab", so it stayed visible under every tab. -->
+                        <h3>Workers</h3>
+                        <div class="fieldDescription" id="WorkersLine" style="margin-bottom:0.25em;">&mdash;</div>
+                        <div id="WorkerRunList"></div>
+
+                        <!-- One refresh for EVERY live readout (user order 30.09.2026: "es reicht wenn er
+                             unter General tab sitzt woanders laufen keine live daten rein"). It sits at
+                             the END of the General tab, not next to Save: every live readout on this page
+                             (quota, SubDL/TMDb lights, library read/write rows, statistics, workers) lives
+                             in this tab, so the button belongs with them. It is INSIDE the tab container
+                             on purpose — being inside is what keeps it on General only. -->
+                        <!-- The stamp sits DIRECTLY above the button it describes, and from
+                             30.09.2026 it is written by the Refresh button ONLY (user order: "Dann
+                             nur noch vom refresh bitte"). It used to live up in the SubDL/TMDb block
+                             and was overwritten by two AUTOMATIC loaders — the quota fetch (server
+                             cached 5 min, so its fetchedAt could be minutes old) and the status
+                             probe. Two writers meant the line could report a time that had nothing
+                             to do with the click, and the 10 s poll could move it on its own. -->
+                        <div id="SubdlStatusTimestamp" style="margin-top:1.2em;font-size:0.85em;opacity:0.8;">Not refreshed yet.</div>
+
+                        <!-- Same width and height as Save, flush left AND right with it, grey so the
+                             two are never confused: Save is the blue action, this only re-reads
+                             (user order 30.09.2026). 'block' gives the width, the wrapper matches
+                             Save's own wrapper (a bare div, no extra margins) so both edges line up. -->
+                        <div>
+                            <!-- Width/depth set INLINE, not only via the 'block' class (user report
+                                 30.09.2026: the button rendered narrow and left-aligned on the phone
+                                 while it measured full width in a desktop browser). A theme or client
+                                 that orders its own .emby-button rule after .block silently wins over
+                                 the class; an inline style cannot be reordered away. display/width/
+                                 box-sizing together give Save's exact footprint. -->
+                            <button is="emby-button" type="button" class="raised button-submit block emby-button" id="RefreshSubdlStatus" style="display:block;width:100%;box-sizing:border-box;background-color:#424242;border-color:#5a5a5a;color:rgba(255,255,255,0.85);">Refresh status</button>
+                        </div>
+
+                    
+
+                        
+                    
+</div>
+
+                    
+                    
+                    <div class="subdl-tab" data-tab-content="expert" style="display:none">
+                        <div class="fieldDescription" style="border:1px solid #a4262c;padding:8px 12px;margin-bottom:1em;border-radius:4px;background:#fdf0f0;color:#a4262c;font-weight:600;">
+                            &#9888; Expert settings — change only if you know what you are doing.
+                        </div>
+
+<h3>General</h3>
+<div class="inputLabel inputLabelUnfocused" style="margin:1.2em 0 0.35em 0;">Log verbosity</div>
+<div class="selectContainer">
+                            <select is="emby-select" id="LogMode" name="LogMode" class="emby-select-withcolor emby-select">
+                                <option value="Normal">Normal</option>
+                                <option value="Verbose">Verbose</option>
+                                <option value="Debug">Debug</option>
+                            </select>
+                        </div>
+
+<div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="ArrivalDebounceMinutes">Arrival debounce window (minutes)</label>
+                            <input id="ArrivalDebounceMinutes" name="ArrivalDebounceMinutes" type="number" is="emby-input" min="1" max="120" />
+                            <div class="fieldDescription">Wait after new media arrives, so a whole import is handled in one pass. Default: 5.</div>
+                        </div>
+
+                                                
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="JobSpacingMinutes">Job spacing (minutes)</label>
+                            <input id="JobSpacingMinutes" name="JobSpacingMinutes" type="number" is="emby-input" min="5" max="120" />
+                            <div class="fieldDescription">Retry delay when the run lock is busy. Default: 15.</div>
+                        </div>
+<h3>Rate Limit</h3>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="UploadsPerHour">Max. Upload or Download Rate per hour (100&ndash;500)</label>
+                            <input id="UploadsPerHour" name="UploadsPerHour" type="number" is="emby-input" min="100" max="500" />
+                            <div class="fieldDescription">Default: 400.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="MinCallPauseSec">Min. pause between API calls, seconds (0.1&#8211;5)</label>
+                            <input id="MinCallPauseSec" name="MinCallPauseSec" type="number" inputmode="decimal" is="emby-input" min="0.1" max="5" step="0.1" />
+                            <div class="fieldDescription">Delay between requests in seconds. Default: 0.5.</div>
+                        </div>
+
+
+<h3>Retries</h3>
+                        
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="FileRetryLimit">File-missing retries before skip (upload + download)</label>
+                            <input id="FileRetryLimit" name="FileRetryLimit" type="number" is="emby-input" min="0" max="20" />
+                            <div class="fieldDescription">Skip after this many missing-file failures. 0 = never. Default: 3.</div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="IdRetryLimit">ID-resolution retries before give-up (upload + download)</label>
+                            <input id="IdRetryLimit" name="IdRetryLimit" type="number" is="emby-input" min="0" max="20" />
+                            <div class="fieldDescription">Skip item after this many ID failures. 0 = never. Default: 3.</div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadQaRetryLimit">QA-reject retries before give-up (download)</label>
+                            <input id="DownloadQaRetryLimit" name="DownloadQaRetryLimit" type="number" is="emby-input" min="0" max="20" />
+                            <div class="fieldDescription">Skip after this many QA rejects. 0 = never. Default: 3.</div>
+                        </div>
+
+<h3>Skip filters (upload + download)</h3>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="SkipDirs">Skip directories (one pattern per line)</label>
+                            <textarea id="SkipDirs" rows="3"></textarea>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="SkipFiles">Skip file name patterns (one per line)</label>
+                            <textarea id="SkipFiles" rows="8"></textarea>
+                        </div>
+
+<h3>Database refresh</h3>
+                        <div class="selectContainer">
+                            <select is="emby-select" id="PruneMode" name="PruneMode" class="emby-select-withcolor emby-select">
+                                <option value="Never">Never — no scheduled refresh</option>
+                                <option value="Weekly">Weekly refresh</option>
+                                <option value="Monthly">Monthly refresh</option>
+                                <option value="Yearly">Yearly refresh</option>
+                            </select>
+                            <div class="fieldDescription">Checks stored state against reality: a deleted subtitle loses its verdict, a vanished file drops its download mark, removed media are cleaned up. Compacts the database. Default: Weekly.</div>
+                        </div>
+
+<h3>OSHash refresh</h3>
+                        <div class="selectContainer">
+                            <select is="emby-select" id="OshashRefresh" name="OshashRefresh" class="emby-select-withcolor emby-select">
+                                <option value="Never">Never — trust cached fingerprint</option>
+                                <option value="Weekly">Weekly revalidation</option>
+                                <option value="Monthly">Monthly revalidation</option>
+                                <option value="Yearly">Yearly revalidation</option>
+                            </select>
+                            <div class="fieldDescription">Recheck interval for cached hashes. Default: Monthly.</div>
+                        </div>
+
+                        <h3>Download</h3>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="DownloadDryRun" name="DownloadDryRun" type="checkbox" is="emby-checkbox" />
+                                <span>Dry run — download (debug)</span>
+                            </label>
+                            <div class="fieldDescription">Search only — no file is downloaded and nothing is saved. Reports the candidate it would pick per language, the numbered slots it would fill, and the hearing-impaired file it would fetch. Costs one search per language set. Default: off.</div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadMaxCandidatesPerLanguage">Max candidates per language</label>
+                            <input id="DownloadMaxCandidatesPerLanguage" type="number" is="emby-input" min="0" max="20" />
+                            <div class="fieldDescription">Download attempts per file+language. 0 = unlimited. Default: 3.</div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadKeepBestPerLanguage">Best subtitles to keep per language</label>
+                            <input id="DownloadKeepBestPerLanguage" type="number" is="emby-input" min="1" max="10" />
+                            <div class="fieldDescription">Best X subtitles per language. Default: 1.</div>
+                        </div>
+
+                        <h3>Download — Ranking</h3>
+<div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused">Score weights</label>
+                            <div style="display:flex; gap:10px;">
+                                <div style="flex:1;">
+                                    <span class="fieldDescription" style="display:block; min-height:2.6em;">Release<br>group</span>
+                                    <input id="DownloadScoreWeightGroup" type="number" is="emby-input" min="0" />
+                                    <div class="fieldDescription">Same group tag as your file. Default: 1000.</div>
+                                </div>
+                                <div style="flex:1;">
+                                    <span class="fieldDescription" style="display:block; min-height:2.6em;">Token<br>overlap</span>
+                                    <input id="DownloadScoreWeightToken" type="number" is="emby-input" min="0" />
+                                    <div class="fieldDescription">Shared name fragments per match. Default: 10.</div>
+                                </div>
+                                <div style="flex:1;">
+                                    <span class="fieldDescription" style="display:block; min-height:2.6em;">Downloads</span>
+                                    <input id="DownloadScoreWeightDownload" type="number" is="emby-input" min="0" />
+                                    <div class="fieldDescription">SubDL download count as popularity tie-breaker. Default: 1.</div>
+                                </div>
+                            </div>
+                        </div>
+
+
+                                                <h3>Upload</h3>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="DryRun" name="DryRun" type="checkbox" is="emby-checkbox" />
+                                <span>Dry run — upload (debug)</span>
+                            </label>
+                            <div class="fieldDescription">Dry run: no real uploads.</div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="UploadPostprocessInterval">Upload postprocessing interval</label>
+                            <select is="emby-select" id="UploadPostprocessInterval" name="UploadPostprocessInterval" class="emby-select-withcolor emby-select">
+                                <option value="Never">Never</option>
+                                <option value="Daily">Daily</option>
+                                <option value="Weekly">Weekly</option>
+                                <option value="Monthly">Monthly</option>
+                            </select>
+                            <div class="fieldDescription">How often rejected uploads are resolved against /user/mySubtitles. Default: Daily.</div>
+                        </div>
+
+                        <h3>Database</h3>
+                        <div class="fieldDescription" style="max-width:60em;">
+                            <b>Reset plugin database.</b> Deletes all persistent state files. Rebuild costs API quota. No double uploads (local registry guard), backups are kept.
+                        </div>
+                        <div style="margin-top:0.5em; margin-bottom:1em;">
+                            <button is="emby-button" type="button" class="raised" id="ResetRegistry" style="color:#f00;">Reset plugin database…</button>
+                        </div>
+
+                        <div class="fieldDescription" style="max-width:60em;">
+                            Restore a timestamped backup of a state file. The current file is kept as .pre-restore-&lt;timestamp&gt; before anything is overwritten.
+                        </div>
+                        <div style="margin-top:0.8em;">
+                            <button is="emby-button" type="button" class="raised" id="RestoreBackup">Restore from backup…</button>
+                            <div class="fieldDescription">Restores a timestamped backup of a state file.</div>
+                        </div>
+                    </div>
+
+
+
+<div class="subdl-tab" data-tab-content="upload" style="display:none">
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="UploadEnabled" name="UploadEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Upload enabled</span>
+                            </label>
+                            <div class="fieldDescription">Enable all upload functions. Default: off.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="UploadOnArrival" name="UploadOnArrival" type="checkbox" is="emby-checkbox" />
+                                <span>Upload subtitles on arrival</span>
+                            </label>
+                            <div class="fieldDescription">Upload shortly after new media arrives. Only the new arrivals are checked. Default: on.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="UploadContinueAfterLimit" name="UploadContinueAfterLimit" type="checkbox" is="emby-checkbox" />
+                                <span>Continue after daily API limit</span>
+                            </label>
+                            <div class="fieldDescription">On 429/overload, schedule one automatic retry. Default: on.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                        <input id="FollowUpRoundsUpload" name="FollowUpRoundsUpload" type="checkbox" is="emby-checkbox" />
+                        <span>Follow-up rounds for uploads (2..n)</span>
+                        </label>
+                        <div class="fieldDescription">Further runs while new files keep arriving. Default: on.</div>
+                        </div>
+                    <h3>Quality gates (before upload)</h3>
+                        <div class="fieldDescription">Quality gates for uploads. All on by default.</div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="QaVerifyLanguage" name="QaVerifyLanguage" type="checkbox" is="emby-checkbox" />
+                                <span>Verify language (content vs. tag)</span>
+                            </label>
+                            <div class="fieldDescription">Rejects uploads with wrong language tag. Default: on.</div>
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="QaMinCues" name="QaMinCues" type="checkbox" is="emby-checkbox" />
+                                <span>Minimum cue count (30)</span>
+                            </label>
+                            <div class="fieldDescription">Rejects subs with fewer than 30 cues.</div>
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="QaValidateSrt" name="QaValidateSrt" type="checkbox" is="emby-checkbox" />
+                                <span>Validate SRT structure</span>
+                            </label>
+                            <div class="fieldDescription">Rejects invalid timings and cue durations.</div>
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="QaCheckSync" name="QaCheckSync" type="checkbox" is="emby-checkbox" />
+                                <span>Check sync plausibility</span>
+                            </label>
+                            <div class="fieldDescription">Rejects cue span beyond media runtime.</div>
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="UploadResolveUnd" name="UploadResolveUnd" type="checkbox" is="emby-checkbox" />
+                                <span>Resolve "und" streams by detection</span>
+                            </label>
+                            <div class="fieldDescription">Detect language for "und" streams. Default: on.</div>
+                        </div>
+                                                                                                                                                                    </div>
+
+                    <div class="subdl-tab" data-tab-content="download" style="display:none">
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="DownloadEnabled" name="DownloadEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Download enabled</span>
+                            </label>
+                            <div class="fieldDescription">Enable all download functions. Default: on.</div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadLanguagesDisplay">Target languages (<span class="subdl-req-inline">Required</span>)</label>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <input id="DownloadLanguagesDisplay" type="text" is="emby-input" readonly style="flex:1;" />
+                                <button is="emby-button" type="button" class="raised" id="DownloadLangPickerBtn">Select&hellip;</button>
+                            </div>
+                            <div class="fieldDescription">Languages to download. Empty = download off.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="DownloadOnArrival" name="DownloadOnArrival" type="checkbox" is="emby-checkbox" />
+                                <span>Download subtitles on arrival</span>
+                            </label>
+                            <div class="fieldDescription">Download shortly after new media arrives. Only the new arrivals are checked. Default: on.</div>
+                        </div>
+
+                        <!-- F-M111: per-direction scheduling removed — unified RefetchInterval (General tab). -->
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="DownloadContinueAfterLimit" name="DownloadContinueAfterLimit" type="checkbox" is="emby-checkbox" />
+                                <span>Continue after daily limit</span>
+                            </label>
+                            <div class="fieldDescription">On 429/overload, schedule one automatic retry. Default: on.</div>
+                        </div>
+
+                        
+
+                        
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="DownloadOnlyMissing" name="DownloadOnlyMissing" type="checkbox" is="emby-checkbox" />
+                                <span>Only missing languages (embedded count as present)</span>
+                            </label>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="DownloadHearingImpaired" name="DownloadHearingImpaired" type="checkbox" is="emby-checkbox" />
+                                <span>Also download hearing impaired version (if available)</span>
+                            </label>
+                            <div class="fieldDescription">Also save the SDH variant as separate file. Default: off.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="DownloadRequireImdb" name="DownloadRequireImdb" type="checkbox" is="emby-checkbox" />
+                                <span>Require IMDb/TMDb match</span>
+                            </label>
+                            <div class="fieldDescription">No download without an IMDb/TMDb ID.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                        <input id="FollowUpRoundsDownload" name="FollowUpRoundsDownload" type="checkbox" is="emby-checkbox" />
+                        <span>Follow-up rounds for downloads (2..n)</span>
+                        </label>
+                        <div class="fieldDescription">Further runs while new files keep arriving. Default: on.</div>
+                        </div>
+                    <h3 style="margin-top:1.2em;">Quality gates (before download save)</h3>
+                        <div class="fieldDescription" style="margin-bottom:.6em;">Structure, runtime and known-content checks always run. Extra gates reject before saving.</div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="QaDownloadVerifyLanguage" name="QaDownloadVerifyLanguage" type="checkbox" is="emby-checkbox" />
+                                <span>Verify language (content vs. tag)</span>
+                            </label>
+                            <div class="fieldDescription">Rejects uploads with wrong language tag. Default: on.</div>
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="QaDownloadMinCues" name="QaDownloadMinCues" type="checkbox" is="emby-checkbox" />
+                                <span>Minimum cue count (≥30)</span>
+                            </label>
+                            <div class="fieldDescription">Rejects files with too few cues. Default: on.</div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadRuntimeToleranceSec">Runtime tolerance (seconds)</label>
+                            <input id="DownloadRuntimeToleranceSec" name="DownloadRuntimeToleranceSec" type="number" is="emby-input" min="0" max="1800" />
+                            <div class="fieldDescription">Max. cue span vs. runtime in seconds. 0 = off. Default: 600.</div>
+                        </div>
+
+                        
+                        
+                        
+                                                
+                    </div>
+
+
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
+
+<div id="DownloadLangModal" style="display:none; position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,.6); z-index:1000; align-items:center; justify-content:center;">
+                    <div style="background:#242424; color:#fff; border-radius:8px; padding:20px 24px; max-width:660px; width:92%; max-height:80vh; display:flex; flex-direction:column;">
+                        <h3 style="margin:0 0 4px 0;">Select target languages</h3>
+                        <div class="fieldDescription">Select the subtitle languages to download.</div>
+                        <div id="DownloadLangList" class="checkboxList" style="overflow-y:auto; flex:1; margin:10px 0;"></div>
+                        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+                            <button is="emby-button" type="button" class="raised" id="DownloadLangCancelBtn">Cancel</button>
+                            <button is="emby-button" type="button" class="raised button-submit" id="DownloadLangOkBtn">Apply</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script>
+// (19.09.2026): JF strips style blocks when embedding
+            // The page and executes only the first inline script — inject the page
+            // CSS right here from the main page script.
+            (function () {
+                var css = `        .subdl-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 1.2em 0; }
+        .subdl-tab-btn { flex: 1 1 auto; min-width: 0; white-space: nowrap; }
+        @media (max-width: 480px) { .subdl-tabs { gap: 4px; } .subdl-tab-btn { padding: 0.6em 0.5em; font-size: 90%; } }
+        .subdl-tab-btn.active { background: #00a4dc; color: #fff; }
+        .subdl-status-row { display: flex; align-items: center; gap: 0.6em; margin: 0.25em 0; }
+        .subdl-light { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--color, #767676); flex-shrink: 0; }
+        .subdl-label { font-weight: 600; min-width: 8em; }
+        .subdl-msg { opacity: 0.85; }
+        /* Innenluft in der Zeitspalte: the cell is max-content, so padding is what separates the
+           date from the column edges. Keep it small and re-check the line's minimum width. */
+        .subdl-when { opacity: 0.85; padding: 0 0.45em; }
+        .subdl-outcome { font-weight: 600; }
+        /* Dry-run note: plain grey text beside the result word, NOT a badge and NOT its own
+           column. It must not inherit the result colour (that stays the outcome's own colour). */
+        .subdl-dryrun { color: #9a9a9a; margin-left: 0.5em; }
+        /* Workers section only: ONE worker = ONE line, never wrapped.
+           Four columns, in this order: light, name, time, result -- ALL left-aligned, so every
+           value starts at the same x and the block reads as a plain list rather than a centred
+           or right-pinned table. A dry run is grey text appended INSIDE the result cell; it is
+           deliberately not a column of its own (that cost ~50px and pushed the result off a
+           narrow screen).
+           Traps that earlier attempts fell into, do not reintroduce them:
+           - the time column was a narrow minmax(), so "9/30/2026 3:19 PM" broke after the
+             minutes and "PM" landed on a second line; white-space:nowrap plus no width cap
+             on that column is what keeps it on one line.
+           - the cells were centred (justify-items:center), which reads as a ragged list.
+           - each ROW was its own grid, so every row sized its own max-content tracks and
+             nothing lined up vertically. The LIST is the grid now and the rows are
+             display:contents, so all rows share one set of tracks and the columns line up.
+             (With the badge column gone, all rows emit exactly four cells anyway.)
+           - full words ("Postprocessing", "cancelled") made the line too wide for a phone;
+             the names and status words are abbreviated for that reason, not for style.
+           NEVER put a backtick in these comments: this whole block is a JS template
+           literal, so a backtick ends the string early and the CSS silently never gets
+           injected (the rows then fall back to plain flex and nothing lines up). */
+        #WorkerRunList {
+            display: grid;
+            grid-template-columns: 1.4em max-content max-content 1fr;
+            align-items: center;
+            /* 0.7em, not the earlier 0.4em: the time cell's TEXT measured exactly as wide as its
+               own column (136px of 136px at a 360px viewport), so the date sat flush against both
+               the worker name and the result with no breathing room. Paired with the padding
+               below; the column floor is re-measured after any change here. */
+            column-gap: 1.1em;
+            /* Safety net: the trailing column is max-content (the result cell), so on a very
+               narrow screen the row cannot shrink below its text and would run off the right
+               edge, silently cutting off the result. Scrolling keeps it reachable.
+               A cell's own box is useless for measuring this -- the trailing 1fr column stretches,
+               so every width appears to "fit". Measure the TEXT edges, or read the element's
+               scrollWidth with its width forced to the minimum. */
+            overflow-x: auto;
+            font-size: 1em;
+        }
+        #WorkerRunList .subdl-status-row { display: contents; }
+        #WorkerRunList > .subdl-status-row > * { min-width: 0; text-align: left; white-space: nowrap; }
+        .subdl-bar { background: #333; border-radius: 4px; height: 8px; margin-top: 3px; overflow: hidden; }
+        .subdl-bar-fill { background: #00a4dc; height: 100%; border-radius: 4px; }
+        .subdl-bar-fill.warn { background: #ffc107; }
+        .subdl-bar-fill.danger { background: #a4262c; }
+        .subdl-quota-row { margin: 0.35em 0; }
+        .subdl-quota-label { display: flex; justify-content: space-between; font-size: 0.92em; }
+        .subdl-quota-label span:last-child { opacity: 0.8; }
+        .subdl-bar { background: #333; border-radius: 4px; height: 8px; margin-top: 3px; overflow: hidden; }
+        .subdl-bar-fill { background: #00a4dc; height: 100%; border-radius: 4px; }
+        .subdl-bar-fill.warn { background: #ffc107; }
+        .subdl-bar-fill.danger { background: #a4262c; }
+        .subdl-quota-row { margin: 0.35em 0; }
+        .subdl-quota-label { display: flex; justify-content: space-between; font-size: 0.92em; }
+        .subdl-quota-label span:last-child { opacity: 0.8; }
+        .subdl-tab-btn.active .itemLabelText { color: #fff; }
+        #DownloadLangList { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 2px 12px; margin: 0.5em 0; }
+        .subdl-prio { display: inline-block; min-width: 1.1em; margin-left: 4px; color: #00a4dc; font-weight: bold; }
+        .subdl-required { color: #00a4dc; font-weight: 600; font-size: 0.9em; }
+        .subdl-req-inline { color: #00a4dc; font-weight: 600; font-size: 0.9em; }
+        #SubdlSyncConfigPage a { color: #00a4dc; }
+    `;
+                var el = document.createElement('style');
+                el.textContent = css;
+                document.head.appendChild(el);
+            })();
+            var SubdlSyncConfig = {
+                pluginUniqueId: '7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b'
+            };
+
+            // One date format for the whole page: US order (M/D/YYYY) with local AM/PM
+            // time, so statistics, quota and status stamps read identically instead of
+            // each call site relying on its own locale default.
+            var subdlFmtDateTime = function (iso) {
+                var d = (iso instanceof Date) ? iso : new Date(iso);
+                if (isNaN(d.getTime())) { return ''; }
+                var date = d.toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' });
+                var time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                return date + ' ' + time;
+            };
+            var subdlFmtTime = function (iso) {
+                var d = (iso instanceof Date) ? iso : new Date(iso);
+                if (isNaN(d.getTime())) { return ''; }
+                // SECONDS included on purpose (30.09.2026): the footer reads "Updated ...", and with
+                // minute resolution a refresh inside the same minute produced an identical string —
+                // the button looked dead ("es andert sich nix beim draufdrücken") although all four
+                // requests fired. Seconds make the effect visible immediately.
+                return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+            };
+
+            // --- Tab switching (plain JS, works standalone + in dashboard) ---
+            function subdlShowTab(tab) {
+                var sections = document.querySelectorAll('.subdl-tab');
+                for (var i = 0; i < sections.length; i++) {
+                    sections[i].style.display = (sections[i].getAttribute('data-tab-content') === tab) ? '' : 'none';
+                }
+                var btns = document.querySelectorAll('.subdl-tab-btn');
+                for (var j = 0; j < btns.length; j++) {
+                    if (btns[j].getAttribute('data-tab') === tab) {
+                        btns[j].classList.add('active');
+                    } else {
+                        btns[j].classList.remove('active');
+                    }
+                }
+            }
+
+            (function () {
+                var btns = document.querySelectorAll('.subdl-tab-btn');
+                for (var i = 0; i < btns.length; i++) {
+                    btns[i].addEventListener('click', function () {
+                        subdlShowTab(this.getAttribute('data-tab'));
+                    });
+                }
+                subdlShowTab('general');
+            })();
+
+            var SUBDL_LANGS = [
+                ['SQ', 'Albanian'], ['AR', 'Arabic'], ['HY', 'Armenian'], ['AZ', 'Azerbaijani'],
+                ['EU', 'Basque'], ['BS', 'Bosnian'], ['BG', 'Bulgarian'], ['MY', 'Burmese'],
+                ['CA', 'Catalan'], ['ZH', 'Chinese'], ['HR', 'Croatian'], ['CS', 'Czech'],
+                ['DA', 'Danish'], ['NL', 'Dutch'], ['EN', 'English'], ['ET', 'Estonian'],
+                ['FI', 'Finnish'], ['FR', 'French'], ['GL', 'Galician'], ['KA', 'Georgian'],
+                ['DE', 'German'], ['EL', 'Greek'], ['HE', 'Hebrew'], ['HI', 'Hindi'],
+                ['HU', 'Hungarian'], ['IS', 'Icelandic'], ['ID', 'Indonesian'], ['IT', 'Italian'],
+                ['JA', 'Japanese'], ['KM', 'Khmer'], ['KO', 'Korean'], ['KU', 'Kurdish'],
+                ['LV', 'Latvian'], ['LT', 'Lithuanian'], ['MK', 'Macedonian'], ['MS', 'Malay'],
+                ['ML', 'Malayalam'], ['MN', 'Mongolian'], ['NO', 'Norwegian'], ['FA', 'Persian'],
+                ['PL', 'Polish'], ['PT', 'Portuguese'], ['RO', 'Romanian'], ['RU', 'Russian'],
+                ['SR', 'Serbian'], ['SI', 'Sinhala'], ['SK', 'Slovak'], ['SL', 'Slovenian'],
+                ['ES', 'Spanish'], ['SV', 'Swedish'], ['TA', 'Tamil'], ['TE', 'Telugu'],
+                ['TH', 'Thai'], ['TR', 'Turkish'], ['UK', 'Ukrainian'], ['UR', 'Urdu'],
+                ['VI', 'Vietnamese']
+            ];
+
+            var SUBDL_LANG_PICKED = []; // Click order = saved order (no visual numbering anymore)
+
+            function subdlGetSelectedLangs() {
+                return SUBDL_LANG_PICKED.slice();
+            }
+
+            function subdlSyncPickedFromDisplay() {
+                var current = (document.querySelector('#DownloadLanguagesDisplay') || {}).value || '';
+                SUBDL_LANG_PICKED = current.split(',').map(function (s) { return s.trim().toUpperCase(); }).filter(Boolean);
+                var pickedSet = {};
+                SUBDL_LANG_PICKED.forEach(function (l) { pickedSet[l] = true; });
+                var boxes = document.querySelectorAll('#DownloadLangList input[type=checkbox]');
+                for (var i = 0; i < boxes.length; i++) {
+                    var code = boxes[i].getAttribute('data-lang');
+                    boxes[i].checked = !!pickedSet[code];
+                }
+            }
+
+            function subdlUpdateLangPreview() {
+                // Order footer removed — the save order is the language-list order.
+            }
+
+            function subdlPopulateLangList(config) {
+                var container = document.querySelector('#DownloadLangList');
+                if (!container) { return; }
+                var existing = (config.DownloadLanguages || '').split(',').map(function (s) { return s.trim().toUpperCase(); }).filter(Boolean);
+                var known = {};
+                SUBDL_LANGS.forEach(function (pair) { known[pair[0]] = true; });
+                // List strictly alphabetical (SUBDL_LANGS order), ticks mark the selection
+                var ordered = SUBDL_LANGS.map(function (pair) { return pair[0]; });
+                existing.forEach(function (l) { if (!known[l] && ordered.indexOf(l) === -1) { ordered.push(l); } });
+                container.innerHTML = '';
+                ordered.forEach(function (code) {
+                    var name = code;
+                    for (var i = 0; i < SUBDL_LANGS.length; i++) {
+                        if (SUBDL_LANGS[i][0] === code) { name = SUBDL_LANGS[i][1] + ' (' + code + ')'; break; }
+                    }
+                    var isPicked = existing.indexOf(code) !== -1;
+                    var div = document.createElement('div');
+                    div.className = 'checkboxContainer';
+                    var label = document.createElement('label');
+                    label.className = 'emby-checkbox-label';
+                    var input = document.createElement('input');
+                    input.type = 'checkbox';
+                    input.setAttribute('is', 'emby-checkbox');
+                    input.id = 'dl-lang-' + code;
+                    input.setAttribute('data-lang', code);
+                    if (isPicked) { input.setAttribute('checked', 'checked'); }
+                    var span = document.createElement('span');
+                    span.textContent = name;
+                    label.appendChild(input);
+                    label.appendChild(span);
+                    div.appendChild(label);
+                    container.appendChild(div);
+                    input.checked = isPicked; // After mount — emby-checkbox upgrade can drop the pre-mount checked
+                    input.addEventListener('change', function () {
+                        var code = this.getAttribute('data-lang');
+                        if (this.checked) {
+                            if (SUBDL_LANG_PICKED.indexOf(code) === -1) { SUBDL_LANG_PICKED.push(code); }
+                        } else {
+                            SUBDL_LANG_PICKED = SUBDL_LANG_PICKED.filter(function (l) { return l !== code; });
+                        }
+                        subdlUpdateLangPreview();
+                    });
+                });
+                subdlUpdateLangPreview();
+            }
+
+            function subdlOpenLangPicker() {
+                var modal = document.querySelector('#DownloadLangModal');
+                if (!modal) { return; }
+                subdlSyncPickedFromDisplay();
+                subdlUpdateLangPreview();
+                modal.style.display = 'flex';
+            }
+
+            function subdlCloseLangPicker() {
+                var modal = document.querySelector('#DownloadLangModal');
+                if (modal) { modal.style.display = 'none'; }
+            }
+
+            (function () {
+                var pickerBtn = document.querySelector('#DownloadLangPickerBtn');
+                var okBtn = document.querySelector('#DownloadLangOkBtn');
+                var cancelBtn = document.querySelector('#DownloadLangCancelBtn');
+                if (pickerBtn) { pickerBtn.addEventListener('click', function () { subdlOpenLangPicker(); }); }
+                if (okBtn) {
+                    okBtn.addEventListener('click', function () {
+                        document.querySelector('#DownloadLanguagesDisplay').value = subdlGetSelectedLangs().join(', ');
+                        subdlCloseLangPicker();
+                    });
+                }
+                if (cancelBtn) {
+                    cancelBtn.addEventListener('click', function () {
+                        subdlCloseLangPicker();
+                    });
+                }
+            })();
+
+            function subdlPopulateLibraries(config) {
+                // The library selection renders in BOTH places (General tab and
+                // Download tab) — same config list, two views, kept in sync on save.
+                var containers = ['#LibraryList'].map(function (s) { return document.querySelector(s); }).filter(Boolean);
+                if (containers.length === 0) { return; }
+                var container = containers[0];
+                ApiClient.getVirtualFolders().then(function (folders) {
+                    containers.forEach(function (c) { c.innerHTML = ''; });
+                    folders.forEach(function (f) {
+                        containers.forEach(function (container) {
+                            var id = 'lib_' + (container.id || '') + '_' + f.Name;
+                            var div = document.createElement('div');
+                            div.className = 'checkboxContainer';
+                            var label = document.createElement('label');
+                            label.className = 'emby-checkbox-label';
+                            var input = document.createElement('input');
+                            input.type = 'checkbox';
+                            input.setAttribute('is', 'emby-checkbox');
+                            input.id = id;
+                            input.setAttribute('data-libname', f.Name);
+                            if ((config.SelectedLibraries || []).indexOf(f.Name) !== -1) {
+                                input.checked = true;
+                            }
+                            var span = document.createElement('span');
+                            span.textContent = f.Name;
+                            label.appendChild(input);
+                            label.appendChild(span);
+                            div.appendChild(label);
+                            container.appendChild(div);
+                        });
+                    });
+                });
+            }
+
+            function subdlInitConfigPage() {
+                console.log('[SubDL Scribe] pageinit called');
+                if (typeof Dashboard !== 'undefined' && Dashboard.showLoadingMsg) { try { Dashboard.showLoadingMsg(); } catch (err) { /* non-fatal */ } }
+                ApiClient.getPluginConfiguration(SubdlSyncConfig.pluginUniqueId).then(function (config) {
+                    console.log('[SubDL Scribe] config loaded');
+                    document.querySelector('#Username').value = config.Username || '';
+                        document.querySelector('#Password').value = config.Password || '';
+                        document.querySelector('#ApiKey').value = config.ApiKey || '';
+                        document.querySelector('#TmdbApiKey').value = config.TmdbApiKey || '';
+                        subdlLoadQuota();
+                        subdlStartQuotaPoll();
+                        document.querySelector('#UploadsPerHour').value = config.UploadsPerHour;
+        document.querySelector('#MinCallPauseSec').value = (config.MinCallPauseSec != null ? config.MinCallPauseSec : 0.5);
+                        document.querySelector('#FollowUpRoundsDownload').checked = (config.FollowUpRoundsDownload !== false);
+                        document.querySelector('#FollowUpRoundsUpload').checked = (config.FollowUpRoundsUpload !== false);
+                        document.querySelector('#FileRetryLimit').value = (function () { var v = parseInt(config.FileRetryLimit); return isNaN(v) ? 3 : v; })();
+                        document.querySelector('#IdRetryLimit').value = (function () { var v = parseInt(config.IdRetryLimit); return isNaN(v) ? 3 : v; })();
+                        document.querySelector('#DownloadQaRetryLimit').value = (function () { var v = parseInt(config.DownloadQaRetryLimit); return isNaN(v) ? 3 : v; })();
+                        document.querySelector('#ArrivalDebounceMinutes').value = (function () { var v = parseInt(config.ArrivalDebounceMinutes); return isNaN(v) ? 5 : v; })();                                                document.querySelector('#RefetchInterval').value = config.RefetchInterval;
+                        document.querySelector('#JobSpacingMinutes').value = (function () { var v = parseInt(config.JobSpacingMinutes); return isNaN(v) ? 15 : v; })();
+
+                        var rsi = document.querySelector('#RandomScheduleInfo');
+                        if (rsi) {
+                            var wd = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+                            var parts = (config.RandomWeeklyTime || '').split(' ');
+                            function ord(n) { var s = ['th','st','nd','rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+                            function toAmPm(t) {
+                                if (!t) { return '—'; }
+                                var p = t.split(':');
+                                var h = parseInt(p[0], 10);
+                                var m = p[1] || '00';
+                                var suffix = h >= 12 ? 'PM' : 'AM';
+                                var hh = h % 12 || 12;
+                                return hh + ':' + m + ' ' + suffix;
+                            }
+                            var txt = 'Current windows: Daily ' + toAmPm(config.RandomDailyTime) +
+                                ', Weekly ' + (parts.length === 2 ? wd[parseInt(parts[0]) - 1] + ' ' + toAmPm(parts[1]) : '—') +
+                                ', Monthly ' + (config.RandomMonthlyDay ? ord(config.RandomMonthlyDay) : '—') + '. ' + toAmPm(config.RandomMonthlyTime);
+                            rsi.textContent = txt;
+                        }
+                        document.querySelector('#UploadOnArrival').checked = config.UploadOnArrival;
+                        document.querySelector('#UploadEnabled').checked = config.UploadEnabled;
+                        document.querySelector('#DryRun').checked = config.DryRun;
+                        document.querySelector('#LogMode').value = config.LogMode;
+                        document.querySelector('#OshashRefresh').value = config.OshashRefresh || 'Monthly';
+        document.querySelector('#PruneMode').value = config.PruneMode || 'Weekly';
+        document.querySelector('#UploadPostprocessInterval').value = config.UploadPostprocessInterval || 'Daily';
+                        document.querySelector('#QaValidateSrt').checked = config.QaValidateSrt;
+                        document.querySelector('#QaCheckSync').checked = config.QaCheckSync;
+                        document.querySelector('#QaVerifyLanguage').checked = config.QaVerifyLanguage;
+                        document.querySelector('#UploadResolveUnd').checked = config.UploadResolveUnd;
+                        document.querySelector('#QaMinCues').checked = config.QaMinCues;
+                        // F-M34/M35: show effective defaults when the user list is empty (visible prefill)
+                        // F-M36: requirement marker added for traceability.
+                        document.querySelector('#SkipDirs').value = (config.SkipDirPatterns && config.SkipDirPatterns.length)
+                            ? config.SkipDirPatterns.join('\n')
+                            : ['incomplete', 'downloading', '.tmp'].join('\n');
+                        document.querySelector('#SkipFiles').value = (config.SkipFilePatterns && config.SkipFilePatterns.length)
+                            ? config.SkipFilePatterns.join('\n')
+                            : ['sample', 'trailer', 'incomplete',
+                               '.!qb', '.!ut', '.bc!', '.!bt', '.az!', '.bt!', '.part', '.partial', '.downloading',
+                               '.crdownload', '.opdownload',
+                               '.ob!', '.fb!', '.jc!', '.td', '.dtapart', '.tmp'].join('\n');
+                        document.querySelector('#DownloadEnabled').checked = config.DownloadEnabled;
+                        subdlPopulateLangList(config);
+                        document.querySelector('#DownloadLanguagesDisplay').value = (config.DownloadLanguages || '');
+                        document.querySelector('#DownloadOnlyMissing').checked = config.DownloadOnlyMissing;
+                        document.querySelector('#DownloadHearingImpaired').checked = config.DownloadHearingImpaired;
+                        document.querySelector('#DownloadRuntimeToleranceSec').value = config.DownloadRuntimeToleranceSec;
+                        document.querySelector('#DownloadRequireImdb').checked = config.DownloadRequireImdb;
+                        document.querySelector('#AllocateMissingLanguageCodes').checked = config.AllocateMissingLanguageCodes;
+                        document.querySelector('#QaDownloadMinCues').checked = config.QaDownloadMinCues;
+                        document.querySelector('#QaDownloadVerifyLanguage').checked = config.QaDownloadVerifyLanguage;
+                        document.querySelector('#DownloadScoreWeightGroup').value = config.DownloadScoreWeightGroup;
+                        document.querySelector('#DownloadScoreWeightToken').value = config.DownloadScoreWeightToken;
+                        document.querySelector('#DownloadScoreWeightDownload').value = config.DownloadScoreWeightDownload;
+                                                document.querySelector('#DownloadOnArrival').checked = config.DownloadOnArrival;
+                        var dmcl = parseInt(config.DownloadMaxCandidatesPerLanguage);
+                        document.querySelector('#DownloadMaxCandidatesPerLanguage').value = isNaN(dmcl) ? 3 : dmcl;
+                        var dkb = parseInt(config.DownloadKeepBestPerLanguage);
+                        document.querySelector('#DownloadKeepBestPerLanguage').value = isNaN(dkb) ? 1 : dkb;
+                        document.querySelector('#UploadContinueAfterLimit').checked = config.UploadContinueAfterLimit;
+                        document.querySelector('#DownloadContinueAfterLimit').checked = config.DownloadContinueAfterLimit;
+                        document.querySelector('#DownloadDryRun').checked = config.DownloadDryRun;
+
+                        // F-M23 (rework 25.09.2026): the counters live in the database now, so the GUI
+                        // asks the plugin API instead of the configuration.
+                        var fmtLast = function (iso) {
+                            if (!iso) { return 'never'; }
+                            return subdlFmtDateTime(iso);
+                        };
+                        var subdlRenderStats = function (s) {
+                            var el = document.querySelector('#StatsLine');
+                            if (!el) { return; }
+                            if (!s) { el.textContent = '—'; return; }
+                            el.textContent =
+                                s.Uploaded + ' subtitles uploaded, ' +
+                                s.Downloaded + ' subtitles downloaded since the last reset.';
+
+                            // F-M218 quality line: what the volume counters cannot show —
+                            // where the run had to work around Jellyfin's metadata, and how
+                            // much the QA gates filtered out.
+                            var q = document.querySelector('#StatsQualityLine');
+                            if (q) {
+                                q.textContent =
+                                    'Corrections and rejects: ' +
+                                    (s.TypeCorrectedByFileName || 0) + ' items the file name typed ' +
+                                    '(Jellyfin had the wrong type), ' +
+                                    (s.TmdbYearFilterMisses || 0) + ' titles found only after dropping ' +
+                                    'Jellyfin\u2019s year, ' +
+                                    (s.QaRejectedDownload || 0) + ' downloads / ' +
+                                    (s.QaRejectedUpload || 0) + ' uploads rejected by the quality check.';
+                            }
+
+                            // The period stamp sits on its own line, last — it belongs to
+                            // all of the counters above, not to a sentence in the middle.
+                            var since = document.querySelector('#StatsSinceLine');
+                            if (since) {
+                                since.textContent = s.SinceUtc
+                                    ? 'Counting since ' + subdlFmtDateTime(s.SinceUtc)
+                                    : 'Counting since: no reset yet.';
+                            }
+                        };
+                        window.subdlRenderStats = subdlRenderStats;
+                        var subdlLoadStats = function () {
+                            // dataType:'json' is REQUIRED. Without it the apiclient bundle sees a
+                            // Content-Type of application/json (not text/*) and hands back the RAW
+                            // Response object, so s.Uploaded/s.SinceUtc are undefined and the line
+                            // reads "undefined subtitles uploaded ... since —". The other loaders in
+                            // this file call .json() themselves; this one did not.
+                            // _t cache-buster: a cached body would make the Refresh button look dead
+                            // again (the same symptom as before), so never let a layer serve a stale one.
+                            var statsUrl = ApiClient.getUrl('Plugins/SubdlSync/Stats');
+                            statsUrl += (statsUrl.indexOf('?') === -1 ? '?' : '&') + '_t=' + Date.now();
+                            return ApiClient.ajax({ type: 'GET', url: statsUrl, dataType: 'json' })
+                                .then(function (s) { subdlRenderStats(s); return s; });
+                        };
+                        window.subdlLoadStats = subdlLoadStats;
+                        subdlLoadStats();
+
+                        // Workers section (bottom of the page): the LAST run of each worker, read from
+                        // the data file — one line per worker, never a history. Kept in the database
+                        // rather than in a static field precisely because a Jellyfin restart used to
+                        // reset that "last run" to "never run" while the run was minutes old.
+                        var subdlWorkerOutcome = function (o) {
+                            switch ((o || '').toLowerCase()) {
+                                // ABBREVIATED status words, at most 6 characters. The Workers columns are
+                                // max-content and cannot shrink, so the longest word here sets the minimum
+                                // width of the whole line on a phone. The full words were 8-9 characters and
+                                // forced the section down to 0.85em to fit a 320px screen; these fit at full
+                                // size. Keep new status words <= 6 characters and re-measure (see
+                                // #WorkerRunList) -- a longer one pushes the status off the right edge
+                                // instead of eliding.
+                                case 'run': return { color: '#00a4dc', text: 'run' };
+                                case 'ok': return { color: '#107c10', text: 'ok' };
+                                case 'failed': return { color: '#a4262c', text: 'fail' };
+                                case 'cancelled': return { color: '#ffc107', text: 'cancel' };
+                                case 'skipped': return { color: '#767676', text: 'skip' };
+                                // Quota/rate limit or a lock deferral: the cycle finished, the work
+                                // did not happen. YELLOW, because green reads as success (user,
+                                // 30.09.2026) and grey would hide it. Word kept <=6 chars.
+                                case 'deferred': return { color: '#ffc107', text: 'defer' };
+                                default: return { color: '#767676', text: 'never' };
+                            }
+                        };
+                        var subdlRenderWorkers = function (d) {
+                            var list = document.querySelector('#WorkerRunList');
+                            if (!list) { return; }
+                            var workers = (d && d.Workers) || [];
+                            var line = document.querySelector('#WorkersLine');
+                            if (line) {
+                                line.textContent = 'The last run of each worker.';
+                            }
+                            list.innerHTML = '';
+workers.forEach(function (w) {
+                                var oc = subdlWorkerOutcome(w.Outcome);
+                                var when = w.Started ? subdlFmtDateTime(w.Started) : '\u2014';
+                                var row = document.createElement('div');
+                                row.className = 'subdl-status-row';
+                                // FOUR cells, one per column: light, name, time, result. The dry-run note
+                                // is grey text INSIDE the result cell (not a separate badge/cell) --
+                                // a badge in its own column widened the line by ~50px and pushed the
+                                // status off the right edge on a narrow phone. Inside the result cell it
+                                // costs nothing extra in column alignment, because the cell is already
+                                // sized by its own content.
+                                row.innerHTML = '<span class="subdl-light" style="background:' + oc.color + ';"></span>' +
+                                    '<span class="subdl-label">' + (w.Name || '?') + '</span>' +
+                                    '<span class="subdl-when">' + when + '</span>' +
+                                    '<span class="subdl-outcome" style="color:' + oc.color + ';">' + oc.text +
+                                    (w.DryRun ? '<span class="subdl-dryrun">dry run</span>' : '') + '</span>';
+                                list.appendChild(row);
+                            });
+                        };
+                        var subdlLoadWorkers = function () {
+                            // _t cache-buster, same reason as the stats loader above.
+                            var wUrl = ApiClient.getUrl('Plugins/SubdlSync/WorkerRuns');
+                            wUrl += (wUrl.indexOf('?') === -1 ? '?' : '&') + '_t=' + Date.now();
+                            return ApiClient.ajax({ type: 'GET', url: wUrl, dataType: 'json' })
+                                .then(function (d) { subdlRenderWorkers(d); return d; })
+                                .catch(function () { subdlRenderWorkers(null); });
+                        };
+                        window.subdlLoadWorkers = subdlLoadWorkers;
+                        subdlLoadWorkers();
+                        // One call that reloads EVERY live readout on the page: the API/search quota,
+                        // the download quota (both live in #SubdlQuotaBox), the SubDL/TMDb status rows,
+                        // the statistics counters and the Workers list. Wired to the "Refresh status"
+                        // button AND used by the poll tick, so a manual run shows up without an F5
+                        // (measured 30.09.2026: subdlLoadWorkers was called ONCE at init, so a worker
+                        // row only changed on a page reload — it looked like caching, the server was
+                        // innocent).
+                        var subdlReloadEverything = function () {
+                            // NOTE: quota and status are plain function declarations at the script's top
+                            // level, NOT window.* properties — reading them off window here would hand
+                            // back undefined and the refresh would silently skip two of the five
+                            // readouts. Referenced by name; the closure reaches the outer scope.
+                            // 'status' covers the SubDL/TMDb lights AND the library read/write rows.
+                            var jobs = [
+                                ['api/search quota + download quota', subdlLoadQuota],
+                                ['SubDL/TMDb lights + library read/write', subdlLoadStatus],
+                                ['statistics counters', subdlLoadStats],
+                                ['workers list', subdlLoadWorkers]
+                            ];
+                            jobs.forEach(function (job) {
+                                var fn = job[1];
+                                if (typeof fn !== 'function') {
+                                    console.log('[SubDL Scribe] refresh: ' + job[0] + ' loader not available');
+                                    return;
+                                }
+                                try { fn(); } catch (e) { console.error('[SubDL Scribe] refresh failed: ' + job[0], e); }
+                            });
+                        };
+                        window.subdlReloadEverything = subdlReloadEverything;
+
+                        // Refresh every 10s while the page stays open so live runs update it.
+                        if (window.subdlStatsRefresh) { clearInterval(window.subdlStatsRefresh); }
+                        window.subdlStatsRefresh = setInterval(function () {
+                            subdlLoadStats();
+                            subdlLoadWorkers();
+                        }, 10000);
+                        Dashboard.hideLoadingMsg();
+                        subdlPopulateLibraries(config);
+                        subdlLoadQuota();
+                        subdlLoadStatus();
+                        console.log('[SubDL Scribe] init complete');
+                    }).catch(function (err) {
+                        console.error('[SubDL Scribe] init failed', err);
+                        if (typeof Dashboard !== 'undefined' && Dashboard.hideLoadingMsg) { try { Dashboard.hideLoadingMsg(); } catch (e) { /* non-fatal */ } }
+                        var box = document.querySelector('#SubdlStatusBox');
+                        if (box) {
+                            box.innerHTML = '<div class="fieldDescription" style="color:#a4262c;">Failed to load configuration: ' + (err && err.message ? err.message : String(err)) + '</div>';
+                        }
+                        // Try to render the page anyway so it is not stuck
+                        try { subdlPopulateLibraries({}); } catch (e) { }
+                        try { subdlLoadQuota(); } catch (e) { }
+                        try { subdlLoadStatus(); } catch (e) { }
+                    });
+                }
+
+                // F-M48 (user decision 08.09.2026): manual run buttons — always available,
+                // In every interval mode. The task itself only gates on its master switch.
+                // Buttons stay enabled even when a pipeline is disabled — the task then
+                // Skips with a log line; the user gets consistent behaviour ("disabled
+                // Pipelines stay off") without us re-implementing state polling here.
+                function subdlFindTaskId(name, cb) {
+                    ApiClient.getScheduledTasks().then(function (tasks) {
+                        var hit = tasks.filter(function (t) { return t.Name === name; })[0];
+                        cb(hit ? hit.Id : null);
+                    }, function () { cb(null); });
+                }
+
+                function subdlStartTask(name) {
+                    Dashboard.showLoadingMsg();
+                    subdlFindTaskId(name, function (id) {
+                        if (!id) {
+                            Dashboard.hideLoadingMsg();
+                            Dashboard.alert('Task not found: ' + name);
+                            return;
+                        }
+                        // JF API: POST /ScheduledTasks/Running/{taskId}
+                        ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('ScheduledTasks/Running/' + id) }).then(function () {
+                            Dashboard.hideLoadingMsg();
+                            Dashboard.alert('Started: ' + name);
+                        }, function () {
+                            Dashboard.hideLoadingMsg();
+                            Dashboard.alert('Could not start task (is it already running?): ' + name);
+                        });
+                    });
+                }
+
+                // F-M70 (09.09.2026): live SubDL quota under the API key field.
+                // GET /Plugins/SubdlQuota/Get proxies /api/v1/me server-side
+                // (free of request quota, 5-min cached server-side).
+                // Auto-refresh: 60 s poll — the server cache keeps this free.
+                var subdlQuotaTimer = null;
+                function subdlStopQuotaPoll() {
+                    if (subdlQuotaTimer) { clearInterval(subdlQuotaTimer); subdlQuotaTimer = null; }
+                }
+                function subdlStartQuotaPoll() {
+                    subdlStopQuotaPoll();
+                    subdlQuotaTimer = setInterval(subdlLoadQuota, 60000);
+                }
+                function subdlLoadQuota() {
+                    var box = document.querySelector('#SubdlQuotaBox');
+                    if (!box) { return; }
+                    var subdlQ = ApiClient.getUrl('Plugins/SubdlQuota/Get');
+                    subdlQ += (subdlQ.indexOf('?') === -1 ? '?' : '&') + '_t=' + Date.now();
+                    fetch(subdlQ, { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.json(); }).then(function (res) {
+                        function n(v) { return (typeof v === 'number') ? v.toLocaleString() : v; }
+                        function t(iso) {
+                            // FetchedAt is UTC ISO — render in the viewer's timezone (Europe/Berlin)
+                            return isNaN(new Date(iso).getTime()) ? '' : 'Updated ' + subdlFmtTime(iso);
+                        }
+                        if (res && res.error) {
+                            if (res.error === 'no-api-key') {
+                                box.textContent = 'No API key configured.';
+                            } else {
+                                box.textContent = 'Unavailable (' + res.error + ')';
+                            }
+                            box.style.display = 'block';
+                            return;
+                        }
+                        // (15.09.2026): docs-shaped rendering —
+                        // Plan / search / downloads, errors as 429 line.
+                        // Old "API requests today... as of" form dropped
+                        // (user decision 15.09.2026).
+                        if (!res || !res.search) {
+                            box.textContent = 'Unavailable (bad response)';
+                            box.style.display = 'block';
+                            return;
+                        }
+                        function resetLocal(iso) {
+                            return isNaN(new Date(iso).getTime()) ? '' : subdlFmtTime(iso);
+                        }
+                        function renderBar(label, used, limit, reset) {
+                            var pct = (limit > 0) ? Math.min(100, (used / limit) * 100) : 0;
+                            var cls = pct >= 95 ? 'danger' : (pct >= 75 ? 'warn' : '');
+                            return '<div class="subdl-quota-row">' +
+                                '<div class="subdl-quota-label"><span>' + label + '</span><span>' + n(used) + ' / ' + n(limit) + '</span></div>' +
+                                '<div class="subdl-bar"><div class="subdl-bar-fill ' + cls + '" style="width:' + pct.toFixed(1) + '%;"></div></div>' +
+                                (reset ? '<div style="font-size:0.85em;opacity:0.75;">resets ' + reset + '</div>' : '') +
+                                '</div>';
+                        }
+                        var lines = [];
+                        lines.push('<div style="font-weight:600;">Plan: ' + (res.plan || 'Free') + '</div>');
+                        lines.push(renderBar('Search', res.search.used, res.search.limit, resetLocal(res.search.reset_at)));
+                        if (res.downloads) {
+                            lines.push(renderBar('Downloads', res.downloads.used, res.downloads.limit, resetLocal(res.downloads.reset_at)));
+                        }
+                        box.innerHTML = lines.join('');
+                        // The footer stamp is NOT written here any more (30.09.2026): this loader runs
+                        // on a 60 s poll and the server caches the quota answer for 5 minutes, so its
+                        // fetchedAt could be minutes behind while claiming to be the page's refresh
+                        // time. Only the Refresh button stamps that line now.
+                        box.style.display = 'block';
+
+                    }, function () {
+                        box.style.display = 'none';
+                    });
+                }
+
+                // NF-8 (20.09.2026 rev.3): stop button — simply creates.stop-upload
+                // And.stop-download marker files in the plugin data directory.
+                function subdlNotify(msg) {
+                    if (typeof Dashboard !== 'undefined' && typeof Dashboard.alert === 'function') {
+                        try { Dashboard.alert(msg); return; } catch (e) {}
+                    }
+                    if (typeof alert === 'function') { alert(msg); }
+                    else { console.log('[SubDL Scribe] notify:', msg); }
+                }
+
+                function subdlStopTask(name) {
+                    var dir = name.indexOf('Upload') >= 0 ? 'upload' : 'download';
+                    ApiClient.ajax({
+                        type: 'POST',
+                        url: ApiClient.getUrl('Plugins/SubdlSync/Stop', { direction: dir })
+                    }).then(function (r) {
+                        if (r && r.ok) {
+                            subdlNotify('Stop marker set: ' + name);
+                        } else {
+                            subdlNotify('Stop failed: ' + name + ' (' + (r && r.error ? r.error : 'unknown') + ')');
+                        }
+                    }).catch(function (err) {
+                        console.error('[SubDL Scribe] stop failed', name, err);
+                        subdlNotify('Stop failed — plugin not reachable: ' + name);
+                    });
+                }
+
+                // Page-wide refresh, next to Save (user order 30.09.2026). Reloads all five readouts
+                // at once; see subdlReloadEverything for the list and why it is shared with the poll.
+                var refreshBtn = document.querySelector('#RefreshSubdlStatus');
+                if (refreshBtn) {
+                    refreshBtn.addEventListener('click', function () {
+                        // MUST go through window: this listener sits at the script's top level, while
+                        // subdlReloadEverything is a var inside the config callback. A bare name here
+                        // resolves to nothing and the click would throw a ReferenceError. Guarded so a
+                        // failed config load cannot leave a dead button.
+                        if (typeof window.subdlReloadEverything === 'function') {
+                            window.subdlReloadEverything();
+                        } else {
+                            subdlLoadQuota();
+                            subdlLoadStatus();
+                        }
+                        // The stamp above the button is written HERE and nowhere else (user order
+                        // 30.09.2026: "Dann nur noch vom refresh bitte"). The time shown is the moment
+                        // of the click in the VIEWER's timezone — the only time the user can line up
+                        // with their own action. Deliberately NOT a server timestamp: the quota answer
+                        // is cached server-side for 5 minutes, so its fetchedAt would show a time the
+                        // click did not cause.
+                        try {
+                            var stamp = document.querySelector('#SubdlStatusTimestamp');
+                            if (stamp) { stamp.textContent = 'Manually refreshed ' + subdlFmtTime(new Date()); }
+                        } catch (e) { /* the readouts matter more than the stamp */ }
+                    });
+                }
+
+                document.querySelector('#RunUploadNow').addEventListener('click', function () { subdlStartTask('SubDL/TMDB — Subtitle Upload'); });
+                document.querySelector('#RunDownloadNow').addEventListener('click', function () { subdlStartTask('SubDL/TMDB — Subtitle Download'); });
+                document.querySelector('#StopAllNow').addEventListener('click', function () {
+                    // NF-8: stop BOTH directions — one click, two marker files.
+                    subdlStopTask('SubDL/TMDB — Subtitle Upload');
+                    subdlStopTask('SubDL/TMDB — Subtitle Download');
+                });
+
+                // Statistics reset: zero the counters via plugin config update.
+                document.querySelector('#ResetRegistry').addEventListener('click', function (e) {
+                    e.preventDefault();
+                    // F-M90: two-stage confirmation — the wording is intentionally blunt.
+                    if (!confirm('Reset the plugin database?\n\nThis deletes ALL persistent state files: uploaded/rejected memory, stream positions, hash cache. On the next run every stream is re-screened from scratch and re-verified against SubDL (existing uploads are skipped, nothing is uploaded twice). Timestamped backups are kept in the plugin data directory.\n\nAre you absolutely sure?')) {
+                        return;
+                    }
+                    if (!confirm('FINAL CONFIRMATION\n\nThis makes EVERYTHING new — the plugin forgets every decision it ever made. A full re-screen will consume API quota and may take several runs.\n\nProceed only if you really want this.')) {
+                        return;
+                    }
+                    Dashboard.showLoadingMsg();
+                    ApiClient.ajax({ url: ApiClient.getUrl('Plugins/SubdlReset/Reset', { confirm: 'true', scope: 'all' }), type: 'POST' }).then(function (r) {
+                        return r.json();
+                    }).then(function (res) {
+                        Dashboard.hideLoadingMsg();
+                        if (res && res.ok) {
+                            Dashboard.alert('Plugin database reset. Backup kept as ' + res.backup + '. Everything is re-derived on the next run.');
+                        } else {
+                            Dashboard.alert('Reset failed: ' + (res && res.error ? res.error : 'unknown'));
+                        }
+                    }).catch(function () {
+                        Dashboard.hideLoadingMsg();
+                        Dashboard.alert('Reset failed — plugin not reachable.');
+                    });
+                });
+
+                // F-M182: restore the most recent backup directly, with confirmation.
+                document.querySelector('#RestoreBackup').addEventListener('click', function (e) {
+                    e.preventDefault();
+                    Dashboard.showLoadingMsg();
+                    ApiClient.ajax({ url: ApiClient.getUrl('Plugins/SubdlReset/List'), type: 'GET' }).then(function (r) {
+                        return r.json();
+                    }).then(function (res) {
+                        Dashboard.hideLoadingMsg();
+                        var backups = (res && res.backups) || [];
+                        if (!res || !res.ok || !backups.length) {
+                            Dashboard.alert('No restorable backup found in the plugin data directory.');
+                            return;
+                        }
+                        var stamp = backups[0]; // Newest first
+                        if (!confirm('Restore subdl-scribe.db from backup ' + stamp + '?\n\nThe current database will be kept as .pre-restore copy before overwriting.\n\nProceed?')) {
+                            return;
+                        }
+                        Dashboard.showLoadingMsg();
+                        ApiClient.ajax({ url: ApiClient.getUrl('Plugins/SubdlReset/Restore', { confirm: 'true', stamp: stamp }), type: 'POST' }).then(function (r) {
+                            return r.json();
+                        }).then(function (res2) {
+                            Dashboard.hideLoadingMsg();
+                            if (res2 && res2.ok) {
+                                Dashboard.alert('Restored subdl-scribe.db from ' + res2.stamp + '. Previous live file kept as .pre-restore-' + res2.restoreStamp + '.');
+                            } else {
+                                Dashboard.alert('Restore failed: ' + (res2 && res2.error ? res2.error : 'unknown'));
+                            }
+                        }).catch(function () {
+                            Dashboard.hideLoadingMsg();
+                            Dashboard.alert('Restore failed — plugin not reachable.');
+                        });
+                    }).catch(function () {
+                        Dashboard.hideLoadingMsg();
+                        Dashboard.alert('Could not list backups — plugin not reachable.');
+                    });
+                });
+
+                // Statistics reset: zero the two displayed counters via plugin config update.
+                document.querySelector('#ResetStats').addEventListener('click', function (e) {
+                    e.preventDefault();
+                    Dashboard.showLoadingMsg();
+                    // Counters live in the database now — reset them through the plugin API, not by
+                    // rewriting the configuration.
+                    ApiClient.ajax({
+                        type: 'POST',
+                        url: ApiClient.getUrl('Plugins/SubdlSync/StatsReset', { confirm: 'true' }),
+                        dataType: 'json'
+                    }).then(function (res) {
+                        Dashboard.hideLoadingMsg();
+                        if (res && res.ok) {
+                            if (typeof window.subdlRenderStats === 'function') {
+                                window.subdlRenderStats(res);
+                            } else if (typeof window.subdlLoadStats === 'function') {
+                                window.subdlLoadStats();
+                            }
+                        } else {
+                            Dashboard.alert('Reset failed: ' + (res && res.error ? res.error : 'unknown'));
+                        }
+                    }, function () {
+                        Dashboard.hideLoadingMsg();
+                        Dashboard.alert('Reset failed.');
+                    });
+                });
+
+            document.querySelector('#SubdlSyncConfigForm')
+                .addEventListener('submit', function (e) {
+                    // PreventDefault MUST run synchronously FIRST — any throw in
+                    // The async chain (missing JF global, quota poll helper) otherwise
+                    // Lets the browser do a NATIVE form submit: page reloads, nothing
+                    // Saved (user report 10.09.2026 "configuration is no longer
+                    // Saved after save").
+                    e.preventDefault();
+                    try { subdlStopQuotaPoll(); } catch (err) { /* non-fatal */ }
+                    if (typeof ApiClient === 'undefined' || typeof SubdlSyncConfig === 'undefined') { return false; }
+                    try { Dashboard.showLoadingMsg(); } catch (err) { /* non-fatal */ }
+                    ApiClient.getPluginConfiguration(SubdlSyncConfig.pluginUniqueId).then(function (config) {
+                        // TMDb key is REQUIRED: id resolution is TMDB-authoritative, and series
+                        // are skipped without it. Refuse to save an empty key rather than
+                        // silently degrading the pipeline.
+                        var tmdbKey = String(document.querySelector('#TmdbApiKey').value || '').trim();
+                        if (!tmdbKey) {
+                            try { Dashboard.hideLoadingMsg(); } catch (err) { /* non-fatal */ }
+                            subdlNotify('TMDb API key is required to properly resolve IMDb / TMDb ids for upload and download.');
+                            var el = document.querySelector('#TmdbApiKey');
+                            if (el && typeof el.focus === 'function') { el.focus(); }
+                            return false;
+                        }
+                        config.Username = document.querySelector('#Username').value;
+                        config.Password = document.querySelector('#Password').value;
+                        config.ApiKey = document.querySelector('#ApiKey').value;
+                        config.TmdbApiKey = tmdbKey;
+                        var uph = parseInt(document.querySelector('#UploadsPerHour').value) || 400;
+                        config.FileRetryLimit = (function () { var v = parseInt(document.querySelector('#FileRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
+                        config.IdRetryLimit = (function () { var v = parseInt(document.querySelector('#IdRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
+                        config.DownloadQaRetryLimit = (function () { var v = parseInt(document.querySelector('#DownloadQaRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
+                        config.ArrivalDebounceMinutes = (function () { var v = parseInt(document.querySelector('#ArrivalDebounceMinutes').value, 10); return isNaN(v) ? 5 : Math.min(120, Math.max(1, v)); })();                                                config.RefetchInterval = document.querySelector('#RefetchInterval').value;
+                        config.JobSpacingMinutes = (function () { var v = parseInt(document.querySelector('#JobSpacingMinutes').value, 10); return isNaN(v) ? 15 : Math.min(120, Math.max(5, v)); })();
+
+                        config.UploadsPerHour = Math.min(500, Math.max(100, uph)); // Range 100..500
+                        var mcp = parseFloat(String(document.querySelector('#MinCallPauseSec').value).replace(',', '.'));
+                        if (isNaN(mcp)) { mcp = 0.5; }
+                        config.MinCallPauseSec = Math.min(5, Math.max(0.1, mcp)); // 0.1..5
+                        config.FollowUpRoundsDownload = document.querySelector('#FollowUpRoundsDownload').checked;
+                        config.FollowUpRoundsUpload = document.querySelector('#FollowUpRoundsUpload').checked;
+                        config.UploadOnArrival = document.querySelector('#UploadOnArrival').checked;
+                                                config.UploadEnabled = document.querySelector('#UploadEnabled').checked;
+                        config.DryRun = document.querySelector('#DryRun').checked;
+                        config.LogMode = document.querySelector('#LogMode').value;
+                        config.OshashRefresh = document.querySelector('#OshashRefresh').value;
+        config.PruneMode = document.querySelector('#PruneMode').value;
+        config.UploadPostprocessInterval = document.querySelector('#UploadPostprocessInterval').value;
+                        config.QaValidateSrt = document.querySelector('#QaValidateSrt').checked;
+                        config.QaCheckSync = document.querySelector('#QaCheckSync').checked;
+                        config.QaVerifyLanguage = document.querySelector('#QaVerifyLanguage').checked;
+                        config.UploadResolveUnd = document.querySelector('#UploadResolveUnd').checked;
+                        config.QaMinCues = document.querySelector('#QaMinCues').checked;
+                        config.UploadContinueAfterLimit = document.querySelector('#UploadContinueAfterLimit').checked;
+                        config.SkipDirPatterns = document.querySelector('#SkipDirs').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+                        config.SkipFilePatterns = document.querySelector('#SkipFiles').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+                        config.DownloadEnabled = document.querySelector('#DownloadEnabled').checked;
+                        config.DownloadLanguages = document.querySelector('#DownloadLanguagesDisplay').value;
+                        config.DownloadOnlyMissing = document.querySelector('#DownloadOnlyMissing').checked;
+                        config.DownloadHearingImpaired = document.querySelector('#DownloadHearingImpaired').checked;
+                        config.DownloadRuntimeToleranceSec = (function () { var v = parseInt(document.querySelector('#DownloadRuntimeToleranceSec').value, 10); return isNaN(v) ? 600 : v; })();
+                        config.DownloadRequireImdb = document.querySelector('#DownloadRequireImdb').checked;
+                        config.AllocateMissingLanguageCodes = document.querySelector('#AllocateMissingLanguageCodes').checked;
+                        config.QaDownloadMinCues = document.querySelector('#QaDownloadMinCues').checked;
+                        config.QaDownloadVerifyLanguage = document.querySelector('#QaDownloadVerifyLanguage').checked;
+                        config.DownloadScoreWeightGroup = parseInt(document.querySelector('#DownloadScoreWeightGroup').value) || 1000;
+                        config.DownloadScoreWeightToken = parseInt(document.querySelector('#DownloadScoreWeightToken').value) || 10;
+                        config.DownloadScoreWeightDownload = parseInt(document.querySelector('#DownloadScoreWeightDownload').value, 10); if (isNaN(config.DownloadScoreWeightDownload)) { config.DownloadScoreWeightDownload = 1; }
+                                                config.DownloadOnArrival = document.querySelector('#DownloadOnArrival').checked;
+                        config.DownloadMaxCandidatesPerLanguage = (function () { var v = parseInt(document.querySelector('#DownloadMaxCandidatesPerLanguage').value, 10); return isNaN(v) ? 3 : v; })();
+                        config.DownloadKeepBestPerLanguage = (function () { var v = parseInt(document.querySelector('#DownloadKeepBestPerLanguage').value, 10); return isNaN(v) ? 1 : Math.min(10, Math.max(1, v)); })();
+                        config.DownloadContinueAfterLimit = document.querySelector('#DownloadContinueAfterLimit').checked;
+                        config.DownloadDryRun = document.querySelector('#DownloadDryRun').checked;
+                        // Union of both library views — a tick in either the
+                        // General or the Download tab selects the library.
+                        var selected = [];
+                        document.querySelectorAll('#LibraryList input[type=checkbox]').forEach(function (cb) {
+                            var n = cb.getAttribute('data-libname');
+                            if (cb.checked && selected.indexOf(n) === -1) { selected.push(n); }
+                        });
+                        config.SelectedLibraries = selected;
+                        ApiClient.updatePluginConfiguration(SubdlSyncConfig.pluginUniqueId, config).then(function (result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                            // F-M70: saved — restart the quota poll so the box shows
+                            // The (possibly new) key's numbers within a minute.
+                            subdlLoadQuota();
+                            subdlStartQuotaPoll();
+                        });
+                    });
+                    return false;
+                });
+
+
+
+            // --- live status / traffic lights (inline because JF 12.1 strips external script src) ---
+            function subdlSetLight(id, light, message) {
+                var row = document.querySelector(id);
+                if (!row) { return; }
+                var colors = { red: '#a4262c', yellow: '#ffc107', green: '#107c10', grey: '#767676' };
+                var bulb = row.querySelector('.subdl-light');
+                var msg = row.querySelector('.subdl-msg');
+                if (bulb) { bulb.style.setProperty('--color', colors[light] || colors.grey); }
+                if (msg) { msg.textContent = message || ''; }
+            }
+
+            function subdlLoadStatus() {
+                var box = document.querySelector('#SubdlStatusBox');
+                if (!box) { return; }
+                subdlSetLight('#SubdlLoginStatus', 'grey', 'Checking…');
+                subdlSetLight('#SubdlApiStatus', 'grey', 'Checking…');
+                subdlSetLight('#TmdbApiStatus', 'grey', 'Checking…');
+                var dirList = document.querySelector('#SubdlDirStatusList');
+                if (dirList) { dirList.innerHTML = '<div class="fieldDescription">Loading…</div>'; }
+
+                var statusUrl = ApiClient.getUrl('Plugins/SubdlSync/Status');
+                statusUrl += (statusUrl.indexOf('?') === -1 ? '?' : '&') + '_t=' + Date.now();
+                fetch(statusUrl, { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.json(); }).then(function (data) {
+                    var login = data.SubdlLogin || {};
+                    var api = data.Subdl || {};
+                    var tmdb = data.Tmdb || {};
+                    subdlSetLight('#SubdlLoginStatus', (login.Light || 'grey').toLowerCase(), login.Message);
+                    subdlSetLight('#SubdlApiStatus', (api.Light || 'grey').toLowerCase(), api.Message);
+                    subdlSetLight('#TmdbApiStatus', (tmdb.Light || 'grey').toLowerCase(), tmdb.Message);
+
+                    if (dirList) {
+                        var dirs = data.Directories || [];
+                        if (dirs.length === 0) {
+                            dirList.innerHTML = '<div class="fieldDescription">No library directories found.</div>';
+                        } else {
+                            dirList.innerHTML = '';
+                            dirs.forEach(function (d) {
+                                var row = document.createElement('div');
+                                row.className = 'subdl-status-row';
+                                var colors = { red: '#a4262c', yellow: '#ffc107', green: '#107c10', grey: '#767676' };
+                                row.innerHTML = '<span class="subdl-light" style="background:' + (colors[(d.Light || 'grey').toLowerCase()] || colors.grey) + ';"></span>' +
+                                    '<span class="subdl-label">' + (d.LibraryName || '?') + '</span>' +
+                                    '<span class="subdl-msg">' + (d.Message || '') + ' — ' + (d.Path || '') + '</span>';
+                                dirList.appendChild(row);
+                            });
+                        }
+                    }
+
+                    // The footer stamp is NOT written here any more (30.09.2026): this probe runs on
+                    // the 10 s poll and after Save, so it would move the line without anyone pressing
+                    // Refresh. Only that button stamps it now.
+                }).catch(function (err) {
+                    subdlSetLight('#SubdlLoginStatus', 'red', 'Status probe failed');
+                    subdlSetLight('#SubdlApiStatus', 'red', 'Status probe failed');
+                    subdlSetLight('#TmdbApiStatus', 'red', 'Status probe failed');
+                    if (dirList) { dirList.innerHTML = '<div class="fieldDescription" style="color:#a4262c;">Unable to load status.</div>'; }
+                });
+            }
+
+            // Deferred script load — run load routine now if page div is present
+            if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", subdlInitConfigPage); } else { subdlInitConfigPage(); }
+
+            // Jellyfin plugin configuration page entry point
+            function pageinit() {
+                subdlInitConfigPage();
+            }
+
+</script>
+    </div>
+</body>
+</html>

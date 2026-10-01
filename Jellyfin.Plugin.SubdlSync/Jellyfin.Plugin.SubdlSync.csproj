@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Jellyfin.Plugin.SubdlScribe</RootNamespace>
+    <AssemblyName>Jellyfin.Plugin.SubdlSync</AssemblyName>
+    <Version>12.1.12.157-dev</Version>
+    <AssemblyVersion>12.1.12.157</AssemblyVersion>
+    <FileVersion>12.1.12.157</FileVersion>
+    <Authors>Hermes Agent</Authors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+      <NoWarn>$(NoWarn);CA2254</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jellyfin.Controller" Version="12.1.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Jellyfin.Model" Version="12.1.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="LiteDB" Version="5.0.21" />
+    <PackageReference Include="LanguageDetection" Version="1.2.0" />
+      <None Remove="logo.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Configuration\configPage.html" />
+    <EmbeddedResource Include="Configuration\configPage.html" />
+    <EmbeddedResource Include="Configuration\configPage.js" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,21 @@
+[
+  {
+    "guid": "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b",
+    "name": "SubDL Scribe",
+    "description": "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key.",
+    "overview": "Sync subtitles with SubDL — download missing and upload new subtitles.",
+    "owner": "nrg80",
+    "category": "Subtitles",
+    "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
+    "versions": [
+      {
+        "version": "12.1.12.157",
+        "changelog": "v12.1.12.157: The stamp above the refresh button reads \"Manually refreshed <time>\" instead of\n  \"Refreshed <time>\" - it is written by that button and nothing else, so the label now says so.\n  The second page script carried its own status loader that still wrote the line with a SERVER\n  timestamp labelled \"Last checked\"; that writer is gone, so the one-writer rule holds in both\n  files. A check fails the build if either file writes the stamp again.",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.157-dev/Jellyfin.Plugin.SubdlSync_12.1.12.157.zip",
+        "checksum": "9dc5b8d29137dc1497b3bc0eadb2444b",
+        "timestamp": "2026-09-30T20:03:20Z"
+      }
+    ]
+  }
+]
