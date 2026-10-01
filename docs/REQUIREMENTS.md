@@ -564,7 +564,7 @@ There is deliberately **no "settled"/"done" state.** The previous model kept a s
 - N-5: Changes to Jellyfin core
 ## 5. Non-Functional Requirements
 - **NF-1:** Platform independence: pure IL DLL (net10.0), no native binding, no P/Invoke, no platform-specific dependencies.
-- **NF-2:** GPLv3
+- **NF-2:** GPL-3.0-or-later (GNU GPL v3, or any later version) — the SPDX identifier the source headers carry
 - **NF-3:** Performance: no blocking of library scans; uploads asynchronous (background queue, IHostedService), extraction sequential per file
 - **NF-4:** Robustness: queue survives Jellyfin restart (persistent state files); no infinite retries
 - **NF-5:** No telemetry/external calls except api.subdl.com (+ dl.subdl.com for downloads, + api.themoviedb.org when a TMDB key is configured)

@@ -8,3 +8,6 @@ out/
 # Scratch files (commit messages, notes) never belong in the repo
 __msg.txt
 __*.txt
+# Python bytecode from the test scripts
+__pycache__/
+*.pyc

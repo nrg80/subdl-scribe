@@ -1,3 +1,13 @@
+// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// SubDL Scribe is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the
+// Free Software Foundation, either version 3 of the License, or (at your
+// option) any later version.
+// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
 // T82 (F-M264): laeuft das Sprachcode-Gate pro Datei nur EINMAL?
 //
 // Nachgestellt wird der Prod-Fall vom 30.09.2026: ein Arrival durchlaeuft im selben Zyklus
