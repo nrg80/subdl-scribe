@@ -148,7 +148,7 @@ changelog: >
     grouped as 43 "2x01" + 8 bare "Exx" + 40 "SxxExx"-at-end + 1 date name + 10 long form +
     76 bracket titles, zero unexplained in both.
   v12.1.12.133: Two more series markers the parser did not see.
-    Found by running guessit - the mature Python release-name parser - over the whole library
+    Found by running an independent release-name parser (guessit) over the whole library
     and comparing it against ours: it located an episode where ours found none in 84 files,
     and the reverse never happened. Two causes, 83 files, both real.
     "2x01"/"1x04" was not a marker at all, so the item counted as a film and was searched as
@@ -221,9 +221,9 @@ changelog: >
     that is 83 reads of the same gigabyte: the extraction stalls were the only slow part of
     an upload run whose median item took 11 seconds - 31 minutes for the worst file, 21 for
     another, four files over ten minutes against 86 under thirty seconds. One call now takes
-    every text stream in a single pass, which is what the Python predecessor did and what
-    the requirement always said. Measured on a 369 MB file with 40 subtitle streams: 39.3x
-    the file read and 9.27 s before, 1.0x read and 0.25 s after, byte-identical output.
+    every text stream in a single pass, which is what the requirement always said: the cost
+    of the per-stream shape is re-reading the whole container, so 40 streams meant 40 reads
+    of the same file. One pass reads it once, with byte-identical output.
   v12.1.12.128: The TMDb trace is logged once, not twice.
     Every TMDb call went through TWO gates at once - the Verbose one and the Debug one - so at
     Debug mode each line was written twice with identical text. Verbose is a SUBSET of Debug,

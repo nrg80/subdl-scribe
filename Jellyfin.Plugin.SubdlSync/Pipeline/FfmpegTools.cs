@@ -179,8 +179,8 @@ public static class FfmpegTools
     /// subtitle streams that is 83 reads of the same gigabyte — measured on prod
     /// 28.09.2026 as the only multi-minute stalls in an otherwise 11 s-median run.
     /// One call with repeated <c>-map 0:s:N</c> + <c>-f srt</c> output pairs reads the
-    /// file once and writes one file per stream, which is what the Python
-    /// predecessor did.
+    /// file once and writes one file per stream, so the container is read a single
+    /// time however many streams it carries.
     /// <para>
     /// The mapping uses the SUBTITLE-relative index (<c>0:s:N</c>), never the container
     /// index: mixing the two lands on video/audio streams (exit 8 / no-stream errors).

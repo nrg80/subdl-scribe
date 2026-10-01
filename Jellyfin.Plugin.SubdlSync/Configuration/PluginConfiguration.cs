@@ -594,11 +594,9 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>
     /// F-M74 (user decision 10.09.2026): resolve 'und' (undefined-language) subtitle
-    /// streams via language detection before upload — ported from the Python pipeline
-    /// (langdetect on 'und' tracks). ON: detected language replaces the tag and the
-    /// stream uploads normally; detection failure → skip (Python parity). OFF: every
-    /// 'und' stream is removed from the upload set (skip, logged).
-    /// Default on = Python behaviour.
+    /// streams via language detection before upload. ON: the detected language replaces
+    /// the tag and the stream uploads normally; detection failure → skip. OFF: every
+    /// 'und' stream is removed from the upload set (skip, logged). Default: on.
     /// </summary>
     public bool UploadResolveUnd { get; set; } = true;
 

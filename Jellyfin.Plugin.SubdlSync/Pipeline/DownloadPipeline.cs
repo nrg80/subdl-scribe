@@ -995,7 +995,7 @@ public sealed class DownloadPipeline : IDisposable
 
             // F-M66: TMDB ladder now runs in BOTH directions without RequireImdb gating —
             // "if tmdb available, fetch imdb" (user decision 09.09.2026): TMDB→IMDB via key,
-            // then title search (like the Python NFO generator).
+            // then a title search.
             if (string.IsNullOrWhiteSpace(imdbId) && !string.IsNullOrWhiteSpace(tmdbId) && _tmdb.IsConfigured)
             {
                 imdbId = await _tmdb.ResolveImdbAsync(tmdbId, isSeries, ct).ConfigureAwait(false);

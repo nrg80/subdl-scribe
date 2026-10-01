@@ -25,7 +25,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 
 /// <summary>
 /// SubDL API v3 client (F-M8, F-M9, F-M19). Login → Bearer token; upload is a 3-step flow
-/// (getNId → uploadSingleSubtitle → uploadSubtitle), ported from the Python pipeline.
+/// (getNId → uploadSingleSubtitle → uploadSubtitle).
 /// Credentials are never logged (F-M24b).
 /// </summary>
 public sealed class SubdlApiClient
@@ -619,7 +619,7 @@ public sealed class SubdlApiClient
         // Step 2: uploadSingleSubtitle (multipart)
         // NOTE: built MANUALLY — SubDL rejects MultipartFormDataContent output
         // ("Invalid request parameters"), only the plain requests-style format
-        // with bare name= parts works (verified 08.09.2026, python parity).
+        // with bare name= parts works.
         var srtBytes = Encoding.UTF8.GetBytes(srtContent);
         var boundary = "----Boundary" + Guid.NewGuid().ToString("N");
         var sb = new System.Text.StringBuilder();
@@ -683,9 +683,8 @@ public sealed class SubdlApiClient
             ["framerate"] = "0",
             ["comment"] = "",
             ["season"] = season.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            // F-M71 (09.09.2026, user decision "beides unbedingt fixen"): hi is no longer
-            // hardcoded — SDH/HI variants are uploaded with hi=true (parity with the
-            // Python pipeline's hearing_impaired detection).
+            // F-M71: hi is no longer hardcoded — SDH/HI variants are uploaded with
+            // hi=true, from the hearing-impaired detection (F-M71/F-M254).
             ["hi"] = hearingImpaired ? "true" : "false",
             ["is_full_season"] = "false"
         };
@@ -717,8 +716,8 @@ public sealed class SubdlApiClient
         // F-M72 (user decision 09.09.2026 "500/h limit"): the upload hourly cap does NOT
         // come as 429 — SubDL answers HTTP 200 with status:false and a message body
         // ("Upload limit reached (500 subtitles per hour). Please wait and continue
-        // later — your account can keep uploading next hour."). Python-parity: the
-        // phase-4b seeder treats 'limit' in the message as a run stop + requeue.
+        // later — your account can keep uploading next hour."). The seeder treats
+        // 'limit' in the message as a run stop + requeue.
         // A real 429 still goes through Classify429 (daily_limit vs service_busy).
         if ((int)metaResp.StatusCode == 429)
         {

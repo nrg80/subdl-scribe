@@ -345,7 +345,7 @@ public sealed class SubdlSeeder
         {
             // Parity: no imdb AND no tmdb id → back of the queue (the pipeline
             // would spend its 15-min metadata ladder on them). Episoden: Series-Ids
-            // zählen (pipeline-parity).
+            // zählen.
             var item = GetItem(qi.ItemId);
             var (imdb, tmdb, _, _, _) = ResolveIdsOf(item);
             if (string.IsNullOrWhiteSpace(imdb) && string.IsNullOrWhiteSpace(tmdb))
@@ -528,7 +528,7 @@ public sealed class SubdlSeeder
             // queued. The pipeline keeps the fail-closed decision: an item that stays
             // id-less is skipped there (SkippedNoId, no-id requeue), not here.
 
-            // F-M47 parity: refetch gate.
+            // F-M47: refetch gate.
             var searchTracker = new Registry.DownloadSearchTracker(db);
             if (!searchTracker.IsDue(item.Id.ToString(), SubdlDownloadTask.IntervalToGap(config.RefetchInterval), TargetLanguagesOf(config)))
             {
@@ -1023,7 +1023,7 @@ public sealed class SubdlSeeder
         }
     }
 
-    /// <summary>Loose sidecar SRTs next to the media file (parity).</summary>
+    /// <summary>Loose sidecar SRTs next to the media file.</summary>
     private List<string> FindLooseSrts(string mediaPath)
     {
         var result = new List<string>();

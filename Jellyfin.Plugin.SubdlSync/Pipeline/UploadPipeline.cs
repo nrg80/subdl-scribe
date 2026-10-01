@@ -390,7 +390,7 @@ public sealed class UploadPipeline
 
         // F-M59 (user decision 09.09.2026): LIFO within BOTH partitions — newest items
         // (DateCreated descending) get the daily quota first, old library stock last.
-        // Mirrors the Python pipeline's LIFO queue: a brand-new arrival must not lose
+        // LIFO queue order (F-M59): a brand-new arrival must not lose
         // the quota race against 284 legacy items (verified live 09.09.2026: The Runner,
         // arrived 06:14, hit the daily limit after the legacy stock had burned the
         // requests). The id-partition keeps priority (user decision: "id-less items go
@@ -786,8 +786,8 @@ public sealed class UploadPipeline
 
             // ============================================================
             // F-M5: ONE ffmpeg pass for every text stream of this file, before the
-            // per-stream loop. The predecessor (subdl-sub-uploader.py,
-            // extract_all_subtitles) did this and said why: "to avoid re-reading
+            // per-stream loop. The single pass exists because the cost of the
+            // per-stream shape is re-reading the whole container: "to avoid re-reading
             // large CIFS files". The C# port lost it and extracted per stream, so
             // ffmpeg reopened a ~1 GB file once per stream. Measured on prod
             // 28.09.2026 (upload run 15:24, 90 items, median item 11 s): the only
@@ -842,10 +842,10 @@ public sealed class UploadPipeline
 
                 // F-M10: language mapping — 'und' (undefined) streams resolve via
                 // F-M74 detection (tickbox UploadResolveUnd): detected language replaces
-                // the tag (Python parity); without the tickbox every 'und' stream is
+                // the tag; without the tickbox every 'und' stream is
                 // removed from the upload set.
                 string rawLang = stream.Language ?? string.Empty;
-                // A NULL/empty tag means exactly what 'und' means — Python parity
+                // A NULL/empty tag means exactly what 'und' means (F-M261)
                 // (movies2-sub-uploader.py: tags.get('language', 'und')). Before this fix
                 // untagged streams (The.Hawk: 40 per file) fell through MapToSubdl → null
                 // and were silently skipped without ever learning a pair → permanent walk.
@@ -952,8 +952,8 @@ public sealed class UploadPipeline
                 srt = ContentHashRegistry.NormalizeSrt(srt);
 
                 // F-M74: resolve the 'und' sentinel with real detection on the extracted
-                // text (Python parity — langdetect ran after extraction there too).
-                // Python's size order preserved: the 2 KB floor (hard, F-M16) runs BEFORE
+                // text (detection runs after extraction).
+                // Size order matters: the 2 KB floor (hard, F-M16) runs BEFORE
                 // detection — tiny und-streams skip instead of getting a garbage verdict.
                 // Success → the detected language replaces the tag; failure → skip.
                 if (lang == "UN")
@@ -1621,7 +1621,7 @@ public sealed class UploadPipeline
     }
 
     /// <summary>
-    /// F-M71 (parity with the Python pipeline, user decision 09.09.2026 "beides unbedingt fixen"):
+    /// F-M71:
     /// detects a hearing-impaired (SDH) embedded subtitle stream. Sources, in order:
     /// the JF stream Title ("SDH"/"Hearing Impaired" — set by MediaElch/ TinyMediaManager
     /// or JF metadata) and the stream's own flag as a fallback.
@@ -2065,8 +2065,8 @@ public sealed class UploadPipeline
     /// subtitle streams that is 83 reads of the same gigabyte — measured on prod
     /// 28.09.2026 as the only multi-minute stalls in an otherwise 11 s-median run.
     /// One call with repeated <c>-map 0:s:N</c> + <c>-f srt</c> output pairs reads the
-    /// file once and writes one file per stream, which is what the Python
-    /// predecessor did.
+    /// file once and writes one file per stream, so the container is read a single
+    /// time however many streams it carries.
     /// <para>
     /// The mapping uses the SUBTITLE-relative index (<c>0:s:N</c>), never the container
     /// index: mixing the two lands on video/audio streams (exit 8 / no-stream errors).

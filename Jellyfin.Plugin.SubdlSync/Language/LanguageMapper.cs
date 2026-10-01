@@ -16,7 +16,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Language;
 
 /// <summary>
 /// Maps ISO 639-2 (ffprobe/MediaBrowser) three-letter codes to SubDL two-letter codes (F-M10).
-/// Ported 1:1 from the Python pipeline (subdl-sub-uploader.py LANG_MAP), verified codes.
+/// The codes are the ones SubDL accepts, verified against the API.
 /// </summary>
 public static class LanguageMapper
 {

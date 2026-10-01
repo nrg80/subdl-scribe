@@ -98,7 +98,7 @@ public static class QaGates
     /// (user decision 10.09.2026): language detection via the LanguageDetection
     /// NuGet (Cybozu n-gram port, Apache-2.0, offline) — replaces the hand-rolled
     /// Unicode-block + Latin stopword scan that produced 18/19 false positives on
-    /// real-world tracks (TR→NL, DA→DE, FI→NL; verified live against Python's
+    /// real-world tracks (TR→NL, DA→DE, FI→NL; verified against the detector's
     /// langdetect on the same corpus: langdetect 18/19 correct vs. stopwords 18/19 wrong).
     /// Deterministic: fixed seed, mirroring langdetect's DetectorFactory.seed = 0.
     /// Returns null when no confident verdict is possible — gate stays silent.
