@@ -241,15 +241,13 @@ The file-retry counter is recorded as a success, so a dry run neither burns a re
 
 The HI block of the download loop is guarded by the *effective* flag, not the candidate's: when the file just saved already was the HI variant, no second download follows.
 
-The dry run reports the name and marker it WOULD write, HI marker included.
-
 **F-M242 [D]:** **"Best subtitles to keep per language" saves exactly that many numbered files.** With `KeepBestPerLanguage = X` the pipeline saves the top X QA-passed candidates per (item, language): slot 1 is `<basename>.<lang>.srt`, slots 2..X are `<basename>.<lang>.2.srt`, `.<lang>.3.srt`, … Fewer usable candidates than X saves fewer files, never an error.
 
 The ONLY exit from the candidate loop is `savedCount >= keepBest`. `KeepBestPerLanguage = 1` (the default) is unchanged.
 
 The GUI caps the saved-slot count at 10.
 
-The dry run names the files it would write (`DRY-RUN slot 2/3 … → <name>.en.2.srt`), so the setting is verifiable without spending quota.
+While `KeepBestPerLanguage > 1` the dry run names the slots it would fill (`DRY-RUN slot 2/3 … → <name>.en.2.srt`), so the setting is verifiable without spending quota. With the default of 1 there is one slot and the line is not written. The slot preview carries the slot number, not the hearing-impaired marker: it runs before any file is fetched (F-M277).
 
 **F-M241 [D]:** **Two searches, one per side of the hearing-impaired split.** The regular slot is filled from a `&hi=0` search and the HI slot from a `&hi=1` search; the HI search runs only while the switch is on, so a user who does not want HI pays one search exactly as before.
 
@@ -301,7 +299,9 @@ It runs: the id quality gate (F-M151b), the searches (F-M241), the release scori
 
 It does not run: the file fetch, the quality gates of 4.1 (language verify, minimum cue count, runtime match), the file write, the download mark and the registry write.
 
-The report names, per language, the chosen release with its score and its hearing-impaired flag, and every numbered slot with the file name it WOULD write (F-M242). While the hearing-impaired switch is on, the candidate from the hearing-impaired pool is named as well (F-M241).
+The report names, per language, the chosen release with its score and its hearing-impaired flag. While the hearing-impaired switch is on, the candidate from the hearing-impaired pool is named as well (F-M241). While `KeepBestPerLanguage > 1`, the slots it would fill are named (F-M242).
+
+**The report stops at the candidate, not at the file.** A dry run fetches nothing, so it cannot know the byte size, and it never reaches the point where the name is built from the fetched file — the hearing-impaired marker of the F-M260 name is therefore NOT part of a dry run. What a dry run answers is *which release* per language, not *which file*.
 
 **It stops before the download call,** so no file is transferred — but the searches DO cost API quota, one per language set (two while the HI switch is on, F-M241). The GUI text must name both: "without saving files" and "without API calls" are not the same claim.
 

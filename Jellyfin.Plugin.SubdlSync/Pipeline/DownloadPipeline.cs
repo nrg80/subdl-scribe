@@ -1728,25 +1728,6 @@ public sealed class DownloadPipeline : IDisposable
                 // still records the content hash below so the seeder's checks
                 // keep working.
 
-                // Dry-run: everything above ran but no file write
-                if (_config.DownloadDryRun)
-                {
-                    if (_config.LogMode >= LogLevelMode.Verbose)
-                    {
-                        // F-M260: report the name that would really be written — including the
-                        // ".sdh" marker when the fetched file is a hearing-impaired one. The dry
-                        // run's whole value is answering "what would land on disk?".
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] DRY-RUN would save {Name} ({Size} bytes, hi={Hi}) for {File}",
-                            Path.GetFileName(SidecarNaming.Build(mediaPath, lang, effectiveHi, savedCount + 1)), bytes.Length,
-                            effectiveHi ? "yes" : "no", Path.GetFileName(mediaPath));
-                    }
-
-                    summary.Downloaded++;
-                    ReportOutcome(item, ItemOutcome.Done);
-                    savedAny = true;
-                    break;
-                }
-
                 try
                 {
                     // Slot 1 = "<base>.<lang>.srt" (as before), further slots
@@ -1878,7 +1859,10 @@ public sealed class DownloadPipeline : IDisposable
                                     }
                                     else
                                     {
-                                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] DRY-RUN would save HI variant for {File} [{Lang}]", Path.GetFileName(mediaPath), lang);
+                                        // Safety, not a promise: the dry run never reaches the fetch
+                                        // (it breaks before it, F-M22). If that ever changes, this
+                                        // guard still stops the HI file from being written.
+                                        LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] DRY-RUN would save HI variant for {File} [{Lang}]", Path.GetFileName(mediaPath), lang);
                                     }
                                 }
                                 else
