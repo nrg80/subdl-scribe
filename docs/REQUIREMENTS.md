@@ -12,20 +12,21 @@
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 11 requirements
 - [6. Database Refresh](#6-database-refresh) — 13 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 5 requirements
-- [8. Rules of Both Pipelines](#8-rules-of-both-pipelines) — 4 requirements
-- [9. Quality Gates](#9-quality-gates) — 6 requirements
-- [10. SubDL/TMDb API, IDs and Credentials](#10-subdl-tmdb-api-ids-and-credentials) — 23 requirements
-- [11. Scheduler, Quota and Timing](#11-scheduler-quota-and-timing) — 12 requirements
-- [12. Content Registry and Identity](#12-content-registry-and-identity) — 9 requirements
-- [13. Library Scope and Skip Filters](#13-library-scope-and-skip-filters) — 8 requirements
-- [14. Configuration and Settings Page](#14-configuration-and-settings-page) — 11 requirements
-- [15. Data Model and Persistence](#15-data-model-and-persistence) — 6 requirements
-- [16. Logging, Status and Transparency](#16-logging-status-and-transparency) — 15 requirements
-- [17. Non-Goals](#17-non-goals)
-- [18. Non-Functional Requirements](#18-non-functional-requirements)
-- [19. Acceptance Criteria](#19-acceptance-criteria)
-- [20. Test Library](#20-test-library)
-- [21. References](#21-references)
+- [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 8 requirements
+  - [8.1 Extraction, Queue and Skip Order](#81-extraction-queue-and-skip-order) — 4 requirements
+  - [8.2 Quality Gates](#82-quality-gates) — 4 requirements
+- [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 23 requirements
+- [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 12 requirements
+- [11. Content Registry and Identity](#11-content-registry-and-identity) — 11 requirements
+- [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 11 requirements
+- [14. Data Model and Persistence](#14-data-model-and-persistence) — 6 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 15 requirements
+- [16. Non-Goals](#16-non-goals)
+- [17. Non-Functional Requirements](#17-non-functional-requirements)
+- [18. Acceptance Criteria](#18-acceptance-criteria)
+- [19. Test Library](#19-test-library)
+- [20. References](#20-references)
 
 ## 1. Objective and Scope
 
@@ -221,7 +222,9 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
 - **F-M196:** one record per **video file**, `_id` = the stable OSHash (16 hex characters, F-M61). Carries the path, the Jellyfin item id, the IMDb id, the TMDb id, the SubDL id, the series flag, the season, the episode, the last-seen stamp. For a series episode the ids are the **SHOW** ids, never episode or season ids (F-M191).
  - Derived, written automatically whenever an embedded track is stored so they cannot drift: the language aggregate (sorted, comma separated) and the hearing-impaired aggregate.
 
-## 8. Rules of Both Pipelines
+## 8. Rules Shared by Both Directions
+
+### 8.1 Extraction, Queue and Skip Order
 
 - **F-M5:** **One ffmpeg call per file, however many subtitle streams it carries.** All text subtitle streams are extracted in a SINGLE invocation into a temp folder: repeated `-map 0:s:N -c:s srt -f srt <out>` output pairs on one input.
  - **The index rule:** stream positions are SUBTITLE-relative (`0:s:N`), never container indices. Both numbering schemes agree only while the file has no non-subtitle streams before the subtitles; mixing them lands on video or audio and fails with exit 8 or a no-stream error.
@@ -240,16 +243,14 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
 - **F-M59:** **LIFO queue order:** both pipelines process items by the creation stamp descending — newest first. The id-order partition keeps id-resolvable items before the id-less backlog.
 - **F-M60:** **File-missing retries before permanent skip:** persistent counter per item (shared by both pipelines). Each failed file access bumps it, success resets it. At the configurable threshold (default 3, 0 = never) the item is skipped as "file-missing (retries exhausted)".
 
-## 9. Quality Gates
+### 8.2 Quality Gates
 
-- **F-M185:** **Canonical SRT form — one normalization for hash AND payload.** Every extracted or loose SRT is normalized once on arrival, before any QA gate, hashing or upload: strip a leading UTF-8 BOM, CRLF → LF, lone CR → LF, trim trailing whitespace. The same string feeds both the hash function and the upload body, so hash input and uploaded bytes are identical by construction. The normalization is **idempotent** and runs at extraction, at loose-file read, and again in the upload path (reachable via the retry path).
 - **F-M13 [B2]:** SRT parser validation: valid UTF-8, ≥1 cue, monotonically increasing timestamps, plausible cue duration (>0.1 s, <10 min — long music cues stay legal)
 - **F-M14 [B2]:** Sync plausibility: cue span vs. media runtime (+5 min tolerance; all cues concentrated in <10 % of runtime = reject)
 - **F-M15 [B2]:** Language verification: detected language of the content (script blocks for CJK/Cyrillic/etc., Latin via stopwords) vs. stream tag; mismatch → skip; undetectable content passes (fail-open)
 - **F-M16 [B2]:** Minimum size (hard 2 KB floor, always on) and minimum cue count (30) — below that "too small", skip
-- **F-M39 [B2]:** **No double work across directions:** every subtitle the system uploads or downloads is registered under its normalized content hash, so a subtitle that already arrived from either direction is neither fetched nor sent again. The two directions answer it at different points: the **upload** side asks the content-known check on the candidate itself, right before sending. The **download** side does not ask it during the fetch — the seeder asks it before the item enters the queue and keeps a file out whose sidecar content is already known. The download still records the hash it saved, which is what keeps the seeder's answer correct.
 
-## 10. SubDL/TMDb API, IDs and Credentials
+## 9. SubDL/TMDb API, IDs and Credentials
 
 - **F-M11 [B1]:** Upload queue with retry: failed uploads (HTTP 5xx/timeout) retried with exponential backoff, max N attempts, then status "failed" + dashboard display
 - **F-M12 [B1]:** Configurable account (SubDL user/pass) in plugin config, password never in plaintext in logs
@@ -308,7 +309,7 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
 - **F-M206:** **A respacing log line must not claim a quota reset.** A fire carrying an exact, caller-computed time (lock-busy, hourly-cap, rate-limit respacing) applies **no jitter** and must log `respaced by JobSpacingMinutes after lock-busy or rate-limit (no jitter)`. The quota-reset wording (reset anchor + 30–300 min jitter) is confined to the branch that actually dices it. **Test: T25.**
 - **F-M191b — Unresolvable IMDb id ⇒ DROP it, never keep it.** When `/find` returns every result array empty, TMDB does not index that IMDb id at all — for a series item it is an episode id TMDB has no record of. Keeping it "as the best available" uploads an episode IMDb id in the SERIES slot, exactly what this rule forbids. Both ids are dropped so the caller's type-free title search resolves the show by name.
 
-## 11. Scheduler, Quota and Timing
+## 10. Scheduler, Quota and Timing
 
 - **F-M20 [B1]:** Configurable rate limit: uploads/hour (**default 400**) or a minimum pause between API calls (the configured minimum pause, 0.1–10 s, default 0.5 s, GUI-capped at 0.1–5 s; the smaller of the two wins). the rate limiter clamps the rate to **1–2000**; the run watchdog clamps its grace calculation to **1–500**. The default of 400 sits inside both.
 - **F-M272:** **The page has THREE refresh cadences, and none of them is "10 s for everything".**
@@ -341,7 +342,7 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
 - **F-M54:** **Reaction matrix per server response:** 403 auth → immediate stop; 429 → classified by variant (F-M238) and decided against the live counters — a spent allowance follows F-M49/F-M182 (wait-until-reset or clean stop per the direction's setting), a short-term `service_busy`/`rate_limit` trip is respaced by the job spacing; 5xx → retry with backoff; 200 + `status:false` → warn, fail-open for searches.
 - **F-M204:** **A running cycle is never widened and a trigger is never merged into it.** Any overlap between scheduled upload and download is answered by a **reschedule**: `ScheduleRecoveryFireAt(direction, now + JobSpacingMinutes)` for the direction not covered by the running cycle; the dispatcher logs `rescheduled +N min — cycle already running` and returns `false`. When the fire comes due, the coordinator's tick re-checks the lock check and defers again if still busy. The per-direction latch exists for the fresh-cycle case only.
 
-## 12. Content Registry and Identity
+## 11. Content Registry and Identity
 
 - **F-M17z [B2]:** **Upload dedup respects the stored outcome:** any recorded outcome — uploaded, or rejected with any reason — counts as "known". With the four-state model of section 15 this is simply "a row exists", and a new rejection reason never needs a new state name.
 - **F-M243 [D]:** **The HI variant counts as present whether it is a file or an embedded track.** Both evidence sources answer the same question, and Jellyfin's own the hearing-impaired flag decides a stream — read through ONE detector (the hearing-impaired predicate) used by uploader and downloader alike.
@@ -373,8 +374,10 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
  Find(x => x.ItemId == itemId).Where(x => string.Equals(x.Language, language, StringComparison.OrdinalIgnoreCase))
  ```
 - **F-M194b:** every area is keyed by a **computed business key stored in the record's own `_id`**, never by a database-assigned auto id. This is the structural correction of **F-M194**: with an auto id an upsert of a "new" row can never find the row it means to update, and the write silently inserts instead — so one logical fact came to exist many times over. With a computed key the failure is impossible by construction. **Test: T16.**
+- **F-M185:** **Canonical SRT form — one normalization for hash AND payload.** Every extracted or loose SRT is normalized once on arrival, before any QA gate, hashing or upload: strip a leading UTF-8 BOM, CRLF → LF, lone CR → LF, trim trailing whitespace. The same string feeds both the hash function and the upload body, so hash input and uploaded bytes are identical by construction. The normalization is **idempotent** and runs at extraction, at loose-file read, and again in the upload path (reachable via the retry path).
+- **F-M39 [B2]:** **No double work across directions:** every subtitle the system uploads or downloads is registered under its normalized content hash, so a subtitle that already arrived from either direction is neither fetched nor sent again. The two directions answer it at different points: the **upload** side asks the content-known check on the candidate itself, right before sending. The **download** side does not ask it during the fetch — the seeder asks it before the item enters the queue and keeps a file out whose sidecar content is already known. The download still records the hash it saved, which is what keeps the seeder's answer correct.
 
-## 13. Library Scope and Skip Filters
+## 12. Library Scope and Skip Filters
 
 - **F-M213:** **The library selection is a hard gate for every trigger and BOTH directions. Every report names only what was SELECTED.**
  - **Work:** with the library selection empty, no direction may start a run. The upload pipeline and the seeder stop up front; the download pipeline must do the same (`No libraries selected — nothing to do`) instead of filtering everything away later in the collection step. A run that did nothing must not look like a run that scanned everything.
@@ -394,7 +397,7 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
  - A `null` field value is **skipped**, never written as empty: "unknown" must not become "delete".
  - When no file exists yet, only the plugin's own fields are written; the document is deliberately **not** seeded from the in-memory object, since that would be the very overwrite this rule prevents.
 
-## 14. Configuration and Settings Page
+## 13. Configuration and Settings Page
 
 - **F-M18 [B1]:** Library selection: checkbox list of all JF libraries — only selected ones are scanned/uploaded (default: none, deliberate opt-in)
 - **F-M53:** Manual run buttons and statistics reset on the General tab
@@ -418,48 +421,48 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
 - **F-M224:** **The plugin's own log mode is the only authority — and every plugin line is written at a level Jellyfin always passes.** Jellyfin's Serilog pipeline filters a record before the sink writes it, so a plugin line at `Debug` never appears while the server runs at the normal level; the documented workaround was to raise Jellyfin's own `logging.json`, because Jellyfin exposes no API to change its log level. The plugin therefore writes **everything at the normal level** and gates the detail itself in the log helper (the per-item level, the trace level → Verbose+; the detail level → Debug+); `Normal` stays lifecycle/summary only and warnings/errors are never gated. No plugin line may be written at Trace, which ranks below Information and reaches no log at any setting. No server-side setup remains, so the GUI note under the log-verbosity field is gone. **Test: T39.**
 - **F-M36 [B2]:** Both lists maintainable on the config page (one pattern per line, textarea), defaults pre-filled (`incomplete`, `sample`, `trailer`, `partial`, `downloading`).
 
-## 15. Data Model and Persistence
+## 14. Data Model and Persistence
 
-- **F-M38 [B1]:** **Persistent state split by the kind of thing described** (section 15). Embedded tracks live under their video file, keyed by media hash + stream position; sidecars are keyed by normalized content hash; the file's own record carries path, IDs, season/episode and the derived language aggregates. Both pipelines read and write the same store.
+- **F-M38 [B1]:** **Persistent state split by the kind of thing described** (section 14). Embedded tracks live under their video file, keyed by media hash + stream position; sidecars are keyed by normalized content hash; the file's own record carries path, IDs, season/episode and the derived language aggregates. Both pipelines read and write the same store.
 The plugin keeps its state in **one database file**, grouped into **five clearly separated areas**, each keyed by the thing it actually describes. "One file, five areas" is deliberate: the areas share a lifetime and are written by the same lock, but they must not be mixed, because a verdict about a video file, a stream position and a piece of subtitle text has three different identities.
-#### 15.0 Area 0 — Compatibility record (`meta`)
+#### 14.0 Area 0 — Compatibility record (`meta`)
 - **F-M195:** exactly **one** row (`_id = "db"`) describing the file itself: the schema version (integer, raised by hand whenever the stored shape changes), the plugin version that wrote it last, the Jellyfin version, and a timestamp.
  - A **lower** version logs a warning and raises the marker; no migration (F-M195b).
  - The row is written **once per context creation**, never per run: an audit record that rewrites itself every cycle is a write amplifier and tells nobody anything.
-#### 15.1 Area 1 — Media hash cache (`oshashes`)
-#### 15.2 Area 2 — Video files and their embedded tracks (`media`, `embeds`)
+#### 14.1 Area 1 — Media hash cache (`oshashes`)
+#### 14.2 Area 2 — Video files and their embedded tracks (`media`, `embeds`)
 - **F-M197:** one record per **embedded subtitle stream** in `embeds`, `_id` = `"<media hash>|<stream position>"`.
  - The key is media hash **plus position** because that is the identity of an embedded track: it has no name and no existence of its own. Two streams of one file can share a language (a normal and an SDH variant), so the language alone must never identify the row.
  - Fields: the language, the hearing-impaired flag, the content hash, the status, the reason field, the status stamp, the SubDL id (F-M198).
-#### 15.3 Area 3 — Sidecar files (`sidecars`)
+#### 14.3 Area 3 — Sidecar files (`sidecars`)
 - **F-M199:** one record per loose `.srt` file, `_id` = the **normalized content hash** (F-M186).
  - Content is the identity because that is what makes a sidecar an independent thing: the same subtitle stays known after the file is renamed or moved, and two sidecars sharing a language but differing in text stay two rows. The file name is stored for diagnosis only and plays **no part** in the key.
  - Fields: the shared subtitle state (F-M198), plus the file name, the path, the media hash and a copy of the parent metadata (the IMDb id, the TMDb id, the series flag, the season, the episode) so a sidecar can be judged without loading the file record.
  - Downloaded subtitles are stored here too: once fetched, the file on disk **is** a sidecar.
  - Sidecars deliberately carry **no stream position**: they have none. Terminality is therefore the outcome itself — there is no second "settled" marker to write. **Test: T19.**
-#### 15.4 Area 4 — Burned download candidates (`rejected_candidates`)
+#### 14.4 Area 4 — Burned download candidates (`rejected_candidates`)
 - **F-M200:** one record per fetched-and-discarded download candidate, `_id` = `"<item id>|<language>|<SubDL id>"`.
  - Its grain is neither a stream nor a piece of content but "this remote release was burned for this file and language", and SubDL's own id is the only identifier such a verdict has.
  - Fields: the reason field, its stamp. Capped at the newest 50 per file and language so a pathological candidate sequence cannot grow the store without bound. Cleared for a file and language when a download finally succeeds.
-#### 15.5 The four subtitle states (F-M198)
+#### 14.5 The four subtitle states (F-M198)
 A subtitle in area 2 or 3 is in exactly one of four states:
 - **uploaded** — sent to SubDL and accepted.
 - **rejected** — not accepted. The **reason** lives in its own field (the reason field), never in the state name: `duplicate-remote`, `duplicate-content`, `too-small`, `too-few-cues`, `lang-mismatch`, `bad-structure`, `runtime-mismatch`, `und-off`, `und-too-small`, `und-detection-failed`, `unmapped-language`, `duplicate-self-echo`, `candidate-rejected`.
 - **downloaded** — fetched from SubDL.
 - **pending** — nothing recorded yet. This is **never stored**: it is the absence of a row.
 There is deliberately **no "settled"/"done" state.** The previous model kept a separate settled row beside the outcome row, which duplicated every verdict and forced every reader to know both layers. "Is this position finished?" is answered by asking whether any of the three stored outcomes is present.
-#### 15.6 Key discipline (all areas)
+#### 14.6 Key discipline (all areas)
 - Composite keys are built in exactly one place per area (the embedded key, the candidate key) so writers and readers cannot drift apart on the key shape.
 - Every area has an index on its key; the query paths used by the pipelines are indexed as well (media hash, content hash, status, language).
-#### 15.7 Consequences for readers and writers
+#### 14.7 Consequences for readers and writers
 - `IsUploaded(mediaHash, language, hearingImpaired)` stays pair-level by design: it answers "do I still need to upload this language for this file", which is what the self-echo guard and the collector ask.
 - Per-position questions use the embedded lookup / the rejection reason / the terminal-position test — never a pair-level query.
 - A stream skipped **because its language is already uploaded** is recorded as **rejected with `duplicate-self-echo`**, not as "uploaded". It was not uploaded; claiming so would inflate the upload statistics.
 - Derived file aggregates (the language aggregate, the hearing-impaired aggregate) are recomputed whenever a track is written, in one place, so no caller can leave them stale.
-#### 15.8 Migration policy
+#### 14.8 Migration policy
 - **F-M195b:** structural changes are **not migrated**. The schema marker in area 0 makes the change visible and the database reset (F-M90) is the intended path; records from an unrecognised schema version are ignored rather than rewritten. The stored state is reconstructible from the media files, and a half-migrated store is worse than an empty one.
 
-## 16. Logging, Status and Transparency
+## 15. Logging, Status and Transparency
 
 - **F-M273:** **The configuration page has a host-free structural regression check.**
  - **The checks are structural, not wording-dependent:** a comment rewrite must not be able to raise a false failure.
@@ -493,13 +496,13 @@ There is deliberately **no "settled"/"done" state.** The previous model kept a s
  - `ok` → green; `deferred` and `cancelled` → yellow (quota, run-lock deferral, user stop); `failed` → red (exception, failed cycle, unreachable core); `skipped` and `never` → grey (disabled, never run, or a scan that found nothing to do).
 - **F-M193 [B1]:** **`/user/mySubtitles` is NOT paginated — the counters must count DISTINCT upload ids.** The endpoint ignores `page`, `per_page`, `offset`, `limit` and `start`: every value returns the byte-identical complete list. the subtitle listing must therefore deduplicate by the upload id and break on the first page that adds no new id, while rows with `UploadId <= 0` are kept unconditionally so a parser regression cannot silently drop data. the subtitle count counts distinct ids and additionally reports a distinct-id count and the pagination note; the status line must not claim "in N pages".
 
-## 17. Non-Goals
+## 16. Non-Goals
 
 - N-1: Standalone downloader app or separate downloader plugin — integrated in SubDL Scribe.
 - N-3: Transcoding/opening bitmap subtitles
 - N-5: Changes to Jellyfin core
 
-## 18. Non-Functional Requirements
+## 17. Non-Functional Requirements
 
 - **NF-1:** Platform independence: pure IL DLL (net10.0), no native binding, no P/Invoke, no platform-specific dependencies.
 - **NF-2:** GPL-3.0-or-later (GNU GPL v3, or any later version) — the SPDX identifier the source headers carry
@@ -510,7 +513,7 @@ There is deliberately **no "settled"/"done" state.** The previous model kept a s
 - **NF-7:** Cross-platform discipline in code: no hardcoded path separators, no P/Invoke, no case-sensitive file operations without normalization
 - **NF-8:** **Manual stop button** ("■ Stop all uploads & downloads", General tab): one click sends `DELETE /ScheduledTasks/Running/{taskId}` for BOTH directions.
 
-## 19. Acceptance Criteria
+## 18. Acceptance Criteria
 
 - **A-1:** New episode with embedded subs appears in JF → all text subs automatically extracted, QA-checked, uploaded, without manual intervention
 - **A-2:** Dry run on test library produces a complete status report without API calls
@@ -520,7 +523,7 @@ There is deliberately **no "settled"/"done" state.** The previous model kept a s
 - **A-6:** State survives JF restart: already uploaded files are not processed again
 - **A-7:** Library scan is not blocked by running uploads (<1s in-scan overhead)
 
-## 20. Test Library
+## 19. Test Library
 
 Every functional requirement (F-M*) carries at least one automated test case: a unit test where possible, an integration test where the behaviour needs one.
 - **T1:** Episode with mixed-language text subs and one wrong stream tag
@@ -653,7 +656,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 - **T86:** The refresh detail line names a rebuild fallback without turning the light red (F-M269)
 - **T87:** The configuration page's structure and wiring hold without a host (F-M270–F-M273)
 
-## 21. References
+## 20. References
 
 - Plugin template: github.com/jellyfin/jellyfin-plugin-template
 - Reference plugin (download): Jellyfin OpenSubtitles plugin
