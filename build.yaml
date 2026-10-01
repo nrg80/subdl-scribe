@@ -1,6 +1,6 @@
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.157"
+version: "12.1.12.158"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -16,6 +16,28 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.158: Four credentials, no partial operation.
+    The settings page enforced exactly one of the four credential fields: an empty TMDb
+    key refused the save, while an empty SubDL email, password or API key saved happily
+    and only surfaced later as a 404 from the login - and the page carried "Required"
+    over all three sections, so the label and the behaviour disagreed.
+    All four are now checked the same way and the empty one is named. They are not
+    alternatives, which the documentation claimed ("username/password or API key"): the
+    login pair authenticates the upload, the API key authenticates search, file download
+    and the quota read, and the TMDb key resolves the ids in both directions. A run
+    refuses to start without them, so the failure is one line at run start instead of a
+    404 halfway through.
+    Two switches existed for the ID gate and were read by no code path. They are removed
+    rather than wired up: they claimed the gate was optional, and it is what makes the
+    TMDb key load-bearing. With them go the branches that treated it as a flag.
+    Loose .srt files beside a media file now go through language detection before an
+    upload. A name without a language token used to be read as English on Jellyfin's
+    convention, so a German subtitle was uploaded as English. Such a file is the sidecar
+    counterpart of an 'und' stream now - same switch, same order (2 KB floor first),
+    same outcomes: switch off, too little text or no language found all mean skip, and a
+    detected language becomes the language. A sidecar whose language cannot be
+    established no longer counts as covering anything, so the language is still fetched.
+
   v12.1.12.157: The stamp above the refresh button reads "Manually refreshed <time>" instead of
   "Refreshed <time>" - it is written by that button and nothing else, so the label now says so.
   The second page script carried its own status loader that still wrote the line with a SERVER
