@@ -70,7 +70,7 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
 ## 3. Upload Pipeline
 
 - **F-M2 [B1]:** Manually triggerable scheduled task (dashboard "Scheduled Tasks") for a full library rebuild
-- **F-M3 [B1]:** Only process files with embedded text subtitles (Jellyfin's text-subtitle flag from the Jellyfin item)
+- **F-M3 [B1]:** **A media file is upload material when it carries at least one text subtitle stream, or at least one loose subtitle file next to it.** Bitmap streams (PGS/VobSub) do not qualify: they carry no text (F-M6). A stream Jellyfin reports as external is a loose file already, not a container stream. A forced track carries only the lines of foreign-language scenes and does not qualify either (F-M246).
 - **F-M4 [B1]:** Never upload an (item, language) pair twice — persistent state file in the plugin data dir
 - **F-M6 [B1]:** Text formats only (SRT/ASS/SSA/VTT via SubRip conversion); bitmap subs (PGS/VobSub) explicitly excluded
 - **F-M7 [B1]:** **Extraction writes nothing into the media library, and its working files are removed on every exit.** Each extraction runs in its own directory outside the library, one per job. That directory is removed when the job ends — after a success, after a failure and after a cancellation. The removal is best effort and stays silent: a leftover working file must never fail a run, and it is never worth a warning.
