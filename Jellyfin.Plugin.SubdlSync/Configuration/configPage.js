@@ -756,21 +756,36 @@ workers.forEach(function (w) {
                     if (typeof ApiClient === 'undefined' || typeof SubdlSyncConfig === 'undefined') { return false; }
                     try { Dashboard.showLoadingMsg(); } catch (err) { /* non-fatal */ }
                     ApiClient.getPluginConfiguration(SubdlSyncConfig.pluginUniqueId).then(function (config) {
-                        // TMDb key is REQUIRED: id resolution is TMDB-authoritative, and series
-                        // are skipped without it. Refuse to save an empty key rather than
-                        // silently degrading the pipeline.
-                        var tmdbKey = String(document.querySelector('#TmdbApiKey').value || '').trim();
-                        if (!tmdbKey) {
-                            try { Dashboard.hideLoadingMsg(); } catch (err) { /* non-fatal */ }
-                            subdlNotify('TMDb API key is required to properly resolve IMDb / TMDb ids for upload and download.');
-                            var el = document.querySelector('#TmdbApiKey');
-                            if (el && typeof el.focus === 'function') { el.focus(); }
-                            return false;
+                        // ALL FOUR credentials are required, and they are required in the
+                        // same way: there is no partial operation here. SubDL needs the
+                        // login pair for the upload (the three upload steps authenticate
+                        // with a Bearer token from /login) AND the API key for search,
+                        // file download and the quota read — they serve different
+                        // endpoints, so neither replaces the other. TMDb is what resolves
+                        // and corrects the ids in both directions. An empty field refuses
+                        // the save and names the field, instead of degrading the pipeline
+                        // silently and only failing later mid-run.
+                        var subdlRequired = [
+                            ['Username', 'SubDL email'],
+                            ['Password', 'SubDL password'],
+                            ['ApiKey', 'SubDL API key'],
+                            ['TmdbApiKey', 'TMDb API key (v3)']
+                        ];
+                        for (var ri = 0; ri < subdlRequired.length; ri++) {
+                            var fieldId = subdlRequired[ri][0];
+                            var fieldEl = document.querySelector('#' + fieldId);
+                            var fieldVal = String(fieldEl ? fieldEl.value : '').trim();
+                            if (!fieldVal) {
+                                try { Dashboard.hideLoadingMsg(); } catch (err) { /* non-fatal */ }
+                                subdlNotify(subdlRequired[ri][1] + ' is required — the plugin does not run without all four credentials.');
+                                if (fieldEl && typeof fieldEl.focus === 'function') { fieldEl.focus(); }
+                                return false;
+                            }
                         }
                         config.Username = document.querySelector('#Username').value;
                         config.Password = document.querySelector('#Password').value;
                         config.ApiKey = document.querySelector('#ApiKey').value;
-                        config.TmdbApiKey = tmdbKey;
+                        config.TmdbApiKey = String(document.querySelector('#TmdbApiKey').value || '').trim();
                         var uph = parseInt(document.querySelector('#UploadsPerHour').value) || 400;
                         config.FileRetryLimit = (function () { var v = parseInt(document.querySelector('#FileRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
                         config.IdRetryLimit = (function () { var v = parseInt(document.querySelector('#IdRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();

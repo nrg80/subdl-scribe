@@ -106,11 +106,11 @@ Content is the key, not the path, and the hash uses the uploader's own function 
 
 **F-M8 [B1]:** SubDL API (`https://api.subdl.com`): login (user/pass → token) and the upload endpoint. The call rate is configured, not fixed (F-M20)
 
-**F-M9 [B1]:** Metadata per upload: series IMDB (**not** episode IMDB) + season + episode for TV; movie IMDB for movies — from Jellyfin provider IDs. Without IMDB → skip (F-M28). **F-M151:** the upload ID quality gate validates/corrects JF IDs via TMDb before upload, default ON. **F-M203:** the TMDb key is required — the gate is not optional.
+**F-M9 [B1]:** Metadata per upload: series IMDB (**not** episode IMDB) + season + episode for TV; movie IMDB for movies — from Jellyfin provider IDs. Without IMDB → skip (F-M28).
 
 **F-M10 [B1]:** Language mapping to SubDL's two-letter codes (`nob`→`NO` etc.)
 
-**F-M48 [D2]:** **Loose SRT files as an additional upload source:** external `.srt` files next to the media file are uploaded in addition to embedded streams. Language detection from the filename suffix; unlabeled treated as EN. The marker is **`sdh` only**, and such a file is uploaded with `hi=true` (F-M71). `hi` is NOT a marker — it is the ISO 639-1 code for **Hindi** (`MapToSubdl("hin") = HI`), so a `.hi.srt` name is a Hindi subtitle. Nothing in this plugin writes `.hi.srt`; the downloader writes `.sdh.srt` (F-M239). The HI flag is part of the identity in both areas (F-M197, F-M199).
+**F-M48 [D2]:** **Loose SRT files as an additional upload source:** external `.srt` files next to the media file are uploaded in addition to embedded streams. The language comes from the file name; a name that carries **no** language token goes through language detection, at the same switch as an `und` stream (F-M74) and with the same outcomes — switch off, text below the 2 KB floor (F-M16), or no language found all mean **skip**, never a guess. The marker is **`sdh` only**, and such a file is uploaded with `hi=true` (F-M71). `hi` is NOT a marker — it is the ISO 639-1 code for **Hindi** (`MapToSubdl("hin") = HI`), so a `.hi.srt` name is a Hindi subtitle. Nothing in this plugin writes `.hi.srt`; the downloader writes `.sdh.srt` (F-M239). The HI flag is part of the identity in both areas (F-M197, F-M199).
 
 **F-M88c [B3]:** **Upload-side short-circuit (the upload-side completion mark):** a file whose embedded subtitle side is complete is skipped before any ffprobe, directory walk or API call. Complete means every stream position reached a terminal state (uploaded or rejected). The field is named after the SUBTITLES, not the file: the video file itself is never uploaded.
 
@@ -182,7 +182,7 @@ Before the extraction pass, read the container's ACTUAL per-subtitle tags (a sin
 
 The switch the missing-language switch sits on the **General** tab under `Media files`, directly above the statistics section. **Test: T82.**
 
-**F-M239 [B1/D2]:** **One reader for sidecar file names.** The name→(language, hearing-impaired) rule exists ONCE (the sidecar reader); the uploader, the pipeline's missing-language check and the database refresh all call it. Marker is `sdh` only — never `hi` (F-M48). Recognized shapes: `<base>.srt` (unlabeled = EN), `<base>.<lang>.srt`, `<base>.<lang>.sdh.srt`, and the numbered slots `<base>.<lang>.<n>.srt` the downloader writes. `.part` is never a subtitle.
+**F-M239 [B1/D2]:** **One reader for sidecar file names.** The name→(language, hearing-impaired) rule exists ONCE (the sidecar reader); the uploader, the pipeline's missing-language check and the database refresh all call it. Marker is `sdh` only — never `hi` (F-M48). Recognized shapes: `<base>.srt` (no language — it is detected before upload, F-M48), `<base>.<lang>.srt`, `<base>.<lang>.sdh.srt`, and the numbered slots `<base>.<lang>.<n>.srt` the downloader writes. `.part` is never a subtitle.
 
 A marker is consumed as a marker and the language token is read from the position BEFORE it; a marker must never reach the language mapper. A name whose marker has no resolvable language token yields nothing.
 
@@ -416,7 +416,7 @@ The download chain runs against each candidate in score order, before the file i
 **Stage 1 — pre-download (FPS):** SubDL provides `framerate`/`fps` per candidate. If set: difference > ±1 % vs. item FPS → candidate rejected. Missing → criterion skipped, no hard fail.
 **Stage 2 — post-download (structure + runtime):** corruption check on the downloaded bytes (cue timings present, monotonically increasing, plausible durations), then runtime check of SRT cue span vs. item the runtime, default tolerance ±600 s. Outside → discard. Missing runtime metadata → criterion deactivated.
 
-**F-M45 [D]:** **IMDB/TMDB match** (default on, switchable off): candidates matched against item IDs. Default is a hard criterion (no ID → no download); switchable off for title-based fallback. **F-M151b:** the download ID quality gate validates/corrects JF IDs via TMDb before search, default ON.
+**F-M45 [D]:** **IMDB/TMDB match** (default on, switchable off): candidates matched against item IDs. Default is a hard criterion (no ID → no download); switchable off for title-based fallback.
 
 **F-M50 [D]:** **Download budget per (item, language):** max N candidate downloads before the language counts as "not available" (default 3, 0 = unlimited).
 
@@ -432,7 +432,7 @@ The download chain runs against each candidate in score order, before the file i
 
 **F-M17c2:** **Remote duplicate detection requires a canonical payload AND a matching hash function.** The registry hash is comparable with SubDL's stored raw-file MD5 only when both describe the same bytes and use the same function (F-M186). F-M185 and F-M186 are therefore **preconditions** of this section, not improvements to it.
 
-**F-M19 [B1]:** Credentials: SubDL **username/password** *or* **API key** (both fields present; API key preferred if set, else user/pass → token)
+**F-M19 [B1]:** **All four credentials are required — they are not alternatives.** The SubDL **email/password** pair authenticates the UPLOAD (its three steps carry a Bearer token from `/login`); the SubDL **API key** authenticates search, file download and the quota read; the **TMDb key** resolves and corrects the ids in both directions. Neither replaces the other — the earlier wording ("username/password *or* API key") was wrong about that. A missing one is not a degraded mode: the run is refused up front, naming the field (F-M203).
 
 **F-M208:** **The reschedule budget is per UTC day and resets at the day roll-over** — the same 00:00 UTC boundary the SubDL quota reset uses, so the budget returns when the quota does. the daily reset clears every slot at the roll-over. It is a no-op when the day has not changed.
 
@@ -508,17 +508,21 @@ The give-up line names the server as not answering in time, never as a caller ca
 
 **F-M28a:** Before every SubDL search/upload the plugin calls the id validation to cross-check and correct Jellyfin's IDs via TMDB when a key is configured. Mismatches are corrected, missing IDs backfilled. Automatic whenever a TMDB key is present; no separate UI switch.
 
-**F-M203 [B1]:** **The TMDb API key is required — a SERIES is refused without it, films still upload.**
+**F-M151 [B1]:** **The upload ID quality gate — no switch, it always runs.** Before an upload Jellyfin's IMDb/TMDb ids are validated against TMDb: missing ids are filled, conflicting ids are corrected towards TMDb, and the type is re-decided from the answer. A setting named `UploadIdQualityGate` existed and was read by no code path (removed 01.10.2026) — the gate is not an option but the thing that makes the TMDb key load-bearing (F-M203).
+
+**F-M151b [D]:** **The download ID quality gate — same, and no switch either.** Before a search the ids are validated and corrected via TMDb so the SubDL search points at the right title. `DownloadIdQualityGate` was equally unread and is gone.
+
+**F-M203 [B1]:** **The TMDb API key is required — without it no run starts, in either direction.**
 
 Rationale: id resolution is TMDB-authoritative (F-M190) and the SHOW id a series upload must carry (F-M191) is only obtainable through the key. With Jellyfin's own ids a mis-typed episode would be uploaded with an **episode id in the series slot**.
 
-**Scope: series only.** A film whose ids come from Jellyfin is not mis-slotted, so films keep uploading and the plugin stays usable for film-only libraries. Without a key no series resolves and such files stop at `no-imdb`.
+**No partial operation.** The key is not a series-only gate that leaves films running: id resolution runs in both directions and feeds the search and the upload payload alike, so a run without it cannot do its job. The plugin refuses to start and names the missing field (F-M19) rather than uploading with unverified ids.
 
-Upload and download side alike: a series without a key is skipped with `no-tmdb-key +1`, counted in the no-key counter, requeued — never uploaded with episode ids.
+Upload and download side alike, from one check (`MissingCredentials`): the run stops before the first item, so nothing is ever uploaded or searched with unverified ids.
 
 GUI: the field label reads **"TMDb API key (v3) — required"**, the input carries `required`, and the save handler **refuses to save an empty key** instead of silently degrading the pipeline.
 
-Status: a missing key reports **red** with "Not configured — REQUIRED: series are skipped without it (films still upload)".
+Status: a missing key reports **red**; the settings page refuses to save it and the run refuses to start.
 
 **F-M63:** **Official API endpoint:** `https://api.subdl.com` for all API calls (login, search, upload, /me).
 

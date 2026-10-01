@@ -80,9 +80,6 @@ public class DownloadRunSummary
     /// <summary>Gets or sets the count of items skipped as id-unresolvable after exhausting the F-M66 retry budget.</summary>
     public int SkippedIdGaveUp { get; set; }
 
-    /// <summary>Gets or sets the count of SERIES items refused because no TMDb key is configured (F-M203).</summary>
-    public int SkippedNoTmdbKey { get; set; }
-
     /// <summary>Gets or sets the count of items skipped by the skip filters (dir/file patterns).</summary>
     public int SkippedByFilter { get; set; }
 
@@ -326,6 +323,16 @@ public sealed class DownloadPipeline : IDisposable
         }
         try
         {
+        // F-M19/F-M203: no partial operation — same gate as the upload side, from the same
+        // source. Without all four credentials the search cannot run (the API key) and the
+        // ids cannot be resolved (the TMDb key), so the run is refused up front.
+        var missingDown = _config.MissingCredentials();
+        if (missingDown.Count > 0)
+        {
+            LogUtil.Normal(_logger, "[SubDL-D] download: NOT started — missing credential(s): {Missing}. Set them in the plugin configuration.", string.Join(", ", missingDown));
+            return summary;
+        }
+
         var targets = TargetLanguages;
         if (targets.Count == 0)
         {
@@ -863,10 +870,10 @@ public sealed class DownloadPipeline : IDisposable
         // in ONE pass whenever the IMDb ID is missing — 60 s metadata wait (arrival
         // only, 30 s heartbeat loop), then the TMDB ladder (id→IMDB, title search),
         // then requeue-with-counter.
-        // F-M152: first validate/correct JF ids against TMDb so JF and TMDb point at
-        // the same title (default ON).
+        // F-M151b: the download ID quality gate — first validate/correct JF ids against
+        // TMDb so JF and TMDb point at the same title. No switch: it is the standard path,
+        // and the run does not start without the TMDb key it depends on (F-M203).
         var (imdbId, tmdbId, season, episode, isSeries) = ResolveIds(item);
-        bool gateActive = _tmdb.IsConfigured;
 
         // F-M217 (27.09.2026, user decision "immer typneutral suchen und uns nicht auf
         // die JF-Klassifizierung einlassen"): the FILE NAME is the authority for the
@@ -916,18 +923,6 @@ public sealed class DownloadPipeline : IDisposable
         // verweigern"): a SERIES cannot be matched without TMDB — the show id that both
         // the SubDL search and the series/episode pairing need comes from the key. Films
         // keep working. Same fail-closed rule as the upload side.
-        if (isSeries && !gateActive)
-        {
-            _idNotFound.RecordFailure(item.Id.ToString());
-            summary.SkippedItems++;
-            summary.SkippedNoId++;
-            summary.SkippedNoTmdbKey++;
-            LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL-D] SKIP {File} — series needs a TMDb key (set it in the plugin configuration) — requeued, no-tmdb-key +1",
-                Path.GetFileName(mediaPath));
-            return;
-        }
-
         // F-M231 (27.09.2026, user decision "Wir testen jfs id immer gegen tmdb"): the FILE
         // NAME's year wins for the id test — Jellyfin's year comes from the same metadata
         // that may be pinned to the wrong title, so asking with it can only confirm the
@@ -937,7 +932,7 @@ public sealed class DownloadPipeline : IDisposable
             : (item as Episode)?.Series?.ProductionYear is int isy ? isy
             : null);
 
-        if (gateActive && (!string.IsNullOrWhiteSpace(imdbId) || !string.IsNullOrWhiteSpace(tmdbId)))
+        if (!string.IsNullOrWhiteSpace(imdbId) || !string.IsNullOrWhiteSpace(tmdbId))
         {
             // F-M231: ALWAYS test Jellyfin's ids against TMDb by TITLE and YEAR before using
             // them. ResolveAndValidateIdsAsync below only asks whether the two ids describe
@@ -2048,6 +2043,14 @@ public sealed class DownloadPipeline : IDisposable
         var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (_, lang, _) in Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.List(mediaPath))
         {
+            if (lang == null)
+            {
+                // A sidecar whose NAME carries no language and whose text has not been
+                // detected yet proves nothing about coverage. It is not added, so the
+                // language still counts as missing and is fetched if it is configured.
+                continue;
+            }
+
             present.Add(lang);
         }
 

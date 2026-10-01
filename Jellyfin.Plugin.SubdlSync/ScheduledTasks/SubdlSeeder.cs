@@ -733,6 +733,11 @@ public sealed class SubdlSeeder
         var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (_, lang, _) in Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.List(mediaPath))
         {
+            if (lang == null)
+            {
+                continue; // name carries no language — not evidence of coverage
+            }
+
             present.Add(lang);
         }
 
@@ -1014,6 +1019,17 @@ public sealed class SubdlSeeder
                 catch
                 {
                     continue; // unreadable — the pipeline's business, not an observation
+                }
+
+                if (looseLang == null)
+                {
+                    // The NAME carries no language. An observation row must state a
+                    // language — it is what the coverage check reads — and this method
+                    // cannot detect one (no ffmpeg pass here, and detection needs the
+                    // 2 KB floor). Recording it as a row with an empty language would
+                    // claim coverage that does not exist; the upload path owns this
+                    // sidecar and resolves its language there (F-M74).
+                    continue;
                 }
 
                 string contentHash = Registry.ContentHashRegistry.ComputeHash(content);

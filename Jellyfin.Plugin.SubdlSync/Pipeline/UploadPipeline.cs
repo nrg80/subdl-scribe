@@ -74,9 +74,6 @@ public class RunSummary
     /// <summary>F-M218: candidates a QA gate rejected this run (language/structure/runtime).</summary>
     public int QaRejectedCandidates { get; set; }
 
-    /// <summary>Gets or sets the count of SERIES items refused because no TMDb key is configured (F-M203).</summary>
-    public int SkippedNoTmdbKey { get; set; }
-
     /// <summary>Gets or sets the count of items skipped as id-unresolvable after exhausting the F-M66 retry budget.</summary>
     public int SkippedIdGaveUp { get; set; }
 
@@ -318,6 +315,17 @@ public sealed class UploadPipeline
         {
         var skipFilter = new SkipFilter(_config.EffectiveSkipDirPatterns, _config.EffectiveSkipFilePatterns);
 
+        // F-M19/F-M203: no partial operation. Without all four credentials the run cannot
+        // do its job, and the failure would otherwise surface later at the first call that
+        // needs the missing one (the login 404, a search without an API key, an id that
+        // cannot be resolved). Refused here, with the fields named.
+        var missingUp = _config.MissingCredentials();
+        if (missingUp.Count > 0)
+        {
+            LogUtil.Normal(_logger, "[SubDL] upload: NOT started — missing credential(s): {Missing}. Set them in the plugin configuration.", string.Join(", ", missingUp));
+            return summary;
+        }
+
         if (_config.SelectedLibraries.Count == 0)
         {
             LogUtil.Normal(_logger, "[SubDL] No libraries selected — nothing to do.");
@@ -554,7 +562,6 @@ public sealed class UploadPipeline
             // against TMDB. Items that remain unresolvable are requeued with the
             // id-not-found budget.
             var (imdbId, tmdbIdRaw, season, episode, isSeries) = ResolveIdsRaw(item);
-            bool gateActive = _tmdb.IsConfigured;
 
 
             // F-M190 (24.09.2026, user decision): the FILE NAME is authoritative
@@ -601,16 +608,6 @@ public sealed class UploadPipeline
             // SERIES is refused outright — fail-closed, reported, requeued. A FILM may
             // still upload: Jellyfin's film ids are the film's own ids, nothing is
             // mis-slotted, and the plugin stays usable for film-only libraries.
-            if (isSeries && !gateActive)
-            {
-                summary.SkippedNoTmdbKey++;
-                summary.FilesSkipped++;
-                LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL] SKIP {File} — series needs a TMDb key (id resolution is TMDB-authoritative; set it in the plugin configuration) — requeued, no-tmdb-key +1",
-                    Path.GetFileName(mediaPath));
-                continue;
-            }
-
             // F-M191 (24.09.2026, user decision): a SERIES item needs SHOW-level ids —
             // TMDB and SubDL expect the tvshow id plus season/episode, never an episode
             // id. Jellyfin's provider ids for a mis-typed episode carry EPISODE ids in
@@ -623,7 +620,7 @@ public sealed class UploadPipeline
             //
             // F-M202 (25.09.2026): season/episode come from the parsed FILE NAME — they are
             // what lets an episode id be PROVEN against a candidate show.
-            if (isSeries && gateActive)
+            if (isSeries)
             {
                 var (nlImdb, nlTmdb) = await _tmdb.NormalizeSeriesLevelIdsAsync(
                     imdbId, tmdbIdRaw, searchTitle, searchYear, season, episode, runCt).ConfigureAwait(false);
@@ -631,36 +628,33 @@ public sealed class UploadPipeline
                 tmdbIdRaw = nlTmdb;
             }
 
-            if (gateActive)
+            // F-M231 (27.09.2026, user decision "Wir testen jfs id immer gegen tmdb"):
+            // ALWAYS test Jellyfin's ids against TMDb by TITLE and YEAR. The pair check
+            // inside ResolveAndValidateIdsAsync is tautological (it asks whether the two
+            // ids describe the same entity, which a wrongly pinned pair does), so on its
+            // own it confirms an item whose metadata points at the wrong title.
+            var verified = await _tmdb.VerifyIdsAgainstTmdbAsync(imdbId, tmdbIdRaw, searchTitle, idTestYear, isSeries, runCt).ConfigureAwait(false);
+            if (verified.Corrected)
             {
-                // F-M231 (27.09.2026, user decision "Wir testen jfs id immer gegen tmdb"):
-                // ALWAYS test Jellyfin's ids against TMDb by TITLE and YEAR. The pair check
-                // inside ResolveAndValidateIdsAsync is tautological (it asks whether the two
-                // ids describe the same entity, which a wrongly pinned pair does), so on its
-                // own it confirms an item whose metadata points at the wrong title.
-                var verified = await _tmdb.VerifyIdsAgainstTmdbAsync(imdbId, tmdbIdRaw, searchTitle, idTestYear, isSeries, runCt).ConfigureAwait(false);
-                if (verified.Corrected)
-                {
-                    imdbId = verified.Imdb;
-                    tmdbIdRaw = verified.Tmdb;
-                    isSeries = verified.IsSeries;
-                    summary.TypeCorrectedByFileName++; // same counter as the other id corrections
-                }
+                imdbId = verified.Imdb;
+                tmdbIdRaw = verified.Tmdb;
+                isSeries = verified.IsSeries;
+                summary.TypeCorrectedByFileName++; // same counter as the other id corrections
+            }
 
-                string title = searchTitle;
-                int? year = searchYear;
-                var (correctedImdb, correctedTmdb) = await _tmdb.ResolveAndValidateIdsAsync(imdbId, tmdbIdRaw, title, year, isSeries, runCt).ConfigureAwait(false);
-                if (correctedImdb != null || correctedTmdb != null)
-                {
-                    imdbId = correctedImdb ?? imdbId;
-                    tmdbIdRaw = correctedTmdb ?? tmdbIdRaw;
-                    _idNotFound.RecordSuccess(item.Id.ToString());
-                }
-                else
-                {
-                    imdbId = null;
-                    tmdbIdRaw = null;
-                }
+            string title = searchTitle;
+            int? year = searchYear;
+            var (correctedImdb, correctedTmdb) = await _tmdb.ResolveAndValidateIdsAsync(imdbId, tmdbIdRaw, title, year, isSeries, runCt).ConfigureAwait(false);
+            if (correctedImdb != null || correctedTmdb != null)
+            {
+                imdbId = correctedImdb ?? imdbId;
+                tmdbIdRaw = correctedTmdb ?? tmdbIdRaw;
+                _idNotFound.RecordSuccess(item.Id.ToString());
+            }
+            else
+            {
+                imdbId = null;
+                tmdbIdRaw = null;
             }
 
             if (string.IsNullOrWhiteSpace(imdbId))
@@ -686,15 +680,15 @@ public sealed class UploadPipeline
 
                 if (string.IsNullOrWhiteSpace(imdbId) && _tmdb.IsConfigured)
                 {
-                    string title = searchTitle;
-                    int? year = searchYear;
+                    string ladderTitle = searchTitle;
+                    int? ladderYear = searchYear;
 
                     // F-M190: for a name-detected series the type may still be
                     // wrong (Jellyfin said Movie) — ask TMDB WITHOUT a type
                     // assumption so its answer decides, and take the ids from
                     // that same hit. Falls back to the type-specific title
                     // search when the multi-search finds nothing.
-                    var multi = await _tmdb.ResolveByMultiSearchAsync(title, year, isSeries, runCt).ConfigureAwait(false);
+                    var multi = await _tmdb.ResolveByMultiSearchAsync(ladderTitle, ladderYear, isSeries, runCt).ConfigureAwait(false);
                     if (multi.Found)
                     {
                         imdbId = multi.Imdb;
@@ -709,7 +703,7 @@ public sealed class UploadPipeline
                     }
                     else
                     {
-                        (imdbId, tmdbIdRaw) = await _tmdb.ResolveImdbByTitleAsync(title, year, isSeries, runCt).ConfigureAwait(false);
+                        (imdbId, tmdbIdRaw) = await _tmdb.ResolveImdbByTitleAsync(ladderTitle, ladderYear, isSeries, runCt).ConfigureAwait(false);
                     }
                 }
 
@@ -1042,8 +1036,71 @@ public sealed class UploadPipeline
                     // file written with CRLF must hash and upload like its LF twin.
                     looseSrt = ContentHashRegistry.NormalizeSrt(looseSrt);
 
+                    // F-M74 for SIDECARS: a name without a language token is the sidecar
+                    // counterpart of an 'und' stream — the name says nothing, so the text
+                    // has to. Same toggle as the embedded path (UploadResolveUnd), same
+                    // order, same outcomes:
+                    //   switch off + no token in the name → skipped, logged
+                    //   text below the 2 KB floor (F-M16)  → skipped as too little text
+                    //   detection finds no language         → skipped
+                    //   detection finds one                 → it IS the language
+                    // The unlabelled "<base>.srt" used to be read as EN by Jellyfin's
+                    // convention, which uploaded German text as English; that guess is gone
+                    // (user decision 30.09.2026).
+                    string? looseLangResolved = looseLang;
+                    if (looseLangResolved == null)
+                    {
+                        if (!_config.UploadResolveUnd)
+                        {
+                            summary.SkippedStreams++;
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL] SKIP {File} — sidecar names no language and resolve-und is disabled",
+                                Path.GetFileName(loosePath));
+                            string offHash = ContentHashRegistry.ComputeHash(looseSrt);
+                            Registry.MarkAndFlush(() => Registry.MarkSidecar(
+                                offHash, mediaHash, "UN", looseHi,
+                                SubtitleStatus.Rejected, reason: RejectReason.UndOff,
+                                fileName: Path.GetFileName(loosePath), path: loosePath));
+                            continue;
+                        }
+
+                        if (looseSrt.Length < 2048)
+                        {
+                            summary.SkippedStreams++;
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL] SKIP {File} — sidecar names no language and is too small to detect one ({Bytes} bytes)",
+                                Path.GetFileName(loosePath), looseSrt.Length);
+                            string smallHash = ContentHashRegistry.ComputeHash(looseSrt);
+                            Registry.MarkAndFlush(() => Registry.MarkSidecar(
+                                smallHash, mediaHash, "UN", looseHi,
+                                SubtitleStatus.Rejected, reason: RejectReason.UndTooSmall,
+                                fileName: Path.GetFileName(loosePath), path: loosePath));
+                            continue;
+                        }
+
+                        string? looseDetected = Qa.QaGates.DetectLanguage(looseSrt);
+                        if (looseDetected == null)
+                        {
+                            summary.SkippedStreams++;
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL] SKIP {File} — sidecar names no language and none could be detected ({Bytes} bytes)",
+                                Path.GetFileName(loosePath), looseSrt.Length);
+                            string failHash = ContentHashRegistry.ComputeHash(looseSrt);
+                            Registry.MarkAndFlush(() => Registry.MarkSidecar(
+                                failHash, mediaHash, "UN", looseHi,
+                                SubtitleStatus.Rejected, reason: RejectReason.UndDetectionFailed,
+                                fileName: Path.GetFileName(loosePath), path: loosePath));
+                            continue;
+                        }
+
+                        looseLangResolved = looseDetected;
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL] {File}: sidecar names no language — detected {Lang} ({Bytes} bytes)",
+                            Path.GetFileName(loosePath), looseDetected, looseSrt.Length);
+                    }
+
                     looseSeen++;
-                    phase1.Add((true, null, -1, loosePath, looseLang, looseSrt, looseHi));
+                    phase1.Add((true, null, -1, loosePath, looseLangResolved, looseSrt, looseHi));
                 }
                 catch (Exception ex)
                 {

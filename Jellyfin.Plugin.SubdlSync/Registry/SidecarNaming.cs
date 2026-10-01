@@ -102,18 +102,24 @@ public static class SidecarNaming
     /// </summary>
     /// <param name="fileNameWithoutExtension">Sidecar name without the .srt extension.</param>
     /// <param name="baseName">Media file name without extension.</param>
-    /// <returns>Language and HI flag, or null when the name carries no language.</returns>
-    public static (string Lang, bool HearingImpaired)? Parse(string fileNameWithoutExtension, string baseName)
+    /// <returns>Language (null when the name carries none) and HI flag; null when the name is not a sidecar at all.</returns>
+    public static (string? Lang, bool HearingImpaired)? Parse(string fileNameWithoutExtension, string baseName)
     {
         if (string.IsNullOrEmpty(fileNameWithoutExtension))
         {
             return null;
         }
 
-        // Unlabeled "<base>.srt" — Jellyfin's convention treats it as English.
+        // Unlabeled "<base>.srt" — the name carries NO language, and saying nothing
+        // is not the same as saying English. Until 01.10.2026 this returned "EN" on
+        // Jellyfin's convention, which made an unlabelled file upload as English even
+        // when its text was German (user decision 30.09.2026: an unlabelled loose SRT
+        // goes through language detection, and a file whose language cannot be
+        // established is skipped — never guessed at). Reported as (null, false) so the
+        // caller can tell "no language in the name" from "the name says EN".
         if (fileNameWithoutExtension.Equals(baseName, StringComparison.OrdinalIgnoreCase))
         {
-            return ("EN", false);
+            return (null, false);
         }
 
         string[] parts = fileNameWithoutExtension.Split('.');
@@ -164,9 +170,9 @@ public static class SidecarNaming
     /// </summary>
     /// <param name="mediaPath">Media file path.</param>
     /// <returns>One entry per recognized sidecar.</returns>
-    public static List<(string Path, string Lang, bool HearingImpaired)> List(string mediaPath)
+    public static List<(string Path, string? Lang, bool HearingImpaired)> List(string mediaPath)
     {
-        var result = new List<(string, string, bool)>();
+        var result = new List<(string, string?, bool)>();
         if (string.IsNullOrWhiteSpace(mediaPath))
         {
             return result;
@@ -210,6 +216,15 @@ public static class SidecarNaming
         var found = new Dictionary<string, (bool Any, bool Hi)>(StringComparer.OrdinalIgnoreCase);
         foreach (var (_, lang, hi) in List(mediaPath))
         {
+            if (lang == null)
+            {
+                // The name carries no language and no detection has run for it yet, so it
+                // proves nothing about which language is covered. Skipped rather than
+                // guessed: claiming "present" would suppress the fetch for a language that
+                // is in fact missing.
+                continue;
+            }
+
             found.TryGetValue(lang, out var current);
             found[lang] = (true, current.Hi || hi);
         }

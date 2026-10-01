@@ -17,9 +17,10 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 
 /// <summary>
 /// Resolves an IMDb ID from a TMDB id via the TMDB REST API (user decision 08.09.2026).
-/// REQUIRED component (F-M203, 25.09.2026): no key configured → returns null and the
-/// pipelines refuse SERIES items outright (SkippedNoTmdbKey) — an episode id must never
-/// reach SubDL where a show id belongs. Films still upload with Jellyfin's own ids.
+/// REQUIRED component (F-M203, 01.10.2026): with no key configured a run does not start
+/// at all — both pipelines refuse it up front and name the missing field (F-M19). The
+/// reason it is not optional: id resolution is TMDb-authoritative in both directions, so
+/// without it an episode id could reach SubDL where a show id belongs.
 /// Results are cached per (tmdbId, isSeries, year, season, episode) for the process
 /// lifetime (negative results too — avoids hammering TMDB while polling).
 /// </summary>

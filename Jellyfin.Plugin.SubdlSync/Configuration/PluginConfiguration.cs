@@ -188,20 +188,13 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool FollowUpRoundsDownload { get; set; } = true;
 
     /// <summary>
-    /// F-M151 (20.09.2026, user request): upload ID quality gate. When enabled,
-    /// Jellyfin's IMDb/TMDb IDs are validated/cross-resolved via TMDb before the
-    /// upload. Missing IDs are filled, conflicting IDs are corrected towards the
-    /// TMDb source of truth, and items that still cannot be resolved are skipped.
-    /// Default: ON.
+    /// F-M151/F-M152: the ID quality gate has no switch. It validates and corrects
+    /// Jellyfin's IMDb/TMDb ids against TMDb before an upload and before a search,
+    /// and it is what makes the TMDb key load-bearing — so it cannot be turned off
+    /// without turning off the correctness it provides. A switch existed here and
+    /// was read by no code path (removed 01.10.2026): a control that does nothing
+    /// is worse than none, because it claims a choice that does not exist.
     /// </summary>
-    public bool UploadIdQualityGate { get; set; } = true;
-
-    /// <summary>
-    /// F-M152: validates/corrects Jellyfin IMDb/TMDb IDs for downloads against
-    /// TMDb so the SubDL search points at the right title. Default: ON.
-    /// </summary>
-    public bool DownloadIdQualityGate { get; set; } = true;
-
     /// <summary>
     /// Gets or sets a value indicating whether the UPLOAD pipeline also runs on
     /// new media arrivals (user decision 09.09.2026, symmetric to DownloadOnArrival).
@@ -578,12 +571,51 @@ public class PluginConfiguration : BasePluginConfiguration
     }
 
     /// <summary>
+    /// F-M19/F-M203: the four credentials the plugin cannot run without, in ONE place
+    /// so both pipelines and the settings page answer the same question.
+    /// <para>
+    /// They are not alternatives: the SubDL login pair authenticates the UPLOAD (its
+    /// three steps carry a Bearer token from /login), the SubDL API key authenticates
+    /// search, file download and the quota read, and the TMDb key is what resolves and
+    /// corrects the ids in both directions. A missing one is not a degraded mode, it is
+    /// a run that cannot do its job — so the run is refused up front with the field
+    /// named, instead of failing later at the first call that needs it.
+    /// </para>
+    /// </summary>
+    /// <returns>The human-readable labels of every missing credential; empty when complete.</returns>
+    public List<string> MissingCredentials()
+    {
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(Username))
+        {
+            missing.Add("SubDL email");
+        }
+
+        if (string.IsNullOrWhiteSpace(Password))
+        {
+            missing.Add("SubDL password");
+        }
+
+        if (string.IsNullOrWhiteSpace(ApiKey))
+        {
+            missing.Add("SubDL API key");
+        }
+
+        if (string.IsNullOrWhiteSpace(TmdbApiKey))
+        {
+            missing.Add("TMDb API key (v3)");
+        }
+
+        return missing;
+    }
+
+    /// <summary>
     /// Gets or sets the REQUIRED TMDB API key (v3), the TMDb-authoritative source for
     /// id resolution (F-M202/F-M203, user decision 25.09.2026). It resolves missing
     /// IMDb/TMDb ids, corrects Jellyfin's ids, and decides film vs series.
-    /// Empty/null → no id resolution: SERIES items are skipped entirely in both the
-    /// upload and download pipelines (SkippedNoTmdbKey); FILMS still upload with
-    /// Jellyfin's own ids. The GUI refuses to save an empty key.
+    /// Empty/null → nothing runs: a run without the key is refused up front (F-M203),
+    /// because the id resolution it feeds is not optional in either direction. The GUI
+    /// refuses to save an empty key.
     /// </summary>
     public string TmdbApiKey { get; set; } = string.Empty;
 
