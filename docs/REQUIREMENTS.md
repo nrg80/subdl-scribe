@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.157-dev. Single canonical requirements document.
+**Status:** Implementation — v12.1.12.157-dev.
 ## 1. Objective
 Automatic upload of all embedded text subtitles from the Jellyfin library to SubDL.com.
 **Core idea:** Jellyfin already knows every file and every stream. The plugin handles discovery, extraction, quality assurance and upload entirely within the media server — no external polling cron, no separate state management for file discovery.
@@ -392,9 +392,6 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
 - **F-M191b — Unresolvable IMDb id ⇒ DROP it, never keep it.** When `/find` returns every result array empty, TMDB does not index that IMDb id at all — for a series item it is an episode id TMDB has no record of. Keeping it "as the best available" uploads an episode IMDb id in the SERIES slot, exactly what this rule forbids. Both ids are dropped so the caller's type-free title search resolves the show by name.
 - **F-M90:** **Database maintenance UI:** the config page exposes only **Reset** and **Restore** for `subdl-sync.db`. **Reset** creates a timestamped backup, then removes the database so the plugin starts with a fresh registry. **Restore** restores the most recent backup after a single confirmation. No separate "Initialize database" button: the plugin creates an empty database on first start and always opens an existing one.
 - **F-M181:** **Single backup retention:** after a database reset all older `subdl-sync.db.bak-*` files are deleted; only the backup created by that reset remains.
-### 3.17 Implementation Notes
-- **F-M66–F-M72:** Implementation refinements tracked via source markers (persistent reject store, batched item precheck, seeder prefilter, neutral-done skipped items, etc.).
-- Sub-requirements and fixes from F-M74 onwards are tracked via the tag markers in the C#/HTML/JS source files, which are the source of truth for implementation details.
 ### 3.18 Persistent State — Data Model and Compatibility
 The plugin keeps its state in **one database file**, grouped into **five clearly separated areas**, each keyed by the thing it actually describes. "One file, five areas" is deliberate: the areas share a lifetime and are written by the same lock, but they must not be mixed, because a verdict about a video file, a stream position and a piece of subtitle text has three different identities.
 #### 3.18.0 Area 0 — Compatibility record (`meta`)
@@ -464,7 +461,7 @@ There is deliberately **no "settled"/"done" state.** The previous model kept a s
 - **A-6:** State survives JF restart: already uploaded files are not processed again
 - **A-7:** Library scan is not blocked by running uploads (<1s in-scan overhead)
 ## 7. Test Loop / Acceptance Framework
-Every functional requirement (F-M*) gets at least one automated test case — unit test where possible, integration test against a real test JF instance where needed.
+Every functional requirement (F-M*) carries at least one automated test case: a unit test where possible, an integration test where the behaviour needs one.
 ### Test Library (fixed fixtures)
 - **T1:** Episode with mixed-language text subs and one wrong stream tag
 - **T2:** Movie with bitmap subs only (PGS) is ignored
@@ -591,16 +588,9 @@ Every functional requirement (F-M*) gets at least one automated test case — un
 
 - **T83:** The stored last-run rows survive a restart and are read from the database (F-M265)
 - **T82:** A media file is rewritten at most once (F-M264)
-
-### Test Modes
-- **Automatic (CI):** unit tests (QA logic, SRT parser, language detection, hash dedup, rate-limit calculation) + build.
-- **Automatic (nightly):** integration loop against a SubDL mock server in dry-run mode.
-- **Manual (release gate):** one real run against a production instance with a real SubDL account on a mini library.
-
 - **T84:** The sweep removes observations but never a verdict (F-M266)
 - **T85:** The waiting row reports the cycle's fate in the right colour (F-M267/F-M268)
 - **T86:** The refresh detail line names a rebuild fallback without turning the light red (F-M269)
-
 - **T87:** The configuration page's structure and wiring hold without a host (F-M270–F-M273)
 
 ## 8. References
