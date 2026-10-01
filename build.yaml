@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.159"
+version: "12.1.12.160"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,25 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.160: The download mark names files, and an unlabelled sidecar gets its name.
+    A regular subtitle and its hearing-impaired variant are two files on disk, but the
+    mark recorded both as the plain language - so a successful regular save closed the
+    variant's slot too, the mark claimed a file that was not there, and the refresh
+    contradicted it on every pass. Measured on the live library: 31 items re-searched in
+    one morning, 16 regular sidecars rewritten although they were already on disk. The
+    mark now carries one token per required file (DE, DE:hi), which ends the loop; no
+    expiry and no give-up, a variant SubDL does not carry today is looked for again on
+    the next refetch.
+    A subtitle file whose NAME carries no language proved no coverage at all: it was
+    skipped, never recorded, and its item was searched for a language its own disk
+    already held. The scan now detects such a file's language from its text and renames
+    it to the shape this plugin writes, <container>.<lang>.srt - behind the existing
+    resolve-und switch, with the same 2 KB floor and the same skip when nothing is found.
+    A file that already names its language is never touched, and a taken name takes the
+    next free slot instead of overwriting a subtitle. Two defects found on the way are
+    fixed with it: a rename would have destroyed the stored row (the refresh forgets a
+    sidecar whose path is gone), and an observation without a language was rewritten on
+    every pass forever.
   v12.1.12.159: The refresh chapters and the dry-run report.
     The download dry run reported a file name it cannot know. Its report ends before the
     fetch by design, but a second log site further down printed the name with the

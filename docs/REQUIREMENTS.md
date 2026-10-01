@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.159.
+**Status:** Implementation — v12.1.12.160.
 
 ## Contents
 
