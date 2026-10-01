@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.158"
+version: "12.1.12.159"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,22 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.159: The refresh chapters and the dry-run report.
+    The download dry run reported a file name it cannot know. Its report ends before the
+    fetch by design, but a second log site further down printed the name with the
+    hearing-impaired marker and the byte size - and sat after the dry run's own break, so it
+    never ran at all. A dry run holds no bytes and never builds a name from a fetched file,
+    so the site is removed and the wording follows: a dry run answers WHICH RELEASE per
+    language, not WHICH FILE. The same wording was corrected on the settings page.
+    The database refresh and the OSHash refresh each state their own procedure now, in one
+    place instead of spread over their chapters. Eleven rules whose code anchors live in
+    other components (counters, log levels, the configuration page, the reset UI, the
+    registry hash, the data model) moved to the chapter they belong to, so a chapter
+    describes its own task again.
+    The database refresh no longer drops download marks it cannot see, and it checks the
+    hearing-impaired variant. A dry run no longer marks the files it reports as complete -
+    a run against a library used to leave that library marked as done, so the next real run
+    skipped the very files the dry run had been asked to report.
   v12.1.12.158: Four credentials, no partial operation.
     The settings page enforced exactly one of the four credential fields: an empty TMDb
     key refused the save, while an empty SubDL email, password or API key saved happily
