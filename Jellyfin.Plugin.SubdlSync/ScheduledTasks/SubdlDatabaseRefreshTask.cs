@@ -546,6 +546,38 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             }
 
             var stale = Registry.ContentHashRegistry.FindStaleDownloadedLanguages(stored, missingOnDisk, settledUnavailable);
+
+            // F-M240 (user decision 01.10.2026): the mark answers for the LANGUAGE, but the HI switch
+            // asks for a FILE. While the switch is on, a target language whose hearing-impaired
+            // variant is gone makes the mark a lie just as a missing regular subtitle does — and the
+            // refresh is the only instance that walks the whole library regularly, so leaving the
+            // question to the pipeline meant it was never asked for an item the mark kept skipping.
+            // Same reader as the pipeline (F-M254): the stored rows, not the stream list, because
+            // Jellyfin caches its stream list and a container corrected this cycle still reads old.
+            if (Plugin.Instance?.Configuration.DownloadHearingImpaired == true)
+            {
+                var (storedHi, hiProbeUsable) = HearingImpairedLanguagesForCoverage(registry, media);
+                if (!hiProbeUsable)
+                {
+                    // No HI information at all — neither stored nor readable. Judging here would
+                    // drop the mark on a guess, which is the mistake this whole run just stopped
+                    // making (unknown ≠ deleted).
+                    LogUtil.Detail(_logger, "[SubDL-Refresh] HI check skipped for {Id} — no HI evidence readable.", media.Id);
+                }
+                else
+                {
+                    var hiMissing = Registry.SidecarNaming
+                        .MissingHearingImpaired(stored, storedHi)
+                        .Where(l => !settledUnavailable.Contains(l, StringComparer.OrdinalIgnoreCase))
+                        .ToList();
+
+                    foreach (var l in hiMissing.Where(l => !stale.Contains(l, StringComparer.OrdinalIgnoreCase)))
+                    {
+                        stale.Add(l);
+                    }
+                }
+            }
+
             if (stale.Count == 0)
             {
                 continue;
@@ -558,10 +590,84 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             }
 
             dropped++;
-            LogUtil.Normal(_logger, "[SubDL-Refresh] dropped stale download mark for {File} — {Langs} no longer on disk.", Path.GetFileName(media.Path!), string.Join(", ", stale));
+            // The two reasons are named apart: "no longer on disk" was wrong for a language whose
+            // subtitle sits inside the container, and it hides whether the HI variant drove it.
+            LogUtil.Normal(_logger, "[SubDL-Refresh] dropped stale download mark for {File} — {Langs} no longer covered.", Path.GetFileName(media.Path!), string.Join(", ", stale));
         }
 
         return dropped;
+    }
+
+    /// <summary>
+    /// F-M240/F-M254: the languages whose hearing-impaired variant the file carries, plus whether
+    /// the answer can be trusted at all.
+    /// <para>
+    /// Two sources, because neither is complete on its own. The REGISTRY holds what earlier runs
+    /// observed, but a file the downloader has never touched has no row — and the download pipeline
+    /// fills that area immediately before it asks the same question, a courtesy the refresh cannot
+    /// rely on. The STREAM LIST holds what Jellyfin reports right now, but it is cached, so a
+    /// container the gate corrected this cycle still reads old.
+    /// </para>
+    /// <para>
+    /// <c>Usable</c> is false only when BOTH are empty AND the stream list could not be read: then
+    /// nothing is known, and the caller must not conclude that the variant is missing. A file
+    /// genuinely without any HI track has a readable, non-empty stream list and yields
+    /// <c>Usable = true</c> with an empty set — which is a verdict, not ignorance.
+    /// </para>
+    /// </summary>
+    /// <param name="registry">Content registry.</param>
+    /// <param name="media">The media row whose mark is being judged.</param>
+    /// <returns>The HI languages found, and whether that answer may be used.</returns>
+    private (HashSet<string> Languages, bool Usable) HearingImpairedLanguagesForCoverage(Registry.ContentHashRegistry registry, Data.MediaEntity media)
+    {
+        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool probeUsable = false;
+
+        if (!string.IsNullOrEmpty(media.Path))
+        {
+            foreach (var lang in registry.HearingImpairedLanguages(media.Path))
+            {
+                found.Add(lang);
+                probeUsable = true;
+            }
+        }
+
+        if (string.IsNullOrEmpty(media.JellyfinItemId) || !Guid.TryParse(media.JellyfinItemId, out var itemGuid))
+        {
+            return (found, probeUsable);
+        }
+
+        try
+        {
+            var streams = _mediaSourceManager.GetMediaStreams(itemGuid)?.ToList();
+            if (streams is { Count: > 0 })
+            {
+                probeUsable = true;
+                foreach (var s in streams)
+                {
+                    if (s.Type != MediaBrowser.Model.Entities.MediaStreamType.Subtitle || s.IsExternal
+                        || Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsForcedStream(s))
+                    {
+                        continue;
+                    }
+
+                    if (Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(s))
+                    {
+                        var mapped = Jellyfin.Plugin.SubdlScribe.Language.LanguageMapper.MapToSubdl(s.Language);
+                        if (mapped != null)
+                        {
+                            found.Add(mapped);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogUtil.Detail(_logger, "[SubDL-Refresh] HI probe skipped for {Id}: {Msg}", media.Id, ex.Message);
+        }
+
+        return (found, probeUsable);
     }
 
     /// <summary>

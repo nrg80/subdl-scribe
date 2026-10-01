@@ -657,6 +657,8 @@ The upload side follows the same rule: a forced track is removed from the upload
 
 **F-M240 [B1]:** **The hearing-impaired variant is answered from the stored rows, not from the download mark.** While the switch is on, a target language with no stored hearing-impaired row counts as stale and invalidates the mark, so the same run delivers the variant.
 
+**The database refresh asks this question too**, not only the download run. The mark answers for the LANGUAGE; the switch asks for a FILE, and the refresh is the only instance that walks the whole library on its own — leaving the question to the pipeline meant it was never asked for an item the mark kept skipping. The refresh reads the HI languages from the stored rows first, then from the stream list, and skips the check entirely when neither can be read: judging on no evidence is the mistake this rule exists to prevent.
+
 A language already settled-as-unavailable (QA-exhausted) does not count as stale.
 
 **F-M193a:** **No construct the database cannot translate may cross into a query.** A string-comparison overload, a helper-method call or any predicate without a database expression must be applied **outside** the query lambda: keep the indexed equality inside and move the rest to LINQ-to-objects afterwards.
