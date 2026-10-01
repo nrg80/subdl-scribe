@@ -247,7 +247,7 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
 - **F-M14 [B2]:** Sync plausibility: cue span vs. media runtime (+5 min tolerance; all cues concentrated in <10 % of runtime = reject)
 - **F-M15 [B2]:** Language verification: detected language of the content (script blocks for CJK/Cyrillic/etc., Latin via stopwords) vs. stream tag; mismatch → skip; undetectable content passes (fail-open)
 - **F-M16 [B2]:** Minimum size (hard 2 KB floor, always on) and minimum cue count (30) — below that "too small", skip
-- **F-M39 [B2]:** **No double work across directions:** every subtitle the system uploads or downloads is registered under its normalized content hash. The upload side asks the content-known check before uploading and the download side before downloading, so a subtitle that already arrived from either direction is neither fetched nor sent again.
+- **F-M39 [B2]:** **No double work across directions:** every subtitle the system uploads or downloads is registered under its normalized content hash, so a subtitle that already arrived from either direction is neither fetched nor sent again. The two directions answer it at different points: the **upload** side asks the content-known check on the candidate itself, right before sending. The **download** side does not ask it during the fetch — the seeder asks it before the item enters the queue and keeps a file out whose sidecar content is already known. The download still records the hash it saved, which is what keeps the seeder's answer correct.
 
 ## 10. SubDL/TMDb API, IDs and Credentials
 
