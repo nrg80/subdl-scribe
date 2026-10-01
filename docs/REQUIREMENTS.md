@@ -1,23 +1,22 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.157-dev.
+**Status:** Implementation — v12.1.12.158.
 
 ## Contents
 
 - [1. Objective and Scope](#1-objective-and-scope)
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 11 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 25 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 31 requirements
+  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
 - [4. Download Pipeline](#4-download-pipeline) — 19 requirements
+  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 5 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 11 requirements
 - [6. Database Refresh](#6-database-refresh) — 13 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 5 requirements
-- [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 17 requirements
-  - [8.1 Extraction, Queue and Skip Order](#81-extraction-queue-and-skip-order) — 4 requirements
-  - [8.2 Quality Gates — Upload](#82-quality-gates-upload) — 8 requirements
-  - [8.3 Quality Gates — Download](#83-quality-gates-download) — 5 requirements
+- [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 4 requirements
 
-- [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 23 requirements
+- [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 25 requirements
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 12 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 11 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
@@ -44,19 +43,19 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
 **Known problems the plugin must solve:** container language tags are often wrong (ISO 639-2/B inconsistent), so language verification is needed; and files in subfolders can produce path resolution errors.
 **F-M37 [B1]:** **Modular layering:** strict separation into (a) SubDL API client, (b) content-hash registry, (c) language mapping/IMDB resolver, (d) upload pipeline, (e) config/status. Only (d) is upload-specific; (a)–(c) and (e) are reusable.
 
-**F-M40 [B1]:** **DI registration via IPluginServiceRegistrator:** the shared services are registered so the download pipeline obtains them via constructor injection.
+**F-M40 [B1]:** **DI registration via IPluginServiceRegistrator:** the shared services are registered with the container. The download pipeline is built outside the container and takes the registry from the plugin instance.
 
 ## 2. Seeder — what enters the queue
 
-**F-M1 [B1]:** Automatic upload of new media files via scheduled task, interval configurable (manual/daily/weekly/monthly per F-M21; "on new file" = ItemAdded, F-M1a)
+**F-M1 [B1]:** Automatic upload of new media files via scheduled task, interval configurable (per F-M21). The task is a trigger only and starts a dispatch cycle; "on new file" is the arrival path (F-M1a).
 
 **F-M4a [B1]:** Only process libraries selected in the config (F-M18)
 
-**F-M189 [B1]:** **Library selection resolves to PATHS, so a selection keeps working when libraries are NESTED.** An item is accepted when its path lies under a selected root on a **directory boundary** (a selected path prefix must not match, and the comparison follows the filesystem's case semantics), or when the resolved collection-folder name is selected. resolves the selected names once per scan via Jellyfin's virtual folders → Jellyfin's folder list. the containment check marks libraries that CONTAIN or are CONTAINED BY a selected path, because the folder walk must enumerate the OUTER library. Applied at all five scope sites: the seeder's hard gate and its event-path gate, the collection step in both pipelines, the dispatcher's event-library resolution, and the status controller's directory check.
+**F-M189 [B1]:** **Library selection resolves to PATHS, so a selection keeps working when libraries are NESTED.** An item is accepted when its path lies under a selected root on a **directory boundary** (a selected path prefix must not match, and the comparison follows the filesystem's case semantics), or when the resolved collection-folder name is selected. The containment check also marks libraries that CONTAIN or are CONTAINED BY a selected path, because the folder walk must enumerate the OUTER library. The gate applies at the seeder's hard gate and its event-path gate, the collection step in both pipelines, the dispatcher's event-library resolution and the status controller's directory check. The selected names are resolved per call site, not cached across a run.
 
-**A nested layout must not be "fixed" by restructuring the library:** creating the inner library over an already-covered path succeeds via the API but stays EMPTY, and deleting the outer one is destructive. The scope must handle subdirectories.
+**The scope must handle subdirectories of a selected library:** an inner library created over an already-covered path stays empty.
 
-**F-M1a [B3]:** ItemAdded real-time trigger — the item-added event subscription in the event dispatcher (the handler); there is no separate watcher class. Each arrival starts a non-resetting debounce timer (the arrival debounce window (default 5 min), default 5 min). On fire the dispatcher runs one cycle: seed → download → upload (download first, F-M149). Events during an active cycle collect in the pending ids; one follow-up reseed runs at cycle end if the list is non-empty, gated by the follow-up setting and the follow-up setting.
+**F-M1a [B3]:** ItemAdded real-time trigger — the item-added event subscription in the event dispatcher (the handler); there is no separate watcher class. Each arrival starts a non-resetting debounce timer (the arrival debounce window (default 5 min), default 5 min). On fire the dispatcher runs one cycle: seed → download → upload (download first, F-M149). Events during an active cycle collect in the pending ids. A follow-up reseed runs at cycle end only if that list is non-empty; the follow-up settings decide which directions take part. Arrivals that are still pending when the cycle ends start one further full cycle after a 90-second delay.
 
 **F-M233:** **An on-arrival run works ONLY the arrivals; a full-coverage pass happens on the schedule or the manual button.**
 
@@ -70,7 +69,7 @@ Only `event` and `arrival-followup` are scoped. `scheduled-upload`, `scheduled-d
 
 An arrival cycle with an empty collector ends without a scan. Falling back to a full scan on the arrival path is a defect, not a graceful default. **See T48.**
 
-**F-M244 [B1/D] [NOT IMPLEMENTED]:** **The queue item is a complete work order; the pipelines only carry it out.** The seeder decides WHAT is to be done and hands it over in the item; the downloader and the uploader execute that order rather than re-deriving it.
+**F-M244 [B1/D]:** **The queue item is a complete work order; the pipelines only carry it out.** The seeder decides WHAT is to be done and hands it over in the item; the downloader and the uploader execute that order rather than re-deriving it.
 
 The download pipeline reads its languages from the item and does not answer the HI question again — that decision is the HI wish plus the languages the order names. The upload pipeline likewise consumes the positions it was handed.
 
@@ -80,11 +79,11 @@ The pipelines keep ONE non-derivation check — the media file's existence (F-M6
 
 With a dry run (upload) OR a dry run (download) armed, the gate still resolves untagged tracks and reports them but writes nothing into the media file. Detection is not suppressed: a dry run's value is answering what it WOULD do (F-M22).
 
-**F-M259 [D]:** **The loose.srt files get the same writer the embedded tracks got — the scan.**
+**F-M259 [D]:** **Loose .srt files are observed by the seeder's scan.**
 
-The seeder's scan records every loose subtitle file beside the media as an observation row, keyed by the normalized content hash (the sidecar's identity) with its language and HI flag. `Status = observed`, no verdict; an existing verdict is never overwritten.
+The scan records every loose subtitle file beside the media whose NAME carries a language as an observation row, keyed by the normalized content hash (the sidecar's identity) with its language and HI flag. A sidecar whose name carries no language token is skipped here and gets no observation row. `Status = observed`, no verdict; an existing verdict is never overwritten.
 
-Content is the key, not the path, and the hash uses the uploader's own function (the uploader's hash function), so a row observed here is the row the uploader would find. Two sidecars with the same language but different text stay two rows.
+Content is the key, not the path, and the hash is the uploader's own function. Two sidecars with the same language but different text stay two rows.
 
 **F-M55:** **Download-on-arrival as its own switch** + UI restructure: "Download subtitles on arrival" checkbox (Download tab), independent of the upload arrival setting. Both directions share the same diced anchors/jitter.
 
@@ -100,7 +99,7 @@ Content is the key, not the path, and the hash uses the uploader's own function 
 
 **F-M4 [B1]:** Never upload an (item, language) pair twice — persistent state file in the plugin data dir
 
-**F-M6 [B1]:** Text formats only (SRT/ASS/SSA/VTT via SubRip conversion); bitmap subs (PGS/VobSub) explicitly excluded
+**F-M6 [B1]:** Text subtitle streams only (SRT/ASS/SSA, converted to SRT); bitmap subs (PGS/VobSub) explicitly excluded
 
 **F-M7 [B1]:** **Extraction writes nothing into the media library, and its working files are removed on every exit.** Each extraction runs in its own directory outside the library, one per job. That directory is removed when the job ends — after a success, after a failure and after a cancellation. The removal is best effort and stays silent: a leftover working file must never fail a run, and it is never worth a warning.
 
@@ -114,7 +113,7 @@ Content is the key, not the path, and the hash uses the uploader's own function 
 
 **F-M88c [B3]:** **Upload-side short-circuit (the upload-side completion mark):** a file whose embedded subtitle side is complete is skipped before any ffprobe, directory walk or API call. Complete means every stream position reached a terminal state (uploaded or rejected). The field is named after the SUBTITLES, not the file: the video file itself is never uploaded.
 
-**F-M21 [B1]:** Update interval: **manual / daily / weekly / monthly**. A scheduled interval fires at the per-installation diced random anchor (F-M51); **manual** leaves no scheduled fire at all and keeps the dashboard and config-page triggers; "on new file" = F-M1a. **Default: Weekly** — since F-M111 both directions share this one cycle interval, whose constructor default is Weekly.
+**F-M21 [B1]:** Update interval: **manual / daily / twice daily / twice weekly / weekly / monthly**. A scheduled interval fires at the per-installation diced random anchor (F-M51); **manual** leaves no scheduled fire at all and keeps the dashboard and config-page triggers; "on new file" = F-M1a. **Default: Weekly** — since F-M111 both directions share this one cycle interval, whose constructor default is Weekly.
 
 **F-M22 [B1]:** **Dry-run switch, one per direction (both default off): search runs, no transfer.** The pipeline walks its full decision path — search, threshold, ranking — and reports what it WOULD do (chosen candidate per language, the numbered slots of F-M242, the hearing-impaired pick of F-M241), but fetches no file and writes nothing.
 
@@ -138,7 +137,7 @@ The coordinator must not add a second offset on top: this path uses the recovery
 
 **Scope:** only those two shapes change; every other file parses byte-identically in title, year, type, season and episode, and no file loses its title.
 
-**Deliberately NOT changed:** the prefix of (b) is dropped, not combined (a strand is not part of a title); a bare `Exx` never invents a season; the compact TV-stamp path is untouched; and the `E` must be **uppercase** — a lowercase `e` is indistinguishable from a word fragment in a name like `<title>.<season>.e<episode>`.
+**Deliberately NOT changed:** the prefix of (b) is dropped, not combined (a strand is not part of a title); a bare `Exx` never invents a season; the compact TV-stamp path is untouched; and a bare `Exx` marker is accepted in either case, upper or lower.
 
 **F-M252:** **a bracketed year is a year, and its opening bracket is not part of the title.** the tail-year rule must close its character class correctly and accept `(YYYY)` and `[YYYY]` at the tail. A pattern that cannot match lets every name fall through to the "year anywhere in the head" branch, which cuts at the YEAR rather than at the separator before it — so a bracketed year in the name leaves the opening bracket in the title. Such a title is never real, and TMDb answers it with a different title than the clean one, so the id test compares against the wrong name.
 
@@ -160,13 +159,11 @@ The coordinator must not add a second offset on top: this path uses the recovery
 
 **F-M202 [B1]:** **An episode TMDB id is PROVEN against a candidate show — never guessed.**
 
-Jellyfin reports an episode TMDB id with no IMDb id for some files, and `/find` **cannot** walk an episode id up to its show — `find?external_source=tmdb_id` returns every result array empty. Dropping such an id leaves the item with no ids at all.
+Rule: title + season + episode → `search/multi` → candidate show → `tv/{show}/season/{s}/episode/{e}` → accept the show **only when the episode id returned there equals Jellyfin's id**. A confirmed match yields the SHOW ids (imdb via `/external_ids`, since the detail endpoint reports `imdb_id: null` for series).
 
-Rule: title + season + episode from the **FILE NAME** → `search/multi` → candidate show → `tv/{show}/season/{s}/episode/{e}` → accept the show **only when the episode id returned there equals Jellyfin's id**. A confirmed match yields the SHOW ids (imdb via `/external_ids`, since the detail endpoint reports `imdb_id: null` for series).
+**Fail-closed:** no confirmed equality ⇒ `(null, null)` ⇒ the item is skipped like any other unresolvable series.
 
-**Fail-closed:** no confirmed equality ⇒ `(null, null)` ⇒ the item is skipped like any other unresolvable series. A title search alone is never sufficient: it also returns titles that merely begin the same way, and only the id equality makes the mapping provable.
-
-Season/episode always come from the file name (Jellyfin reports none for a mis-typed episode).
+Season and episode come from Jellyfin's own metadata where it reports them; the parsed file name is the fallback and leads only when the name itself marked the item as a series.
 
 **F-M29 [B1]:** **No user-identifying metadata in uploads:** exclusively IMDB ID + season/episode + language + subtitle file. No username, no library/path information, no source media filenames, no server/installation identifiers, no version telemetry.
 
@@ -192,7 +189,27 @@ A marker is consumed as a marker and the language token is read from the positio
 
 **Episode → show resolution:** `GET /find/{imdbId}?external_source=imdb_id` → `tv_episode_results[0].show_id` IS the series TMDB id; `tv_results[0].id` is the series itself when the id was already show-level. The series IMDb then comes from `/tv/{showId}/external_ids`.
 
-**An episode TMDB id cannot be walked up directly:** `/find/{episodeId}?external_source=tmdb_id` returns EMPTY and `/tv/{episodeId}` is 404. Without a usable IMDb id such a value is **dropped** (one the show-id probe instead of two guaranteed 404s); the caller's type-free title search resolves the show by name.
+**An episode TMDB id cannot be walked up directly:** `/find/{episodeId}?external_source=tmdb_id` returns EMPTY and `/tv/{episodeId}` is 404. Such a value is first PROVEN against a candidate show (F-M202); only when that proof fails is it dropped, and the caller's type-free title search then resolves the show by name.
+
+### 3.1 Quality Gates — Upload
+
+The upload chain, in the order the code applies it. Each switchable gate names its own switch and default.
+
+**F-M16 [B2]:** **Minimum size and minimum cue count.** The 2 KB size floor applies to UPLOADS only and is always on. The cue count (30) applies in BOTH directions and is switchable per direction, default on. Below either, the stream is skipped as "too small".
+
+**F-M13 [B2]:** **SRT parser validation (switchable, default on):** ≥1 cue, monotonically increasing timestamps, plausible cue duration (>0.1 s, <10 min — long music cues stay legal)
+
+**F-M14 [B2]:** **Sync plausibility (switchable, default on):** cue span vs. media runtime (+5 min tolerance; all cues concentrated in <10 % of runtime = reject)
+
+**F-M15 [B2]:** **Language verification (switchable in each direction, default on):** detected language of the content (bundled n-gram classifier) vs. stream tag; mismatch → skip; undetectable content passes (fail-open)
+
+**F-M142:** **A pair already uploaded in this run is recorded as rejected, never as uploaded.** A stream whose (media content hash, language, hearing-impaired) pair is already up is skipped, and its position is recorded with the reason `duplicate-self-echo`. It is not marked `uploaded`, because that would claim a transfer that never happened. The hearing-impaired variant has its own key space, so a normal upload never blocks an SDH variant.
+
+**F-M17c [B2]:** **Own upload dedup:** (item, language) pair + content hash in persistent state — never upload an already-uploaded or in-session-processed content hash twice. Depends on the canonical SRT form (F-M185): the hash is only stable across extraction runs when the payload is normalized first.
+
+**F-M17x [B2]:** **Remote duplicate learning:** when SubDL rejects an upload with "Duplicate upload: identical file already published", the normalized content hash is stored as `duplicate-remote`. Future runs skip that content before any API call.
+
+**F-M74:** **An `und` stream is resolved by detection before upload. Switchable, default on.** With the switch on, the detected language replaces the tag and the stream uploads normally; a detection that fails skips the stream. With the switch off, every `und` stream is removed from the upload set and logged. Detection needs text to work on, so a stream below the 2 KB floor (F-M16) is skipped as too little text.
 
 ## 4. Download Pipeline
 
@@ -232,7 +249,7 @@ A failed HI search keeps the regular candidates and logs it — the HI variant i
 
 A dry run reports the HI pick from the HI pool, because the real selection happens after the file download, which a dry run never reaches.
 
-**F-M47 [D]:** **Configurable refetch interval:** manual / daily / weekly / monthly. **Default: Weekly.** The per-file last-search stamp (the last-search stamp and the stored language list) protects already-downloaded languages and controls re-search. The old per-direction refetch property is **obsolete since F-M111** — the unified cycle interval governs both directions; the old property is kept only for XML compatibility.
+**F-M47 [D]:** **Configurable refetch interval:** manual / daily / weekly / monthly. **Default: Weekly.** The per-file last-search stamp (the last-search stamp and the stored language list) protects already-downloaded languages and controls re-search. The unified cycle interval governs both directions; the per-direction refetch property is carried for XML compatibility only and read by no code path.
 
 **F-M215 [D]:** **A season or range pack is resolved to the episode it belongs to — never saved whole.** A pack must yield exactly one subtitle file per episode, chosen from the pack's own listing:
 
@@ -240,11 +257,29 @@ A dry run reports the HI pick from the HI pool, because the real selection happe
 
 A pack with no entry for this episode is **skipped**, not saved wrong. Non-pack paths keep their existing behaviour.
 
-**F-M156:** **One-shot global catch-up for missed refetch windows:** if any scheduled anchor window passes unhandled (server down, restart, lock busy), the scheduler queues **exactly one** catch-up run. Multiple missed slots do **not** stack. The catch-up state resets when the next regular anchor fire runs.
+**F-M156:** **Missed refetch anchors:** an unhandled anchor is taken up by the next regular fire; the marker counts the claim, not the outcome. Missed slots do not stack.
 
 **F-M58:** **Transient-overload 429 classification.** A `service_busy` 429 is server overload, not the daily allowance: the download side retries in place, up to 3 attempts, waiting the server's retry hint (default 5 s) and continuing the run. The upload side has no in-run retry — it ends the run and schedules the overload fire. A `rate_limit` 429 gets the same treatment (default 30 s), because the status code cannot tell the two apart (F-M238). A login is classified rather than propagated: 404 and 403 are auth verdicts and fail closed at once, 429 retries, and a 5xx or a non-JSON body after 3 attempts ends the run as a transient overload and schedules the overload fire.
 
 **F-M64:** **Target-language change needs no reset pass:** each file stores the language list it was last searched under plus the timestamp (the stored language list). the due check compares that stored list against the current configuration, so a changed list simply makes affected files due again — no global reset run and no second bookkeeping row. Items already holding all new languages still skip without API calls.
+
+### 4.1 Quality Gates — Download
+
+The download chain runs against each candidate in score order, before the file is saved. F-M15 and F-M16 are the two gates both directions share.
+
+**F-M44 [D]:** **Release match:** candidate release name scored against the local filename: release-group match > token overlap > download-count tie-breaker. Weights configurable (expert mode).
+
+**F-M43 [D]:** **Runtime/FPS match with tolerance:**
+**Stage 1 — pre-download (FPS):** SubDL provides `framerate`/`fps` per candidate. If set: difference > ±1 % vs. item FPS → candidate rejected. Missing → criterion skipped, no hard fail.
+**Stage 2 — post-download (structure + runtime):** corruption check on the downloaded bytes (cue timings present, monotonically increasing, plausible durations), then runtime check of SRT cue span vs. item the runtime, default tolerance ±600 s. Outside → discard. Missing runtime metadata → criterion deactivated.
+
+**F-M45 [D]:** **IMDB/TMDB match** (default on, switchable off): candidates matched against item IDs. Default is a hard criterion (no ID → no download); switchable off for title-based fallback.
+
+**F-M50 [D]:** **Download budget per (item, language):** max N candidate downloads before the language counts as "not available" (default 3, 0 = unlimited).
+
+**The same language verification runs here verbatim** (F-M15), on the downloaded bytes, with its own per-direction switch.
+
+**F-M46 [D]:** **Overall selection:** one best candidate per (item, language) by combined score from F-M43–F-M45. The keep-best count is configurable (default 1); above 1 the QA-passed candidates are saved as numbered sidecars. No candidate passing → the language counts as "not available".
 
 ## 5. Upload Postprocessing
 
@@ -262,7 +297,7 @@ A pack with no entry for this episode is **skipped**, not saved wrong. Non-pack 
 
 **F-M131:** **Manual stop via marker files:** the Stop button creates `.stop-upload` and/or `.stop-download` in the plugin data directory. Each pipeline checks its marker before processing the next item (and, for uploads, between streams of the same item), cancels the direction, deletes the marker and reports the stop marker. The dispatcher ends the cycle without starting further directions. Stop markers do **not** affect the delayed postprocessing task. The canonical endpoint for programmatic stops is `POST /Plugins/SubdlSync/Stop?direction=upload|download|all`; `DELETE /ScheduledTasks/Running/{id}` cancels the Jellyfin task wrapper, but a running pipeline item may finish first.
 
-**F-M17y:** **Delayed upload postprocessing:** after an upload run (normal finish or stop), on the postprocessing schedule (F-M176; not tied to the run and not to a fixed delay — SubDL review latency varies), the plugin queries `/user/mySubtitles` and resolves every locally pending-review entry into its final verdict: `accepted` → approved; `rejected` with "Duplicate upload" → deleted on SubDL + marked duplicate-remote; other rejects → marked upload-rejected. All steps logged at Debug. The task runs on its own cadence and diced anchor (F-M210), independent of any run, so a stopped upload does not suppress it.
+**F-M17y:** **Delayed upload postprocessing:** after an upload run (normal finish or stop), on the postprocessing schedule (F-M176; not tied to the run and not to a fixed delay — SubDL review latency varies), the plugin queries `/user/mySubtitles` and resolves every locally pending-review entry whose status is `rejected`: an entry with "Duplicate upload" is deleted on SubDL and marked duplicate-remote; any other rejected entry is deleted without a mark. Accepted entries are not touched. All steps logged at Debug. The task runs on its own cadence and diced anchor (F-M210), independent of any run.
 
 **F-M176:** **Postprocessing reschedule spacing:** if postprocessing cannot start because the global run lock is busy (F-M94h: immediate `false`, no waiting) or it hits the hourly rate limit, it schedules a one-shot re-fire in the job spacing (5–120 min). The re-fire still respects the diced anchor and does not move the next regular run. A busy lock is first checked for staleness; only a genuinely living previous run causes a deferral.
 
@@ -270,7 +305,7 @@ A pack with no entry for this episode is **skipped**, not saved wrong. Non-pack 
 
 **Stale detection:** dead holder PID → take over immediately; holder alive but stamp older than the 6-h run ceiling → wedged run, take over; file older than 24 h → take over. the startup cleanup deletes a leftover block file at plugin start. Fail-open: a malformed block file never wedges the plugin.
 
-**F-M205:** **Every reschedule is counted; after 16 the rescheduling stops.** One counter per slot (upload, download, postprocess, database refresh, OSHash refresh, refetch); once a slot has been rescheduled 16 times it is refused. **The limit is 16** — a single constant; every log line renders `{Limit}`, so raising it touches no message text.
+**F-M205:** **Every reschedule is counted; after 16 the rescheduling stops.** One counter per slot (upload, download, postprocess, database refresh, OSHash refresh, refetch); once a slot has been rescheduled 16 times it is refused. The database refresh carries two slot keys, one for its anchor and one for its reschedule fire. **The limit is 16** — a single constant; every log line renders `{Limit}`, so raising it touches no message text.
 
 Giving up is logged as a **warning** exactly once; further refusals are logged at debug.
 
@@ -312,31 +347,31 @@ Fail-safe, same two-tier rule as the oshash cache: every root the stored paths l
 
 Subset rule: a stored language set that COVERS the configured one counts as complete, so removing a language does not invalidate every mark; adding one still does.
 
-**F-M225:** **Every plugin line belongs to exactly one level — and the statistics never depend on logging.** Ungated normal-level calls must not make `Normal` show diagnostics (resolved ffmpeg path, compaction sizes, reschedule budget, seed pre-check timestamps). Assignment: internals and diagnostics → the detail level; per-item work → the per-item level; run lifecycle, abort reasons and task summaries stay at Normal. The counters are written in the single statistics writer from the run summaries, unguarded in the run path, and no log call carries a side effect in its arguments, so a `Normal` run counts exactly like a `Debug` run. **Test: T40.**
+**F-M225:** **Every plugin line belongs to exactly one level — and the statistics never depend on logging.** Ungated normal-level calls must not make `Normal` show diagnostics (resolved ffmpeg path, reschedule budget, seed pre-check timestamps). Assignment: internals and diagnostics → the detail level; per-item work → the per-item level; run lifecycle, abort reasons and task summaries stay at Normal. The counters are written in the single statistics writer from the run summaries, unguarded in the run path, and no log call carries a side effect in its arguments, so a `Normal` run counts exactly like a `Debug` run. **Test: T40.**
 
-**F-M183:** **Legible download run reporting:** the download run counts **queued** items as the denominator of its progress and abort lines, not every item of the selected libraries. At run end one compact aggregate line (saved, no candidates, language not available, skipped with reasons, failed, processed/queued), so a run that searched and saved nothing is distinguishable from a run that did nothing without raising the log mode.
+**F-M183:** **Legible download run reporting:** the download run counts **queued** items as the denominator of its abort line; the progress counter runs over every item of the selected libraries. At run end one compact aggregate line (saved, no candidates, language not available, skipped with reasons, failed, processed/queued), so a run that searched and saved nothing is distinguishable from a run that did nothing without raising the log mode.
 
 **F-M258 [D]:** **The database refresh checks the embedded side too, not only the sidecar side.**
 
 For every media row whose Jellyfin item still exists and which has stored embedded rows, the refresh reads the item's current streams and forgets every stored row that disagrees — on the key (position) and on the recorded facts (language, hearing-impaired). A row whose position is gone, or whose language/HI no longer matches the stream at that position, is dropped.
 
-The check is structural, not judicial: it compares position, language and HI without judging the verdict, so an `uploaded`/`rejected` row is dropped on the same terms as an observation. A row survives while its track survives.
+The check is structural for observations only. A row carrying a verdict (`uploaded`/`rejected`) or a detection attempt is kept unconditionally; only a plain observation is dropped when position, language or HI disagree.
 
 Fail-safe, exactly as the rest of the refresh ("unknown ≠ deleted"). An item Jellyfin no longer resolves, an unreadable stream list, and an EMPTY stream list are all skipped rather than judged. The empty case is the dangerous one: treating "Jellyfin cannot probe this item" as "the file has no tracks" would delete every row of a library that is merely offline. Only a NON-empty list that disagrees with a stored row is evidence.
 
 The check runs only for files that HAVE stored rows, so it costs one stream lookup per file with state.
 
-**F-M265:** **The LAST run of each worker is stored in the database and shown in a "Workers" section at the bottom of the configuration page — one line per worker with the time of its last run and how it ended.** Deliberately the last run only, NOT a history: a history would need a prune path and a cap.
+**F-M265:** **The LAST run of each worker is stored in the database and shown in a "Workers" section on the General tab of the configuration page — one line per worker with the time of its last run and how it ended.** Only the last run is stored, not a history.
 
 **Six outcomes**, each mapped to a colour and a word in the GUI: `ok`, `failed`, `cancelled`, `skipped` (a scan that found nothing to do), `deferred` (nothing broken, the work was pushed forward: run lock busy, quota, user stop) and `never`, plus `running` while a cycle is still working at the wait cap. Colour rule: F-M268. A `skipped` run still writes its row — "the task was not allowed to run" is information, and without it a disabled direction looks identical to a broken one.
 
-**The dry-run note is CONDITIONAL**: appended to the line only while the direction's dry-run flag is on, e.g. `cycle finished — dry run, nothing written` (download) / `— dry run, nothing uploaded` (upload). With the flag off the line stays clean. A dry run's log numbers are hypothetical, and a reader who cannot see the flag would take the run for a real one.
+**The dry-run note is CONDITIONAL**: a grey `dry run` note appears in the result cell only while the direction's dry-run flag is on. With the flag off the line stays clean.
 
 **F-M269:** **The database refresh's detail line names the compaction fallback.**
 
 **This is a NOTE, not a red light:** the refresh did its work and the store came back usable, so the outcome stays `ok`. The line carries the note precisely so the fallback is visible; with no compaction the line stays clean, so a note cannot be mistaken for the normal case. The engine's own compaction failure is deliberately NOT to be solved; the rebuild is the accepted answer. **Test: T86.**
 
-**F-M94:** **Database refresh as scheduler task:** a dedicated task reconciles the stored state with reality — it removes tracker state for Jellyfin items that no longer exist and verifies the file side of stored verdicts (F-M234). The task, its dashboard name and its log prefix all read "database refresh" (the refresh task, `[SubDL-Refresh]`); its cadence setting keeps its name because it is serialized. It uses the global run lock and operates on the shared database.
+**F-M94:** **Database refresh as scheduler task:** a dedicated task reconciles the stored state with reality — it removes tracker state for Jellyfin items that no longer exist and verifies the file side of stored verdicts (F-M234). The task, its dashboard name and its log prefix read "database refresh" (`[SubDL-Refresh]`). It uses the global run lock and operates on the shared database.
 
 **F-M214:** **A database refresh compacts the database in the same run.** Deleting rows releases pages inside the file but never returns them to the filesystem, and every delete also sits in the rollback journal (`subdl-scribe-log.db`) until a checkpoint — so a prune on its own leaves the store physically as large as before. The prune is therefore followed, in the same run and while it holds the global run lock, by the compaction: fold the journal in (the journal fold), then rebuild the file (the rebuild) to release the free pages.
 
@@ -344,7 +379,15 @@ The check runs only for files that HAVE stored rows, so it costs one stream look
 
 **It must never fail the task:** an exception is logged as a warning and swallowed. It is housekeeping, and the refresh's own work has already succeeded.
 
-**F-M90:** **Database maintenance UI:** the config page exposes only **Reset** and **Restore** for `subdl-scribe.db`. **Reset** creates a timestamped backup, then removes the database so the plugin starts with a fresh registry. **Restore** restores the most recent backup after a single confirmation. No separate "Initialize database" button: the plugin creates an empty database on first start and always opens an existing one.
+**F-M90:** **Database maintenance UI:** the config page exposes only **Reset** and **Restore** for `subdl-scribe.db`. **Reset** creates a timestamped backup, then removes the database so the plugin starts with a fresh registry. **Restore** restores the most recent backup after a single confirmation. No "Initialize database" control exists.
+
+**Initialisation, first start:** the shared context creates the plugin data directory, opens the data file, raises the collection indexes and checks the schema marker. A missing data file is created empty; an existing one is opened and kept.
+
+**Initialisation, every start:** the same sequence runs on each context creation, so a data file that lost its indexes or its schema marker is repaired to the current shape on open.
+
+**Schema mismatch:** a lower stored schema version logs a warning and raises the marker (F-M195b); a data file written by a newer build is opened read-only.
+
+**Reset is the only path to an empty registry.** Structural changes are never migrated; the stored state is reconstructible from the media files.
 
 **F-M181:** **Single backup retention:** after a database reset all older `subdl-scribe.db.bak-*` files are deleted; only the backup created by that reset remains.
 
@@ -364,8 +407,6 @@ Derived, written automatically whenever an embedded track is stored so they cann
 
 ## 8. Rules Shared by Both Directions
 
-### 8.1 Extraction, Queue and Skip Order
-
 **F-M5:** **One ffmpeg call per file, however many subtitle streams it carries.** All text subtitle streams are extracted in a SINGLE invocation into a temp folder: repeated `-map 0:s:N -c:s srt -f srt <out>` output pairs on one input.
 **The index rule:** stream positions are SUBTITLE-relative (`0:s:N`), never container indices. Both numbering schemes agree only while the file has no non-subtitle streams before the subtitles; mixing them lands on video or audio and fails with exit 8 or a no-stream error.
 **No optional mapping — `0:s:N` without `?`.** A trailing `?` is the opposite of safe: on an index that does not exist ffmpeg writes the FIRST subtitle stream into that slot, exits 0 and reports nothing — a wrong-language subtitle, silently duplicated in another slot. An unknown index must fail the call, which the caller reads as a whole-pass failure and answers by retrying the empty streams one at a time.
@@ -384,49 +425,11 @@ The result is read back out of the file across the stream shapes that exist (aud
 
 **F-M59:** **LIFO queue order:** both pipelines process items by the creation stamp descending — newest first. The id-order partition keeps id-resolvable items before the id-less backlog.
 
-**F-M60:** **File-missing retries before permanent skip:** persistent counter per item (shared by both pipelines). Each failed file access bumps it, success resets it. At the configurable threshold (default 3, 0 = never) the item is skipped as "file-missing (retries exhausted)".
-
-### 8.2 Quality Gates — Upload
-
-The upload chain, in the order the code applies it. Each switchable gate names its own switch and default.
-
-**F-M16 [B2]:** **Minimum size and minimum cue count.** The 2 KB size floor applies to UPLOADS only and is always on. The cue count (30) applies in BOTH directions and is switchable per direction, default on. Below either, the stream is skipped as "too small".
-
-**F-M13 [B2]:** **SRT parser validation (switchable, default on):** valid UTF-8, ≥1 cue, monotonically increasing timestamps, plausible cue duration (>0.1 s, <10 min — long music cues stay legal)
-
-**F-M14 [B2]:** **Sync plausibility (switchable, default on):** cue span vs. media runtime (+5 min tolerance; all cues concentrated in <10 % of runtime = reject)
-
-**F-M15 [B2]:** **Language verification (switchable in each direction, default on):** detected language of the content (script blocks for CJK/Cyrillic/etc., Latin via stopwords) vs. stream tag; mismatch → skip; undetectable content passes (fail-open)
-
-**F-M142:** **A pair already uploaded in this run is recorded as rejected, never as uploaded.** A stream whose (media content hash, language, hearing-impaired) pair is already up is skipped, and its position is recorded with the reason `duplicate-self-echo`. It is not marked `uploaded`, because that would claim a transfer that never happened. The hearing-impaired variant has its own key space, so a normal upload never blocks an SDH variant.
-
-**F-M17c [B2]:** **Own upload dedup:** (item, language) pair + content hash in persistent state — never upload an already-uploaded or in-session-processed content hash twice. Depends on the canonical SRT form (F-M185): the hash is only stable across extraction runs when the payload is normalized first.
-
-**F-M17x [B2]:** **Remote duplicate learning:** when SubDL rejects an upload with "Duplicate upload: identical file already published", the normalized content hash is stored as `duplicate-remote`. Future runs skip that content before any API call.
-
-**F-M74:** **An `und` stream is resolved by detection before upload. Switchable, default on.** With the switch on, the detected language replaces the tag and the stream uploads normally; a detection that fails skips the stream. With the switch off, every `und` stream is removed from the upload set and logged. Detection needs text to work on, so a stream below the 2 KB floor (F-M16) is skipped as too little text.
-
-### 8.3 Quality Gates — Download
-
-The download chain runs against each candidate in score order, before the file is saved. F-M15 and F-M16 are the two gates both directions share.
-
-**F-M44 [D]:** **Release match:** candidate release name scored against the local filename: release-group match > token overlap > download-count tie-breaker. Weights configurable (expert mode).
-
-**F-M43 [D]:** **Runtime/FPS match with tolerance:**
-**Stage 1 — pre-download (FPS):** SubDL provides `framerate`/`fps` per candidate. If set: difference > ±1 % vs. item FPS → candidate rejected. Missing → criterion skipped, no hard fail.
-**Stage 2 — post-download (structure + runtime):** corruption check on the downloaded bytes (cue timings present, monotonically increasing, plausible durations), then runtime check of SRT cue span vs. item the runtime, default tolerance ±600 s. Outside → discard. Missing runtime metadata → criterion deactivated.
-
-**F-M45 [D]:** **IMDB/TMDB match** (default on, switchable off): candidates matched against item IDs. Default is a hard criterion (no ID → no download); switchable off for title-based fallback.
-
-**F-M50 [D]:** **Download budget per (item, language):** max N candidate downloads before the language counts as "not available" (default 3, 0 = unlimited).
-
-**The same language verification runs here verbatim** (F-M15), on the downloaded bytes, with its own per-direction switch.
-
-**F-M46 [D]:** **Overall selection:** exactly one best candidate per (item, language) by combined score from F-M43–F-M45. No candidate passing → the language counts as "not available".
+**F-M60:** **File-missing retries before permanent skip:** persistent counter per item (shared by both pipelines). Each failed file-existence check bumps it, success resets it. An extraction failure does not bump it. At the configurable threshold (default 3, 0 = never) the item is skipped as "file-missing (retries exhausted)".
 
 ## 9. SubDL/TMDb API, IDs and Credentials
 
-**F-M11 [B1]:** Upload queue with retry: failed uploads (HTTP 5xx/timeout) retried with exponential backoff, max N attempts, then status "failed" + dashboard display
+**F-M11 [B1]:** Upload queue with retry: a failed item is retried across runs up to the configured maximum, without backoff; at the limit it is purged. Timeouts are retried in-transport three times with a doubling 1 s backoff.
 
 **F-M12 [B1]:** Configurable account (SubDL user/pass) in plugin config, password never in plaintext in logs
 
@@ -490,7 +493,7 @@ The give-up line names the server as not answering in time, never as a caller ca
 
 **F-M26a:** **Which pause applies where (single source of truth).** the bare-call pause — bare API calls, deterministic. the transfer pause — real transfers, ±30 %.
 
-**F-M27 [B2]:** **Auto-backoff:** on HTTP 429/rate-limit or 5xx the request is retried up to 3 attempts with exponential backoff (2 s, then 4 s; the server's retry hint wins when sent, minimum 5 s). On exhaustion the request fails cleanly and the run-level reaction matrix (F-M54) applies.
+**F-M27 [B2]:** **Auto-backoff:** on HTTP 429/rate-limit or 5xx a file transfer is retried up to 3 attempts with exponential backoff (2 s, then 4 s). The server's retry hint with a 5 s floor applies on the login and transient paths. On exhaustion the request fails cleanly and the run-level reaction matrix (F-M54) applies.
 
 **F-M28 [B1]:** **IMDB ID mandatory — correct per media type.** For series strictly the series IMDB (tvshow, not episode) plus season and episode; for movies the movie IMDB. Resolution order: (1) Jellyfin metadata as-is; (2) TMDB id → IMDB via the TMDB REST API (key required, F-M203); (3) TMDB title search; (4) skip "no-imdb". Episode IMDB is never used. The 15-min metadata wait was removed (F-M100).
 
@@ -544,7 +547,7 @@ Status: a missing key reports **red**; the settings page refuses to save it and 
 
 ## 10. Scheduler, Quota and Timing
 
-**F-M20 [B1]:** Configurable rate limit: uploads/hour (**default 400**) or a minimum pause between API calls (the configured minimum pause, 0.1–10 s, default 0.5 s, GUI-capped at 0.1–5 s; the smaller of the two wins). the rate limiter clamps the rate to **1–2000**; the run watchdog clamps its grace calculation to **1–500**. The default of 400 sits inside both.
+**F-M20 [B1]:** Configurable rate limit: uploads/hour (**default 400**) or a minimum pause between API calls (0.1–10 s, default 0.5 s, GUI-capped at 0.1–5 s). A configured pause replaces the rate-derived pause; the two are not compared. the rate limiter clamps the rate to **1–2000**; the run watchdog clamps its grace calculation to **1–500**. The default of 400 sits inside both.
 
 **F-M272:** **The page has THREE refresh cadences, and none of them is "10 s for everything".**
 
@@ -590,7 +593,7 @@ The "derive from the hourly cap" sentinel `-1` must **survive** clamping; only a
 
 **F-M182:** **Jittered recovery fire after the daily limit:** when a pipeline stops on the daily quota, the direction is re-fired once after the server-reported reset plus a random 30–300 minutes. The offset is diced freshly per fire (cryptographic RNG) and rolled independently per direction, so the retry does not land on the 00:00 UTC reset moment every API consumer hits. The jitter applies to the **quota-anchor path only**; fires carrying their own offset (run-lock retry, hourly-cap roll-over) keep their exact time. Log lines name the reset anchor, the resulting fire time in the local zone, and the jitter window applied.
 
-**F-M116:** **Recovery fires persisted:** the next scheduled download/upload fire times are persisted to disk and restored on restart, so missed windows are eventually caught.
+**F-M116:** **Scheduler state persisted:** the next scheduled download/upload fire times, the anchor markers, the catch-up flag and the lock-busy deferrals are persisted and restored on restart.
 
 **F-M248:** **The scheduler's whole due-state is persisted, and a missed anchor slot is caught up instead of waiting for the next window.**
 
@@ -606,7 +609,7 @@ The marker counts the CLAIM, not the outcome: a run that fails after being queue
 
 ## 11. Content Registry and Identity
 
-**F-M17z [B2]:** **Upload dedup respects the stored outcome:** any recorded outcome — uploaded, or rejected with any reason — counts as "known". With the four-state model of section 15 this is simply "a row exists", and a new rejection reason never needs a new state name.
+**F-M17z [B2]:** **Upload dedup respects the stored outcome:** a stored verdict — uploaded, or rejected with any reason — counts as "known"; an observation row does not.
 
 **F-M243 [D]:** **The HI variant counts as present whether it is a file or an embedded track.** Both evidence sources answer the same question, and Jellyfin's own the hearing-impaired flag decides a stream — read through ONE detector (the hearing-impaired predicate) used by uploader and downloader alike.
 
@@ -624,9 +627,9 @@ The marker list gains `cc`: closed captions serve the same audience as SDH and c
 
 **F-M256 [D]:** **A registry lookup takes the media PATH and resolves the hash itself.** the hearing-impaired reader receives the media file path, resolves the media hash internally (the media-hash lookup), then reads the embedded and sidecar rows; no caller passes a hash for this question.
 
-The resolution lives inside the method, once. This is a signature change, not a caller-side fix: a rule that depends on every caller choosing the right one of two indistinguishable strings has already been broken — the same defect class as the two name parsers (F-M251) and the three HI readers (F-M254).
+The resolution lives inside the method, once.
 
-**The negative control is the test.** Assert the hearing-impaired reader finds a stored HI row AND that the same call with the HASH finds nothing; assert the pipeline consequence (with the path only `DE` is missing, with the hash `EN` and `DE` are). A positive-only test passes on the broken build, which is how this shipped — the earlier suite had asserted the broken behaviour as its expected value.
+**Test: T73.** The reader finds a stored HI row for a media path and finds nothing for the same call with the hash.
 
 **F-M257 [D]:** **The embedded area is written by whoever reads the streams, not only by the uploader.**
 
@@ -644,11 +647,9 @@ A hearing-impaired track DOES count: SDH is the same dialogue with annotations. 
 
 The upload side follows the same rule: a forced track is removed from the upload set, read through ONE predicate the forced predicate used by the pipeline's collector AND the seeder's the upload-todo check prefilter — otherwise the prefilter keeps queueing items whose every track the run then discards.
 
-**F-M240 [B1]:** **The hearing-impaired switch is answered against the disk, not against the mark.** The download mark is keyed by language, so a file that already carries its subtitles is "complete" the moment the switch is turned on — and the HI variant is never fetched. While the switch is on, a target language whose `<base>.<lang>.sdh.srt` is absent counts as stale, which invalidates the mark and lets the same run deliver the variant.
+**F-M240 [B1]:** **The hearing-impaired variant is answered from the stored rows, not from the download mark.** While the switch is on, a target language with no stored hearing-impaired row counts as stale and invalidates the mark, so the same run delivers the variant.
 
-A language already settled-as-unavailable (QA-exhausted) does not count as stale, so an item with no HI release on SubDL is not reworked forever.
-
-Disk evidence and not a stored flag, because it is self-correcting: deleting the `.sdh.srt` makes the item due again, and turning the switch off needs no bookkeeping.
+A language already settled-as-unavailable (QA-exhausted) does not count as stale.
 
 **F-M193a:** **No construct the database cannot translate may cross into a query.** A string-comparison overload, a helper-method call or any predicate without a database expression must be applied **outside** the query lambda: keep the indexed equality inside and move the rest to LINQ-to-objects afterwards.
 
@@ -658,11 +659,11 @@ Disk evidence and not a stored flag, because it is self-correcting: deleting the
  // right
  Find(x => x.ItemId == itemId).Where(x => string.Equals(x.Language, language, StringComparison.OrdinalIgnoreCase))
  ```
-**F-M194b:** every area is keyed by a **computed business key stored in the record's own `_id`**, never by a database-assigned auto id. This is the structural correction of **F-M194**: with an auto id an upsert of a "new" row can never find the row it means to update, and the write silently inserts instead — so one logical fact came to exist many times over. With a computed key the failure is impossible by construction. **Test: T16.**
+**F-M194b:** every content area is keyed by a **computed business key stored in the record's own `_id`**, never by a database-assigned auto id. The counters area and the pipeline-run area use a database-assigned id and are addressed by a separate key field. **Test: T16.**
 
 **F-M185:** **Canonical SRT form — one normalization for hash AND payload.** Every extracted or loose SRT is normalized once on arrival, before any QA gate, hashing or upload: strip a leading UTF-8 BOM, CRLF → LF, lone CR → LF, trim trailing whitespace. The same string feeds both the hash function and the upload body, so hash input and uploaded bytes are identical by construction. The normalization is **idempotent** and runs at extraction, at loose-file read, and again in the upload path (reachable via the retry path).
 
-**F-M39 [B2]:** **No double work across directions:** every subtitle the system uploads or downloads is registered under its normalized content hash, so a subtitle that already arrived from either direction is neither fetched nor sent again. The two directions answer it at different points: the **upload** side asks the content-known check on the candidate itself, right before sending. The **download** side does not ask it during the fetch — the seeder asks it before the item enters the queue and keeps a file out whose sidecar content is already known. The download still records the hash it saved, which is what keeps the seeder's answer correct.
+**F-M39 [B2]:** **No double work across directions:** every subtitle the system uploads or downloads is registered under its normalized content hash, so a subtitle that already arrived from either direction is neither fetched nor sent again. The two directions answer it at different points: the **upload** side asks the content-known check on the candidate itself, right before sending. The **download** side does not ask it during the fetch of a regular candidate — the seeder asks it before the item enters the queue and keeps a file out whose sidecar content is already known. The hearing-impaired variant does ask it during the fetch. The download records the hash it saved.
 
 ## 12. Library Scope and Skip Filters
 
@@ -688,7 +689,7 @@ Changing the card text requires a **DLL rebuild and a Jellyfin restart**; the st
 
 **F-M211:** **The shared database context is created under a lock.** Concurrent first access by two jobs firing in the same tick must yield exactly one context; two contexts over the same data file race the object mapper and one task is lost.
 
-**F-M177:** **Conditional follow-up reseed:** after the first seed/download/upload round of a cycle, a follow-up reseed runs exactly once — and only if new library arrivals were collected while a seed, download or upload was already running. Gated by the follow-up setting and the follow-up setting; if both are off no reseed runs, otherwise the forced scan seeds the pending arrivals and, if it adds new work, download runs before upload.
+**F-M177:** **Conditional follow-up reseed:** after the first seed/download/upload round of a cycle, a follow-up reseed runs exactly once — and only if new library arrivals were collected while a seed, download or upload was already running. Gated by the pending arrivals; the follow-up settings decide which directions take part, and with both off no reseed runs. Otherwise the forced scan seeds the pending arrivals and, if it adds new work, download runs before upload.
 
 **F-M192 [B1]:** **The partial reset scopes (`scope=upload`, `scope=download`) must WRITE BACK the rows they mutate.** Clearing a file-complete marker mutates the entities returned by a full read, so the persist step must receive **those same objects** — passing a second, freshly re-read list makes both scopes silent no-ops that answer `200 {ok:true}` while the database is untouched. Collect the touched entities and call the write-back. The scope logs the number of cleared markers so a no-op is visible instead of looking like success. **The `all` scope was never affected** — it deletes the whole file, which is why a full reset appeared to work while the partial scopes did not.
 
@@ -738,7 +739,7 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M229:** **Links in the settings page use the same accent blue as the rest of the page.** Jellyfin's stylesheet ships only `a{color:inherit}`, so the links in the field descriptions fell back to the browser default `#0000EE`. Rule: `#SubdlSyncConfigPage a { color: #00a4dc; }` — exactly one blue, no separate hover shade. Scope: link colour only; the destructive red and the status colours are untouched. **Test: T44.**
 
-**F-M228:** **The settings page marks required fields in the accent colour, without stray spacing.** Red on this page means destructive or failed, so a red the required marker made a mandatory field look like a fault; the marker uses the accent blue `#00a4dc`. Green was rejected — it is the page's "healthy" status colour. The inline variant's `margin-left: 4px` rendered `( Required)` and is removed. Scope: the four markers and their two CSS rules. **Test: T43.**
+**F-M228:** **The settings page marks required fields in the accent colour `#00a4dc`, without extra spacing.** Red is reserved for destructive and failed states, so a red marker made a mandatory field look like a fault. The inline variant carries no margin of its own. Scope: the four markers and their two style rules. **Test: T43.**
 
 **F-M224:** **The plugin's own log mode is the only authority — and every plugin line is written at a level Jellyfin always passes.** Jellyfin's Serilog pipeline filters a record before the sink writes it, so a plugin line at `Debug` never appears while the server runs at the normal level; the documented workaround was to raise Jellyfin's own `logging.json`, because Jellyfin exposes no API to change its log level. The plugin therefore writes **everything at the normal level** and gates the detail itself in the log helper (the per-item level, the trace level → Verbose+; the detail level → Debug+); `Normal` stays lifecycle/summary only and warnings/errors are never gated. No plugin line may be written at Trace, which ranks below Information and reaches no log at any setting. No server-side setup remains, so the GUI note under the log-verbosity field is gone. **Test: T39.**
 
@@ -806,7 +807,7 @@ There is deliberately **no "settled"/"done" state.** The previous model kept a s
 
 **The checks are structural, not wording-dependent:** a comment rewrite must not be able to raise a false failure.
 
-**F-M23 [B2]:** Status view: two cumulative counters on the config page — subtitles uploaded and downloaded since the last reset. The line reads "N subtitles uploaded, M subtitles downloaded since <date> (last timer reset)". "Reset statistics" zeroes both and moves the date. Both are incremented at the end of every run from that run's summary, including runs cancelled from outside: the pipelines return their partial summary, so work that reached SubDL counts.
+**F-M23 [B2]:** Status view: two cumulative counters on the config page — subtitles uploaded and downloaded since the last reset. The line reads "N subtitles uploaded, M subtitles downloaded since the last reset"; the date stands on its own line below it. "Reset statistics" zeroes both and moves the date. Both are incremented at the end of every run from that run's summary, including runs cancelled from outside: the pipelines return their partial summary, so work that reached SubDL counts.
 
 **F-M209:** **A run's in-run watchdog is torn down on EVERY exit path.** 
 
@@ -834,15 +835,23 @@ Verbose: per-file up-/downloads, SKIP reasons, dry-run lines, search results, QA
 
 Debug: every SubDL API round-trip (search, download, upload, login), api_key always redacted; TMDB round-trips too.
 
-**F-M24d [B1]:** **High-level log concept for Normal mode:** one summary line per run/direction with counters; one aggregate line per skip-reason class; lifecycle events and warnings/errors once per event.
+**F-M24d [B1]:** **High-level log concept for Normal mode:** one summary line per run/direction with counters; one aggregate line covering the skip reasons of a download run; lifecycle events and warnings/errors once per event. The upload run writes no skip aggregate.
 
-**F-M152:** Log-noise reduction (see F-M24a)
+**F-M152:** **The 429 reaction is decided by the server's rate headers and a live counter read, never by the status code alone.** Every response is parsed for the API's rate headers; the values are the daily limit, the remaining count and the exact server reset.
+
+The counter is read from the account endpoint after a 429 and only then, so a run that never hits a limit makes no extra call.
+
+A 429 carrying a reset header is the account's daily limit: the run stops against the live counter unless continue-after-limit is on, and the next fire is anchored on the server reset plus the randomised 30–300 min offset (F-M182).
+
+A 429 naming a transient server state is retried in place (F-M58); a 429 carrying no rate header and no named state is treated as an edge case and anchored on the next midnight, not on the daily limit.
+
+The daily-limit decision and its anchor are one rule (F-M62, F-M238).
 
 **F-M255 [D]:** **No candidate and no stream is discarded without a line naming it and the reason.**
 
 Every exit inside the candidate walk that does not end in a save, and every per-stream exit of the upload collector, writes one line at Verbose (`[SubDL-D] … reject …` / `[SubDL-V] …`) carrying the release or file, the language, and the measured reason. The gates are named individually: download failure (no bytes, too few bytes, with the byte count), language detection, structure (monotonic flag, cue span), cue count, runtime, content-already-known, keep-best stop (with the number of untried lower-ranked candidates), the QA memory filter (with the ids it removed), and the empty HI pool (with its size).
 
-The reason carries the measured value, not a verdict: `structure: monotonic=False min=… max=…` and `only N bytes` are diagnosable; "rejected" is not.
+The reason carries the measured value, not a verdict (monotonic flag, cue span, byte count). The three regular download QA gates currently name the gate without the measured value.
 
 The level is Verbose, not Normal: these lines are per candidate and per stream. The exits that already carried a counter but no line gained the line; the counters keep their meaning.
 
@@ -860,7 +869,9 @@ Reporting the task's own "ok" is wrong twice over: it claims success when the wa
 
 **F-M268:** **One colour rule for every worker: green = the work ran and ended without an exception, yellow = the work did not happen but nothing is broken, red = something is broken, grey = deliberately not run.**
 
-`ok` → green; `deferred` and `cancelled` → yellow (quota, run-lock deferral, user stop); `failed` → red (exception, failed cycle, unreachable core); `skipped` and `never` → grey (disabled, never run, or a scan that found nothing to do).
+The palette: the page accent is `#00a4dc`. `run` → accent; `ok` → `#107c10`; `failed` → `#a4262c`; `cancelled` and `deferred` → `#ffc107` (quota, run-lock deferral, user stop); `skipped` and `never` → `#767676`; a dry-run note → `#9a9a9a`.
+
+The accent is also the link colour (F-M229) and the required-field colour (F-M228). Red is reserved for destructive and failed states. The quota bar uses the same palette for fill, warning (`#ffc107`) and danger (`#a4262c`).
 
 **F-M193 [B1]:** **`/user/mySubtitles` is NOT paginated — the counters must count DISTINCT upload ids.** The endpoint ignores `page`, `per_page`, `offset`, `limit` and `start`: every value returns the byte-identical complete list. the subtitle listing must therefore deduplicate by the upload id and break on the first page that adds no new id, while rows with `UploadId <= 0` are kept unconditionally so a parser regression cannot silently drop data. the subtitle count counts distinct ids and additionally reports a distinct-id count and the pagination note; the status line must not claim "in N pages".
 
