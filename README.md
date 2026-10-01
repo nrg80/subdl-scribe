@@ -86,8 +86,8 @@ Open **Dashboard → Plugins → SubDL Scribe**:
 
 ## Branch workflow
 
-- **`develop`** — the only active branch. Every fix, feature and release lands here.
-- **`main`** — reserved for a stable line, and **created only on explicit instruction**. Commits do not go to `main` on their own initiative; the repository currently has no `main` branch at all.
+- **`develop`** — the active branch. Every fix, feature and release lands here.
+- **`main`** — a reference line, created on explicit instruction. It sits on the commit of the last released version and is **not advanced automatically**: nothing in the release path pushes to it, so it moves only when someone moves it deliberately. `develop` stays the branch the catalog is served from.
 
 ### For maintainers
 

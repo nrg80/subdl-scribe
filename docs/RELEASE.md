@@ -77,9 +77,10 @@ release notes.
 ## Versions
 
 Both Jellyfin instances are configured with the `develop` manifest URL, so a
-release is installable as soon as it is published. `main` is not used: the
-repository ships prereleases (`-dev`) only, and per the maintainer's policy no
-commit goes to `main` without an explicit release instruction.
+release is installable as soon as it is published. The catalog is served from
+`develop` and not from `main`: the repository ships prereleases (`-dev`) only.
+`main` exists as a reference line pinned to the last released version, and the
+release path never pushes to it — it moves only on an explicit instruction.
 
 Install on an instance:
 
