@@ -117,6 +117,8 @@ Content is the key, not the path, and the hash is the uploader's own function. T
 
 **F-M22 [B1]:** **Dry-run switch, one per direction (both default off): search runs, no transfer.** The pipeline walks its full decision path — search, threshold, ranking — and reports what it WOULD do (chosen candidate per language, the numbered slots of F-M242, the hearing-impaired pick of F-M241), but fetches no file and writes nothing.
 
+**No stored verdict is written or cleared by a dry run.** A completion mark (F-M88c) says a file is settled; a dry run that sets one takes the work away instead of describing it, because the next real run reads the mark and skips the file. The same applies in the other direction: what a dry run leaves behind must not change what a later run finds.
+
 **It stops before the download call,** so no file is transferred — but searches DO cost API quota, one per language set (two while the HI switch is on, F-M241). The GUI text must name both: "without saving files" and "without API calls" are not the same claim.
 
 **F-M26b [D]:** **Hourly-cap roll-over fire is offset by the job spacing.** When the shared hourly bucket is exhausted mid-run, the run stops and a one-shot recovery fire is scheduled at the bucket roll-over **+ the job spacing** (both directions, the roll-over fire), clamped 5–120. Default 15.
