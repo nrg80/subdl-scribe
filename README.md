@@ -8,7 +8,7 @@ Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 
 - Jellyfin **12.1.x** (targetAbi `12.1.0.0`)
 - A [SubDL](https://subdl.com) account with its **API key**
-- A **TMDb API key** — without it series cannot be resolved
+- A **TMDb API key**
 
 ## Installation
 
