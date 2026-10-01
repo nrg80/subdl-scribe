@@ -1,28 +1,23 @@
-# Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
-**Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.61
-**Status:** Implementation — v12.1.12.158.
-
 ## Contents
 
-- [1. Objective and Scope](#1-objective-and-scope)
+- [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 11 requirements
 - [3. Upload Pipeline](#3-upload-pipeline) — 31 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 19 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 20 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 5 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 11 requirements
-- [6. Database Refresh](#6-database-refresh) — 13 requirements
-- [7. OSHash Refresh](#7-oshash-refresh) — 5 requirements
+- [6. Database Refresh](#6-database-refresh) — 7 requirements
+- [7. OSHash Refresh](#7-oshash-refresh) — 2 requirements
 - [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 4 requirements
 
 - [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 25 requirements
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 12 requirements
-- [11. Content Registry and Identity](#11-content-registry-and-identity) — 11 requirements
+- [11. Content Registry and Identity](#11-content-registry-and-identity) — 13 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
-- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 11 requirements
-- [14. Data Model and Persistence](#14-data-model-and-persistence) — 6 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 15 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 13 requirements
+- [14. Data Model and Persistence](#14-data-model-and-persistence) — 8 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 19 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -261,6 +256,8 @@ A pack with no entry for this episode is **skipped**, not saved wrong. Non-pack 
 
 **F-M64:** **Target-language change needs no reset pass:** each file stores the language list it was last searched under plus the timestamp (the stored language list). the due check compares that stored list against the current configuration, so a changed list simply makes affected files due again — no global reset run and no second bookkeeping row. Items already holding all new languages still skip without API calls.
 
+**F-M183:** **Legible download run reporting:** the download run counts **queued** items as the denominator of its abort line; the progress counter runs over every item of the selected libraries. At run end one compact aggregate line (saved, no candidates, language not available, skipped with reasons, failed, processed/queued), so a run that searched and saved nothing is distinguishable from a run that did nothing without raising the log mode.
+
 ### 4.1 Quality Gates — Download
 
 The download chain runs against each candidate in score order, before the file is saved. F-M15 and F-M16 are the two gates both directions share.
@@ -313,13 +310,59 @@ The counter is cleared by the reschedule reset on a real fire and by the per-day
 
 ## 6. Database Refresh
 
-**F-M207:** **The cumulative counters live in the database; a database reset resets them with it.** Stored as one single row in the database, with 64-bit counters.
+**F-M94:** **Database refresh as scheduler task:** a dedicated task reconciles the stored state with reality — it removes tracker state for Jellyfin items that are gone and verifies the file side of stored verdicts (F-M234). The task, its dashboard name and its log prefix read "database refresh" (`[SubDL-Refresh]`). It uses the global run lock and operates on the shared database.
 
-`scope=all` calls the reset in the same operation, so display and data cannot disagree.
+**F-M274:** **The refresh runs its steps in one fixed order, in a single run, under the global run lock, and reports what it changed.**
 
-The pre-migration XML totals are adopted once, guarded by the one-time adoption flag. Without the flag a restart after a database reset would re-import them. It is listed in the plugin-owned field list so an automatic save cannot drop it.
+**Step 0 — library probe:** the full item id set is resolved (movies, series, episodes). A library that is not queryable, or that answers with zero items, skips the whole run; nothing is judged.
 
-The pre-migration XML totals stay in place, unread, so a downgrade finds them. **Test: T26.**
+**Step 1 — dead rows:** media and subtitle rows whose Jellyfin item is gone are removed, and the count is reported.
+
+**Step 2 — guid-keyed trackers:** the search tracker, the file-retry tracker, the id-not-found tracker and the QA-fail tracker are pruned of rows whose item is gone.
+
+**Step 3 — OSHash cache paths:** cached paths whose root is no longer listable are dropped.
+
+**Step 4 — vanished subtitle files:** the sidecar verdicts and the stale download marks of F-M234 and F-M240.
+
+**Step 4b — embedded rows:** the check of F-M258.
+
+**Step 5 — compaction:** the fold and the rebuild of F-M214.
+
+A step that cannot read its evidence is skipped, never judged ("unknown ≠ deleted").
+
+**The run's own line** reports the removed rows per area, the forgotten subtitle verdicts, the dropped download marks and the forgotten embedded rows; a run that changed nothing reports that the database matches reality. A run that cannot take the global run lock is recorded as `deferred` and re-fires later, never as failed.
+
+**F-M234:** **The state prune is a database refresh: it verifies the FILE side of a stored verdict, not only whether the item still exists.**
+
+A removed item is only the crudest case. A subtitle file deleted while its item stays keeps a verdict saying "uploaded"/"rejected"/"downloaded" and a download mark saying the language is settled — both permanently wrong, and the item is reported complete forever while the seeder keeps queueing it.
+
+Fail-safe, same two-tier rule as the oshash cache: every root the stored paths live under must exist and list cleanly, else the file side is skipped entirely. Rows without a stored path are never judged. "Unknown ≠ deleted" — a missed refresh costs nothing, a false one destroys valid verdicts.
+
+Subset rule: a stored language set that COVERS the configured one counts as complete, so removing a language does not invalidate every mark; adding one still does.
+
+**What "the file side" is.** A mark is only stale when the language has lost its evidence EVERYWHERE the configuration counts it: no sidecar file AND no embedded track, or a track settled as unavailable. The refresh asks the same question the download pipeline asks, through the same reader.
+
+**"Settled as unavailable" is read from the whole stored set**, not from the languages that failed the disk test. A language SubDL does not have has neither a file nor a track, so deriving the settled set from the missing list left it empty in exactly the case it exists for.
+
+**A missing probe is not a deletion.** When the embedded half cannot be read (item unresolvable, unreadable stream list), the check falls back to the files alone rather than judging.
+
+**F-M258 [D]:** **The database refresh checks the embedded side too, not only the sidecar side.**
+
+For every media row whose Jellyfin item still exists and which has stored embedded rows, the refresh reads the item's current streams and forgets every stored row that disagrees — on the key (position) and on the recorded facts (language, hearing-impaired). A row whose position is gone, or whose language/HI no longer matches the stream at that position, is dropped.
+
+The check is structural for observations only. A row carrying a verdict (`uploaded`/`rejected`) or a detection attempt is kept unconditionally; only a plain observation is dropped when position, language or HI disagree.
+
+**The comparison is made against positions, not against the tracks whose language resolved.** A row is dropped when its POSITION no longer exists among the item's non-external subtitle streams; a position that exists but answered nothing keeps its row, and only a position that exists and answers differently is a disagreement.
+
+Fail-safe, as the rest of the refresh ("unknown ≠ deleted"). An item Jellyfin no longer resolves, an unreadable stream list, and an EMPTY stream list are all skipped rather than judged. Only a NON-empty list that disagrees with a stored row is evidence.
+
+The check runs only for files that HAVE stored rows, so it costs one stream lookup per file with state.
+
+**F-M214:** **A database refresh compacts the database in the same run.** The prune is followed, in the same run and while it holds the global run lock, by the compaction: fold the journal in (the journal fold), then rebuild the file (the rebuild) to release the free pages.
+
+**Compaction is measured as the whole footprint** — data file plus journal, before and after.
+
+**It must never fail the task:** an exception is logged as a warning and swallowed. It is housekeeping, and the refresh's own work has already succeeded.
 
 **F-M237:** **A the rebuild that cannot release the pages is replaced by a rebuild from the file's own rows.**
 
@@ -337,79 +380,19 @@ The compaction is verified, not trusted: after a failed rebuild the database is 
 
 The repair preserves the data: the failed swap leaves the original file on disk, so rows survive. **See T51.**
 
-**F-M234:** **The state prune is a database refresh: it verifies the FILE side of a stored verdict, not only whether the item still exists.**
-
-A removed item is only the crudest case. A subtitle file deleted while its item stays keeps a verdict saying "uploaded"/"rejected"/"downloaded" and a download mark saying the language is settled — both permanently wrong, and the item is reported complete forever while the seeder keeps queueing it.
-
-Fail-safe, same two-tier rule as the oshash cache: every root the stored paths live under must exist and list cleanly, else the file side is skipped entirely. Rows without a stored path are never judged. "Unknown ≠ deleted" — a missed refresh costs nothing, a false one destroys valid verdicts.
-
-Subset rule: a stored language set that COVERS the configured one counts as complete, so removing a language does not invalidate every mark; adding one still does.
-
-**What "the file side" is.** A mark is only stale when the language has lost its evidence EVERYWHERE the configuration counts it: no sidecar file AND no embedded track, or a track settled as unavailable. The refresh asks the same question the download pipeline asks, through the same reader.
-
-**"Settled as unavailable" is read from the whole stored set**, not from the languages that failed the disk test. A language SubDL does not have has neither a file nor a track, so deriving the settled set from the missing list left it empty in exactly the case it exists for.
-
-**A missing probe is not a deletion.** When the embedded half cannot be read (item unresolvable, unreadable stream list), the check falls back to the files alone rather than judging.
-
-**F-M225:** **Every plugin line belongs to exactly one level — and the statistics never depend on logging.** Ungated normal-level calls must not make `Normal` show diagnostics (resolved ffmpeg path, reschedule budget, seed pre-check timestamps). Assignment: internals and diagnostics → the detail level; per-item work → the per-item level; run lifecycle, abort reasons and task summaries stay at Normal. The counters are written in the single statistics writer from the run summaries, unguarded in the run path, and no log call carries a side effect in its arguments, so a `Normal` run counts exactly like a `Debug` run. **Test: T40.**
-
-**F-M183:** **Legible download run reporting:** the download run counts **queued** items as the denominator of its abort line; the progress counter runs over every item of the selected libraries. At run end one compact aggregate line (saved, no candidates, language not available, skipped with reasons, failed, processed/queued), so a run that searched and saved nothing is distinguishable from a run that did nothing without raising the log mode.
-
-**F-M258 [D]:** **The database refresh checks the embedded side too, not only the sidecar side.**
-
-For every media row whose Jellyfin item still exists and which has stored embedded rows, the refresh reads the item's current streams and forgets every stored row that disagrees — on the key (position) and on the recorded facts (language, hearing-impaired). A row whose position is gone, or whose language/HI no longer matches the stream at that position, is dropped.
-
-The check is structural for observations only. A row carrying a verdict (`uploaded`/`rejected`) or a detection attempt is kept unconditionally; only a plain observation is dropped when position, language or HI disagree.
-
-**The comparison is made against positions, not against the tracks whose language resolved.** A row is dropped when its POSITION no longer exists among the item's non-external subtitle streams; a position that exists but answered nothing keeps its row, and only a position that exists and answers differently is a disagreement.
-
-Fail-safe, as the rest of the refresh ("unknown ≠ deleted"). An item Jellyfin no longer resolves, an unreadable stream list, and an EMPTY stream list are all skipped rather than judged. Only a NON-empty list that disagrees with a stored row is evidence.
-
-The check runs only for files that HAVE stored rows, so it costs one stream lookup per file with state.
-
-**F-M265:** **The LAST run of each worker is stored in the database and shown in a "Workers" section on the General tab of the configuration page — one line per worker with the time of its last run and how it ended.** Only the last run is stored, not a history.
-
-**Six outcomes**, each mapped to a colour and a word in the GUI: `ok`, `failed`, `cancelled`, `skipped` (a scan that found nothing to do), `deferred` (nothing broken, the work was pushed forward: run lock busy, quota, user stop) and `never`, plus `running` while a cycle is still working at the wait cap. Colour rule: F-M268. A `skipped` run still writes its row — "the task was not allowed to run" is information, and without it a disabled direction looks identical to a broken one.
-
-**The dry-run note is CONDITIONAL**: a grey `dry run` note appears in the result cell only while the direction's dry-run flag is on. With the flag off the line stays clean.
-
-**F-M269:** **The database refresh's detail line names the compaction fallback.**
-
-**This is a NOTE, not a red light:** the outcome stays `ok`. **Test: T86.**
-
-**F-M94:** **Database refresh as scheduler task:** a dedicated task reconciles the stored state with reality — it removes tracker state for Jellyfin items that are gone and verifies the file side of stored verdicts (F-M234). The task, its dashboard name and its log prefix read "database refresh" (`[SubDL-Refresh]`). It uses the global run lock and operates on the shared database.
-
-**F-M214:** **A database refresh compacts the database in the same run.** The prune is followed, in the same run and while it holds the global run lock, by the compaction: fold the journal in (the journal fold), then rebuild the file (the rebuild) to release the free pages.
-
-**Compaction is measured as the whole footprint** — data file plus journal, before and after.
-
-**It must never fail the task:** an exception is logged as a warning and swallowed. It is housekeeping, and the refresh's own work has already succeeded.
-
-**F-M90:** **Database maintenance UI:** the config page exposes only **Reset** and **Restore** for `subdl-scribe.db`. **Reset** creates a timestamped backup, then removes the database so the plugin starts with a fresh registry. **Restore** restores the most recent backup after a single confirmation. No "Initialize database" control exists.
-
-**Initialisation, first start:** the shared context creates the plugin data directory, opens the data file, raises the collection indexes and checks the schema marker. A missing data file is created empty; an existing one is opened and kept.
-
-**Initialisation, every start:** the same sequence runs on each context creation, so a data file that lost its indexes or its schema marker is repaired to the current shape on open.
-
-**Schema mismatch:** a lower stored schema version logs a warning and raises the marker (F-M195b); a data file written by a newer build is opened read-only.
-
-**Reset is the only path to an empty registry.** Structural changes are never migrated; the stored state is reconstructible from the media files.
-
-**F-M181:** **Single backup retention:** after a database reset all older `subdl-scribe.db.bak-*` files are deleted; only the backup created by that reset remains.
-
 ## 7. OSHash Refresh
-
-**F-M186:** **The registry content hash uses SubDL's own function** — the hash function returns the MD5 of the canonical payload from F-M185, lowercase hex, 32 characters, equal to the `md5` SubDL stores in `raw_files[].md5` for our uploads. Changing the function invalidates the existing registry; the database reset (F-M90) is the intended path, no migration. The media hash (F-M61) is unaffected — it is the OpenSubtitles OSHash over size + first/last 64 KiB.
-
-**F-M61:** **Path-independent dedup key (OSHash):** upload dedup keyed on the media content hash, persisted across restarts, moves and renames.
 
 **F-M119:** **OSHash refresh as scheduler task:** a dedicated task recomputes expired or fingerprint-changed OSHash cache entries on **its own diced WEEKLY anchor** ("D HH:mm", drawn once at install and never re-rolled). It fires **every week**. It holds the global run lock while mutating the shared cache. The OSHash cadence bounds how long a cached fingerprint is trusted (`Never` = fingerprint mismatch only, zero media reads in the steady state), while the fire date comes from the anchor alone. Setting it to `Never` does **not** disable the job.
 
-**F-M61b:** keyed by **file path** → the hash, the size, the modification time, its stamp. A lookup validates size **and** mtime and treats a mismatch as a miss, so a replaced file is re-hashed automatically.
+**F-M275:** **The refresh works on a snapshot of the cache and decides per entry from the file's fingerprint.**
 
-**F-M196:** one record per **video file**, `_id` = the stable OSHash (16 hex characters, F-M61). Carries the path, the Jellyfin item id, the IMDb id, the TMDb id, the SubDL id, the series flag, the season, the episode, the last-seen stamp. For a series episode the ids are the **SHOW** ids, never episode or season ids (F-M191).
+For every entry the file is stat-ed for **size** and **modification time**. A file that is missing, or that cannot be stat-ed, leaves its entry untouched and is counted as **missing** — removing entries is the state prune's job (F-M94), not this task's.
 
-Derived, written automatically whenever an embedded track is stored so they cannot drift: the language aggregate (sorted, comma separated) and the hearing-impaired aggregate.
+A fingerprint mismatch (size or modification time differs) recomputes the media hash. An unchanged fingerprint recomputes only when the entry's trust window has expired; with the cadence set to `Never` the window never expires, so only a mismatch triggers a recomputation.
+
+A recomputed hash is stored together with size and modification time. A file that cannot be hashed keeps its old entry and is counted as **skipped**.
+
+The cache is flushed at the end of the run. The run's line reports the entry count and the changed, missing and skipped counts. The run ends `ok`, `cancelled` or `failed`; a failed run keeps the entries already flushed and leaves the remainder untouched. A run that cannot take the global run lock is recorded as `deferred` and re-fires after the job spacing (default 15 minutes, clamped to 5–120).
 
 ## 8. Rules Shared by Both Directions
 
@@ -671,6 +654,10 @@ A language already settled-as-unavailable (QA-exhausted) does not count as stale
 
 **F-M185:** **Canonical SRT form — one normalization for hash AND payload.** Every extracted or loose SRT is normalized once on arrival, before any QA gate, hashing or upload: strip a leading UTF-8 BOM, CRLF → LF, lone CR → LF, trim trailing whitespace. The same string feeds both the hash function and the upload body, so hash input and uploaded bytes are identical by construction. The normalization is **idempotent** and runs at extraction, at loose-file read, and again in the upload path (reachable via the retry path).
 
+**F-M186:** **The registry content hash uses SubDL's own function** — the hash function returns the MD5 of the canonical payload from F-M185, lowercase hex, 32 characters, equal to the `md5` SubDL stores in `raw_files[].md5` for our uploads. Changing the function invalidates the existing registry; the database reset (F-M90) is the intended path, no migration. The media hash (F-M61) is unaffected — it is the OpenSubtitles OSHash over size + first/last 64 KiB.
+
+**F-M61:** **Path-independent dedup key (OSHash):** upload dedup keyed on the media content hash, persisted across restarts, moves and renames.
+
 **F-M39 [B2]:** **No double work across directions:** every subtitle the system uploads or downloads is registered under its normalized content hash, so a subtitle that already arrived from either direction is neither fetched nor sent again. The two directions answer it at different points: the **upload** side asks the content-known check on the candidate itself, right before sending. The **download** side does not ask it during the fetch of a regular candidate — the seeder asks it before the item enters the queue and keeps a file out whose sidecar content is already known. The hearing-impaired variant does ask it during the fetch. The download records the hash it saved.
 
 ## 12. Library Scope and Skip Filters
@@ -753,6 +740,18 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M36 [B2]:** Both lists maintainable on the config page (one pattern per line, textarea), defaults pre-filled (`incomplete`, `sample`, `trailer`, `partial`, `downloading`).
 
+**F-M90:** **Database maintenance UI:** the config page exposes only **Reset** and **Restore** for `subdl-scribe.db`. **Reset** creates a timestamped backup, then removes the database so the plugin starts with a fresh registry. **Restore** restores the most recent backup after a single confirmation. No "Initialize database" control exists.
+
+**Initialisation, first start:** the shared context creates the plugin data directory, opens the data file, raises the collection indexes and checks the schema marker. A missing data file is created empty; an existing one is opened and kept.
+
+**Initialisation, every start:** the same sequence runs on each context creation, so a data file that lost its indexes or its schema marker is repaired to the current shape on open.
+
+**Schema mismatch:** a lower stored schema version logs a warning and raises the marker (F-M195b); a data file written by a newer build is opened read-only.
+
+**Reset is the only path to an empty registry.** Structural changes are never migrated; the stored state is reconstructible from the media files.
+
+**F-M181:** **Single backup retention:** after a database reset all older `subdl-scribe.db.bak-*` files are deleted; only the backup created by that reset remains.
+
 ## 14. Data Model and Persistence
 
 **F-M38 [B1]:** **Persistent state split by the kind of thing described** (section 14). Embedded tracks live under their video file, keyed by media hash + stream position; sidecars are keyed by normalized content hash; the file's own record carries path, IDs, season/episode and the derived language aggregates. Both pipelines read and write the same store.
@@ -767,6 +766,12 @@ The row is written **once per context creation**, never per run: an audit record
 
 #### 14.1 Area 1 — Media hash cache (`oshashes`)
 #### 14.2 Area 2 — Video files and their embedded tracks (`media`, `embeds`)
+**F-M61b:** keyed by **file path** → the hash, the size, the modification time, its stamp. A lookup validates size **and** mtime and treats a mismatch as a miss, so a replaced file is re-hashed automatically.
+
+**F-M196:** one record per **video file**, `_id` = the stable OSHash (16 hex characters, F-M61). Carries the path, the Jellyfin item id, the IMDb id, the TMDb id, the SubDL id, the series flag, the season, the episode, the last-seen stamp. For a series episode the ids are the **SHOW** ids, never episode or season ids (F-M191).
+
+Derived, written automatically whenever an embedded track is stored so they cannot drift: the language aggregate (sorted, comma separated) and the hearing-impaired aggregate.
+
 **F-M197:** one record per **embedded subtitle stream** in `embeds`, `_id` = `"<media hash>|<stream position>"`.
 
 The key is media hash **plus position**. Two streams of one file can share a language (a normal and an SDH variant), so the language alone never identifies the row.
@@ -817,9 +822,19 @@ There is **no "settled"/"done" state.** "Is this position finished?" is answered
 
 **F-M23 [B2]:** Status view: two cumulative counters on the config page — subtitles uploaded and downloaded since the last reset. The line reads "N subtitles uploaded, M subtitles downloaded since the last reset"; the date stands on its own line below it. "Reset statistics" zeroes both and moves the date. Both are incremented at the end of every run from that run's summary, including runs cancelled from outside.
 
+**F-M207:** **The cumulative counters live in the database; a database reset resets them with it.** Stored as one single row in the database, with 64-bit counters.
+
+`scope=all` calls the reset in the same operation, so display and data cannot disagree.
+
+The pre-migration XML totals are adopted once, guarded by the one-time adoption flag. Without the flag a restart after a database reset would re-import them. It is listed in the plugin-owned field list so an automatic save cannot drop it.
+
+The pre-migration XML totals stay in place, unread, so a downgrade finds them. **Test: T26.**
+
 **F-M209:** **A run's in-run watchdog is torn down on EVERY exit path.** 
 
 **F-M226:** **Every plugin line's level is visible — as a text marker, written at the normal level (F-M224).** The marker `[N]` (Normal), `[V]` (Verbose and up), `[D]` (Debug and up) sits in front of the message, written by the normal level/the per-item level/the detail level/the trace level. Warnings and errors carry no marker. **Test: T41.**
+
+**F-M225:** **Every plugin line belongs to exactly one level — and the statistics never depend on logging.** Ungated normal-level calls must not make `Normal` show diagnostics (resolved ffmpeg path, reschedule budget, seed pre-check timestamps). Assignment: internals and diagnostics → the detail level; per-item work → the per-item level; run lifecycle, abort reasons and task summaries stay at Normal. The counters are written in the single statistics writer from the run summaries, unguarded in the run path, and no log call carries a side effect in its arguments, so a `Normal` run counts exactly like a `Debug` run. **Test: T40.**
 
 **F-M247:** **A dry run contributes NOTHING to the statistics — all six counters, not only the volume ones.**
 
@@ -882,6 +897,16 @@ The palette: the page accent is `#00a4dc`. `run` → accent; `ok` → `#107c10`;
 The accent is also the link colour (F-M229) and the required-field colour (F-M228). Red is reserved for destructive and failed states. The quota bar uses the same palette for fill, warning (`#ffc107`) and danger (`#a4262c`).
 
 **F-M193 [B1]:** **`/user/mySubtitles` is NOT paginated — the counters must count DISTINCT upload ids.** The endpoint ignores `page`, `per_page`, `offset`, `limit` and `start`. The listing deduplicates by the upload id and breaks on the first page that adds no new id; rows with `UploadId <= 0` are kept unconditionally. The status line does not claim "in N pages".
+
+**F-M265:** **The LAST run of each worker is stored in the database and shown in a "Workers" section on the General tab of the configuration page — one line per worker with the time of its last run and how it ended.** Only the last run is stored, not a history.
+
+**Six outcomes**, each mapped to a colour and a word in the GUI: `ok`, `failed`, `cancelled`, `skipped` (a scan that found nothing to do), `deferred` (nothing broken, the work was pushed forward: run lock busy, quota, user stop) and `never`, plus `running` while a cycle is still working at the wait cap. Colour rule: F-M268. A `skipped` run still writes its row — "the task was not allowed to run" is information, and without it a disabled direction looks identical to a broken one.
+
+**The dry-run note is CONDITIONAL**: a grey `dry run` note appears in the result cell only while the direction's dry-run flag is on. With the flag off the line stays clean.
+
+**F-M269:** **The database refresh's detail line names the compaction fallback.**
+
+**This is a NOTE, not a red light:** the outcome stays `ok`. **Test: T86.**
 
 ## 16. Non-Goals
 
