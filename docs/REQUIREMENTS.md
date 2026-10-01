@@ -83,9 +83,23 @@ With a dry run (upload) OR a dry run (download) armed, the gate still resolves u
 
 **F-M259 [D]:** **Loose .srt files are observed by the seeder's scan.**
 
-The scan records every loose subtitle file beside the media whose NAME carries a language as an observation row, keyed by the normalized content hash (the sidecar's identity) with its language and HI flag. A sidecar whose name carries no language token is skipped here and gets no observation row. `Status = observed`, no verdict; an existing verdict is never overwritten.
+The scan records every loose subtitle file beside the media whose NAME carries a language as an observation row, keyed by the normalized content hash (the sidecar's identity) with its language and HI flag. A sidecar whose name carries no language token is resolved by detection and renamed first (F-M278); if its language cannot be established it gets no observation row. `Status = observed`, no verdict; an existing verdict is never overwritten.
 
 Content is the key, not the path, and the hash is the uploader's own function. Two sidecars with the same language but different text stay two rows.
+
+**F-M278 [D]:** **An unlabelled sidecar is detected and then RENAMED to the shape this plugin writes — `<container>.<lang>[.sdh].srt`. Only a file whose name carries no language token is touched.**
+
+The name is the only thing Jellyfin, MediaElch and every reader here can see. An unlabelled `<container>.srt` is read as "no language" (F-M239), so it proves no coverage, gets no observation row (F-M259) and the item is searched for a language its own disk already holds — the item never settles. Detecting the language and writing it into the name is what ends that.
+
+**The run order is detect, then rename, then record.** Detection reads the file's own text — an `.srt` is plain text, so no ffmpeg pass is involved. The three gates of F-M74 apply unchanged and in the same order: switch `UploadResolveUnd` off, text below the 2 KB floor (F-M16), or no language found all mean **the file is left exactly as it is** — no rename, no row. Only a detection that names a language renames.
+
+**A file that already carries a language token is never renamed.** Its name is already the shape this rule produces, and rewriting it would churn files that are correct.
+
+**A taken combination takes the next free slot, never an overwrite.** The target is slot 1 (`<container>.<lang>.srt`); where that name is already on disk the next slot is used (`<container>.<lang>.2.srt`, `.3.srt`, …), because two unlabelled files that both detect as the same language are two subtitles and tidying a name must not destroy one. The slot is per combination: a `DE` file present does not push an `EN` file to a slot.
+
+**A rename moves the stored row's location with it.** The content hash — the row key — does not change, so the row keeps its verdict and only its path and name are updated. Without that the refresh task would find a path that no longer exists and forget the row (F-M234) for a file that is right there under a new name.
+
+**A refused rename is not a failed observation.** If the target cannot be built, the directory cannot be listed or the filesystem rejects the move, the file stays where it is and is recorded under its current name. The rename is a tidying step, never a precondition for recording.
 
 **F-M55:** **Download-on-arrival as its own switch** + UI restructure: "Download subtitles on arrival" checkbox (Download tab), independent of the upload arrival setting. Both directions share the same diced anchors/jitter.
 
@@ -680,6 +694,7 @@ Recording both under the plain language is what let one file stand in for the ot
 With tokens the whole special case disappears: the mark is written only when every required token has evidence, and the generic subset rule (`CoversLanguages`) answers the rest. Turning the switch on adds the variant tokens, so an item that already has its subtitles becomes due; turning it off removes them, so nothing has to be cleaned up. **No expiry and no give-up:** a variant SubDL does not carry today is looked for again on the next refetch, and the run line counts the withheld marks (`complete marks withheld`) for information only.
 
 Both readers judge per token: the download pipeline against disk plus the stored HI verdict (F-M254), the database refresh against disk per token — a vanished `.sdh.srt` is an open token like any other, and the language-keyed HI special case that used to sit in the refresh is gone.
+
 **F-M193a:** **No construct the database cannot translate may cross into a query.** A string-comparison overload, a helper-method call or any predicate without a database expression must be applied **outside** the query lambda: keep the indexed equality inside and move the rest to LINQ-to-objects afterwards.
 
  ```
@@ -1105,6 +1120,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T85:** The waiting row reports the cycle's fate in the right colour (F-M267/F-M268)
 **T86:** The refresh detail line names a rebuild fallback without turning the light red (F-M269)
 **T87:** The configuration page's structure and wiring hold without a host (F-M270–F-M273)
+**T88:** An unlabelled sidecar is detected and renamed, and a taken combination takes the next slot (F-M278)
 
 ## 20. References
 

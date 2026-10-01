@@ -923,6 +923,16 @@ public sealed class ContentHashRegistry : IDisposable
             return false;
         }
 
+        // F-M278: a row must state a language — it is what the coverage check reads. An observation
+        // without one is not "no information", it is a claim of coverage that does not exist, and it
+        // is not even idempotent: LiteDB stores the null as an empty string, so the comparison below
+        // never matches it and every pass rewrites the row forever. A caller that cannot name the
+        // language must not call this; the absence of a row is what keeps the item searchable.
+        if (string.IsNullOrEmpty(language))
+        {
+            return false;
+        }
+
         _db.EnsureMedia(mediaHash);
         var existing = _db.Sidecars.FindById(contentHash);
 
@@ -961,6 +971,52 @@ public sealed class ContentHashRegistry : IDisposable
         _db.Sidecars.Upsert(row);
         LogUtil.Detail(_logger, "[SubDL-DB] sidecar {Hash} observed {Lang} (HI={Hi})",
             contentHash, language, hearingImpaired);
+        return true;
+    }
+
+    /// <summary>
+    /// Points an existing sidecar row at the file's new name after that file was renamed (F-M278).
+    /// <para>
+    /// A rename changes neither the content nor the verdict — the content hash is the row key and it
+    /// does not move — so this updates the two location fields ONLY and returns early for a row that
+    /// does not exist. It must never go through <see cref="ObserveSidecar"/> or the verdict writers:
+    /// those rewrite <c>Status</c>, and an <c>uploaded</c> row silently downgraded to
+    /// <c>observed</c> is the exact overwrite this class warns about.
+    /// </para>
+    /// <para>
+    /// It is not cosmetic. The refresh task forgets a sidecar row whose stored path no longer exists
+    /// (<see cref="GetSidecarsMissingFromDisk"/>), so a rename that left the old path behind would
+    /// hand the reconciliation pass a "vanished file" and destroy the row for a file that is very
+    /// much there — under a new name.
+    /// </para>
+    /// </summary>
+    /// <param name="contentHash">Content hash (the row key, unchanged by a rename).</param>
+    /// <param name="fileName">The new file name.</param>
+    /// <param name="path">The new full path.</param>
+    /// <returns>True when a row was moved.</returns>
+    public bool MoveSidecarLocation(string? contentHash, string fileName, string path)
+    {
+        if (string.IsNullOrEmpty(contentHash) || string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+
+        var row = _db.Sidecars.FindById(contentHash);
+        if (row == null)
+        {
+            return false;
+        }
+
+        if (string.Equals(row.Path, path, StringComparison.Ordinal)
+            && string.Equals(row.FileName, fileName, StringComparison.Ordinal))
+        {
+            return false; // already points there
+        }
+
+        row.FileName = fileName;
+        row.Path = path;
+        _db.Sidecars.Upsert(row);
+        LogUtil.Detail(_logger, "[SubDL-DB] sidecar {Hash} moved to {Name}", contentHash, fileName);
         return true;
     }
 

@@ -970,6 +970,77 @@ public sealed class SubdlSeeder
     }
 
     /// <summary>
+    /// Moves an unlabelled sidecar onto the name this plugin writes, once its language is known.
+    /// <para>
+    /// F-M278 (user decision 01.10.2026). Only ever called for a file whose name carried NO language
+    /// token — a file that already names its language is left alone, which is what the caller's
+    /// <c>wasUnlabeled</c> guard enforces.
+    /// </para>
+    /// <para>
+    /// The move is refused rather than forced when anything is not as expected: the target already
+    /// exists (another subtitle of that language is there — a rename must not destroy it), the target
+    /// name cannot be built, or the filesystem rejects the move. Every refusal leaves the file exactly
+    /// where it was and returns the original path, so the caller records the fact under a name that is
+    /// really on disk. A rename is a tidying step, never a precondition for recording.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaPath">Media file the sidecar belongs to.</param>
+    /// <param name="loosePath">Current path of the unlabelled sidecar.</param>
+    /// <param name="lang">The language resolved from the file's text.</param>
+    /// <returns>The path the file is at after this call — the new one, or the original on any refusal.</returns>
+    private string RenameSidecar(string mediaPath, string loosePath, string lang)
+    {
+        try
+        {
+            string? dir = System.IO.Path.GetDirectoryName(loosePath);
+            if (string.IsNullOrEmpty(dir))
+            {
+                return loosePath;
+            }
+
+            // The names already taken, so a second file of the same language takes the next slot
+            // instead of landing on the first. Read fresh: earlier renames in this same loop have
+            // already changed what is on disk.
+            var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (var existing in Directory.EnumerateFiles(dir, "*.srt"))
+                {
+                    taken.Add(System.IO.Path.GetFileName(existing));
+                }
+            }
+            catch
+            {
+                return loosePath; // cannot list the directory — do not guess at a free name
+            }
+
+            string target = Registry.SidecarNaming.PlanTarget(mediaPath, lang, hearingImpaired: false, taken);
+            string targetName = System.IO.Path.GetFileName(target);
+
+            if (System.IO.Path.GetFullPath(target).Equals(
+                    System.IO.Path.GetFullPath(loosePath), StringComparison.Ordinal))
+            {
+                return loosePath; // already carries the wanted name
+            }
+
+            File.Move(loosePath, target);
+
+            LogUtil.Normal(_logger,
+                "[SubDL-Seed] {Old} names no language — detected {Lang}, renamed to {New}",
+                System.IO.Path.GetFileName(loosePath), lang, targetName);
+            return target;
+        }
+        catch (Exception ex)
+        {
+            // A refused rename is not a failed observation: the file stays where it is and is
+            // recorded under its current name, which is true.
+            LogUtil.Detail(_logger, "[SubDL-Seed] {File} could not be renamed: {Msg}",
+                System.IO.Path.GetFileName(loosePath), ex.Message);
+            return loosePath;
+        }
+    }
+
+    /// <summary>
     /// F-M259: writes the loose .srt files beside this media into the registry as OBSERVATIONS.
     /// <para>
     /// The sidecar area's only writers were the two pipelines, both behind their own switch — so a
@@ -1021,20 +1092,72 @@ public sealed class SubdlSeeder
                     continue; // unreadable — the pipeline's business, not an observation
                 }
 
-                if (looseLang == null)
+                bool wasUnlabeled = looseLang == null;
+                string? resolvedLang = looseLang;
+
+                if (wasUnlabeled)
                 {
-                    // The NAME carries no language. An observation row must state a
-                    // language — it is what the coverage check reads — and this method
-                    // cannot detect one (no ffmpeg pass here, and detection needs the
-                    // 2 KB floor). Recording it as a row with an empty language would
-                    // claim coverage that does not exist; the upload path owns this
-                    // sidecar and resolves its language there (F-M74).
-                    continue;
+                    // F-M278 (user decision 01.10.2026): the NAME carries no language, so the text has
+                    // to. Same three gates as the uploader's sidecar branch (F-M74), same order, same
+                    // outcome — the toggle decides whether we look at all, the 2 KB floor refuses a
+                    // verdict from too little text, and a detection that returns nothing leaves the
+                    // file exactly as it is. Only a detection that names a language continues.
+                    //
+                    // Detection needs no ffmpeg here: an .srt is plain text and is already in hand.
+                    var config = Plugin.Instance?.Configuration;
+                    if (config?.UploadResolveUnd != true)
+                    {
+                        continue; // switch off — the uploader owns this file, as before
+                    }
+
+                    string normalized = Registry.ContentHashRegistry.NormalizeSrt(content);
+                    if (normalized.Length < 2048)
+                    {
+                        LogUtil.Detail(_logger,
+                            "[SubDL-Seed] {File} names no language and is too small to detect one ({Bytes} bytes) — left as is",
+                            System.IO.Path.GetFileName(loosePath), normalized.Length);
+                        continue;
+                    }
+
+                    string? detected = Qa.QaGates.DetectLanguage(normalized);
+                    if (detected == null)
+                    {
+                        LogUtil.Detail(_logger,
+                            "[SubDL-Seed] {File} names no language and none could be detected ({Bytes} bytes) — left as is",
+                            System.IO.Path.GetFileName(loosePath), normalized.Length);
+                        continue;
+                    }
+
+                    resolvedLang = detected;
                 }
 
+                // A rename does not touch the content, so this hash is the same before and after it.
                 string contentHash = Registry.ContentHashRegistry.ComputeHash(content);
-                if (registry.ObserveSidecar(contentHash, mediaHash, looseLang, looseHi,
-                        System.IO.Path.GetFileName(loosePath), loosePath))
+                string factPath = loosePath;
+
+                // F-M278: now that the language is known, the file is moved to the name this plugin
+                // itself writes (<container>.<lang>[.sdh].srt), because the NAME is the only thing
+                // Jellyfin and every reader here can see. A taken combination gets the next free slot
+                // rather than an overwrite: two unlabelled files that both detect as EN are two
+                // subtitles, and tidying a name must never destroy one of them.
+                if (wasUnlabeled)
+                {
+                    string before = loosePath;
+                    factPath = RenameSidecar(mediaPath, loosePath, resolvedLang!);
+
+                    // A rename leaves any existing row pointing at a name that no longer exists, and
+                    // the refresh task forgets a sidecar whose stored path is gone — it would destroy
+                    // the row of a file that is right there under a new name. Move the location, keep
+                    // the verdict. Called for BOTH cases: a row that exists (its status stands, so the
+                    // observe below returns early) and no row at all (nothing to move, no-op).
+                    if (!string.Equals(before, factPath, StringComparison.Ordinal))
+                    {
+                        registry.MoveSidecarLocation(contentHash, System.IO.Path.GetFileName(factPath), factPath);
+                    }
+                }
+
+                if (registry.ObserveSidecar(contentHash, mediaHash, resolvedLang!, looseHi,
+                        System.IO.Path.GetFileName(factPath), factPath))
                 {
                     written++;
                 }

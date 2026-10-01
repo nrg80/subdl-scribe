@@ -19,13 +19,15 @@
 //   C  SidecarNaming.EmbeddedTracks reads MediaStream DTOs
 //   D  the three together = one database built, both areas in one answer
 //   E  the writer/reader name contract (F-M260)
+//   E2 the rename target for an unlabelled sidecar (F-M278)
+//   E3 a renamed sidecar keeps its row and its verdict (F-M278)
 //   F  observations never overwrite a verdict (F-M257/F-M259)
 //   G  edge cases: bitmap, forced, unlabeled, unreadable
 //
-// What this does NOT cover: a full SubdlSeeder.Scan() pass. That needs
-// Plugin.Instance (static, not injectable) and IMediaSourceManager /
-// ILibraryManager — i.e. a running Jellyfin. The scan loop is covered by the
-// live test instance, not here.
+// What this does NOT cover: a full SubdlSeeder.Scan() pass, and therefore the rename itself —
+// RenameSidecar reads Plugin.Instance for the switch and moves a file, so it needs the host. This
+// suite covers the pure rule it calls (SidecarNaming.PlanTarget) and the row move that follows it
+// (MoveSidecarLocation). The scan loop is covered by the live test instance, not here.
 //
 // Exit code 0 = all checks passed, 1 = at least one failed.
 
@@ -136,6 +138,12 @@ internal static class Program
         Check("three sidecars recognized", loose.Count == 3,
               "-> " + string.Join(",", loose.Select(x => x.Lang + (x.HearingImpaired ? "/hi" : ""))));
         Check("the .sdh.srt reads as EN/HI", loose.Any(x => x.Lang == "EN" && x.HearingImpaired));
+        // F-M278: the unlabelled file carries NO language in its name — that is exactly why the
+        // seeder now runs detection on it and renames it. Reading it as EN was the old guess
+        // (Jellyfin's convention), removed by user decision on 30.09.2026.
+        Check("the unlabeled .srt carries NO language",
+              loose.Any(x => x.Lang == null && !x.HearingImpaired),
+              "-> " + string.Join(",", loose.Select(x => x.Lang ?? "<null>")));
 
         // ── B2) mark tokens: one entry per required FILE (F-M240) ────────────
         // A regular subtitle and its variant are two files on disk, so they must be two
@@ -179,7 +187,6 @@ internal static class Program
               ContentHashRegistry.CoversLanguages(new[] { "DE", "DE:hi", "EN" }, new[] { "DE", "DE:hi" }));
         Check("a superset still covers a smaller requirement",
               ContentHashRegistry.CoversLanguages(new[] { "DE", "DE:hi", "EN", "FR" }, new[] { "DE", "DE:hi" }));
-        Check("the unlabeled .srt reads as EN", loose.Any(x => x.Lang == "EN" && !x.HearingImpaired));
 
         // ── D ───────────────────────────────────────────────────────────────
         Section("D) The three together = one database built");
@@ -203,8 +210,14 @@ internal static class Program
             }
         }
 
+        // F-M278: the fixture's sidecars are TWO labelled (.en.sdh.srt, .de.srt) and ONE unlabelled
+        // (.srt). The unlabelled one resolves to no language, and a row must state a language — it is
+        // what the coverage check reads — so it is refused and gets no row. That is the rule the
+        // seeder's own path now follows by detecting the language first (F-M278); this fixture has no
+        // text-based resolution, so the file simply contributes nothing here.
         Check("embed rows written", embWritten == 2, "-> " + embWritten);
-        Check("sidecar rows written", sideWritten == 3, "-> " + sideWritten);
+        Check("sidecar rows written (2 labelled, the unlabelled one cannot state a language)",
+              sideWritten == 2, "-> " + sideWritten);
 
         // Both areas answer the SAME question, so the answer must merge them:
         // DE comes from the embed side, EN from the sidecar side.
@@ -263,6 +276,80 @@ internal static class Program
             Check("Parse reads back " + label, ok,
                   parsed.HasValue ? $"-> lang={parsed.Value.Lang} hi={parsed.Value.HearingImpaired}" : "-> null");
         }
+
+        // ── E2 ──────────────────────────────────────────────────────────────
+        // F-M278: the rename target. A file whose NAME says nothing gets the shape this plugin
+        // writes — and a combination already on disk takes the next slot instead of an overwrite,
+        // because two unlabelled files detected as EN are two subtitles.
+        Section("E2) Rename target for an unlabelled sidecar (F-M278)");
+
+        var noneTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string freeTarget = SidecarNaming.PlanTarget(media, "EN", false, noneTaken);
+        Check("free slot 1 -> <base>.en.srt",
+              Path.GetFileName(freeTarget) == baseName + ".en.srt",
+              "-> " + Path.GetFileName(freeTarget));
+
+        var plainTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { baseName + ".en.srt" };
+        string slot2 = SidecarNaming.PlanTarget(media, "EN", false, plainTaken);
+        Check("taken slot 1 -> slot 2",
+              Path.GetFileName(slot2) == baseName + ".en.2.srt",
+              "-> " + Path.GetFileName(slot2));
+
+        var twoTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            baseName + ".en.srt", baseName + ".en.2.srt",
+        };
+        string slot3 = SidecarNaming.PlanTarget(media, "EN", false, twoTaken);
+        Check("taken slots 1+2 -> slot 3",
+              Path.GetFileName(slot3) == baseName + ".en.3.srt",
+              "-> " + Path.GetFileName(slot3));
+
+        // The slot is per COMBINATION: a DE file present does not push the EN file to a slot.
+        var otherLangTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { baseName + ".de.srt" };
+        Check("another language's file does not occupy the slot",
+              Path.GetFileName(SidecarNaming.PlanTarget(media, "EN", false, otherLangTaken)) == baseName + ".en.srt");
+
+        // And the target must be a name the plugin's own reader reads back — a rename that writes a
+        // name Parse cannot resolve would make the file invisible while "tidying" it.
+        foreach (var (path, label) in new (string, string)[]
+                 {
+                     (freeTarget, "slot 1"), (slot2, "slot 2"), (slot3, "slot 3"),
+                 })
+        {
+            var parsedTarget = SidecarNaming.Parse(Path.GetFileNameWithoutExtension(path), baseName);
+            Check("Parse reads the rename target back (" + label + ")",
+                  parsedTarget.HasValue
+                  && string.Equals(parsedTarget.Value.Lang, "EN", StringComparison.OrdinalIgnoreCase)
+                  && !parsedTarget.Value.HearingImpaired,
+                  parsedTarget.HasValue ? "-> lang=" + parsedTarget.Value.Lang : "-> null");
+        }
+
+        // ── E3 ──────────────────────────────────────────────────────────────
+        // F-M278: a rename moves the file, so a stored row must move with it — otherwise the refresh
+        // task forgets the row of a file that is right there under a new name.
+        Section("E3) A renamed sidecar keeps its row and its verdict (F-M278)");
+
+        string movedText = "1\n00:00:01,000 --> 00:00:02,000\nmoved\n";
+        string movedHash = ContentHashRegistry.ComputeHash(movedText);
+        string oldPath = Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.srt");
+        string newPath = Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.en.srt");
+        reg.MarkSidecar(movedHash, mediaHash, "EN", false, SubtitleStatus.Uploaded,
+                        fileName: Path.GetFileName(oldPath), path: oldPath);
+
+        bool locMoved = reg.MoveSidecarLocation(movedHash, Path.GetFileName(newPath), newPath);
+        var renamedRow = reg.GetSidecar(movedHash);
+        Check("the location move reports a change", locMoved);
+        Check("the row points at the new name",
+              renamedRow != null && renamedRow.Path == newPath,
+              "-> " + (renamedRow?.Path ?? "null"));
+        Check("the VERDICT survived the move",
+              renamedRow != null && renamedRow.Status == SubtitleStatus.Uploaded,
+              "-> " + (renamedRow?.Status ?? "null"));
+
+        Check("a second identical move is a no-op",
+              !reg.MoveSidecarLocation(movedHash, Path.GetFileName(newPath), newPath));
+        Check("a move for an unknown row does nothing",
+              !reg.MoveSidecarLocation("00000000000000000000000000000000", "x.srt", Path.Combine(mediaDir, "x.srt")));
 
         // ── F ───────────────────────────────────────────────────────────────
         Section("F) An observation never overwrites a verdict");

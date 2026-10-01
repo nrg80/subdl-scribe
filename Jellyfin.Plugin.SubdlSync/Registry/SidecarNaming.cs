@@ -66,6 +66,46 @@ public static class SidecarNaming
     }
 
     /// <summary>
+    /// The name a sidecar should carry once its language is known, lowest free slot first.
+    /// <para>
+    /// F-M278 (user decision 01.10.2026): a subtitle file whose NAME says nothing is renamed to the
+    /// shape this plugin itself writes, because the name is the only thing Jellyfin, MediaElch and
+    /// every reader in this codebase can see. An unlabelled <c>&lt;container&gt;.srt</c> is
+    /// recognized by <see cref="Parse"/> as "no language", so it is skipped by
+    /// <see cref="PresentTokens"/>, never recorded as a fact, and the item is searched for a
+    /// language its own disk already holds.
+    /// </para>
+    /// <para>
+    /// Slot 1 is the plain name. A higher slot is chosen when that combination is already on disk —
+    /// two unlabelled files detected as the same language are two entries, and a rename that
+    /// overwrote one with the other would destroy a subtitle to tidy a file name. The rule is pure:
+    /// the caller hands in the names that exist, so it can be asserted with plain strings.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaPath">Media file path.</param>
+    /// <param name="lang">The language, already resolved (by name token or by detection).</param>
+    /// <param name="hearingImpaired">True when the file is the variant.</param>
+    /// <param name="existingNames">File names already present in the directory, as <see cref="Parse"/>'s caller sees them.</param>
+    /// <returns>Full path of the name to move the file to. May already exist when every slot is taken.</returns>
+    public static string PlanTarget(string mediaPath, string lang, bool hearingImpaired,
+                                    System.Collections.Generic.ISet<string> existingNames)
+    {
+        for (int slot = 1; slot <= 999; slot++)
+        {
+            string candidate = Build(mediaPath, lang, hearingImpaired, slot);
+            if (existingNames == null || !existingNames.Contains(Path.GetFileName(candidate)))
+            {
+                return candidate;
+            }
+        }
+
+        // Every slot taken (999 files of one language beside one media file). Return the plain
+        // name so the caller's own existence check refuses the move — never a name that would
+        // overwrite one of them.
+        return Build(mediaPath, lang, hearingImpaired, 1);
+    }
+
+    /// <summary>
     /// True when a name token marks a hearing-impaired variant rather than a language.
     /// <para>
     /// Only <c>sdh</c> qualifies. The earlier rule also accepted <c>hi</c>, which is wrong on two
