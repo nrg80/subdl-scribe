@@ -213,7 +213,7 @@ The upload chain, in the order the code applies it. Each switchable gate names i
 
 ## 4. Download Pipeline
 
-**F-M151a [B3]:** **Download-side short-circuit (the download-side completion mark):** analogous to F-M88c. The stored language set is part of the state: the mark covers the languages it was written for, and any configured language it does not cover makes the file un-done. **Subset, not equality:** a stored set that covers the configured one counts as complete (F-M234), so removing a language leaves existing marks intact. The mark is validated against the disk before it is trusted (F-M234).
+**F-M151a [B3]:** **Download-side short-circuit (the download-side completion mark):** analogous to F-M88c. The stored language set is part of the state: the mark covers the languages it was written for, and any configured language it does not cover makes the file un-done. **Subset, not equality:** a stored set that covers the configured one counts as complete (F-M234), so removing a language leaves existing marks intact. The mark is validated against the disk before it is trusted (F-M234) — and "the disk" means every kind of coverage the configuration counts, the embedded tracks included, not the `.srt` files alone. A language carried inside the container is evidence exactly as a file is; asking only for files dropped valid marks on 349 of 442 files.
 
 **F-M187:** **Downloaded bytes have exactly one decode path.** Every conversion of downloaded subtitle bytes to text goes through one path, which honours a UTF-16 byte-order mark (LE/BE, stripped) and falls back to UTF-8. The download side hashes the decode path, and the upload side later reads the written file as UTF-8/UTF-16 text, so the two must agree. The file on disk stays **byte-identical** to SubDL's payload — normalization applies in memory for hashing and upload, never to the stored file.
 
@@ -347,6 +347,12 @@ Fail-safe, same two-tier rule as the oshash cache: every root the stored paths l
 
 Subset rule: a stored language set that COVERS the configured one counts as complete, so removing a language does not invalidate every mark; adding one still does.
 
+**What "the file side" is, and what it is not.** A mark is only stale when the language has lost its evidence EVERYWHERE the configuration counts it: no sidecar file AND no embedded track, or a track settled as unavailable. Reading the directory alone is not this check — it answers "is there a `.srt`?", and 349 of 442 files on the live library carried their only German and English subtitles inside the container. That reading dropped 450 valid marks in fourteen seconds. The refresh therefore asks the same question the download pipeline asks, through the same reader, instead of recomputing a narrower one.
+
+**"Settled as unavailable" is read from the whole stored set**, not from the languages that failed the disk test. A language SubDL does not have has neither a file nor a track, so deriving the settled set from the missing list left it empty in exactly the case it exists for.
+
+**A missing probe is not a deletion.** When the embedded half cannot be read (item unresolvable, unreadable stream list), the check falls back to the files alone rather than judging — narrow, never false.
+
 **F-M225:** **Every plugin line belongs to exactly one level — and the statistics never depend on logging.** Ungated normal-level calls must not make `Normal` show diagnostics (resolved ffmpeg path, reschedule budget, seed pre-check timestamps). Assignment: internals and diagnostics → the detail level; per-item work → the per-item level; run lifecycle, abort reasons and task summaries stay at Normal. The counters are written in the single statistics writer from the run summaries, unguarded in the run path, and no log call carries a side effect in its arguments, so a `Normal` run counts exactly like a `Debug` run. **Test: T40.**
 
 **F-M183:** **Legible download run reporting:** the download run counts **queued** items as the denominator of its abort line; the progress counter runs over every item of the selected libraries. At run end one compact aggregate line (saved, no candidates, language not available, skipped with reasons, failed, processed/queued), so a run that searched and saved nothing is distinguishable from a run that did nothing without raising the log mode.
@@ -356,6 +362,8 @@ Subset rule: a stored language set that COVERS the configured one counts as comp
 For every media row whose Jellyfin item still exists and which has stored embedded rows, the refresh reads the item's current streams and forgets every stored row that disagrees — on the key (position) and on the recorded facts (language, hearing-impaired). A row whose position is gone, or whose language/HI no longer matches the stream at that position, is dropped.
 
 The check is structural for observations only. A row carrying a verdict (`uploaded`/`rejected`) or a detection attempt is kept unconditionally; only a plain observation is dropped when position, language or HI disagree.
+
+**The comparison is made against positions, not against the tracks whose language resolved.** A stream whose tag the caller cannot read is not evidence that the row is wrong, and Jellyfin caches its stream list — a container the language gate corrected earlier in the same cycle still reports no language. Comparing against the readable tracks made every such row look orphaned: a file whose container carried `eng`/`ger` lost both its rows although the tracks were present. A row is dropped when its POSITION no longer exists among the item's non-external subtitle streams; a position that exists but answered nothing keeps its row, and only a position that exists and answers differently is a disagreement.
 
 Fail-safe, exactly as the rest of the refresh ("unknown ≠ deleted"). An item Jellyfin no longer resolves, an unreadable stream list, and an EMPTY stream list are all skipped rather than judged. The empty case is the dangerous one: treating "Jellyfin cannot probe this item" as "the file has no tracks" would delete every row of a library that is merely offline. Only a NON-empty list that disagrees with a stored row is evidence.
 

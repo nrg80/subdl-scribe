@@ -485,6 +485,44 @@ public static class SidecarNaming
         return result;
     }
 
+    /// <summary>
+    /// F-M258: the stream positions the item HAS, whether or not their language is readable.
+    /// <para>
+    /// <see cref="EmbeddedTracks"/> reports only tracks whose language resolves, so a track whose
+    /// tag Jellyfin cannot read yet — notably right after the language gate wrote it, because
+    /// Jellyfin caches its stream list — is absent from that list even though it exists. A caller
+    /// comparing stored rows against it would read "the language is unknown" as "the track is
+    /// gone" and drop a valid row. This answers the other half of the question: does the position
+    /// still exist at all? Positions follow the same rule as <see cref="EmbeddedTracks"/> — the
+    /// unfiltered, non-external subtitle list, because ffmpeg's <c>0:s:N</c> counts every subtitle
+    /// stream including forced and bitmap ones.
+    /// </para>
+    /// </summary>
+    /// <param name="streams">The item's stream list.</param>
+    /// <returns>Positions of every non-external subtitle stream.</returns>
+    public static HashSet<int> SubtitlePositions(IEnumerable<MediaStream>? streams)
+    {
+        var positions = new HashSet<int>();
+        if (streams == null)
+        {
+            return positions;
+        }
+
+        int pos = 0;
+        foreach (var s in streams)
+        {
+            if (s.Type != MediaStreamType.Subtitle || s.IsExternal)
+            {
+                continue;
+            }
+
+            positions.Add(pos);
+            pos++;
+        }
+
+        return positions;
+    }
+
     private static bool AllDigits(string s)
     {
         foreach (char c in s)

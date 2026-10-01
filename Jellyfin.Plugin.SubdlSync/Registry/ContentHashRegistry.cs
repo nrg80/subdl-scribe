@@ -1357,14 +1357,26 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="mediaHash">Parent media hash.</param>
     /// <param name="currentTracks">The tracks the file has NOW, as (position, language, HI).</param>
     /// <returns>Removed rows.</returns>
-    public int ForgetStaleEmbeds(string? mediaHash, IEnumerable<(int SubPos, string Lang, bool HearingImpaired)> currentTracks)
+    public int ForgetStaleEmbeds(string? mediaHash, IEnumerable<(int SubPos, string Lang, bool HearingImpaired)> currentTracks, IReadOnlyCollection<int>? livePositions = null)
     {
         if (string.IsNullOrEmpty(mediaHash))
         {
             return 0;
         }
 
-        var present = currentTracks.ToDictionary(t => t.SubPos, t => (t.Lang, t.HearingImpaired));
+        var current = currentTracks.ToList();
+        var present = current.ToDictionary(t => t.SubPos, t => (t.Lang, t.HearingImpaired));
+
+        // F-M258: which positions still EXIST, as opposed to which ones answered with a language.
+        // A track whose tag the caller could not read is not evidence of a deletion — Jellyfin
+        // caches its stream list, so a container corrected earlier in the cycle still reports no
+        // language, and a row for such a track must survive. Null keeps the older behaviour and
+        // infers existence from the readable tracks, which is what the callers that already know
+        // the list expect.
+        var live = livePositions != null
+            ? new HashSet<int>(livePositions)
+            : new HashSet<int>(present.Keys);
+
         var stored = GetEmbeds(mediaHash);
         int removed = 0;
 
@@ -1380,8 +1392,24 @@ public sealed class ContentHashRegistry : IDisposable
                 continue;
             }
 
-            bool keep = present.TryGetValue(row.SubPos, out var now)
-                        && string.Equals(row.Language, now.Lang, StringComparison.OrdinalIgnoreCase)
+            // The position is gone: the row describes a stream the file no longer has.
+            if (!live.Contains(row.SubPos))
+            {
+                _db.Embeds.Delete(row.Id);
+                removed++;
+                LogUtil.Detail(_logger, "[SubDL-DB] forgot stale embed {Media}|{Pos} {Lang} (HI={Hi}, position gone)",
+                    mediaHash, row.SubPos, row.Language, row.HearingImpaired);
+                continue;
+            }
+
+            // The position exists but the caller could not read its language — no verdict.
+            if (!present.TryGetValue(row.SubPos, out var now))
+            {
+                continue;
+            }
+
+            // The position exists AND answered: only a real disagreement is evidence.
+            bool keep = string.Equals(row.Language, now.Lang, StringComparison.OrdinalIgnoreCase)
                         && row.HearingImpaired == now.HearingImpaired;
             if (keep)
             {

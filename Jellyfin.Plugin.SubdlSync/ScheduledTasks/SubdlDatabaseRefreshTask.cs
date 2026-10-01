@@ -170,6 +170,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
 
             int removedSearch = 0, removedRetry = 0, removedIdNotFound = 0, removedQa = 0, removedOshash = 0;
             int forgottenSidecars = 0, invalidatedMarks = 0, forgottenEmbeds = 0;
+            int removedPrunedSubtitles = 0, removedPrunedMedia = 0;
             Exception? refreshException = null;
             // Filled by the compaction step below; stays empty when it compacted cleanly. Names the
             // rebuild fallback in the worker row, which otherwise reads as a clean run.
@@ -183,7 +184,11 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 // ---- Phase 1: dead media/subtitle rows (item removed from Jellyfin) ----
                 if (registry != null)
                 {
-                    _ = registry.PruneDeadMediaAndSubtitles(allItems);
+                    // Counted, not discarded (user decision 01.10.2026): the tuple was thrown away
+                    // with `_ =`, so Phase 1 could remove rows and the run summary would not
+                    // mention it — a refresh that cleaned house looked like a refresh that found
+                    // nothing.
+                    (removedPrunedSubtitles, removedPrunedMedia) = registry.PruneDeadMediaAndSubtitles(allItems);
                 }
 
                 // ---- Phase 2: guid-keyed trackers ----
@@ -309,15 +314,17 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 _logger.LogError(ex, "[SubDL-Refresh] Refresh aborted mid-run — already-flushed parts stay, remainder untouched.");
             }
 
-            int removedTotal = removedSearch + removedRetry + removedIdNotFound + removedQa + removedOshash;
+            int removedTotal = removedSearch + removedRetry + removedIdNotFound + removedQa + removedOshash
+                               + removedPrunedSubtitles + removedPrunedMedia;
             int changedTotal = removedTotal + forgottenSidecars + invalidatedMarks + forgottenEmbeds;
 
             if (changedTotal > 0)
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL-Refresh] Removed dead state: {Search} search / {Retry} file-retry / {IdNotFound} id-not-found / {Qa} qa-fail / {Oshash} oshash. Forgot {Sidecars} vanished subtitle verdict(s); dropped {Marks} stale download mark(s); forgot {Embeds} stale embedded row(s).",
+                    "[SubDL-Refresh] Removed dead state: {Search} search / {Retry} file-retry / {IdNotFound} id-not-found / {Qa} qa-fail / {Oshash} oshash / {PrunedSubs} subtitle / {PrunedMedia} media (dead items). Forgot {Sidecars} vanished subtitle verdict(s); dropped {Marks} stale download mark(s); forgot {Embeds} stale embedded row(s).",
                     removedSearch, removedRetry, removedIdNotFound, removedQa, removedOshash,
+                    removedPrunedSubtitles, removedPrunedMedia,
                     forgottenSidecars, invalidatedMarks, forgottenEmbeds);
             }
             else if (refreshException != null)
@@ -451,8 +458,23 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 continue; // unknown ≠ deleted: an empty list may mean "cannot probe right now"
             }
 
-            var current = Registry.SidecarNaming.EmbeddedTracks(streams);
-            removed += registry.ForgetStaleEmbeds(media.Id, current);
+            // F-M258 (user decision 01.10.2026): a stored row is only provably stale when the
+            // POSITION is gone. The previous call compared against EmbeddedTracks, which lists a
+            // track only once its language resolves — and Jellyfin caches its stream list, so a
+            // container the gate corrected earlier in the cycle still reports Language=null. Every
+            // row of such a file therefore looked orphaned and was deleted, although the track was
+            // right there (FM264 Probe: the container carries eng/ger, ffprobe reads them, Jellyfin
+            // reported none, and two valid rows were dropped).
+            //
+            // A position that still exists keeps its row: the stored language came from the gate's
+            // own detection or from an observed stream, and it is at least as good as a tag the
+            // cache has not caught up with. A position that no longer exists goes, and so does a
+            // row whose position is out of range of the item's subtitle streams.
+            var positions = Registry.SidecarNaming.SubtitlePositions(streams);
+            var current = Registry.SidecarNaming.EmbeddedTracks(streams)
+                .Where(t => positions.Contains(t.SubPos))
+                .ToList();
+            removed += registry.ForgetStaleEmbeds(media.Id, current, positions);
         }
 
         return removed;
@@ -502,12 +524,23 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 continue;
             }
 
-            var missingOnDisk = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.MissingOnDisk(media.Path!, stored);
+            // F-M234 (user decision 01.10.2026): a sidecar file is only ONE kind of evidence. The
+            // disk-only question dropped 450 valid marks on the live library in one run — 349 of
+            // those files carried their only German and English subtitles INSIDE the container,
+            // which the configuration counts as coverage (DownloadOnlyMissing). The pipeline has
+            // always done it this way; the refresh now shares the rule instead of recomputing it.
+            var missingWhere = Jellyfin.Plugin.SubdlScribe.Registry.SubtitlePresence.CoveredLanguages(
+                media.Path!, EmbeddedLanguagesForCoverage(db, registry, media));
+            var missingOnDisk = stored.Where(l => !missingWhere.Contains(l)).ToList();
             var qaFails = new Registry.QaFailTracker(db);
             var settledUnavailable = new List<string>();
             if (!string.IsNullOrEmpty(media.JellyfinItemId))
             {
-                settledUnavailable = missingOnDisk
+                // Built from EVERY stored language, not only from the ones missing where we looked:
+                // a language SubDL settled as unavailable has no file AND no track, so deriving
+                // this set from the missing list alone left it empty in exactly the case it exists
+                // for, and the mark was then treated as a lie.
+                settledUnavailable = stored
                     .Where(l => qaFails.IsExhausted(media.JellyfinItemId!, l, Plugin.Instance?.Configuration.DownloadQaRetryLimit ?? 3))
                     .ToList();
             }
@@ -529,6 +562,62 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
         }
 
         return dropped;
+    }
+
+    /// <summary>
+    /// F-M234: the embedded languages that count as coverage for a stored download mark.
+    /// <para>
+    /// Same sources the download pipeline consults, in the same order of authority: the REGISTRY
+    /// first, because Jellyfin caches its stream list and still reports the OLD tag of a container
+    /// corrected earlier in the cycle, then Jellyfin's own list as the second opinion.
+    /// </para>
+    /// <para>
+    /// Empty when the configuration does not count embedded tracks at all, and empty while the item
+    /// cannot be probed. The caller then decides on the files alone, which is the pre-01.10.2026
+    /// behaviour — narrow, but never worse than the truth.
+    /// </para>
+    /// </summary>
+    /// <param name="db">Shared database.</param>
+    /// <param name="registry">Content registry.</param>
+    /// <param name="media">The media row whose mark is being judged.</param>
+    /// <returns>Languages carried by the file's own tracks.</returns>
+    private HashSet<string> EmbeddedLanguagesForCoverage(Data.SubdlDbContext db, Registry.ContentHashRegistry registry, Data.MediaEntity media)
+    {
+        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (Plugin.Instance?.Configuration.DownloadOnlyMissing != true)
+        {
+            return found;
+        }
+
+        if (!string.IsNullOrEmpty(media.Path))
+        {
+            foreach (var lang in registry.EmbeddedLanguages(media.Path))
+            {
+                found.Add(lang);
+            }
+        }
+
+        if (string.IsNullOrEmpty(media.JellyfinItemId) || !Guid.TryParse(media.JellyfinItemId, out var itemGuid))
+        {
+            return found;
+        }
+
+        try
+        {
+            foreach (var lang in Registry.SidecarNaming.EmbeddedPresentLanguages(_mediaSourceManager.GetMediaStreams(itemGuid)))
+            {
+                found.Add(lang);
+            }
+        }
+        catch (Exception ex)
+        {
+            // unknown ≠ missing: the registry half already answered, and a probe that fails adds
+            // nothing rather than turning a language into "absent".
+            LogUtil.Detail(_logger, "[SubDL-Refresh] embedded coverage probe skipped for {Id}: {Msg}", media.Id, ex.Message);
+        }
+
+        return found;
     }
 
     /// <summary>
