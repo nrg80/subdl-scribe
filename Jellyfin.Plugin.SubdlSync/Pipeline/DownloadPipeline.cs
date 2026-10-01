@@ -1153,8 +1153,10 @@ public sealed class DownloadPipeline : IDisposable
         {
             summary.SkippedItems++;
             summary.SkippedNothingMissing++;
-            // F-M88c: nothing missing = file is complete for download purposes.
-            if (mediaHash != null)
+            // F-M88c: nothing missing = file is complete for download purposes. F-M22: the mark is
+            // written on request, not from a dry run — a dry run must not settle a file, or the next
+            // real run finds it complete and never fetches what the dry run was asked to report.
+            if (!_config.DownloadDryRun && mediaHash != null)
             {
                 Registry.MarkAndFlush(() => Registry.MarkSubtitlesDownloaded(mediaHash, TargetLanguages));
             }
@@ -1543,6 +1545,11 @@ public sealed class DownloadPipeline : IDisposable
 
                     summary.Downloaded++;
                     ReportOutcome(item, ItemOutcome.Done);
+                    // F-M22: `savedAny` stays set on purpose although nothing was saved. It is not
+                    // the mark's only reader: it also decides whether this language counts as a
+                    // FAILED run (the QA retry counter below). Clearing it would make every dry run
+                    // burn a retry on every language and give up after the limit. The completion
+                    // mark is guarded at its own site instead.
                     savedAny = true;
                     break;
                 }
@@ -1975,7 +1982,11 @@ public sealed class DownloadPipeline : IDisposable
 
         // F-M88c: if every missing language reached a terminal state this run, mark
         // the whole media file complete so future download runs skip it entirely.
-        if (mediaHash != null && missing.All(l => closedLangs.Contains(l)) && !_stopRun)
+        // F-M22: not in a dry run. The dry run reaches this point with savedAny set — it reports
+        // what it WOULD save — and a mark written here says the file is settled although nothing
+        // was fetched. The next real run then skips it as complete, so the dry run has taken the
+        // work away instead of only describing it.
+        if (!_config.DownloadDryRun && mediaHash != null && missing.All(l => closedLangs.Contains(l)) && !_stopRun)
         {
             Registry.MarkAndFlush(() => Registry.MarkSubtitlesDownloaded(mediaHash, TargetLanguages));
             LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] FILE COMPLETE {File} — all target languages settled", Path.GetFileName(mediaPath));
