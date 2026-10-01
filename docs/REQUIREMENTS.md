@@ -73,7 +73,7 @@ Automatic upload of all embedded text subtitles from the Jellyfin library to Sub
 - **F-M3 [B1]:** Only process files with embedded text subtitles (Jellyfin's text-subtitle flag from the Jellyfin item)
 - **F-M4 [B1]:** Never upload an (item, language) pair twice — persistent state file in the plugin data dir
 - **F-M6 [B1]:** Text formats only (SRT/ASS/SSA/VTT via SubRip conversion); bitmap subs (PGS/VobSub) explicitly excluded
-- **F-M7 [B1]:** Safely delete temp files after processing (success AND failure)
+- **F-M7 [B1]:** **Extraction writes nothing into the media library, and its working files are removed on every exit.** Each extraction runs in its own directory outside the library, one per job. That directory is removed when the job ends — after a success, after a failure and after a cancellation. The removal is best effort and stays silent: a leftover working file must never fail a run, and it is never worth a warning.
 - **F-M8 [B1]:** SubDL API (`https://api.subdl.com`): login (user/pass → token) and the upload endpoint. The call rate is configured, not fixed (F-M20)
 - **F-M9 [B1]:** Metadata per upload: series IMDB (**not** episode IMDB) + season + episode for TV; movie IMDB for movies — from Jellyfin provider IDs. Without IMDB → skip (F-M28). **F-M151:** the upload ID quality gate validates/corrects JF IDs via TMDb before upload, default ON. **F-M203:** the TMDb key is required — the gate is not optional.
 - **F-M10 [B1]:** Language mapping to SubDL's two-letter codes (`nob`→`NO` etc.)
