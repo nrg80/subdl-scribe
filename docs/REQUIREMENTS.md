@@ -1212,6 +1212,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T92:** The refresh backfills the forced flag on rows written before the field existed, from their own names (F-M284)
 
 **T93:** `hi` and `forced` are three-valued — a legacy row reads back as `null` and claims nothing, a fresh write states `false` explicitly (F-M285)
+**T94:** A forced subtitle is observed but never uploaded — the loose-file path asks `IsDeliverable` and skips it, the embedded path drops it via `IsDialogueStream` (F-M284)
+**T95:** A container rewrite re-states the forced disposition and is REJECTED if it did not survive, so a language-tag write can never silently turn a forced track into the film's dialogue (F-M284)
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)
 **T80:** A container rewrite is reported at `Normal`, the per-track detail at `Verbose` (F-M262)
