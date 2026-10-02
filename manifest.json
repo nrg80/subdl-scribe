@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.165",
-        "changelog": "v12.1.12.165: A dry run no longer leaves state behind that changes the next real run.\n    It writes no registry rows, spends no retry or id-resolution budget, starts no refetch\n    clock and clears nothing — and the download queue keeps every reported item as open.\n    Until now each of those sat before the dry run's own exit and ran anyway, so a single\n    dry run could hide work for a full refetch interval or empty the queue of everything\n    it had just described.",
+        "version": "12.1.12.166",
+        "changelog": "v12.1.12.166: The two candidate settings now agree with each other, and the search obeys them.\n    \"Max candidates per language\" used to be ignored by the search, which stopped at a hard-coded\n    three per language no matter what the setting said, and a budget below \"keep X\" made that\n    setting unreachable. Both numbers are derived from one place now.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.165-dev/Jellyfin.Plugin.SubdlSync_12.1.12.165.zip",
-        "checksum": "757b16dd81479f0e1935ba4c25cce14b",
-        "timestamp": "2026-10-02T11:31:47Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.166-dev/Jellyfin.Plugin.SubdlSync_12.1.12.166.zip",
+        "checksum": "cfeaa25db606ba8aca3d72d855e320c6",
+        "timestamp": "2026-10-02T15:00:01Z"
       }
     ]
   }
