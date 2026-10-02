@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.162",
-        "changelog": "v12.1.12.162: Forced subtitles are never uploaded, and a rewrite keeps the flag.\n    A forced subtitle carries only the lines of foreign-language scenes, so it is\n    not the film's dialogue and has no counterpart at SubDL. It is now observed and\n    never uploaded - the loose-file path skips it before it costs a read or a search\n    request, and the embedded path already dropped it.\n    The previous version recorded the forced flag on embedded tracks but DROPPED it\n    for a loose .srt: the writer had no parameter for it, so a .forced.srt produced a\n    row that said nothing. A row that does not state its flags is invisible to every\n    reader, so the forced subtitle vanished from the state - and a rewrite of a file\n    could turn the gap into the claim \"not forced\". Both writers now require the flag,\n    and a row whose name carries no marker is stated as \"no\" rather than left silent.\n    Finally the language-tag rewrite no longer risks the flag: the forced track is\n    re-stated as such and the written file is checked for it, with the original kept\n    if it did not survive. Measured against a real file, the additive form is what\n    makes this safe - the plain form clears a stream's other flags.",
+        "version": "12.1.12.163",
+        "changelog": "v12.1.12.163: Forced subtitles are never uploaded, and a rewrite keeps the flag.\n    A forced subtitle carries only the foreign-language scenes, so it is not the\n    film's dialogue and SubDL has no counterpart for it: it is observed, never uploaded.\n    The previous version recorded that flag on tracks inside the container but dropped\n    it for a loose .srt, so such a row said nothing and was invisible to every reader;\n    both writers now state it, and a plain row is stated as \"no\" instead of left silent.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.162-dev/Jellyfin.Plugin.SubdlSync_12.1.12.162.zip",
-        "checksum": "879fe7bb91736a61efbebd9501ef33c5",
-        "timestamp": "2026-10-02T05:57:49Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.163-dev/Jellyfin.Plugin.SubdlSync_12.1.12.163.zip",
+        "checksum": "9458a873a00f870e4c9594573d7e6150",
+        "timestamp": "2026-10-02T06:24:08Z"
       }
     ]
   }
