@@ -209,6 +209,34 @@ internal static class Program
               "-> [" + string.Join(",", pairsAfter.Select(p => p.ToString()).OrderBy(x => x)) + "]");
         File.Delete(Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.de.sdh.srt"));
 
+        // ── B2b) the marker reader the backfill shares with Parse — F-M284 ──
+        // A row written before `Forced` existed reads back as false, so a forced sidecar would
+        // COUNT as coverage and its language would stay settled forever. The refresh re-reads the
+        // flag off the row's own name, which is where it always came from — through this reader, so
+        // the backfill and the normal parse cannot disagree about what a marker is.
+        Section("B2b) The marker reader: forced and hi as a set (F-M284)");
+        Check("a plain name states neither flag",
+              SidecarNaming.ReadFlags("Film.2026.1080p.WEB-DL.de") == (false, false),
+              "-> " + SidecarNaming.ReadFlags("Film.2026.1080p.WEB-DL.de"));
+        Check("the .forced marker is read",
+              SidecarNaming.ReadFlags("Film.2026.1080p.WEB-DL.de.forced").Forced);
+        Check("the .sdh marker is read",
+              SidecarNaming.ReadFlags("Film.2026.1080p.WEB-DL.de.sdh").HearingImpaired);
+        var bothFlags = SidecarNaming.ReadFlags("Film.2026.1080p.WEB-DL.de.sdh.forced");
+        Check("both markers in one name resolve together (sdh then forced)",
+              bothFlags.HearingImpaired && bothFlags.Forced,
+              "-> hi=" + bothFlags.HearingImpaired + " forced=" + bothFlags.Forced);
+        var bothReversed = SidecarNaming.ReadFlags("Film.2026.1080p.WEB-DL.de.forced.sdh");
+        Check("order does not matter (forced then sdh)",
+              bothReversed.HearingImpaired && bothReversed.Forced,
+              "-> hi=" + bothReversed.HearingImpaired + " forced=" + bothReversed.Forced);
+        Check("the numbered slot is stepped over before the markers are read",
+              SidecarNaming.ReadFlags("Film.2026.1080p.WEB-DL.de.sdh.2").HearingImpaired,
+              "-> " + SidecarNaming.ReadFlags("Film.2026.1080p.WEB-DL.de.sdh.2"));
+        Check("a language token that merely LOOKS like a marker is not one",
+              SidecarNaming.ReadFlags("Film.2026.1080p.WEB-DL.hin") == (false, false),
+              "-> hin is Hindi, not a marker");
+
         // ── B3) coverage: the ONE reader, and the two search pools it feeds ──
         // This is the regression that mattered on the live library: a missing variant was reported
         // as a missing LANGUAGE, the regular search was fed that language, and the .de.srt already

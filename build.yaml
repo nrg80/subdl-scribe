@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.160"
+version: "12.1.12.161"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,32 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.161: A subtitle is its own datum, and the download mark is gone.
+    A subtitle carries its own properties - language, hearing-impaired, forced -
+    and its own hash, whether it sits in the container or as a file beside it. It
+    was never a property of the media file, and treating the variant as a spelling
+    of the language is what re-fetched subtitles that were already on disk.
+    The download mark is removed: it was a second answer beside the rows that
+    describe the subtitles, and the two drifted - the check that TRUSTED it asked
+    the disk plus the stored variant verdict while the check that WROTE it asked the
+    disk alone, so a variant inside the container kept the mark from ever being
+    written, the item stayed due and the regular subtitle was fetched again every
+    pass (41 downloads in one run against a 50/day limit, the same content hash on
+    three consecutive days). Completeness is now DERIVED on every ask by one reader
+    that the pipeline, the seeder and the refresh all share, so no two components
+    can judge one file differently and a deleted subtitle opens its datum by itself.
+    The two search pools are fed separately: only a missing variant asks SubDL for
+    the hearing-impaired side, and the regular file is left alone.
+    Forced joins as a second property of the datum. Jellyfin reports it, but SubDL
+    has no forced counterpart - no filter, no field, and no candidate in the pool
+    names it - so a forced subtitle is observed and never sought, fetched or
+    uploaded, and it never counts as coverage. That rule now lives in one predicate
+    instead of five call sites.
+    The stored shape changed; the data file reports schema version 2 and older
+    records are ignored rather than rewritten. A row written before the forced
+    property existed reads back as false, which would let a forced track pass as
+    the film's dialogue and keep its language settled forever - the database
+    refresh therefore backfills the flag from each row's own file name.
   v12.1.12.160: The download mark names files, and an unlabelled sidecar gets its name.
     A regular subtitle and its hearing-impaired variant are two files on disk, but the
     mark recorded both as the plain language - so a successful regular save closed the

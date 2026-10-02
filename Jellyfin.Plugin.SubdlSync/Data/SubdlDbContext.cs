@@ -68,7 +68,12 @@ public sealed class SubdlDbContext : IDisposable
     /// older build could not survive.
     /// </summary>
     // F-M195: the schema marker the compatibility row carries.
-    public const int CurrentSchemaVersion = 1;
+    // F-M282/F-M283/F-M284 (02.10.2026): raised to 2. The stored shape changed — a subtitle row now
+    // carries `Forced` beside `HearingImpaired`, and the media record no longer carries the download
+    // mark (`SubtitlesDownloadedAt` / `SubtitlesDownloadedLanguages`). Per F-M195b there is no
+    // migration: the marker makes the change visible, the older records are ignored rather than
+    // rewritten, and a reset (F-M90) is the intended path.
+    public const int CurrentSchemaVersion = 2;
 
     /// <summary>
     /// The open LiteDB engine. Deliberately NOT readonly: LiteDB's <c>Rebuild()</c> closes the

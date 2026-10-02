@@ -892,6 +892,10 @@ Jellyfin reports both on its streams (`MediaStream.IsHearingImpaired`, `MediaStr
 
 **Naming:** the marker is `forced`, read as a SET with `sdh` in either order (`Movie.de.forced.srt`, `Movie.de.sdh.forced.srt`), so a datum that is both resolves with both flags. Bitmap tracks remain excluded, and that is a different matter: they carry no text at all (F-M6), so there is no datum to record. **Test: T91.**
 
+**A row written before the property existed is BACKFILLED** (user decision 02.10.2026). A document store has no schema, so such a row has no `forced` field and reads back as `false` — which is not a harmless default: a forced track would be indistinguishable from the film's dialogue, would count as coverage, and its language would stay settled although its only track carries foreign-language scenes. The refresh re-reads the flag off the row's own file name, through the marker reader `Parse` uses, so the backfill derives nothing new and cannot disagree with the normal read.
+
+An embedded row cannot be backfilled this way and is deliberately left alone: its flag lives in the container's stream list, not in a name, and the next scan or download pass observes the track and writes the current value. Recording `false` there would be the mistake the backfill exists to undo.
+
 #### 14.3 Area 3 — Sidecar files (`sidecars`)
 **F-M199:** one record per loose `.srt` file, `_id` = the **normalized content hash** (F-M186).
 
@@ -1176,6 +1180,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T90:** One coverage reader feeds the pipeline, the seeder and the refresh, and splits the two search pools apart — only the variant is open when only the variant is missing (F-M282/F-M283)
 
 **T91:** A forced subtitle is a datum with its own flag, observed in both areas, and it never covers its language (F-M284)
+
+**T92:** The refresh backfills the forced flag on rows written before the field existed, from their own names (F-M284)
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)
 **T80:** A container rewrite is reported at `Normal`, the per-track detail at `Verbose` (F-M262)

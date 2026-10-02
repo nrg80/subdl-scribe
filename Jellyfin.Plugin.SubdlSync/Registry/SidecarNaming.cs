@@ -142,6 +142,53 @@ public static class SidecarNaming
         => token.Equals("forced", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Reads the MARKERS (hearing-impaired, forced) out of a sidecar name, without resolving a
+    /// language and without needing the media base name.
+    /// <para>
+    /// F-M284: extracted so the two callers that need only the flags — the sidecar backfill, which
+    /// holds a stored file name rather than a directory to walk, and <see cref="Parse"/> — cannot
+    /// disagree about what a marker is. The scan starts at the END and skips the numbered slot
+    /// first, because that is where the writer puts it (<c>&lt;base&gt;.&lt;lang&gt;.sdh.2.srt</c>).
+    /// </para>
+    /// </summary>
+    /// <param name="fileNameWithoutExtension">Sidecar name without the .srt extension.</param>
+    /// <returns>The two flags the name states.</returns>
+    public static (bool HearingImpaired, bool Forced) ReadFlags(string? fileNameWithoutExtension)
+    {
+        if (string.IsNullOrEmpty(fileNameWithoutExtension))
+        {
+            return (false, false);
+        }
+
+        string[] parts = fileNameWithoutExtension.Split('.');
+        int end = parts.Length - 1;
+
+        // The numbered slot sits LAST (F-M260), so it is stepped over before any marker is read.
+        if (end > 0 && parts[end].Length > 0 && parts[end].Length <= 2 && AllDigits(parts[end]))
+        {
+            end--;
+        }
+
+        bool hi = false;
+        bool forced = false;
+        while (end > 0 && (IsHearingImpairedToken(parts[end]) || IsForcedToken(parts[end])))
+        {
+            if (IsHearingImpairedToken(parts[end]))
+            {
+                hi = true;
+            }
+            else
+            {
+                forced = true;
+            }
+
+            end--;
+        }
+
+        return (hi, forced);
+    }
+
+    /// <summary>
     /// Reads the language and BOTH properties (hearing-impaired, forced) out of a sidecar file name.
     /// <para>
     /// Recognized shapes, all relative to the media base name:

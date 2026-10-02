@@ -169,7 +169,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             progress.Report(20);
 
             int removedSearch = 0, removedRetry = 0, removedIdNotFound = 0, removedQa = 0, removedOshash = 0;
-            int forgottenSidecars = 0, openFiles = 0, forgottenEmbeds = 0;
+            int forgottenSidecars = 0, openFiles = 0, forgottenEmbeds = 0, backfilledForced = 0;
             int removedPrunedSubtitles = 0, removedPrunedMedia = 0;
             Exception? refreshException = null;
             // Filled by the compaction step below; stays empty when it compacted cleanly. Names the
@@ -257,6 +257,11 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 // streams cannot be read, or an item Jellyfin no longer resolves, is skipped.
                 if (registry != null)
                 {
+                    // F-M284: rows written before the forced property existed read back as
+                    // `false`, which would let a forced track pass as the film's dialogue and
+                    // mark its language settled. Bring them up to date from their own names.
+                    backfilledForced = BackfillForcedFlags(db);
+
                     forgottenEmbeds = ForgetStaleEmbeds(registry, allItems);
                 }
 
@@ -318,7 +323,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
 
             int removedTotal = removedSearch + removedRetry + removedIdNotFound + removedQa + removedOshash
                                + removedPrunedSubtitles + removedPrunedMedia;
-            int changedTotal = removedTotal + forgottenSidecars + openFiles + forgottenEmbeds;
+            int changedTotal = removedTotal + forgottenSidecars + openFiles + forgottenEmbeds + backfilledForced;
 
             if (changedTotal > 0)
             {
@@ -399,6 +404,73 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             : "nothing to change";
 
         return string.IsNullOrWhiteSpace(compactNote) ? body : body + " | " + compactNote;
+    }
+
+    /// <summary>
+    /// F-M284 (user decision 02.10.2026): backfills the FORCED property on rows written before it
+    /// existed.
+    /// <para>
+    /// A document store has no schema, so a row written by an older build simply has no
+    /// <c>Forced</c> field and reads back as <c>false</c>. That is not a harmless default here: a
+    /// forced track would then be indistinguishable from the film's dialogue, so it would COUNT AS
+    /// COVERAGE — the language would look settled although its only track carries foreign-language
+    /// scenes, and the regular subtitle would never be fetched. The stored rows are the state, so
+    /// they are brought up to date rather than left to look settled.
+    /// </para>
+    /// <para>
+    /// The flag is read back off the row's own name, which is where it came from in the first place:
+    /// a sidecar states its markers in its file name (<c>Movie.de.forced.srt</c>), so the backfill
+    /// derives nothing new — it re-reads a fact the name always carried.
+    /// </para>
+    /// <para>
+    /// An EMBEDDED row cannot be backfilled this way and is deliberately left alone: its flag lives
+    /// in the container's stream list, not in a name, and the next scan or download pass observes
+    /// the track again and writes the current value. Guessing <c>false</c> there would be the very
+    /// mistake this method exists to undo.
+    /// </para>
+    /// </summary>
+    /// <param name="registry">Content registry (accepts the sidecar rows directly).</param>
+    /// <returns>Number of sidecar rows whose forced flag was set.</returns>
+    private int BackfillForcedFlags(Data.SubdlDbContext db)
+    {
+        int updated = 0;
+        var changed = new List<Data.SidecarEntity>();
+
+        foreach (var row in db.Sidecars.FindAll())
+        {
+            if (row.Forced)
+            {
+                continue; // already stated
+            }
+
+            // The stored file name is the same string the marker reader works on. A row without one
+            // carries no evidence either way, so it is skipped rather than guessed at.
+            string? name = !string.IsNullOrEmpty(row.FileName)
+                ? Path.GetFileNameWithoutExtension(row.FileName!)
+                : (!string.IsNullOrEmpty(row.Path) ? Path.GetFileNameWithoutExtension(row.Path!) : null);
+            if (string.IsNullOrEmpty(name))
+            {
+                continue;
+            }
+
+            var (_, forced) = Registry.SidecarNaming.ReadFlags(name);
+            if (!forced)
+            {
+                continue;
+            }
+
+            row.Forced = true;
+            changed.Add(row);
+            updated++;
+        }
+
+        if (changed.Count > 0)
+        {
+            db.Sidecars.Update(changed);
+            LogUtil.Normal(_logger, "[SubDL-Refresh] forced flag backfilled on {Count} sidecar row(s) written before the field existed.", updated);
+        }
+
+        return updated;
     }
 
     /// <summary>
