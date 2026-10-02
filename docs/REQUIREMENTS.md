@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.161.
+**Status:** Implementation — v12.1.12.162.
 
 ## Contents
 
@@ -891,6 +891,15 @@ Jellyfin reports both on its streams (`MediaStream.IsHearingImpaired`, `MediaStr
 **One reader, not five call sites.** Before this, the forced exclusion was re-derived from Jellyfin's flag in five places (the seeder twice, the upload pipeline, the language gate, and the embedded-track enumeration itself). The enumeration now **records** a forced track rather than dropping it, and the "does not count as coverage" rule lives in `SubtitleCoverage` alone — the same rule for a sidecar (`.forced.srt`) and for a track inside the container.
 
 **Naming:** the marker is `forced`, read as a SET with `sdh` in either order (`Movie.de.forced.srt`, `Movie.de.sdh.forced.srt`), so a datum that is both resolves with both flags. Bitmap tracks remain excluded, and that is a different matter: they carry no text at all (F-M6), so there is no datum to record. **Test: T91.**
+
+**A forced subtitle is never UPLOADED** (user decision 02.10.2026). `IsDeliverable` says so, and the upload pipeline asks it: a loose `.forced.srt` is skipped before it costs a read, a hash or a search request. The embedded side needs no separate check — its enumeration already runs through `IsDialogueStream`, which drops a forced track before it can become a candidate. The two paths reaching the same verdict by different means is not redundancy here: one filters by the stream flag, the other reads the name, and both must agree.
+
+**When the plugin rewrites a container, the forced flag survives it** (user decision 02.10.2026). The language-tag gate replaces the file, so the `forced` disposition — the container's only record of it — must be re-stated in that rewrite and verified afterwards. Two measured facts decide how:
+
+- `ffmpeg -map 0 -c copy` carries the disposition over by itself, so the rewrite is not the danger it looks like; the explicit re-statement is the guarantee, and the verification is what makes a silent loss impossible.
+- The additive form matters: **`-disposition:s:N +forced`** leaves the stream's other dispositions alone, while the bare `forced` RESETS the whole set — measured on a real container, a stream carrying `default=1` came back as `default=0`. And the spec is `stream_type:index`, never the doubled `s:s:N`: the doubled form makes ffmpeg abort the entire command with `Stream type specified multiple times` (exit 234), so no tag is written at all.
+
+The verification is the point. A tag write is confirmed by re-reading the temp file, and a rewrite whose forced flag did not survive is REJECTED and the original kept — otherwise the container would lose the flag and the next observation would record the loss as fact, with nothing left to notice it.
 
 **A row written before the property existed is BACKFILLED** (user decision 02.10.2026). A document store has no schema, so such a row has no `forced` field and reads back as `false` — which is not a harmless default: a forced track would be indistinguishable from the film's dialogue, would count as coverage, and its language would stay settled although its only track carries foreign-language scenes. The refresh re-reads the flag off the row's own file name, through the marker reader `Parse` uses, so the backfill derives nothing new and cannot disagree with the normal read.
 

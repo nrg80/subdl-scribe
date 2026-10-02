@@ -995,6 +995,24 @@ public sealed class UploadPipeline
                 runCt.ThrowIfCancellationRequested();
                 watchdog.Heartbeat();
 
+                // F-M284: a forced subtitle is OBSERVED, never DELIVERED — SubDL has no forced
+                // counterpart (no filter, no field, no candidate names it), so there is nothing to
+                // publish and nothing to search for. `IsDeliverable` is the predicate that says so;
+                // this is a caller that PLANS WORK, which is exactly what must check it. Returning
+                // before the read, the hash and the QA keeps the file out of the run entirely rather
+                // than spending a search request to have the server reject it.
+                //
+                // The embedded side needs no counterpart here: its enumeration already runs through
+                // IsDialogueStream, which drops a forced track before it can become a candidate.
+                if (looseForced)
+                {
+                    summary.SkippedStreams++;
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL] SKIP {File} — forced subtitle, observed but never uploaded (F-M284)",
+                        Path.GetFileName(loosePath));
+                    continue;
+                }
+
                 if (Registry.IsUploaded(mediaHash, looseLang, looseHi))
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] Loose SRT already uploaded — skipping: {File} ({Lang}{Hi})", Path.GetFileName(loosePath), looseLang, looseHi ? ",HI" : "");

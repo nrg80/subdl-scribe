@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.161"
+version: "12.1.12.162"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,21 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.162: Forced subtitles are never uploaded, and a rewrite keeps the flag.
+    A forced subtitle carries only the lines of foreign-language scenes, so it is
+    not the film's dialogue and has no counterpart at SubDL. It is now observed and
+    never uploaded - the loose-file path skips it before it costs a read or a search
+    request, and the embedded path already dropped it.
+    The previous version recorded the forced flag on embedded tracks but DROPPED it
+    for a loose .srt: the writer had no parameter for it, so a .forced.srt produced a
+    row that said nothing. A row that does not state its flags is invisible to every
+    reader, so the forced subtitle vanished from the state - and a rewrite of a file
+    could turn the gap into the claim "not forced". Both writers now require the flag,
+    and a row whose name carries no marker is stated as "no" rather than left silent.
+    Finally the language-tag rewrite no longer risks the flag: the forced track is
+    re-stated as such and the written file is checked for it, with the original kept
+    if it did not survive. Measured against a real file, the additive form is what
+    makes this safe - the plain form clears a stream's other flags.
   v12.1.12.161: A subtitle is its own datum, and the download mark is gone.
     A subtitle carries its own properties - language, hearing-impaired, forced -
     and its own hash, whether it sits in the container or as a file beside it.

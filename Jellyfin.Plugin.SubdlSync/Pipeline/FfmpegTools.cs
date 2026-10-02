@@ -343,14 +343,21 @@ public static class FfmpegTools
     /// <param name="logger">Logger.</param>
     /// <param name="config">Configuration, for the log mode.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>True when the container now carries every wanted tag.</returns>
+    /// <param name="forcedByPosition">F-M284: subtitle positions whose FORCED disposition must survive
+    /// the rewrite. Written with the ADDITIVE form <c>+forced</c>, never the bare one — measured on a
+    /// real container: <c>-disposition:s:s:N forced</c> CLEARS every other disposition of that stream
+    /// (a stream carrying <c>default=1</c> came back as <c>default=0</c>), while <c>+forced</c> leaves
+    /// them untouched. The disposition is the only place a forced track is recorded, so a rewrite that
+    /// dropped it would silently turn a forced track into the film's dialogue.</param>
+    /// <returns>True when the tags were written and verified.</returns>
     public static async Task<bool> WriteLanguageTagsAsync(
         string ffmpegPath,
         string mediaPath,
         IReadOnlyDictionary<int, string> iso639ByPosition,
         ILogger logger,
         PluginConfiguration config,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyCollection<int>? forcedByPosition = null)
     {
         if (iso639ByPosition.Count == 0)
         {
@@ -390,6 +397,20 @@ public static class FfmpegTools
                 psi.ArgumentList.Add("language=" + kv.Value);
             }
 
+            // F-M284: the forced disposition rides along with an ADDITIVE tag. `+forced` is applied on
+            // top of what the stream already has; the bare `forced` would RESET the stream's whole
+            // disposition set (measured: default=1 became default=0), so a rewrite meant to add a
+            // language would quietly strip a default flag. Only positions already measured as forced
+            // are named, so nothing is invented here.
+            foreach (int pos in forcedByPosition ?? Array.Empty<int>())
+            {
+                // The spec is `stream_type:index`, NOT `stream_type:stream_type:index` — with the
+                // doubled form ffmpeg aborts the whole command with "Stream type specified multiple
+                // times" and exit 234, so no tag is written at all. Measured against a real container.
+                psi.ArgumentList.Add("-disposition:s:" + pos.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                psi.ArgumentList.Add("+forced");
+            }
+
             psi.ArgumentList.Add(tempPath);
 
             using (var proc = Process.Start(psi))
@@ -415,14 +436,15 @@ public static class FfmpegTools
             // Verify the temp file really carries the tags BEFORE the original is touched.
             // A silent ffmpeg success on an unset metadata key would otherwise replace a good
             // file with one that is no better than before — and cost a new hash for nothing.
-            var verified = await ReadSubtitleTagsAsync(ffmpegPath, tempPath, logger, ct).ConfigureAwait(false);
-            if (verified == null)
+            var verifiedStreams = await ReadSubtitleStreamsAsync(ffmpegPath, tempPath, logger, ct).ConfigureAwait(false);
+            if (verifiedStreams == null)
             {
                 LogUtil.PerItem(config.LogMode, logger, "[SubDL-D] tag write not verifiable, keeping original {File}", fileName);
                 DeleteFileBestEffort(tempPath);
                 return false;
             }
 
+            var verified = verifiedStreams.Value.Tags;
             foreach (var kv in iso639ByPosition)
             {
                 if (!verified.TryGetValue(kv.Key, out string? got) || !LanguageTagMatches(got, kv.Value))
@@ -430,6 +452,23 @@ public static class FfmpegTools
                     LogUtil.PerItem(config.LogMode, logger,
                         "[SubDL-D] tag write did not take on {File} s{Pos} (wanted {Want}, got {Got}) — original kept",
                         fileName, kv.Key, kv.Value, got ?? "none");
+                    DeleteFileBestEffort(tempPath);
+                    return false;
+                }
+            }
+
+            // F-M284: and the FORCED disposition must have survived. It is the container's only record
+            // of "this track is not the film's dialogue", so a rewrite that dropped it would silently
+            // turn a forced track into the dialogue — and nothing downstream would notice, because the
+            // row is re-observed from the very flag that just disappeared.
+            var verifiedForced = verifiedStreams.Value.Forced;
+            foreach (int pos in forcedByPosition ?? Array.Empty<int>())
+            {
+                if (!verifiedForced.Contains(pos))
+                {
+                    LogUtil.PerItem(config.LogMode, logger,
+                        "[SubDL-D] forced flag LOST on {File} s{Pos} — original kept",
+                        fileName, pos);
                     DeleteFileBestEffort(tempPath);
                     return false;
                 }
@@ -474,7 +513,26 @@ public static class FfmpegTools
         ILogger logger,
         CancellationToken ct)
     {
-        string probe = ffmpegPath;
+        var result = await ReadSubtitleStreamsAsync(ffmpegPath, mediaPath, logger, ct).ConfigureAwait(false);
+        return result?.Tags;
+    }
+
+    /// <summary>
+    /// Reads a container's subtitle streams through ffprobe: their language tags AND their forced
+    /// disposition, at SUBTITLE-RELATIVE positions.
+    /// </summary>
+    /// <param name="ffmpegPath">Resolved ffmpeg binary; ffprobe is looked up next to it.</param>
+    /// <param name="mediaPath">Container to read.</param>
+    /// <param name="logger">Logger.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Positions to tags and to forced-ness, or null when nothing could be read.</returns>
+    public static async Task<(Dictionary<int, string> Tags, HashSet<int> Forced)?> ReadSubtitleStreamsAsync(
+        string ffmpegPath,
+        string mediaPath,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var probe = ffmpegPath;
         int cut = ffmpegPath.LastIndexOf("ffmpeg", StringComparison.OrdinalIgnoreCase);
         if (cut >= 0)
         {
@@ -495,7 +553,10 @@ public static class FfmpegTools
             psi.ArgumentList.Add("-select_streams");
             psi.ArgumentList.Add("s");
             psi.ArgumentList.Add("-show_entries");
-            psi.ArgumentList.Add("stream=index:stream_tags=language");
+            // F-M284: the forced disposition is read in the SAME probe as the tag. A rewrite writes
+            // both, so both are verified in one pass — and a verification that checked only the tag
+            // could report success on a rewrite that had dropped the forced flag.
+            psi.ArgumentList.Add("stream=index:stream_tags=language:stream_disposition=forced");
             psi.ArgumentList.Add("-of");
             psi.ArgumentList.Add("default=noprint_wrappers=1");
             psi.ArgumentList.Add(mediaPath);
@@ -513,10 +574,11 @@ public static class FfmpegTools
                 return null;
             }
 
-            // Collect (global index, tag) pairs, then renumber by order of the global index.
-            var raw = new List<(int ContainerIndex, string? Tag)>();
+            // Collect (global index, tag, forced) triples, then renumber by order of the global index.
+            var raw = new List<(int ContainerIndex, string? Tag, bool Forced)>();
             int current = -1;
             string? currentTag = null;
+            bool currentForced = false;
             foreach (var lineRaw in stdout.Split('\n'))
             {
                 var line = lineRaw.Trim();
@@ -524,34 +586,45 @@ public static class FfmpegTools
                 {
                     if (current >= 0)
                     {
-                        raw.Add((current, currentTag));
+                        raw.Add((current, currentTag, currentForced));
                     }
 
                     current = int.TryParse(line[6..], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int v) ? v : -1;
                     currentTag = null;
+                    currentForced = false;
                 }
                 else if (line.StartsWith("TAG:language=", StringComparison.Ordinal) && current >= 0)
                 {
                     currentTag = line[13..].Trim();
                 }
+                else if (line.Equals("DISPOSITION:forced=1", StringComparison.OrdinalIgnoreCase))
+                {
+                    currentForced = true;
+                }
             }
 
             if (current >= 0)
             {
-                raw.Add((current, currentTag));
+                raw.Add((current, currentTag, currentForced));
             }
 
             raw.Sort((a, b) => a.ContainerIndex.CompareTo(b.ContainerIndex));
             var tags = new Dictionary<int, string>();
+            var forced = new HashSet<int>();
             for (int pos = 0; pos < raw.Count; pos++)
             {
                 if (!string.IsNullOrEmpty(raw[pos].Tag))
                 {
                     tags[pos] = raw[pos].Tag!;
                 }
+
+                if (raw[pos].Forced)
+                {
+                    forced.Add(pos);
+                }
             }
 
-            return tags;
+            return (tags, forced);
         }
         catch (OperationCanceledException)
         {

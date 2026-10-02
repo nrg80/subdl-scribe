@@ -594,6 +594,33 @@ internal static class Program
               && forcedRoundTrip.Value.HearingImpaired && forcedRoundTrip.Value.Forced,
               "-> " + (forcedRoundTrip?.ToString() ?? "null"));
 
+        // ── F3) a forced datum is never DELIVERABLE — F-M284 ─────────────────
+        Section("F3) A forced subtitle is observed, never uploaded (F-M284)");
+        // The upload pipeline asks this predicate before it reads, hashes or searches a loose file,
+        // so a forced subtitle costs nothing. The embedded path needs no such check because its
+        // enumeration already drops a forced track (IsDialogueStream).
+        Check("a forced datum is NOT deliverable",
+              !new SubtitleRef("DE", false, true).IsDeliverable);
+        Check("its plain and variant siblings still are",
+              new SubtitleRef("DE", false, false).IsDeliverable
+              && new SubtitleRef("DE", true, false).IsDeliverable);
+        Check("and it stays a usable datum — observed, just not delivered",
+              new SubtitleRef("DE", false, true).IsUsable);
+        Check("a forced track is never a dialogue stream (the embedded half)",
+              !SidecarNaming.IsDialogueStream(new MediaStream
+              {
+                  Type = MediaStreamType.Subtitle,
+                  Codec = "subrip",
+                  IsForced = true,
+              }));
+        Check("and a plain text track still is",
+              SidecarNaming.IsDialogueStream(new MediaStream
+              {
+                  Type = MediaStreamType.Subtitle,
+                  Codec = "subrip",
+                  IsForced = false,
+              }));
+
         // ── G ───────────────────────────────────────────────────────────────
         Section("G) Edge cases");
         Check("no streams -> no tracks", SidecarNaming.EmbeddedTracks(null).Count == 0);

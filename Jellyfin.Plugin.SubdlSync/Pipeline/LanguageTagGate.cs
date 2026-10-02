@@ -194,12 +194,22 @@ public sealed class LanguageTagGate
         // bitmap and forced tracks as well, so a position from a filtered list names a
         // different stream (the invariant F-M246/F-M257 already document).
         var pending = new List<(int Pos, MediaStream Stream)>();
+        // F-M284: the FORCED positions of this file, collected in the same pass that computes every
+        // other position — so the rewrite below re-states a fact that was already measured here
+        // rather than re-deriving it. The disposition is the container's own record of "forced", and
+        // a track that carries one must still carry it after the tags are written.
+        var forcedPositions = new List<int>();
         for (int pos = 0; pos < all.Count; pos++)
         {
             var s = all[pos];
             if (s.Type != MediaStreamType.Subtitle || s.IsExternal)
             {
                 continue;
+            }
+
+            if (SidecarNaming.IsForcedStream(s))
+            {
+                forcedPositions.Add(pos);
             }
 
             // F-M246/F-M284: a forced or bitmap track is not the film's dialogue, so it needs no
@@ -416,7 +426,7 @@ public sealed class LanguageTagGate
         // because nothing prunes a media row whose Jellyfin item is still there (F-M261).
         string? oldHash = _registry?.GetMediaHash(mediaPath);
 
-        written = await FfmpegTools.WriteLanguageTagsAsync(ffmpegPath, mediaPath, iso639, _logger, _config, ct)
+        written = await FfmpegTools.WriteLanguageTagsAsync(ffmpegPath, mediaPath, iso639, _logger, _config, ct, forcedPositions)
             .ConfigureAwait(false) ? iso639.Count : 0;
 
         string? newHash = written > 0 ? _registry?.GetMediaHash(mediaPath) : null;
