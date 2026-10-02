@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.164",
-        "changelog": "v12.1.12.164: Reject counters now count every discarded candidate, and the run lines print them.\n    A run that fetched 50 files and kept 41 reported \"1 rejected\". The counter covered four\n    download gates and one upload gate, while the hearing-impaired block and 16 other upload\n    paths stored a Rejected verdict and counted nothing — the GUI column showed a fraction.\n    The counters now count everything fetched and thrown away, both run lines carry the number,\n    and the fields were renamed to match their widened meaning. Nothing that was never fetched\n    is counted. Schema marker 2 -> 3.",
+        "version": "12.1.12.165",
+        "changelog": "v12.1.12.165: A dry run no longer leaves state behind that changes the next real run.\n    It writes no registry rows, spends no retry or id-resolution budget, starts no refetch\n    clock and clears nothing — and the download queue keeps every reported item as open.\n    Until now each of those sat before the dry run's own exit and ran anyway, so a single\n    dry run could hide work for a full refetch interval or empty the queue of everything\n    it had just described.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.164-dev/Jellyfin.Plugin.SubdlSync_12.1.12.164.zip",
-        "checksum": "788c0b2a80385017718a8b79afbd9ea9",
-        "timestamp": "2026-10-02T09:33:00Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.165-dev/Jellyfin.Plugin.SubdlSync_12.1.12.165.zip",
+        "checksum": "757b16dd81479f0e1935ba4c25cce14b",
+        "timestamp": "2026-10-02T11:31:47Z"
       }
     ]
   }
