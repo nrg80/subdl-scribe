@@ -510,8 +510,11 @@ public sealed class UploadPipeline
                 OshashCache.Flush(); // kill-safe: the prune survives a cancelled run
 
                 // Remove the media and subtitle state for the missing file.
+                // F-M22 (defect fixed 02.10.2026): NOT in a dry run — this branch returns before the
+                // upload dry-run exit (the per-item DRY-RUN block below), so a dry run cleared the
+                // item's whole registry state. "No stored verdict is written or cleared by a dry run."
                 var missingHash = Registry.GetMediaHash(mediaPath);
-                if (!string.IsNullOrEmpty(missingHash))
+                if (!string.IsNullOrEmpty(missingHash) && !_config.DryRun)
                 {
                     Registry.MarkAndFlush(() => Registry.DeleteMediaAndSubtitles(missingHash));
                 }
@@ -525,7 +528,17 @@ public sealed class UploadPipeline
             // fails fast here (no stream scan, no API calls) and bumps the retry counter.
             if (!File.Exists(mediaPath))
             {
-                _fileRetries.RecordFailure(item.Id.ToString());
+                // F-M22 (defect fixed 02.10.2026): see the download side — a dry run does not burn a
+                // retry, because the give-up branch deletes the item's registry state.
+                if (!_config.DryRun)
+                {
+                    _fileRetries.RecordFailure(item.Id.ToString());
+                }
+                else
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] DRY-RUN {File} is missing — retry counter left untouched (F-M22)", Path.GetFileName(mediaPath));
+                }
+
                 summary.Failed++;
                 ReportOutcome(item, ItemOutcome.RealFailure);
                 LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] FILE MISSING {File} — attempt {N} (skip after {Limit})", Path.GetFileName(mediaPath), _fileRetries.Count, _config.FileRetryLimit);
@@ -541,7 +554,11 @@ public sealed class UploadPipeline
             // Monthly/Yearly) trusts the entry.
             string? mediaHash = MediaHashFor(mediaPath);
 
-            if (!string.IsNullOrEmpty(mediaHash))
+            // F-M22 (defect fixed 02.10.2026): this upsert runs per item, ahead of the upload
+            // dry-run exit below — so a dry run wrote rows for items it only described. Held back
+            // like its counterpart on the download side; the hash is still computed, because the
+            // candidate path needs it either way.
+            if (!string.IsNullOrEmpty(mediaHash) && !_config.DryRun)
             {
                 Registry.MarkAndFlush(() => Registry.EnsureMedia(mediaHash, item.Id.ToString("D"), mediaPath));
             }
@@ -719,7 +736,13 @@ public sealed class UploadPipeline
                 }
                 else if (string.IsNullOrWhiteSpace(tmdbIdRaw))
                 {
-                    _idNotFound.RecordFailure(item.Id.ToString());
+                    // F-M22 (defect fixed 02.10.2026): same as the download side — a dry run spends
+                    // no part of the id-resolution budget, because its limit retires the item.
+                    if (!_config.DryRun)
+                    {
+                        _idNotFound.RecordFailure(item.Id.ToString());
+                    }
+
                     summary.SkippedNoImdb++;
                     summary.FilesSkipped++;
                     if (_config.LogMode >= LogLevelMode.Verbose)

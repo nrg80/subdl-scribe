@@ -734,8 +734,15 @@ public sealed class DownloadPipeline : IDisposable
         {
             summary.SkippedFileMissing++;
             // Remove the media and subtitle state for the missing file.
+            //
+            // F-M22 (defect fixed 02.10.2026): NOT in a dry run. This method returns from the
+            // file-missing branch above every dry-run exit in the file (the exits sit per language,
+            // far below), so a dry run could DELETE rows for an item it merely reported on. F-M22
+            // names both directions of the rule: "No stored verdict is written **or cleared** by a
+            // dry run." Clearing is the destructive half — the item's whole registry state went,
+            // and unlike a wrong stamp there is nothing to re-derive it from but a full re-scan.
             var missingHash = Registry.GetMediaHash(mediaPath);
-            if (!string.IsNullOrEmpty(missingHash))
+            if (!string.IsNullOrEmpty(missingHash) && !_config.DownloadDryRun)
             {
                 Registry.MarkAndFlush(() => Registry.DeleteMediaAndSubtitles(missingHash));
             }
@@ -769,7 +776,21 @@ public sealed class DownloadPipeline : IDisposable
 
         if (!File.Exists(mediaPath))
         {
-            _fileRetries.RecordFailure(item.Id.ToString());
+            // F-M22 (defect fixed 02.10.2026): a dry run does not burn a retry. The counter is
+            // stored state that decides when this item is given up on — and the give-up branch
+            // DELETES its registry rows. Letting a report-only run advance that count means a dry
+            // run can be the reason an item loses its state. F-M22 states the rule for the counter
+            // by name ("a dry run neither burns a retry nor leaves the retry state stale"); the
+            // normal path honours it by recording a success, this exit path recorded a failure.
+            if (!_config.DownloadDryRun)
+            {
+                _fileRetries.RecordFailure(item.Id.ToString());
+            }
+            else
+            {
+                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] DRY-RUN {File} is missing — retry counter left untouched (F-M22)", Path.GetFileName(mediaPath));
+            }
+
             summary.Failed++;
             ReportOutcome(item, ItemOutcome.RealFailure);
             LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] FILE MISSING {File} — skip after {Limit} consecutive attempts", Path.GetFileName(mediaPath), _config.FileRetryLimit);
@@ -795,17 +816,26 @@ public sealed class DownloadPipeline : IDisposable
 
         // F-M88c + F-M234 (B): media content hash for file-complete short-circuit.
         string? mediaHash = Registry.GetMediaHash(mediaPath);
-        if (!string.IsNullOrEmpty(mediaHash))
-        {
-            Registry.MarkAndFlush(() => Registry.EnsureMedia(mediaHash, item.Id.ToString("D"), mediaPath));
-        }
 
-        // F-M257: record what the container carries, before any work decision is taken. The
-        // download side asks what subtitle data are covered (F-M282); on an install where the
-        // uploader never runs that area was empty, so the question was answered "absent" forever for
-        // a track sitting right there. This runs ahead of the open-pair check on purpose: a settled
-        // item still has facts worth having.
-        ObserveEmbeddedFacts(item, mediaHash);
+        // F-M22 (defect fixed 02.10.2026): BOTH registry writes below are STORED STATE and run
+        // ahead of the dry-run exit (which sits per language, far below this method's pro-item
+        // section). A dry run must write no stored verdict, so the pair moves behind one guard.
+        // The hash itself is still read — the coverage check needs it either way; only the
+        // WRITING is held back. In a real run the behaviour is unchanged.
+        if (!_config.DownloadDryRun)
+        {
+            if (!string.IsNullOrEmpty(mediaHash))
+            {
+                Registry.MarkAndFlush(() => Registry.EnsureMedia(mediaHash, item.Id.ToString("D"), mediaPath));
+            }
+
+            // F-M257: record what the container carries, before any work decision is taken. The
+            // download side asks what subtitle data are covered (F-M282); on an install where the
+            // uploader never runs that area was empty, so the question was answered "absent" forever
+            // for a track sitting right there. This runs ahead of the open-pair check on purpose: a
+            // settled item still has facts worth having — but only a real run records them.
+            ObserveEmbeddedFacts(item, mediaHash);
+        }
 
         // F-M283 (user decision 02.10.2026): the download mark is GONE, and with it the short-circuit
         // this block used to be. It read a stored verdict, then re-derived a list of "open tokens"
@@ -1071,7 +1101,18 @@ public sealed class DownloadPipeline : IDisposable
             {
                 if (_config.DownloadRequireImdb)
                 {
-                    _idNotFound.RecordFailure(item.Id.ToString());
+                    // F-M22 (defect fixed 02.10.2026): a dry run does not spend the item's
+                    // id-resolution budget. This counter's limit (IdRetryLimit) is what gives an
+                    // item up, and the give-up is a STORED verdict a later run reads — so three dry
+                    // runs could retire an item that a real run never touched. The success side is
+                    // deliberately NOT guarded: recording a success clears stale state instead of
+                    // creating it, which is the direction F-M22 sanctions ("neither burns a retry
+                    // nor leaves the retry state stale").
+                    if (!_config.DownloadDryRun)
+                    {
+                        _idNotFound.RecordFailure(item.Id.ToString());
+                    }
+
                     summary.SkippedItems++;
                     summary.SkippedNoId++;
                     if (_config.LogMode >= LogLevelMode.Verbose)
@@ -1330,7 +1371,18 @@ public sealed class DownloadPipeline : IDisposable
         // refetch clock. Items with missing languages get re-searched after the
         // configured interval; new arrivals pass immediately. 5xx errors don't count
         // as a search (fail-open empty result above, but the refetch clock stays off).
-        _searchTracker.MarkSearched(item.Id.ToString(), targets);
+        //
+        // F-M22 (defect fixed 02.10.2026): NOT in a dry run. The stamp is a stored verdict
+        // about this item, and a dry run may write none — "what a dry run leaves behind must
+        // not change what a later run finds". Without this guard the clock ran anyway, so a
+        // dry run made every item it reported read as `not due` for the whole refetch
+        // interval: the very run meant to answer "what WOULD happen" silently suppressed the
+        // next real one. Unlike the old download mark there is no invalidation pass to undo
+        // a wrong stamp — the pipeline trusts it — so this one did not self-heal.
+        if (!_config.DownloadDryRun)
+        {
+            _searchTracker.MarkSearched(item.Id.ToString(), targets);
+        }
 
         // ID sanity check + fallback — compare the searched id with the
         // film header SubDL returned (results[0]) and backfill the missing one.

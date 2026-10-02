@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.164"
+version: "12.1.12.165"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,12 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.165: A dry run no longer leaves state behind that changes the next real run.
+    It writes no registry rows, spends no retry or id-resolution budget, starts no refetch
+    clock and clears nothing — and the download queue keeps every reported item as open.
+    Until now each of those sat before the dry run's own exit and ran anyway, so a single
+    dry run could hide work for a full refetch interval or empty the queue of everything
+    it had just described.
   v12.1.12.164: Reject counters now count every discarded candidate, and the run lines print them.
     A run that fetched 50 files and kept 41 reported "1 rejected". The counter covered four
     download gates and one upload gate, while the hearing-impaired block and 16 other upload

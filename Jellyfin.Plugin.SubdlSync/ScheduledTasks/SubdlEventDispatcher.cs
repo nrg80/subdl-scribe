@@ -117,6 +117,13 @@ public sealed class SubdlEventDispatcher : IDisposable
     private volatile bool _upQuotaStopped;   // Direction hit quota/rate limit in THIS cycle
     private volatile bool _downQuotaStopped; // → drain loop must not re-seed/re-run that direction
 
+    // F-M22 (02.10.2026): the dry-run state of the direction currently running. The per-item
+    // outcome handler (OnItemResult / ApplyOutcomeUpload) fires DURING the pipeline and used to
+    // mark items `Done` for a run that only described them. The run's own summary is not available
+    // yet at that moment, so the flag is set before the pipeline starts and cleared in `finally`.
+    private volatile bool _upInFlightDryRun;
+    private volatile bool _downInFlightDryRun;
+
     // Fate of each direction in the cycle that just ended, so the waiting download/upload task can
     // report what happened to ITS direction instead of a blanket "ok". Live 30.09.2026 18:51: the
     // download direction was stopped by the daily quota (429) after 2 of 1144 items and the GUI
@@ -925,6 +932,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             bundle.Pipeline.QueueFilter = filter;
             bundle.Pipeline.IsArrivalRun = false;
             bundle.Pipeline.ItemResult += (id, outcome) => OnUploadItemResult(_uploadQueue, id, outcome);
+            _upInFlightDryRun = config.DryRun; // F-M22: the outcome handler consults this per item
             try
             {
                 using var stopLinkedUp = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, _stopCts.Token); // F-M131
@@ -944,6 +952,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
             finally
             {
+                _upInFlightDryRun = false; // F-M22: the flag lives exactly as long as the run
                 PluginServiceRegistrator.DisposePipeline(bundle);
                 // F-M17y removed: postprocessing now runs on its own schedule (F-M176+).
                 // It is no longer auto-triggered after every upload run.
@@ -955,6 +964,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             bundle.Pipeline.QueueFilter = filter;
             bundle.Pipeline.IsArrivalRun = false;
             bundle.Pipeline.ItemResult += (id, outcome) => OnItemResult(_downloadQueue, id, outcome);
+            _downInFlightDryRun = config.DownloadDryRun; // F-M22: the outcome handler consults this per item
             try
             {
                 using var stopLinkedDown = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, _stopCts.Token); // F-M131
@@ -974,6 +984,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
             finally
             {
+                _downInFlightDryRun = false; // F-M22: the flag lives exactly as long as the run
                 PluginServiceRegistrator.DisposeDownloadPipeline(bundle);
             }
         }
@@ -1062,7 +1073,21 @@ public sealed class SubdlEventDispatcher : IDisposable
                 Registry.WorkerRunRegistry.Outcome.Deferred,
                 upload ? "upload quota/rate limit — rescheduled" : "download quota/rate limit — rescheduled");
         }
-        if (!quotaStopped && !stopRequested)
+        // F-M22 (defect fixed 02.10.2026): a dry run must not take work away. This block used to
+        // mark every processed item `Done` and — via the RemoveAll below — delete it from
+        // `cycle-queues.json` on DISK. A dry run reports outcomes for items it never worked (it sets
+        // ItemOutcome.Done and counts a "would have saved"), so the next real run found those items
+        // gone from the queue instead of waiting for them: the report-only mode consumed the work it
+        // was describing. The queue is a stored statement about what is still open, and F-M22 allows
+        // no stored verdict to be written or cleared by a dry run. With this guard the items stay
+        // `Queued` and the next real run works them.
+        //
+        // Per direction: at most one of the two summaries is the run that just finished. The
+        // worker-run status above is NOT held back — a dry run did run, and recording that it ran is
+        // a truthful transparency record about the WORKER, not a stored verdict about an item.
+        bool dryRun = upload ? upSummary?.IsDryRun == true : downSummary?.IsDryRun == true;
+
+        if (!quotaStopped && !stopRequested && !dryRun)
         {
             foreach (var qi in queue)
             {
@@ -1076,8 +1101,14 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
         }
 
-        int removed = queue.RemoveAll(x => x.State != QueueItem.ItemState.Queued);
-        if (removed > 0)
+        int removed = dryRun ? 0 : queue.RemoveAll(x => x.State != QueueItem.ItemState.Queued);
+        if (dryRun)
+        {
+            LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,
+                "[SubDL-Dispatch] DRY RUN — {Count} item(s) left Queued in the {Queue} queue (F-M22: a dry run removes no work).",
+                queue.Count(x => x.State == QueueItem.ItemState.Queued), upload ? "upload" : "download");
+        }
+        else if (removed > 0)
         {
             LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[SubDL-Dispatch] {Count} finished items removed from {Queue} queue.", removed, upload ? "upload" : "download");
         }
@@ -1101,6 +1132,15 @@ public sealed class SubdlEventDispatcher : IDisposable
         switch (outcome)
         {
             case Pipeline.DownloadPipeline.ItemOutcome.Done:
+                // F-M22 (defect fixed 02.10.2026): this is where the real damage happened. A dry run
+                // reports ItemOutcome.Done for items it only DESCRIBED (it sets `savedAny = true` and
+                // counts a "would have saved"), and this handler marked them `Done` immediately —
+                // live, not at cleanup. CleanupDirectionQueue then deleted them from
+                // `cycle-queues.json`. So one dry run emptied the queue of every item it reported,
+                // and the next real run had nothing to work: the report-only mode consumed the work
+                // it was describing. F-M22: "what a dry run leaves behind must not change what a
+                // later run finds."
+                if (_upInFlightDryRun) { break; }
                 ApplyItem(queue, itemId, QueueItem.ItemState.Done);
                 break;
 
@@ -1122,6 +1162,9 @@ public sealed class SubdlEventDispatcher : IDisposable
         switch (outcome)
         {
             case Pipeline.UploadPipeline.ItemOutcome.Done:
+                // F-M22: same as the download side — a dry upload reports Done for items it only
+                // described, and that must not remove them from the queue.
+                if (_upInFlightDryRun) { break; }
                 ApplyItem(queue, itemId, QueueItem.ItemState.Done, bumpRetry: false);
                 break;
             case Pipeline.UploadPipeline.ItemOutcome.RealFailure:

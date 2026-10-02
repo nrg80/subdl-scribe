@@ -922,6 +922,72 @@ internal static class Program
                 $"-> {ent.RejectedDownload} / {ent.RejectedUpload}");
         }
 
+        // ── L  the dry run writes no stored verdict (F-M22) ────────────────────────────
+        // The rule has two halves and both were violated in the same shape: a write sat BEFORE the
+        // mode's own exit, so the report-only run left state behind that changed what the next real
+        // run found. These checks pin the two trackers the pipelines own, because those are the
+        // stored verdicts with the longest reach: the refetch stamp (hides work for a whole
+        // interval) and the id-resolution budget (retires an item after IdRetryLimit runs).
+        {
+            string ldir = Path.Combine(Path.GetTempPath(), "subdl-fm22-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(ldir);
+            try
+            {
+                using var ldb = new SubdlDbContext(Path.Combine(ldir, "db"), null);
+                var stamp = new DownloadSearchTracker(ldb, null);
+                string itemId = Guid.NewGuid().ToString();
+                var gap = TimeSpan.FromHours(24);
+
+                // MarkSearched writes onto the item's MEDIA row (FindByItemId), so the row has to
+                // exist first — without it the stamp is a silent no-op. Creating it here also
+                // documents that dependency: the stamp is not a free-standing record.
+                ldb.EnsureMedia("fm22hash", itemId, "/tmp/fm22.mkv");
+
+                // A fresh item is due: the stamp is what makes it otherwise.
+                Check("L1 a never-searched item is due", stamp.IsDue(itemId, gap));
+
+                stamp.MarkSearched(itemId, new List<string> { "EN" });
+                stamp.Flush();
+                // The language list is part of the stamp's meaning: IsDue compares it, and a
+                // DIFFERENT list counts as due on purpose (the old verdict does not cover the new
+                // question). Passing the same list is what isolates the timestamp itself.
+                Check("L2 a searched item is not due inside the gap",
+                      !stamp.IsDue(itemId, gap, new List<string> { "EN" }),
+                      "-> the stamp is what hides the item");
+                Check("L2b a changed language list makes it due again",
+                      stamp.IsDue(itemId, gap, new List<string> { "EN", "DE" }),
+                      "-> so a dry run's stamp cannot hide a language the user adds later");
+
+                // This is the mechanism the dry-run guard protects: had MarkSearched run in a dry
+                // run, the item would read as not-due here even though nothing was ever fetched.
+                stamp.ClearStamp(itemId);
+                stamp.Flush();
+                Check("L3 clearing the stamp makes the item due again", stamp.IsDue(itemId, gap, new List<string> { "EN" }),
+                      "-> no invalidation pass exists, so a wrong stamp does not self-heal");
+
+                // The id-resolution budget: the limit is what gives an item up, and giving up is a
+                // stored verdict. 3 failures at limit 3 must exhaust it; a success must clear it.
+                var idnf = new IdNotFoundTracker(ldb, null);
+                string item2 = Guid.NewGuid().ToString();
+                for (int i = 0; i < 3; i++)
+                {
+                    Check($"L4.{i + 1} id-not-found is not exhausted after {i} failure(s)",
+                          !idnf.IsExhausted(item2, 3));
+                    idnf.RecordFailure(item2);
+                }
+
+                Check("L5 the id-resolution budget is exhausted at its limit", idnf.IsExhausted(item2, 3),
+                      "-> and the give-up is read by later runs");
+                idnf.RecordSuccess(item2);
+                Check("L6 a success clears the budget (the direction a dry run MAY touch)",
+                      !idnf.IsExhausted(item2, 3));
+            }
+            finally
+            {
+                try { Directory.Delete(ldir, true); } catch { /* best effort */ }
+            }
+        }
+
         // ── summary ─────────────────────────────────────────────────────────
         Console.WriteLine();
         Console.WriteLine("Fehler: " + _failed + "  (bestanden: " + _passed + ")");
