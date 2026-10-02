@@ -1,7 +1,11 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.162.
+**Status:** Implementation — v12.1.12.163.
+
+**Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
+`/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
+markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
 
 ## Contents
 
@@ -693,16 +697,7 @@ The upload side follows the same rule: a forced track is removed from the upload
 
 **F-M240 [B1] (superseded by F-M282/F-M283, 02.10.2026):** **The hearing-impaired variant is its own subtitle datum, and completeness is derived rather than marked.**
 
-The question is asked at the grain of the pair — see 14.2a and 14.2b — through the one reader (`SubtitleCoverage`), which consults the files next to the media file, the container's own embedded rows, and (when the configuration counts them) the language-level stream list.
-
-**What F-M240 used to say, and why it is withdrawn.** It answered the HI question with LANGUAGES and carried the variant as a `:hi` token inside the download mark's language list. Both halves are gone:
-
-- the **token** is withdrawn with the vocabulary that could not express the datum (14.2a) — the variant is a pair, not a spelling;
-- the **mark** is withdrawn with the duplicated answer (14.2b) — completeness is derived on every ask, so nothing has to be invalidated, repaired, or kept consistent.
-
-A variant that SubDL does not carry today is looked for again on the next refetch (F-M47). **No expiry, no give-up, no counter as a brake. Test: T79/T90.**
-
-**Every component asks the same reader** — the download pipeline, the seeder, and the database refresh. That is what ends the disagreement the old model produced: the pipeline trusted a stored mark while the seeder queued from the disk and the refresh judged from the stored rows, so one file could be simultaneously complete, due and stale. A vanished `.sdh.srt` is now simply an open pair, everywhere.
+It used to answer the HI question with LANGUAGES and carry the variant as a `:hi` token inside the download mark's language list. Both halves are withdrawn: the token with the vocabulary that could not express the datum (14.2a), the mark with the duplicated answer (14.2b) — the pipeline trusted a stored mark while the seeder queued from the disk and the refresh judged from the stored rows, so one file could be simultaneously complete, due and stale. Every component now asks the same reader (`SubtitleCoverage`), so a vanished `.sdh.srt` is simply an open pair. **Test: T79/T90.**
 
 **F-M193a:** **No construct the database cannot translate may cross into a query.** A string-comparison overload, a helper-method call or any predicate without a database expression must be applied **outside** the query lambda: keep the indexed equality inside and move the rest to LINQ-to-objects afterwards.
 
@@ -841,88 +836,28 @@ The key is media hash **plus position**. Two streams of one file can share a lan
 Fields: the language, **both datum properties** (the hearing-impaired flag and the forced flag), the content hash, the status, the reason field, the status stamp, the SubDL id (F-M198). Each property is stored three-valued (F-M285) — `ja` / `nein` / not said — and a row that does not state them claims no coverage.
 
 #### 14.2a The subtitle DATUM is the pair (language, hearing-impaired) — F-M282
-**F-M282 [B1] (user decision 02.10.2026):** **A hearing-impaired subtitle is its own subtitle DATUM.** It is not a property of the media file and not a modifier of a language: it is its own row, with its own identity, its own content hash, and its own hearing-impaired flag. The smallest thing a question can be asked about is therefore the **pair** `(language, hearing-impaired)`, and every reader and writer asks at that grain.
+**F-M282 [B1] (user decision 02.10.2026):** **A hearing-impaired subtitle is its own subtitle DATUM** — its own row, identity, content hash and flag, never a property of the media file and never a modifier of a language. Every reader and writer asks at the grain of the **pair** `(language, hearing-impaired)`: area 2 keys by media hash + position (F-M197), area 3 by content hash (F-M199), so `Movie.de.srt` and `Movie.de.sdh.srt` are two rows and two data; the pair is also the key space of `IsUploaded(...)`, so a normal upload never blocks an SDH variant (F-M71).
 
-The whole model follows from this one sentence:
-
-- **Area 2** (`embeds`) — one row per stream, keyed by media hash + position, carrying the language and the flag (F-M197). Two streams of one file may differ only in the flag, which is why the position — not the language — is the identity.
-- **Area 3** (`sidecars`) — one row per FILE, keyed by content hash, carrying the language and the flag (F-M199). `Movie.de.srt` and `Movie.de.sdh.srt` are two files with two contents, so they are two rows, two hashes, two data.
-- **Upload** — the pair is the key space of `IsUploaded(mediaHash, language, hearingImpaired)`; a normal upload never blocks an SDH variant (F-M71).
-- **Download** — the pair decides what is searched: the regular datum goes to the `hi=0` pool, the variant datum to the `hi=1` pool, which SubDL serves separately (F-M241).
-- **Refresh, seeder** — both compare pairs, and both read them through the SAME reader, so no two components can judge one file differently.
-
-**The one rule that does NOT split:** a subtitle of language L proves L, whether or not it is the variant — SDH is the same dialogue with annotations (F-M243). It proves `L (HI)` only when it IS the variant. So a lone `Movie.de.sdh.srt` satisfies both pairs of German; a lone `Movie.de.srt` satisfies German only.
-
-**What this replaced, and why it had to go.** The download mark carried the pair as TEXT: a comma-separated language list where the variant rode as a `:hi` suffix (`DE`, `DE:hi`). That spelling could be re-projected back to a plain language, and every projection was a place the conflation re-entered — a missing variant was answered as a missing LANGUAGE, the regular search was fed that language, and `.de.srt` was fetched again over the file already on disk. Measured on the live library: 41 downloads in one run against a 50/day limit, 35 marks withheld in the same run, the same content hash on three consecutive days. A pair cannot be re-projected by accident: there is no spelling of `DE` that carries the variant and no parse that can lose it.
-
-**The string-token vocabulary is withdrawn**, because a type that cannot express the datum is the defect: `HiTokenSuffix`, `Token()`, `IsHiToken`, `TokenLanguage`, `PresentTokens`. **Test: T79.**
+**The one rule that does NOT split:** a subtitle of language L proves L whether or not it is the variant — SDH is the same dialogue with annotations (F-M243) — and proves `L (HI)` only when it IS the variant. So `Movie.de.sdh.srt` alone satisfies both pairs of German; `Movie.de.srt` alone satisfies German only. **Test: T79.**
 
 #### 14.2b Completeness is DERIVED, never stored — F-M283
-**F-M283 [B1] (user decision 02.10.2026):** **There is no download completion mark.** `SubtitlesDownloadedAt` and `SubtitlesDownloadedLanguages` are GONE from the file record, and with them `MarkSubtitlesDownloaded`, `IsSubtitlesDownloaded`, `GetDownloadedLanguages`, `CoversLanguages`, `FindStaleDownloadedLanguages` and `InvalidateDownloadedMark`.
+**F-M283 [B1] (user decision 02.10.2026):** **There is no download completion mark.** `SubtitlesDownloadedAt` and `SubtitlesDownloadedLanguages` are GONE from the file record, and with them the whole support apparatus that read and wrote it.
 
-Whether a file is complete is answered **on every ask**, from the evidence that describes the subtitles themselves — the files next to the media file and the container's own embedded rows — at the grain of F-M282.
+Completeness is answered **on every ask** by ONE reader — `SubtitleCoverage`, asked by pipeline, seeder and refresh alike — from three sources: the sidecar files beside the media, the container's embedded rows, and the language-level stream list (counted only where the configuration counts embedded tracks as coverage).
 
-**Why a stored mark had to go.** It was a SECOND truth beside the rows, and a second truth can only drift. It did: the short-circuit that TRUSTED the mark asked the disk **plus** the stored variant verdict, while the check that decided whether to WRITE the mark asked the disk **alone**. A variant embedded in the container has a registry verdict and no sidecar — so the withhold check reported `no file evidence`, refused the mark, the mark was never written, the item stayed due, and the pipeline re-downloaded the regular subtitle on every pass. Two readers of one question, fed different evidence, is not a bug in either one; it is what a duplicated answer produces.
-
-**One reader: `SubtitleCoverage`.** The download pipeline, the seeder, and the database refresh all ask it, with the same three sources of evidence:
-
-1. **the files next to the media file** — the exact pair each sidecar name states. This is what self-corrects.
-2. **the embedded rows of the container** — each with its own language and its own flag, written by whichever pass observed the streams (F-M257). This is the source the withhold side was missing.
-3. **the language-level embedded evidence** the caller may hold (Jellyfin's stream list), counted only when the configuration counts embedded tracks as coverage. It speaks about a language and can never prove a variant.
-
-**No invalidation step exists, and none is needed.** A stored verdict had to be corrected when it was overtaken by reality; a derived answer cannot be overtaken. Deleting `Movie.de.sdh.srt` removes its evidence, so the pair is simply open on the next ask — no mark to drop, no stamp to clear, no repair pass. The database refresh therefore **reports** which items have open files and writes nothing (the `MarksInvalidated` counter is gone with its subject).
-
-**The cost is deliberate and small:** an item with nothing open is no longer skipped by a stored stamp, so every run asks the question. That is a directory listing and an indexed lookup, not an API call — and it is the point, because the answer can no longer be stale.
-
-**Not a give-up.** A pair SubDL does not carry today is looked for again on the next refetch (F-M47); there is no expiry and no retry budget as a brake. The QA budget is keyed `(item, language)` and **shared** between a language's two data, which is why a "no candidate in the pool" outcome must never be recorded as a QA failure (F-M42b). **Test: T90.**
+**No invalidation step exists, and none is needed.** Deleting `Movie.de.sdh.srt` removes its evidence, so the pair is open on the next ask; the refresh therefore **reports** open files and writes nothing. A pair SubDL does not carry is retried on the next refetch (F-M47) — no expiry, no retry budget as a brake. **Test: T90.**
 
 #### 14.2c The second property: FORCED — F-M284
-**F-M284 [B1] (user decision 02.10.2026):** **`forced` is an Eigenschaft OF THE SUBTITLE DATUM, exactly like hearing-impaired.** A forced subtitle is its own datum with its own row and its own flag — never a flag on the media file, and never a way to identify a language. The grain is therefore the triple `(language, hearing-impaired, forced)`.
+**F-M284 [B1] (user decision 02.10.2026):** **`forced` is a property OF THE SUBTITLE DATUM, like hearing-impaired** — its own row and flag, never a flag on the media file and never a way to identify a language. Grain: `(language, hearing-impaired, forced)`.
 
-Jellyfin reports both on its streams (`MediaStream.IsHearingImpaired`, `MediaStream.IsForced`), so both are readable at the source. **But the two are NOT symmetric on SubDL's side, and the difference decides what may be done with each:**
+**They are NOT symmetric on SubDL's side.** Hearing-impaired is bilateral — two server-side pools (`&hi=1` / `&hi=0`, F-M241) plus an upload field — so it can be searched, fetched and announced. **Forced is LOCAL:** no filter, no field, no candidate names it. A forced datum is therefore **OBSERVED, never DELIVERED** (`SubtitleRef.IsDeliverable`) and never covers its language (F-M246).
 
-- **hearing-impaired is bilateral.** SubDL serves it from two separate server-side pools (`&hi=1` / `&hi=0`, F-M241) and accepts the flag on upload — so the datum can be **searched for, fetched and announced**.
-- **forced is LOCAL.** SubDL has no forced filter and returns no forced field. Measured live 02.10.2026: `forced=1`, `forced=0` and no parameter at all returned the **same 10 candidates**; the response carries only `hi`; and **0 of 22** candidates across three languages carried "forced" in the release name.
-
-**So a forced datum is OBSERVED, never DELIVERED.** The plugin never searches for one, never fetches one, and never uploads one. `SubtitleRef.IsDeliverable` states this for callers that plan work.
-
-**What forced is FOR: it is the reason a language can be due while a track of it exists.** A forced track carries the lines of foreign-language scenes, not the film's dialogue (F-M246), so it never counts as coverage: the regular datum stays open and is searched for. The row that records the forced track is what makes that visible, instead of a rule each caller has to re-derive.
-
-**One reader, not five call sites.** Before this, the forced exclusion was re-derived from Jellyfin's flag in five places (the seeder twice, the upload pipeline, the language gate, and the embedded-track enumeration itself). The enumeration now **records** a forced track rather than dropping it, and the "does not count as coverage" rule lives in `SubtitleCoverage` alone — the same rule for a sidecar (`.forced.srt`) and for a track inside the container.
-
-**Naming:** the marker is `forced`, read as a SET with `sdh` in either order (`Movie.de.forced.srt`, `Movie.de.sdh.forced.srt`), so a datum that is both resolves with both flags. Bitmap tracks remain excluded, and that is a different matter: they carry no text at all (F-M6), so there is no datum to record. **Test: T91.**
-
-**A forced subtitle is never UPLOADED** (user decision 02.10.2026). `IsDeliverable` says so, and the upload pipeline asks it: a loose `.forced.srt` is skipped before it costs a read, a hash or a search request. The embedded side needs no separate check — its enumeration already runs through `IsDialogueStream`, which drops a forced track before it can become a candidate. The two paths reaching the same verdict by different means is not redundancy here: one filters by the stream flag, the other reads the name, and both must agree.
-
-**When the plugin rewrites a container, the forced flag survives it** (user decision 02.10.2026). The language-tag gate replaces the file, so the `forced` disposition — the container's only record of it — must be re-stated in that rewrite and verified afterwards. Two measured facts decide how:
-
-- `ffmpeg -map 0 -c copy` carries the disposition over by itself, so the rewrite is not the danger it looks like; the explicit re-statement is the guarantee, and the verification is what makes a silent loss impossible.
-- The additive form matters: **`-disposition:s:N +forced`** leaves the stream's other dispositions alone, while the bare `forced` RESETS the whole set — measured on a real container, a stream carrying `default=1` came back as `default=0`. And the spec is `stream_type:index`, never the doubled `s:s:N`: the doubled form makes ffmpeg abort the entire command with `Stream type specified multiple times` (exit 234), so no tag is written at all.
-
-The verification is the point. A tag write is confirmed by re-reading the temp file, and a rewrite whose forced flag did not survive is REJECTED and the original kept — otherwise the container would lose the flag and the next observation would record the loss as fact, with nothing left to notice it.
-
-**A row written before the property existed is BACKFILLED** (user decision 02.10.2026). A document store has no schema, so such a row has no `forced` field and reads back as `false` — which is not a harmless default: a forced track would be indistinguishable from the film's dialogue, would count as coverage, and its language would stay settled although its only track carries foreign-language scenes. The refresh re-reads the flag off the row's own file name, through the marker reader `Parse` uses, so the backfill derives nothing new and cannot disagree with the normal read.
-
-An embedded row cannot be backfilled this way and is deliberately left alone: its flag lives in the container's stream list, not in a name, and the next scan or download pass observes the track and writes the current value. Recording `false` there would be the mistake the backfill exists to undo.
+**A forced track is RECORDED, not dropped** — that rule lives in `SubtitleCoverage` alone. Marker `forced`, read as a SET with `sdh` in either order; bitmap tracks stay excluded (F-M6), and a rewrite re-states the flag or is rejected. **Test: T91–T95.**
 
 #### 14.2d `hi` and `forced` are stored THREE-valued — F-M285
-**F-M285 [B1] (user decision 02.10.2026):** **Every subtitle datum states `hi` and `forced` explicitly as `ja` or `nein`.** The stored value is three-valued, not two:
+**F-M285 [B1] (user decision 02.10.2026):** **Every subtitle datum states `hi` and `forced` explicitly as `ja` or `nein`.** Three-valued: `true` (it IS the variant, or IS forced), `false` (it is NOT — also a statement, written explicitly, because a writer that knows the fact must never leave it unsaid), `null` (the row does not say).
 
-- **`true`** — the subtitle IS the variant (or IS forced). A statement.
-- **`false`** — the subtitle is NOT the variant (or is NOT forced). Also a statement, and it is written EXPLICITLY: a writer that knows the fact must never leave it unsaid.
-- **`null`** — the row **does not say**. Reserved for a row written before the field existed, or for a fact nothing could decide.
-
-**Why the third value is not decoration.** A document store has no schema, so a missing field reads back as a default, and a default that looks like a decision is how a missing fact becomes a false claim. Concretely: a legacy row that carried no `forced` would read as "not forced", so a forced track would pass as the film's dialogue, its language would count as covered, and the item would look settled forever with nothing left to correct it.
-
-**A gap is never read as a statement.** A reader that needs the fact treats `null` as "no claim" — see `SubtitleCoverage`, where such a datum simply reports no coverage. That direction is chosen because it **converges**: the datum reads as open, the item is worked once more, and that pass states the value explicitly. The opposite default would be permanent and silent.
-
-**The refresh fills the gap from the fact itself**, not by guessing: the forced flag is re-read off each sidecar row's own file name (the marker reader `Parse` uses, so the two cannot disagree). Only a `null` is filled — an explicit `true` or `false` is a statement and is left untouched. **The gap is filled with the value that was READ, including `false`:** filling only the affirmative case would leave a plain `.de.srt` row at `null` for ever, so it would never reach the statement the rule requires and its datum would read as open on every run. A gap-filler that writes only one of the two answers does not converge.
-
-**Every writer states BOTH properties, on BOTH paths.** `hi` and `forced` are required parameters of `MarkSidecar`/`ObserveSidecar` and of `MarkEmbed`/`ObserveEmbed` — no default value, because a default is exactly how a caller leaves a fact unsaid. Measured before this rule: the embedded path recorded `forced` (its source is Jellyfin's stream list) while the loose-sidecar path **dropped it** — the call site destructured the name reader's tuple with `_` and the writers had no `forced` parameter at all, so `Film.de.forced.srt` produced a `null` row that `RecordedPairsByHash` and the coverage reader both skipped. A reader can hand a caller a fact a writer cannot take; the signature is what makes that impossible.
-
-**The name writer carries the marker too.** `SidecarNaming.Build`/`PlanTarget` take `forced`, so a rename of an unlabelled forced file keeps its property. Otherwise the rename would silently turn a forced file into the film's dialogue — the exact confusion the datum exists to prevent. **Test: T93.**
-
-Embedded rows are not backfilled this way: their flags live in the container's stream list, not in a name, and the next scan or download pass observes the track and writes the current value. **Test: T93.**
+**A gap is never read as a statement.** A reader treats `null` as "no claim", so the datum reports no coverage; that direction **converges** — the item is worked once more and that pass states the value — whereas the opposite default would look settled forever. The refresh fills a `null` from the row's own file name **with the value it read, `false` included**. Both properties are REQUIRED parameters on both paths, and `SidecarNaming.Build`/`PlanTarget` carry `forced`. **Test: T93.**
 
 #### 14.3 Area 3 — Sidecar files (`sidecars`)
 **F-M199:** one record per loose `.srt` file, `_id` = the **normalized content hash** (F-M186).

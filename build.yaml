@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.162"
+version: "12.1.12.163"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,12 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.163: Forced subtitles are never uploaded, and a rewrite keeps the flag.
+    A forced subtitle carries only the foreign-language scenes, so it is not the
+    film's dialogue and SubDL has no counterpart for it: it is observed, never uploaded.
+    The previous version recorded that flag on tracks inside the container but dropped
+    it for a loose .srt, so such a row said nothing and was invisible to every reader;
+    both writers now state it, and a plain row is stated as "no" instead of left silent.
   v12.1.12.162: Forced subtitles are never uploaded, and a rewrite keeps the flag.
     A forced subtitle carries only the lines of foreign-language scenes, so it is
     not the film's dialogue and has no counterpart at SubDL. It is now observed and
