@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.160.
+**Status:** Implementation — v12.1.12.161.
 
 ## Contents
 
@@ -832,13 +832,13 @@ The row is written **once per context creation**, never per run: an audit record
 
 **F-M196:** one record per **video file**, `_id` = the stable OSHash (16 hex characters, F-M61). Carries the path, the Jellyfin item id, the IMDb id, the TMDb id, the SubDL id, the series flag, the season, the episode, the last-seen stamp. For a series episode the ids are the **SHOW** ids, never episode or season ids (F-M191).
 
-Derived, written automatically whenever an embedded track is stored so they cannot drift: the language aggregate (sorted, comma separated) and the hearing-impaired aggregate.
+Derived, written automatically whenever an embedded track is stored so it cannot drift: the language aggregate (sorted, comma separated). There is **no hearing-impaired aggregate** — the flag belongs to the datum (F-M282) and an aggregate would be a second truth beside the rows.
 
 **F-M197:** one record per **embedded subtitle stream** in `embeds`, `_id` = `"<media hash>|<stream position>"`.
 
 The key is media hash **plus position**. Two streams of one file can share a language (a normal and an SDH variant), so the language alone never identifies the row.
 
-Fields: the language, the hearing-impaired flag, the content hash, the status, the reason field, the status stamp, the SubDL id (F-M198).
+Fields: the language, **both datum properties** (the hearing-impaired flag and the forced flag), the content hash, the status, the reason field, the status stamp, the SubDL id (F-M198). Each property is stored three-valued (F-M285) — `ja` / `nein` / not said — and a row that does not state them claims no coverage.
 
 #### 14.2a The subtitle DATUM is the pair (language, hearing-impaired) — F-M282
 **F-M282 [B1] (user decision 02.10.2026):** **A hearing-impaired subtitle is its own subtitle DATUM.** It is not a property of the media file and not a modifier of a language: it is its own row, with its own identity, its own content hash, and its own hearing-impaired flag. The smallest thing a question can be asked about is therefore the **pair** `(language, hearing-impaired)`, and every reader and writer asks at that grain.
@@ -907,7 +907,11 @@ An embedded row cannot be backfilled this way and is deliberately left alone: it
 
 **A gap is never read as a statement.** A reader that needs the fact treats `null` as "no claim" — see `SubtitleCoverage`, where such a datum simply reports no coverage. That direction is chosen because it **converges**: the datum reads as open, the item is worked once more, and that pass states the value explicitly. The opposite default would be permanent and silent.
 
-**The refresh fills the gap from the fact itself**, not by guessing: the forced flag is re-read off each sidecar row's own file name (the marker reader `Parse` uses, so the two cannot disagree). Only a `null` is filled — an explicit `true` or `false` is a statement and is left untouched.
+**The refresh fills the gap from the fact itself**, not by guessing: the forced flag is re-read off each sidecar row's own file name (the marker reader `Parse` uses, so the two cannot disagree). Only a `null` is filled — an explicit `true` or `false` is a statement and is left untouched. **The gap is filled with the value that was READ, including `false`:** filling only the affirmative case would leave a plain `.de.srt` row at `null` for ever, so it would never reach the statement the rule requires and its datum would read as open on every run. A gap-filler that writes only one of the two answers does not converge.
+
+**Every writer states BOTH properties, on BOTH paths.** `hi` and `forced` are required parameters of `MarkSidecar`/`ObserveSidecar` and of `MarkEmbed`/`ObserveEmbed` — no default value, because a default is exactly how a caller leaves a fact unsaid. Measured before this rule: the embedded path recorded `forced` (its source is Jellyfin's stream list) while the loose-sidecar path **dropped it** — the call site destructured the name reader's tuple with `_` and the writers had no `forced` parameter at all, so `Film.de.forced.srt` produced a `null` row that `RecordedPairsByHash` and the coverage reader both skipped. A reader can hand a caller a fact a writer cannot take; the signature is what makes that impossible.
+
+**The name writer carries the marker too.** `SidecarNaming.Build`/`PlanTarget` take `forced`, so a rename of an unlabelled forced file keeps its property. Otherwise the rename would silently turn a forced file into the film's dialogue — the exact confusion the datum exists to prevent. **Test: T93.**
 
 Embedded rows are not backfilled this way: their flags live in the container's stream list, not in a name, and the next scan or download pass observes the track and writes the current value. **Test: T93.**
 
@@ -943,7 +947,7 @@ There is **no "settled"/"done" state.** "Is this position finished?" is answered
 - `IsUploaded(mediaHash, language, hearingImpaired)` answers "do I still need to upload this language for this file".
 - Per-position questions use the embedded lookup / the rejection reason / the terminal-position test — never a pair-level query.
 - A stream skipped **because its language is already uploaded** is recorded as **rejected with `duplicate-self-echo`**, not as "uploaded".
-- Derived file aggregates (the language aggregate, the hearing-impaired aggregate) are recomputed whenever a track is written, in one place.
+- The derived file aggregate (the language aggregate) is recomputed whenever a track is written, in one place. There is no hearing-impaired aggregate (F-M282/F-M283).
 #### 14.8 Migration policy
 **F-M195b:** structural changes are **not migrated**. The schema marker in area 0 makes the change visible and the database reset (F-M90) is the intended path; records from an unrecognised schema version are ignored rather than rewritten.
 

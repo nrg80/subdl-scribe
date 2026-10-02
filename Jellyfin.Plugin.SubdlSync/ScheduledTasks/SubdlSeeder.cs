@@ -978,7 +978,7 @@ public sealed class SubdlSeeder
     /// <param name="loosePath">Current path of the unlabelled sidecar.</param>
     /// <param name="lang">The language resolved from the file's text.</param>
     /// <returns>The path the file is at after this call — the new one, or the original on any refusal.</returns>
-    private string RenameSidecar(string mediaPath, string loosePath, string lang)
+    private string RenameSidecar(string mediaPath, string loosePath, string lang, bool forced)
     {
         try
         {
@@ -1004,7 +1004,7 @@ public sealed class SubdlSeeder
                 return loosePath; // cannot list the directory — do not guess at a free name
             }
 
-            string target = Registry.SidecarNaming.PlanTarget(mediaPath, lang, hearingImpaired: false, taken);
+            string target = Registry.SidecarNaming.PlanTarget(mediaPath, lang, hearingImpaired: false, taken, forced);
             string targetName = System.IO.Path.GetFileName(target);
 
             if (System.IO.Path.GetFullPath(target).Equals(
@@ -1069,7 +1069,7 @@ public sealed class SubdlSeeder
             // FindLooseSrts below — that copy returns bare paths and carries no language or HI
             // marker, so it cannot answer the question this method records. Reading a name here with
             // a fifth parser is exactly how the earlier four drifted apart.
-            foreach (var (loosePath, looseLang, looseHi, _) in
+            foreach (var (loosePath, looseLang, looseHi, looseForced) in
                      Pipeline.UploadPipeline.FindLooseSrts(mediaPath))
             {
                 string content;
@@ -1133,7 +1133,7 @@ public sealed class SubdlSeeder
                 if (wasUnlabeled)
                 {
                     string before = loosePath;
-                    factPath = RenameSidecar(mediaPath, loosePath, resolvedLang!);
+                    factPath = RenameSidecar(mediaPath, loosePath, resolvedLang!, looseForced);
 
                     // A rename leaves any existing row pointing at a name that no longer exists, and
                     // the refresh task forgets a sidecar whose stored path is gone — it would destroy
@@ -1146,7 +1146,7 @@ public sealed class SubdlSeeder
                     }
                 }
 
-                if (registry.ObserveSidecar(contentHash, mediaHash, resolvedLang!, looseHi,
+                if (registry.ObserveSidecar(contentHash, mediaHash, resolvedLang!, looseHi, looseForced,
                         System.IO.Path.GetFileName(factPath), factPath))
                 {
                     written++;

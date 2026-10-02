@@ -457,20 +457,25 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             }
 
             var (_, forced) = Registry.SidecarNaming.ReadFlags(name);
-            if (!forced)
-            {
-                continue;
-            }
 
-            row.Forced = true;
+            // F-M285: the gap is filled with the value that was READ — including `false`. Returning
+            // early on a name without the marker left a plain `.de.srt` row at `null` for ever, so it
+            // never reached the explicit statement the three-valued rule requires: the row would keep
+            // saying "I do not know" about a fact its own name states, and the datum would read as
+            // open on every single run. A gap-filler that only writes the affirmative case does not
+            // converge.
+            row.Forced = forced;
             changed.Add(row);
-            updated++;
+            if (forced)
+            {
+                updated++;
+            }
         }
 
         if (changed.Count > 0)
         {
             db.Sidecars.Update(changed);
-            LogUtil.Normal(_logger, "[SubDL-Refresh] forced flag backfilled on {Count} sidecar row(s) written before the field existed.", updated);
+            LogUtil.Normal(_logger, "[SubDL-Refresh] forced flag stated on {Count} sidecar row(s) written before the field existed ({ForcedCount} forced, {PlainCount} not).", changed.Count, updated, changed.Count - updated);
         }
 
         return updated;

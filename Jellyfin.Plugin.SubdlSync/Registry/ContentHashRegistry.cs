@@ -858,13 +858,16 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="mediaHash">Media hash of the file it sits beside.</param>
     /// <param name="language">Language code.</param>
     /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <param name="forced">F-M284: true when this datum IS forced. Required, with no default: the
+    /// writer knows the fact, and a default would let a caller leave it unsaid — which is the very
+    /// gap this row shape exists to close.</param>
     /// <param name="status">One of <see cref="SubtitleStatus"/>.</param>
     /// <param name="reason">Rejection reason when rejected.</param>
     /// <param name="subdlId">SubDL id when known.</param>
     /// <param name="fileName">File name for diagnostics.</param>
     /// <param name="path">Full path for diagnostics.</param>
     public void MarkSidecar(string? contentHash, string mediaHash, string language, bool hearingImpaired,
-                            string status, string? reason = null, string? subdlId = null,
+                            bool forced, string status, string? reason = null, string? subdlId = null,
                             string? fileName = null, string? path = null)
     {
         if (string.IsNullOrEmpty(contentHash))
@@ -879,8 +882,10 @@ public sealed class ContentHashRegistry : IDisposable
         existing.Language = language;
         // F-M285: the WRITER states the value explicitly. `null` is reserved for "this row does not
         // say" (a row from an older build), so a writer that knows the fact must never leave it null.
+        // Both properties are written unconditionally — a `??=` here would turn "nobody said" into a
+        // statement, and a forced file would then pass as the film's dialogue.
         existing.HearingImpaired = hearingImpaired;
-        existing.Forced ??= false;
+        existing.Forced = forced;
         existing.ContentHash = contentHash;
         existing.Status = status;
         existing.Reason = reason;
@@ -933,11 +938,13 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="mediaHash">Media hash of the file it sits beside.</param>
     /// <param name="language">Language code.</param>
     /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <param name="forced">F-M284: true when this datum IS forced. Required, no default — the
+    /// observation knows the fact (its source states it) and must state it.</param>
     /// <param name="fileName">File name for diagnostics.</param>
     /// <param name="path">Full path for diagnostics.</param>
     /// <returns>True when a row was created or its facts changed.</returns>
     public bool ObserveSidecar(string? contentHash, string mediaHash, string language, bool hearingImpaired,
-                               string? fileName = null, string? path = null)
+                               bool forced, string? fileName = null, string? path = null)
     {
         if (string.IsNullOrEmpty(contentHash) || string.IsNullOrEmpty(mediaHash))
         {
@@ -965,7 +972,9 @@ public sealed class ContentHashRegistry : IDisposable
 
         if (existing != null
             && string.Equals(existing.Language, language, StringComparison.OrdinalIgnoreCase)
-            && existing.HearingImpaired == hearingImpaired)
+            && existing.HearingImpaired == hearingImpaired
+            && existing.Forced.HasValue
+            && existing.Forced.Value == forced)
         {
             return false; // already recorded, unchanged
         }
@@ -975,6 +984,7 @@ public sealed class ContentHashRegistry : IDisposable
         row.MediaHash = mediaHash;
         row.Language = language;
         row.HearingImpaired = hearingImpaired;
+        row.Forced = forced;
         row.ContentHash = contentHash;
         row.Status = SubtitleStatus.Observed;
         row.Reason = null;
@@ -1130,7 +1140,7 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="path">Written path.</param>
     public void MarkDownloaded(string contentHash, string mediaHash, string language, bool hearingImpaired = false,
                                string? subdlId = null, string? fileName = null, string? path = null)
-        => MarkSidecar(contentHash, mediaHash, language, hearingImpaired,
+        => MarkSidecar(contentHash, mediaHash, language, hearingImpaired, forced: false,
                        SubtitleStatus.Downloaded, reason: null, subdlId: subdlId, fileName: fileName, path: path);
 
     // ------------------------------------------- rejected download candidates (area 4)

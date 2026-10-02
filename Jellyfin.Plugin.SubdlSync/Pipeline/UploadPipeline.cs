@@ -816,7 +816,7 @@ public sealed class UploadPipeline
 
             // Phase 1 candidates: (kind, stream/loose-data, lang, srtContent)
             // F-M71: HearingImpaired rides along — SDH streams upload with hi=true.
-            var phase1 = new List<(bool IsLoose, MediaStream? Stream, int SubPos, string LoosePath, string Lang, string Srt, bool HearingImpaired)>();
+            var phase1 = new List<(bool IsLoose, MediaStream? Stream, int SubPos, string LoosePath, string Lang, string Srt, bool HearingImpaired, bool Forced)>();
             int looseSeen = 0, embeddedSeen = 0;
 
             foreach (var stream in textStreams)
@@ -986,11 +986,11 @@ public sealed class UploadPipeline
                 }
 
                 embeddedSeen++;
-                phase1.Add((false, stream, subPos, string.Empty, lang, srt, streamHi));
+                phase1.Add((false, stream, subPos, string.Empty, lang, srt, streamHi, forced: false));
             }
 
             // F-M48: loose SRT files — same phase-1 treatment (read + QA local)
-            foreach (var (loosePath, looseLang, looseHi, _) in FindLooseSrts(mediaPath))
+            foreach (var (loosePath, looseLang, looseHi, looseForced) in FindLooseSrts(mediaPath))
             {
                 runCt.ThrowIfCancellationRequested();
                 watchdog.Heartbeat();
@@ -1058,7 +1058,7 @@ public sealed class UploadPipeline
                                 Path.GetFileName(loosePath));
                             string offHash = ContentHashRegistry.ComputeHash(looseSrt);
                             Registry.MarkAndFlush(() => Registry.MarkSidecar(
-                                offHash, mediaHash, "UN", looseHi,
+                                offHash, mediaHash, "UN", looseHi, looseForced,
                                 SubtitleStatus.Rejected, reason: RejectReason.UndOff,
                                 fileName: Path.GetFileName(loosePath), path: loosePath));
                             continue;
@@ -1072,7 +1072,7 @@ public sealed class UploadPipeline
                                 Path.GetFileName(loosePath), looseSrt.Length);
                             string smallHash = ContentHashRegistry.ComputeHash(looseSrt);
                             Registry.MarkAndFlush(() => Registry.MarkSidecar(
-                                smallHash, mediaHash, "UN", looseHi,
+                                smallHash, mediaHash, "UN", looseHi, looseForced,
                                 SubtitleStatus.Rejected, reason: RejectReason.UndTooSmall,
                                 fileName: Path.GetFileName(loosePath), path: loosePath));
                             continue;
@@ -1087,7 +1087,7 @@ public sealed class UploadPipeline
                                 Path.GetFileName(loosePath), looseSrt.Length);
                             string failHash = ContentHashRegistry.ComputeHash(looseSrt);
                             Registry.MarkAndFlush(() => Registry.MarkSidecar(
-                                failHash, mediaHash, "UN", looseHi,
+                                failHash, mediaHash, "UN", looseHi, looseForced,
                                 SubtitleStatus.Rejected, reason: RejectReason.UndDetectionFailed,
                                 fileName: Path.GetFileName(loosePath), path: loosePath));
                             continue;
@@ -1100,7 +1100,7 @@ public sealed class UploadPipeline
                     }
 
                     looseSeen++;
-                    phase1.Add((true, null, -1, loosePath, looseLangResolved, looseSrt, looseHi));
+                    phase1.Add((true, null, -1, loosePath, looseLangResolved, looseSrt, looseHi, looseForced));
                 }
                 catch (Exception ex)
                 {
@@ -1131,7 +1131,7 @@ public sealed class UploadPipeline
             // QA rejects are persisted to the F-M68 reject store so they never
             // come back. QA needs the runtime for the sync gate.
             long runtimeMs = (item.RunTimeTicks ?? 0) / 10_000;
-            var qaSurvivors = new List<(bool IsLoose, MediaStream? Stream, int SubPos, string LoosePath, string Lang, string Srt, bool HearingImpaired)>();
+            var qaSurvivors = new List<(bool IsLoose, MediaStream? Stream, int SubPos, string LoosePath, string Lang, string Srt, bool HearingImpaired, bool Forced)>();
             foreach (var cand in phase1)
             {
                 runCt.ThrowIfCancellationRequested();
@@ -1152,7 +1152,7 @@ public sealed class UploadPipeline
                     {
                         // A sidecar is identified by content, not by a position — one verdict row.
                         Registry.MarkAndFlush(() => Registry.MarkSidecar(
-                            contentHash, mediaHash, cand.Lang, cand.HearingImpaired,
+                            contentHash, mediaHash, cand.Lang, cand.HearingImpaired, cand.Forced,
                             SubtitleStatus.Rejected, reason: qaReject,
                             fileName: Path.GetFileName(cand.LoosePath), path: cand.LoosePath));
                     }
@@ -1248,7 +1248,7 @@ public sealed class UploadPipeline
                     if (cand.IsLoose)
                     {
                         Registry.MarkAndFlush(() => Registry.MarkSidecar(
-                            contentHash, mediaHash, cand.Lang, cand.HearingImpaired,
+                            contentHash, mediaHash, cand.Lang, cand.HearingImpaired, cand.Forced,
                             SubtitleStatus.Rejected, reason: RejectReason.SelfEcho,
                             fileName: Path.GetFileName(cand.LoosePath), path: cand.LoosePath));
                     }
@@ -1292,7 +1292,8 @@ public sealed class UploadPipeline
                     skipPrecheck: true,
                     tmdbId: tmdbIdRaw,
                     hearingImpaired: cand.HearingImpaired,
-                    subPos: cand.SubPos).ConfigureAwait(false);
+                    subPos: cand.SubPos,
+                    forced: cand.Forced).ConfigureAwait(false);
                 switch (result)
                 {
                     case { Ok: true }:
@@ -1303,7 +1304,7 @@ public sealed class UploadPipeline
                         if (cand.IsLoose)
                         {
                             Registry.MarkAndFlush(() => Registry.MarkSidecar(
-                                ContentHashRegistry.ComputeHash(cand.Srt), mediaHash, cand.Lang, cand.HearingImpaired,
+                                ContentHashRegistry.ComputeHash(cand.Srt), mediaHash, cand.Lang, cand.HearingImpaired, cand.Forced,
                                 SubtitleStatus.Uploaded,
                                 fileName: Path.GetFileName(cand.LoosePath), path: cand.LoosePath));
                         }
@@ -1328,7 +1329,7 @@ public sealed class UploadPipeline
                         if (cand.IsLoose)
                         {
                             Registry.MarkAndFlush(() => Registry.MarkSidecar(
-                                ContentHashRegistry.ComputeHash(cand.Srt), mediaHash, cand.Lang, cand.HearingImpaired,
+                                ContentHashRegistry.ComputeHash(cand.Srt), mediaHash, cand.Lang, cand.HearingImpaired, cand.Forced,
                                 SubtitleStatus.Rejected, reason: skipReason,
                                 fileName: Path.GetFileName(cand.LoosePath), path: cand.LoosePath));
                         }
@@ -1738,7 +1739,8 @@ public sealed class UploadPipeline
         bool skipPrecheck = false,
         string? tmdbId = null,
         bool hearingImpaired = false,
-        int subPos = -1)
+        int subPos = -1,
+        bool forced = false)
     {
         // F-M48: loose file — read from disk
         if (srtContent == null && loosePath != null)
@@ -1844,7 +1846,7 @@ public sealed class UploadPipeline
             {
                 if (loosePath != null)
                 {
-                    Registry.MarkSidecar(contentHashEarly, mediaHash ?? contentHashEarly, lang, hearingImpaired,
+                    Registry.MarkSidecar(contentHashEarly, mediaHash ?? contentHashEarly, lang, hearingImpaired, forced,
                         SubtitleStatus.Uploaded, subdlId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         fileName: Path.GetFileName(loosePath), path: loosePath);
                 }

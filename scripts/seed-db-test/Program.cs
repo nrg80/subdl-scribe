@@ -329,10 +329,10 @@ internal static class Program
         }
 
         int sideWritten = 0;
-        foreach (var (path, lang, hi, _) in loose)
+        foreach (var (path, lang, hi, forced) in loose)
         {
             string text = File.ReadAllText(path);
-            if (reg.ObserveSidecar(ContentHashRegistry.ComputeHash(text), mediaHash, lang, hi,
+            if (reg.ObserveSidecar(ContentHashRegistry.ComputeHash(text), mediaHash, lang, hi, forced,
                                    Path.GetFileName(path), path))
             {
                 sideWritten++;
@@ -368,9 +368,27 @@ internal static class Program
         Check("the recorded data merge both areas (DE variant embed + forced ES)",
               recorded.Contains(new SubtitleRef("DE", true)) && recorded.Contains(new SubtitleRef("ES", false, true)),
               "-> [" + string.Join(",", recorded.Select(p => p.ToString()).OrderBy(x => x)) + "]");
+        // The claim is about the RAW reader not widening a variant — so it must be asserted on the
+        // EMBED rows, not on the merged set. `recorded` legitimately carries plain DE as well, from
+        // the fixture's real .de.srt sidecar, and that is the point: before the sidecar path stated
+        // its flags, that row was `null` and INVISIBLE, so this assertion passed VACUOUSLY. It only
+        // became a real test once the sidecar wrote its statement.
+        var embedOnly = reg.GetEmbeds(mediaHash)
+            .Where(r => !string.IsNullOrWhiteSpace(r.Language) && r.HearingImpaired.HasValue && r.Forced.HasValue)
+            .Select(r => new SubtitleRef(r.Language, r.HearingImpaired.Value, r.Forced.Value))
+            .ToHashSet();
         Check("the raw reader does NOT widen a variant into its plain language",
-              !recorded.Contains(new SubtitleRef("DE", false)),
+              !embedOnly.Contains(new SubtitleRef("DE", false)),
+              "-> embeds: [" + string.Join(",", embedOnly.Select(p => p.ToString()).OrderBy(x => x)) + "]");
+        Check("and the merged set DOES carry plain DE — from the .de.srt sidecar",
+              recorded.Contains(new SubtitleRef("DE", false)),
               "-> [" + string.Join(",", recorded.Select(p => p.ToString()).OrderBy(x => x)) + "]");
+        var deSidecarRow = loose.Where(x => x.Lang == "EN" || x.Lang == "DE")
+            .Select(x => reg.GetSidecar(ContentHashRegistry.ComputeHash(File.ReadAllText(x.Path))))
+            .FirstOrDefault(r => r != null && r.Language == "DE");
+        Check("the .de.srt sidecar row STATES forced=false explicitly (not a gap)",
+              deSidecarRow != null && deSidecarRow.Forced.HasValue && deSidecarRow.Forced.Value == false,
+              "-> " + (deSidecarRow?.Forced?.ToString() ?? "NULL (unsichtbar fuer jeden Leser)"));
         Check("coverage is where the widening happens (a variant does cover its language)",
               SubtitleCoverage.FromPairs(recorded).Covers(new SubtitleRef("DE", false)),
               "-> DE (HI) on disk must cover plain DE");
@@ -385,10 +403,10 @@ internal static class Program
             }
         }
 
-        foreach (var (path, lang, hi, _) in loose)
+        foreach (var (path, lang, hi, forced) in loose)
         {
             string text = File.ReadAllText(path);
-            if (reg.ObserveSidecar(ContentHashRegistry.ComputeHash(text), mediaHash, lang, hi,
+            if (reg.ObserveSidecar(ContentHashRegistry.ComputeHash(text), mediaHash, lang, hi, forced,
                                    Path.GetFileName(path), path))
             {
                 sideAgain++;
@@ -482,7 +500,7 @@ internal static class Program
         string movedHash = ContentHashRegistry.ComputeHash(movedText);
         string oldPath = Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.srt");
         string newPath = Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.en.srt");
-        reg.MarkSidecar(movedHash, mediaHash, "EN", false, SubtitleStatus.Uploaded,
+        reg.MarkSidecar(movedHash, mediaHash, "EN", false, false, SubtitleStatus.Uploaded,
                         fileName: Path.GetFileName(oldPath), path: oldPath);
 
         bool locMoved = reg.MoveSidecarLocation(movedHash, Path.GetFileName(newPath), newPath);
@@ -504,11 +522,11 @@ internal static class Program
         Section("F) An observation never overwrites a verdict");
         string verdictText = "1\n00:00:01,000 --> 00:00:02,000\nverdict\n";
         string verdictHash = ContentHashRegistry.ComputeHash(verdictText);
-        reg.MarkSidecar(verdictHash, mediaHash, "EN", false, SubtitleStatus.Downloaded,
+        reg.MarkSidecar(verdictHash, mediaHash, "EN", false, false, SubtitleStatus.Downloaded,
                         subdlId: "12345", fileName: "Film.2026.1080p.WEB-DL.en.srt",
                         path: Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.en.srt"));
 
-        bool changed = reg.ObserveSidecar(verdictHash, mediaHash, "EN", true);
+        bool changed = reg.ObserveSidecar(verdictHash, mediaHash, "EN", true, false);
         var row = reg.GetSidecar(verdictHash);
         Check("observation reports 'nothing done'", !changed);
         Check("the verdict still stands", row != null && row.Status == SubtitleStatus.Downloaded,
@@ -524,8 +542,57 @@ internal static class Program
         // An observation row must NOT answer IsContentKnown.
         string obsText = "1\n00:00:01,000 --> 00:00:02,000\nobserved only\n";
         string obsHash = ContentHashRegistry.ComputeHash(obsText);
-        reg.ObserveSidecar(obsHash, mediaHash, "FR", false);
+        reg.ObserveSidecar(obsHash, mediaHash, "FR", false, false);
         Check("an observation is NOT knowledge", !reg.IsContentKnown(obsHash));
+
+        // ── F2) the SIDECAR path states forced too — F-M284 ──────────────────
+        Section("F2) The sidecar path states forced (F-M284/F-M285)");
+        // The defect this pins: ObserveSidecar/MarkSidecar had no `forced` parameter at all, so a
+        // `.de.forced.srt` row was left `null` — and a row that does not state its property is
+        // invisible to every reader. The probe measured exactly that (row.Forced = NULL) while the
+        // EMBEDDED path recorded `True` from the same call site shape. Both paths must state it.
+        string forceText = "1\n00:00:01,000 --> 00:00:02,000\n[ FREMDSPRACHE ]\n";
+        string forceHash = ContentHashRegistry.ComputeHash(forceText);
+        reg.ObserveSidecar(forceHash, mediaHash, "DE", false, true,
+                           "Film.2026.1080p.WEB-DL.de.forced.srt",
+                           Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.de.forced.srt"));
+        var forceRow = reg.GetSidecar(forceHash);
+        Check("a forced sidecar row STATES forced=true",
+              forceRow != null && forceRow.Forced == true,
+              "-> " + (forceRow?.Forced?.ToString() ?? "NULL (sagt nichts)"));
+        Check("and it states hi too (never a gap)",
+              forceRow != null && forceRow.HearingImpaired.HasValue,
+              "-> " + (forceRow?.HearingImpaired?.ToString() ?? "NULL"));
+        Check("the forced datum is reported as a datum",
+              reg.RecordedPairsByHash(mediaHash).Contains(new SubtitleRef("DE", false, true)),
+              "-> [" + string.Join(",", reg.RecordedPairsByHash(mediaHash).Select(x => x.ToString())) + "]");
+        // Scoped to the forced datum ALONE — the merged set also holds plain DE from the real
+        // .de.srt, so asking it would have tested the fixture instead of the rule.
+        Check("a forced sidecar does NOT cover its plain language",
+              !SubtitleCoverage.FromPairs(new[] { new SubtitleRef("DE", false, true) })
+                  .Covers(new SubtitleRef("DE", false, false)));
+        Check("re-observing the same fact is a no-op",
+              !reg.ObserveSidecar(forceHash, mediaHash, "DE", false, true,
+                                  "Film.2026.1080p.WEB-DL.de.forced.srt",
+                                  Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.de.forced.srt")));
+
+        // The name writer must carry the marker, or a rename of an unlabelled forced file would
+        // turn it into the film's dialogue.
+        Check("Build carries the forced marker",
+              Path.GetFileName(SidecarNaming.Build(media, "DE", false, 1, true)) ==
+              Path.GetFileNameWithoutExtension(media) + ".de.forced.srt",
+              "-> " + Path.GetFileName(SidecarNaming.Build(media, "DE", false, 1, true)));
+        Check("Build carries both markers",
+              Path.GetFileName(SidecarNaming.Build(media, "DE", true, 1, true)) ==
+              Path.GetFileNameWithoutExtension(media) + ".de.sdh.forced.srt",
+              "-> " + Path.GetFileName(SidecarNaming.Build(media, "DE", true, 1, true)));
+        var forcedRoundTrip = SidecarNaming.Parse(
+            Path.GetFileNameWithoutExtension(SidecarNaming.Build(media, "DE", true, 1, true)),
+            Path.GetFileNameWithoutExtension(media));
+        Check("what Build writes, Parse reads back",
+              forcedRoundTrip != null && forcedRoundTrip.Value.Lang == "DE"
+              && forcedRoundTrip.Value.HearingImpaired && forcedRoundTrip.Value.Forced,
+              "-> " + (forcedRoundTrip?.ToString() ?? "null"));
 
         // ── G ───────────────────────────────────────────────────────────────
         Section("G) Edge cases");
@@ -618,9 +685,9 @@ internal static class Program
             {
                 m.ImdbId = "tt1234567";
             });
-            ireg.ObserveEmbed(hOld, 0, "EN", false);
-            ireg.ObserveEmbed(hOld, 2, "DE", true);
-            ireg.MarkSidecar("content-de", hOld, "DE", false, SubtitleStatus.Downloaded);
+            ireg.ObserveEmbed(hOld, 0, "EN", false, false);
+            ireg.ObserveEmbed(hOld, 2, "DE", true, false);
+            ireg.MarkSidecar("content-de", hOld, "DE", false, false, SubtitleStatus.Downloaded);
 
             Check("before: exactly one media row", idb.Media.Count() == 1, "-> " + idb.Media.Count());
             Check("before: two embed rows", ireg.GetEmbeds(hOld).Count == 2, "-> " + ireg.GetEmbeds(hOld).Count);

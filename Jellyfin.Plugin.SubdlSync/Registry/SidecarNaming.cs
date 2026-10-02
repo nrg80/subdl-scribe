@@ -54,11 +54,19 @@ public static class SidecarNaming
     /// <param name="hearingImpaired">True for the <c>.sdh</c> variant (F-M260).</param>
     /// <param name="slot">1-based slot; 1 is the plain name, higher numbers get a suffix.</param>
     /// <returns>Full path of the sidecar.</returns>
-    public static string Build(string mediaPath, string lang, bool hearingImpaired = false, int slot = 1)
+    public static string Build(string mediaPath, string lang, bool hearingImpaired = false, int slot = 1,
+                               bool forced = false)
     {
         string dir = Path.GetDirectoryName(mediaPath) ?? ".";
         string baseName = Path.GetFileNameWithoutExtension(mediaPath);
         string suffix = hearingImpaired ? ".sdh" : string.Empty;
+        if (forced)
+        {
+            // F-M284: the marker is part of the datum, so it belongs in the name this class writes.
+            // A rename that dropped it would leave a forced file looking like the film's dialogue.
+            suffix += ".forced";
+        }
+
         string slotSuffix = slot > 1
             ? "." + slot.ToString(System.Globalization.CultureInfo.InvariantCulture)
             : string.Empty;
@@ -88,11 +96,12 @@ public static class SidecarNaming
     /// <param name="existingNames">File names already present in the directory, as <see cref="Parse"/>'s caller sees them.</param>
     /// <returns>Full path of the name to move the file to. May already exist when every slot is taken.</returns>
     public static string PlanTarget(string mediaPath, string lang, bool hearingImpaired,
-                                    System.Collections.Generic.ISet<string> existingNames)
+                                    System.Collections.Generic.ISet<string> existingNames,
+                                    bool forced = false)
     {
         for (int slot = 1; slot <= 999; slot++)
         {
-            string candidate = Build(mediaPath, lang, hearingImpaired, slot);
+            string candidate = Build(mediaPath, lang, hearingImpaired, slot, forced);
             if (existingNames == null || !existingNames.Contains(Path.GetFileName(candidate)))
             {
                 return candidate;
