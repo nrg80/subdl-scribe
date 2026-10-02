@@ -273,9 +273,9 @@ public sealed class ContentHashRegistry : IDisposable
 
             // Completion marks: a file whose rewrite was triggered by its own language gate has
             // already been worked on, and that verdict belongs to the file, not to a byte count.
+            // F-M283: only the UPLOAD mark is carried now. The download mark is gone — completeness
+            // is derived from the evidence, so there is no stored verdict to move to the new hash.
             target.SubtitlesUploadedAt ??= oldMedia.SubtitlesUploadedAt;
-            target.SubtitlesDownloadedAt ??= oldMedia.SubtitlesDownloadedAt;
-            target.SubtitlesDownloadedLanguages ??= oldMedia.SubtitlesDownloadedLanguages;
             target.LastSearchUtc ??= oldMedia.LastSearchUtc;
             target.LastSearchLanguages ??= oldMedia.LastSearchLanguages;
             target.LastSeen = DateTime.UtcNow;
@@ -387,8 +387,10 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="contentHash">Content hash when the content was read.</param>
     /// <param name="reason">Rejection reason when rejected.</param>
     /// <param name="subdlId">SubDL id when known.</param>
+    /// <param name="forced">F-M284: true when the track is forced (never counts as coverage).</param>
     public void MarkEmbed(string? mediaHash, int subPos, string language, bool hearingImpaired,
-                          string status, string? contentHash = null, string? reason = null, string? subdlId = null)
+                          string status, string? contentHash = null, string? reason = null, string? subdlId = null,
+                          bool forced = false)
     {
         if (string.IsNullOrEmpty(mediaHash) || subPos < 0)
         {
@@ -406,6 +408,7 @@ public sealed class ContentHashRegistry : IDisposable
 
         existing.Language = language;
         existing.HearingImpaired = hearingImpaired;
+        existing.Forced = forced;
         existing.Status = status;
         existing.Reason = reason;
         existing.StatusAt = DateTime.UtcNow;
@@ -443,8 +446,9 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="subPos">ffmpeg stream position.</param>
     /// <param name="language">Language code.</param>
     /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <param name="forced">F-M284: true when the track is forced (recorded, never coverage).</param>
     /// <returns>True when a row was created or its facts changed.</returns>
-    public bool ObserveEmbed(string? mediaHash, int subPos, string language, bool hearingImpaired)
+    public bool ObserveEmbed(string? mediaHash, int subPos, string language, bool hearingImpaired, bool forced = false)
     {
         if (string.IsNullOrEmpty(mediaHash) || subPos < 0)
         {
@@ -464,7 +468,8 @@ public sealed class ContentHashRegistry : IDisposable
 
         if (existing != null
             && string.Equals(existing.Language, language, StringComparison.OrdinalIgnoreCase)
-            && existing.HearingImpaired == hearingImpaired)
+            && existing.HearingImpaired == hearingImpaired
+            && existing.Forced == forced)
         {
             return false; // already recorded, unchanged
         }
@@ -478,6 +483,7 @@ public sealed class ContentHashRegistry : IDisposable
 
         row.Language = language;
         row.HearingImpaired = hearingImpaired;
+        row.Forced = forced;
         row.Status = SubtitleStatus.Observed;
         row.Reason = null;
         row.StatusAt = DateTime.UtcNow;
@@ -606,19 +612,19 @@ public sealed class ContentHashRegistry : IDisposable
             : _db.Embeds.Find(x => x.MediaHash == mediaHash).OrderBy(x => x.SubPos).ToList();
 
     /// <summary>
-    /// F-M254: the languages whose hearing-impaired variant the registry already holds — the ONE
-    /// answer the HI question is read from.
+    /// F-M282: every subtitle datum the registry records for this file — embedded rows and sidecar
+    /// rows, each with its own language and its own hearing-impaired flag.
     /// <para>
-    /// The HI switch used to be answered live, from Jellyfin's stream titles and from the sidecar
-    /// names next to the media. Both are snapshots the registry already took: the uploader stores the
-    /// stream verdict through <c>MarkEmbed</c>, the downloader stores the fetched variant through
-    /// <c>MarkDownloaded</c>. Asking the sources again meant a stored verdict could be ignored — a
-    /// captioned EN track whose title Jellyfin does not surface read as "HI absent" while its own row
-    /// said otherwise, so the language was fetched again for a variant the container already carried.
+    /// This used to be <c>HearingImpairedLanguages</c>: a set of LANGUAGE CODES, answering "which
+    /// languages have a variant". That projection is exactly what the paired model removes — a
+    /// language-keyed answer cannot distinguish the regular file from its variant, so a caller asking
+    /// "is the German variant here?" was told about German and the regular subtitle was fetched over
+    /// the file already on disk.
     /// </para>
     /// <para>
-    /// Both areas are consulted because the variant arrives either way: an embedded track, or a
-    /// sidecar fetched from SubDL.
+    /// Both areas are consulted because a datum arrives either way: an embedded track the uploader or
+    /// the observer stored (<c>MarkEmbed</c>, F-M257), or a sidecar the downloader fetched
+    /// (<c>MarkDownloaded</c>).
     /// </para>
     /// <para>
     /// F-M256: the parameter is the media PATH, not the hash. Every caller holds a path, and this
@@ -630,34 +636,41 @@ public sealed class ContentHashRegistry : IDisposable
     /// </para>
     /// </summary>
     /// <param name="mediaPath">Path to the media file.</param>
-    /// <returns>Language codes with a recorded hearing-impaired variant.</returns>
-    public HashSet<string> HearingImpairedLanguages(string? mediaPath)
-    {
-        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (string.IsNullOrEmpty(mediaPath))
-        {
-            return found;
-        }
+    /// <returns>Pairs recorded for this file, from its embedded rows and its sidecar rows.</returns>
+    public HashSet<SubtitleRef> RecordedPairs(string? mediaPath)
+        => RecordedPairsByHash(GetMediaHash(mediaPath));
 
-        string? mediaHash = GetMediaHash(mediaPath);
+    /// <summary>
+    /// F-M282: the pairs recorded under a known media hash.
+    /// <para>
+    /// Split out from the path-taking sibling so a caller that already holds the hash — or a
+    /// host-free test whose media path does not exist on disk — can ask the same question without
+    /// going through the oshash cache.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaHash">Media hash.</param>
+    /// <returns>Pairs recorded for this hash.</returns>
+    public HashSet<SubtitleRef> RecordedPairsByHash(string? mediaHash)
+    {
+        var found = new HashSet<SubtitleRef>();
         if (string.IsNullOrEmpty(mediaHash))
         {
             return found;
         }
 
-        foreach (var language in GetEmbeds(mediaHash).Where(x => x.HearingImpaired).Select(x => x.Language))
+        foreach (var row in GetEmbeds(mediaHash))
         {
-            if (!string.IsNullOrEmpty(language))
+            if (!string.IsNullOrWhiteSpace(row.Language))
             {
-                found.Add(language);
+                found.Add(new SubtitleRef(row.Language, row.HearingImpaired));
             }
         }
 
-        foreach (var language in GetSidecars(mediaHash).Where(x => x.HearingImpaired).Select(x => x.Language))
+        foreach (var row in GetSidecars(mediaHash))
         {
-            if (!string.IsNullOrEmpty(language))
+            if (!string.IsNullOrWhiteSpace(row.Language))
             {
-                found.Add(language);
+                found.Add(new SubtitleRef(row.Language, row.HearingImpaired));
             }
         }
 
@@ -1189,155 +1202,53 @@ public sealed class ContentHashRegistry : IDisposable
     public bool IsSubtitlesUploaded(string? mediaHash)
         => !string.IsNullOrEmpty(mediaHash) && _db.Media.FindById(mediaHash)?.SubtitlesUploadedAt != null;
 
+    // ------------------------------------------------- the download mark is GONE
+    //
+    // F-M283 (user decision 02.10.2026): `MarkSubtitlesDownloaded`, `IsSubtitlesDownloaded`,
+    // `GetDownloadedLanguages`, `CoversLanguages`, `FindStaleDownloadedLanguages` and
+    // `InvalidateDownloadedMark` used to live here. They are removed, not deprecated.
+    //
+    // The mark was a SECOND truth beside the rows that describe the subtitles themselves: a
+    // timestamp plus a comma-separated language list on the file record, written when a run believed
+    // everything was settled. Two readers then had to agree about it forever, and they did not —
+    // the complete-mark short-circuit asked the disk PLUS the stored variant verdict while the
+    // withhold check that decided whether to WRITE the mark asked the disk alone. A variant embedded
+    // in the container therefore had a registry verdict and no sidecar, the withhold check reported
+    // `no file evidence`, refused the mark, and the item stayed due: measured on the live library,
+    // 35 marks withheld and 41 downloads in one run against a 50/day limit, with the same content
+    // hash on three consecutive days because the regular subtitle was fetched over the file that
+    // was already there.
+    //
+    // Completeness is now DERIVED on every ask, from the evidence that describes the subtitles —
+    // see `SubtitleCoverage.Read`. Nothing can drift because there is no second copy of the answer
+    // left to drift, and a deletion needs no invalidation step: removing `Movie.de.sdh.srt` removes
+    // its evidence and the pair is simply open again.
+    //
+    // The cost is deliberate and small: an item with nothing open is no longer skipped by a stored
+    // stamp, so every run asks the question locally. That is a directory listing and an indexed
+    // lookup, not an API call — and it is the point, because the answer can no longer be stale.
+
     /// <summary>
-    /// Marks the download side complete for a specific language set.
+    /// F-M283: the pairs of this file that have NO evidence — what is open for it right now.
     /// <para>
-    /// The language set is part of the state, not a note: the mark is only valid for exactly those
-    /// languages. Change the configured set and the comparison fails, so the file is revisited for
-    /// whatever is now missing instead of being skipped as done.
+    /// This is the one question the download pipeline, the seeder and the refresh all ask, and it
+    /// replaces the mark-based pair of readers (`IsSubtitlesDownloaded` and the withhold check).
+    /// Because both callers now go through <see cref="SubtitleCoverage"/>, they cannot be fed
+    /// different evidence and disagree — which is what kept a complete item looking due forever.
     /// </para>
     /// </summary>
-    /// <param name="mediaHash">Media hash.</param>
-    /// <param name="languages">Languages that were covered.</param>
-    public void MarkSubtitlesDownloaded(string? mediaHash, IReadOnlyList<string> languages)
-    {
-        if (string.IsNullOrEmpty(mediaHash))
-        {
-            return;
-        }
+    /// <param name="mediaPath">Path to the media file.</param>
+    /// <param name="required">Pairs the caller requires (regular, plus variant when the switch is on).</param>
+    /// <param name="embeddedLanguages">Language-level embedded evidence the caller holds, or null.</param>
+    /// <returns>The open pairs, in the order given.</returns>
+    public List<SubtitleRef> OpenPairs(
+        string? mediaPath,
+        IEnumerable<SubtitleRef> required,
+        IEnumerable<string>? embeddedLanguages = null)
+        => SubtitleCoverage
+            .Read(this, mediaPath, embeddedLanguages)
+            .Open(required);
 
-        var normalized = string.Join(",", languages.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
-        var now = DateTime.UtcNow;
-        _db.EnsureMedia(mediaHash, m =>
-        {
-            m.SubtitlesDownloadedAt = now;
-            m.SubtitlesDownloadedLanguages = normalized;
-        });
-        LogUtil.Detail(_logger, "[SubDL-DB] subtitles downloaded-complete {Media} langs={Langs}", mediaHash, normalized);
-    }
-
-    /// <summary>
-    /// F-M234 (D): true when the stored language set covers the requested one.
-    /// <para>
-    /// Extracted so the rule is testable without a database: a stored SUPERSET is complete, a
-    /// missing language is not. Removing a language from the configuration must not invalidate the
-    /// mark (equality and supersets count), while adding one must.
-    /// </para>
-    /// </summary>
-    /// <param name="storedLanguages">Languages the mark was written for.</param>
-    /// <param name="requestedLanguages">Languages wanted now.</param>
-    /// <returns>True when nothing requested is missing from the stored set.</returns>
-    public static bool CoversLanguages(IEnumerable<string> storedLanguages, IReadOnlyList<string> requestedLanguages)
-    {
-        var stored = storedLanguages.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return requestedLanguages.All(stored.Contains);
-    }
-
-    /// <summary>
-    /// F-M234 (D): true when the download side is complete for at least this language set.
-    /// <para>
-    /// A SUPERSET stored set still covers a smaller current set: removing a language from the
-    /// configuration must not invalidate the mark and send the whole library through a pointless
-    /// refetch. Equality (and any stored superset) counts as complete; only languages the stored
-    /// mark does NOT cover make the file un-done.
-    /// </para>
-    /// </summary>
-    /// <param name="mediaHash">Media hash.</param>
-    /// <param name="languages">Languages to compare against.</param>
-    /// <returns>True when complete and the stored set covers the requested one.</returns>
-    public bool IsSubtitlesDownloaded(string? mediaHash, IReadOnlyList<string> languages)
-    {
-        if (string.IsNullOrEmpty(mediaHash))
-        {
-            return false;
-        }
-
-        var media = _db.Media.FindById(mediaHash);
-        if (media?.SubtitlesDownloadedAt == null)
-        {
-            return false;
-        }
-
-        var stored = (media.SubtitlesDownloadedLanguages ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries);
-        return CoversLanguages(stored, languages);
-    }
-
-    /// <summary>
-    /// F-M234 (A/B): the stored download mark for this file, or null when unmarked. Returns the
-    /// language set the mark was written for, so a caller can tell WHICH languages went stale.
-    /// </summary>
-    /// <param name="mediaHash">Media hash.</param>
-    /// <returns>Stored languages, or null when there is no mark.</returns>
-    public List<string>? GetDownloadedLanguages(string? mediaHash)
-    {
-        if (string.IsNullOrEmpty(mediaHash))
-        {
-            return null;
-        }
-
-        var media = _db.Media.FindById(mediaHash);
-        if (media?.SubtitlesDownloadedAt == null)
-        {
-            return null;
-        }
-
-        return (media.SubtitlesDownloadedLanguages ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries)
-            .ToList();
-    }
-
-    /// <summary>
-    /// F-M234 (B): which languages of the stored mark no longer have file evidence.
-    /// <para>
-    /// The mark means "every language settled" — settled either by SAVING a subtitle or by SubDL
-    /// answering that it does not have it (QA-exhausted). Only the first kind leaves a file behind,
-    /// so a language that is gone from disk AND not settled-as-unavailable proves the mark was
-    /// overtaken by a deletion: the stored verdict is a lie and the file must be revisited.
-    /// </para>
-    /// </summary>
-    /// <param name="storedLanguages">Languages the mark was written for.</param>
-    /// <param name="missingOnDisk">Languages currently absent from disk.</param>
-    /// <param name="settledUnavailable">Languages SubDL has settled as unavailable.</param>
-    /// <returns>Languages that lost their evidence (empty = the mark still holds).</returns>
-    public static List<string> FindStaleDownloadedLanguages(
-        IEnumerable<string> storedLanguages,
-        IReadOnlyCollection<string> missingOnDisk,
-        IReadOnlyCollection<string> settledUnavailable)
-    {
-        var missing = missingOnDisk.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var settled = settledUnavailable.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return storedLanguages
-            .Where(l => missing.Contains(l) && !settled.Contains(l))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-
-    /// <summary>
-    /// F-M234 (B): drops a download mark whose file evidence has disappeared, so the next run
-    /// reworks the item instead of trusting "file complete" forever.
-    /// </summary>
-    /// <param name="mediaHash">Media hash.</param>
-    /// <returns>True when a mark was present and removed.</returns>
-    public bool InvalidateDownloadedMark(string? mediaHash)
-    {
-        if (string.IsNullOrEmpty(mediaHash))
-        {
-            return false;
-        }
-
-        var media = _db.Media.FindById(mediaHash);
-        if (media?.SubtitlesDownloadedAt == null)
-        {
-            return false;
-        }
-
-        media.SubtitlesDownloadedAt = null;
-        media.SubtitlesDownloadedLanguages = null;
-        _db.Media.Update(media);
-        LogUtil.Detail(_logger, "[SubDL-DB] download mark invalidated {Media} — file evidence gone", mediaHash);
-        return true;
-    }
 
     /// <summary>
     /// F-M234 (A): sidecar rows whose stored file path no longer exists.
@@ -1413,7 +1324,7 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="mediaHash">Parent media hash.</param>
     /// <param name="currentTracks">The tracks the file has NOW, as (position, language, HI).</param>
     /// <returns>Removed rows.</returns>
-    public int ForgetStaleEmbeds(string? mediaHash, IEnumerable<(int SubPos, string Lang, bool HearingImpaired)> currentTracks, IReadOnlyCollection<int>? livePositions = null)
+    public int ForgetStaleEmbeds(string? mediaHash, IEnumerable<(int SubPos, string Lang, bool HearingImpaired, bool Forced)> currentTracks, IReadOnlyCollection<int>? livePositions = null)
     {
         if (string.IsNullOrEmpty(mediaHash))
         {
@@ -1421,7 +1332,7 @@ public sealed class ContentHashRegistry : IDisposable
         }
 
         var current = currentTracks.ToList();
-        var present = current.ToDictionary(t => t.SubPos, t => (t.Lang, t.HearingImpaired));
+        var present = current.ToDictionary(t => t.SubPos, t => (t.Lang, t.HearingImpaired, t.Forced));
 
         // F-M258: which positions still EXIST, as opposed to which ones answered with a language.
         // A track whose tag the caller could not read is not evidence of a deletion — Jellyfin
@@ -1591,9 +1502,14 @@ public sealed class ContentHashRegistry : IDisposable
     // ------------------------------------------------------------- aggregates
 
     /// <summary>
-    /// Recomputes the derived per-file aggregates from the embedded tracks: which languages are
-    /// present and whether an HI variant exists. Derived values are written here rather than
-    /// maintained by every caller, so they cannot drift.
+    /// Recomputes the derived per-file aggregate: which languages are present.
+    /// <para>
+    /// F-M283 (user decision 02.10.2026): the hearing-impaired aggregate was removed with the rest
+    /// of the file-level HI state. Whether a file carries a variant is a property of its individual
+    /// subtitle DATA (each with its own language and its own flag), not of the file — and as a file
+    /// flag it was written here and read nowhere, a second truth that could only ever drift. The
+    /// language list stays: it is a genuine summary of the rows beneath the file.
+    /// </para>
     /// </summary>
     /// <param name="mediaHash">Media hash.</param>
     private void RefreshMediaAggregates(string mediaHash)
@@ -1608,12 +1524,10 @@ public sealed class ContentHashRegistry : IDisposable
             .Where(l => !string.IsNullOrEmpty(l))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(l => l, StringComparer.OrdinalIgnoreCase));
-        bool hi = tracks.Any(t => t.HearingImpaired);
 
         _db.EnsureMedia(mediaHash, m =>
         {
             m.LanguagesAvailable = languages;
-            m.HearingImpairedAvailable = hi;
         });
     }
 

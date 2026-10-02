@@ -122,12 +122,34 @@ public static class SidecarNaming
         => token.Equals("sdh", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Reads the language and hearing-impaired flag out of a sidecar file name.
+    /// True when a name token marks a FORCED track rather than a language.
+    /// <para>
+    /// F-M284 (user decision 02.10.2026): <c>forced</c> is the marker every other tool writes
+    /// (<c>Movie.de.forced.srt</c>), so it is read like <c>sdh</c> is. It is not a marker the plugin
+    /// writes itself: SubDL has no forced counterpart (measured live 02.10.2026 — no filter, no
+    /// field, 0 of 22 candidates named forced), so nothing is ever downloaded as a forced sidecar.
+    /// Recognizing it is what lets such a file be recorded as what it IS instead of being counted as
+    /// the film's dialogue.
+    /// </para>
+    /// <para>
+    /// Strictly the whole token, for the same reason the HI marker is: a substring rule would read
+    /// real names as markers and lose their language.
+    /// </para>
+    /// </summary>
+    /// <param name="token">Name token to test.</param>
+    /// <returns>True when the token is a forced marker.</returns>
+    public static bool IsForcedToken(string token)
+        => token.Equals("forced", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Reads the language and BOTH properties (hearing-impaired, forced) out of a sidecar file name.
     /// <para>
     /// Recognized shapes, all relative to the media base name:
-    /// <c>&lt;base&gt;.srt</c> (unlabeled, English by Jellyfin convention),
+    /// <c>&lt;base&gt;.srt</c> (no language in the name),
     /// <c>&lt;base&gt;.&lt;lang&gt;.srt</c>,
     /// <c>&lt;base&gt;.&lt;lang&gt;.sdh.srt</c> / <c>&lt;base&gt;.&lt;lang&gt;.hi.srt</c>,
+    /// <c>&lt;base&gt;.&lt;lang&gt;.forced.srt</c>,
+    /// the two markers combined (<c>&lt;base&gt;.&lt;lang&gt;.sdh.forced.srt</c>, either order),
     /// and the numbered extra slots the downloader writes
     /// (<c>&lt;base&gt;.&lt;lang&gt;.2.srt</c>, <c>.3</c>, …).
     /// </para>
@@ -140,8 +162,8 @@ public static class SidecarNaming
     /// </summary>
     /// <param name="fileNameWithoutExtension">Sidecar name without the .srt extension.</param>
     /// <param name="baseName">Media file name without extension.</param>
-    /// <returns>Language (null when the name carries none) and HI flag; null when the name is not a sidecar at all.</returns>
-    public static (string? Lang, bool HearingImpaired)? Parse(string fileNameWithoutExtension, string baseName)
+    /// <returns>Language (null when the name carries none) with both flags; null when the name is not a sidecar at all.</returns>
+    public static (string? Lang, bool HearingImpaired, bool Forced)? Parse(string fileNameWithoutExtension, string baseName)
     {
         if (string.IsNullOrEmpty(fileNameWithoutExtension))
         {
@@ -153,11 +175,11 @@ public static class SidecarNaming
         // Jellyfin's convention, which made an unlabelled file upload as English even
         // when its text was German (user decision 30.09.2026: an unlabelled loose SRT
         // goes through language detection, and a file whose language cannot be
-        // established is skipped — never guessed at). Reported as (null, false) so the
+        // established is skipped — never guessed at). Reported as (null, false, false) so the
         // caller can tell "no language in the name" from "the name says EN".
         if (fileNameWithoutExtension.Equals(baseName, StringComparison.OrdinalIgnoreCase))
         {
-            return (null, false);
+            return (null, false, false);
         }
 
         string[] parts = fileNameWithoutExtension.Split('.');
@@ -166,51 +188,55 @@ public static class SidecarNaming
             return null;
         }
 
-        string last = parts[^1];
+        int end = parts.Length - 1;
 
-        // Hearing-impaired marker: the language token sits BEFORE it
-        // (Movie.de.sdh.srt → DE, hi=true). If it does not resolve, the name says nothing.
-        if (IsHearingImpairedToken(last))
+        // F-M260: the numbered slot sits LAST and the markers come BEFORE the language token. A
+        // slot is 1-2 digits ("<base>.<lang>.2.srt"), which is also how it is told apart from a
+        // 2-letter language or from a marker token.
+        if (parts.Length >= 3 && end > 0 && parts[end].Length > 0 && parts[end].Length <= 2 && AllDigits(parts[end]))
         {
-            string? markerLang = parts.Length >= 3 ? ResolveToken(parts[^2]) : null;
-            return markerLang == null ? null : (markerLang, true);
+            end--;
         }
 
-        // Numbered extra slot the downloader writes for a second/third candidate of one
-        // language: "<base>.<lang>.2.srt". Without this the slot files were invisible.
-        // F-M260: the slot and the marker COMBINE — "<base>.<lang>.sdh.2.srt" is slot 2 of the
-        // hearing-impaired variant. The writer (Build) produces that shape, so the reader must
-        // accept it; otherwise the plugin writes a file it cannot recognize one line later.
-        if (parts.Length >= 3 && last.Length > 0 && last.Length <= 2 && AllDigits(last))
+        // F-M284: the markers are read as a SET, in either order, so "de.sdh.forced" and
+        // "de.forced.sdh" both resolve to DE with both properties. Reading them one-by-one was the
+        // shape that could not express a track that is both.
+        bool hi = false;
+        bool forced = false;
+        while (end > 0 && (IsHearingImpairedToken(parts[end]) || IsForcedToken(parts[end])))
         {
-            if (parts.Length >= 4 && IsHearingImpairedToken(parts[^2]))
+            if (IsHearingImpairedToken(parts[end]))
             {
-                string? slotHiLang = ResolveToken(parts[^3]);
-                return slotHiLang == null ? null : (slotHiLang, true);
+                hi = true;
+            }
+            else
+            {
+                forced = true;
             }
 
-            string? slotLang = ResolveToken(parts[^2]);
-            return slotLang == null ? null : (slotLang, false);
+            end--;
         }
 
-        string? lang = ResolveToken(last);
-        return lang == null ? null : (lang, false);
+        string? lang = ResolveToken(parts[end]);
+        return lang == null ? null : (lang, hi, forced);
     }
 
     /// <summary>
     /// The sidecar files next to a media file, in one directory listing.
     /// <para>
     /// Callers need different projections of the same fact — the uploader wants paths, the
-    /// existence checks want just the languages, the HI check wants the flag — so the listing is
-    /// done once here and projected by the callers, rather than each caller walking the directory
-    /// with its own idea of what a file name means.
+    /// existence checks want just the languages, the coverage reader wants the DATA (language plus
+    /// both flags) — so the listing is done once here and projected by the callers, rather than each
+    /// caller walking the directory with its own idea of what a file name means. F-M284: the tuple
+    /// carries forced as well, because a `.forced.srt` is not the film's dialogue and must not be
+    /// counted as coverage.
     /// </para>
     /// </summary>
     /// <param name="mediaPath">Media file path.</param>
     /// <returns>One entry per recognized sidecar.</returns>
-    public static List<(string Path, string? Lang, bool HearingImpaired)> List(string mediaPath)
+    public static List<(string Path, string? Lang, bool HearingImpaired, bool Forced)> List(string mediaPath)
     {
-        var result = new List<(string, string?, bool)>();
+        var result = new List<(string, string?, bool, bool)>();
         if (string.IsNullOrWhiteSpace(mediaPath))
         {
             return result;
@@ -231,7 +257,7 @@ public static class SidecarNaming
                 var parsed = Parse(Path.GetFileNameWithoutExtension(f), baseName);
                 if (parsed != null)
                 {
-                    result.Add((f, parsed.Value.Lang, parsed.Value.HearingImpaired));
+                    result.Add((f, parsed.Value.Lang, parsed.Value.HearingImpaired, parsed.Value.Forced));
                 }
             }
         }
@@ -252,7 +278,7 @@ public static class SidecarNaming
     public static Dictionary<string, (bool Any, bool Hi)> Present(string mediaPath)
     {
         var found = new Dictionary<string, (bool Any, bool Hi)>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (_, lang, hi) in List(mediaPath))
+        foreach (var (_, lang, hi, _) in List(mediaPath))
         {
             if (lang == null)
             {
@@ -292,63 +318,27 @@ public static class SidecarNaming
     }
 
     /// <summary>
-    /// F-M240 (user decision 01.10.2026): the marker that makes a variant its OWN registered file.
+    /// F-M282 (user decision 02.10.2026): the pairs that have file evidence next to the media file.
     /// <para>
-    /// A regular subtitle and its hearing-impaired variant are two independent files on disk
-    /// (<c>Movie.de.srt</c> and <c>Movie.de.sdh.srt</c>), so they must be two independent entries in
-    /// the download mark as well. Recording both as the plain language "DE" is what made one file
-    /// stand in for the other: a successful regular save closed the HI slot too, the mark was written
-    /// while the variant was absent, and every later check contradicted it — 31 items re-searched and
-    /// their sidecars rewritten in a single morning on the live library, 24 of them already handled
-    /// the evening before.
+    /// This replaces <c>PresentTokens</c> and with it the whole string-token vocabulary
+    /// (<c>HiTokenSuffix</c>, <c>IsHiToken</c>, <c>TokenLanguage</c>). Those existed to carry a
+    /// hearing-impaired property through a comma-separated language list — and every helper that
+    /// mapped a token back to its plain language was a place the conflation re-entered, because a
+    /// language-keyed reader then re-requested the LANGUAGE for a missing variant and fetched the
+    /// regular subtitle over the file already on disk.
     /// </para>
     /// <para>
-    /// The token is the language plus this suffix, e.g. <c>DE:hi</c>. It is carried in the existing
-    /// comma-separated language list, so no schema change is needed and the readers that treat the
-    /// list as opaque (coverage, subset rule, reset) keep working unchanged.
-    /// </para>
-    /// </summary>
-    public const string HiTokenSuffix = ":hi";
-
-    /// <summary>
-    /// The mark token for one file: the language alone for a regular subtitle, the language plus
-    /// <see cref="HiTokenSuffix"/> for the hearing-impaired variant.
-    /// </summary>
-    /// <param name="language">Two or three letter language code.</param>
-    /// <param name="hearingImpaired">True for the variant.</param>
-    /// <returns>The token.</returns>
-    public static string Token(string language, bool hearingImpaired)
-        => hearingImpaired ? language + HiTokenSuffix : language;
-
-    /// <summary>True when the token names a hearing-impaired variant rather than a plain language.</summary>
-    /// <param name="token">Mark token.</param>
-    /// <returns>True for a variant token.</returns>
-    public static bool IsHiToken(string? token)
-        => !string.IsNullOrEmpty(token) && token.EndsWith(HiTokenSuffix, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// The language a token speaks about — <c>DE</c> for both <c>DE</c> and <c>DE:hi</c>, so a
-    /// language-keyed verdict (the QA budget) can be looked up for either.
-    /// </summary>
-    /// <param name="token">Mark token.</param>
-    /// <returns>The language code.</returns>
-    public static string TokenLanguage(string token)
-        => IsHiToken(token) ? token.Substring(0, token.Length - HiTokenSuffix.Length) : token;
-
-    /// <summary>
-    /// Which mark tokens have file evidence next to the media file.
-    /// <para>
-    /// The regular token is present when ANY subtitle of that language is there — an HI-only file
-    /// still proves the language is covered, which is the rule the on-disk check has always used. The
-    /// variant token is present only when a hearing-impaired file is actually on disk.
+    /// A pair cannot be projected back by accident: there is no spelling of <c>DE</c> that carries
+    /// the variant and no parse that can lose it. The rule of the old reader is kept: a subtitle of
+    /// language L proves L whether or not it is the variant, and proves L (HI) only when it IS.
     /// </para>
     /// </summary>
     /// <param name="mediaPath">Media file path.</param>
-    /// <returns>Tokens with file evidence.</returns>
-    public static HashSet<string> PresentTokens(string mediaPath)
+    /// <returns>Pairs with file evidence.</returns>
+    public static HashSet<SubtitleRef> PresentPairs(string mediaPath)
     {
-        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (_, lang, hi) in List(mediaPath))
+        var found = new HashSet<SubtitleRef>();
+        foreach (var (_, lang, hi, _) in List(mediaPath))
         {
             if (lang == null)
             {
@@ -356,10 +346,10 @@ public static class SidecarNaming
                 continue;
             }
 
-            found.Add(Token(lang, false));
+            found.Add(new SubtitleRef(lang, false));
             if (hi)
             {
-                found.Add(Token(lang, true));
+                found.Add(new SubtitleRef(lang, true));
             }
         }
 
@@ -367,44 +357,28 @@ public static class SidecarNaming
     }
 
     /// <summary>
-    /// F-M240: languages whose hearing-impaired variant is absent from disk.
+    /// True when this stream is a subtitle track that carries the film's DIALOGUE — readable text,
+    /// not forced.
     /// <para>
-    /// The download mark describes the language dimension, so a file that already carries its
-    /// subtitles looks complete the moment the HI switch is turned on — and the HI variant is never
-    /// fetched. Asking this question separates "the language is covered" from "the variant the
-    /// switch asks for is covered". Disk evidence rather than a stored flag on purpose: it
-    /// self-corrects when the HI file is deleted, and turning the switch off needs no bookkeeping
-    /// at all.
+    /// F-M284 (user decision 02.10.2026): this is the ONE predicate behind every "is this track part
+    /// of the film?" decision in the plugin. A forced track carries the lines of foreign-language
+    /// scenes only (F-M246), so it is not dialogue and must not count as coverage, must not be
+    /// uploaded, and needs no language tag. A bitmap track carries pixels (F-M6/F-M257), so it cannot
+    /// be read at all.
+    /// </para>
+    /// <para>
+    /// It exists as a named rule because the same judgement used to be re-derived from Jellyfin's
+    /// flags in five separate call sites (the seeder twice, the upload pipeline, the language gate,
+    /// and the embedded-presence check). Copies drift: the four name parsers this codebase used to
+    /// carry are the standing proof, and one of them silently read <c>.sdh</c> as the language "SD".
+    /// A caller that needs a different QUESTION asks a different predicate; a caller that needs the
+    /// same question calls this one.
     /// </para>
     /// </summary>
-    /// <param name="mediaPath">Media file path.</param>
-    /// <param name="languages">Languages to check.</param>
-    /// <returns>Languages with no hearing-impaired sidecar.</returns>
-    /// <summary>
-    /// F-M243: the HI question, answered from the registry.
-    /// <para>
-    /// A check that looks only at files next to the media read a file whose
-    /// English is EMBEDDED as "HI absent", so the language was queued and downloaded although the
-    /// variant was already in the container. Measured on prod: 33 of 35 sampled files embed
-    /// <c>eng</c> with no EN sidecar, so nearly every item was re-fetched for a variant it had.
-    /// </para>
-    /// <para>
-    /// F-M254: the registry is the source, not the stream list. The embedded verdict is stored (the
-    /// uploader writes it through <c>MarkEmbed</c>, the downloader through <c>MarkDownloaded</c>), so
-    /// answering the question live meant a stored verdict could be ignored — a captioned track whose
-    /// title Jellyfin does not surface read as "HI absent" while its own row said otherwise. The
-    /// caller passes what the registry holds.
-    /// </para>
-    /// </summary>
-    /// <param name="languages">Languages to check.</param>
-    /// <param name="storedHi">Languages the registry records as hearing-impaired.</param>
-    /// <returns>Languages with no recorded hearing-impaired variant.</returns>
-    public static List<string> MissingHearingImpaired(
-        IEnumerable<string> languages, IEnumerable<string>? storedHi)
-    {
-        var known = new HashSet<string>(storedHi ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-        return languages.Where(lang => !known.Contains(lang)).ToList();
-    }
+    /// <param name="stream">Media stream.</param>
+    /// <returns>True when the stream is a non-forced text subtitle track.</returns>
+    public static bool IsDialogueStream(MediaStream? stream)
+        => stream != null && stream.IsTextSubtitleStream && !IsForcedStream(stream);
 
     /// <summary>
     /// F-M71's HI detection on an embedded stream, in ONE place. Jellyfin's own flag first, then the
@@ -523,11 +497,10 @@ public static class SidecarNaming
 
         foreach (var s in streams)
         {
-            // F-M246: forced tracks are not the film's subtitle.
-            // F-M257: neither is a bitmap track — dvdsub/pgssub carry pixels, so they cannot be
-            // read, extracted or published. Counting one as coverage left 86 items in the library
-            // marked "settled" for a language whose only subtitle was unreadable.
-            if (s.Type != MediaStreamType.Subtitle || IsForcedStream(s) || !s.IsTextSubtitleStream)
+            // F-M246/F-M257/F-M284: the ONE predicate — a forced track carries only foreign-language
+            // scenes, a bitmap track carries pixels (86 items were once marked "settled" for a
+            // language whose only subtitle was unreadable). Neither is dialogue, so neither covers.
+            if (s.Type != MediaStreamType.Subtitle || !IsDialogueStream(s))
             {
                 continue;
             }
@@ -569,9 +542,34 @@ public static class SidecarNaming
     /// </summary>
     /// <param name="streams">All subtitle streams of the item, UNFILTERED (as Jellyfin returns them).</param>
     /// <returns>One triple per mappable, non-forced, TEXT embedded subtitle track.</returns>
-    public static List<(int SubPos, string Lang, bool HearingImpaired)> EmbeddedTracks(IEnumerable<MediaStream>? streams)
+    /// <summary>
+    /// F-M284 (user decision 02.10.2026): the embedded subtitle tracks of a file, with BOTH
+    /// properties, observed rather than filtered.
+    /// <para>
+    /// This used to skip forced and bitmap streams outright, which meant the registry never held a
+    /// row for a track that exists — and then every caller that cared re-derived the exclusion from
+    /// Jellyfin's stream flag, in five separate places (the seeder twice, the upload pipeline, the
+    /// language gate, and the coverage check). A fact that is never recorded is a fact that gets
+    /// re-guessed: the rule now lives in ONE reader, and the row states what the file carries.
+    /// </para>
+    /// <para>
+    /// Bitmap tracks are still EXCLUDED, and that is a different matter: they carry no text at all
+    /// (F-M6), so there is no subtitle datum to record — no language to resolve, nothing to upload,
+    /// nothing to hash.
+    /// </para>
+    /// <para>
+    /// A forced track is recorded with <c>Forced = true</c> and deliberately still carries its
+    /// language: that is the whole point of recording it. It does not count as coverage anywhere
+    /// (a forced track is not the film's dialogue, F-M246), so the language stays open and is
+    /// searched for — and because the row exists, the reason is visible instead of having to be
+    /// re-derived.
+    /// </para>
+    /// </summary>
+    /// <param name="streams">The item's stream list.</param>
+    /// <returns>One triple per mappable, non-bitmap TEXT embedded subtitle track.</returns>
+    public static List<(int SubPos, string Lang, bool HearingImpaired, bool Forced)> EmbeddedTracks(IEnumerable<MediaStream>? streams)
     {
-        var result = new List<(int, string, bool)>();
+        var result = new List<(int, string, bool, bool)>();
         var all = streams?
             .Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal)
             .ToList();
@@ -583,15 +581,15 @@ public static class SidecarNaming
         for (int pos = 0; pos < all.Count; pos++)
         {
             var s = all[pos];
-            if (IsForcedStream(s) || !s.IsTextSubtitleStream)
+            if (!s.IsTextSubtitleStream)
             {
-                continue;
+                continue; // bitmap: no text, so no datum to record (F-M6)
             }
 
             string? lang = LanguageMapper.MapToSubdl(s.Language);
             if (lang != null)
             {
-                result.Add((pos, lang, IsHearingImpairedStream(s)));
+                result.Add((pos, lang, IsHearingImpairedStream(s), IsForcedStream(s)));
             }
         }
 

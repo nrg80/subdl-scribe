@@ -139,21 +139,12 @@ public class SubdlReset : ControllerBase
                     db.Media.Update(media);
                 }
 
-                // F-M192: same defect as the upload scope — persist the mutated rows.
-                var touched = new List<MediaEntity>();
-                foreach (var media in db.Media.FindAll().Where(m => m.SubtitlesDownloadedAt != null))
-                {
-                    media.SubtitlesDownloadedAt = null;
-                    media.SubtitlesDownloadedLanguages = null;
-                    touched.Add(media);
-                }
-
-                if (touched.Count > 0)
-                {
-                    db.Media.Update(touched);
-                }
-
-                LogUtil.Normal(_logger, "[SubDL] Reset \"download\": {Count} file-complete marker(s) cleared.", touched.Count);
+                // F-M283 (user decision 02.10.2026): there is no download completion mark to clear.
+                // The reset keeps the part that is real state — the downloaded sidecar rows, the
+                // burned candidates, the QA counters and the search stamps — and drops the sweep
+                // over `SubtitlesDownloadedAt`, because the item is re-asked from its evidence on
+                // the very next run. Nothing needs clearing to make it due again.
+                LogUtil.Normal(_logger, "[SubDL] Reset \"download\": downloaded sidecars, burned candidates and search stamps cleared. No completion mark exists (F-M283).");
             }
             else
             {

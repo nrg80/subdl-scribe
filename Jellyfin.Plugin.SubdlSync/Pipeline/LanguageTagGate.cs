@@ -202,7 +202,9 @@ public sealed class LanguageTagGate
                 continue;
             }
 
-            if (SidecarNaming.IsForcedStream(s) || !s.IsTextSubtitleStream)
+            // F-M246/F-M284: a forced or bitmap track is not the film's dialogue, so it needs no
+            // tag — the ONE predicate, shared with the uploader and the seeder.
+            if (!SidecarNaming.IsDialogueStream(s))
             {
                 continue;
             }

@@ -764,10 +764,10 @@ public sealed class UploadPipeline
             // F-M3: only items with embedded TEXT subtitle streams.
             // IsExternal filters out loose .srt files JF mixes into the stream
             // list — ffmpeg extraction only works on container streams.
-            // F-M246: a FORCED track is not the film's subtitle — it carries only the lines of
-            // foreign-language scenes, so there is nothing worth publishing. It is excluded here
-            // AND in the seeder's upload-todo prefilter, through one predicate
-            // (SidecarNaming.IsForcedStream), so the two cannot drift apart.
+            // F-M246/F-M284: a FORCED track is not the film's subtitle — it carries only the lines
+            // of foreign-language scenes, so there is nothing worth publishing. The question is
+            // asked through the ONE predicate (SidecarNaming.IsDialogueStream), which the seeder's
+            // prefilter and the language gate ask as well.
             // NOTE: allSubs stays UNFILTERED for the position lookup below — ffmpeg's 0:s:N
             // counts every subtitle stream including the forced and the bitmap ones, so the
             // index must be computed against the whole list.
@@ -775,7 +775,7 @@ public sealed class UploadPipeline
                 .Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal)
                 .ToList() ?? new List<MediaStream>();
             var textStreams = allSubs
-                .Where(s => s.IsTextSubtitleStream && !Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsForcedStream(s))
+                .Where(Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream)
                 .ToList();
 
             // ============================================================
@@ -990,7 +990,7 @@ public sealed class UploadPipeline
             }
 
             // F-M48: loose SRT files — same phase-1 treatment (read + QA local)
-            foreach (var (loosePath, looseLang, looseHi) in FindLooseSrts(mediaPath))
+            foreach (var (loosePath, looseLang, looseHi, _) in FindLooseSrts(mediaPath))
             {
                 runCt.ThrowIfCancellationRequested();
                 watchdog.Heartbeat();
@@ -1615,7 +1615,7 @@ public sealed class UploadPipeline
     }
 
     /// <summary>
-    /// F-M48: finds loose SRT files next to the media file. Returns (path, language, hearing-impaired) triples.
+    /// F-M48: finds loose SRT files next to the media file. Returns (path, language, HI, forced) tuples.
     /// <para>
     /// The name is read by <see cref="Registry.SidecarNaming"/>, the one parser — this method used to
     /// carry its own copy and the copies drifted.
@@ -1623,7 +1623,7 @@ public sealed class UploadPipeline
     /// </summary>
     /// <param name="mediaPath">Media file path.</param>
     /// <returns>One entry per loose sidecar.</returns>
-    public static List<(string Path, string Lang, bool HearingImpaired)> FindLooseSrts(string mediaPath)
+    public static List<(string Path, string Lang, bool HearingImpaired, bool Forced)> FindLooseSrts(string mediaPath)
         => Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.List(mediaPath);
 
     /// <summary>

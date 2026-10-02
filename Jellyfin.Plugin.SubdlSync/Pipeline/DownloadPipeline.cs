@@ -51,11 +51,16 @@ public class DownloadRunSummary
     /// <summary>Gets or sets the number of failed downloads.</summary>
     public int Failed { get; set; }
 
-    /// <summary>F-M234 (B): stored "file complete" marks that were proven wrong by the disk and dropped.</summary>
-    public int MarksInvalidated { get; set; }
+    /// <summary>
+    /// F-M283 (user decision 02.10.2026): there is no download mark any more, so there is nothing to
+    /// invalidate or to withhold. `MarksInvalidated` and `MarksWithheld` are removed with their
+    /// subject — a counter that reports on a construct which no longer exists reads as information
+    /// while telling nobody anything. What the run reports instead is which items are open and which
+    /// searches were asked for; see the run line below.
+    /// </summary>
 
-    /// <summary>F-M240: complete marks NOT written because a required file (regular or the hearing-impaired variant) has no evidence yet. Informational — the item stays on its refetch clock.</summary>
-    public int MarksWithheld { get; set; }
+    /// <summary>F-M282: open required files seen in this run (regular + hearing-impaired data).</summary>
+    public int OpenFilesSeen { get; set; }
 
     /// <summary>Gets or sets the number of languages reported "not available" for an item.</summary>
     public int NotAvailable { get; set; }
@@ -509,7 +514,7 @@ public sealed class DownloadPipeline : IDisposable
         // the saves the run would have made.
         string savedLabel = summary.IsDryRun ? "would have saved" : "saved";
         LogUtil.Normal(_logger, 
-            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing missing) | {Marks} complete marks invalidated | {Withheld} complete marks withheld | {Failed} failed | processed {Done}/{Queued} queued",
+            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued",
             summary.Downloaded,
             summary.SkippedNoCandidates,
             summary.NotAvailable,
@@ -518,8 +523,7 @@ public sealed class DownloadPipeline : IDisposable
             summary.SkippedByFilter,
             summary.SkippedNoId + summary.SkippedIdGaveUp,
             summary.SkippedNothingMissing,
-            summary.MarksInvalidated,
-            summary.MarksWithheld,
+            summary.OpenFilesSeen,
             summary.Failed,
             idx,
             queuedTotal);
@@ -786,76 +790,52 @@ public sealed class DownloadPipeline : IDisposable
         }
 
         // F-M257: record what the container carries, before any work decision is taken. The
-        // download side asks the registry whether a language's HI variant is present (F-M254); on an
-        // install where the uploader never runs that area was empty, so the question was answered
-        // "absent" forever for a track sitting right there. This runs ahead of the file-complete
-        // short-circuit on purpose: a settled item still has facts worth having.
+        // download side asks what subtitle data are covered (F-M282); on an install where the
+        // uploader never runs that area was empty, so the question was answered "absent" forever for
+        // a track sitting right there. This runs ahead of the open-pair check on purpose: a settled
+        // item still has facts worth having.
         ObserveEmbeddedFacts(item, mediaHash);
 
-        if (Registry.IsSubtitlesDownloaded(mediaHash, RequiredTokens(TargetLanguages)))
+        // F-M283 (user decision 02.10.2026): the download mark is GONE, and with it the short-circuit
+        // this block used to be. It read a stored verdict, then re-derived a list of "open tokens"
+        // from a DIFFERENT set of evidence than the check that had written it — so a variant embedded
+        // in the container had a registry verdict and no sidecar, the withhold check refused the mark,
+        // the mark was never written, and the item stayed due forever while the regular subtitle was
+        // re-fetched on every pass.
+        //
+        // The question is now asked once, at the grain of the subtitle datum: which of the required
+        // PAIRS have no evidence? Both answers — "is this file done" and "may it be marked done" —
+        // were always the same question, and with the mark deleted there is only one of them left.
+        var required = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef
+            .Required(TargetLanguages, _config.DownloadHearingImpaired);
+        var openPairs = Registry.OpenPairs(mediaPath, required, EmbeddedPresentLanguagesOf(item));
+
+        var openStale = openPairs
+            .Where(r => !_qaFails.IsExhausted(item.Id.ToString(), r.Language, _config.DownloadQaRetryLimit))
+            .ToList();
+
+        if (openStale.Count == 0)
         {
-            // F-M234 (B): "file complete" is a STORED verdict, not a fact about the disk. Before
-            // trusting it, ask the filesystem whether the evidence is still there. A stored file
-            // whose subtitle is gone — and which SubDL did not settle as unavailable — proves the
-            // mark was overtaken by a deletion (user deleted the .srt). Without this check the item
-            // stays "complete" forever while the seeder keeps queuing it: it is skipped here on
-            // every single run and nothing ever changes.
-            //
-            // F-M240 (user decision 01.10.2026): the question is asked PER REQUIRED FILE, not per
-            // language. `DE` and `DE:hi` are two independent tokens, so the regular subtitle and its
-            // variant are judged apart and the whole HI special case this block used to carry is gone
-            // — a missing variant is simply an open token like any other. That also ends the loop the
-            // special case caused: the old code marked the LANGUAGE stale while the regular file was
-            // present, so every pass re-searched, re-saved and re-marked an item whose sidecar was
-            // already on disk (31 items in one morning on the live library, 24 of them handled the
-            // evening before).
-            var settledLangs = MissingLanguages(item, mediaPath, TargetLanguages);
-            var fileEvidence = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.PresentTokens(mediaPath);
-            var storedHi = Registry.HearingImpairedLanguages(mediaPath); // F-M254: the registry verdict
-            var openTokens = new List<string>();
-            foreach (var l in TargetLanguages)
-            {
-                // Regular file: the embedded-aware answer, because a language whose subtitle sits
-                // inside the container has no sidecar and is not missing.
-                if (settledLangs.Contains(l, StringComparer.OrdinalIgnoreCase))
-                {
-                    openTokens.Add(Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.Token(l, false));
-                }
+            // Everything required has evidence, or SubDL settled it as unavailable. Nothing to do —
+            // and because the answer is derived, it cannot be stale: deleting a subtitle puts its
+            // pair back in this list on the next ask, with no invalidation step and no stored stamp
+            // to be overtaken. That is why `MarksInvalidated` is gone: there was never a mark to
+            // invalidate, only a deletion whose evidence disappeared.
+            summary.SkippedItems++;
+            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] SKIP {File} — nothing open", Path.GetFileName(mediaPath));
+            return;
+        }
 
-                // Variant: the FILE is what the switch asks for, so the regular subtitle never proves
-                // it. Either evidence counts — a variant file on disk, or the registry row a previous
-                // save or the uploader wrote (F-M254 reads the verdict, not the live streams).
-                if (_config.DownloadHearingImpaired
-                    && !fileEvidence.Contains(Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.Token(l, true))
-                    && !storedHi.Contains(l, StringComparer.OrdinalIgnoreCase))
-                {
-                    openTokens.Add(Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.Token(l, true));
-                }
-            }
-
-            // A language SubDL settled as unavailable is not a lie by the mark — the mark is allowed
-            // to claim it without a file.
-            var stale = openTokens
-                .Where(t => !_qaFails.IsExhausted(
-                    item.Id.ToString(),
-                    Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.TokenLanguage(t),
-                    _config.DownloadQaRetryLimit))
-                .ToList();
-
-            if (stale.Count == 0)
-            {
-                summary.SkippedItems++;
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] SKIP {File} — file complete", Path.GetFileName(mediaPath));
-                return;
-            }
-
-            // The mark lied. Drop it and clear the search stamp so the item is reworked in THIS run
-            // rather than waiting out the refetch gap for a subtitle that no longer exists.
-            Registry.MarkAndFlush(() => Registry.InvalidateDownloadedMark(mediaHash));
-            _searchTracker.ClearStamp(item.Id.ToString());
-            summary.MarksInvalidated++;
-            LogUtil.Normal(_logger, "[SubDL-D] complete mark invalidated {File} — {Tokens} no longer on disk; refetching this run.",
-                Path.GetFileName(mediaPath), string.Join(",", stale));
+        if (openPairs.Count > openStale.Count)
+        {
+            // Something is open but settled-as-unavailable. Only informative: the QA budget is not a
+            // give-up, it says "do not ask SubDL for this again this cycle".
+            LogUtil.PerItem(
+                _config.LogMode,
+                _logger,
+                "[SubDL-D] open but QA-exhausted {File}: {Pairs}",
+                Path.GetFileName(mediaPath),
+                string.Join(",", openPairs.Select(r => r.ToString())));
         }
 
         // F-M47: per-item refetch gate — never-searched items (new arrivals) pass
@@ -1143,59 +1123,44 @@ public sealed class DownloadPipeline : IDisposable
             return;
         }
 
-        // Which target languages are actually missing on this item?
-        var missing = MissingLanguages(item, mediaPath, targets);
+        // F-M282 (user decision 02.10.2026): the two search pools are fed from the PAIRS, separately.
+        //
+        // This is the spot that produced the wasted downloads. The old code asked which LANGUAGES had
+        // no variant and appended them to the same `missing` list that feeds the `hi=0` search — so a
+        // missing German variant made the regular German subtitle "missing", the search ran with
+        // `hi=0` on a language whose .de.srt had been on disk for days, and the file was re-fetched.
+        // SubDL serves the two sides from separate, non-overlapping pools (F-M241), so they must be
+        // fed separately here: `regularMissing` drives `&hi=0`, `variantMissing` drives `&hi=1`.
+        var requiredPairs = RequiredPairs(targets);
+        var openPairsNow = Registry.OpenPairs(mediaPath, requiredPairs, EmbeddedPresentLanguagesOf(item));
 
-        // F-M240: the same disk question as in the mark branch above, and it has to be asked HERE
-        // too. This branch runs when there is no download mark (a new or never-completed file):
-        // there the language is present but its HI variant is not, so "nothing missing" was
-        // answered for the regular subtitle and the run returned before any search — the item was
-        // queued by the seeder (which now knows about HI) and then dropped here. Measured on prod:
-        // 290 items queued, 280 of them skipped as "nothing missing".
-        if (_config.DownloadHearingImpaired)
-        {
-            // F-M254: the registry holds the verdict — same rule as everywhere else.
-            foreach (var l in Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
-                         .MissingHearingImpaired(targets, Registry.HearingImpairedLanguages(mediaPath)))
-            {
-                if (!missing.Contains(l, StringComparer.OrdinalIgnoreCase)
-                    && !_qaFails.IsExhausted(item.Id.ToString(), l, _config.DownloadQaRetryLimit))
-                {
-                    missing.Add(l);
-                }
-            }
-        }
+        var regularMissing = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleCoverage
+            .RegularLanguages(openPairsNow);
+        var variantMissing = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleCoverage
+            .VariantLanguages(openPairsNow);
+        var missing = new List<string>(regularMissing);
 
-        if (missing.Count == 0)
+        if (missing.Count == 0 && variantMissing.Count == 0)
         {
             summary.SkippedItems++;
             summary.SkippedNothingMissing++;
-            // F-M88c: nothing missing = file is complete for download purposes. F-M22: the mark is
-            // written on request, not from a dry run — a dry run must not settle a file, or the next
-            // real run finds it complete and never fetches what the dry run was asked to report.
-            // F-M240 (user decision 01.10.2026): the mark names the required FILES, so the
-            // hearing-impaired variant is its own entry and a missing variant keeps the mark from
-            // being written. The item stays on its refetch clock (F-M47) and is looked at again every
-            // interval — deliberately not a give-up.
-            if (!_config.DownloadDryRun && mediaHash != null)
-            {
-                var openTokens = MissingTokens(targets, mediaPath);
-                if (openTokens.Count > 0)
-                {
-                    summary.MarksWithheld++;
-                    LogUtil.PerItem(
-                        _config.LogMode,
-                        _logger,
-                        "[SubDL-D] FILE NOT COMPLETE {File} — no file evidence for {Tokens}; mark withheld, retry on the refetch clock",
-                        Path.GetFileName(mediaPath),
-                        string.Join(",", openTokens));
-                    return;
-                }
-
-                Registry.MarkAndFlush(() => Registry.MarkSubtitlesDownloaded(mediaHash, RequiredTokens(targets)));
-            }
-
+            // F-M283: nothing open means nothing to fetch. No mark is written any more — the question
+            // at the top of this method IS the answer, asked fresh every run, so there is no stored
+            // verdict left to settle or to contradict.
             return;
+        }
+
+        // The variant pool is asked even when nothing regular is missing: that is the whole point of
+        // judging the datum instead of the language. A file with its German on disk but no German
+        // variant has work to do, and it must not be reached by re-requesting German.
+        if (missing.Count == 0)
+        {
+            LogUtil.PerItem(
+                _config.LogMode,
+                _logger,
+                "[SubDL-D] {File} — only the variant is open: {Pairs} (regular files present, no re-fetch)",
+                Path.GetFileName(mediaPath),
+                string.Join(",", openPairsNow.Select(p => p.ToString())));
         }
 
         // F-M88c: track which target languages reached a terminal state this run
@@ -1257,7 +1222,7 @@ public sealed class DownloadPipeline : IDisposable
         // imdb/tmdb/film_name + season/episode, unpack=1); No v2 search remains
         // in the download path.
         var (candidates, usedBackup, thresholdPassCount, hiCandidates) = await RunV2SearchAsync(
-            item, mediaPath, imdbId, tmdbId, season, isSeries ? episode : 0, missing, summary, ct);
+            item, mediaPath, imdbId, tmdbId, season, isSeries ? episode : 0, missing, variantMissing, summary, ct);
 
         const int maxTransientRetries = 3;
         int transientAttempt = 0;
@@ -1275,7 +1240,7 @@ public sealed class DownloadPipeline : IDisposable
             _watchdog?.Heartbeat();
             _api.ResetRateLimitFlag(); // clear the transient marker before the retry
             (candidates, usedBackup, thresholdPassCount, hiCandidates) = await RunV2SearchAsync(
-                item, mediaPath, imdbId, tmdbId, season, isSeries ? episode : 0, missing, summary, ct);
+                item, mediaPath, imdbId, tmdbId, season, isSeries ? episode : 0, missing, variantMissing, summary, ct);
         }
 
         // F-M52: requirement marker added for traceability.
@@ -1999,37 +1964,26 @@ public sealed class DownloadPipeline : IDisposable
             }
         }
 
-        // F-M88c: if every missing language reached a terminal state this run, mark
-        // the whole media file complete so future download runs skip it entirely.
-        // F-M22: not in a dry run. The dry run reaches this point with savedAny set — it reports
-        // what it WOULD save — and a mark written here says the file is settled although nothing
-        // was fetched. The next real run then skips it as complete, so the dry run has taken the
-        // work away instead of only describing it.
-        if (!_config.DownloadDryRun && mediaHash != null && missing.All(l => closedLangs.Contains(l)) && !_stopRun)
+        // F-M283 (user decision 02.10.2026): the completion mark is GONE. This block used to decide
+        // whether to WRITE one, and that decision was a third reading of the same question — it asked
+        // `MissingTokens` (disk only) while the reader above asked disk plus the stored variant
+        // verdict, so the two disagreed on exactly the case that mattered: a variant embedded in the
+        // container. The withhold refused the mark, the item stayed due, and the regular subtitle was
+        // re-fetched on every pass.
+        //
+        // Nothing is settled here any more, so there is nothing to report as withheld or complete:
+        // the open-pair question at the top of the run is the only answer, and it is asked fresh
+        // every time. What this spot still reports is the outcome of the search itself — a language
+        // whose candidates were all rejected and whose QA budget is spent is closed for this cycle,
+        // which is informative, not a give-up (F-M42b: no expiry, no retry budget as a brake).
+        if (!_stopRun && missing.Count > 0 && missing.All(l => closedLangs.Contains(l)))
         {
-            // F-M240 (user decision 01.10.2026): the mark names the required FILES. The
-            // hearing-impaired variant is its own token, and the loop above can only close the
-            // regular one — so a missing variant is checked here and keeps the mark from being
-            // written at all. That is what ends the loop: the refresh finds nothing to contradict,
-            // and the item stays on its refetch clock (F-M47) instead of being re-searched on every
-            // pass. Deliberately not a give-up and without expiry: a variant SubDL does not carry
-            // today is looked for again on the next refetch.
-            var openTokens = MissingTokens(targets, mediaPath);
-            if (openTokens.Count > 0)
-            {
-                summary.MarksWithheld++;
-                LogUtil.PerItem(
-                    _config.LogMode,
-                    _logger,
-                    "[SubDL-D] FILE NOT COMPLETE {File} — no file evidence for {Tokens}; mark withheld, retry on the refetch clock",
-                    Path.GetFileName(mediaPath),
-                    string.Join(",", openTokens));
-            }
-            else
-            {
-                Registry.MarkAndFlush(() => Registry.MarkSubtitlesDownloaded(mediaHash, RequiredTokens(targets)));
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] FILE COMPLETE {File} — all required files settled", Path.GetFileName(mediaPath));
-            }
+            LogUtil.PerItem(
+                _config.LogMode,
+                _logger,
+                "[SubDL-D] {File} — {Count} language(s) closed by the QA budget this run; nothing left to search",
+                Path.GetFileName(mediaPath),
+                missing.Count);
         }
     }
 
@@ -2069,9 +2023,9 @@ public sealed class DownloadPipeline : IDisposable
             // what it can read (ObserveEmbed never overwrites an existing row), while the corrected
             // language is already stored — and the coverage check reads it from there.
             int written = 0;
-            foreach (var (subPos, lang, hi) in tracks)
+            foreach (var (subPos, lang, hi, forced) in tracks)
             {
-                if (Registry.ObserveEmbed(mediaHash, subPos, lang, hi))
+                if (Registry.ObserveEmbed(mediaHash, subPos, lang, hi, forced))
                 {
                     written++;
                 }
@@ -2092,13 +2046,21 @@ public sealed class DownloadPipeline : IDisposable
         // name rules. See SidecarNaming for why three copies of this parse had to go: the copies
         // disagreed about the "sdh" marker and the disagreement silently invalidated download marks.
         var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (_, lang, _) in Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.List(mediaPath))
+        foreach (var (_, lang, _, forced) in Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.List(mediaPath))
         {
             if (lang == null)
             {
                 // A sidecar whose NAME carries no language and whose text has not been
                 // detected yet proves nothing about coverage. It is not added, so the
                 // language still counts as missing and is fetched if it is configured.
+                continue;
+            }
+
+            // F-M284: a forced subtitle is not the film's dialogue (F-M246), so it never proves
+            // its language. This is the ONE place the rule lives now; it used to be re-derived in
+            // five call sites from Jellyfin's stream flag.
+            if (forced)
+            {
                 continue;
             }
 
@@ -2134,53 +2096,63 @@ public sealed class DownloadPipeline : IDisposable
     }
 
     /// <summary>
-    /// F-M240 (user decision 01.10.2026): the tokens the download mark must cover for this file.
+    /// F-M282: the language-level embedded evidence this run may count as coverage.
     /// <para>
-    /// A regular subtitle and its hearing-impaired variant are two independent files, so the mark has
-    /// to name them apart — <c>DE</c> and <c>DE:hi</c>. Recording both as the plain language is what
-    /// let one file settle the other: the regular save closed the HI slot as well, the mark was
-    /// written while the variant was absent, and the refresh contradicted it on every pass (31 items
-    /// in one morning on the live library, their sidecars rewritten although they were on disk).
+    /// Deliberately language-level and deliberately optional: it is Jellyfin's stream list, which
+    /// says a LANGUAGE has a track but says nothing about which variant, so it can prove the regular
+    /// pair and never the variant pair. The registry's own embedded ROWS are consulted separately by
+    /// the coverage reader and they DO carry the flag — that is the difference between the cached
+    /// stream snapshot and a stored fact (F-M263).
     /// </para>
     /// <para>
-    /// While the HI switch is off no variant token exists, so the mark is written as before and
-    /// turning the switch off needs no bookkeeping at all. Deliberately no expiry and no give-up: a
-    /// variant SubDL does not carry today is looked for again on the next refetch, and this method is
-    /// a pure projection of the configuration.
+    /// Empty while <c>DownloadOnlyMissing</c> is off, which is the configuration saying embedded
+    /// tracks are not coverage for this install. F-M246: a FORCED track does not make its language
+    /// present — it carries only the lines of foreign-language scenes.
     /// </para>
     /// </summary>
-    /// <param name="targets">Configured target languages.</param>
-    /// <returns>One token per required file.</returns>
-    private List<string> RequiredTokens(IReadOnlyList<string> targets)
+    /// <param name="item">Jellyfin item.</param>
+    /// <returns>Languages with a usable embedded track, or empty.</returns>
+    private IEnumerable<string> EmbeddedPresentLanguagesOf(BaseItem item)
     {
-        var tokens = new List<string>(targets);
-        if (_config.DownloadHearingImpaired)
+        if (!_config.DownloadOnlyMissing)
         {
-            tokens.AddRange(targets.Select(l => Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.Token(l, true)));
+            return Enumerable.Empty<string>();
         }
 
-        return tokens;
+        return Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
+            .EmbeddedPresentLanguages(_mediaSourceManager.GetMediaStreams(item.Id));
     }
 
     /// <summary>
-    /// F-M240: which required tokens have no file evidence next to the media file.
+    /// F-M282 (user decision 02.10.2026): the subtitle DATA this run must deliver for this file —
+    /// the regular subtitle of each configured language, plus its variant when the HI switch is on.
     /// <para>
-    /// Read from the disk through the shared reader, never from a stored flag: deleting the
-    /// <c>.sdh.srt</c> makes its token missing again and the item is revisited, which is exactly the
-    /// self-correcting behaviour the refresh relies on.
+    /// This replaces <c>RequiredTokens</c>. It is a pure projection of the configuration, and pairs
+    /// carry the hearing-impaired property structurally: turning the switch on ADDS the variant
+    /// pairs, so an item that already has its subtitles simply becomes due for the variant, and
+    /// turning it off removes them so nothing has to be cleaned up.
+    /// </para>
+    /// </summary>
+    /// <param name="targets">Configured target languages.</param>
+    /// <returns>One pair per required file.</returns>
+    private List<Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef> RequiredPairs(IReadOnlyList<string> targets)
+        => Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef
+            .Required(targets, _config.DownloadHearingImpaired);
+
+    /// <summary>
+    /// F-M282: which required PAIRS have no evidence for this file.
+    /// <para>
+    /// Read through the one shared reader (<see cref="Jellyfin.Plugin.SubdlScribe.Registry.SubtitleCoverage"/>),
+    /// so this answer and the coverage question at the top of the run can never be fed different
+    /// evidence — which is precisely how a complete item used to keep looking due.
     /// </para>
     /// </summary>
     /// <param name="targets">Configured target languages.</param>
     /// <param name="mediaPath">Media file path.</param>
-    /// <returns>Tokens without file evidence.</returns>
-    private List<string> MissingTokens(IReadOnlyList<string> targets, string mediaPath)
-    {
-        var present = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.PresentTokens(mediaPath);
-        return RequiredTokens(targets)
-            .Where(t => !present.Contains(t))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
+    /// <returns>Pairs without evidence.</returns>
+    private List<Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef> OpenPairs(
+        IReadOnlyList<string> targets, string mediaPath)
+        => Registry.OpenPairs(mediaPath, RequiredPairs(targets));
 
     /// <summary>F-M44 weighted release score: group match × WeightGroup + token overlap × WeightToken + min(dl,500) × WeightDownload.</summary>
     /// <summary>
@@ -2193,8 +2165,12 @@ public sealed class DownloadPipeline : IDisposable
     /// Returns (candidates, usedFilenameFallback, thresholdPassCount); null only
     /// when the search did not complete (429/5xx/403 — run must stop, F-M48).
     /// </summary>
+    /// <param name="missing">Regular subtitle pairs without evidence — drives the <c>hi=0</c> search.</param>
+    /// <param name="variantMissing">Variant pairs without evidence — drives the <c>hi=1</c> search.</param>
+    /// <param name="summary">Run summary.</param>
+    /// <param name="ct">Cancellation token.</param>
     private async Task<(List<SubtitleCandidate>? Candidates, bool UsedFilenameFallback, int ThresholdPassCount, List<SubtitleCandidate> HiCandidates)> RunV2SearchAsync(
-        BaseItem item, string mediaPath, string? imdbId, string? tmdbId, int season, int episode, List<string> missing, DownloadRunSummary summary, CancellationToken ct)
+        BaseItem item, string mediaPath, string? imdbId, string? tmdbId, int season, int episode, List<string> missing, List<string> variantMissing, DownloadRunSummary summary, CancellationToken ct)
     {
         string filename = Path.GetFileName(mediaPath);
         string langs = string.Join(",", missing);
@@ -2228,30 +2204,40 @@ public sealed class DownloadPipeline : IDisposable
             // HI releases the response happened to contain. The HI search only runs when the HI
             // switch asks for it, so a user who does not want HI variants pays exactly one search,
             // as before.
-            var main = await _api.SearchSubtitlesAsync(
-                string.IsNullOrWhiteSpace(imdbId) ? null : imdbId,
-                string.IsNullOrWhiteSpace(tmdbId) ? null : tmdbId,
-                _searchFnTitle, season, episode, langs, 20, ct, 3, hearingImpaired: false).ConfigureAwait(false);
+            // F-M282: the regular search runs only when a REGULAR file is open. When the variant is
+            // the only thing missing, `langs` is empty and this call would be a search for nothing —
+            // worse, it used to be the call that re-fetched a subtitle already on disk.
+            var main = langs.Length == 0
+                ? new List<SubtitleCandidate>()
+                : await _api.SearchSubtitlesAsync(
+                    string.IsNullOrWhiteSpace(imdbId) ? null : imdbId,
+                    string.IsNullOrWhiteSpace(tmdbId) ? null : tmdbId,
+                    _searchFnTitle, season, episode, langs, 20, ct, 3, hearingImpaired: false).ConfigureAwait(false);
             if (main == null)
             {
                 return (null, false, 0, noHi); // 429/5xx/403 → stop the run
             }
 
-            if (main.Count > 0 && _config.DownloadHearingImpaired)
+            if (variantMissing.Count > 0 && _config.DownloadHearingImpaired)
             {
-                // Second search. A failure here must NOT lose the regular candidates: the HI
-                // variant is a bonus (F-M42b), the regular subtitle is the actual target, so an
-                // error only means "no HI pool this run".
+                // Second search, fed from the VARIANT pairs only. A failure here must NOT lose the
+                // regular candidates: the HI variant is a bonus (F-M42b), the regular subtitle is the
+                // actual target, so an error only means "no HI pool this run".
+                //
+                // The language list is `variantMissing`, never `missing`: sending the regular list
+                // asked SubDL for the regular side of a language whose variant was missing, and the
+                // result was a regular subtitle fetched over the file already on disk.
+                var hiLangs = string.Join(",", variantMissing);
                 var hi = await _api.SearchSubtitlesAsync(
                     string.IsNullOrWhiteSpace(imdbId) ? null : imdbId,
                     string.IsNullOrWhiteSpace(tmdbId) ? null : tmdbId,
-                    _searchFnTitle, season, episode, langs, 20, ct, 3, hearingImpaired: true).ConfigureAwait(false);
+                    _searchFnTitle, season, episode, hiLangs, 20, ct, 3, hearingImpaired: true).ConfigureAwait(false);
                 if (hi != null && hi.Count > 0)
                 {
-                    noHi = hi.Where(c => c.Language != null && missing.Contains(c.Language, StringComparer.OrdinalIgnoreCase)).ToList();
+                    noHi = hi.Where(c => c.Language != null && variantMissing.Contains(c.Language, StringComparer.OrdinalIgnoreCase)).ToList();
                     LogUtil.PerItem(_config.LogMode, _logger,
                         "[SubDL-D] HI search {File} [{Langs}] — {N} hearing-impaired candidates (separate pool, F-M241)",
-                        filename, langs, noHi.Count);
+                        filename, hiLangs, noHi.Count);
                 }
                 else if (hi == null)
                 {

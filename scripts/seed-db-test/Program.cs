@@ -125,12 +125,20 @@ internal static class Program
         };
 
         var tracks = SidecarNaming.EmbeddedTracks(streams);
-        Check("two embedded tracks survive the filters", tracks.Count == 2,
-              "-> " + string.Join(",", tracks.Select(t => "pos" + t.SubPos + ":" + t.Lang + (t.HearingImpaired ? "/hi" : ""))));
-        Check("bitmap codec skipped", !tracks.Any(t => t.Lang == "FR"));
-        Check("forced track skipped", !tracks.Any(t => t.Lang == "ES"));
+        // F-M284: a forced track IS observed now — it used to be filtered out here, which left the
+        // registry with no row for a track the file demonstrably carries, and every caller then
+        // re-derived the exclusion from Jellyfin's flag in five separate places. The rule lives in
+        // ONE reader (SubtitleCoverage) and the row states what the file has.
+        Check("three embedded tracks survive the filters (forced is OBSERVED now)",
+              tracks.Count == 3,
+              "-> " + string.Join(",", tracks.Select(t => "pos" + t.SubPos + ":" + t.Lang
+                    + (t.HearingImpaired ? "/hi" : "") + (t.Forced ? "/forced" : ""))));
+        Check("bitmap codec skipped — no text, so no datum", !tracks.Any(t => t.Lang == "FR"));
         Check("external stream skipped", !tracks.Any(t => t.Lang == "IT"));
         Check("HI flag carried through", tracks.Any(t => t.Lang == "DE" && t.HearingImpaired));
+        Check("forced flag carried through", tracks.Any(t => t.Lang == "ES" && t.Forced),
+              "-> " + string.Join(",", tracks.Where(t => t.Lang == "ES").Select(t => t.Forced.ToString())));
+        Check("a forced track is not hearing-impaired", !tracks.Any(t => t.Lang == "ES" && t.HearingImpaired));
 
         // ── B ───────────────────────────────────────────────────────────────
         Section("B) SidecarNaming.List reads loose files from a path alone");
@@ -152,62 +160,102 @@ internal static class Program
               loose.Any(x => x.Lang == null && !x.HearingImpaired),
               "-> " + string.Join(",", loose.Select(x => x.Lang ?? "<null>")));
 
-        // ── B2) mark tokens: one entry per required FILE (F-M240) ────────────
-        // A regular subtitle and its variant are two files on disk, so they must be two
-        // entries in the mark. The failure this guards: both recorded as "DE", the regular
-        // save closed the variant's slot, and the mark claimed a file that was not there.
-        Section("B2) The mark names files: DE vs DE:hi (F-M240)");
-        Check("Token(DE, false) is the plain language", SidecarNaming.Token("DE", false) == "DE",
-              "-> " + SidecarNaming.Token("DE", false));
-        Check("Token(DE, true) carries the variant marker", SidecarNaming.Token("DE", true) == "DE:hi",
-              "-> " + SidecarNaming.Token("DE", true));
-        Check("a plain token is not read as a variant", !SidecarNaming.IsHiToken("DE"));
-        Check("a variant token is recognized", SidecarNaming.IsHiToken("DE:hi"));
-        Check("the marker is case-insensitive", SidecarNaming.IsHiToken("de:HI"));
-        Check("TokenLanguage(DE:hi) is DE", SidecarNaming.TokenLanguage("DE:hi") == "DE",
-              "-> " + SidecarNaming.TokenLanguage("DE:hi"));
-        Check("TokenLanguage(DE) is DE", SidecarNaming.TokenLanguage("DE") == "DE");
+        // ── B2) the datum is the pair (language, HI) — F-M282 ───────────────
+        // A hearing-impaired subtitle is its own datum with its own identity: a regular subtitle
+        // and its variant are two files on disk, two sidecar rows keyed by content, and two pairs.
+        // The failure this guards is the one the string tokens could not prevent — both recorded
+        // under the plain language, so the regular save closed the variant's slot and the mark
+        // claimed a file that was not there, while the search re-fetched the regular file.
+        Section("B2) The datum is the pair (language, HI) — F-M282");
+        var deRegular = new SubtitleRef("de", false);
+        var deVariant = new SubtitleRef("DE", true);
+        Check("the language is normalized, so two spellings are one datum",
+              deRegular == new SubtitleRef("DE", false),
+              "-> " + deRegular.Language);
+        Check("the variant is a DIFFERENT datum from the regular file",
+              !deRegular.Equals(deVariant));
+        Check("a variant prints as readable text, not as a parseable token",
+              deVariant.ToString() == "DE (HI)",
+              "-> " + deVariant.ToString());
+        Check("an empty language is not a datum", !new SubtitleRef("", false).IsUsable);
 
-        // PresentTokens reads the DISK: the .de.srt in this fixture carries no marker, so it
-        // proves the plain token and must NOT prove the variant. This is the assertion the old
-        // language-keyed code could not express at all.
-        var tokens = SidecarNaming.PresentTokens(media);
-        Check("the .de.srt proves the DE token", tokens.Contains("DE"));
-        Check("the .de.srt does NOT prove DE:hi", !tokens.Contains("DE:hi"),
-              "-> [" + string.Join(",", tokens.OrderBy(x => x)) + "]");
-        Check("the .en.sdh.srt proves EN:hi", tokens.Contains("EN:hi"));
-        Check("the .en.sdh.srt also proves EN (a variant is still the language)", tokens.Contains("EN"));
+        // Required(): the switch ADDS the variant pairs, so turning it on makes an item due for the
+        // variant and turning it off removes them with nothing to clean up.
+        var withoutHi = SubtitleRef.Required(new[] { "DE" }, includeHearingImpaired: false);
+        var withHi = SubtitleRef.Required(new[] { "DE" }, includeHearingImpaired: true);
+        Check("switch off requires exactly the regular file", withoutHi.Count == 1,
+              "-> " + withoutHi.Count);
+        Check("switch on requires the regular file AND its variant", withHi.Count == 2,
+              "-> " + string.Join(",", withHi.Select(p => p.ToString())));
+        Check("the two required pairs are distinct", withHi[0] != withHi[1]);
 
-        // The variant, once on disk, must prove its own token.
+        // PresentPairs reads the DISK: the .de.srt in this fixture carries no marker, so it proves
+        // the regular datum and must NOT prove the variant. Under the string tokens this assertion
+        // had to be written against a spelling ("DE" vs "DE:hi"); now it is a comparison of data.
+        var presentPairs = SidecarNaming.PresentPairs(media);
+        Check("the .de.srt proves the regular DE datum", presentPairs.Contains(new SubtitleRef("DE", false)));
+        Check("the .de.srt does NOT prove the DE variant", !presentPairs.Contains(new SubtitleRef("DE", true)),
+              "-> [" + string.Join(",", presentPairs.Select(p => p.ToString()).OrderBy(x => x)) + "]");
+        Check("the .en.sdh.srt proves the EN variant", presentPairs.Contains(new SubtitleRef("EN", true)));
+        Check("the .en.sdh.srt also proves EN itself (a variant is still the language)",
+              presentPairs.Contains(new SubtitleRef("EN", false)));
+
+        // The variant, once on disk, must prove its own datum.
         File.WriteAllText(Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.de.sdh.srt"),
             "1\n00:00:01,000 --> 00:00:02,000\n[ TÜR ]\n");
-        var tokensAfter = SidecarNaming.PresentTokens(media);
-        Check("a .de.sdh.srt on disk proves DE:hi", tokensAfter.Contains("DE:hi"),
-              "-> [" + string.Join(",", tokensAfter.OrderBy(x => x)) + "]");
+        var pairsAfter = SidecarNaming.PresentPairs(media);
+        Check("a .de.sdh.srt on disk proves the DE variant",
+              pairsAfter.Contains(new SubtitleRef("DE", true)),
+              "-> [" + string.Join(",", pairsAfter.Select(p => p.ToString()).OrderBy(x => x)) + "]");
         File.Delete(Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.de.sdh.srt"));
 
-        // The regression that started this: the subset rule must NOT let a plain set cover a
-        // variant requirement. "DE,EN" (regular only) must fail to satisfy "DE,DE:hi".
-        Check("a regular-only set does not cover the variant requirement",
-              !ContentHashRegistry.CoversLanguages(new[] { "DE", "EN" }, new[] { "DE", "DE:hi" }));
-        Check("a set with both covers the variant requirement",
-              ContentHashRegistry.CoversLanguages(new[] { "DE", "DE:hi", "EN" }, new[] { "DE", "DE:hi" }));
-        Check("a superset still covers a smaller requirement",
-              ContentHashRegistry.CoversLanguages(new[] { "DE", "DE:hi", "EN", "FR" }, new[] { "DE", "DE:hi" }));
+        // ── B3) coverage: the ONE reader, and the two search pools it feeds ──
+        // This is the regression that mattered on the live library: a missing variant was reported
+        // as a missing LANGUAGE, the regular search was fed that language, and the .de.srt already
+        // on disk was fetched again — 41 downloads in one run against a 50/day limit, the same
+        // content hash on three consecutive days.
+        Section("B3) Coverage: the datum decides, and the pools are separate — F-M282/F-M283");
+        var covRegularOnly = SubtitleCoverage.FromPairs(new[] { new SubtitleRef("DE", false) });
+        Check("a regular file covers its language datum",
+              covRegularOnly.Covers(new SubtitleRef("DE", false)));
+        Check("a regular file does NOT cover the variant datum",
+              !covRegularOnly.Covers(new SubtitleRef("DE", true)));
+
+        var requiredBoth = SubtitleRef.Required(new[] { "DE" }, includeHearingImpaired: true);
+        var openBoth = covRegularOnly.Open(requiredBoth);
+        Check("exactly the variant is open when only the regular file is present",
+              openBoth.Count == 1 && openBoth[0] == new SubtitleRef("DE", true),
+              "-> " + string.Join(",", openBoth.Select(p => p.ToString())));
+        Check("the open regular pool is EMPTY — no re-fetch of the file on disk",
+              SubtitleCoverage.RegularLanguages(openBoth).Count == 0,
+              "-> [" + string.Join(",", SubtitleCoverage.RegularLanguages(openBoth)) + "]");
+        Check("the open variant pool names DE — the pool that must be searched",
+              SubtitleCoverage.VariantLanguages(openBoth).SequenceEqual(new[] { "DE" }),
+              "-> [" + string.Join(",", SubtitleCoverage.VariantLanguages(openBoth)) + "]");
+
+        var covVariantOnDisk = SubtitleCoverage.FromPairs(new[] { new SubtitleRef("DE", true) });
+        Check("a variant file satisfies the regular datum too (SDH is the same dialogue)",
+              covVariantOnDisk.Covers(new SubtitleRef("DE", false)));
+        Check("a variant file satisfies the variant datum", covVariantOnDisk.Covers(new SubtitleRef("DE", true)));
+        Check("nothing is open for a file carrying its German", covVariantOnDisk.Open(requiredBoth).Count == 0);
+
+        // Deleting the variant puts its datum back — no invalidation step, no stored mark.
+        Check("a datum with no evidence is open again (self-correcting, F-M283)",
+              covRegularOnly.Open(requiredBoth).Any(p => p.HearingImpaired));
 
         // ── D ───────────────────────────────────────────────────────────────
         Section("D) The three together = one database built");
         int embWritten = 0;
-        foreach (var (pos, lang, hi) in tracks)
+        foreach (var (pos, lang, hi, forced) in tracks)
         {
-            if (reg.ObserveEmbed(mediaHash, pos, lang, hi))
+            if (reg.ObserveEmbed(mediaHash, pos, lang, hi, forced))
             {
                 embWritten++;
             }
         }
 
         int sideWritten = 0;
-        foreach (var (path, lang, hi) in loose)
+        foreach (var (path, lang, hi, _) in loose)
         {
             string text = File.ReadAllText(path);
             if (reg.ObserveSidecar(ContentHashRegistry.ComputeHash(text), mediaHash, lang, hi,
@@ -222,28 +270,40 @@ internal static class Program
         // what the coverage check reads — so it is refused and gets no row. That is the rule the
         // seeder's own path now follows by detecting the language first (F-M278); this fixture has no
         // text-based resolution, so the file simply contributes nothing here.
-        Check("embed rows written", embWritten == 2, "-> " + embWritten);
+        Check("embed rows written (forced row included — it is a fact about the file)",
+              embWritten == 3, "-> " + embWritten);
+        Check("the forced row states its flag in the database",
+              reg.GetEmbeds(mediaHash).Any(x => x.Language == "ES" && x.Forced),
+              "-> " + string.Join(",", reg.GetEmbeds(mediaHash).Select(x => x.Language + (x.Forced ? "/forced" : ""))));
+        Check("a forced track never counts as coverage (F-M246/F-M284)",
+              !SubtitleCoverage.FromPairs(new[] { new SubtitleRef("ES", false, true) })
+                  .Covers(new SubtitleRef("ES", false)),
+              "-> forced ES alone must NOT cover ES");
         Check("sidecar rows written (2 labelled, the unlabelled one cannot state a language)",
               sideWritten == 2, "-> " + sideWritten);
 
-        // Both areas answer the SAME question, so the answer must merge them:
-        // DE comes from the embed side, EN from the sidecar side.
-        var hiLangs = reg.HearingImpairedLanguages(media);
-        Check("HI answer merges both areas (DE embed + EN sidecar)",
-              hiLangs.Contains("DE") && hiLangs.Contains("EN"),
-              "-> [" + string.Join(",", hiLangs.OrderBy(x => x)) + "]");
+        // Both areas answer the SAME question, so the answer must merge them — and it now answers
+        // with PAIRS, which is what lets a caller tell the regular German from its variant:
+        // DE (HI) comes from the embed side, EN (HI) from the sidecar side.
+        var recorded = reg.RecordedPairs(media);
+        Check("the recorded pairs merge both areas (DE variant embed + EN variant sidecar)",
+              recorded.Contains(new SubtitleRef("DE", true)) && recorded.Contains(new SubtitleRef("EN", true)),
+              "-> [" + string.Join(",", recorded.Select(p => p.ToString()).OrderBy(x => x)) + "]");
+        Check("the regular datum of a variant language is recorded too (SDH is still the language)",
+              recorded.Contains(new SubtitleRef("DE", false)) && recorded.Contains(new SubtitleRef("EN", false)),
+              "-> [" + string.Join(",", recorded.Select(p => p.ToString()).OrderBy(x => x)) + "]");
 
         // Idempotence: the seeder calls this on every pass.
         int embAgain = 0, sideAgain = 0;
-        foreach (var (pos, lang, hi) in tracks)
+        foreach (var (pos, lang, hi, forced) in tracks)
         {
-            if (reg.ObserveEmbed(mediaHash, pos, lang, hi))
+            if (reg.ObserveEmbed(mediaHash, pos, lang, hi, forced))
             {
                 embAgain++;
             }
         }
 
-        foreach (var (path, lang, hi) in loose)
+        foreach (var (path, lang, hi, _) in loose)
         {
             string text = File.ReadAllText(path);
             if (reg.ObserveSidecar(ContentHashRegistry.ComputeHash(text), mediaHash, lang, hi,
@@ -475,8 +535,6 @@ internal static class Program
             ireg.EnsureMedia(hOld, itemId, mediaPath, m =>
             {
                 m.ImdbId = "tt1234567";
-                m.SubtitlesDownloadedAt = new DateTime(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc);
-                m.SubtitlesDownloadedLanguages = "de,en";
             });
             ireg.ObserveEmbed(hOld, 0, "EN", false);
             ireg.ObserveEmbed(hOld, 2, "DE", true);
@@ -496,12 +554,12 @@ internal static class Program
             Check("item id travelled", movedRow?.JellyfinItemId == itemId, "-> " + (movedRow?.JellyfinItemId ?? "null"));
             Check("path travelled", movedRow?.Path == mediaPath, "-> " + (movedRow?.Path ?? "null"));
             Check("imdb id travelled", movedRow?.ImdbId == "tt1234567", "-> " + (movedRow?.ImdbId ?? "null"));
-            Check("the download mark travelled (this is a rename, not a re-decision)",
-                  movedRow?.SubtitlesDownloadedAt != null,
-                  "-> " + (movedRow?.SubtitlesDownloadedAt?.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) ?? "null"));
-            Check("the mark's language list travelled",
-                  movedRow?.SubtitlesDownloadedLanguages == "de,en",
-                  "-> " + (movedRow?.SubtitlesDownloadedLanguages ?? "null"));
+            Check("the subtitle DATA travelled — the rows that describe them (F-M283)",
+                  ireg.GetEmbeds(hNew).Count == 2 && idb.Sidecars.FindAll().Any(),
+                  "-> " + ireg.GetEmbeds(hNew).Count + " embed(s), " + idb.Sidecars.FindAll().Count() + " sidecar(s)");
+            Check("the pair record for the file travelled with its flag",
+                  ireg.RecordedPairsByHash(hNew).Contains(new SubtitleRef("DE", true)),
+                  "-> [" + string.Join(",", ireg.RecordedPairsByHash(hNew).Select(p => p.ToString())) + "]");
 
             Check("embeds travelled", ireg.GetEmbeds(hNew).Count == 2, "-> " + ireg.GetEmbeds(hNew).Count);
             Check("no embeds left under the old key", ireg.GetEmbeds(hOld).Count == 0, "-> " + ireg.GetEmbeds(hOld).Count);

@@ -169,7 +169,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             progress.Report(20);
 
             int removedSearch = 0, removedRetry = 0, removedIdNotFound = 0, removedQa = 0, removedOshash = 0;
-            int forgottenSidecars = 0, invalidatedMarks = 0, forgottenEmbeds = 0;
+            int forgottenSidecars = 0, openFiles = 0, forgottenEmbeds = 0;
             int removedPrunedSubtitles = 0, removedPrunedMedia = 0;
             Exception? refreshException = null;
             // Filled by the compaction step below; stays empty when it compacted cleanly. Names the
@@ -238,10 +238,12 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                         forgottenSidecars = registry.ForgetSidecars(vanished);
                     }
 
-                    // Download marks: a mark whose language has no file left AND was not settled as
-                    // unavailable by SubDL is provably wrong, so it is dropped. Files the refresh
-                    // cannot see (media path missing) are left alone — the pipeline owns those.
-                    invalidatedMarks = InvalidateStaleDownloadMarks(db, registry, allItems);
+                    // F-M283 (user decision 02.10.2026): there is no download mark to drop any more.
+                    // What the refresh still does here is ASK the one question — which required files
+                    // are open on this disk — through the same reader the pipeline and the seeder
+                    // use, so all three components can never disagree. It reports and writes nothing,
+                    // which is why the run cannot take work away from the pipeline.
+                    openFiles = CountItemsWithOpenFiles(db, registry, allItems);
                 }
 
                 progress.Report(75);
@@ -316,16 +318,16 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
 
             int removedTotal = removedSearch + removedRetry + removedIdNotFound + removedQa + removedOshash
                                + removedPrunedSubtitles + removedPrunedMedia;
-            int changedTotal = removedTotal + forgottenSidecars + invalidatedMarks + forgottenEmbeds;
+            int changedTotal = removedTotal + forgottenSidecars + openFiles + forgottenEmbeds;
 
             if (changedTotal > 0)
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL-Refresh] Removed dead state: {Search} search / {Retry} file-retry / {IdNotFound} id-not-found / {Qa} qa-fail / {Oshash} oshash / {PrunedSubs} subtitle / {PrunedMedia} media (dead items). Forgot {Sidecars} vanished subtitle verdict(s); dropped {Marks} stale download mark(s); forgot {Embeds} stale embedded row(s).",
+                    "[SubDL-Refresh] Removed dead state: {Search} search / {Retry} file-retry / {IdNotFound} id-not-found / {Qa} qa-fail / {Oshash} oshash / {PrunedSubs} subtitle / {PrunedMedia} media (dead items). Forgot {Sidecars} vanished subtitle verdict(s); {OpenFiles} item(s) with an open required file; forgot {Embeds} stale embedded row(s).",
                     removedSearch, removedRetry, removedIdNotFound, removedQa, removedOshash,
                     removedPrunedSubtitles, removedPrunedMedia,
-                    forgottenSidecars, invalidatedMarks, forgottenEmbeds);
+                    forgottenSidecars, openFiles, forgottenEmbeds);
             }
             else if (refreshException != null)
             {
@@ -342,7 +344,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 "SubdlSyncDatabaseRefreshTask",
                 Name,
                 refreshException != null ? Registry.WorkerRunRegistry.Outcome.Failed : Registry.WorkerRunRegistry.Outcome.Ok,
-                BuildRefreshDetail(refreshException, changedTotal, removedTotal, forgottenSidecars, forgottenEmbeds, invalidatedMarks, compactNote));
+                BuildRefreshDetail(refreshException, changedTotal, removedTotal, forgottenSidecars, forgottenEmbeds, openFiles, compactNote));
 
             progress.Report(100);
         }
@@ -369,7 +371,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
     /// <param name="removedTotal">How many dead-state rows were removed.</param>
     /// <param name="forgottenSidecars">How many vanished subtitle verdicts were forgotten.</param>
     /// <param name="forgottenEmbeds">How many stale embedded rows were forgotten.</param>
-    /// <param name="invalidatedMarks">How many stale download marks were dropped.</param>
+    /// <param name="openFiles">How many items still have a required file missing.</param>
     /// <param name="compactNote">A note about the compaction step, or empty when it compacted cleanly.</param>
     /// <returns>The detail text for the worker row.</returns>
     public static string BuildRefreshDetail(
@@ -378,7 +380,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
         int removedTotal,
         int forgottenSidecars,
         int forgottenEmbeds,
-        int invalidatedMarks,
+        int openFiles,
         string? compactNote)
     {
         if (refreshException != null)
@@ -390,10 +392,10 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
         string body = changedTotal > 0
             ? string.Format(
                 System.Globalization.CultureInfo.InvariantCulture,
-                "removed {0} dead state, forgot {1} stale row(s), dropped {2} mark(s)",
+                "removed {0} dead state, forgot {1} stale row(s), {2} item(s) with open files",
                 removedTotal,
                 forgottenSidecars + forgottenEmbeds,
-                invalidatedMarks)
+                openFiles)
             : "nothing to change";
 
         return string.IsNullOrWhiteSpace(compactNote) ? body : body + " | " + compactNote;
@@ -481,29 +483,50 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
     }
 
     /// <summary>
-    /// F-M234 (A): drops download marks whose file evidence has vanished.
+    /// F-M283 (user decision 02.10.2026): how many items have an OPEN required file.
     /// <para>
-    /// A mark says "every target language settled". Settled can mean SAVED (there is a file) or
-    /// "SubDL does not have it" (QA-exhausted, no file expected). So a language that is absent from
-    /// disk AND not QA-exhausted proves the mark was overtaken by a deletion. Those marks are
-    /// dropped and the search stamp cleared, so the next run reworks the item instead of reporting
-    /// it complete forever.
+    /// This used to be <c>InvalidateStaleDownloadMarks</c>: it walked every stored download mark,
+    /// re-derived its "open tokens" and DROPPED the mark when a subtitle had vanished — a repair of
+    /// a second truth that should never have existed. Measured on the live library, that machinery
+    /// dropped 450 valid marks in one run on its first attempt (disk-only evidence against files
+    /// whose subtitles sat inside the container) and, once narrowed, kept contradicting a mark the
+    /// pipeline could not write at all: 35 marks withheld in a single run.
     /// </para>
     /// <para>
-    /// Only marks whose media file is present are judged — a missing media path is the pipeline's
-    /// business (FileRetryTracker), and a directory that does not list cleanly yields no verdict.
+    /// With the mark gone there is nothing to drop and nothing to repair. What remains is the
+    /// question itself — "which required files are missing on this disk?" — asked through the SAME
+    /// reader the pipeline and the seeder use (<see cref="Registry.SubtitleCoverage"/>), so a
+    /// deletion here and a deletion there cannot be judged differently. A vanished
+    /// <c>.sdh.srt</c> is simply an open pair, and the item is due on the next run without any
+    /// bookkeeping at all.
+    /// </para>
+    /// <para>
+    /// The method only REPORTS, deliberately: this is the refresh, and its job is to make the state
+    /// visible. It writes nothing, so a run can never take work away from the pipeline.
     /// </para>
     /// </summary>
     /// <param name="db">Shared database.</param>
     /// <param name="registry">Content registry.</param>
     /// <param name="aliveItemIds">Item ids still present in Jellyfin.</param>
-    /// <returns>Number of dropped marks.</returns>
-    private int InvalidateStaleDownloadMarks(Data.SubdlDbContext db, Registry.ContentHashRegistry registry, HashSet<string> aliveItemIds)
+    /// <returns>Number of items with at least one open required file.</returns>
+    private int CountItemsWithOpenFiles(Data.SubdlDbContext db, Registry.ContentHashRegistry registry, HashSet<string> aliveItemIds)
     {
-        int dropped = 0;
+        var targets = (Plugin.Instance?.Configuration.DownloadLanguages ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(l => l.ToUpperInvariant())
+            .Distinct()
+            .ToList();
+        if (targets.Count == 0)
+        {
+            return 0;
+        }
+
+        var required = Registry.SubtitleRef.Required(
+            targets, Plugin.Instance?.Configuration.DownloadHearingImpaired == true);
+
+        int open = 0;
         foreach (var media in db.Media.FindAll()
-                     .Where(m => m.SubtitlesDownloadedAt != null
-                                 && !string.IsNullOrEmpty(m.JellyfinItemId)
+                     .Where(m => !string.IsNullOrEmpty(m.JellyfinItemId)
                                  && aliveItemIds.Contains(m.JellyfinItemId!))
                      .ToList())
         {
@@ -518,83 +541,39 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 continue; // directory unreadable — no verdict this run (unknown ≠ deleted)
             }
 
-            var stored = registry.GetDownloadedLanguages(media.Id);
-            if (stored == null || stored.Count == 0)
+            // The SAME reader the pipeline and the seeder use, so all three answer alike. The
+            // embedded rows the registry holds are part of the evidence, which is what makes a
+            // subtitle inside the container count — and a VARIANT inside the container count as the
+            // variant, which the old language-keyed check could not express (F-M234, F-M282).
+            var openPairs = registry.OpenPairs(media.Path!, required);
+            if (openPairs.Count == 0)
             {
                 continue;
             }
 
-            // F-M234 (user decision 01.10.2026): a sidecar file is only ONE kind of evidence. The
-            // disk-only question dropped 450 valid marks on the live library in one run — 349 of
-            // those files carried their only German and English subtitles INSIDE the container,
-            // which the configuration counts as coverage (DownloadOnlyMissing). The pipeline has
-            // always done it this way; the refresh now shares the rule instead of recomputing it.
-            var coveredLangs = Jellyfin.Plugin.SubdlScribe.Registry.SubtitlePresence.CoveredLanguages(
-                media.Path!, EmbeddedLanguagesForCoverage(db, registry, media));
-
-            // F-M240 (user decision 01.10.2026): the stored entries are TOKENS, one per required
-            // FILE — `DE` for the regular subtitle, `DE:hi` for the variant. The refresh therefore
-            // judges each of them against its own evidence and the whole HI special case that used to
-            // sit here is gone: a vanished `.sdh.srt` is simply an open token. The token also settles
-            // what the old language-keyed check could not tell apart — a file that still has its
-            // regular German but lost the variant used to look half-covered either way.
-            var fileEvidence = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.PresentTokens(media.Path!);
-            var openTokens = new List<string>();
-            foreach (var token in stored)
-            {
-                var lang = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.TokenLanguage(token);
-                if (Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHiToken(token))
-                {
-                    // The variant needs a variant file (or a stored HI verdict) — the regular file
-                    // never proves it, which is the entire point of the token.
-                    if (fileEvidence.Contains(token) || registry.HearingImpairedLanguages(media.Path!).Contains(lang, StringComparer.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-                }
-                else if (coveredLangs.Contains(lang))
-                {
-                    continue; // sidecar or embedded track — coverage as the pipeline computes it
-                }
-
-                openTokens.Add(token);
-            }
-
+            // A pair SubDL settled as unavailable is not missing work — the QA budget said so.
             var qaFails = new Registry.QaFailTracker(db);
-            var settledUnavailable = new List<string>();
-            if (!string.IsNullOrEmpty(media.JellyfinItemId))
-            {
-                // A language SubDL settled as unavailable may be claimed by the mark without a file,
-                // so it is not a lie. Asked PER TOKEN: the QA budget is keyed by language, and the
-                // variant shares its language's budget (F-M240).
-                settledUnavailable = openTokens
-                    .Where(t => qaFails.IsExhausted(
-                        media.JellyfinItemId!,
-                        Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.TokenLanguage(t),
-                        Plugin.Instance?.Configuration.DownloadQaRetryLimit ?? 3))
-                    .ToList();
-            }
-
-            var stale = Registry.ContentHashRegistry.FindStaleDownloadedLanguages(stored, openTokens, settledUnavailable);
-
-            if (stale.Count == 0)
+            var actionable = openPairs
+                .Where(r => !qaFails.IsExhausted(
+                    media.JellyfinItemId!,
+                    r.Language,
+                    Plugin.Instance?.Configuration.DownloadQaRetryLimit ?? 3))
+                .ToList();
+            if (actionable.Count == 0)
             {
                 continue;
             }
 
-            registry.InvalidateDownloadedMark(media.Id);
-            if (!string.IsNullOrEmpty(media.JellyfinItemId))
-            {
-                new Registry.DownloadSearchTracker(db).ClearStamp(media.JellyfinItemId!);
-            }
-
-            dropped++;
-            // The two reasons are named apart: "no longer on disk" was wrong for a language whose
-            // subtitle sits inside the container, and it hides whether the HI variant drove it.
-            LogUtil.Normal(_logger, "[SubDL-Refresh] dropped stale download mark for {File} — {Langs} no longer covered.", Path.GetFileName(media.Path!), string.Join(", ", stale));
+            open++;
+            LogUtil.Normal(
+                _logger,
+                "[SubDL-Refresh] {File} has {Count} open required file(s): {Pairs}",
+                Path.GetFileName(media.Path!),
+                actionable.Count,
+                string.Join(", ", actionable.Select(p => p.ToString())));
         }
 
-        return dropped;
+        return open;
     }
 
     /// <summary>

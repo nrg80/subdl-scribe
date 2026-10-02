@@ -546,11 +546,13 @@ public sealed class SubdlSeeder
                 return false;
             }
 
-            // Parity: QA-exhausted languages drop out of the missing list.
-            var missing = MissingLanguagesOf(item, mediaPath, TargetLanguagesOf(config), config.DownloadOnlyMissing);
+            // Parity: QA-exhausted pairs drop out of the open list. Asked per PAIR, not per
+            // language: a variant whose pool is empty must not close the regular subtitle of the
+            // same language, and vice versa.
+            var open = OpenPairsOf(item, mediaPath, TargetLanguagesOf(config), config.DownloadOnlyMissing);
             var qaFails = new Registry.QaFailTracker(db);
-            missing.RemoveAll(lang => qaFails.IsExhausted(item.Id.ToString(), lang, config.DownloadQaRetryLimit));
-            return missing.Count > 0;
+            open.RemoveAll(r => qaFails.IsExhausted(item.Id.ToString(), r.Language, config.DownloadQaRetryLimit));
+            return open.Count > 0;
         }
         catch
         {
@@ -574,10 +576,11 @@ public sealed class SubdlSeeder
             var allSubs = _mediaSourceManager.GetMediaStreams(item.Id)?
                 .Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal)
                 .ToList() ?? new List<MediaStream>();
-            // F-M246: a forced track is not upload work — same predicate as the pipeline, so the
-            // prefilter and the run agree on what there is to do.
+            // F-M246/F-M284: a forced track is not upload work — asked through the ONE predicate
+            // (IsDialogueStream), so the prefilter, the pipeline and the language gate cannot drift
+            // apart on what counts as a track worth publishing.
             var textStreams = allSubs
-                .Where(s => s.IsTextSubtitleStream && !Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsForcedStream(s))
+                .Where(Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream)
                 .ToList();
 
             if (textStreams.Count == 0)
@@ -661,12 +664,12 @@ public sealed class SubdlSeeder
     /// for sidecars that pass the registry lookups — settled items cost two
     /// dictionary hits and no I/O.
     /// </summary>
-    private bool SidecarsNeedWork(List<(string Path, string Lang, bool HearingImpaired)> loose, string mediaHash)
+    private bool SidecarsNeedWork(List<(string Path, string Lang, bool HearingImpaired, bool Forced)> loose, string mediaHash)
     {
         var db = Plugin.Instance!.SharedDbContext;
         var registry = new Registry.ContentHashRegistry(db);
 
-        foreach (var (loosePath, looseLang, looseHi) in loose)
+        foreach (var (loosePath, looseLang, looseHi, _) in loose)
         {
             if (registry.IsUploaded(mediaHash, looseLang, looseHi))
             {
@@ -717,68 +720,56 @@ public sealed class SubdlSeeder
             .Distinct()
             .ToList();
 
-    /// <summary>Parity with DownloadPipeline.MissingLanguages — now via the one name reader (F-M239).</summary>
+    /// <summary>
+    /// F-M282 (user decision 02.10.2026): the subtitle DATA missing for this file, at the grain of
+    /// the datum.
+    /// <para>
+    /// This replaces the language-keyed <c>MissingLanguagesOf</c>, and with it the fourth copy of
+    /// the sidecar-name parse (F-M239: a copy without the <c>sdh</c> marker read
+    /// <c>Movie.de.sdh.srt</c> as the phantom language "SD", so a file carrying its only German
+    /// variant looked like it was missing German and was queued on every scan) and the
+    /// <c>MissingHearingImpaired</c> projection that followed it.
+    /// </para>
+    /// <para>
+    /// That projection is where the model broke: it answered with LANGUAGES whose variant was
+    /// absent, and the caller dropped those into the same list that drives the search — so a missing
+    /// variant made the REGULAR subtitle due, and it was fetched over the file already on disk (41
+    /// downloads in one run against a 50/day limit, the same content hash on three consecutive days).
+    /// A pair list cannot be re-projected like that: the regular German and the German variant come
+    /// back as two entries, and the search asks SubDL for whichever one is actually absent.
+    /// </para>
+    /// <para>
+    /// The queue gate and the pipeline now ask the SAME reader
+    /// (<see cref="Registry.SubtitleCoverage"/>), so an item the seeder queues is an item the
+    /// pipeline has work for — the mismatch that queued 290 items and let the pipeline skip 280 of
+    /// them as "nothing missing" cannot recur.
+    /// </para>
+    /// </summary>
     /// <param name="item">Jellyfin item.</param>
     /// <param name="mediaPath">Media file path.</param>
     /// <param name="targets">Configured target languages.</param>
-    /// <param name="onlyMissing">True when embedded streams count as present.</param>
-    /// <returns>Target languages without file evidence.</returns>
-    private List<string> MissingLanguagesOf(BaseItem item, string mediaPath, List<string> targets, bool onlyMissing)
+    /// <param name="onlyMissing">True when embedded streams count as evidence.</param>
+    /// <returns>The pairs without evidence.</returns>
+    private List<Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef> OpenPairsOf(
+        BaseItem item, string mediaPath, List<string> targets, bool onlyMissing)
     {
-        // F-M239: the FOURTH copy of the name parse used to live here, and this one matters most —
-        // it decides whether an item enters the download queue at all. It had the same defect as
-        // the other copies (no "sdh" marker, so "sdh" became the phantom language "SD"), which
-        // means a file whose only subtitle was Movie.de.sdh.srt looked like it was missing DE and
-        // was queued for a search on every scan.
-        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (_, lang, _) in Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.List(mediaPath))
-        {
-            if (lang == null)
-            {
-                continue; // name carries no language — not evidence of coverage
-            }
+        // F-M246: one rule with the pipeline — a forced track does not make its language present.
+        // The language-level stream evidence only counts when the configuration says embedded
+        // tracks are coverage (DownloadOnlyMissing); the embedded ROWS the registry holds are
+        // always consulted by the reader itself, because a stored row is a fact.
+        IEnumerable<string>? streamLangs = onlyMissing
+            ? Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
+                .EmbeddedPresentLanguages(_mediaSourceManager.GetMediaStreams(item.Id))
+            : null;
 
-            present.Add(lang);
-        }
+        var required = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef.Required(
+            targets, Plugin.Instance?.Configuration.DownloadHearingImpaired == true);
 
-        // F-M240: while the hearing-impaired switch is on, a language whose HI variant is absent is
-        // "missing" for queueing too — otherwise the pipeline's own disk check could never fire,
-        // because the seeder would not have queued the item in the first place.
-        if (onlyMissing)
-        {
-            // F-M246: one rule with the pipeline — a forced track does not make its language present.
-            foreach (var lang in Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
-                         .EmbeddedPresentLanguages(_mediaSourceManager.GetMediaStreams(item.Id)))
-            {
-                present.Add(lang);
-            }
-        }
-
-        var missing = targets.Where(t => !present.Contains(t)).ToList();
-
-        // F-M240: with the hearing-impaired switch on, a language whose HI variant is absent is
-        // missing for QUEUEING as well. Without this the pipeline never sees the item — the
-        // download mark would be invalidated there, but nothing would ever queue it, so the HI
-        // variant still would not arrive.
-        if (Plugin.Instance?.Configuration.DownloadHearingImpaired == true)
-        {
-            // F-M254: answered from the registry — the uploader stored which embedded tracks are
-            // hearing-impaired, the downloader stored which fetched variants are. Asking the streams
-            // again would ignore those verdicts: a track whose title Jellyfin does not surface read
-            // as "HI absent" here while its own row said otherwise, so the item was queued for a
-            // variant the container already carried.
-            foreach (var l in Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
-                         .MissingHearingImpaired(targets, Plugin.Instance?.Registry.HearingImpairedLanguages(mediaPath)))
-            {
-                if (!missing.Contains(l, StringComparer.OrdinalIgnoreCase))
-                {
-                    missing.Add(l);
-                }
-            }
-        }
-
-        return missing;
+        return (Plugin.Instance?.Registry
+                ?? throw new InvalidOperationException("registry unavailable"))
+            .OpenPairs(mediaPath, required, streamLangs);
     }
+
 
     /// <summary>
     /// F-M261 (user decision 30.09.2026): gives an untagged or <c>und</c> subtitle track its real
@@ -841,8 +832,7 @@ public sealed class SubdlSeeder
             // answers that for the price of the stream list — no ffmpeg call at all.
             bool anyUntagged = streams != null && streams.Any(s =>
                 s.Type == MediaStreamType.Subtitle && !s.IsExternal
-                && !Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsForcedStream(s)
-                && s.IsTextSubtitleStream
+                && Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream(s)
                 && Pipeline.LanguageTagGate.IsUntagged(s.Language));
 
             if (!anyUntagged)
@@ -949,9 +939,9 @@ public sealed class SubdlSeeder
                 .EmbeddedTracks(_mediaSourceManager.GetMediaStreams(item.Id));
 
             int written = 0;
-            foreach (var (subPos, lang, hi) in tracks)
+            foreach (var (subPos, lang, hi, forced) in tracks)
             {
-                if (registry.ObserveEmbed(mediaHash, subPos, lang, hi))
+                if (registry.ObserveEmbed(mediaHash, subPos, lang, hi, forced))
                 {
                     written++;
                 }
@@ -1079,7 +1069,7 @@ public sealed class SubdlSeeder
             // FindLooseSrts below — that copy returns bare paths and carries no language or HI
             // marker, so it cannot answer the question this method records. Reading a name here with
             // a fifth parser is exactly how the earlier four drifted apart.
-            foreach (var (loosePath, looseLang, looseHi) in
+            foreach (var (loosePath, looseLang, looseHi, _) in
                      Pipeline.UploadPipeline.FindLooseSrts(mediaPath))
             {
                 string content;

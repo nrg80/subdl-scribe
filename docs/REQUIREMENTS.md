@@ -237,7 +237,9 @@ The file-retry counter is recorded as a success, so a dry run neither burns a re
 
 ## 4. Download Pipeline
 
-**F-M151a [B3]:** **Download-side short-circuit (the download-side completion mark):** analogous to F-M88c. The stored language set is part of the state: the mark covers the languages it was written for, and any configured language it does not cover makes the file un-done. **Subset, not equality:** a stored set that covers the configured one counts as complete (F-M234), so removing a language leaves existing marks intact. The mark is validated against the disk before it is trusted (F-M234), where "the disk" means every kind of coverage the configuration counts, the embedded tracks included, not the `.srt` files alone. A language carried inside the container is evidence exactly as a file is.
+**F-M151a [B3] (superseded by F-M283, 02.10.2026):** **Download-side short-circuit — replaced by the derived open-pair question.**
+
+There is no download-side completion mark any more. The pipeline asks `SubtitleCoverage` which required PAIRS have no evidence (14.2b) and returns when the answer is empty; that answer is derived fresh on every run, so it cannot be overtaken by a deletion and needs no stored language set and no validation pass. See F-M283 for why the stored mark had to go.
 
 **F-M187:** **Downloaded bytes have exactly one decode path.** Every conversion of downloaded subtitle bytes to text goes through one path, which honours a UTF-16 byte-order mark (LE/BE, stripped) and falls back to UTF-8. The download side hashes the decode path, and the upload side later reads the written file as UTF-8/UTF-16 text, so the two must agree. The file on disk stays **byte-identical** to SubDL's payload — normalization applies in memory for hashing and upload, never to the stored file.
 
@@ -367,7 +369,7 @@ The counter is cleared by the reschedule reset on a real fire and by the per-day
 
 **Step 3 — OSHash cache paths:** cached paths whose root is no longer listable are dropped.
 
-**Step 4 — vanished subtitle files:** the sidecar verdicts and the stale download marks of F-M234 and F-M240.
+**Step 4 — vanished subtitle files:** the sidecar verdicts of F-M234, and the open required FILES of F-M283 (reported, never repaired — there is no stored mark).
 
 **Step 4b — embedded rows:** the check of F-M258.
 
@@ -689,19 +691,18 @@ A hearing-impaired track DOES count: SDH is the same dialogue with annotations. 
 
 The upload side follows the same rule: a forced track is removed from the upload set, through the same predicate the pipeline's collector and the seeder's upload-todo prefilter use.
 
-**F-M240 [B1]:** **The hearing-impaired variant is answered from the stored rows, not from the download mark.** While the switch is on, a target language with no stored hearing-impaired row counts as stale and invalidates the mark, so the same run delivers the variant.
+**F-M240 [B1] (superseded by F-M282/F-M283, 02.10.2026):** **The hearing-impaired variant is its own subtitle datum, and completeness is derived rather than marked.**
 
-**The database refresh asks this question too**, not only the download run. The refresh reads the HI languages from the stored rows first, then from the stream list, and skips the check when neither can be read.
+The question is asked at the grain of the pair — see 14.2a and 14.2b — through the one reader (`SubtitleCoverage`), which consults the files next to the media file, the container's own embedded rows, and (when the configuration counts them) the language-level stream list.
 
-A language already settled-as-unavailable (QA-exhausted) does not count as stale.
+**What F-M240 used to say, and why it is withdrawn.** It answered the HI question with LANGUAGES and carried the variant as a `:hi` token inside the download mark's language list. Both halves are gone:
 
-**The download mark names FILES, not languages** (user decision 01.10.2026). A regular subtitle and its hearing-impaired variant are two independent files (`Movie.de.srt`, `Movie.de.sdh.srt`), so they are two independent entries: the language code alone for the regular file, the language plus `:hi` for the variant (`DE`, `DE:hi`). The suffix rides in the existing comma-separated language list — no schema change, and the readers that treat the list as opaque (coverage, the subset rule, the reset) keep working unchanged.
+- the **token** is withdrawn with the vocabulary that could not express the datum (14.2a) — the variant is a pair, not a spelling;
+- the **mark** is withdrawn with the duplicated answer (14.2b) — completeness is derived on every ask, so nothing has to be invalidated, repaired, or kept consistent.
 
-Recording both under the plain language is what let one file stand in for the other. A successful regular save closed the variant's slot too, so the mark claimed a file that was not there; the refresh found that and dropped the mark — correctly — and the next run wrote it again. Measured on the live library: 31 items re-searched in one morning, 16 regular sidecars rewritten although they were already on disk, 24 items already handled the evening before.
+A variant that SubDL does not carry today is looked for again on the next refetch (F-M47). **No expiry, no give-up, no counter as a brake. Test: T79/T90.**
 
-With tokens the whole special case disappears: the mark is written only when every required token has evidence, and the generic subset rule (`CoversLanguages`) answers the rest. Turning the switch on adds the variant tokens, so an item that already has its subtitles becomes due; turning it off removes them, so nothing has to be cleaned up. **No expiry and no give-up:** a variant SubDL does not carry today is looked for again on the next refetch, and the run line counts the withheld marks (`complete marks withheld`) for information only.
-
-Both readers judge per token: the download pipeline against disk plus the stored HI verdict (F-M254), the database refresh against disk per token — a vanished `.sdh.srt` is an open token like any other, and the language-keyed HI special case that used to sit in the refresh is gone.
+**Every component asks the same reader** — the download pipeline, the seeder, and the database refresh. That is what ends the disagreement the old model produced: the pipeline trusted a stored mark while the seeder queued from the disk and the refresh judged from the stored rows, so one file could be simultaneously complete, due and stale. A vanished `.sdh.srt` is now simply an open pair, everywhere.
 
 **F-M193a:** **No construct the database cannot translate may cross into a query.** A string-comparison overload, a helper-method call or any predicate without a database expression must be applied **outside** the query lambda: keep the indexed equality inside and move the rest to LINQ-to-objects afterwards.
 
@@ -815,7 +816,7 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 ## 14. Data Model and Persistence
 
-**F-M38 [B1]:** **Persistent state split by the kind of thing described** (section 14). Embedded tracks live under their video file, keyed by media hash + stream position; sidecars are keyed by normalized content hash; the file's own record carries path, IDs, season/episode and the derived language aggregates. Both pipelines read and write the same store.
+**F-M38 [B1]:** **Persistent state split by the kind of thing described** (section 14). Embedded tracks live under their video file, keyed by media hash + stream position; sidecars are keyed by normalized content hash; the file's own record carries path, IDs, season/episode and the derived language aggregate. The **hearing-impaired flag belongs to each subtitle datum**, never to the file (F-M282), and **completeness is derived rather than stored** (F-M283) — so the file record carries no download mark and no HI aggregate. Both pipelines read and write the same store.
 
 The plugin keeps its state in **one database file**, grouped into **five clearly separated areas**, each keyed by the thing it actually describes. The areas share a lifetime and are written by the same lock, but they are not mixed.
 #### 14.0 Area 0 — Compatibility record (`meta`)
@@ -838,6 +839,58 @@ Derived, written automatically whenever an embedded track is stored so they cann
 The key is media hash **plus position**. Two streams of one file can share a language (a normal and an SDH variant), so the language alone never identifies the row.
 
 Fields: the language, the hearing-impaired flag, the content hash, the status, the reason field, the status stamp, the SubDL id (F-M198).
+
+#### 14.2a The subtitle DATUM is the pair (language, hearing-impaired) — F-M282
+**F-M282 [B1] (user decision 02.10.2026):** **A hearing-impaired subtitle is its own subtitle DATUM.** It is not a property of the media file and not a modifier of a language: it is its own row, with its own identity, its own content hash, and its own hearing-impaired flag. The smallest thing a question can be asked about is therefore the **pair** `(language, hearing-impaired)`, and every reader and writer asks at that grain.
+
+The whole model follows from this one sentence:
+
+- **Area 2** (`embeds`) — one row per stream, keyed by media hash + position, carrying the language and the flag (F-M197). Two streams of one file may differ only in the flag, which is why the position — not the language — is the identity.
+- **Area 3** (`sidecars`) — one row per FILE, keyed by content hash, carrying the language and the flag (F-M199). `Movie.de.srt` and `Movie.de.sdh.srt` are two files with two contents, so they are two rows, two hashes, two data.
+- **Upload** — the pair is the key space of `IsUploaded(mediaHash, language, hearingImpaired)`; a normal upload never blocks an SDH variant (F-M71).
+- **Download** — the pair decides what is searched: the regular datum goes to the `hi=0` pool, the variant datum to the `hi=1` pool, which SubDL serves separately (F-M241).
+- **Refresh, seeder** — both compare pairs, and both read them through the SAME reader, so no two components can judge one file differently.
+
+**The one rule that does NOT split:** a subtitle of language L proves L, whether or not it is the variant — SDH is the same dialogue with annotations (F-M243). It proves `L (HI)` only when it IS the variant. So a lone `Movie.de.sdh.srt` satisfies both pairs of German; a lone `Movie.de.srt` satisfies German only.
+
+**What this replaced, and why it had to go.** The download mark carried the pair as TEXT: a comma-separated language list where the variant rode as a `:hi` suffix (`DE`, `DE:hi`). That spelling could be re-projected back to a plain language, and every projection was a place the conflation re-entered — a missing variant was answered as a missing LANGUAGE, the regular search was fed that language, and `.de.srt` was fetched again over the file already on disk. Measured on the live library: 41 downloads in one run against a 50/day limit, 35 marks withheld in the same run, the same content hash on three consecutive days. A pair cannot be re-projected by accident: there is no spelling of `DE` that carries the variant and no parse that can lose it.
+
+**The string-token vocabulary is withdrawn**, because a type that cannot express the datum is the defect: `HiTokenSuffix`, `Token()`, `IsHiToken`, `TokenLanguage`, `PresentTokens`. **Test: T79.**
+
+#### 14.2b Completeness is DERIVED, never stored — F-M283
+**F-M283 [B1] (user decision 02.10.2026):** **There is no download completion mark.** `SubtitlesDownloadedAt` and `SubtitlesDownloadedLanguages` are GONE from the file record, and with them `MarkSubtitlesDownloaded`, `IsSubtitlesDownloaded`, `GetDownloadedLanguages`, `CoversLanguages`, `FindStaleDownloadedLanguages` and `InvalidateDownloadedMark`.
+
+Whether a file is complete is answered **on every ask**, from the evidence that describes the subtitles themselves — the files next to the media file and the container's own embedded rows — at the grain of F-M282.
+
+**Why a stored mark had to go.** It was a SECOND truth beside the rows, and a second truth can only drift. It did: the short-circuit that TRUSTED the mark asked the disk **plus** the stored variant verdict, while the check that decided whether to WRITE the mark asked the disk **alone**. A variant embedded in the container has a registry verdict and no sidecar — so the withhold check reported `no file evidence`, refused the mark, the mark was never written, the item stayed due, and the pipeline re-downloaded the regular subtitle on every pass. Two readers of one question, fed different evidence, is not a bug in either one; it is what a duplicated answer produces.
+
+**One reader: `SubtitleCoverage`.** The download pipeline, the seeder, and the database refresh all ask it, with the same three sources of evidence:
+
+1. **the files next to the media file** — the exact pair each sidecar name states. This is what self-corrects.
+2. **the embedded rows of the container** — each with its own language and its own flag, written by whichever pass observed the streams (F-M257). This is the source the withhold side was missing.
+3. **the language-level embedded evidence** the caller may hold (Jellyfin's stream list), counted only when the configuration counts embedded tracks as coverage. It speaks about a language and can never prove a variant.
+
+**No invalidation step exists, and none is needed.** A stored verdict had to be corrected when it was overtaken by reality; a derived answer cannot be overtaken. Deleting `Movie.de.sdh.srt` removes its evidence, so the pair is simply open on the next ask — no mark to drop, no stamp to clear, no repair pass. The database refresh therefore **reports** which items have open files and writes nothing (the `MarksInvalidated` counter is gone with its subject).
+
+**The cost is deliberate and small:** an item with nothing open is no longer skipped by a stored stamp, so every run asks the question. That is a directory listing and an indexed lookup, not an API call — and it is the point, because the answer can no longer be stale.
+
+**Not a give-up.** A pair SubDL does not carry today is looked for again on the next refetch (F-M47); there is no expiry and no retry budget as a brake. The QA budget is keyed `(item, language)` and **shared** between a language's two data, which is why a "no candidate in the pool" outcome must never be recorded as a QA failure (F-M42b). **Test: T90.**
+
+#### 14.2c The second property: FORCED — F-M284
+**F-M284 [B1] (user decision 02.10.2026):** **`forced` is an Eigenschaft OF THE SUBTITLE DATUM, exactly like hearing-impaired.** A forced subtitle is its own datum with its own row and its own flag — never a flag on the media file, and never a way to identify a language. The grain is therefore the triple `(language, hearing-impaired, forced)`.
+
+Jellyfin reports both on its streams (`MediaStream.IsHearingImpaired`, `MediaStream.IsForced`), so both are readable at the source. **But the two are NOT symmetric on SubDL's side, and the difference decides what may be done with each:**
+
+- **hearing-impaired is bilateral.** SubDL serves it from two separate server-side pools (`&hi=1` / `&hi=0`, F-M241) and accepts the flag on upload — so the datum can be **searched for, fetched and announced**.
+- **forced is LOCAL.** SubDL has no forced filter and returns no forced field. Measured live 02.10.2026: `forced=1`, `forced=0` and no parameter at all returned the **same 10 candidates**; the response carries only `hi`; and **0 of 22** candidates across three languages carried "forced" in the release name.
+
+**So a forced datum is OBSERVED, never DELIVERED.** The plugin never searches for one, never fetches one, and never uploads one. `SubtitleRef.IsDeliverable` states this for callers that plan work.
+
+**What forced is FOR: it is the reason a language can be due while a track of it exists.** A forced track carries the lines of foreign-language scenes, not the film's dialogue (F-M246), so it never counts as coverage: the regular datum stays open and is searched for. The row that records the forced track is what makes that visible, instead of a rule each caller has to re-derive.
+
+**One reader, not five call sites.** Before this, the forced exclusion was re-derived from Jellyfin's flag in five places (the seeder twice, the upload pipeline, the language gate, and the embedded-track enumeration itself). The enumeration now **records** a forced track rather than dropping it, and the "does not count as coverage" rule lives in `SubtitleCoverage` alone — the same rule for a sidecar (`.forced.srt`) and for a track inside the container.
+
+**Naming:** the marker is `forced`, read as a SET with `sdh` in either order (`Movie.de.forced.srt`, `Movie.de.sdh.forced.srt`), so a datum that is both resolves with both flags. Bitmap tracks remain excluded, and that is a different matter: they carry no text at all (F-M6), so there is no datum to record. **Test: T91.**
 
 #### 14.3 Area 3 — Sidecar files (`sidecars`)
 **F-M199:** one record per loose `.srt` file, `_id` = the **normalized content hash** (F-M186).
@@ -1067,7 +1120,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T48:** An on-arrival run works exactly the items that arrived (F-M233)
 
-**T49:** The refresh drops a download mark only on positive disk evidence (F-M234)
+**T49 (superseded by F-M283):** The refresh REPORTS open required files and writes nothing — there is no download mark left to drop (F-M234/F-M283)
 
 **T50:** Three transport timeouts are retried, a user stop is never (F-M235)
 
@@ -1082,7 +1135,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T55:** Every day-long 429 stop schedules a fire (F-M238)
 
 **T56:** Sidecar names resolve through one reader, never through the language mapper (F-M239)
-**T57:** The download mark is invalidated against the disk while the HI switch is on (F-M240, F-M238)
+**T57 (superseded by F-M282/F-M283):** A vanished `.sdh.srt` is an open pair on the next ask, with no invalidation step (F-M240, F-M283)
 **T58:** The HI variant comes from its own search (F-M241)
 
 **T59:** The best-per-language setting writes exactly that many numbered files (F-M242)
@@ -1118,7 +1171,13 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T76:** The scan records loose sidecars as observations (F-M259)
 **T77:** The fetched file's own HI flag decides its name and its record (F-M260)
 **T78:** The database is exercised without a Jellyfin host (F-M257/F-M259/F-M260)
-**T79:** An untagged track is resolved and the found language written back (F-M261)
+**T79:** The subtitle datum is the pair — a variant is a different datum from its regular file, and a variant file still proves its language (F-M282)
+
+**T90:** One coverage reader feeds the pipeline, the seeder and the refresh, and splits the two search pools apart — only the variant is open when only the variant is missing (F-M282/F-M283)
+
+**T91:** A forced subtitle is a datum with its own flag, observed in both areas, and it never covers its language (F-M284)
+
+**T89:** An untagged track is resolved and the found language written back (F-M261)
 **T80:** A container rewrite is reported at `Normal`, the per-track detail at `Verbose` (F-M262)
 **T81:** A dry run suppresses the container rewrite for both directions (F-M263)
 

@@ -70,9 +70,11 @@ public static class SubtitlePresence
 
         if (!string.IsNullOrEmpty(mediaPath))
         {
-            foreach (var (_, lang, _) in SidecarNaming.List(mediaPath))
+            foreach (var (_, lang, _, forced) in SidecarNaming.List(mediaPath))
             {
-                if (lang != null)
+                // F-M284: a forced sidecar is not the film's dialogue (F-M246), so it must not
+                // mark its language as covered — the regular subtitle stays open and is searched for.
+                if (lang != null && !forced)
                 {
                     covered.Add(lang);
                 }

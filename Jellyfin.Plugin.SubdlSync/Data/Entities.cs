@@ -189,9 +189,6 @@ public class MediaEntity
     /// <summary>Languages present in this file, comma separated and sorted. Derived from the embedded tracks.</summary>
     public string? LanguagesAvailable { get; set; }
 
-    /// <summary>True when any embedded track is a hearing-impaired variant.</summary>
-    public bool HearingImpairedAvailable { get; set; }
-
     /// <summary>
     /// When every embedded subtitle of this file reached a terminal state (uploaded or rejected).
     /// <para>
@@ -202,19 +199,20 @@ public class MediaEntity
     // F-M88c: the upload-side completion mark; a file whose embedded side is complete is skipped.
     public DateTime? SubtitlesUploadedAt { get; set; }
 
-    /// <summary>When the download side was last completed, together with the language set below.</summary>
-    // F-M151a: the download-side completion mark; the stored language set is part of the state.
-    public DateTime? SubtitlesDownloadedAt { get; set; }
-
-    /// <summary>
-    /// Serialized target-language list that was current when the download completed.
-    /// <para>
-    /// Part of the completion state, not decoration: the "done" mark is only valid for exactly
-    /// these languages. Change the configured language set and the comparison fails, so the file
-    /// is revisited for the languages that are now missing.
-    /// </para>
-    /// </summary>
-    public string? SubtitlesDownloadedLanguages { get; set; }
+    // F-M283 (user decision 02.10.2026): the download-side completion mark is GONE.
+    //
+    // `SubtitlesDownloadedAt` (a timestamp) and `SubtitlesDownloadedLanguages` (a comma-separated
+    // language list, later carrying `:hi` tokens) used to sit here. They were a second truth beside
+    // the rows that describe the subtitles, and the two drifted: the reader that decided whether to
+    // WRITE the mark and the reader that trusted it asked for different evidence, so a variant
+    // embedded in the container kept the mark from ever being written and the item was re-downloaded
+    // on every pass (41 downloads in one run against a 50/day limit, 35 marks withheld, the same
+    // content hash for three consecutive days).
+    //
+    // Completeness is derived instead, on every ask, from the files and the embedded rows
+    // (`Registry.SubtitleCoverage`). Nothing needs invalidating when a subtitle is deleted because
+    // nothing was ever stored as "done" — and the hearing-impaired variant is judged as what it is:
+    // its own subtitle datum, with its own language and its own flag.
 
     /// <summary>Last time a SubDL search ran for this file.</summary>
     public DateTime? LastSearchUtc { get; set; }
@@ -236,6 +234,24 @@ public abstract class SubtitleState
 
     /// <summary>Hearing-impaired / SDH variant.</summary>
     public bool HearingImpaired { get; set; }
+
+    /// <summary>
+    /// F-M284 (user decision 02.10.2026): the track is FORCED — it carries the lines of
+    /// foreign-language scenes, not the film's dialogue.
+    /// <para>
+    /// An Eigenschaft OF THIS DATUM, exactly like <see cref="HearingImpaired"/>: a forced subtitle
+    /// is its own row under its own hash, never a flag on the media file. It never counts as
+    /// coverage, so a language whose only track is forced stays open and is searched for (F-M246).
+    /// </para>
+    /// <para>
+    /// Unlike the hearing-impaired flag it is not bilateral: Jellyfin reports it on its streams, but
+    /// SubDL has no forced counterpart — no search filter, no response field, and 0 of 22 candidates
+    /// named it when measured live on 02.10.2026. So a forced datum is OBSERVED, never sought,
+    /// fetched or uploaded. Recording it is what stops it from being mistaken for the film's
+    /// dialogue.
+    /// </para>
+    /// </summary>
+    public bool Forced { get; set; }
 
     /// <summary>MD5 of the normalized SRT content, in SubDL's own format. Null when the content was never read.</summary>
     public string? ContentHash { get; set; }
