@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.163",
-        "changelog": "v12.1.12.163: Forced subtitles are never uploaded, and a rewrite keeps the flag.\n    A forced subtitle carries only the foreign-language scenes, so it is not the\n    film's dialogue and SubDL has no counterpart for it: it is observed, never uploaded.\n    The previous version recorded that flag on tracks inside the container but dropped\n    it for a loose .srt, so such a row said nothing and was invisible to every reader;\n    both writers now state it, and a plain row is stated as \"no\" instead of left silent.",
+        "version": "12.1.12.164",
+        "changelog": "v12.1.12.164: Reject counters now count every discarded candidate, and the run lines print them.\n    A run that fetched 50 files and kept 41 reported \"1 rejected\". The counter covered four\n    download gates and one upload gate, while the hearing-impaired block and 16 other upload\n    paths stored a Rejected verdict and counted nothing — the GUI column showed a fraction.\n    The counters now count everything fetched and thrown away, both run lines carry the number,\n    and the fields were renamed to match their widened meaning. Nothing that was never fetched\n    is counted. Schema marker 2 -> 3.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.163-dev/Jellyfin.Plugin.SubdlSync_12.1.12.163.zip",
-        "checksum": "9458a873a00f870e4c9594573d7e6150",
-        "timestamp": "2026-10-02T06:24:08Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.164-dev/Jellyfin.Plugin.SubdlSync_12.1.12.164.zip",
+        "checksum": "788c0b2a80385017718a8b79afbd9ea9",
+        "timestamp": "2026-10-02T09:33:00Z"
       }
     ]
   }
