@@ -49,4 +49,14 @@
       <HintPath>$(JellyfinDir)/Microsoft.Extensions.Logging.Abstractions.dll</HintPath>
     </Reference>
   </ItemGroup>
+  <!-- The M11-M13 checks read the pipeline SOURCE, not the compiled DLL: a hard-coded literal
+       is invisible in IL, so the source has to be next to the binary. Copied here rather than by
+       hand — a manual step is one a later run forgets, and the check would then pass by absence.
+       (M10 fails loudly if this file is missing, so the silence cannot spread.) -->
+  <Target Name="CopyPipelineSourceForStructuralChecks" AfterTargets="Build">
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)../../Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"
+          DestinationFiles="$(OutDir)DownloadPipeline.source.cs"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

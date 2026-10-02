@@ -283,13 +283,13 @@
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="DownloadMaxCandidatesPerLanguage">Max candidates per language</label>
                             <input id="DownloadMaxCandidatesPerLanguage" type="number" is="emby-input" min="0" max="20" />
-                            <div class="fieldDescription">Download attempts per file+language. 0 = unlimited. Default: 3.</div>
+                            <div class="fieldDescription">Download attempts per file+language, and the search's early stop. 0 = unlimited. Default: 3. Raised to the keep-best count when that is higher.</div>
                         </div>
 
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="DownloadKeepBestPerLanguage">Best subtitles to keep per language</label>
                             <input id="DownloadKeepBestPerLanguage" type="number" is="emby-input" min="1" max="10" />
-                            <div class="fieldDescription">Best X subtitles per language. Default: 1.</div>
+                            <div class="fieldDescription">Best X subtitles per language, saved as X numbered files. Default: 1.</div>
                         </div>
 
                         <h3>Download — Ranking</h3>

@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.165.
+**Status:** Implementation — v12.1.12.166.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -266,11 +266,13 @@ The HI block of the download loop is guarded by the *effective* flag, not the ca
 
 **F-M242 [D]:** **"Best subtitles to keep per language" saves exactly that many numbered files.** With `KeepBestPerLanguage = X` the pipeline saves the top X QA-passed candidates per (item, language): slot 1 is `<basename>.<lang>.srt`, slots 2..X are `<basename>.<lang>.2.srt`, `.<lang>.3.srt`, … Fewer usable candidates than X saves fewer files, never an error.
 
-The ONLY exit from the candidate loop is `savedCount >= keepBest`. `KeepBestPerLanguage = 1` (the default) is unchanged.
+The candidate loop has two exits: `savedCount >= keepBest` and the download budget (F-M50), whichever comes first. Because the budget is raised to `keepBest`, the keep-best exit is reachable and the setting is never silently cut short — before 02.10.2026 the budget broke the loop first. `KeepBestPerLanguage = 1` (the default) is unchanged. **Test: T99.**
 
 The GUI caps the saved-slot count at 10.
 
 While `KeepBestPerLanguage > 1` the dry run names the slots it would fill (`DRY-RUN slot 2/3 … → <name>.en.2.srt`), so the setting is verifiable without spending quota. With the default of 1 there is one slot and the line is not written. The slot preview carries the slot number, not the hearing-impaired marker: it runs before any file is fetched (F-M277).
+
+**F-M95:** **The search's early stop is the download cap, derived — never a literal.** The page walk stops once every requested language has at least N candidates, where N is the effective download budget (F-M50); `0` disables the early stop. Until 02.10.2026 the threshold was hard-coded to 3, so raising "Max candidates per language" widened the download budget but never the search: the walk still stopped after three candidates per language and the loop never saw a fourth.
 
 **F-M241 [D]:** **Two searches, one per side of the hearing-impaired split.** The regular slot is filled from a `&hi=0` search and the HI slot from a `&hi=1` search; the HI search runs only while the switch is on, so a user who does not want HI pays one search exactly as before.
 
@@ -308,7 +310,7 @@ The download chain runs against each candidate in score order, before the file i
 
 **F-M45 [D]:** **IMDB/TMDB match** (default on, switchable off): candidates matched against item IDs. Default is a hard criterion (no ID → no download); switchable off for title-based fallback.
 
-**F-M50 [D]:** **Download budget per (item, language):** max N candidate downloads before the language counts as "not available" (default 3, 0 = unlimited).
+**F-M50 [D]:** **Download budget per (item, language):** max N candidate downloads before the language counts as "not available" (default 3, 0 = unlimited). The configured budget is raised to the keep-best count (F-M242) when that is higher — a budget below it would make "keep X saves X files" unreachable. **Test: T98.**
 
 **The same language verification runs here verbatim** (F-M15), on the downloaded bytes, with its own per-direction switch.
 
@@ -1168,6 +1170,10 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T96:** Every path that fetches and then discards a candidate increments the reject counter, the count reconciles with the day's spend (requests = saved + rejected), and both the download and the upload run line print it (F-M286)
 
 **T97:** A dry run leaves no stored verdict in either direction - the refetch stamp, the file-retry counter, the id-resolution budget, the registry upserts, the file-missing deletion and the cycle-queue removal are all held back, while the worker-run record is still written (F-M22, F-M287)
+
+**T98:** With `MaxCandidatesPerLanguage = 3` and `KeepBestPerLanguage = 4` the effective download cap AND the search's early-stop threshold are both 4; with the default pair they are both 3, and `0` stays unlimited on both (F-M95/F-M50).
+
+**T99:** The candidate loop's two exits can both be reached: a budget below keep-best is raised, so "keep X" writes X files; a budget above keep-best is never lowered (F-M242/F-M50).
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)
 **T80:** A container rewrite is reported at `Normal`, the per-track detail at `Verbose` (F-M262)

@@ -1515,12 +1515,17 @@ public sealed class DownloadPipeline : IDisposable
             var qaRejectedReleases = new List<string>();
             int savedCount = 0;
             int keepBest = Math.Max(1, _config.DownloadKeepBestPerLanguage);
+            int downloadCap = DownloadBudget.EffectiveDownloadCap(
+                _config.DownloadMaxCandidatesPerLanguage, keepBest);
             foreach (var (cand, _) in ranked)
             {
                 // F-M50: download budget per (item, language) — each candidate download
                 // costs daily quota even when rejected afterwards (runtime check), so
                 // stop walking after the configured number of failed attempts.
-                if (_config.DownloadMaxCandidatesPerLanguage > 0 && attempts >= _config.DownloadMaxCandidatesPerLanguage)
+                // F-M242: the cap is raised to the keep-best count when that is higher — a budget
+                // below it makes "keep X saves X files" unreachable, and the break below would fire
+                // before the Xth slot could ever be filled.
+                if (downloadCap > 0 && attempts >= downloadCap)
                 {
                     if (savedCount == 0)
                     {
@@ -1532,7 +1537,7 @@ public sealed class DownloadPipeline : IDisposable
                     {
                         LogUtil.PerItem(_config.LogMode, _logger, 
                             "[SubDL-D] {File} [{Lang}] — download budget exhausted ({Max} candidates tried), counting as not available; {N} rejected download(s) memorized (F-M93g/F-M93m), next run takes fresh candidates; retried at the next refetch interval",
-                            Path.GetFileName(mediaPath), lang, _config.DownloadMaxCandidatesPerLanguage, qaRejectedReleases.Count);
+                            Path.GetFileName(mediaPath), lang, downloadCap, qaRejectedReleases.Count);
                     }
                     break;
                 }
@@ -2254,9 +2259,10 @@ public sealed class DownloadPipeline : IDisposable
         // ---- Main: v1 id search (episode-exact, server-side verified) ----
         // (15.09.2026): v2 id-search ignores season/episode server-side
         // (live: BCS S02E01 query returned 30 candidates incl. S06 packs and
-        // The Simpsons); v1 filters episode-exact. Early-stop with
-        // maxCandidatesPerLanguage=3 (DownloadMaxCandidatesPerLanguage) keeps
-        // the request count low.
+        // The Simpsons); v1 filters episode-exact. Early-stop is fed by
+        // DownloadBudget.SearchEarlyStopThreshold (F-M95): it used to be a hard-coded 3, so
+        // DownloadMaxCandidatesPerLanguage widened the download budget but never the search —
+        // the page walk still stopped at three candidates per language.
         // (16.09.2026): id-less soft mode runs v1 with film_name
         // (_searchFnTitle ?? item.Name) — HEAD 8a17aed behavior restored.
         if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId) && _searchFnTitle == null && !_config.DownloadRequireImdb)
@@ -2279,6 +2285,9 @@ public sealed class DownloadPipeline : IDisposable
             // HI releases the response happened to contain. The HI search only runs when the HI
             // switch asks for it, so a user who does not want HI variants pays exactly one search,
             // as before.
+            // F-M95: the threshold is derived from the two candidate settings, never a literal.
+            int earlyStop = DownloadBudget.SearchEarlyStopThreshold(
+                _config.DownloadMaxCandidatesPerLanguage, _config.DownloadKeepBestPerLanguage);
             // F-M282: the regular search runs only when a REGULAR file is open. When the variant is
             // the only thing missing, `langs` is empty and this call would be a search for nothing —
             // worse, it used to be the call that re-fetched a subtitle already on disk.
@@ -2287,7 +2296,7 @@ public sealed class DownloadPipeline : IDisposable
                 : await _api.SearchSubtitlesAsync(
                     string.IsNullOrWhiteSpace(imdbId) ? null : imdbId,
                     string.IsNullOrWhiteSpace(tmdbId) ? null : tmdbId,
-                    _searchFnTitle, season, episode, langs, 20, ct, 3, hearingImpaired: false).ConfigureAwait(false);
+                    _searchFnTitle, season, episode, langs, 20, ct, earlyStop, hearingImpaired: false).ConfigureAwait(false);
             if (main == null)
             {
                 return (null, false, 0, noHi); // 429/5xx/403 → stop the run
@@ -2306,7 +2315,7 @@ public sealed class DownloadPipeline : IDisposable
                 var hi = await _api.SearchSubtitlesAsync(
                     string.IsNullOrWhiteSpace(imdbId) ? null : imdbId,
                     string.IsNullOrWhiteSpace(tmdbId) ? null : tmdbId,
-                    _searchFnTitle, season, episode, hiLangs, 20, ct, 3, hearingImpaired: true).ConfigureAwait(false);
+                    _searchFnTitle, season, episode, hiLangs, 20, ct, earlyStop, hearingImpaired: true).ConfigureAwait(false);
                 if (hi != null && hi.Count > 0)
                 {
                     noHi = hi.Where(c => c.Language != null && variantMissing.Contains(c.Language, StringComparer.OrdinalIgnoreCase)).ToList();

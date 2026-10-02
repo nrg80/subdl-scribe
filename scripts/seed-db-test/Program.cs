@@ -47,6 +47,7 @@ using Jellyfin.Plugin.SubdlScribe.Language;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
 using Jellyfin.Plugin.SubdlScribe.Registry;
 using MediaBrowser.Model.Entities;
+using System.Text.RegularExpressions;
 
 namespace SeedDbTest;
 
@@ -985,6 +986,74 @@ internal static class Program
             finally
             {
                 try { Directory.Delete(ldir, true); } catch { /* best effort */ }
+            }
+        }
+
+        // ── M  the search width, the download cap and keep-best agree (F-M95/F-M50/F-M242) ──
+        // Three settings met in one loop and none of them was checked against the others. The
+        // search received a HARD-CODED 3 while its own comment named
+        // DownloadMaxCandidatesPerLanguage, so raising the setting widened the download budget but
+        // never the search — the page walk stopped after three candidates per language and the
+        // loop could not see a fourth. Independently, a budget below the keep-best count made
+        // F-M242 unreachable: with KeepBest=4 and the default budget 3 the budget break fired
+        // before the fourth slot could be filled.
+        {
+            // The configured default pair, unchanged: the effective numbers must stay 3 / 3, so
+            // the fix does not silently widen every existing installation's quota use.
+            Check("M1 the default budget is passed through unchanged",
+                  DownloadBudget.EffectiveDownloadCap(3, 1) == 3);
+            Check("M2 the search threshold equals the unchanged budget",
+                  DownloadBudget.SearchEarlyStopThreshold(3, 1) == 3,
+                  "-> today's behaviour, so the fix is not a hidden quota increase");
+
+            // The contradiction: the user asks for more files than the budget would let the loop try.
+            Check("M3 keep-best above the budget raises the cap (F-M242 reachable)",
+                  DownloadBudget.EffectiveDownloadCap(3, 4) == 4,
+                  "-> without this the budget break fires before slot 4 exists");
+            Check("M4 the search threshold follows the raised cap (F-M95)",
+                  DownloadBudget.SearchEarlyStopThreshold(3, 4) == 4,
+                  "-> else the loop may try 4 candidates the search never fetched");
+
+            // 0 means unlimited in F-M50 and must stay unlimited — it is NOT raised to keepBest.
+            Check("M5 unlimited stays unlimited (F-M50)",
+                  DownloadBudget.EffectiveDownloadCap(0, 4) == 0);
+            Check("M6 an unlimited budget disables the early stop (F-M95/F-M50)",
+                  DownloadBudget.SearchEarlyStopThreshold(0, 4) == 0,
+                  "-> 0 is the documented 'no early stop', not a threshold of zero");
+
+            // A budget ALREADY above keep-best is never lowered: the user set it deliberately.
+            Check("M7 a budget above keep-best is not lowered",
+                  DownloadBudget.EffectiveDownloadCap(10, 2) == 10);
+            Check("M8 a nonsensical keep-best cannot produce a zero threshold",
+                  DownloadBudget.SearchEarlyStopThreshold(3, 0) == 3,
+                  "-> keepBest is clamped to 1, so the search never stops after zero candidates");
+
+            // The formula is only half the fix: a correct helper that nobody calls leaves the
+            // behaviour unchanged. These two are STRUCTURAL — they read the pipeline source and
+            // assert the numbers are wired in, so the literal cannot come back unnoticed.
+            {
+                string srcPath = Path.Combine(AppContext.BaseDirectory, "DownloadPipeline.source.cs");
+                string src = File.Exists(srcPath) ? File.ReadAllText(srcPath) : "";
+                Check("M10 the pipeline source is available for the structural check", src.Length > 0,
+                      "-> " + srcPath);
+                // The bug in one line: a bare ", 3," as the search threshold.
+                Check("M11 no hard-coded search threshold remains in the pipeline",
+                      !Regex.IsMatch(src, @"ct,\s*3,\s*hearingImpaired"),
+                      "-> the literal that ignored DownloadMaxCandidatesPerLanguage");
+                Check("M12 both search calls take the derived threshold",
+                      Regex.Matches(src, @"ct,\s*earlyStop,\s*hearingImpaired").Count == 2,
+                      "-> regular search and HI search");
+                Check("M13 the download loop compares against the derived cap",
+                      src.Contains("attempts >= downloadCap", StringComparison.Ordinal),
+                      "-> not against the raw setting");
+            }
+
+            // The two numbers are one decision, not two: this is the drift that caused the bug.
+            foreach (var (budget, keep) in new[] { (3, 1), (3, 4), (2, 2), (10, 2), (0, 4) })
+            {
+                Check($"M9.{budget}/{keep} search and download agree",
+                      DownloadBudget.SearchEarlyStopThreshold(budget, keep)
+                          == DownloadBudget.EffectiveDownloadCap(budget, keep));
             }
         }
 
