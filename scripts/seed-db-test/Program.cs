@@ -872,6 +872,56 @@ internal static class Program
             try { Directory.Delete(jDir, true); } catch { /* best effort */ }
         }
 
+        // ── K  counters: every reject path is counted, and the delta matches (F-M286) ─────
+        // F-M286 widened the reject counters from "the QA gates" to "everything fetched and thrown
+        // away", because the old scope made the GUI column and the run line describe a fraction of
+        // the run: seven of nine discards in the audited download run exited through the
+        // hearing-impaired block, which counted nothing. These checks pin the CONTRACT, not the
+        // implementation: the two summaries expose one reject number per direction, a dry run
+        // contributes zero, and an all-zero summary leaves the row untouched.
+        {
+            // A real download run: 41 saved, 9 fetched and discarded.
+            var dl = new DownloadRunSummary { Downloaded = 41, RejectedCandidates = 9 };
+            var dlDelta = StatusCounterDelta.From(null, dl);
+            Check("K1 a download run reports its rejects beside its saves",
+                dlDelta.Downloaded == 41 && dlDelta.RejectedDownload == 9,
+                $"-> {dlDelta.Downloaded} saved / {dlDelta.RejectedDownload} rejected");
+            Check("K2 a download run contributes no upload reject",
+                dlDelta.RejectedUpload == 0);
+
+            // A dry run saves nothing and must therefore report nothing — not even the rejects.
+            var dry = new DownloadRunSummary { Downloaded = 0, RejectedCandidates = 9, IsDryRun = true };
+            var dryDelta = StatusCounterDelta.From(null, dry);
+            Check("K3 a dry run contributes no rejects (it is not a fact about the library)",
+                dryDelta.RejectedDownload == 0, $"-> {dryDelta.RejectedDownload}");
+
+            // An upload run: the counter covers every path, not the QA gates alone.
+            var up = new RunSummary { Uploaded = 3, RejectedCandidates = 12 };
+            var upDelta = StatusCounterDelta.From(up, null);
+            Check("K4 an upload run reports its rejects beside its uploads",
+                upDelta.Uploaded == 3 && upDelta.RejectedUpload == 12,
+                $"-> {upDelta.Uploaded} uploaded / {upDelta.RejectedUpload} rejected");
+            Check("K5 an upload run contributes no download reject",
+                upDelta.RejectedDownload == 0);
+
+            // A dry upload must not zero a real download's numbers, and the other way round.
+            var mixed = StatusCounterDelta.From(new RunSummary { IsDryRun = true }, dl);
+            Check("K6 a dry upload does not zero a real download's rejects",
+                mixed.RejectedDownload == 9 && mixed.RejectedUpload == 0);
+
+            // Nothing happened -> the row is not touched (that is what keeps Updated meaningful).
+            var nothing = StatusCounterDelta.From(new RunSummary(), new DownloadRunSummary());
+            Check("K7 an empty run leaves the statistics row untouched", nothing.IsEmpty);
+
+            // The two directions are separate fields on the row, so one cannot overwrite the other.
+            var ent = new StatusStatsEntity { Id = "status" };
+            ent.RejectedDownload += dlDelta.RejectedDownload;
+            ent.RejectedUpload += upDelta.RejectedUpload;
+            Check("K8 both directions persist into their own field",
+                ent.RejectedDownload == 9 && ent.RejectedUpload == 12,
+                $"-> {ent.RejectedDownload} / {ent.RejectedUpload}");
+        }
+
         // ── summary ─────────────────────────────────────────────────────────
         Console.WriteLine();
         Console.WriteLine("Fehler: " + _failed + "  (bestanden: " + _passed + ")");

@@ -91,8 +91,8 @@ public class SubdlStatusController : ControllerBase
             Downloaded = row.Downloaded,
             TypeCorrectedByFileName = row.TypeCorrectedByFileName,
             TmdbYearFilterMisses = row.TmdbYearFilterMisses,
-            QaRejectedDownload = row.QaRejectedDownload,
-            QaRejectedUpload = row.QaRejectedUpload,
+            RejectedDownload = row.RejectedDownload,
+            RejectedUpload = row.RejectedUpload,
             SinceUtc = row.SinceUtc?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
             Updated = row.Updated.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
         });
@@ -169,8 +169,8 @@ public class SubdlStatusController : ControllerBase
             Downloaded = row.Downloaded,
             TypeCorrectedByFileName = row.TypeCorrectedByFileName,
             TmdbYearFilterMisses = row.TmdbYearFilterMisses,
-            QaRejectedDownload = row.QaRejectedDownload,
-            QaRejectedUpload = row.QaRejectedUpload,
+            RejectedDownload = row.RejectedDownload,
+            RejectedUpload = row.RejectedUpload,
             SinceUtc = row.SinceUtc?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
             Updated = row.Updated.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
         });

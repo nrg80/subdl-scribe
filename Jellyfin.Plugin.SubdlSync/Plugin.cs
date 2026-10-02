@@ -127,18 +127,18 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// <param name="downloaded">Subtitles downloaded in this run.</param>
     /// <param name="typeCorrected">F-M218: items typed by the file name instead of Jellyfin.</param>
     /// <param name="tmdbYearMisses">F-M218: TMDb searches that needed the year filter dropped.</param>
-    /// <param name="qaDownload">F-M218: download candidates a QA gate rejected.</param>
-    /// <param name="qaUpload">F-M218: upload candidates a QA gate rejected.</param>
+    /// <param name="rejectedDownload">F-M286: download candidates fetched and thrown away.</param>
+    /// <param name="rejectedUpload">F-M286: upload candidates discarded from the upload.</param>
     public void AddStatusCounters(
         long uploaded,
         long downloaded,
         long typeCorrected = 0,
         long tmdbYearMisses = 0,
-        long qaDownload = 0,
-        long qaUpload = 0)
+        long rejectedDownload = 0,
+        long rejectedUpload = 0)
     {
         if (uploaded == 0 && downloaded == 0 && typeCorrected == 0 && tmdbYearMisses == 0
-            && qaDownload == 0 && qaUpload == 0)
+            && rejectedDownload == 0 && rejectedUpload == 0)
         {
             return; // nothing happened — do not touch the row (keeps Updated meaningful)
         }
@@ -150,8 +150,8 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         row.Downloaded += downloaded;
         row.TypeCorrectedByFileName += typeCorrected;
         row.TmdbYearFilterMisses += tmdbYearMisses;
-        row.QaRejectedDownload += qaDownload;
-        row.QaRejectedUpload += qaUpload;
+        row.RejectedDownload += rejectedDownload;
+        row.RejectedUpload += rejectedUpload;
         row.Updated = DateTime.UtcNow;
         db.StatusStats.Upsert(row);
     }
@@ -168,8 +168,8 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         row.Downloaded = 0;
         row.TypeCorrectedByFileName = 0; // F-M218
         row.TmdbYearFilterMisses = 0;
-        row.QaRejectedDownload = 0;
-        row.QaRejectedUpload = 0;
+        row.RejectedDownload = 0;
+        row.RejectedUpload = 0;
         row.SinceUtc = DateTime.UtcNow;
         row.Updated = DateTime.UtcNow;
         db.StatusStats.Upsert(row);

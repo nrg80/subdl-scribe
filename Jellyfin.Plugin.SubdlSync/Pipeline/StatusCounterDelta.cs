@@ -38,15 +38,15 @@ public readonly struct StatusCounterDelta
         long downloaded,
         long typeCorrected,
         long tmdbYearMisses,
-        long qaDownload,
-        long qaUpload)
+        long rejectedDownload,
+        long rejectedUpload)
     {
         Uploaded = uploaded;
         Downloaded = downloaded;
         TypeCorrected = typeCorrected;
         TmdbYearMisses = tmdbYearMisses;
-        QaDownload = qaDownload;
-        QaUpload = qaUpload;
+        RejectedDownload = rejectedDownload;
+        RejectedUpload = rejectedUpload;
     }
 
     /// <summary>Gets subtitles uploaded by this run.</summary>
@@ -61,16 +61,16 @@ public readonly struct StatusCounterDelta
     /// <summary>Gets the F-M218 TMDb searches that needed the year filter dropped.</summary>
     public long TmdbYearMisses { get; }
 
-    /// <summary>Gets the F-M218 download candidates a QA gate rejected.</summary>
-    public long QaDownload { get; }
+    /// <summary>Gets the F-M286 download candidates fetched and then thrown away.</summary>
+    public long RejectedDownload { get; }
 
-    /// <summary>Gets the F-M218 upload candidates a QA gate rejected.</summary>
-    public long QaUpload { get; }
+    /// <summary>Gets the F-M286 upload candidates discarded from the upload.</summary>
+    public long RejectedUpload { get; }
 
     /// <summary>Gets a value indicating whether this delta leaves the statistics row untouched.</summary>
     public bool IsEmpty
         => Uploaded == 0 && Downloaded == 0 && TypeCorrected == 0 && TmdbYearMisses == 0
-           && QaDownload == 0 && QaUpload == 0;
+           && RejectedDownload == 0 && RejectedUpload == 0;
 
     /// <summary>
     /// F-M247: builds the delta for one direction run, discarding everything a dry run produced.
@@ -95,7 +95,7 @@ public readonly struct StatusCounterDelta
             typeCorrected: (downloadDry ? 0 : download?.TypeCorrectedByFileName ?? 0)
                 + (uploadDry ? 0 : upload?.TypeCorrectedByFileName ?? 0),
             tmdbYearMisses: downloadDry ? 0 : download?.TmdbYearFilterMisses ?? 0,
-            qaDownload: downloadDry ? 0 : download?.QaRejectedCandidates ?? 0,
-            qaUpload: uploadDry ? 0 : upload?.QaRejectedCandidates ?? 0);
+            rejectedDownload: downloadDry ? 0 : download?.RejectedCandidates ?? 0,
+            rejectedUpload: uploadDry ? 0 : upload?.RejectedCandidates ?? 0);
     }
 }

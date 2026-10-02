@@ -528,11 +528,21 @@ public class StatusStatsEntity
     /// <summary>TMDb title searches that only matched after the year filter was dropped (F-M217).</summary>
     public long TmdbYearFilterMisses { get; set; }
 
-    /// <summary>Download candidates a QA gate rejected (language/structure/min-cues/runtime).</summary>
-    public long QaRejectedDownload { get; set; }
+    /// <summary>
+    /// F-M286: candidates FETCHED and then thrown away, per direction — every reject path, not the QA
+    /// gates alone. Renamed from <c>QaRejectedDownload</c> when the meaning widened: a fetched
+    /// candidate discarded because its content was already known, or because no usable bytes came
+    /// back, spends a request just like a gate rejection does. Reconciles with the day's quota:
+    /// requests = saved + rejected. Nothing that was never fetched is counted.
+    /// </summary>
+    public long RejectedDownload { get; set; }
 
-    /// <summary>Upload candidates a QA gate rejected (language/structure/runtime).</summary>
-    public long QaRejectedUpload { get; set; }
+    /// <summary>
+    /// F-M286: upload candidates discarded before or instead of an upload — QA gates, und-off,
+    /// unmapped language, self-echo, duplicate-remote, forced (F-M284). Same rule as the download:
+    /// one field, every reject path.
+    /// </summary>
+    public long RejectedUpload { get; set; }
 
     /// <summary>Start of the counting period; set by "Reset statistics", null before first use.</summary>
     public DateTime? SinceUtc { get; set; }

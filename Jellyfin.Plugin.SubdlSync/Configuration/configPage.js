@@ -342,8 +342,8 @@
                                     '(Jellyfin had the wrong type), ' +
                                     (s.TmdbYearFilterMisses || 0) + ' titles found only after dropping ' +
                                     'Jellyfin\u2019s year, ' +
-                                    (s.QaRejectedDownload || 0) + ' downloads / ' +
-                                    (s.QaRejectedUpload || 0) + ' uploads rejected by the quality check.';
+                                    (s.RejectedDownload || 0) + ' downloads / ' +
+                                    (s.RejectedUpload || 0) + ' uploads rejected after being fetched.';
                             }
 
                             // The period stamp sits on its own line, last — it belongs to

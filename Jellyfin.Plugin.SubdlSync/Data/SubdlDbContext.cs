@@ -73,7 +73,11 @@ public sealed class SubdlDbContext : IDisposable
     // mark (`SubtitlesDownloadedAt` / `SubtitlesDownloadedLanguages`). Per F-M195b there is no
     // migration: the marker makes the change visible, the older records are ignored rather than
     // rewritten, and a reset (F-M90) is the intended path.
-    public const int CurrentSchemaVersion = 2;
+    // F-M286 (02.10.2026): raised to 3. The status row's two quality counters were renamed
+    // (`QaRejectedDownload`/`QaRejectedUpload` -> `RejectedDownload`/`RejectedUpload`) because they
+    // now count every fetched-and-discarded candidate, not the QA gates alone. An older build reading
+    // this file finds neither field and reports 0, which is why the marker moves with the rename.
+    public const int CurrentSchemaVersion = 3;
 
     /// <summary>
     /// The open LiteDB engine. Deliberately NOT readonly: LiteDB's <c>Rebuild()</c> closes the

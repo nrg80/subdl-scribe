@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.163.
+**Status:** Implementation — v12.1.12.164.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -927,9 +927,17 @@ The log line reads `DRY RUN, would have uploaded {N}` / `{Saved} would have save
 
 **F-M218:** **The quality counters are persisted too, per direction, next to the volume counters.** Four 64-bit fields on the same single status row as F-M207, one field per counter.
 
-type-corrected-from-file-name — items whose type/season/episode came from the file name (F-M217). TMDb year-filter misses — searches that only matched once the Jellyfin year was dropped. QA-rejected downloads/QA-rejected uploads — candidates the QA gates rejected, counted AT the gate, not at the skip counter.
+type-corrected-from-file-name — items whose type/season/episode came from the file name (F-M217). TMDb year-filter misses — searches that only matched once the Jellyfin year was dropped. Rejected downloads / rejected uploads — candidates **fetched and then thrown away**, one field per direction; the scope is every reject path, and it is F-M286 that defines it. **Test: K1–K8.**
 
 Every timestamp uses one format — US order (M/D/YYYY) with local AM/PM time — through the timestamp formatter and the time formatter, so stamps cannot drift apart per call site. an unqualified locale call without an explicit locale follows the BROWSER's locale.
+
+**F-M286 [B1] (user decision 02.10.2026):** **A reject counter counts what the run SPENT, and every counter is printed somewhere.**
+
+Scope: **every path that fetches and then discards** — no bytes, content already known, broken content, hearing-impaired gate, und-off, unmappable language, self-echo, duplicate-remote, forced. A stored `Rejected` verdict without an increment is a silent discard.
+
+Not counted: anything the run did not spend on — an empty hearing-impaired pool, candidates keep-best left untried, a retry that re-runs a gate already counted.
+
+The number reconciles with the day's quota (`requests = saved + rejected`) and both run lines print it. **Test: T96, K1–K8.** See F-M218, F-M24d.
 
 **F-M24a [B1]:** **Tiered logging, all levels via Jellyfin's logger. DEFAULT: Normal.**
 
@@ -939,7 +947,7 @@ Verbose: per-file up-/downloads, SKIP reasons, dry-run lines, search results, QA
 
 Debug: every SubDL API round-trip (search, download, upload, login), api_key always redacted; TMDB round-trips too.
 
-**F-M24d [B1]:** **High-level log concept for Normal mode:** one summary line per run/direction with counters; one aggregate line covering the skip reasons of a download run; lifecycle events and warnings/errors once per event. The upload run writes no skip aggregate.
+**F-M24d [B1]:** **High-level log concept for Normal mode:** one summary line per run/direction with counters; one aggregate line covering the skip reasons of a download run; lifecycle events and warnings/errors once per event. **Amended 02.10.2026 (F-M286): the upload run writes ONE line with its two numbers — uploads and rejections — instead of none.** The old sentence ("no skip aggregate") dates from when the upload's reject number covered a single gate; with the counter now spanning every reject path, a run that discarded its whole inventory read exactly like a run that found nothing. What stays: it is one line with two numbers, not a per-reason aggregate — the per-item SKIP lines remain the Verbose detail.
 
 **F-M152:** **The 429 reaction is decided by the server's rate headers and a live counter read, never by the status code alone.** Every response is parsed for the API's rate headers; the values are the daily limit, the remaining count and the exact server reset.
 
@@ -1149,6 +1157,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T93:** `hi` and `forced` are three-valued — a legacy row reads back as `null` and claims nothing, a fresh write states `false` explicitly (F-M285)
 **T94:** A forced subtitle is observed but never uploaded — the loose-file path asks `IsDeliverable` and skips it, the embedded path drops it via `IsDialogueStream` (F-M284)
 **T95:** A container rewrite re-states the forced disposition and is REJECTED if it did not survive, so a language-tag write can never silently turn a forced track into the film's dialogue (F-M284)
+
+**T96:** Every path that fetches and then discards a candidate increments the reject counter, the count reconciles with the day's spend (requests = saved + rejected), and both the download and the upload run line print it (F-M286)
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)
 **T80:** A container rewrite is reported at `Normal`, the per-track detail at `Verbose` (F-M262)

@@ -103,8 +103,15 @@ public class DownloadRunSummary
     /// <summary>Gets or sets the total count of (item, language) pairs skipped for the QA retry limit this run.</summary>
     public int QaGiveUpLanguages { get; set; }
 
-    /// <summary>F-M218: candidates a QA gate rejected this run (language/structure/min-cues/runtime).</summary>
-    public int QaRejectedCandidates { get; set; }
+    /// <summary>
+    /// F-M286: candidates this run FETCHED and then threw away — every reject path, not the QA
+    /// gates alone. The four gates (language/structure/min-cues/runtime) are a subset; a candidate
+    /// whose bytes arrived and were discarded for any other reason (no usable data, content already
+    /// known, a hearing-impaired gate) belongs here too. Reconciles with the day's quota:
+    /// requests = saved + rejected. A candidate that was never fetched (empty HI pool, candidates
+    /// left untried by keep-best) is NOT counted — nothing was spent on it.
+    /// </summary>
+    public int RejectedCandidates { get; set; }
 
     /// <summary>F-M218: items whose type/season/episode came from the file name, not Jellyfin.</summary>
     public int TypeCorrectedByFileName { get; set; }
@@ -513,9 +520,13 @@ public sealed class DownloadPipeline : IDisposable
         // run is exactly when those counts matter — but label the first number as what it is:
         // the saves the run would have made.
         string savedLabel = summary.IsDryRun ? "would have saved" : "saved";
+        // F-M286: {Rejected} names what was FETCHED AND THROWN AWAY. Without it a run that spent
+        // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
+        // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
         LogUtil.Normal(_logger, 
-            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued",
+            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Rejected} rejected after fetch | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued",
             summary.Downloaded,
+            summary.RejectedCandidates,
             summary.SkippedNoCandidates,
             summary.NotAvailable,
             summary.SkippedItems,
@@ -1621,6 +1632,10 @@ public sealed class DownloadPipeline : IDisposable
 
                 if (bytes == null || bytes.Length < 100)
                 {
+                    // F-M286: fetched and thrown away — the bytes came back (or the call answered
+                    // without a body) and were discarded, so the request was spent. Counted here,
+                    // like every other reject path; F-M255 added the line, F-M286 the number.
+                    summary.RejectedCandidates++;
                     // F-M255: no candidate is discarded without a line. This exit had none, so a
                     // fetched-and-thrown-away candidate left no trace at all.
                     LogUtil.PerItem(_config.LogMode, _logger,
@@ -1646,7 +1661,7 @@ public sealed class DownloadPipeline : IDisposable
                         && !string.Equals(detected, lang, StringComparison.OrdinalIgnoreCase)
                         && !Qa.QaGates.IsFamilyMatch(lang, detected))
                     {
-                        summary.QaRejectedCandidates++; // F-M218
+                        summary.RejectedCandidates++; // F-M286 (QA gate)
                         qaRejectedReleases.Add(cand.SubdlId); // burned fetch → memorized
 
                         if (_config.LogMode >= LogLevelMode.Verbose)
@@ -1673,7 +1688,7 @@ public sealed class DownloadPipeline : IDisposable
                     {
                         // Burned fetch on a structurally broken file —
                         // remember the exact download, the run counts as failed.
-                        summary.QaRejectedCandidates++; // F-M218
+                        summary.RejectedCandidates++; // F-M286 (QA gate)
                         qaRejectedReleases.Add(cand.SubdlId);
 
                         if (_config.LogMode >= LogLevelMode.Verbose)
@@ -1691,7 +1706,7 @@ public sealed class DownloadPipeline : IDisposable
                 var gateStats = Qa.QaGates.ParseSrt(DecodeSrt(bytes)); // Fresh parse (srtStats is scoped to the structure block)
                 if (_config.QaDownloadMinCues && (gateStats == null || gateStats.CueCount < 30))
                 {
-                    summary.QaRejectedCandidates++; // F-M218
+                    summary.RejectedCandidates++; // F-M286 (QA gate)
                     qaRejectedReleases.Add(cand.SubdlId); // Burned fetch → memorized
 
                     if (_config.LogMode >= LogLevelMode.Verbose)
@@ -1708,7 +1723,7 @@ public sealed class DownloadPipeline : IDisposable
                 {
                     // Burned fetch (stub/broken runtime) —
                     // remember the exact download, the run counts as failed at its end.
-                    summary.QaRejectedCandidates++; // F-M218
+                    summary.RejectedCandidates++; // F-M286 (QA gate)
                     qaRejectedReleases.Add(cand.SubdlId);
 
                     if (_config.LogMode >= LogLevelMode.Verbose)
@@ -1867,6 +1882,11 @@ public sealed class DownloadPipeline : IDisposable
                                 }
                                 else
                                 {
+                                    // F-M286: fetched and discarded — the bytes were spent on the
+                                    // request, so this belongs in the same number as the main-path
+                                    // rejects. It was the largest single hole: seven of nine discards
+                                    // in the audited run exited here and counted nothing.
+                                    summary.RejectedCandidates++;
                                     // F-M255: fetched, but the content is already known — a distinct
                                     // outcome that previously looked exactly like "not saved".
                                     LogUtil.PerItem(_config.LogMode, _logger,
@@ -1879,6 +1899,9 @@ public sealed class DownloadPipeline : IDisposable
                                 // F-M255: the HI fetch was thrown away by a gate, with the measured
                                 // value — four silent exits produced the "14 searches, 1 file" picture
                                 // that could not be explained from the log at all.
+                                // F-M286: fetched and threw the bytes away in a gate — same spend,
+                                // same counter. One increment for every reason in this branch.
+                                summary.RejectedCandidates++;
                                 string hiRejectReason = !hiBytesUsable
                                     ? (hiBytes == null ? "no bytes returned" : "only " + hiBytes.Length + " bytes")
                                     : !hiStructureOk

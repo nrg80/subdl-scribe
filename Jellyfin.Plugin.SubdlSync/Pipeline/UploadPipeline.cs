@@ -71,8 +71,14 @@ public class RunSummary
     /// <summary>Gets or sets the count of items skipped for missing IMDB/season/episode.</summary>
     public int SkippedNoImdb { get; set; }
 
-    /// <summary>F-M218: candidates a QA gate rejected this run (language/structure/runtime).</summary>
-    public int QaRejectedCandidates { get; set; }
+    /// <summary>
+    /// F-M286: candidates DISCARDED from the upload this run — every reject path, not the QA gates
+    /// alone. F-M218 said "counted AT the gate, not at the skip counter"; the code implemented that at
+    /// exactly one gate while 16 other paths recorded a Rejected verdict and counted nothing, so the
+    /// GUI's upload column reported a fraction of the truth. This counter is the whole set:
+    /// QA gates, und-off, unmapped language, self-echo, duplicate-remote, forced (F-M284).
+    /// </summary>
+    public int RejectedCandidates { get; set; }
 
     /// <summary>Gets or sets the count of items skipped as id-unresolvable after exhausting the F-M66 retry budget.</summary>
     public int SkippedIdGaveUp { get; set; }
@@ -853,6 +859,7 @@ public sealed class UploadPipeline
                     if (!_config.UploadResolveUnd)
                     {
                         summary.SkippedStreams++;
+                        summary.RejectedCandidates++; // F-M286
                         LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File}: untagged stream s{Pos} — resolve-und disabled",
                             Path.GetFileName(mediaPath), subPos);
                         // One row, one verdict: the stream is rejected with und-off. There is no
@@ -876,6 +883,7 @@ public sealed class UploadPipeline
                 {
                     // Unmappable tag — terminal for this position.
                     summary.SkippedStreams++;
+                    summary.RejectedCandidates++; // F-M286
                     Registry.MarkAndFlush(() => Registry.MarkEmbed(
                         mediaHash, subPos, rawLang, Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream),
                         SubtitleStatus.Rejected, reason: RejectReason.UnmappedLanguage));
@@ -893,6 +901,9 @@ public sealed class UploadPipeline
                     // an uploaded verdict of its own; it is recorded as rejected-by-self-echo, which
                     // is what it factually is: we did not send this stream because we already had
                     // this language. Marking it "uploaded" would claim an upload that never happened.
+                    // F-M286: a Rejected verdict and no counter was a silent discard — the row said
+                    // "rejected" while the GUI column never learned about it.
+                    summary.RejectedCandidates++; // F-M286
                     Registry.MarkAndFlush(() => Registry.MarkEmbed(
                         mediaHash, subPos, lang, streamHi,
                         SubtitleStatus.Rejected, reason: RejectReason.SelfEcho));
@@ -907,6 +918,7 @@ public sealed class UploadPipeline
                 if (rejectReason != null)
                 {
                     summary.SkippedStreams++;
+                    summary.RejectedCandidates++; // F-M286
                     // Known reject for THIS position — carry the original reason forward verbatim
                     // instead of replacing it with a generic note, so the cause stays readable.
                     Registry.MarkAndFlush(() => Registry.MarkEmbed(
@@ -955,6 +967,7 @@ public sealed class UploadPipeline
                     if (srt.Length < 2048)
                     {
                         summary.SkippedStreams++;
+                        summary.RejectedCandidates++; // F-M286
                         LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File}: untagged stream s{Pos} — too small to detect a language ({Bytes} bytes)",
                             Path.GetFileName(mediaPath), subPos, srt.Length);
                         // Persist the skip so the file can reach file-complete —
@@ -970,6 +983,7 @@ public sealed class UploadPipeline
                     if (detected == null)
                     {
                         summary.SkippedStreams++;
+                        summary.RejectedCandidates++; // F-M286
                         LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File}: untagged stream s{Pos} — language could not be detected ({Bytes} bytes)",
                             Path.GetFileName(mediaPath), subPos, srt.Length);
                         // Same — persist detection failures so files can complete.
@@ -1007,6 +1021,7 @@ public sealed class UploadPipeline
                 if (looseForced)
                 {
                     summary.SkippedStreams++;
+                    summary.RejectedCandidates++; // F-M286
                     LogUtil.PerItem(_config.LogMode, _logger,
                         "[SubDL] SKIP {File} — forced subtitle, observed but never uploaded (F-M284)",
                         Path.GetFileName(loosePath));
@@ -1037,6 +1052,7 @@ public sealed class UploadPipeline
                 if (looseReject != null)
                 {
                     summary.SkippedStreams++;
+                    summary.RejectedCandidates++; // F-M286
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(loosePath), looseLang, ExplainReject(looseReject));
 
                     continue;
@@ -1071,6 +1087,7 @@ public sealed class UploadPipeline
                         if (!_config.UploadResolveUnd)
                         {
                             summary.SkippedStreams++;
+                            summary.RejectedCandidates++; // F-M286
                             LogUtil.PerItem(_config.LogMode, _logger,
                                 "[SubDL] SKIP {File} — sidecar names no language and resolve-und is disabled",
                                 Path.GetFileName(loosePath));
@@ -1085,6 +1102,7 @@ public sealed class UploadPipeline
                         if (looseSrt.Length < 2048)
                         {
                             summary.SkippedStreams++;
+                            summary.RejectedCandidates++; // F-M286
                             LogUtil.PerItem(_config.LogMode, _logger,
                                 "[SubDL] SKIP {File} — sidecar names no language and is too small to detect one ({Bytes} bytes)",
                                 Path.GetFileName(loosePath), looseSrt.Length);
@@ -1100,6 +1118,7 @@ public sealed class UploadPipeline
                         if (looseDetected == null)
                         {
                             summary.SkippedStreams++;
+                            summary.RejectedCandidates++; // F-M286
                             LogUtil.PerItem(_config.LogMode, _logger,
                                 "[SubDL] SKIP {File} — sidecar names no language and none could be detected ({Bytes} bytes)",
                                 Path.GetFileName(loosePath), looseSrt.Length);
@@ -1157,10 +1176,10 @@ public sealed class UploadPipeline
                 string? qaReject = ScreenContentQa(cand.Srt, cand.Lang, runtimeMs, out string contentHash);
                 if (qaReject != null)
                 {
-                    // F-M218: count the gate rejection itself. SkippedStreams also carries
+                    // F-M286: count the rejection itself. SkippedStreams also carries
                     // non-QA reasons (duplicates, missing ids), so it cannot serve as the
-                    // QA number.
-                    summary.QaRejectedCandidates++;
+                    // rejected number either.
+                    summary.RejectedCandidates++;
                     summary.SkippedStreams++;
                     // F-M68: persist the QA reject — next runs skip without re-extract/re-QA... 
                     // Flush immediately — a hard JF kill between reject and run-end
@@ -1263,6 +1282,7 @@ public sealed class UploadPipeline
                 if (Registry.IsUploaded(mediaHash, cand.Lang, cand.HearingImpaired))
                 {
                     summary.SkippedStreams++;
+                    summary.RejectedCandidates++; // F-M286
                     if (cand.IsLoose)
                     {
                         Registry.MarkAndFlush(() => Registry.MarkSidecar(
@@ -1338,6 +1358,7 @@ public sealed class UploadPipeline
                         break;
                     case { SkippedItem: true }:
                         summary.SkippedStreams++;
+                        summary.RejectedCandidates++; // F-M286
                         // A definitive skip verdict settles the position — but
                         // transient reasons (rate caps inside UploadSrtContentAsync return
                         // as failures, not skips) keep the stream due.
@@ -1453,18 +1474,25 @@ public sealed class UploadPipeline
         _idNotFound.Flush(); // Persist id-resolution failure counters (F-M66) — without this every JF restart reset the counters and id-less items (Primer/Coherence test files) waited 60 s + spent TMDB searches in every run forever
         OshashCache.Flush(); // F-M88c: kill-safe flush of the central OSHash cache
         _fileRetries.Flush();
-        // (user decision 14.09.2026): no stats line, no skip aggregates —
-        // per-item UPLOADED lines (real actions) are the only run output; the
-        // log shows started/stopped plus what actually went up.
+        // (user decision 14.09.2026, REVISED 02.10.2026 — F-M286): the rule used to be "no stats
+        // line, no skip aggregates" for the upload, with per-item UPLOADED lines as the only run
+        // output. That decision was made when the upload's reject number was a single gate; with the
+        // counter now covering every reject path it is the number that explains a run which discarded
+        // its whole inventory, and a run that rejected 40 of 40 candidates looked exactly like a run
+        // that found nothing (the same blindness F-M183 fixed for the download).
+        // What stays: this is ONE line with the two numbers, not a per-reason aggregate — the
+        // per-item SKIP lines remain the Verbose detail.
         // F-M247: a dry run uploaded nothing, so its number is labelled hypothetical —
         // "N uploaded" would be a claim the run cannot back.
         if (summary.IsDryRun)
         {
-            LogUtil.Normal(_logger, "[SubDL] upload: finished — lock released. DRY RUN, would have uploaded {N}", summary.Uploaded);
+            LogUtil.Normal(_logger, "[SubDL] upload: finished — lock released. DRY RUN, would have uploaded {N} | {Rejected} rejected, {Skipped} stream(s) skipped",
+                summary.Uploaded, summary.RejectedCandidates, summary.SkippedStreams);
         }
         else
         {
-            LogUtil.Normal(_logger, "[SubDL] upload: finished — lock released. {N} uploaded", summary.Uploaded);
+            LogUtil.Normal(_logger, "[SubDL] upload: finished — lock released. {N} uploaded | {Rejected} rejected, {Skipped} stream(s) skipped",
+                summary.Uploaded, summary.RejectedCandidates, summary.SkippedStreams);
         }
 
         return summary;
