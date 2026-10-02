@@ -52,6 +52,14 @@ changelog: >
     property existed reads back as false, which would let a forced track pass as
     the film's dialogue and keep its language settled forever - the database
     refresh therefore backfills the flag from each row's own file name.
+    Every subtitle datum now states hi and forced EXPLICITLY as ja or nein. The
+    stored value is three-valued: true and false are statements, null means the
+    row does not say - reserved for rows written before the field existed. A gap
+    is never read as a "no", because that is how a missing fact becomes a false
+    claim: a legacy forced row would have passed as the film's dialogue and kept
+    its language settled with nothing left to correct it. Reading the gap as
+    "no claim" converges instead - the item is worked once more and that pass
+    states the value.
   v12.1.12.160: The download mark names files, and an unlabelled sidecar gets its name.
     A regular subtitle and its hearing-impaired variant are two files on disk, but the
     mark recorded both as the plain language - so a successful regular save closed the

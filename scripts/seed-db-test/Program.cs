@@ -237,6 +237,52 @@ internal static class Program
               SidecarNaming.ReadFlags("Film.2026.1080p.WEB-DL.hin") == (false, false),
               "-> hin is Hindi, not a marker");
 
+        // ── B2c) ja / nein / nicht gesagt — F-M285 ──────────────────────────
+        // The stored value is THREE-valued. An explicit false is a STATEMENT (this subtitle is not
+        // the variant); null is a row that does not say. Reading the gap as "no" is how an unknown
+        // becomes a false claim — a legacy forced row would pass as the film's dialogue and its
+        // language would look settled forever, with nothing left to correct it.
+        Section("B2c) hi/forced are ja / nein / nicht gesagt (F-M285)");
+        using (var ndb = new SubdlDbContext(Path.Combine(root, "db-null"), null))
+        {
+            var nreg = new ContentHashRegistry(ndb, null, null);
+            string nHash = "aaaaaaaabbbbbbbb";
+
+            // A row from an older build: it carries no flag at all.
+            ndb.Embeds.Upsert(new EmbedTrackEntity
+            {
+                Id = SubdlDbContext.EmbedKey(nHash, 0),
+                MediaHash = nHash,
+                SubPos = 0,
+                Language = "DE",
+                Status = SubtitleStatus.Observed
+            });
+            var legacy = ndb.Embeds.FindById(SubdlDbContext.EmbedKey(nHash, 0));
+            Check("a row written before the field existed reads back as NULL, not false",
+                  legacy?.HearingImpaired == null,
+                  "-> hi=" + (legacy?.HearingImpaired?.ToString() ?? "null (sagt nichts)"));
+
+            // The gap must NOT be read as coverage. An open datum is worked once more, and that
+            // pass states the value explicitly — the direction that converges.
+            var legacyCoverage = SubtitleCoverage.Read(nreg, null, null);
+            var fromLegacyRows = SubtitleCoverage.Read(nreg, "/media/x.mkv", null);
+            Check("a legacy row does not report data at all (no claim from a gap)",
+                  nreg.RecordedPairsByHash(nHash).Count == 0,
+                  "-> [" + string.Join(",", nreg.RecordedPairsByHash(nHash).Select(p => p.ToString())) + "]");
+
+            // And once a writer states it, the value is explicit.
+            nreg.ObserveEmbed(nHash, 1, "FR", false, false);
+            Check("a fresh observation states hi EXPLICITLY (false, not null)",
+                  ndb.Embeds.FindById(SubdlDbContext.EmbedKey(nHash, 1))?.HearingImpaired == false,
+                  "-> hi=" + (ndb.Embeds.FindById(SubdlDbContext.EmbedKey(nHash, 1))?.HearingImpaired?.ToString() ?? "null"));
+            Check("a fresh observation states forced EXPLICITLY (false, not null)",
+                  ndb.Embeds.FindById(SubdlDbContext.EmbedKey(nHash, 1))?.Forced == false,
+                  "-> forced=" + (ndb.Embeds.FindById(SubdlDbContext.EmbedKey(nHash, 1))?.Forced?.ToString() ?? "null"));
+            Check("an explicitly stated row DOES report its datum",
+                  nreg.RecordedPairsByHash(nHash).Contains(new SubtitleRef("FR", false, false)),
+                  "-> [" + string.Join(",", nreg.RecordedPairsByHash(nHash).Select(p => p.ToString())) + "]");
+        }
+
         // ── B3) coverage: the ONE reader, and the two search pools it feeds ──
         // This is the regression that mattered on the live library: a missing variant was reported
         // as a missing LANGUAGE, the regular search was fed that language, and the .de.srt already
@@ -301,8 +347,8 @@ internal static class Program
         Check("embed rows written (forced row included — it is a fact about the file)",
               embWritten == 3, "-> " + embWritten);
         Check("the forced row states its flag in the database",
-              reg.GetEmbeds(mediaHash).Any(x => x.Language == "ES" && x.Forced),
-              "-> " + string.Join(",", reg.GetEmbeds(mediaHash).Select(x => x.Language + (x.Forced ? "/forced" : ""))));
+              reg.GetEmbeds(mediaHash).Any(x => x.Language == "ES" && x.Forced == true),
+              "-> " + string.Join(",", reg.GetEmbeds(mediaHash).Select(x => x.Language + (x.Forced == true ? "/forced" : ""))));
         Check("a forced track never counts as coverage (F-M246/F-M284)",
               !SubtitleCoverage.FromPairs(new[] { new SubtitleRef("ES", false, true) })
                   .Covers(new SubtitleRef("ES", false)),
@@ -314,12 +360,20 @@ internal static class Program
         // with PAIRS, which is what lets a caller tell the regular German from its variant:
         // DE (HI) comes from the embed side, EN (HI) from the sidecar side.
         var recorded = reg.RecordedPairs(media);
-        Check("the recorded pairs merge both areas (DE variant embed + EN variant sidecar)",
-              recorded.Contains(new SubtitleRef("DE", true)) && recorded.Contains(new SubtitleRef("EN", true)),
+        // F-M285: this reader reports what the ROWS STATE, raw — no expansion. A row saying
+        // "DE (HI)" is recorded as DE (HI) and nothing else; whether that also covers plain DE is
+        // the coverage question, answered in ONE place (SubtitleCoverage), not by a second reader
+        // quietly widening the set. Two readers of one question that disagree is the defect this
+        // whole change removes.
+        Check("the recorded data merge both areas (DE variant embed + forced ES)",
+              recorded.Contains(new SubtitleRef("DE", true)) && recorded.Contains(new SubtitleRef("ES", false, true)),
               "-> [" + string.Join(",", recorded.Select(p => p.ToString()).OrderBy(x => x)) + "]");
-        Check("the regular datum of a variant language is recorded too (SDH is still the language)",
-              recorded.Contains(new SubtitleRef("DE", false)) && recorded.Contains(new SubtitleRef("EN", false)),
+        Check("the raw reader does NOT widen a variant into its plain language",
+              !recorded.Contains(new SubtitleRef("DE", false)),
               "-> [" + string.Join(",", recorded.Select(p => p.ToString()).OrderBy(x => x)) + "]");
+        Check("coverage is where the widening happens (a variant does cover its language)",
+              SubtitleCoverage.FromPairs(recorded).Covers(new SubtitleRef("DE", false)),
+              "-> DE (HI) on disk must cover plain DE");
 
         // Idempotence: the seeder calls this on every pass.
         int embAgain = 0, sideAgain = 0;
@@ -459,8 +513,8 @@ internal static class Program
         Check("observation reports 'nothing done'", !changed);
         Check("the verdict still stands", row != null && row.Status == SubtitleStatus.Downloaded,
               "-> " + (row?.Status ?? "null"));
-        Check("observation did NOT flip the HI flag", row != null && !row.HearingImpaired,
-              "-> hi=" + (row?.HearingImpaired.ToString() ?? "?"));
+        Check("observation did NOT flip the HI flag", row != null && row.HearingImpaired == false,
+              "-> hi=" + (row?.HearingImpaired?.ToString() ?? "null (sagt nichts)"));
         Check("a decided row counts as known",
               reg.IsContentKnown(verdictHash));
         Console.WriteLine("       (the trap on the other side: an OBSERVATION must not count as");
@@ -593,7 +647,7 @@ internal static class Program
             Check("no embeds left under the old key", ireg.GetEmbeds(hOld).Count == 0, "-> " + ireg.GetEmbeds(hOld).Count);
 
             var hiRow = ireg.GetEmbeds(hNew).FirstOrDefault(x => x.SubPos == 2);
-            Check("the HI flag survived the move", hiRow?.HearingImpaired == true, "-> " + (hiRow?.HearingImpaired.ToString() ?? "?"));
+            Check("the HI flag survived the move", hiRow?.HearingImpaired == true, "-> " + (hiRow?.HearingImpaired?.ToString() ?? "null (sagt nichts)"));
             Check("the language survived the move", hiRow?.Language == "DE", "-> " + (hiRow?.Language ?? "null"));
 
             Check("the sidecar's parent pointer travelled",

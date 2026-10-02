@@ -438,9 +438,12 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
 
         foreach (var row in db.Sidecars.FindAll())
         {
-            if (row.Forced)
+            // F-M285: an explicit `true` OR `false` is a statement and is left alone. Only a
+            // `null` — a row that does not say — is filled. The distinction is the point: without
+            // it a legacy gap and a deliberate "not forced" look identical.
+            if (row.Forced.HasValue)
             {
-                continue; // already stated
+                continue; // the row already states its value
             }
 
             // The stored file name is the same string the marker reader works on. A row without one

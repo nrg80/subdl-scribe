@@ -2703,7 +2703,7 @@ public sealed class UploadPipeline
                                 {
                                     registry.PatchMediaMetadata(up.MediaHash, upMedia?.ImdbId,
                                         upMedia?.Season ?? 0, upMedia?.Episode, rejected.NId, upMedia?.TmdbId);
-                                    registry.MarkEmbed(up.MediaHash, up.SubPos, up.Language, up.HearingImpaired,
+                                    registry.MarkEmbed(up.MediaHash, up.SubPos, up.Language, up.HearingImpaired ?? false,
                                         SubtitleStatus.Rejected, contentHash: up.ContentHash,
                                         reason: RejectReason.DuplicateRemote, subdlId: rejected.NId);
                                 });

@@ -658,19 +658,24 @@ public sealed class ContentHashRegistry : IDisposable
             return found;
         }
 
+        // F-M285: a row that does not STATE its flags is not reported as a datum. `null` is a gap,
+        // not a "no" — reporting it would turn an unstated fact into a claim, and the caller reads
+        // this set to decide what a file is known to carry.
         foreach (var row in GetEmbeds(mediaHash))
         {
-            if (!string.IsNullOrWhiteSpace(row.Language))
+            if (!string.IsNullOrWhiteSpace(row.Language)
+                && row.HearingImpaired.HasValue && row.Forced.HasValue)
             {
-                found.Add(new SubtitleRef(row.Language, row.HearingImpaired));
+                found.Add(new SubtitleRef(row.Language, row.HearingImpaired.Value, row.Forced.Value));
             }
         }
 
         foreach (var row in GetSidecars(mediaHash))
         {
-            if (!string.IsNullOrWhiteSpace(row.Language))
+            if (!string.IsNullOrWhiteSpace(row.Language)
+                && row.HearingImpaired.HasValue && row.Forced.HasValue)
             {
-                found.Add(new SubtitleRef(row.Language, row.HearingImpaired));
+                found.Add(new SubtitleRef(row.Language, row.HearingImpaired.Value, row.Forced.Value));
             }
         }
 
@@ -872,7 +877,10 @@ public sealed class ContentHashRegistry : IDisposable
 
         existing.MediaHash = mediaHash;
         existing.Language = language;
+        // F-M285: the WRITER states the value explicitly. `null` is reserved for "this row does not
+        // say" (a row from an older build), so a writer that knows the fact must never leave it null.
         existing.HearingImpaired = hearingImpaired;
+        existing.Forced ??= false;
         existing.ContentHash = contentHash;
         existing.Status = status;
         existing.Reason = reason;

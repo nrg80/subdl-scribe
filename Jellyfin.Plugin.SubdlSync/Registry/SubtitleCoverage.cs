@@ -190,26 +190,41 @@ public sealed class SubtitleCoverage
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-    private static void Add(HashSet<SubtitleRef> covered, string? language, bool hearingImpaired, bool forced)
+    private static void Add(HashSet<SubtitleRef> covered, string? language, bool? hearingImpaired, bool? forced)
     {
         if (string.IsNullOrWhiteSpace(language))
         {
             return;
         }
 
-        if (forced)
+        // F-M285 (user decision 02.10.2026): a row that does not STATE its properties cannot claim
+        // coverage, and the two cases are not the same fact:
+        //   false → a statement: this subtitle is not the variant (or is not forced)
+        //   null  → a gap: the row was written before the field existed, or nothing could decide
+        // Reading the gap as `false` is how an unknown becomes a false claim — a legacy forced row
+        // would pass as the film's dialogue and keep its language settled forever.
+        //
+        // Treating the gap as "no coverage" is deliberately the direction that CONVERGES: the datum
+        // reads as open, the item is worked once more, and that pass states the value explicitly.
+        // The opposite default would look settled forever with nothing to correct it.
+        if (hearingImpaired == null || forced == null)
+        {
+            return;
+        }
+
+        if (forced.Value)
         {
             // F-M284: a forced datum covers ONLY ITSELF. It carries the lines of foreign-language
             // scenes, not the film's dialogue (F-M246), so it must never mark the regular datum — nor
             // the plain variant — as present. Recording it is still worthwhile: it is a fact about the
             // file, and it explains why an item can carry a track of a language and still be due.
-            covered.Add(new SubtitleRef(language, hearingImpaired, true));
+            covered.Add(new SubtitleRef(language, hearingImpaired.Value, true));
             return;
         }
 
         // The language is covered by any non-forced subtitle of it; the variant only by a variant.
         covered.Add(new SubtitleRef(language, false));
-        if (hearingImpaired)
+        if (hearingImpaired.Value)
         {
             covered.Add(new SubtitleRef(language, true));
         }

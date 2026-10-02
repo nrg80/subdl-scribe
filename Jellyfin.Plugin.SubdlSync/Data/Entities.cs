@@ -232,16 +232,27 @@ public abstract class SubtitleState
     /// <summary>Two or three letter language code.</summary>
     public string Language { get; set; } = string.Empty;
 
-    /// <summary>Hearing-impaired / SDH variant.</summary>
-    public bool HearingImpaired { get; set; }
+    /// <summary>
+    /// Hearing-impaired / SDH variant.
+    /// <para>
+    /// F-M285 (user decision 02.10.2026): the stored value is THREE-valued, not two. A row must say
+    /// <c>true</c> or <c>false</c> EXPLICITLY; <c>null</c> means "this row does not say". The
+    /// distinction is the whole point: a document store has no schema, so a row written before this
+    /// field existed reads back as a default, and a default that looks like a decision is how a
+    /// missing fact becomes a false claim. An explicit <c>false</c> is a statement (this subtitle is
+    /// NOT the variant); a <c>null</c> is a gap that a backfill may fill and no reader may read.
+    /// </para>
+    /// </summary>
+    public bool? HearingImpaired { get; set; }
 
     /// <summary>
     /// F-M284 (user decision 02.10.2026): the track is FORCED — it carries the lines of
     /// foreign-language scenes, not the film's dialogue.
     /// <para>
-    /// An Eigenschaft OF THIS DATUM, exactly like <see cref="HearingImpaired"/>: a forced subtitle
-    /// is its own row under its own hash, never a flag on the media file. It never counts as
-    /// coverage, so a language whose only track is forced stays open and is searched for (F-M246).
+    /// An Eigenschaft OF THIS DATUM, exactly like <see cref="HearingImpaired"/>, and stored the same
+    /// three-valued way (F-M285): <c>true</c> / <c>false</c> are statements, <c>null</c> is a row
+    /// that does not say. It never counts as coverage, so a language whose only track is forced stays
+    /// open and is searched for (F-M246).
     /// </para>
     /// <para>
     /// Unlike the hearing-impaired flag it is not bilateral: Jellyfin reports it on its streams, but
@@ -251,7 +262,7 @@ public abstract class SubtitleState
     /// dialogue.
     /// </para>
     /// </summary>
-    public bool Forced { get; set; }
+    public bool? Forced { get; set; }
 
     /// <summary>MD5 of the normalized SRT content, in SubDL's own format. Null when the content was never read.</summary>
     public string? ContentHash { get; set; }

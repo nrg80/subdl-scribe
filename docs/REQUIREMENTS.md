@@ -896,6 +896,21 @@ Jellyfin reports both on its streams (`MediaStream.IsHearingImpaired`, `MediaStr
 
 An embedded row cannot be backfilled this way and is deliberately left alone: its flag lives in the container's stream list, not in a name, and the next scan or download pass observes the track and writes the current value. Recording `false` there would be the mistake the backfill exists to undo.
 
+#### 14.2d `hi` and `forced` are stored THREE-valued — F-M285
+**F-M285 [B1] (user decision 02.10.2026):** **Every subtitle datum states `hi` and `forced` explicitly as `ja` or `nein`.** The stored value is three-valued, not two:
+
+- **`true`** — the subtitle IS the variant (or IS forced). A statement.
+- **`false`** — the subtitle is NOT the variant (or is NOT forced). Also a statement, and it is written EXPLICITLY: a writer that knows the fact must never leave it unsaid.
+- **`null`** — the row **does not say**. Reserved for a row written before the field existed, or for a fact nothing could decide.
+
+**Why the third value is not decoration.** A document store has no schema, so a missing field reads back as a default, and a default that looks like a decision is how a missing fact becomes a false claim. Concretely: a legacy row that carried no `forced` would read as "not forced", so a forced track would pass as the film's dialogue, its language would count as covered, and the item would look settled forever with nothing left to correct it.
+
+**A gap is never read as a statement.** A reader that needs the fact treats `null` as "no claim" — see `SubtitleCoverage`, where such a datum simply reports no coverage. That direction is chosen because it **converges**: the datum reads as open, the item is worked once more, and that pass states the value explicitly. The opposite default would be permanent and silent.
+
+**The refresh fills the gap from the fact itself**, not by guessing: the forced flag is re-read off each sidecar row's own file name (the marker reader `Parse` uses, so the two cannot disagree). Only a `null` is filled — an explicit `true` or `false` is a statement and is left untouched.
+
+Embedded rows are not backfilled this way: their flags live in the container's stream list, not in a name, and the next scan or download pass observes the track and writes the current value. **Test: T93.**
+
 #### 14.3 Area 3 — Sidecar files (`sidecars`)
 **F-M199:** one record per loose `.srt` file, `_id` = the **normalized content hash** (F-M186).
 
@@ -1182,6 +1197,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T91:** A forced subtitle is a datum with its own flag, observed in both areas, and it never covers its language (F-M284)
 
 **T92:** The refresh backfills the forced flag on rows written before the field existed, from their own names (F-M284)
+
+**T93:** `hi` and `forced` are three-valued — a legacy row reads back as `null` and claims nothing, a fresh write states `false` explicitly (F-M285)
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)
 **T80:** A container rewrite is reported at `Normal`, the per-track detail at `Verbose` (F-M262)
