@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.173",
-        "changelog": "v12.1.12.173: A direction whose deferred fire is still pending is painted yellow even when\n    its last run ended green, and the deferral line under the Workers list appears only while\n    the direction is actually stopped. Measured on prod: the download hit its daily limit at\n    06:08 leaving 384 of 412 queued items due and armed its fire for 04:37 the next day; it\n    then ran normally at 10:30 and 13:50, so its row read ok and the lamp went green while the\n    backlog still waited - and the line kept naming that fire as if the direction were stuck.\n    Only a green row is overridden: red, grey and running rows keep their own statement. The\n    fire itself is never touched - dropping it would leave the due items waiting for the next\n    regular anchor.",
+        "version": "12.1.12.174",
+        "changelog": "v12.1.12.174: A Jellyfin restart is no longer reported as a user stop. Both cancel the running\n    task identically and the token carries no reason, so the catch treated them the same - it\n    wrote a stop marker and called RequestUserStop, which records cancelled/\"user stop\" for BOTH\n    directions at once. Measured on prod: a restart at 14:18 painted the download as a user stop\n    although its run had finished clean at 14:08, and the upload as stopped by a button nobody\n    pressed; 58 uploads that had reached SubDL sat behind an action the user never took. The stop\n    marker is the discriminator - the Stop endpoint writes it before it signals, a shutdown never\n    does - so it is now tested without being consumed and everything else records ok/\"restart\".\n    Postprocessing and the OSHash refresh have no stop button, so for them every cancellation is a\n    restart by construction.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.173-dev/Jellyfin.Plugin.SubdlSync_12.1.12.173.zip",
-        "checksum": "2287595ce1ba881e62553aa52b050623",
-        "timestamp": "2026-10-03T12:17:28Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.174-dev/Jellyfin.Plugin.SubdlSync_12.1.12.174.zip",
+        "checksum": "fce975e8795f8c139aded2dcf3e15855",
+        "timestamp": "2026-10-03T12:37:18Z"
       }
     ]
   }
