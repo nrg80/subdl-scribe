@@ -6,7 +6,7 @@
     "overview": "Sync subtitles with SubDL — download missing and upload new subtitles.",
     "owner": "nrg80",
     "category": "Subtitles",
-    "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/main/logo.png",
+    "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
         "version": "12.1.12.170",
