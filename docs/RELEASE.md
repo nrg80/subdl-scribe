@@ -119,6 +119,21 @@ curl -sS 'https://raw.githubusercontent.com/nrg80/subdl-scribe/main/manifest.jso
 publishes a prerelease URL as the installable version — the exact thing the branch-derived tag
 prevents. `main` has to be released on.
 
+The same applies to a **docs-only change that has to appear on `main`**: `git branch -f main develop`
+carries `develop`'s `manifest.json` with it, so `main` silently starts serving the prerelease again.
+This happened here while documenting this very section. The fix is to take the code and docs from
+`develop` but keep `main`'s own manifest:
+
+```bash
+git checkout main
+git checkout develop -- README.md docs/RELEASE.md   # the content you want
+git checkout main -- manifest.json                  # keep main's released manifest
+git commit -m "docs: …" && git push origin main
+```
+
+Whenever `main` is touched, end with the manifest assertion below — it is cheap and it is the only
+thing that catches this class of mistake.
+
 **Never rehearse the release flow against a cloned copy without cutting the API off.** `REPO_SLUG` is
 hardcoded to `nrg80/subdl-scribe` and the token is read from `/opt/data/.secrets.json`, so a
 `release.sh` run in a throwaway clone does not stay local: it looks up and creates real releases on
