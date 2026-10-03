@@ -1,0 +1,25 @@
+# This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# SubDL Scribe is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the
+# Free Software Foundation, either version 3 of the License, or (at your
+# option) any later version.
+# SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+# Build artifacts
+*.zip
+bin/
+obj/
+
+# Local build output (build.sh writes here; never commit binaries)
+out/
+# Scratch files (commit messages, notes, analysis dumps) never belong in the repo.
+# The pattern covers EVERY extension: an analysis dump written as .json or .md
+# slipped past a __*.txt rule and landed in four commits.
+__msg.txt
+__*
+# Python bytecode from the test scripts
+__pycache__/
+*.pyc

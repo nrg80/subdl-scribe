@@ -1,0 +1,62 @@
+<!--
+  This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+  SPDX-License-Identifier: GPL-3.0-or-later
+
+  SubDL Scribe is free software: you can redistribute it and/or modify it
+  under the terms of the GNU General Public License as published by the
+  Free Software Foundation, either version 3 of the License, or (at your
+  option) any later version.
+  SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  See the GNU General Public License for more details.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>seed-db-test</AssemblyName>
+    <RootNamespace>SeedDbTest</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <!-- Jellyfin's own assemblies. Point this elsewhere with:
+           dotnet run -p:JellyfinDir=/path/to/jellyfin -->
+    <JellyfinDir Condition="'$(JellyfinDir)' == ''">/opt/data/jf-test/jellyfin</JellyfinDir>
+    <!-- The plugin under test. Default = the normal build output, so the test
+         checks what `dotnet build` just produced. Point it at an EXTRACTED
+         release zip to check a shipped artifact instead:
+           dotnet run -p:PluginDir=/tmp/pub137 -->
+    <PluginDir Condition="'$(PluginDir)' == ''">$(MSBuildThisFileDirectory)../../Jellyfin.Plugin.SubdlSync/bin/Release/net10.0</PluginDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Jellyfin.Plugin.SubdlSync">
+      <HintPath>$(PluginDir)/Jellyfin.Plugin.SubdlSync.dll</HintPath>
+    </Reference>
+    <Reference Include="MediaBrowser.Common">
+      <HintPath>$(JellyfinDir)/MediaBrowser.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="MediaBrowser.Controller">
+      <HintPath>$(JellyfinDir)/MediaBrowser.Controller.dll</HintPath>
+    </Reference>
+    <Reference Include="MediaBrowser.Model">
+      <HintPath>$(JellyfinDir)/MediaBrowser.Model.dll</HintPath>
+    </Reference>
+    <Reference Include="LiteDB">
+      <HintPath>$(PluginDir)/LiteDB.dll</HintPath>
+    </Reference>
+    <!-- The registry's constructors take an ILogger; the plugin resolves it from
+         Jellyfin's host at runtime, so the test needs the abstraction directly. -->
+    <Reference Include="Microsoft.Extensions.Logging.Abstractions">
+      <HintPath>$(JellyfinDir)/Microsoft.Extensions.Logging.Abstractions.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <!-- The M11-M13 checks read the pipeline SOURCE, not the compiled DLL: a hard-coded literal
+       is invisible in IL, so the source has to be next to the binary. Copied here rather than by
+       hand — a manual step is one a later run forgets, and the check would then pass by absence.
+       (M10 fails loudly if this file is missing, so the silence cannot spread.) -->
+  <Target Name="CopyPipelineSourceForStructuralChecks" AfterTargets="Build">
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)../../Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"
+          DestinationFiles="$(OutDir)DownloadPipeline.source.cs"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

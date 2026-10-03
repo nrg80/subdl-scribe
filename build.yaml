@@ -1,0 +1,813 @@
+# This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# SubDL Scribe is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the
+# Free Software Foundation, either version 3 of the License, or (at your
+# option) any later version.
+# SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+name: "SubDL Scribe"
+guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
+version: "12.1.12.169"
+targetAbi: "12.1.0.0"
+framework: "net10.0"
+owner: "nrg80"
+overview: "Sync subtitles with SubDL — download missing and upload new subtitles."
+description: >
+  SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing
+  subtitles for the languages and libraries you pick and uploads your own.
+  Download is on by default; upload is off — enable at your choice.
+  Requires a SubDL login and API Key plus a TMDb API Key.
+category: "Subtitles"
+artifacts:
+- "Jellyfin.Plugin.SubdlSync.dll"
+- "LanguageDetection.dll"
+- "LiteDB.dll"
+changelog: >
+  v12.1.12.169: Release commits carry the maintainer's own identity.
+    The release script forced "SubDL Scribe <noreply@localhost>" on the commit that
+    writes the manifest, so every release produced one commit that belonged to nobody:
+    GitHub attributed it to no account, the contributor list showed a second author next
+    to the maintainer, and thirteen commits carried a name the maintainer never wrote.
+    The override is gone - the commit inherits the repository's identity, which is the
+    account's verified address, so one author stands behind the whole history.
+    No plugin behaviour change; the release process and the artifact are untouched.
+  v12.1.12.168: The quota bars are a server reading again, and the deferral note moved below the workers.
+    Version .167 let a local deferral repaint the API/search bar yellow, so a bar at 66 % looked
+    like a nearly spent allowance when the counter said nothing of the kind. The colour is decided
+    by the fill alone again - 75 % yellow, 95 % red - and a local deferral no longer touches it.
+    The note about it now sits under the Workers list, in the page's normal text colour: the bars
+    describe the server's allowance, the note describes our own wait, and the two are read side by
+    side instead of over each other.
+  v12.1.12.167: The plugin no longer stops itself. The one limit left is SubDL's.
+    A per-run hourly call bucket sat in our own code and could end a whole run when it
+    filled up. SubDL publishes DAILY counters only, so that bucket was our invention, and
+    it stopped runs the server would have allowed: in two measured runs 735 of 2000 searches
+    and 16 of 50 downloads were still free when it fired. It is gone. What remains is the
+    pacing - the gap between two transfers and the pause between calls - and the run stops
+    only when SubDL itself says no (HTTP 429), decided against the live server counters.
+    With it go the roll-over anchor and the "wait until the next hour" behaviour: a deferral
+    now lands a plain job spacing after the stop, the same knob every other wait already uses,
+    instead of a moving point an hour away that the settings page could not explain.
+    The watchdog's grace no longer scales with the rate either. One file transfer is allowed
+    five minutes, and the scaled value was shorter, so a slow but working download could be
+    aborted as "frozen"; the grace is a fixed six minutes now.
+    Smaller, same round: the call pause runs to 10 seconds instead of 5, and the rate field
+    is labelled "Transfer rate" because that is what it is - a pace, not a ceiling.
+    The quota box also names a local deferral and its cause and turns the bar yellow with it.
+  v12.1.12.166: The two candidate settings now agree with each other, and the search obeys them.
+    "Max candidates per language" used to be ignored by the search, which stopped at a hard-coded
+    three per language no matter what the setting said, and a budget below "keep X" made that
+    setting unreachable. Both numbers are derived from one place now.
+  v12.1.12.165: A dry run no longer leaves state behind that changes the next real run.
+    It writes no registry rows, spends no retry or id-resolution budget, starts no refetch
+    clock and clears nothing — and the download queue keeps every reported item as open.
+    Until now each of those sat before the dry run's own exit and ran anyway, so a single
+    dry run could hide work for a full refetch interval or empty the queue of everything
+    it had just described.
+  v12.1.12.164: Reject counters now count every discarded candidate, and the run lines print them.
+    A run that fetched 50 files and kept 41 reported "1 rejected". The counter covered four
+    download gates and one upload gate, while the hearing-impaired block and 16 other upload
+    paths stored a Rejected verdict and counted nothing — the GUI column showed a fraction.
+    The counters now count everything fetched and thrown away, both run lines carry the number,
+    and the fields were renamed to match their widened meaning. Nothing that was never fetched
+    is counted. Schema marker 2 -> 3.
+  v12.1.12.163: Forced subtitles are never uploaded, and a rewrite keeps the flag.
+    A forced subtitle carries only the foreign-language scenes, so it is not the
+    film's dialogue and SubDL has no counterpart for it: it is observed, never uploaded.
+    The previous version recorded that flag on tracks inside the container but dropped
+    it for a loose .srt, so such a row said nothing and was invisible to every reader;
+    both writers now state it, and a plain row is stated as "no" instead of left silent.
+  v12.1.12.162: Forced subtitles are never uploaded, and a rewrite keeps the flag.
+    A forced subtitle carries only the lines of foreign-language scenes, so it is
+    not the film's dialogue and has no counterpart at SubDL. It is now observed and
+    never uploaded - the loose-file path skips it before it costs a read or a search
+    request, and the embedded path already dropped it.
+    The previous version recorded the forced flag on embedded tracks but DROPPED it
+    for a loose .srt: the writer had no parameter for it, so a .forced.srt produced a
+    row that said nothing. A row that does not state its flags is invisible to every
+    reader, so the forced subtitle vanished from the state - and a rewrite of a file
+    could turn the gap into the claim "not forced". Both writers now require the flag,
+    and a row whose name carries no marker is stated as "no" rather than left silent.
+    Finally the language-tag rewrite no longer risks the flag: the forced track is
+    re-stated as such and the written file is checked for it, with the original kept
+    if it did not survive. Measured against a real file, the additive form is what
+    makes this safe - the plain form clears a stream's other flags.
+  v12.1.12.161: A subtitle is its own datum, and the download mark is gone.
+    A subtitle carries its own properties - language, hearing-impaired, forced -
+    and its own hash, whether it sits in the container or as a file beside it.
+    Treating the variant as a spelling of the language is what re-fetched
+    subtitles that were already on disk.
+    The download mark is removed. It was a second answer beside the rows that
+    describe the subtitles, and the two drifted: the check that trusted it asked
+    the disk plus the stored variant verdict while the check that wrote it asked
+    the disk alone, so a variant inside the container kept the mark from ever
+    being written and the regular subtitle was fetched again on every pass (41
+    downloads in one run against a 50/day limit, the same content hash three days
+    running). Completeness is now derived on every ask by one reader the
+    pipeline, the seeder and the refresh share, and the two search pools are fed
+    separately - only a missing variant asks for the hearing-impaired side.
+    Forced joins as a second property of the datum. SubDL has no forced
+    counterpart, so a forced subtitle is observed and never sought, fetched or
+    uploaded, and it never counts as coverage - one rule, not five call sites.
+    The stored shape changed: the data file reports schema version 2 and older
+    records are ignored rather than rewritten.
+    Every datum states hearing-impaired and forced explicitly as ja or nein;
+    null means the row does not say, and a gap is read as no claim rather than as
+    a no - so the item is worked once more and that pass states the value. Rows
+    written before the field existed get it backfilled from their own file name,
+    a plain row included.
+  v12.1.12.160: The download mark names files, and an unlabelled sidecar gets its name.
+    A regular subtitle and its hearing-impaired variant are two files on disk, but the
+    mark recorded both as the plain language - so a successful regular save closed the
+    variant's slot too, the mark claimed a file that was not there, and the refresh
+    contradicted it on every pass. Measured on the live library: 31 items re-searched in
+    one morning, 16 regular sidecars rewritten although they were already on disk. The
+    mark now carries one token per required file (DE, DE:hi), which ends the loop; no
+    expiry and no give-up, a variant SubDL does not carry today is looked for again on
+    the next refetch.
+    A subtitle file whose NAME carries no language proved no coverage at all: it was
+    skipped, never recorded, and its item was searched for a language its own disk
+    already held. The scan now detects such a file's language from its text and renames
+    it to the shape this plugin writes, <container>.<lang>.srt - behind the existing
+    resolve-und switch, with the same 2 KB floor and the same skip when nothing is found.
+    A file that already names its language is never touched, and a taken name takes the
+    next free slot instead of overwriting a subtitle. Two defects found on the way are
+    fixed with it: a rename would have destroyed the stored row (the refresh forgets a
+    sidecar whose path is gone), and an observation without a language was rewritten on
+    every pass forever.
+  v12.1.12.159: The refresh chapters and the dry-run report.
+    The download dry run reported a file name it cannot know. Its report ends before the
+    fetch by design, but a second log site further down printed the name with the
+    hearing-impaired marker and the byte size - and sat after the dry run's own break, so it
+    never ran at all. A dry run holds no bytes and never builds a name from a fetched file,
+    so the site is removed and the wording follows: a dry run answers WHICH RELEASE per
+    language, not WHICH FILE. The same wording was corrected on the settings page.
+    The database refresh and the OSHash refresh each state their own procedure now, in one
+    place instead of spread over their chapters. Eleven rules whose code anchors live in
+    other components (counters, log levels, the configuration page, the reset UI, the
+    registry hash, the data model) moved to the chapter they belong to, so a chapter
+    describes its own task again.
+    The database refresh no longer drops download marks it cannot see, and it checks the
+    hearing-impaired variant. A dry run no longer marks the files it reports as complete -
+    a run against a library used to leave that library marked as done, so the next real run
+    skipped the very files the dry run had been asked to report.
+  v12.1.12.158: Four credentials, no partial operation.
+    The settings page enforced exactly one of the four credential fields: an empty TMDb
+    key refused the save, while an empty SubDL email, password or API key saved happily
+    and only surfaced later as a 404 from the login - and the page carried "Required"
+    over all three sections, so the label and the behaviour disagreed.
+    All four are now checked the same way and the empty one is named. They are not
+    alternatives, which the documentation claimed ("username/password or API key"): the
+    login pair authenticates the upload, the API key authenticates search, file download
+    and the quota read, and the TMDb key resolves the ids in both directions. A run
+    refuses to start without them, so the failure is one line at run start instead of a
+    404 halfway through.
+    Two switches existed for the ID gate and were read by no code path. They are removed
+    rather than wired up: they claimed the gate was optional, and it is what makes the
+    TMDb key load-bearing. With them go the branches that treated it as a flag.
+    Loose .srt files beside a media file now go through language detection before an
+    upload. A name without a language token used to be read as English on Jellyfin's
+    convention, so a German subtitle was uploaded as English. Such a file is the sidecar
+    counterpart of an 'und' stream now - same switch, same order (2 KB floor first),
+    same outcomes: switch off, too little text or no language found all mean skip, and a
+    detected language becomes the language. A sidecar whose language cannot be
+    established no longer counts as covering anything, so the language is still fetched.
+
+  v12.1.12.157: The stamp above the refresh button reads "Manually refreshed <time>" instead of
+  "Refreshed <time>" - it is written by that button and nothing else, so the label now says so.
+  The second page script carried its own status loader that still wrote the line with a SERVER
+  timestamp labelled "Last checked"; that writer is gone, so the one-writer rule holds in both
+  files. A check fails the build if either file writes the stamp again.
+  v12.1.12.156: The default target languages are the user's own list again - Arabic, English,
+  Spanish, French, Hindi and Mandarin (AR, EN, ES, FR, HI, ZH). The 14.09. rewrite had silently
+  cut the list to three while the documentation kept claiming five, so the two disagreed for two
+  weeks. The default applies only where the language field is still empty; an existing selection
+  always wins. A regression check now reads the value straight from PluginConfiguration.cs.
+  v12.1.12.155: The "Refreshed" stamp sits above the button and only that button writes it;
+  the button's full width is set inline so no client theme can shrink it.
+  v12.1.12.154: The "Refreshed" stamp sits directly above the button and is written by the
+  Refresh button alone, with the click's own time.
+  v12.1.12.153: The status timestamps show seconds, so pressing "Refresh status" is visibly
+  effective; the button matches Save in size, sits flush with it and is grey to set it apart.
+  All refreshed endpoints now carry a cache-buster.
+  v12.1.12.152: "Refresh status" moved to the end of the General tab, where every live readout lives.
+  v12.1.12.151: One "Refresh status" button below the tabs refreshes every live readout at once,
+  and the Workers list keeps itself current.
+  v12.1.12.150: The Workers section sits on the General tab, and a refresh that fell back to the
+  rebuild says so in its detail line.
+  v12.1.12.149: One colour rule for every worker (green = work done, yellow = not done but not
+  broken, red = broken, grey = deliberately not run), the seeder reports in every path, and a
+  failed cycle turns red instead of green.
+  v12.1.12.148: A direction stopped by the quota or the run lock reports "deferred" (yellow),
+  and the date column has more room.
+  v12.1.12.147: The seeder has a status row of its own, and the waiting tasks report it.
+  v12.1.12.146: A track that ran through language detection is remembered, with
+    the date, so the next scan does not open the media file for it again. Only
+    tracks that cannot be resolved are affected, and a rewrite of the file still
+    retries them. Also: the registry cleanup no longer deletes verdict rows for
+    tracks whose language cannot be determined.
+  v12.1.12.145: The dry-run note is now plain grey text inside the result column
+    instead of a badge of its own, so the row needs one column less and the
+    result stays on screen on a narrow phone.
+  v12.1.12.144: The Workers row is one line and everything is left-aligned (light,
+    name, time, result all start at the same x). Names and status words are
+    abbreviated so the line fits a narrow phone — Postproc., and ok / fail /
+    cancel / skip / run / never at full text size. The time no longer wraps, and a
+    dry run is noted in grey beside the result instead of in a badge of its own.
+  v12.1.12.143: The Workers row is ONE line and everything is left-aligned — light,
+    name, time, status all start at the same x. The time no longer wraps (a too
+    narrow column broke "3:19 PM" across two lines), the columns line up exactly
+    (each row used to be its own grid, so nothing matched), and a dry run is
+    marked beside the status instead of inside a sentence. Also repairs the page
+    CSS, which a stray character had silently disabled.
+  v12.1.12.142: The "Workers" line is now one worker, one light, one date, one
+    end status — the outcome detail is no longer printed next to it (it stays on
+    the status endpoint). Worker names are the bare words (download, upload,
+    postprocessing, database, OSHash). A running worker shows "run" instead of
+    "never", and a dry run is marked next to the status rather than inside a
+    sentence.
+  v12.1.12.141: The last run of every worker — download, upload, postprocessing,
+    the database refresh and the hash-cache refresh — is now stored in the
+    database and shown in a "Workers" section at the bottom of the configuration
+    page: one line per worker with the time of its last run and how it ended.
+    Previously that state lived in memory, so a Jellyfin restart reset it to
+    "never run" minutes after a task had in fact run.
+  v12.1.12.140: A media file is now rewritten at most ONCE. The download-seed
+    and upload-seed passes of one cycle both corrected the same container, 8 s
+    apart, because the gate asked Jellyfin whether a track was tagged and
+    Jellyfin caches its stream list — it noticed the first write only minutes
+    later, after the cycle had ended. The gate now reads the container itself
+    (one ffprobe call, no remux) and leaves every track that already carries a
+    tag untouched. The language allocation switch moved from the Expert tab to
+    the General tab, above Statistics.
+  v12.1.12.139: Untagged and 'und' subtitle tracks are resolved in the scanner,
+    before the queue decision, and the found language is written into the
+    container as a real track tag (Expert setting, default off). A rewritten
+    file is reported in the normal log, naming how many codes and which
+    languages. A dry run detects but writes nothing.
+  v12.1.12.138: Untagged and 'und' subtitle tracks no longer read as "language
+    absent". The download gate extracts those tracks, detects their language
+    offline and records it, so a language the file already carries is not
+    searched for again. An optional second half writes the found language back
+    into the media file as a real track tag, before the file is hashed.
+  v12.1.12.137: Both subtitle areas now get written to the registry, so the
+    hearing-impaired question stops being answered from nothing. The seeder
+    records embedded tracks and loose .srt files (upload off was a blind spot),
+    the database refresh checks stored embedded rows against the file's real
+    tracks, and a hearing-impaired file inside a season pack is saved as
+    .sdh.srt instead of a plain .srt. New host-free test for the database built
+    (31 checks, scripts/seed-db-test).
+  v12.1.12.136: No discarded candidate or stream goes unnamed.
+    The 30.09. download run showed what the log could not explain: 14 HI searches reported 1-4
+    candidates each (25 in total) and exactly ONE .sdh.srt was written. The four exits of the HI
+    branch - no bytes, structure, runtime, content-already-known - were silent, as was the main
+    walk's discarded candidate. "The fetch failed", "a gate rejected it" and "the content was
+    already known" were therefore indistinguishable from each other and from "there was nothing
+    to fetch".
+    Every such exit now writes one Verbose line naming the release, the language and the MEASURED
+    reason: "only 90 bytes", "structure: monotonic=False min=... max=...", "content already
+    known", "keep-best reached (1/1); N lower-ranked candidate(s) not tried this run", "N
+    candidate(s) skipped before the walk: QA-rejected in an earlier run (ids)". The upload
+    collector names every stream it drops (no file path, retries exhausted, stream not in the
+    unfiltered list, unmappable tag, duplicate-self-echo) plus an unreadable sidecar.
+    The counters are untouched - they were already correct; what was missing was the record.
+    Also repairs the HI lookup shipped in the previous version: F-M254 read the hearing-impaired
+    verdict from the registry but called it with the media PATH where the method expected a media
+    HASH. Two plain strings the compiler cannot tell apart - so it built, passed its tests and
+    shipped, and every lookup missed. 14 items whose containers already carried an embedded SDH
+    track were searched anyway. The path-to-hash resolution now happens inside the method.
+  v12.1.12.135: The hearing-impaired question is read from the registry.
+    The HI switch was answered live from Jellyfin's stream titles and the file names beside the
+    media. Both are snapshots the registry already took, and Jellyfin does not surface every title
+    a container carries: on Agent.X.S01E01 the track tag reads "CC" while Jellyfin reports
+    Title=None, so the detector found no marker, the language read as "HI absent" and was
+    downloaded again for a variant the container already had. Measured over the 28.09. run: 419
+    search lines carried ["DE,EN"] against 43 carrying ["DE"], and 215 HI searches stored no HI
+    variant at all.
+    The verdict is now read from where it is written - the embedded rows from MarkEmbed, the
+    sidecar rows from MarkDownloaded - through one reader shared by the seeder's queue gate and
+    both download-pipeline branches. The marker list gains "cc": closed captions serve the same
+    audience as SDH and carry the same non-dialogue cues, but only "SDH" was recognized. Matched
+    on a word boundary, never as a substring, so "Occitan" is not read as captioned.
+  v12.1.12.134: One name parser instead of two, and the bracket year.
+    The download side carried its OWN copy of the name parser: its own SxxExx regex, its own
+    year regex, its own quality-tag list. So it kept every gap the main parser had already
+    closed - measured on the test instance it still resolved the Cunk name as the strand
+    "BBC Documentaries" while the upload side had been fixed - and every future name shape
+    would have had to be fixed twice. It now delegates to MediaNameParser.
+    Measuring that change exposed a defect of its own: TailYearPattern ended in a literal "]"
+    instead of a closing bracket class, so it could never match, and every name with a
+    bracketed year fell through to the "year anywhere" rule, which cut AT the year and left
+    the opening bracket in the title. "The Pitt (2025) ..." became the title "The Pitt (".
+    87 files in the library carried that trailing bracket.
+    Measured over 1163 files with both builds in one binary: the main parser changes exactly
+    87 files (all of them the bracket, no other difference); the download side changes 178,
+    grouped as 43 "2x01" + 8 bare "Exx" + 40 "SxxExx"-at-end + 1 date name + 10 long form +
+    76 bracket titles, zero unexplained in both.
+  v12.1.12.133: Two more series markers the parser did not see.
+    Found by running an independent release-name parser (guessit) over the whole library
+    and comparing it against ours: it located an episode where ours found none in 84 files,
+    and the reverse never happened. Two causes, 83 files, both real.
+    "2x01"/"1x04" was not a marker at all, so the item counted as a film and was searched as
+    "Reacher 2x01 Sportello Automatico ITA ENG": zero hits, while TMDB knows the series.
+    The rule cannot confuse a resolution - the season is at most two digits, must not start
+    with zero and may not follow a digit, so 1920x1080 stays a resolution.
+    And "SxxExx" at the very END of a name matched nothing, because a separator was required
+    AFTER the episode number: 40 files of four seasons ("For All Mankind S02E01.mp4") were
+    typed as films and searched by their own marker.
+    Measured over 1163 files with both builds in one binary: 92 differ - 8 + 1 from the
+    previous release, 43 "NxNN", 40 "SxxExx"-at-end. No unexplained change, no file lost its
+    title, none lost a season or episode.
+    guessit itself is NOT adopted: it reads the Cunk date name exactly as wrongly as we did
+    before, and it takes "x265-E5" for an episode. It stays a useful oracle, not a dependency.
+  v12.1.12.132: The file-name parser reads two more real name shapes.
+    A name carrying a bare episode marker and no season - "The Revolutionaries  E05" -
+    matched no series pattern at all, so the item was treated as a film and searched as
+    "The Revolutionaries E05": zero hits, while TMDB knows the series. Eight files sat in
+    that shape, each failing all three id-resolution attempts. The marker is now read as
+    an episode, with a guard that rejects a release group suffix: "x265-E5" is not episode
+    five. The rule falls through to the shared title/year cleanup, so a year before the
+    marker stays a year and trailing quality tags are still stripped.
+    Second shape: a broadcast date in the MIDDLE of the name, with the title after it -
+    "BBC.Documentaries.2016.05.11.Cunk.on.Shakespeare.EN.SUB.MPEG4.x264". The prefix is
+    the strand, not the title, but the old code cut at the first year it found and
+    searched the strand - which returned an unrelated film. The title now comes from
+    after the date, cut at the first release token.
+    Both rules are narrow by construction and the change was measured against the whole
+    library: of 1163 media files exactly 9 parse differently, all 9 intended, the other
+    1154 byte-identical. A parser that widens is a parser that breaks a library quietly,
+    so the diff is part of the test.
+    Unrelated to it and NOT fixed here: "Cunk on Britain" and "Cunk on Earth" parse
+    correctly, but TMDB files both as one entry whose imdb_id is empty, so the ids
+    Jellyfin carries cannot be confirmed against it.
+  v12.1.12.131: The scheduler's state survives a restart, and a missed anchor is caught up.
+    Every due-check asked a RAM field whether a slot had already fired, so a Jellyfin
+    restart re-claimed slots that had run. Measured on prod with the OSHash anchor on
+    Sunday 07:46: 23 restarts produced 22 OSHash fires, of which exactly one was the
+    real anchor fire - the other 21 landed 0-1 seconds after a "Loaded assembly" line,
+    which is a restart, not the scheduler. The test instance showed the same on the
+    refetch slot (3 replayed catch-ups, each queueing a full library scan) and
+    postprocessing fired 22 times with 20 of them right after a restart, its marker
+    being minute-granular. All of it - the four markers, the catch-up flag and the
+    three lock-busy deferrals - now lives in scheduler-state.json and is restored on
+    startup, so a restart stops replaying a day's work.
+    Along with it the 60-second fire window is gone. It contradicted the requirement
+    that a missed anchor is caught up: a slot that came due while the server was down
+    waited for the NEXT regular window instead of firing, which is why a separate
+    catch-up path had to exist as a workaround. A past-due, unconsumed slot now fires
+    on the next tick, exactly like the database refresh, the OSHash refresh and
+    postprocessing already did. Stacking is prevented by the persisted marker.
+  v12.1.12.130: Forced tracks stop counting, and dry runs stop entering the statistics.
+    A forced subtitle track carries only the lines of foreign-language scenes - it is not a
+    subtitle of the film - but every place that asked "does this file already cover its
+    language?" counted it anyway. A file whose English existed only as a forced track was
+    reported as settled and never got a real English subtitle: 4 items in that shape (Taylor
+    Swift - The Eras Tour, no sidecar) plus 8 whose Hindi is. The upload side now drops forced
+    tracks too. A hearing-impaired track still counts - SDH is the same dialogue, annotated.
+    The rule lives in one predicate shared by the seeder's queue gate, the pipeline's
+    language check, the upload collector and the upload prefilter, so they cannot disagree
+    about an item again.
+    Separately, a dry run no longer contributes to the statistics. It searches, ranks and
+    runs the id test and the upload quality gates, so its counters filled up while it saved
+    nothing: of 858 "downloaded" for the period, 771 came from one afternoon of dry runs.
+    All six counters now ignore dry runs, filtered at the single point that writes them, and
+    the run-end lines say "would have uploaded" / "would have saved" instead of claiming work.
+  v12.1.12.129: Subtitle extraction reads each file once, not once per stream.
+    A file's subtitle streams were extracted one ffmpeg call at a time, and every call
+    re-opens and re-reads the whole container. On a 1 GB episode with 83 subtitle streams
+    that is 83 reads of the same gigabyte: the extraction stalls were the only slow part of
+    an upload run whose median item took 11 seconds - 31 minutes for the worst file, 21 for
+    another, four files over ten minutes against 86 under thirty seconds. One call now takes
+    every text stream in a single pass, which is what the requirement always said: the cost
+    of the per-stream shape is re-reading the whole container, so 40 streams meant 40 reads
+    of the same file. One pass reads it once, with byte-identical output.
+  v12.1.12.128: The TMDb trace is logged once, not twice.
+    Every TMDb call went through TWO gates at once - the Verbose one and the Debug one - so at
+    Debug mode each line was written twice with identical text. Verbose is a SUBSET of Debug,
+    not a separate tier, so "additionally at Debug" meant the same message twice: measured on
+    the 28.09. runs, 167 duplicated messages on the upload side and 198 on the download side,
+    every one of them TMDb. The trace now goes through one gate and appears once per call.
+  v12.1.12.127: The hearing-impaired variant counts whether it is a file or an embedded track.
+    All three places that ask "does this language still need its HI variant?" looked only at files
+    next to the media. A file whose English lives EMBEDDED in the container therefore read as "HI
+    absent" and got downloaded again for a variant it already carried - on a 35-file sample that
+    was 33 items, up to three wasted downloads each at KeepBestPerLanguage=3. The question is now
+    answered from both sources: a sidecar .sdh.srt OR an embedded subtitle stream of that language
+    with Jellyfin's hearing-impaired flag. One detector serves uploader and downloader, so both
+    sides agree on what counts as HI.
+  v12.1.12.126: The dry-run description says what it does.
+    It claimed "Search and download without saving files" - but nothing is ever downloaded: the run
+    stops before the fetch and only reports. It also spends search quota, one search per language
+    set and a second one while the hearing-impaired switch is on. The description now names what it
+    reports (the candidate per language, the numbered slots, the hearing-impaired file) and that it
+    costs searches, not downloads.
+  v12.1.12.125: The hearing-impaired check runs in both branches of the download pipeline.
+    It only ran where a download mark existed. For a file that already has its regular subtitle
+    and no HI variant, "nothing missing" was answered and the run returned before searching - the
+    seeder queued those items and the pipeline dropped them again. Measured on prod: 290 queued,
+    280 skipped as "nothing missing".
+  v12.1.12.124: "Best subtitles to keep per language" actually keeps them.
+    The candidate loop ended after the first saved file through an unconditional break, so the
+    setting was inert: every value produced one file and the numbered slots (.2.srt, .3.srt) were
+    never written. The only exit is now the configured count, so X saves the top X candidates as
+    <name>.<lang>.srt, <name>.<lang>.2.srt, ... The default X=1 behaves exactly as before, and a
+    dry run now names the files it would write, so the setting is checkable without spending quota.
+  v12.1.12.123: The sidecar-name rule reaches the place that actually decides - the queue.
+    A fourth copy of the name parse lived in the seeder, and that one gates whether an item is
+    queued at all. It had the same defect, so a file whose only subtitle was Movie.de.sdh.srt
+    looked like it was missing its language and was queued for a search on every scan. All four
+    copies are gone. Turning the HI switch on now also reaches that gate: a language without its
+    .sdh.srt counts as missing for queueing, otherwise the pipeline's own check could never fire.
+  v12.1.12.122: The hearing-impaired variant actually gets fetched, and sidecar names get one reader.
+    The HI switch could not work: its branch sat behind a break that the default setting always
+    triggered, so no HI file was ever written or logged. It now runs, and it is fed by a second,
+    separate search (&hi=1) instead of picking HI releases out of a mixed response - the two pools
+    share no releases, so the regular ranking no longer depends on how many HI releases came back.
+    A dry run names the HI file it would fetch.
+    Sidecar names are parsed in one place again. The three copies disagreed about the "sdh" marker,
+    and "sdh" reached the language mapper, which read it as the language "SD" - so the database
+    refresh saw a language that does not exist, believed the file was gone and threw away its
+    download mark on every run. "hi" is no longer treated as a marker at all: it is the code for
+    Hindi, so Movie.hi.srt is a Hindi subtitle. Turning the HI switch on for a library that already
+    has its subtitles no longer skips every item forever - the switch is answered against the disk.
+  v12.1.12.121: The retry after a limit is always scheduled, and the dry run answers the hearing-impaired question.
+    A spent allowance and an unreadable one now both schedule the day-long fire after
+    the reset; previously the search path stopped with a log line and scheduled nothing,
+    so the work waited for the next regular run instead of the reset. Only the
+    direction's own "continue after daily limit" switch, or an arrival run holding the
+    slot, stops without a fire. In the same pass the dry run reports the hearing-impaired
+    choice: the real one happens after the file download, which a dry run never reaches,
+    so the run repeats that selection and names the file it would fetch and how many
+    candidates carry the flag.
+  v12.1.12.120: A 429 no longer costs the rest of the day.
+    SubDL answers the same status code both when the daily allowance is spent and when
+    a short-term rate limit trips, and only the second case was recognised before: a
+    body of "rate_limit" fell through to the fallback that stops the run until the next
+    day. It is now a short-term trip like "service_busy" - the run is respaced by the
+    configured job spacing (15 min by default) and continues. Which of the two it is,
+    is no longer guessed from the status code: the live counters are read from the same
+    endpoint the settings page shows, search and download are judged separately, and
+    the run stops for the day only when the allowance it needs is actually spent. The
+    next-day anchor is then the reset time the server itself reports, with the jitter on
+    top, and the "continue after daily limit" switch still governs whether that retry
+    is scheduled at all.
+  v12.1.12.119: Hearing-impaired and full-season flags are read as the API sends them.
+    SubDL sends hi and full_season as JSON booleans, and fps as a numeric string. All
+    three were read with an int-only reader, which accepts only JSON numbers, so every
+    one of them silently came back as "off". The visible effect: the "download
+    hearing-impaired" switch did nothing at all - no HI file was ever fetched, and HI
+    candidates were never excluded from the regular slot either. Flags and numbers now
+    share one reader that accepts the types the API actually uses, and the fps code and
+    the literal fps are no longer mixed up (the code is a code, not a rate).
+  v12.1.12.118: The one-time rename code is gone.
+    The state file was renamed to subdl-scribe.db in 12.1.12.116 and both
+    installations carried their files across on the first start, so the code that
+    performed the rename is removed. Nothing else changed: the file keeps its new
+    name, and an installation that never ran the rename starts with an empty
+    registry.
+  v12.1.12.117: The rename log line reads correctly.
+    The migration message rendered the file name with doubled quotes. Same rename,
+    corrected line.
+  v12.1.12.116: The state file is called subdl-scribe.db now, and the GUI says so.
+    The plugin is called SubDL Scribe; the file kept its former working title. It is
+    renamed on the next start, together with its journal and its timestamped backups -
+    nothing is copied or deleted, and an installation that already carries the new name
+    is left alone. "Restore from backup" picks up backups from before the rename too.
+    Two other things moved with this release: the rate limit settings (requests per
+    hour, pause between requests) now sit under Expert -> General instead of the
+    General tab, and the repair added in 12.1.114/.115 looks for the database's side
+    files under their real names (they are built from the file's stem, not its full
+    name), so leftovers from a failed rebuild are cleared as intended.
+  v12.1.12.115: The database repair now actually replaces the file.
+    v12.1.12.114 could not finish on the live server: writing the rebuilt file
+    over the running one was refused with "the file is being used by another
+    process", so the repair stopped short and the file stayed as large as
+    before. The rebuilt file now takes the old one's place by rename instead of
+    being copied over it - a rename does not need write access to the file being
+    replaced, which is exactly what was refused. Verified against a second open
+    holder on the same file, which is the situation on the live server. Nothing
+    is deleted and the fallback stays: if the swap fails, the previous file
+    remains in use.
+  v12.1.12.114: The database file shrinks again instead of staying stuck.
+    LiteDB frees deleted rows inside the file but can only return those pages
+    through a rewrite, and that rewrite walks every index. Past roughly 3000
+    subtitle rows it exceeded its internal limit and threw, so the file stopped
+    shrinking — on the live server every nightly refresh ended with "the data
+    file was NOT shrunk". The file is now rewritten from its own rows when that
+    rewrite fails: rows are read out, written into a fresh file, counted against
+    the original, and only then swapped in. The previous file is kept as one
+    backup that Database restore can roll back to. Nothing is deleted, and the
+    log says "rebuilt from its own rows" instead of reporting a size that did
+    not change.
+  v12.1.12.113: A failed database cleanup no longer breaks the plugin.
+    LiteDB closes the database file while it rewrites it, and only reopens it if that
+    rewrite succeeds. When it failed, the dashboard status and diagnostics answered
+    with a server error until Jellyfin was restarted. The cleanup now checks the
+    database afterwards and reopens it when needed, and it says plainly that the file
+    was not shrunk instead of claiming success. The database description is shorter.
+  v12.1.12.112: A slow server no longer ends the run.
+    A request that ran into the timeout was reported as "cancelled - keeping the partial
+    result", so a slow answer looked exactly like someone pressing stop, and the item was
+    dropped without a retry. Every request now gets three attempts with a short growing
+    pause, and a subtitle file download gets a five-minute budget per attempt because a
+    whole-season archive is far larger than a normal reply. A real stop is still a stop:
+    the plugin tells the two apart and never repeats what you cancelled. The give-up
+    message now says the server did not answer in time.
+  v12.1.12.108: The TMDb id test's correction count covers both directions.
+    Reading only the download summary left an upload-side correction uncounted - the
+    counter existed and nothing reported it. Corrections are now summed across the
+    directions, so the number names what the run fixed regardless of which side
+    found it. A confirmed-unchanged item still moves nothing.
+  v12.1.12.107: Jellyfin's ids are tested against TMDb by TITLE and YEAR, always.
+    The pair check alone only asked whether the two ids describe the same entity, and a
+    wrongly pinned pair answers "yes" to that. A 110-minute 2026 film sitting in a folder
+    named after a 2003 documentary kept the documentary's identity through a whole run
+    because nobody asked its title. The year for the test comes from the FILE NAME when
+    it states one; Jellyfin's year comes from the same metadata that may be wrong.
+    Corrections happen only on an exact year match - no match leaves the ids alone.
+  v12.1.12.106: The Libraries description states the consequence plainly.
+    "Only selected libraries are processed. None: no upload or download. Default: None."
+    The previous wording explained the same thing at length ("Nothing runs without a
+    selection - an empty list stops every download and upload run") and mixed a bold
+    emphasis into a one-line description. Function and default, nothing else.
+  v12.1.12.105: One blue on the settings page, not two.
+    The three links in the field descriptions (subdl.com, the API docs, themoviedb.org)
+    were still painted by the browser: Jellyfin's own stylesheet only sets a{color:inherit}
+    and never styles anchors inside a plugin page, so they fell back to the default link
+    blue #0000EE - a second, much darker blue sitting next to the accent blue #00a4dc used
+    everywhere else on the page. Both now share the accent blue. No third shade was
+    introduced for hover; the underline already marks the link.
+  v12.1.12.104: Required no longer shouts, and the stray space is gone.
+    Two cosmetic defects in the settings page. "Required" was painted in red, the
+    same colour the page uses for destructive actions and failures, so a
+    mandatory field read like a problem - it now uses the accent blue the page
+    already uses for emphasis. And the inline variant carried a left margin meant
+    to separate it from surrounding text, which turned "Target languages
+    (Required)" into "( Required)".
+  v12.1.12.103: All five tasks sit under the plugin.
+    Four of them (OSHash cache refresh, state prune, subtitle download, subtitle
+    upload) were filed under the dashboard's generic Library group, while only the
+    postprocessing task appeared under SubDL Scribe - so the plugin's work was split
+    across two headings and the Library group carried our jobs next to Jellyfin's own.
+    Every task now reports the category SubDL Scribe.
+  v12.1.12.102: Every plugin line says which level produced it.
+    After 12.1.12.99 the plugin wrote everything at Information - correct, because
+    Jellyfin drops anything below that before the sink sees it - but the level itself
+    became invisible: a Normal line and a Debug line looked identical in the log.
+    Each line now carries its level as a marker in front of the message: [N] for
+    Normal, [V] for Verbose, [D] for Debug. Jellyfin stays untouched; the three
+    options no longer look the same in the log either.
+  v12.1.12.101: Remaining plugin lines assigned to a log level.
+    92 of the plugin's own LogInformation calls were ungated, so they appeared at
+    Normal even where the content was diagnostic: the resolved ffmpeg path, database
+    compaction sizes, the reschedule budget, the seed pre-check timestamps, and the
+    postprocessing delete confirmations. Those now sit where they belong - internals
+    and diagnostics at Debug, per-item work at Verbose.
+    Run lifecycle and abort reasons stay at Normal, which is what that level is for.
+    No functional coupling: the statistics counters are updated from the run summaries
+    in ApplyStatusCounters and persisted to the status_stats table, independent of any
+    log line; no log call has side effects in its arguments.
+  v12.1.12.100: The log-verbosity note under the GUI field is gone.
+    It still pointed at Jellyfin's logging.json ("there is nothing to change there"),
+    which invites the reader to go and look at a file that no longer has any bearing on
+    the plugin. The field name alone says what it does, and the three options are
+    self-explanatory, so the note is removed rather than reworded.
+  v12.1.12.99: The plugin's log mode is authoritative.
+    Jellyfin filters a log line BEFORE the sink sees it, so a plugin line written at
+    Debug vanished whenever the server sat at Information - reading plugin detail meant
+    raising the SERVER level and lowering it again afterwards. Worse, LogTrace ranks
+    below Information: the TMDb traces gated at Verbose were never visible at all
+    (measured: 0 [TRC] lines in a full production log day).
+    Every plugin line now goes out at Information, which the server passes at its
+    default level, and the plugin decides the detail itself through LogUtil:
+    PerItem (Verbose+), Trace (Verbose+, the former LogTrace path) and Detail (Debug+).
+    Normal stays lifecycle/summary only; Warning/Error are never gated.
+    Jellyfin's logging.json no longer needs to be touched at all - the previous
+    instruction in the GUI saying otherwise is gone.
+  v12.1.12.98: Log category carries the product name.
+    The class library namespace moved from Jellyfin.Plugin.SubdlSync to
+    Jellyfin.Plugin.SubdlScribe. ILogger<T> derives the log category from the type,
+    so the server log now reads "Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline"
+    instead of "...SubdlSync...". Free text follows: the postprocessing task category,
+    the browser console tags, the database dialog and the GPL headers say SubDL Scribe.
+    The ASSEMBLY name stays Jellyfin.Plugin.SubdlSync on purpose: Jellyfin derives the
+    plugin data folder (plugins/Jellyfin.Plugin.SubdlSync) and the configuration file
+    (configurations/Jellyfin.Plugin.SubdlSync.xml) from it, so renaming it would orphan
+    the credentials and the state database. RootNamespace and the embedded-resource
+    names moved with the namespace; the API routes (Plugins/SubdlSync/...) are unchanged.
+  v12.1.12.97: Required markers in parentheses, source links in order.
+    The required marker now sits in parentheses after the field name - "Libraries
+    (opt-in, Required)", "SubDL Account (Required)", "TMDb (Required)", "Target
+    languages (Required)" - and where a field is both opt-in and required the two
+    are comma-separated inside one parenthesis instead of stacked.
+    Web references follow the order the user needs them: register first, then the
+    key. SubDL: subdl.com then subdl.com/api-doc. TMDb: themoviedb.org then
+    themoviedb.org/settings/api.
+  v12.1.12.96: Required fields marked once, in red.
+    The TMDb key said "required" three times on one screen (label suffix, required
+    attribute, bold Required in the description). Now each of the four required
+    inputs carries one red marker: Libraries (opt-in AND required - an empty
+    selection stops every run), SubDL account, TMDb API key and Download target
+    languages. Each states where the value comes from: subdl.com, subdl.com/api-doc
+    for the free API key, themoviedb.org/settings/api for the TMDb key.
+    The marker CSS is defined in both configPage.html and configPage.js.
+  v12.1.12.95: Card text names the libraries too.
+    The card mentioned the languages the user picks but not the libraries - and an
+    empty library selection stops every run (F-M213), so both belong on the card:
+    "downloads missing subtitles for the languages and libraries you pick and
+    uploads your own. Download is on by default; upload is off - enable at your
+    choice." Wording tightened to fit the 260-character cap (the em dash is written
+    literally in Plugin.cs, not as a \uXXXX escape, which the guard reads as six
+    characters of source text).
+  v12.1.12.94: Card text names the defaults and both required keys.
+    The plugin card now says what the plugin does AND how it starts out: "Download
+    is on by default; upload is off and can be enabled at your choice. Requires a
+    SubDL login and API Key, plus a TMDb API Key." Grammar fixed along the way -
+    "uploads your own subtitles back." had no destination, "Requires SubDL login"
+    was missing its article, and the sentence after the colon had no subject.
+    ASCII only: a non-ASCII dash is escaped as \u2014 in the compiled C# string and
+    then no longer compares equal to the YAML text, tripping the release guard.
+  v12.1.12.93: Plugin card description shortened.
+    The card in Dashboard -> Plugins renders Plugin.Description, which is compiled
+    into the DLL - not the description in build.yaml. So the earlier shortening was
+    invisible: the running card still showed the old essay. Now both carriers hold
+    the same two-sentence text, and release.sh refuses to ship a release where they
+    differ, exceed 260 characters, or stop naming the required SubDL/TMDb keys.
+  v12.1.12.92: One date format on the configuration page.
+    Every timestamp now renders in US order (M/D/YYYY) with local AM/PM time via
+    two shared helpers (subdlFmtDateTime, subdlFmtTime) instead of each call site
+    calling toLocaleDateString/toLocaleTimeString without a locale - those follow
+    the browser, so the same page read differently per user. Covers the statistics
+    period stamp ("Counting since 9/27/2026 10:44 AM"), the quota timestamp and
+    reset times, and the status stamp.
+  v12.1.12.91: Shorter TMDb key explanation.
+    The manifest description and the configuration-page help text had grown into
+    paragraphs that buried the one thing the user needs to know. Both now say the
+    same single sentence: the TMDb API key is required to properly resolve
+    IMDb / TMDb ids for upload and download.
+  v12.1.12.90: Search order, statistics GUI.
+    Search (F-M219): the type-neutral TMDb search is now the FIRST rung wherever an id
+    is resolved, not just on upload. A typed search inherits Jellyfin's guess - a
+    series that Jellyfin typed as a Movie asked search/movie and could never match.
+    The seeder parses the file name before it asks TMDb, and the download pipeline
+    tries the multi-search before the typed one. The year is applied to the RESULTS:
+    measured against TMDB, search/multi ignores year entirely (year,
+    first_air_date_year and primary_release_year return the identical list), so taking
+    hits[0] picked by popularity - "Fargo" resolved to the 2014 series when the item
+    was the 1996 film. A year-equal hit now wins; a wrong year still resolves via the
+    first hit, because a Jellyfin year is often the import year.
+    Statistics (F-M218): the reset response now carries every counter - the GUI renders
+    it directly, so the quality line read "undefined" right after a reset. The period
+    stamp sits on its own line below the counters, and "typed by file name" is replaced
+    by wording that names what happened.
+  v12.1.12.89: Download, statistics and branding in one round.
+    Download (F-M217): the file name now decides type, title and episode instead of
+    Jellyfin's library classification. An episode sitting in a library typed movies
+    arrives as a Movie whose item name is the raw file name ("Reacher.S03E01"), so
+    the seeder's id gate dropped it before the queue and the pipeline searched a name
+    that matches nothing. Measured: 0 saved -> 20 saved after the fix, with eight
+    distinct subtitles for Reacher S03E01-E08 whose runtimes match each episode.
+    Statistics (F-M218): the quality counters are persisted in the database next to
+    the volume counters - items typed by file name, TMDb year-filter misses, and QA
+    rejects per direction. A second GUI line shows them; the statistics reset zeroes
+    them in the same operation. Branding: the logo drops the inkwell and centres the
+    quill between the screen top and the subtitle bars.
+  v12.1.12.88: Config page: the statistics line no longer shows "undefined" (F-M216). The Stats/StatsReset calls now send dataType:"json"; without it the Jellyfin apiclient bundle returns the raw Response object (its Content-Type is application/json, not text/*) so Uploaded/SinceUtc were undefined and the line read "undefined subtitles uploaded ... since —". Fixed in both the inline script in configPage.html and configPage.js.
+  v12.1.12.87: Download: a SubDL season or range pack is now resolved to the episode it belongs to (F-M215). The search asks SubDL for the unpacked file list (unpack=1) and the correct single file is downloaded per episode; the ZIP fallback matches the entry name and refuses to guess inside a multi-file archive instead of writing the first .srt to every episode.
+  v12.1.12.86: the compaction reports its whole footprint. v85 measured only the main
+    file, so the first live run logged "8192 -> 286720 bytes (released -278528)" -
+    a negative release that reads as growth, while the bytes had merely moved out of
+    the 496 KB journal into the data file. Both sizes are now summed (file + journal)
+    before and after, and the log names each part, so a run cannot report a gain as a
+    loss. Same compaction, corrected accounting.
+  v12.1.12.85: the state prune now compacts the database in the same run. Deleting
+    rows in LiteDB releases pages inside the file but never returns them, and every
+    delete also sits in the rollback journal (subdl-sync-log.db) until a checkpoint -
+    so a prune left the store physically as large as before it ran. Measured on a
+    live file: the main file carried 8 KB while its journal held 496 KB. The prune
+    now folds the journal in and rebuilds the file as its last step. Measured on a
+    real store with 390 rows: deleting 359 of them left the file at 516 KB (plus a
+    256 KB journal), Checkpoint + Rebuild brought it to 328 KB (-36%). On a file that
+    is already dense the rebuild reports 0 collections and changes nothing, so
+    running it on every prune costs nothing. Compaction failures are logged and
+    swallowed - housekeeping must never fail the task. The GUI's prune setting now
+    names that behaviour. No change to what the prune deletes.
+  v12.1.12.84: GUI order in the Expert tab's Upload section - the dry-run switch
+    now sits above the postprocessing interval, matching the Download section,
+    where the dry-run switch also leads. Pure reorder, no behaviour change; the
+    element ids and their JS wiring are untouched.
+  v12.1.12.83: the library selection now governs the report as well as the work.
+    Two fixes in one rule (F-M213). First, the GUI's "Library directories" list
+    showed a directory the user had never selected: with Test_SubDL selected, the
+    parent library Movies and its /data/movies2 root were listed next to it,
+    because the report reused the WALK scope. The walk must enumerate the outer
+    library - a nested selection's items live there - but the report names what
+    was selected, so it now matches on selected names only. Second, the download
+    pipeline had no empty-selection check: with nothing selected it still ran the
+    full setup (watchdog, API/TMDB handler wiring, the "download: started" line)
+    and only filtered everything away later in CollectItems, which reads like a
+    full-server scan. The upload pipeline has always stopped up front; download
+    now does the same ("No libraries selected - nothing to do"). The prune's
+    full-server id probe is deliberately untouched - it asks whether an item
+    still exists, not whether it should be worked. No change to what is actually
+    processed: seeding was already gated, and both pipelines filtered by path.
+  v12.1.12.82: the release process had two build paths and now has one. Every
+    release carried four assets instead of one: the locally built ZIP plus a
+    second ZIP rebuilt by the CI publish workflow from the same commit with a
+    different toolchain, along with its md5 and sha256. The manifest pointed at
+    only one of the two, and the extras had to be deleted by hand each time.
+    Worse, the CI ZIP is built from the TAGGED commit - v12.1.12.80-dev was
+    tagged while build.yaml still carried category "Subtitle" (singular), and
+    since the tag never moved, the wrong value shipped for good and no fix on
+    the branch could reach it. scripts/release.sh is now the single supported
+    path: it builds, verifies the artifact (build.yaml inside, no meta.json,
+    version and category checked), writes the manifest, tags, releases, drops
+    every foreign asset, uploads exactly one ZIP and downloads it again to
+    compare md5. It refuses to run on a dirty tree, off develop, with a
+    half-bumped version, without a changelog entry, with a category other than
+    "Subtitles" or with an existing tag - and after tagging it checks what the
+    TAG carries, which is the one check that would have caught v80. The CI
+    publish and changelog workflows are removed; CI now only builds and tests.
+    No plugin behaviour change.
+  v12.1.12.81: every scheduled fire is now checked against the TaskManager
+    before it consumes its slot. QueueScheduledTask silently drops a fire when
+    the target task is not registered yet, and during early startup Jellyfin has
+    not registered the plugin's tasks - so a due anchor could be marked as fired
+    while nothing ran, and the slot was gone for the rest of the day. Download
+    and upload already carried that guard; prune, OSHash refresh, postprocessing,
+    the refetch cycle and the catch-up fire did not. Seen live on the test
+    instance: after the update to .80, "Postprocessing fire at 08:07 local" was
+    logged and immediately followed by "Unable to find scheduled task of type
+    SubdlPostprocessTask" - the fire was consumed and lost. All six fire paths
+    now test registration BEFORE they touch their marker, so an unregistered
+    task leaves the slot claimable and the next 30-s tick retries it.
+  v12.1.12.80: scheduled jobs run on their own intervals again. Prune, OSHash
+    refresh and upload postprocessing each have their own setting and their own
+    randomised anchor, and are documented as independent of the pipeline - but
+    the scheduler returned early for RefetchInterval=Manual/OnArrival BEFORE
+    reaching any of them, so all three could never fire on their own. Measured
+    over every log: 0 prune fires, 0 OSHash fires, 0 postprocessing fires; the
+    only runs were manual triggers. The gate now sits after those three jobs and
+    still governs what it should - the automatic pipeline cycles. Also fixes a
+    race this uncovered: the shared database context was created without a lock,
+    so two jobs firing in the same tick could build it twice and one died with
+    "Member Id not found on BsonMapper". Verified live with every anchor set
+    3 minutes after a restart: all five jobs fire and complete, serialised by
+    the global run lock, 0 task errors.
+  v12.1.12.79: the download direction works again, plus scheduler, counter and
+    scope fixes. A StringComparison inside a LiteDB query (F-M193a) is not
+    translatable: the emitted predicate carried an EMPTY operand and threw
+    "Invalid BsonExpression", which killed every download cycle - the searches
+    succeeded and the run died at the tracker access, so 0 subtitles were
+    downloaded for five days while the upload side was unaffected. The
+    comparison now happens in LINQ-to-objects. Also: a run's watchdog is torn
+    down on the exception path too (F-M209), so a failed run no longer logs a
+    phantom "no progress" abort 2.5 min after it ended; the reschedule budget is
+    counted per slot and reset at the UTC day roll-over instead of blocking a
+    slot forever (F-M208/F-M205); a second trigger reschedules by
+    JobSpacingMinutes instead of being merged away (F-M204); the two cumulative
+    counters live in the database and are zeroed with it (F-M207); library
+    selection resolves to paths so nested libraries work (F-M189); media type
+    and season/episode come from the file name, confirmed by TMDb (F-M190); and
+    the TMDb API key is now required - without it series are skipped, because an
+    episode id must never be uploaded where a show id belongs (F-M203).
+  v12.1.12.78: postprocessing counts DISTINCT upload ids (F-M193) - /user/mySubtitles ignores
+    page/per_page/offset/limit/start, so every "page" returned the identical list and the
+    fetch loop re-read the same entries maxPages times, logging an inflated total
+    (fetched 3250 where the real list held 252). Entries are now deduplicated by upload id
+    and the walk stops at the first page that adds nothing new. No wrong deletions - each id
+    was already deleted exactly once; the old cost was maxPages-fold wasted API calls.
+  v12.1.12.77: downloaded bytes now have a single decode path (F-M187). The hearing-impaired branch of the downloader and the runtime check both read UTF-16 files as mojibake, so their content hash could not match the upload side's and the file would be uploaded again.
+  v12.1.12.76: Content hash now uses SubDL's own function: MD5 over the exact uploaded bytes, lowercase 32-hex, so the registry value equals the md5 SubDL stores for our uploads (F-M186). SHA-256 made the two sides incomparable. Existing registry hashes are invalidated — reset the plugin database.
+  v12.1.12.75: canonical SRT form (F-M185) - the content hash normalized line endings
+    but the upload payload did not, so the same subtitle was published twice: SubDL stores
+    the MD5 of the raw file and therefore saw a CRLF and an LF version as different text,
+    while our registry guard had already collapsed them into one identity and let the
+    second upload through. Extraction, loose-file read and upload now share one canonical
+    form (BOM stripped, CRLF and lone CR to LF, trailing whitespace trimmed), so the bytes
+    we send and the hash we compare describe the same content. Existing registry hashes
+    stay valid; the normalization is idempotent.
+  v12.1.12.74: statistics counters fixed (F-M23) - the config page shows exactly two
+    counters (subtitles uploaded / downloaded). A run cancelled from outside (user stop,
+    task cancel, Jellyfin restart) no longer discards its partial result, so work that
+    already reached SubDL is counted. The 11 counter fields that no UI rendered were
+    removed, and "Reset statistics" now zeroes both displayed counters.
+  v12.1.12.73: requirements doc reconciled with the code - superseded requirements marked
+    [REMOVED] (F-M17a/F-M17d/F-M17f), one unimplemented one marked [NOT IMPLEMENTED] (F-M25),
+    stale numbers corrected (F-M27, F-M65), phantom class name fixed. 101 historical F-M
+    markers without a requirement line removed from comments. No behaviour change.
+  v12.1.12.72: dead-code removal - 23 never-called registry/API/db helper methods
+    deleted (pending-review cluster, unused V2 search variants, Compact, FindMedia,
+    Rekey, orphaned schedulers/limiters). No behaviour change. Requirements doc
+    consolidated into docs/REQUIREMENTS.md (former docs/Lastenheft-SubDL-Plugin.md merged in).
+  v12.1.12.71: documentation/comment corrections - nothing claimed a fixed SubDL review
+    latency any more (review timing varies; postprocessing resolves verdicts whenever it
+    runs), dead duplicate pre-check properties marked legacy, no behaviour change.
+  v12.1.12.70: upload duplicate pre-check removed (F-M184) - duplicates are delegated
+    to postprocessing (mySubtitles sweep), saving one search call per item against the
+    400/h cap and the daily search quota. Duplicates now go up once and are cleaned by
+    the next postprocessing run.
+  v12.1.12.69: download run log reports the queue as denominator (400/727 instead of 400/1125, F-M183) and prints a run-end aggregate (saved / no candidates / not available / skipped / failed), so a 0-saved run is diagnosable without Verbose logging.

@@ -1,0 +1,53 @@
+<!--
+  This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+  SPDX-License-Identifier: GPL-3.0-or-later
+
+  SubDL Scribe is free software: you can redistribute it and/or modify it
+  under the terms of the GNU General Public License as published by the
+  Free Software Foundation, either version 3 of the License, or (at your
+  option) any later version.
+  SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  See the GNU General Public License for more details.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- F-M223: namespace says SubDL Scribe; the ASSEMBLY name stays Jellyfin.Plugin.SubdlSync. -->
+    <RootNamespace>Jellyfin.Plugin.SubdlScribe</RootNamespace>
+    <AssemblyName>Jellyfin.Plugin.SubdlSync</AssemblyName>
+    <Version>12.1.12.169-dev</Version>
+    <AssemblyVersion>12.1.12.169</AssemblyVersion>
+    <FileVersion>12.1.12.169</FileVersion>
+    <Authors>Hermes Agent</Authors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+      <NoWarn>$(NoWarn);CA2254</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jellyfin.Controller" Version="12.1.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Jellyfin.Model" Version="12.1.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="LiteDB" Version="5.0.21" />
+    <PackageReference Include="LanguageDetection" Version="1.2.0" />
+      <None Remove="logo.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Configuration\configPage.html" />
+    <EmbeddedResource Include="Configuration\configPage.html" />
+    <EmbeddedResource Include="Configuration\configPage.js" />
+  </ItemGroup>
+
+</Project>
