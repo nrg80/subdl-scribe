@@ -32,7 +32,8 @@ The order is: manifest commit and push, then tag, then release. The release ther
 ## Catalog manifest
 
 `manifest.json` is committed on `develop` and read by Jellyfin from
-`https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/manifest.json`.
+`https://raw.githubusercontent.com/nrg80/subdl-scribe/main/manifest.json` (released line) or
+`https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/manifest.json` (prerelease line).
 
 The script writes the new version, the release URL and the md5 of the uploaded ZIP, then commits and pushes the manifest before creating the release.
 
@@ -40,9 +41,14 @@ The manifest carries exactly one version entry.
 
 ## Branches
 
-The catalog is served from `develop`, which ships prereleases (`-dev`) only. Both Jellyfin instances use the `develop` manifest URL, so a release is installable as soon as it is published.
+`main` carries the released line and is the URL the README hands to users, so installing from the
+catalog yields the version `main` holds. `develop` carries the prereleases (`-dev`) and is what the
+two test instances subscribe to.
 
-`main` is a reference line pinned to the last released version. The release path never pushes to it; it moves only on an explicit instruction.
+`scripts/release.sh` writes and pushes the manifest to `develop` only — it refuses to run on any
+other branch — so it does not advance `main`. **Move `main` after a release** when the new version
+is meant to become the installable one: `git branch -f main develop && git push origin main`.
+Until that is done, the catalog served from `main` keeps offering the version it already has.
 
 ## CI
 

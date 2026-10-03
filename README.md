@@ -18,7 +18,7 @@ Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 2. Add this repository URL:
 
    ```
-   https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/manifest.json
+   https://raw.githubusercontent.com/nrg80/subdl-scribe/main/manifest.json
    ```
 
 3. Open **Dashboard → Plugins → All**, find **SubDL Scribe** and install it.
@@ -26,7 +26,7 @@ Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 
 ### Manual
 
-1. Download `Jellyfin.Plugin.SubdlSync_12.1.12.157.zip` from the [releases page](../../releases).
+1. Download `Jellyfin.Plugin.SubdlSync_12.1.12.169.zip` from the [releases page](../../releases).
 2. Create a folder for the plugin under your Jellyfin `plugins/` directory and extract the ZIP into it:
 
    ```
