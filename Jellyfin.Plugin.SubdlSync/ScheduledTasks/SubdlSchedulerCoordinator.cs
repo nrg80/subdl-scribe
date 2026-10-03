@@ -729,7 +729,12 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         // Daily/Weekly/Monthly resolve their own anchor so each interval actually works.
         {
             var ppInterval = config.UploadPostprocessInterval;
-            if (ppInterval is not (UpdateInterval.Never or UpdateInterval.Manual or UpdateInterval.OnArrival))
+            // F-M291: postprocessing resolves REJECTED UPLOADS against /user/mySubtitles — work that only
+            // exists because the upload direction is on. With upload switched off the anchor is not even
+            // armed: the task used to keep firing on its own schedule, call SubDL and write a row, for a
+            // direction the user had switched off (the same shape as F-M290 for the seeder).
+            if (config.UploadEnabled
+                && ppInterval is not (UpdateInterval.Never or UpdateInterval.Manual or UpdateInterval.OnArrival))
             {
                 var ppAnchor = ppInterval switch
                 {

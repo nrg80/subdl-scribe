@@ -10,25 +10,25 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 ## Contents
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
-- [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 11 requirements
+- [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 21 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 22 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 5 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
-- [5. Upload Postprocessing](#5-upload-postprocessing) — 11 requirements
+- [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
-- [7. OSHash Refresh](#7-oshash-refresh) — 2 requirements
+- [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
 - [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 4 requirements
 
 - [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 25 requirements
-- [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 12 requirements
+- [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 13 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 13 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 13 requirements
-- [14. Data Model and Persistence](#14-data-model-and-persistence) — 8 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 19 requirements
+- [14. Data Model and Persistence](#14-data-model-and-persistence) — 12 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 22 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -348,7 +348,7 @@ Measured 02.10.2026, both directions: the refetch stamp, the file-retry counter,
 
 **F-M223:** **Every name the user sees says SubDL Scribe — the ASSEMBLY name is the one thing that must NOT follow.** Jellyfin's logger derives its category from the type, so the namespace says SubDL Scribe. The embedded-resource names move with the namespace.ml`/`.js` and the embedded-resource read literal), and all three must change together or the configuration page fails to load. **the assembly name stays the assembly name** — Jellyfin derives the plugin data folder and the configuration file from it, so renaming would orphan the credentials, the state database and the run history. The assembly name is a persistence key, not branding. Free text follows (postprocessing the category, console tags, reset dialog, GPL headers); API routes stay the plugin's own routes. **Test: T38.**
 
-**F-M210:** **Every scheduled job is driven by its OWN setting.** Database refresh, OSHash refresh and upload postprocessing each carry their own cadence setting and their own diced anchor, and must fire on them regardless of any other job's setting. the cycle interval governs **only** the automatic pipeline cycles; `Manual` and `OnArrival` there suppress those cycles and nothing else. A job must never sit behind an early return belonging to a different job's configuration.
+**F-M210:** **Every scheduled job is driven by its OWN setting.** Database refresh, OSHash refresh and upload postprocessing each carry their own cadence setting and their own diced anchor, and must fire on them regardless of any other job's setting. **One exception, and it is not a return to the old coupling:** postprocessing additionally requires the upload direction to be ON (F-M291) — not another *job's* setting but the direction it works for, since with upload off it has no subject at all. the cycle interval governs **only** the automatic pipeline cycles; `Manual` and `OnArrival` there suppress those cycles and nothing else. A job must never sit behind an early return belonging to a different job's configuration.
 
 **F-M210a:** **A service with no manual start button offers "Never"/"off", never "Manual".** `Manual` means "triggered by the dashboard button"; where no such control exists, the disabling option is `Never` (prune, OSHash, postprocessing).
 
@@ -357,6 +357,17 @@ Measured 02.10.2026, both directions: the refetch stamp, the file-retry counter,
 **F-M131:** **Manual stop via marker files:** the Stop button creates `.stop-upload` and/or `.stop-download` in the plugin data directory. Each pipeline checks its marker before processing the next item (and, for uploads, between streams of the same item), cancels the direction, deletes the marker and reports the stop marker. The dispatcher ends the cycle without starting further directions. Stop markers do **not** affect the delayed postprocessing task. The canonical endpoint for programmatic stops is `POST /Plugins/SubdlSync/Stop?direction=upload|download|all`; `DELETE /ScheduledTasks/Running/{id}` cancels the Jellyfin task wrapper, but a running pipeline item may finish first.
 
 **F-M17y:** **Delayed upload postprocessing:** after an upload run (normal finish or stop), on the postprocessing schedule (F-M176; not tied to the run and not to a fixed delay — SubDL review latency varies), the plugin queries `/user/mySubtitles` and resolves every locally pending-review entry whose status is `rejected`: an entry with "Duplicate upload" is deleted on SubDL and marked duplicate-remote; any other rejected entry is deleted without a mark. Accepted entries are not touched. All steps logged at Debug. The task runs on its own cadence and diced anchor (F-M210), independent of any run.
+
+**F-M291 (user decision 03.10.2026):** **With the upload direction switched off, postprocessing does not run either.**
+
+Its whole subject is work that only exists because upload is on: it resolves locally pending-review entries against `/user/mySubtitles`, and an entry can only be pending review if something was uploaded. With upload off there is nothing to resolve, so the task does not go looking — it does not call SubDL, does not touch the database and does not write a run.
+
+Enforced at three points, and each one is needed:
+- **the anchor is not armed** in the scheduler while `UploadEnabled` is false, so no fire is ever queued;
+- **the task refuses** even so — a fire armed before the toggle was switched off, or one queued earlier, must not do the work either;
+- **the manual endpoint** (`POST /Plugins/SubdlSync/PostprocessUploads`) refuses for the same reason and answers `{"status":"skipped","reason":"upload disabled"}` rather than silently doing nothing.
+
+The recorded outcome is `skipped`/"upload disabled" — GREY, because nothing is broken and nothing ran; green would claim a run that did not happen. Wording matches the upload task's own line for the same condition. **Test: T104.**
 
 **F-M176:** **Postprocessing reschedule spacing:** if postprocessing cannot start because the global run lock is busy (F-M94h: immediate `false`, no waiting), it schedules a one-shot re-fire in the job spacing (5–120 min). A local rate limit can no longer defer it (F-M20). The re-fire still respects the diced anchor and does not move the next regular run. A busy lock is first checked for staleness; only a living previous run causes a deferral.
 
@@ -1212,6 +1223,9 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 
 **T103:** With no library selected, a seed step leaves a grey `skipped`/"no libraries selected" seeder row, logs `No libraries selected — seeder not started`, holds no run lock and does not walk the library — neither on a scheduled run nor on an arrival (F-M290)
+
+
+**T104:** With upload switched off, postprocessing does not run: no anchor is armed, a fire that slips through records grey `skipped`/"upload disabled" instead of calling SubDL, and the manual endpoint answers `skipped`/`upload disabled` (F-M291)
 
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)

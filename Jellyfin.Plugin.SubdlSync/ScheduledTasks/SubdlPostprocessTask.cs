@@ -60,6 +60,17 @@ public class SubdlPostprocessTask : IScheduledTask
 
         plugin.WorkerRuns.Start("SubDLPostprocessTask", Name);
 
+        // F-M291: belt and braces for the scheduler's own gate — a fire armed BEFORE upload was switched
+        // off, or a manual trigger, must not do this work either. GREY, not green: nothing is broken and
+        // nothing ran. The wording matches the upload task's line for the same condition.
+        if (!plugin.Configuration.UploadEnabled)
+        {
+            LogUtil.Normal(_logger, "[SubDL] Postprocessing inactive (UploadEnabled=false) — run skipped.");
+            plugin.WorkerRuns.Finish("SubDLPostprocessTask", Name,
+                Registry.WorkerRunRegistry.Outcome.Skipped, "upload disabled");
+            return;
+        }
+
         try
         {
             await UploadPipeline.RunUploadPostprocessingAsync().ConfigureAwait(false);
