@@ -1008,7 +1008,9 @@ Reporting the task's own "ok" is wrong twice over: it claims success when the wa
 
 An arrival cycle starts in the dispatcher and never passes through `SubdlDownloadTask`/`SubdlUploadTask`; those two only record their row while they wait. Before this rule an arrival cycle therefore did its work, logged it and left the Download and Upload rows untouched: they kept showing the last SCHEDULED run, and only the Seeder row moved. The rows were truthful about the wrong run — the failure mode is a reader concluding nothing had happened.
 
-The dispatcher records both direction rows for the arrival triggers (`event`, `arrival-followup`) and only for those: on a scheduled or manual run the waiting task owns its row, and a second writer would fight it. The ranking is `DescribeCycle` (F-M267), so a row reads identically whichever path produced the cycle. The dispatcher marks both rows `running` at cycle start, so a cycle that dies mid-scan shows the attempt rather than the previous green. **Test: T102.**
+The dispatcher records both direction rows for the arrival triggers (`event`, `arrival-followup`) and only for those: on a scheduled or manual run the waiting task owns its row, and a second writer would fight it. The ranking is `DescribeCycle` (F-M267), so a row reads identically whichever path produced the cycle. The dispatcher marks both rows `running` at cycle start, so a cycle that dies mid-scan shows the attempt rather than the previous green.
+
+A direction that is switched OFF is recorded `skipped`/`disabled`, not `ok`: the arrival path leaves it untouched, so a plain `DescribeCycle` call would fall through to green and paint "nothing happened here" as "this ran fine". **Test: T102.**
 
 **F-M268:** **One colour rule for every worker: green = the work ran and ended without an exception, yellow = the work did not happen but nothing is broken, red = something is broken, grey = not run.**
 
@@ -1200,7 +1202,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T100:** A deferred direction shows its own stored cause under the Workers list (never a generic "rate limit"), that line sits below the quota box rather than inside it, the bars keep their 75 %/95 % colours at every fill level, and the line disappears once the scheduler holds no fire for that direction (F-M288)
 
 
-**T102:** An arrival cycle updates the Download, Upload and Seeder rows together, and each direction's row carries that cycle's fate (green on work done, yellow on a quota stop, red on a failure); a scheduled cycle leaves the arrival path out of it entirely (F-M289)
+**T102:** An arrival cycle updates the Download, Upload and Seeder rows together, and each direction's row carries that cycle's fate (green on work done, yellow on a quota stop, red on a failure); a direction that is switched off is recorded grey/`disabled` rather than green; a scheduled cycle leaves the arrival path out of it entirely (F-M289)
 
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)

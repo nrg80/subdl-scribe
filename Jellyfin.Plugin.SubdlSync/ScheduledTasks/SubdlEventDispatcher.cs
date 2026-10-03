@@ -1328,24 +1328,47 @@ public sealed class SubdlEventDispatcher : IDisposable
             return;
         }
 
+        var config = plugin.Configuration;
         var (seedOutcome, seedDetail) = GetSeederOutcome();
 
+        // A DISABLED direction is not a green one. The arrival path leaves a switched-off direction
+        // untouched — it has nothing to report — so DescribeCycle would fall through to `ok` and paint
+        // "nothing happened here" as "this ran fine". The scheduled task records `skipped`/"disabled"
+        // for exactly that case; the arrival path has to say the same thing.
         if (dir != CycleDirection.UploadOnly)
         {
-            var (downOutcome, downDetail) = GetDirectionOutcome(upload: false);
-            var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
-                cycleFinished: true, seedOutcome, seedDetail, downOutcome, downDetail);
-            plugin.WorkerRuns.Finish(
-                Registry.WorkerRunRegistry.DownloadWorkerKey, "Download", outcome, detail, plugin.Configuration.DownloadDryRun);
+            if (!config.DownloadEnabled)
+            {
+                plugin.WorkerRuns.Finish(
+                    Registry.WorkerRunRegistry.DownloadWorkerKey, "Download",
+                    Registry.WorkerRunRegistry.Outcome.Skipped, "disabled");
+            }
+            else
+            {
+                var (downOutcome, downDetail) = GetDirectionOutcome(upload: false);
+                var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
+                    cycleFinished: true, seedOutcome, seedDetail, downOutcome, downDetail);
+                plugin.WorkerRuns.Finish(
+                    Registry.WorkerRunRegistry.DownloadWorkerKey, "Download", outcome, detail, config.DownloadDryRun);
+            }
         }
 
         if (dir != CycleDirection.DownloadOnly)
         {
-            var (upOutcome, upDetail) = GetDirectionOutcome(upload: true);
-            var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
-                cycleFinished: true, seedOutcome, seedDetail, upOutcome, upDetail);
-            plugin.WorkerRuns.Finish(
-                Registry.WorkerRunRegistry.UploadWorkerKey, "Upload", outcome, detail, plugin.Configuration.DryRun);
+            if (!config.UploadEnabled)
+            {
+                plugin.WorkerRuns.Finish(
+                    Registry.WorkerRunRegistry.UploadWorkerKey, "Upload",
+                    Registry.WorkerRunRegistry.Outcome.Skipped, "disabled");
+            }
+            else
+            {
+                var (upOutcome, upDetail) = GetDirectionOutcome(upload: true);
+                var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
+                    cycleFinished: true, seedOutcome, seedDetail, upOutcome, upDetail);
+                plugin.WorkerRuns.Finish(
+                    Registry.WorkerRunRegistry.UploadWorkerKey, "Upload", outcome, detail, config.DryRun);
+            }
         }
     }
 
