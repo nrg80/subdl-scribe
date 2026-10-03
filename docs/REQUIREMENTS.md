@@ -28,7 +28,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 13 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 12 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 25 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 24 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -1045,33 +1045,17 @@ The accent is also the link colour (F-M229) and the required-field colour (F-M22
 
 **The dry-run note is CONDITIONAL**: a grey `dry run` note appears in the result cell only while the direction's dry-run flag is on. With the flag off the line stays clean.
 
-**F-M292:** **A direction whose deferred fire is still pending is painted YELLOW, even when its last run ended green.**
-
-The stored row is a record of the past; the pending fire is live state. A recovery fire exists only because a run could not finish its work — the download hit its daily limit at 06:08 on 03.10.2026 with 384 of 412 queued items left due, and its fire was armed for 04:37 the next day. The direction then ran normally at 10:30 and 13:50, so its last row read `ok` and the lamp went green while that backlog was still waiting. Green claims the direction is finished, and it is not.
-
-**Only a green row is overridden.** A red row (something is broken) and a grey row (never run, or deliberately disabled) are stronger and different statements, and a `run` row is live. The override reads the coordinator's pending fire rather than the row, so the two cannot drift apart; the row keeps its own stored outcome underneath.
-
-**The deferral line is not affected** — it follows the opposite gate, appearing only while the direction is stopped (F-M288). A direction that is running again therefore shows a yellow lamp and no line: work is outstanding, but the direction is not stuck. The fire itself is never touched for either rule; dropping it would leave the due items waiting for the next regular anchor. **Test: T105.**
-
 **F-M293:** **A Jellyfin restart is not a user stop; the worker row reports what it actually did.**
 
-A restart cancels the running task exactly as the stop button does, and the cancellation token carries no reason — so the catch in the task used to treat both the same: it wrote a stop marker, called `RequestUserStop`, and that call records `cancelled`/"user stop" for **both** directions at once. Measured on prod 03.10.2026: a restart at 14:18:02 painted the download as "user stop" although its own run had finished clean at 14:08, and the upload as stopped by a button nobody pressed; the log read `cycle end ("event", dir Both) — user stop.` for a restart. 58 uploads that had already reached SubDL were reported behind an action the user never took.
+A restart cancels the running task exactly as the stop button does, and the token carries no reason. The task's catch therefore treated both the same — it wrote a stop marker, called `RequestUserStop`, and that records `cancelled`/"user stop" for **both** directions at once, so a restart reported an action the user never took.
 
-**The stop marker is the discriminator.** The `Stop` endpoint writes it *before* it signals; a shutdown never does. `PipelineStopSignal.HasMarker` therefore tests it **without consuming it**, and only when it is present is the cancellation a user stop. Without it the row is `ok`/"restart". The same rule covers the whole cancellation path, including the in-cycle `RequestUserStop` call.
-
-**A worker with no stop button can never report a user stop.** Postprocessing and the OSHash refresh have none, so for them every cancellation is a restart by construction. **Test: T106.**
+**The stop marker is the discriminator:** the `Stop` endpoint writes it *before* it signals, a shutdown never does. `PipelineStopSignal.HasMarker` tests it **without consuming it**; without it the row is `ok`/"restart". A worker with no stop button (postprocessing, OSHash refresh) can therefore never report a user stop. **Test: T106.**
 
 **F-M294:** **"Deferred" means a fire was scheduled — for ANY worker, and the moment is named.**
 
-The user's rule (03.10.2026): *"defer whenever a fire was scheduled, whichever worker."* A pending re-fire is the deferral itself: it exists only because a run could not finish its work, and the stored row describes the past while the fire describes what is still owed. Every worker that can hold a fire is covered — download, upload, database refresh, OSHash refresh and postprocessing — not just the two directions.
+A pending re-fire IS the deferral: it exists only because a run could not finish, so it decides the word and the colour of that worker's row — YELLOW as `defer` — for every row that does not claim something stronger. `failed` (broken) and `run` (in progress) are left alone; `ok` and `cancelled` both claim that nothing is owed, and a fire proves otherwise. All workers that can hold a fire are covered (both directions, database refresh, OSHash refresh, postprocessing), and the flag is read per worker from the coordinator rather than from the row.
 
-**Lamps.** A pending fire decides the WORD and the colour for every worker whose row does not claim something stronger: it paints the row YELLOW as `defer`. The first version overrode only a GREEN row, which was wrong (user correction 03.10.2026, measured on prod the same day): the download sat on a yellow `cancel` while its fire for 04:37 was waiting, and "cancel" is the wrong word for a direction that is scheduled to resume. Both `ok` and `cancelled` claim that nothing is owed, and a pending fire proves otherwise.
-
-**Only `failed` and `run` are left alone** — something broken, or a run in progress, are stronger and different statements. The flag is read per worker from the coordinator, not from the row, so lamp and fire cannot drift apart.
-
-**The line.** Under the Workers list, one entry per deferred worker in the Workers-list order: the worker's short name, its own stored cause verbatim, and when the fire is due in the viewer's zone. It is gated on the fire alone — not on a direction being stopped. Two earlier versions got this wrong on the same day: the first ran whenever a fire existed and named an ordinary backlog pickup as if the direction were stuck; the second gated on the row being stopped, which a restart could break, so the line vanished while the fire was pending.
-
-The seeder has no fire of its own — it runs inside a cycle, driven by whichever direction triggered it — so it carries no deferral. A fire is never dropped to clear the state: it is the only thing that brings the still-due items back. **Test: T107.**
+The line under the Workers list names, per worker and in list order, its stored cause and when the fire is due. It is gated on the fire alone, so a restart cannot blank it; the seeder holds no fire of its own and never appears. **Test: T105, T107.**
 
 **F-M269:** **The database refresh's detail line names the compaction fallback.**
 
@@ -1257,11 +1241,11 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T106:** A Jellyfin restart during a run records `ok`/"restart" for the affected worker — not `cancelled`/"user stop": no stop marker exists, so neither the task catch nor the in-cycle path reports a user stop, and both directions keep their own fate; a real stop through the endpoint still records `cancelled`/"user stop" for the direction it names (F-M293)
 
-**T107:** Every worker holding a pending deferred fire shows a yellow `defer` lamp and its own line under the Workers list naming the worker, its stored cause and the moment the fire is due; the fire overrides `ok` AND `cancelled` — a direction with a pending fire is never shown as cancelled — while `failed` and `run` are left alone; the line is gated on the fire alone, so it survives a restart and disappears once the fire is consumed; the seeder never appears (F-M294, F-M292)
+**T107:** Every worker holding a pending deferred fire shows a yellow `defer` lamp and its own line under the Workers list naming the worker, its stored cause and the moment the fire is due; the fire overrides `ok` AND `cancelled` — a direction with a pending fire is never shown as cancelled — while `failed` and `run` are left alone; the line is gated on the fire alone, so it survives a restart and disappears once the fire is consumed; the seeder never appears (F-M294)
 
 
 
-**T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M292, F-M288)
+**T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M294, F-M288)
 
 
 **T104:** With upload switched off, postprocessing does not run: no anchor is armed, a fire that slips through records grey `skipped`/"upload disabled" instead of calling SubDL, and the manual endpoint answers `skipped`/`upload disabled` (F-M291)
