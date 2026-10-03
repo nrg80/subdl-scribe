@@ -56,28 +56,26 @@ pushes the manifest before creating the release. The manifest carries exactly on
 
 ## Branches
 
-`develop` is the repository's default branch and the only release branch. It carries the prereleases
-(`v<ver>-dev`) and is what the two test instances subscribe to.
+`develop` is the repository's default branch and carries the prereleases (`v<ver>-dev`); the two test
+instances subscribe to it. `main` carries the released line (`v<ver>`) and its catalog URL is the one
+the README hands to users.
 
-There is **no stable branch**: `main` was deleted on 03.10.2026 after it had been used for exactly one
-release, `12.1.12.169`. The version that release published is still installable — a release lives in
-its tag and its GitHub release, not in the branch that cut it — but no branch serves a stable catalog
-URL any more.
+**Both branches exist, and each serves its own version.** Neither is a promotion of the other: a release
+is cut on the branch whose channel is meant, because `scripts/release.sh` writes and pushes the manifest
+to the branch it runs on.
 
-**What that means in practice.** The README's install URL points at `develop`, so whoever installs from
-the catalog gets the newest prerelease. That is the intended state: everything published here is
-pre-release software, and the `-dev` tag says so.
+**`main` was absent for part of 03.10.2026** — deleted after it had served exactly one release,
+`12.1.12.169`, and restored the same day for `12.1.12.175`. It came back by re-creating it at the tip it
+had (`a12b8b4d`, a docs-only commit) and merging `develop` into it, **not** by pointing it at `develop`:
+a fast-forward carries `develop`'s `manifest.json` along and a stable-looking branch then serves the
+prerelease URL, which is the one mistake this document exists to prevent.
 
-**If a stable line is ever wanted again,** it does not come back by recreating a branch alone. It needs
-all three of: a branch that survives (recreating `main` and pushing it again is the smallest form), a
-manifest on that branch naming a `v<ver>` — **not** a `v<ver>-dev` — `sourceUrl`, and a release cut on
-that branch so the tag, the asset and the manifest agree. Pointing a fresh branch at `develop` gives a
-stable-looking branch that serves the prerelease URL, which is the one mistake this document used to
-warn about; the warning still holds, it just has no branch to apply to today.
-
-Restoring the deleted branch, if that is ever decided:
-`git push origin a12b8b4d3b6335c8f061ac03ce77fce007f5a7ff:refs/heads/main` puts back the exact tip it had
-(a docs-only commit). The stable release it served — tag `v12.1.12.169` — was never deleted.
+**Not every version reaches `main` — only the ones picked for it.** `develop` releases freely and often;
+`main` moves deliberately, one chosen version at a time, on the maintainer's decision. Skipping versions
+is normal (`main` went from `12.1.12.169` straight to `12.1.12.175`), because a release on `main` is a
+*release*, not a merge of everything in between — the merge brings the code forward, but the release is
+a choice. Nothing carries `main` along automatically: no CI workflow touches it, no scheduled job runs
+`release.sh`, and the script pushes only the branch it runs on.
 
 **Never rehearse the release flow against a cloned copy without cutting the API off.** `REPO_SLUG` is
 hardcoded to `nrg80/subdl-scribe` and the token is read from `/opt/data/.secrets.json`, so a
