@@ -179,8 +179,11 @@ public class SubdlOshashRefreshTask : IScheduledTask
         }
         catch (OperationCanceledException)
         {
-            LogUtil.Normal(_logger, "[SubDL-OshashRefresh] Cancelled.");
-            plugin.WorkerRuns.Finish("SubdlSyncOshashRefreshTask", Name, Registry.WorkerRunRegistry.Outcome.Cancelled, "cancelled");
+            // F-M293 (user decision 03.10.2026): no stop button exists for this worker, so this is a
+            // restart or a task cancel, not a user stop. See the postprocessing twin; the row reports
+            // the work that landed rather than an action nobody took.
+            LogUtil.Normal(_logger, "[SubDL-OshashRefresh] Cancelled — restart, not a user stop.");
+            plugin.WorkerRuns.Finish("SubdlSyncOshashRefreshTask", Name, Registry.WorkerRunRegistry.Outcome.Ok, "restart");
             throw;
         }
         catch (Exception ex)

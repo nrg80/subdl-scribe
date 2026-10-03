@@ -47,6 +47,14 @@ public class SubdlPostprocessController : ControllerBase
             return StatusCode(503, new { error = "Plugin instance not available" });
         }
 
+        // F-M291: the same gate as the scheduled path. Said out loud rather than silently doing nothing,
+        // so a caller can tell "upload is off" from "it ran and found nothing".
+        if (!plugin.Configuration.UploadEnabled)
+        {
+            LogUtil.Normal(_logger, "[SubDL] Manual postprocessing refused — upload disabled.");
+            return Ok(new { status = "skipped", reason = "upload disabled" });
+        }
+
         LogUtil.Normal(_logger, "[SubDL] Manual upload postprocessing triggered via API.");
         await UploadPipeline.RunUploadPostprocessingAsync().ConfigureAwait(false);
         return Ok(new { status = "postprocessing completed" });

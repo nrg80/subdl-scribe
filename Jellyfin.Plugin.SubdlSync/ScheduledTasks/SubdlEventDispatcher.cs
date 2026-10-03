@@ -618,6 +618,52 @@ public sealed class SubdlEventDispatcher : IDisposable
             onlyItems = null;
         }
 
+        // An ARRIVAL cycle has no waiting scheduled task to write the direction rows: Download and
+        // Upload were only ever recorded by SubdlDownloadTask/SubdlUploadTask, and an event never
+        // goes through them. Observed live 03.10.2026: two real arrival cycles ran (Ted Lasso 06:40,
+        // Dark Matter 09:45), both directions did their work, yet the GUI kept showing the previous
+        // scheduled run — only the Seeder row moved. The dispatcher therefore records those two rows
+        // itself, but ONLY for the arrival triggers: on a scheduled or manual run the waiting task
+        // owns them, and two writers on one row would fight.
+        if (IsArrivalTrigger(trigger))
+        {
+            RecordArrivalDirectionStart(dir);
+        }
+
+        try
+        {
+            await RunCycleBodyAsync(trigger, dir, onlyLibs, onlyItems).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Before the rows are written, so a failure is RED rather than green. The outer caller
+            // calls this again — it fills only the fates that are still null, so that is a no-op.
+            MarkCycleFailure(ex.Message);
+            throw;
+        }
+        finally
+        {
+            if (IsArrivalTrigger(trigger))
+            {
+                RecordArrivalDirectionFinish(dir);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The cycle's work: seed and run each direction, then the follow-up rounds.
+    /// <para>
+    /// Split out of <see cref="RunCycleAsync"/> so the arrival rows can be written in a
+    /// <c>finally</c>. Every exit — an early return while the seed lock is busy just as much as an
+    /// exception out of the pipeline — then leaves a finished row instead of one stuck on "run".
+    /// </para>
+    /// </summary>
+    /// <param name="trigger">Cycle trigger reason.</param>
+    /// <param name="dir">Direction this cycle works.</param>
+    /// <param name="onlyLibs">Libraries the event arrived in, or null for a full scan.</param>
+    /// <param name="onlyItems">Item ids the event collected, or null for full coverage.</param>
+    private async Task RunCycleBodyAsync(string trigger, CycleDirection dir, System.Collections.Generic.ISet<string>? onlyLibs, System.Collections.Generic.ISet<string>? onlyItems)
+    {
         // Rev.3: clear stale stop markers at cycle start so a leftover marker
         // from a previous crashed/restarted run cannot abort this cycle before it begins.
         Pipeline.PipelineStopSignal.ClearStaleMarkers(Plugin.Instance?.DataFolderPath ?? string.Empty);
@@ -851,7 +897,17 @@ public sealed class SubdlEventDispatcher : IDisposable
             var progress = new Progress<double>();
             var (upSummary, downSummary) = await ExecutePipelineAsync(upload, config, filter, progress).ConfigureAwait(false);
             // If this direction was stopped by marker, stop the whole cycle.
-            if ((upload && upSummary?.StopRequested == true) || (!upload && downSummary?.StopRequested == true))
+            // F-M293 (user decision 03.10.2026): gated on the MARKER, not on StopRequested alone.
+            // A shutdown also leaves StopRequested true (the pipeline keeps its partial result and
+            // flags the stop), and this call sets Cancelled/"user stop" for BOTH directions — so a
+            // restart at 14:18 painted the download as a user stop although its run had finished
+            // clean ten minutes earlier, and the upload as stopped by a button nobody pressed.
+            // Measured on prod: 'cycle end ("event", dir Both) — user stop.' was logged for a
+            // restart, which is the line the user then read off the page.
+            if ((upload && upSummary?.StopRequested == true
+                    && Pipeline.PipelineStopSignal.HasMarker(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: true))
+                || (!upload && downSummary?.StopRequested == true
+                    && Pipeline.PipelineStopSignal.HasMarker(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: false)))
             {
                 RequestUserStop($"stop marker {(upload ? "upload" : "download")}");
             }
@@ -1244,6 +1300,89 @@ public sealed class SubdlEventDispatcher : IDisposable
     }
 
     /// <summary>
+    /// Marks the arrival cycle's directions as RUNNING, so a cycle that dies mid-scan shows the
+    /// attempt instead of the previous cycle's green.
+    /// </summary>
+    /// <param name="dir">Direction this cycle works.</param>
+    private void RecordArrivalDirectionStart(CycleDirection dir)
+    {
+        var runs = Plugin.Instance?.WorkerRuns;
+        if (runs == null)
+        {
+            return;
+        }
+
+        if (dir != CycleDirection.UploadOnly)
+        {
+            runs.Start(Registry.WorkerRunRegistry.DownloadWorkerKey, "Download");
+        }
+
+        if (dir != CycleDirection.DownloadOnly)
+        {
+            runs.Start(Registry.WorkerRunRegistry.UploadWorkerKey, "Upload");
+        }
+    }
+
+    /// <summary>
+    /// Writes the arrival cycle's direction rows, ranked by the same rule the waiting tasks use
+    /// (<see cref="Registry.WorkerRunRegistry.DescribeCycle"/>), so a row reads identically whether
+    /// an arrival or a schedule produced the cycle. Without it a quota stop or a failed arrival
+    /// cycle would keep showing the previous run's green — exactly the blindness it fixes.
+    /// </summary>
+    /// <param name="dir">Direction this cycle works.</param>
+    private void RecordArrivalDirectionFinish(CycleDirection dir)
+    {
+        var plugin = Plugin.Instance;
+        if (plugin == null)
+        {
+            return;
+        }
+
+        var config = plugin.Configuration;
+        var (seedOutcome, seedDetail) = GetSeederOutcome();
+
+        // A DISABLED direction is not a green one. The arrival path leaves a switched-off direction
+        // untouched — it has nothing to report — so DescribeCycle would fall through to `ok` and paint
+        // "nothing happened here" as "this ran fine". The scheduled task records `skipped`/"disabled"
+        // for exactly that case; the arrival path has to say the same thing.
+        if (dir != CycleDirection.UploadOnly)
+        {
+            if (!config.DownloadEnabled)
+            {
+                plugin.WorkerRuns.Finish(
+                    Registry.WorkerRunRegistry.DownloadWorkerKey, "Download",
+                    Registry.WorkerRunRegistry.Outcome.Skipped, "disabled");
+            }
+            else
+            {
+                var (downOutcome, downDetail) = GetDirectionOutcome(upload: false);
+                var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
+                    cycleFinished: true, seedOutcome, seedDetail, downOutcome, downDetail);
+                plugin.WorkerRuns.Finish(
+                    Registry.WorkerRunRegistry.DownloadWorkerKey, "Download", outcome, detail, config.DownloadDryRun);
+            }
+        }
+
+        if (dir != CycleDirection.DownloadOnly)
+        {
+            if (!config.UploadEnabled)
+            {
+                plugin.WorkerRuns.Finish(
+                    Registry.WorkerRunRegistry.UploadWorkerKey, "Upload",
+                    Registry.WorkerRunRegistry.Outcome.Skipped, "disabled");
+            }
+            else
+            {
+                var (upOutcome, upDetail) = GetDirectionOutcome(upload: true);
+                var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
+                    cycleFinished: true, seedOutcome, seedDetail, upOutcome, upDetail);
+                plugin.WorkerRuns.Finish(
+                    Registry.WorkerRunRegistry.UploadWorkerKey, "Upload", outcome, detail, config.DryRun);
+            }
+        }
+    }
+
+    /// <summary>
     /// Marks a FAILED cycle on the directions that have no fate of their own yet.
     /// <para>
     /// Belt and braces for failures outside a pipeline run (queue merge, save, follow-up). A fate
@@ -1285,6 +1424,24 @@ public sealed class SubdlEventDispatcher : IDisposable
 
     private async Task<bool> SeedAsync(string reason, System.Collections.Generic.ISet<string>? onlyLibraries = null, CycleDirection dir = CycleDirection.Both, bool precheck = false, System.Collections.Generic.ISet<string>? onlyItemIds = null)
     {
+        // F-M188/F-M290: no library selected = there is nothing this seeder could look at, so it does
+        // not even start. The same condition is checked again inside Scan(), but by then the run lock
+        // is held, the pre-check has already walked the library for change stamps and the database has
+        // been touched — all of it to arrive at "nothing to queue". Checked here it costs one lookup.
+        //
+        // GREY, not green: a scan that was never allowed to run must not read like one that ran and
+        // found nothing. The wording matches Scan()'s own line so the two cannot be told apart in the
+        // log either.
+        if (LibraryScope.Create(_libraryManager, Plugin.Instance?.Configuration?.SelectedLibraries, _logger).IsEmpty)
+        {
+            LogUtil.Normal(_logger, "[SubDL-Seed] No libraries selected — seeder not started ({Reason}).", reason);
+            _lastSeedNewIdsUp.Clear();
+            _lastSeedNewIdsDown.Clear();
+            _lastSeedNewItems = 0;
+            RecordSeeder(Registry.WorkerRunRegistry.Outcome.Skipped, "no libraries selected");
+            return true; // nothing to seed; the directions have no work either
+        }
+
         // Cross-run mutual exclusion via the single global block file (stale detection inside).
         if (!await Pipeline.PipelineRunLock.AcquireAsync(_logger, "seeder").ConfigureAwait(false))
         {

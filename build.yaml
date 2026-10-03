@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.169"
+version: "12.1.12.175"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,68 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.175: A pending deferred fire now decides the worker's word and colour for every row
+    that does not claim something stronger, not only for a green one. The previous version
+    overrode green alone, so the download sat on a yellow "cancel" while its fire for 04:37 was
+    waiting - and "cancel" is the wrong word for a direction that is scheduled to resume. Both
+    "ok" and "cancelled" claim that nothing is owed, and a pending fire proves otherwise. Only
+    "failed" (something is broken) and "run" (in progress) are left alone.
+  v12.1.12.174: A Jellyfin restart is no longer reported as a user stop. A Jellyfin restart is no longer reported as a user stop. Both cancel the running
+    task identically and the token carries no reason, so the catch treated them the same - it
+    wrote a stop marker and called RequestUserStop, which records cancelled/"user stop" for BOTH
+    directions at once. Measured on prod: a restart at 14:18 painted the download as a user stop
+    although its run had finished clean at 14:08, and the upload as stopped by a button nobody
+    pressed; 58 uploads that had reached SubDL sat behind an action the user never took. The stop
+    marker is the discriminator - the Stop endpoint writes it before it signals, a shutdown never
+    does - so it is now tested without being consumed and everything else records ok/"restart".
+    Postprocessing and the OSHash refresh have no stop button, so for them every cancellation is a
+    restart by construction.
+
+    "Deferred" now means a fire was scheduled, for ANY worker, and the moment is named. A pending
+    re-fire is the deferral itself: it exists only because a run could not finish, the row
+    describes the past while the fire describes what is owed. Lamps: a pending fire turns a green
+    row yellow for every worker that can hold one - download, upload, database refresh, OSHash
+    refresh, postprocessing; red, grey and running are left alone. The line under the Workers list
+    names each deferred worker with its own cause and the due moment, gated on the fire alone so a
+    restart cannot blank it. Two earlier versions missed on the same day: one named ordinary
+    backlog pickup as if the direction were stuck, the other vanished after a restart while the
+    fire was still pending. The seeder holds no fire of its own and never appears.
+  v12.1.12.173: A pending deferred fire paints the direction row yellow. A direction whose deferred fire is still pending is painted yellow even when
+    its last run ended green, and the deferral line under the Workers list appears only while
+    the direction is actually stopped. Measured on prod: the download hit its daily limit at
+    06:08 leaving 384 of 412 queued items due and armed its fire for 04:37 the next day; it
+    then ran normally at 10:30 and 13:50, so its row read ok and the lamp went green while the
+    backlog still waited - and the line kept naming that fire as if the direction were stuck.
+    Only a green row is overridden: red, grey and running rows keep their own statement. The
+    fire itself is never touched - dropping it would leave the due items waiting for the next
+    regular anchor.
+  v12.1.12.172: Postprocessing does not run while the upload direction is off. Postprocessing does not run while the upload direction is off.
+    Its subject is work that only exists because upload is on - it resolves
+    pending-review entries against /user/mySubtitles, and an entry can only be
+    pending review if something was uploaded. With upload switched off it kept
+    firing on its own anchor, called SubDL and wrote a run row for a direction
+    the user had switched off. The anchor is now not armed, the task refuses a
+    fire that was armed earlier anyway, and the manual endpoint answers
+    skipped/"upload disabled" instead of doing the work.
+  v12.1.12.171: The seeder no longer starts when no library is selected. The seeder no longer starts when no library is selected.
+    It already refused to queue anything without a selection, but only from
+    inside the scan - reached after the global run lock was taken and the
+    change-stamp pre-check had walked the library. A configuration with no
+    library therefore still paid for a lock, a library walk and a database
+    touch to arrive at "nothing to queue". The check now sits at the top of
+    the seed step, ahead of the lock, and the worker row reads grey
+    skipped/"no libraries selected" rather than a green run that found nothing.
+  v12.1.12.170: An arrival cycle now updates the Download and Upload rows too. An arrival cycle now updates the Download and Upload rows too.
+    An arrival cycle starts in the dispatcher and never passes through the
+    download or upload task, and those two were the only writers of their own
+    row. So an arrival run did its work, logged it, and left the rows showing
+    the last SCHEDULED run: measured 03.10.2026, the 06:40 and 09:45 arrival
+    cycles worked both directions while the rows still read 05:58 and 06:08 -
+    only the Seeder row moved. The rows were truthful about the wrong run, and
+    a reader would conclude nothing had happened. The dispatcher now owns both
+    rows for the arrival triggers and only for those - on a scheduled run the
+    waiting task owns them - and ranks them with the same rule, so a row reads
+    the same whichever path produced the cycle.
   v12.1.12.169: Release commits carry the maintainer's own identity.
     The release script forced "SubDL Scribe <noreply@localhost>" on the commit that
     writes the manifest, so every release produced one commit that belonged to nobody:

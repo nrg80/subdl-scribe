@@ -1013,6 +1013,22 @@
                             list.innerHTML = '';
 workers.forEach(function (w) {
                                 var oc = subdlWorkerOutcome(w.Outcome);
+                                // F-M292/F-M294 (user decision 03.10.2026): a pending deferred fire turns a
+                                // GREEN row YELLOW for ANY worker -- the fire is work the run could not do,
+                                // so green would claim the worker is finished while work is still owed.
+                                // Only green is overridden: a red (broken) or grey (never/disabled) row is
+                                // a stronger and different statement, and a running one is live.
+                                // F-M294 (user correction 03.10.2026): a pending fire IS the deferral, so it
+                                // decides the word for every worker whose row does not claim something
+                                // stronger. Both `ok` and `cancelled` claim "nothing is owed", and a pending
+                                // fire proves otherwise -- measured on prod: the download sat on a yellow
+                                // "cancel" while its 04:37 fire was waiting, and "cancel" was the wrong word
+                                // for a direction that is scheduled to resume. Only `failed` (something is
+                                // broken) and `run` (live) are left alone: both are stronger statements.
+                                var wo = (w.Outcome || '').toLowerCase();
+                                if (w.Deferred && wo !== 'failed' && wo !== 'run') {
+                                    oc = subdlWorkerOutcome('deferred');
+                                }
                                 var when = w.Started ? subdlFmtDateTime(w.Started) : '\u2014';
                                 var row = document.createElement('div');
                                 row.className = 'subdl-status-row';
@@ -1205,16 +1221,25 @@ workers.forEach(function (w) {
                         // "run lock busy — rescheduled", "cycle already active"), never a label invented
                         // here: a run-lock deferral is not a rate limit, and calling it one sends the
                         // reader after the wrong problem. The direction name is added, the rest is verbatim.
-                        function localNote(down) {
-                            var stopped = down ? loc.downloadStopped : loc.uploadStopped;
-                            var until = down ? loc.downloadDeferUntil : loc.uploadDeferUntil;
-                            if (!stopped && !until) { return ''; }
-                            var when = until ? resetLocal(until) : '';
-                            var reason = (down ? loc.downloadReason : loc.uploadReason) || 'deferred';
-                            return (down ? 'Download' : 'Upload') + ': ' + reason
-                                + (when ? ' — next attempt ' + when : '');
-                        }
-                        var localLines = [localNote(false), localNote(true)].filter(function (x) { return x; });
+                        // F-M288/F-M294 (reworked 03.10.2026, user decision): the line names EVERY
+                        // worker that has a deferred fire pending, whichever worker it is, together
+                        // with WHEN that fire is due. It is not gated on a direction being stopped:
+                        // the fire IS the deferral, and a worker that has one has work still owed.
+                        //
+                        // Earlier versions got this wrong twice, both measured on prod the same day.
+                        // The first rendered the line whenever a fire existed and kept saying
+                        // "Download: deferred — next attempt 4:37:00 AM" all day for a direction that
+                        // was running fine. The second gated on the direction being STOPPED, which a
+                        // Jellyfin restart could break: the restart rewrote the row, the gate read
+                        // false, and the line vanished while the fire was still pending — the exact
+                        // state it exists to report. A pending fire is now the single, sufficient
+                        // condition, and it is read per worker rather than for two directions.
+                        var deferred = (loc && loc.deferred) || [];
+                        var localLines = deferred.map(function (d) {
+                            var when = d.due ? resetLocal(d.due) : '';
+                            var reason = d.reason || 'deferred';
+                            return d.name + ': ' + reason + (when ? ' — next attempt ' + when : '');
+                        });
                         var deferLine = document.querySelector('#SubdlLocalDeferLine');
                         if (deferLine) {
                             // Plain text, page default colour. Empty when nothing is deferred — then the

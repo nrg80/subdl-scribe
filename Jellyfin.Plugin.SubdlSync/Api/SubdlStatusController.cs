@@ -119,6 +119,33 @@ public class SubdlStatusController : ControllerBase
         }
 
         var rows = plugin.WorkerRuns.List();
+
+        // F-M292/F-M294 (user decision 03.10.2026): a worker whose deferred fire is still pending is
+        // painted YELLOW, whichever worker it is — not just the two directions. A fire exists only
+        // because a run could not do its work (quota, run lock, a restart mid-run), so the stored row
+        // describes the past while the fire describes what is still owed.
+        //
+        // Measured on prod 03.10.2026: the download hit its daily limit at 06:08 leaving 384 of 412
+        // queued items due and armed its fire for 04:37 the next day, then ran normally at 10:30 and
+        // 13:50 — its last row read ok, the lamp went green, and the backlog was still waiting.
+        //
+        // Read from the coordinator rather than the stored row: the fire is live state, the row is a
+        // record. Keys are the worker keys, so every worker can hold one.
+        var pendingFires = new System.Collections.Generic.Dictionary<string, DateTime>(StringComparer.Ordinal);
+        try
+        {
+            var coord = Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSchedulerCoordinator.Instance;
+            if (coord != null)
+            {
+                pendingFires = coord.GetPendingFires();
+            }
+        }
+        catch
+        {
+            // Plugin not fully started — the map stays empty and every row keeps its own colour.
+            // This endpoint must never fail over a lamp.
+        }
+
         return Ok(new
         {
             Workers = rows.Select(r => new
@@ -129,7 +156,12 @@ public class SubdlStatusController : ControllerBase
                 Ended = r.Ended?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
                 r.Outcome,
                 r.Detail,
-                r.DryRun
+                r.DryRun,
+                // F-M294: per worker, plus the moment the fire is due so the page can name it.
+                Deferred = pendingFires.ContainsKey(r.Id),
+                DeferUntil = pendingFires.TryGetValue(r.Id, out var due)
+                    ? due.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+                    : null
             }),
             Timestamp = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
         });

@@ -115,73 +115,82 @@ public class SubdlQuota : ControllerBase
     // The UI renders exactly the docs structure: plan, search, downloads,
     // errors. All strings resolved server-side; UI only formats numbers.
     /// <summary>
-    /// Adds the LOCAL deferral state to the answer (03.10.2026): whether each direction is deferred
-    /// right now, WHY, and when its deferred next attempt is due.
+    /// The LOCAL deferral state for the answer: every worker that has a deferred fire pending, with
+    /// the moment it is due (F-M288/F-M294, reworked 03.10.2026).
     /// <para>
-    /// The server counters cannot express this. They can read 3/1000 while the direction is already
-    /// deferred, so a box built from them alone shows blue bars and no hint that nothing will run for
-    /// the next quarter of an hour. The values come from the worker row (the direction's fate and its
-    /// own wording) and the scheduler (the pending recovery fire) — the same sources the Workers list
-    /// and the server log read, so all three agree.
+    /// The server counters cannot express this. They can read 3/1000 while a worker is already
+    /// deferred, so a box built from them alone shows blue bars and no hint that nothing will run
+    /// for the next quarter of an hour. The values come from the scheduler's pending fires — the
+    /// same source the Workers list and the server log read, so all three agree.
     /// </para>
     /// <para>
-    /// The reason is passed through verbatim rather than summarised: a deferral is a run-lock push
-    /// just as often as it is a rate limit, and a label saying "rate limit" on a lock deferral would
-    /// send the reader looking for a quota problem that does not exist.
+    /// The user's rule (03.10.2026): "defer whenever a fire was scheduled, whichever worker". So
+    /// this is not limited to the two directions — the database refresh, the OSHash refresh and
+    /// postprocessing carry fires of their own and are named by their own worker name.
+    /// </para>
+    /// <para>
+    /// The reason comes from the worker's own stored row, passed through verbatim rather than
+    /// summarised: a deferral is a run-lock push just as often as it is a rate limit, and a label
+    /// saying "rate limit" on a lock deferral would send the reader looking for a quota problem
+    /// that does not exist.
     /// </para>
     /// </summary>
-    /// <returns>An object the config page renders under the bars; all fields false/null when nothing is deferred.</returns>
+    /// <returns>The deferred workers, each with its short name, cause and due moment; empty when nothing is deferred.</returns>
     private static object LocalRateLimitState()
     {
-        DateTime? upUntil = null, downUntil = null;
-        string upReason = string.Empty, downReason = string.Empty;
-        bool upStopped = false, downStopped = false;
+        var entries = new System.Collections.Generic.List<object>();
         try
         {
             var coord = Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSchedulerCoordinator.Instance;
-            if (coord != null)
+            if (coord == null)
             {
-                upUntil = coord.GetPendingFireUtc(upload: true);
-                downUntil = coord.GetPendingFireUtc(upload: false);
+                return new { deferred = entries };
             }
 
-            // The REASON comes from the worker's own row, not from a blanket label. "Deferred" covers
-            // several unrelated causes — the run lock, a spent SubDL allowance, a user stop — and the
-            // config page must not call a lock deferral a rate limit (measured 03.10.2026: the upload
-            // was deferred at 05:43 only because a DownloadOnly cycle was already running, with no
-            // allowance consumed at all). The row's Detail carries the cause verbatim, so it is passed
-            // through instead of being guessed.
-            var registry = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns;
-            if (registry != null)
+            var fires = coord.GetPendingFires();
+            if (fires.Count == 0)
             {
-                var (upOutcome, upDetail) = ReadWorker(registry, "SubdlSyncUploadTask");
-                var (downOutcome, downDetail) = ReadWorker(registry, "SubdlSyncDownloadTask");
-                upStopped = string.Equals(upOutcome, Registry.WorkerRunRegistry.Outcome.Deferred, StringComparison.Ordinal);
-                downStopped = string.Equals(downOutcome, Registry.WorkerRunRegistry.Outcome.Deferred, StringComparison.Ordinal);
-                upReason = upStopped ? (upDetail ?? string.Empty) : string.Empty;
-                downReason = downStopped ? (downDetail ?? string.Empty) : string.Empty;
+                // Nothing pending: the line stays empty. A deferral whose fire is gone is over — the
+                // worker already ran again, and a stale row must not paint a line for it.
+                return new { deferred = entries };
+            }
 
-                // A deferral with no pending fire is over — the task already ran again. Then the row
-                // is stale and must not paint a yellow line for a direction that is moving.
-                if (upStopped && upUntil == null) { upStopped = false; upReason = string.Empty; }
-                if (downStopped && downUntil == null) { downStopped = false; downReason = string.Empty; }
+            var registry = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns;
+
+            // Display order follows the Workers list, so the line reads in the same sequence as the
+            // lamps above it. A worker with a fire but no known name still appears — under its key.
+            foreach (var worker in Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.KnownWorkers)
+            {
+                if (!fires.TryGetValue(worker.Key, out var due))
+                {
+                    continue;
+                }
+
+                var reason = string.Empty;
+                var row = registry?.Get(worker.Key);
+                if (row != null && string.Equals(row.Outcome,
+                        Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Deferred,
+                        StringComparison.Ordinal))
+                {
+                    reason = row.Detail ?? string.Empty;
+                }
+
+                entries.Add(new
+                {
+                    name = worker.Name,
+                    key = worker.Key,
+                    reason,
+                    due = due.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+                });
             }
         }
         catch
         {
-            // The plugin may not be fully started (page requested during a restart) — the box then
-            // simply carries no local note; it must never fail the quota call itself.
+            // The plugin may not be fully started (page requested during a restart) — the line then
+            // simply carries no note; it must never fail the quota call itself.
         }
 
-        return new
-        {
-            uploadStopped = upStopped,
-            downloadStopped = downStopped,
-            uploadReason = upReason,
-            downloadReason = downReason,
-            uploadDeferUntil = upUntil?.ToString("O"),
-            downloadDeferUntil = downUntil?.ToString("O")
-        };
+        return new { deferred = entries };
     }
 
     /// <summary>
