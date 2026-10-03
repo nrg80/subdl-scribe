@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.172",
-        "changelog": "v12.1.12.172: Postprocessing does not run while the upload direction is off.\n    Its subject is work that only exists because upload is on - it resolves\n    pending-review entries against /user/mySubtitles, and an entry can only be\n    pending review if something was uploaded. With upload switched off it kept\n    firing on its own anchor, called SubDL and wrote a run row for a direction\n    the user had switched off. The anchor is now not armed, the task refuses a\n    fire that was armed earlier anyway, and the manual endpoint answers\n    skipped/\"upload disabled\" instead of doing the work.",
+        "version": "12.1.12.173",
+        "changelog": "v12.1.12.173: A direction whose deferred fire is still pending is painted yellow even when\n    its last run ended green, and the deferral line under the Workers list appears only while\n    the direction is actually stopped. Measured on prod: the download hit its daily limit at\n    06:08 leaving 384 of 412 queued items due and armed its fire for 04:37 the next day; it\n    then ran normally at 10:30 and 13:50, so its row read ok and the lamp went green while the\n    backlog still waited - and the line kept naming that fire as if the direction were stuck.\n    Only a green row is overridden: red, grey and running rows keep their own statement. The\n    fire itself is never touched - dropping it would leave the due items waiting for the next\n    regular anchor.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.172-dev/Jellyfin.Plugin.SubdlSync_12.1.12.172.zip",
-        "checksum": "404ddb0a84758c8e3f6456ef6245c02e",
-        "timestamp": "2026-10-03T09:29:27Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.173-dev/Jellyfin.Plugin.SubdlSync_12.1.12.173.zip",
+        "checksum": "2287595ce1ba881e62553aa52b050623",
+        "timestamp": "2026-10-03T12:17:28Z"
       }
     ]
   }
