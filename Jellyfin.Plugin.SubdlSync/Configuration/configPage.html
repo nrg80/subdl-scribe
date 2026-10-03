@@ -1018,7 +1018,15 @@ workers.forEach(function (w) {
                                 // so green would claim the worker is finished while work is still owed.
                                 // Only green is overridden: a red (broken) or grey (never/disabled) row is
                                 // a stronger and different statement, and a running one is live.
-                                if (w.Deferred && (w.Outcome || '').toLowerCase() === 'ok') {
+                                // F-M294 (user correction 03.10.2026): a pending fire IS the deferral, so it
+                                // decides the word for every worker whose row does not claim something
+                                // stronger. Both `ok` and `cancelled` claim "nothing is owed", and a pending
+                                // fire proves otherwise -- measured on prod: the download sat on a yellow
+                                // "cancel" while its 04:37 fire was waiting, and "cancel" was the wrong word
+                                // for a direction that is scheduled to resume. Only `failed` (something is
+                                // broken) and `run` (live) are left alone: both are stronger statements.
+                                var wo = (w.Outcome || '').toLowerCase();
+                                if (w.Deferred && wo !== 'failed' && wo !== 'run') {
                                     oc = subdlWorkerOutcome('deferred');
                                 }
                                 var when = w.Started ? subdlFmtDateTime(w.Started) : '\u2014';

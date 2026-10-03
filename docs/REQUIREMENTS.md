@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.174.
+**Status:** Implementation — v12.1.12.175.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -1065,7 +1065,9 @@ A restart cancels the running task exactly as the stop button does, and the canc
 
 The user's rule (03.10.2026): *"defer whenever a fire was scheduled, whichever worker."* A pending re-fire is the deferral itself: it exists only because a run could not finish its work, and the stored row describes the past while the fire describes what is still owed. Every worker that can hold a fire is covered — download, upload, database refresh, OSHash refresh and postprocessing — not just the two directions.
 
-**Lamps.** A pending fire turns a GREEN row YELLOW, whichever worker it is. Only green is overridden: red (broken) and grey (never/disabled) are stronger and different statements, and `run` is live. The flag is read per worker from the coordinator, not from the row, so lamp and fire cannot drift apart.
+**Lamps.** A pending fire decides the WORD and the colour for every worker whose row does not claim something stronger: it paints the row YELLOW as `defer`. The first version overrode only a GREEN row, which was wrong (user correction 03.10.2026, measured on prod the same day): the download sat on a yellow `cancel` while its fire for 04:37 was waiting, and "cancel" is the wrong word for a direction that is scheduled to resume. Both `ok` and `cancelled` claim that nothing is owed, and a pending fire proves otherwise.
+
+**Only `failed` and `run` are left alone** — something broken, or a run in progress, are stronger and different statements. The flag is read per worker from the coordinator, not from the row, so lamp and fire cannot drift apart.
 
 **The line.** Under the Workers list, one entry per deferred worker in the Workers-list order: the worker's short name, its own stored cause verbatim, and when the fire is due in the viewer's zone. It is gated on the fire alone — not on a direction being stopped. Two earlier versions got this wrong on the same day: the first ran whenever a fire existed and named an ordinary backlog pickup as if the direction were stuck; the second gated on the row being stopped, which a restart could break, so the line vanished while the fire was pending.
 
@@ -1255,7 +1257,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T106:** A Jellyfin restart during a run records `ok`/"restart" for the affected worker — not `cancelled`/"user stop": no stop marker exists, so neither the task catch nor the in-cycle path reports a user stop, and both directions keep their own fate; a real stop through the endpoint still records `cancelled`/"user stop" for the direction it names (F-M293)
 
-**T107:** Every worker holding a pending deferred fire shows a yellow lamp and its own line under the Workers list naming the worker, its stored cause and the moment the fire is due; a green row is overridden and a red, grey or running row is not; the line is gated on the fire alone, so it survives a restart and disappears once the fire is consumed; the seeder never appears (F-M294, F-M292)
+**T107:** Every worker holding a pending deferred fire shows a yellow `defer` lamp and its own line under the Workers list naming the worker, its stored cause and the moment the fire is due; the fire overrides `ok` AND `cancelled` — a direction with a pending fire is never shown as cancelled — while `failed` and `run` are left alone; the line is gated on the fire alone, so it survives a restart and disappears once the fire is consumed; the seeder never appears (F-M294, F-M292)
 
 
 
