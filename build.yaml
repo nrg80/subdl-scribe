@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.170"
+version: "12.1.12.171"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,7 +26,15 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
-  v12.1.12.170: An arrival cycle now updates the Download and Upload rows too.
+  v12.1.12.171: The seeder no longer starts when no library is selected.
+    It already refused to queue anything without a selection, but only from
+    inside the scan - reached after the global run lock was taken and the
+    change-stamp pre-check had walked the library. A configuration with no
+    library therefore still paid for a lock, a library walk and a database
+    touch to arrive at "nothing to queue". The check now sits at the top of
+    the seed step, ahead of the lock, and the worker row reads grey
+    skipped/"no libraries selected" rather than a green run that found nothing.
+  v12.1.12.170: An arrival cycle now updates the Download and Upload rows too. An arrival cycle now updates the Download and Upload rows too.
     An arrival cycle starts in the dispatcher and never passes through the
     download or upload task, and those two were the only writers of their own
     row. So an arrival run did its work, logged it, and left the rows showing
