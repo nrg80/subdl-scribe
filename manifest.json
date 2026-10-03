@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.166",
-        "changelog": "v12.1.12.166: The two candidate settings now agree with each other, and the search obeys them.\n    \"Max candidates per language\" used to be ignored by the search, which stopped at a hard-coded\n    three per language no matter what the setting said, and a budget below \"keep X\" made that\n    setting unreachable. Both numbers are derived from one place now.",
+        "version": "12.1.12.167",
+        "changelog": "v12.1.12.167: The plugin no longer stops itself. The one limit left is SubDL's.\n    A per-run hourly call bucket sat in our own code and could end a whole run when it\n    filled up. SubDL publishes DAILY counters only, so that bucket was our invention, and\n    it stopped runs the server would have allowed: in two measured runs 735 of 2000 searches\n    and 16 of 50 downloads were still free when it fired. It is gone. What remains is the\n    pacing - the gap between two transfers and the pause between calls - and the run stops\n    only when SubDL itself says no (HTTP 429), decided against the live server counters.\n    With it go the roll-over anchor and the \"wait until the next hour\" behaviour: a deferral\n    now lands a plain job spacing after the stop, the same knob every other wait already uses,\n    instead of a moving point an hour away that the settings page could not explain.\n    The watchdog's grace no longer scales with the rate either. One file transfer is allowed\n    five minutes, and the scaled value was shorter, so a slow but working download could be\n    aborted as \"frozen\"; the grace is a fixed six minutes now.\n    Smaller, same round: the call pause runs to 10 seconds instead of 5, and the rate field\n    is labelled \"Transfer rate\" because that is what it is - a pace, not a ceiling.\n    The quota box also names a local deferral and its cause and turns the bar yellow with it.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.166-dev/Jellyfin.Plugin.SubdlSync_12.1.12.166.zip",
-        "checksum": "cfeaa25db606ba8aca3d72d855e320c6",
-        "timestamp": "2026-10-02T15:00:01Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.167-dev/Jellyfin.Plugin.SubdlSync_12.1.12.167.zip",
+        "checksum": "bd08b492399ea113f0dbb114027d0d03",
+        "timestamp": "2026-10-03T04:49:43Z"
       }
     ]
   }
