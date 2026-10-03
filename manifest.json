@@ -12,9 +12,9 @@
         "version": "12.1.12.169",
         "changelog": "v12.1.12.169: Release commits carry the maintainer's own identity.\n    The release script forced \"SubDL Scribe <noreply@localhost>\" on the commit that\n    writes the manifest, so every release produced one commit that belonged to nobody:\n    GitHub attributed it to no account, the contributor list showed a second author next\n    to the maintainer, and thirteen commits carried a name the maintainer never wrote.\n    The override is gone - the commit inherits the repository's identity, which is the\n    account's verified address, so one author stands behind the whole history.\n    No plugin behaviour change; the release process and the artifact are untouched.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.169-dev/Jellyfin.Plugin.SubdlSync_12.1.12.169.zip",
-        "checksum": "fa9f5f5ac5bb3396853451763f071b25",
-        "timestamp": "2026-10-03T07:01:15Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.169/Jellyfin.Plugin.SubdlSync_12.1.12.169.zip",
+        "checksum": "e78817848f9b4bb49a6542aa8354d228",
+        "timestamp": "2026-10-03T07:43:06Z"
       }
     ]
   }
