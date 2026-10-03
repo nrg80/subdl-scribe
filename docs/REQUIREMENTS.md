@@ -1012,6 +1012,12 @@ The dispatcher records both direction rows for the arrival triggers (`event`, `a
 
 A direction that is switched OFF is recorded `skipped`/`disabled`, not `ok`: the arrival path leaves it untouched, so a plain `DescribeCycle` call would fall through to green and paint "nothing happened here" as "this ran fine". **Test: T102.**
 
+**F-M290:** **With no library selected the seeder does not start at all — it does not scan, pre-check, or take the run lock to conclude that there is nothing to do.**
+
+No selection means there is nothing this seeder could look at, so the answer is known before any work begins. The check sits at the TOP of the seed step, ahead of the global run lock, the change-stamp pre-check and every database read: reaching the same conclusion from inside `Scan()` costs a held lock, a walked library and a touched database for a result that was already certain.
+
+The row is `skipped` with "no libraries selected" — GREY, because a scan that was never allowed to run must not read like one that ran and found nothing. The wording matches the line `Scan()` logs for the same condition, so the two cannot be told apart. **Test: T103.**
+
 **F-M268:** **One colour rule for every worker: green = the work ran and ended without an exception, yellow = the work did not happen but nothing is broken, red = something is broken, grey = not run.**
 
 The palette: the page accent is `#00a4dc`. `run` → accent; `ok` → `#107c10`; `failed` → `#a4262c`; `cancelled` and `deferred` → `#ffc107` (quota, run-lock deferral, user stop); `skipped` and `never` → `#767676`; a dry-run note → `#9a9a9a`.
@@ -1203,6 +1209,9 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 
 **T102:** An arrival cycle updates the Download, Upload and Seeder rows together, and each direction's row carries that cycle's fate (green on work done, yellow on a quota stop, red on a failure); a direction that is switched off is recorded grey/`disabled` rather than green; a scheduled cycle leaves the arrival path out of it entirely (F-M289)
+
+
+**T103:** With no library selected, a seed step leaves a grey `skipped`/"no libraries selected" seeder row, logs `No libraries selected — seeder not started`, holds no run lock and does not walk the library — neither on a scheduled run nor on an arrival (F-M290)
 
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)

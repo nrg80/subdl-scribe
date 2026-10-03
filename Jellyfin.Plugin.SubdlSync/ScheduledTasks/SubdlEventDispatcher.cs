@@ -1414,6 +1414,24 @@ public sealed class SubdlEventDispatcher : IDisposable
 
     private async Task<bool> SeedAsync(string reason, System.Collections.Generic.ISet<string>? onlyLibraries = null, CycleDirection dir = CycleDirection.Both, bool precheck = false, System.Collections.Generic.ISet<string>? onlyItemIds = null)
     {
+        // F-M188/F-M290: no library selected = there is nothing this seeder could look at, so it does
+        // not even start. The same condition is checked again inside Scan(), but by then the run lock
+        // is held, the pre-check has already walked the library for change stamps and the database has
+        // been touched — all of it to arrive at "nothing to queue". Checked here it costs one lookup.
+        //
+        // GREY, not green: a scan that was never allowed to run must not read like one that ran and
+        // found nothing. The wording matches Scan()'s own line so the two cannot be told apart in the
+        // log either.
+        if (LibraryScope.Create(_libraryManager, Plugin.Instance?.Configuration?.SelectedLibraries, _logger).IsEmpty)
+        {
+            LogUtil.Normal(_logger, "[SubDL-Seed] No libraries selected — seeder not started ({Reason}).", reason);
+            _lastSeedNewIdsUp.Clear();
+            _lastSeedNewIdsDown.Clear();
+            _lastSeedNewItems = 0;
+            RecordSeeder(Registry.WorkerRunRegistry.Outcome.Skipped, "no libraries selected");
+            return true; // nothing to seed; the directions have no work either
+        }
+
         // Cross-run mutual exclusion via the single global block file (stale detection inside).
         if (!await Pipeline.PipelineRunLock.AcquireAsync(_logger, "seeder").ConfigureAwait(false))
         {
