@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.171"
+version: "12.1.12.172"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,7 +26,15 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
-  v12.1.12.171: The seeder no longer starts when no library is selected.
+  v12.1.12.172: Postprocessing does not run while the upload direction is off.
+    Its subject is work that only exists because upload is on - it resolves
+    pending-review entries against /user/mySubtitles, and an entry can only be
+    pending review if something was uploaded. With upload switched off it kept
+    firing on its own anchor, called SubDL and wrote a run row for a direction
+    the user had switched off. The anchor is now not armed, the task refuses a
+    fire that was armed earlier anyway, and the manual endpoint answers
+    skipped/"upload disabled" instead of doing the work.
+  v12.1.12.171: The seeder no longer starts when no library is selected. The seeder no longer starts when no library is selected.
     It already refused to queue anything without a selection, but only from
     inside the scan - reached after the global run lock was taken and the
     change-stamp pre-check had walked the library. A configuration with no
