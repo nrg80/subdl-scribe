@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.170",
-        "changelog": "v12.1.12.170: An arrival cycle now updates the Download and Upload rows too.\n    An arrival cycle starts in the dispatcher and never passes through the\n    download or upload task, and those two were the only writers of their own\n    row. So an arrival run did its work, logged it, and left the rows showing\n    the last SCHEDULED run: measured 03.10.2026, the 06:40 and 09:45 arrival\n    cycles worked both directions while the rows still read 05:58 and 06:08 -\n    only the Seeder row moved. The rows were truthful about the wrong run, and\n    a reader would conclude nothing had happened. The dispatcher now owns both\n    rows for the arrival triggers and only for those - on a scheduled run the\n    waiting task owns them - and ranks them with the same rule, so a row reads\n    the same whichever path produced the cycle.",
+        "version": "12.1.12.171",
+        "changelog": "v12.1.12.171: The seeder no longer starts when no library is selected.\n    It already refused to queue anything without a selection, but only from\n    inside the scan - reached after the global run lock was taken and the\n    change-stamp pre-check had walked the library. A configuration with no\n    library therefore still paid for a lock, a library walk and a database\n    touch to arrive at \"nothing to queue\". The check now sits at the top of\n    the seed step, ahead of the lock, and the worker row reads grey\n    skipped/\"no libraries selected\" rather than a green run that found nothing.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.170-dev/Jellyfin.Plugin.SubdlSync_12.1.12.170.zip",
-        "checksum": "e1d0c48d12f1bcc82c99a9fff5937b84",
-        "timestamp": "2026-10-03T08:19:55Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.171-dev/Jellyfin.Plugin.SubdlSync_12.1.12.171.zip",
+        "checksum": "f33cb2d4e59c8f42876ce0348b8293ed",
+        "timestamp": "2026-10-03T08:36:42Z"
       }
     ]
   }
