@@ -1013,6 +1013,14 @@
                             list.innerHTML = '';
 workers.forEach(function (w) {
                                 var oc = subdlWorkerOutcome(w.Outcome);
+                                // F-M292 (user decision 03.10.2026): a pending deferred fire turns a GREEN
+                                // direction row YELLOW -- the fire is work the run could not do, so green would
+                                // claim the direction is finished while items are still due. Only green is
+                                // overridden: a red (broken) or grey (never/disabled) row is a stronger and
+                                // different statement, and a running one is live.
+                                if (w.Deferred && (w.Outcome || '').toLowerCase() === 'ok') {
+                                    oc = subdlWorkerOutcome('deferred');
+                                }
                                 var when = w.Started ? subdlFmtDateTime(w.Started) : '\u2014';
                                 var row = document.createElement('div');
                                 row.className = 'subdl-status-row';
@@ -1206,9 +1214,18 @@ workers.forEach(function (w) {
                         // here: a run-lock deferral is not a rate limit, and calling it one sends the
                         // reader after the wrong problem. The direction name is added, the rest is verbatim.
                         function localNote(down) {
+                            // F-M288 rework (03.10.2026, user report): the line answers "why is this
+                            // direction idle", so it is gated on the direction being STOPPED — a pending
+                            // fire by itself is NOT enough. Measured on prod the same day: the download hit
+                            // its daily limit at 06:08, armed its recovery fire for 04:37 the next day, and
+                            // then ran normally at 10:30 and 13:50. Its last row read ok/green, yet the line
+                            // kept claiming "Download: deferred — next attempt 4:37:00 AM" for the rest of
+                            // the day — naming ordinary backlog pickup as if the direction were stuck.
+                            // The FIRE is not touched by this and must not be: without it the 384 still-due
+                            // items would wait for the next regular anchor.
                             var stopped = down ? loc.downloadStopped : loc.uploadStopped;
                             var until = down ? loc.downloadDeferUntil : loc.uploadDeferUntil;
-                            if (!stopped && !until) { return ''; }
+                            if (!stopped) { return ''; }
                             var when = until ? resetLocal(until) : '';
                             var reason = (down ? loc.downloadReason : loc.uploadReason) || 'deferred';
                             return (down ? 'Download' : 'Upload') + ': ' + reason

@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.172.
+**Status:** Implementation — v12.1.12.173.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -28,7 +28,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 13 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 12 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 22 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 23 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -631,7 +631,9 @@ That line sits **under the Workers list**, in the page's normal text colour, and
 
 **The cause is passed through, never guessed.** `deferred` covers three unrelated situations: the run lock being busy, our own quota/rate cap, and a user stop. The line carries the direction's own stored wording ("download quota/rate limit — rescheduled", "cycle already active", "run lock busy — rescheduled") instead of a label invented in the page. A lock deferral painted as a rate limit sends the reader after a quota problem that does not exist.
 
-**A deferral without a pending fire is not shown.** When the scheduler holds no fire for that direction the task has already moved on, and a stale row must not paint a yellow line for a direction that is running again. The line is only rendered when the fire exists; the time it names is that fire, in the viewer's zone.
+**The line answers "why is this direction idle", so it is gated on the direction being STOPPED — a pending fire alone is not enough.** (Reworked 03.10.2026 on the user's report; the first version rendered whenever a fire existed.) Measured the same day on prod: the download hit its daily limit at 06:08 and left 384 of 412 queued items due, armed its recovery fire for 04:37 the next day, then ran normally at 10:30 and 13:50 — its last row read `ok`, yet the line kept claiming "Download: deferred — next attempt 4:37:00 AM" for the rest of the day, naming ordinary backlog pickup as if the direction were stuck. A direction that is running needs no explanation; only a stopped one does.
+
+**A deferral whose fire is gone is not shown either** — when the scheduler holds no fire the task has already moved on, and the server clears the stopped flag for that case before the page ever sees it. The time the line names is that fire, in the viewer's zone.
 
 **F-M272:** **The page has THREE refresh cadences, and none of them is "10 s for everything".**
 
@@ -1043,6 +1045,14 @@ The accent is also the link colour (F-M229) and the required-field colour (F-M22
 
 **The dry-run note is CONDITIONAL**: a grey `dry run` note appears in the result cell only while the direction's dry-run flag is on. With the flag off the line stays clean.
 
+**F-M292:** **A direction whose deferred fire is still pending is painted YELLOW, even when its last run ended green.**
+
+The stored row is a record of the past; the pending fire is live state. A recovery fire exists only because a run could not finish its work — the download hit its daily limit at 06:08 on 03.10.2026 with 384 of 412 queued items left due, and its fire was armed for 04:37 the next day. The direction then ran normally at 10:30 and 13:50, so its last row read `ok` and the lamp went green while that backlog was still waiting. Green claims the direction is finished, and it is not.
+
+**Only a green row is overridden.** A red row (something is broken) and a grey row (never run, or deliberately disabled) are stronger and different statements, and a `run` row is live. The override reads the coordinator's pending fire rather than the row, so the two cannot drift apart; the row keeps its own stored outcome underneath.
+
+**The deferral line is not affected** — it follows the opposite gate, appearing only while the direction is stopped (F-M288). A direction that is running again therefore shows a yellow lamp and no line: work is outstanding, but the direction is not stuck. The fire itself is never touched for either rule; dropping it would leave the due items waiting for the next regular anchor. **Test: T105.**
+
 **F-M269:** **The database refresh's detail line names the compaction fallback.**
 
 **This is a NOTE, not a red light:** the outcome stays `ok`. **Test: T86.**
@@ -1223,6 +1233,9 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 
 **T103:** With no library selected, a seed step leaves a grey `skipped`/"no libraries selected" seeder row, logs `No libraries selected — seeder not started`, holds no run lock and does not walk the library — neither on a scheduled run nor on an arrival (F-M290)
+
+
+**T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M292, F-M288)
 
 
 **T104:** With upload switched off, postprocessing does not run: no anchor is armed, a fire that slips through records grey `skipped`/"upload disabled" instead of calling SubDL, and the manual endpoint answers `skipped`/`upload disabled` (F-M291)

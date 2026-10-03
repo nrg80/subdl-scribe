@@ -119,6 +119,33 @@ public class SubdlStatusController : ControllerBase
         }
 
         var rows = plugin.WorkerRuns.List();
+
+        // F-M292 (user decision 03.10.2026): a direction whose deferred fire is still pending is
+        // painted YELLOW even when its last run ended green. A recovery fire means work the run could
+        // not do is still outstanding (measured on prod: the download hit its daily limit at 06:08
+        // and left 384 of 412 queued items due, armed its fire for 04:37 the next day, then ran
+        // normally at 10:30 and 13:50 — last row ok/green, the backlog still waiting). Green would
+        // claim that direction is done, which it is not.
+        //
+        // Read from the coordinator rather than the stored row: the fire is live state, the row is a
+        // record of the past. Only the two direction rows carry it — the other workers have no
+        // direction and no recovery fire.
+        bool upFirePending = false, downFirePending = false;
+        try
+        {
+            var coord = Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSchedulerCoordinator.Instance;
+            if (coord != null)
+            {
+                upFirePending = coord.GetPendingFireUtc(upload: true) != null;
+                downFirePending = coord.GetPendingFireUtc(upload: false) != null;
+            }
+        }
+        catch
+        {
+            // Plugin not fully started — the flag then stays false and the row keeps its own colour.
+            // This endpoint must never fail over a lamp.
+        }
+
         return Ok(new
         {
             Workers = rows.Select(r => new
@@ -129,7 +156,9 @@ public class SubdlStatusController : ControllerBase
                 Ended = r.Ended?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
                 r.Outcome,
                 r.Detail,
-                r.DryRun
+                r.DryRun,
+                Deferred = r.Id == Registry.WorkerRunRegistry.UploadWorkerKey ? upFirePending
+                    : r.Id == Registry.WorkerRunRegistry.DownloadWorkerKey && downFirePending
             }),
             Timestamp = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
         });
