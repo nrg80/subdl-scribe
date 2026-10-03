@@ -11,18 +11,24 @@ scripts/release.sh
 
 `scripts/release.sh --dry-run` builds and verifies without committing, tagging or uploading.
 
-**The branch picks the channel:**
+**One branch, one channel:**
 
 | branch | tag | release |
 |---|---|---|
 | `develop` | `v<ver>-dev` | prerelease |
-| `main` | `v<ver>` | stable |
 
-So a stable release cannot be cut by accident, and a prerelease cannot silently become the version
-users install. Run the script on the branch whose channel you mean.
+`develop` is the only branch that exists today and the repository's default. Every release here is a
+prerelease, so a build cannot be handed out as a finished one by accident. The channel is derived from
+the branch rather than from a flag, so it cannot drift from where it was cut, and the tag name always
+says which channel a ZIP came from.
 
-The script aborts when the tree is dirty, the branch is neither `develop` nor `main`, that branch is
-not pushed, the tag already exists, or the version in `build.yaml` and the csproj disagree.
+`release.sh` still knows a `main` channel (`v<ver>`, stable) and would use it on a branch of that name.
+With no such branch the case cannot trigger, and it is kept deliberately: restoring a stable line means
+recreating the branch *and* releasing on it, and the script should not have to be edited for that.
+
+The script aborts when the tree is dirty, the branch is not `develop` (or the version argument does not
+match `build.yaml`), that branch is not pushed, the tag already exists, or the version in `build.yaml`
+and the csproj disagree.
 
 ## What the script verifies
 
@@ -30,7 +36,7 @@ not pushed, the tag already exists, or the version in `build.yaml` and the cspro
 - `category` is exactly `Subtitles`
 - a changelog entry exists for this version
 - the plugin description is identical in `build.yaml` and in the plugin card, is at most 260 characters, and names both required keys
-- tree clean, branch is `develop` or `main`, and that branch is pushed
+- tree clean, branch is `develop`, and that branch is pushed
 - the tag does not exist yet
 - the ZIP carries the plugin DLL, its two dependencies (`LanguageDetection`, `LiteDB`) and `build.yaml`, and no `meta.json`
 - version and category inside the ZIP, not in the working tree
@@ -43,110 +49,35 @@ The order is: manifest commit and push, then tag, then release. The release ther
 ## Catalog manifest
 
 `manifest.json` is committed on `develop` and read by Jellyfin from
-`https://raw.githubusercontent.com/nrg80/subdl-scribe/main/manifest.json` (released line) or
-`https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/manifest.json` (prerelease line).
+`https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/manifest.json`.
 
-The script writes the new version, the release URL and the md5 of the uploaded ZIP, then commits and pushes the manifest before creating the release.
-
-The manifest carries exactly one version entry.
+The script writes the new version, the release URL and the md5 of the uploaded ZIP, then commits and
+pushes the manifest before creating the release. The manifest carries exactly one version entry.
 
 ## Branches
 
-`main` carries the released line and is the URL the README hands to users, so installing from the
-catalog yields the version `main` holds. `develop` carries the prereleases (`-dev`) and is what the
-two test instances subscribe to.
+`develop` is the repository's default branch and the only release branch. It carries the prereleases
+(`v<ver>-dev`) and is what the two test instances subscribe to.
 
-`scripts/release.sh` writes and pushes the manifest to **the branch it runs on**, so a release cut on
-`main` advances `main` and a release cut on `develop` advances `develop`. Each branch therefore serves
-its own version, and no manual branch move is needed.
+There is **no stable branch**: `main` was deleted on 03.10.2026 after it had been used for exactly one
+release, `12.1.12.169`. The version that release published is still installable — a release lives in
+its tag and its GitHub release, not in the branch that cut it — but no branch serves a stable catalog
+URL any more.
 
-## Releasing on `main` (prerelease → released line)
+**What that means in practice.** The README's install URL points at `develop`, so whoever installs from
+the catalog gets the newest prerelease. That is the intended state: everything published here is
+pre-release software, and the `-dev` tag says so.
 
-**Not every version reaches `main` — only the ones picked for it.** `develop` releases freely and
-often; `main` moves deliberately, one chosen version at a time, on the maintainer's decision. There is
-no automatic promotion and nothing that carries `main` along:
+**If a stable line is ever wanted again,** it does not come back by recreating a branch alone. It needs
+all three of: a branch that survives (recreating `main` and pushing it again is the smallest form), a
+manifest on that branch naming a `v<ver>` — **not** a `v<ver>-dev` — `sourceUrl`, and a release cut on
+that branch so the tag, the asset and the manifest agree. Pointing a fresh branch at `develop` gives a
+stable-looking branch that serves the prerelease URL, which is the one mistake this document used to
+warn about; the warning still holds, it just has no branch to apply to today.
 
-- no CI workflow touches `main` (`build.yaml` and `test.yaml` are triggered by `develop` only; none of
-  the workflows creates a tag or a release),
-- no scheduled job runs `release.sh`,
-- `scripts/release.sh` pushes only the branch it runs on — never a second one.
-
-So a version stays on `develop` until someone decides otherwise, and skipping versions is normal:
-`main` may go from `12.1.12.169` straight to `12.1.12.175`, because a release on `main` is a *release*,
-not a merge of everything that happened in between. (The merge in step 2 does bring the code forward —
-the point is that the *release* is a choice, not a side effect.)
-
-Normal work happens on `develop`: every release there is tagged `v<ver>-dev` and marked prerelease,
-and the two test instances follow it. A release on `main` is not a promotion of a branch pointer —
-**the version that users install is the one `main`'s manifest names**, so `main` must be released on,
-not merely fast-forwarded.
-
-A release cut on `develop` leaves `main` a commit behind and both branches changed in `manifest.json`:
-
-| | `main` | `develop` |
-|---|---|---|
-| `manifest.json` `sourceUrl` | `…/download/v<ver>/…` | `…/download/v<ver>-dev/…` |
-| everything else | identical | identical |
-
-**The merge therefore conflicts in `manifest.json` every time — that is expected, not a mistake.**
-It is the one generated file that legitimately differs.
-
-```bash
-# 1. develop is released and pushed; version, csproj and REQUIREMENTS.md agree
-git checkout develop && git pull --ff-only
-
-# 2. bring the code over. manifest.json WILL conflict:
-git checkout main && git pull --ff-only
-git merge develop
-#    CONFLICT (content): Merge conflict in manifest.json
-
-# 3. take either side — release.sh rewrites this file in step 5 anyway.
-#    The develop side carries the newer version, so it is the less confusing choice:
-git checkout --theirs manifest.json
-git add manifest.json
-git commit -m "merge develop into main"
-
-# 4. PUSH FIRST. release.sh refuses to run unless the branch equals origin/<branch>
-#    — it aborts with "main is not pushed / behind origin" on an unpushed merge:
-git push origin main
-
-# 5. release on main. This writes the stable tag AND rewrites the manifest
-#    entry to the v<ver> URL, so the -dev reference from step 3 is corrected here:
-./scripts/release.sh --dry-run   # expect: channel stable, tag v<ver> (no -dev)
-./scripts/release.sh             # pushes the manifest commit itself
-```
-
-**Order matters: merge, push, then release.** `release.sh` verifies the branch is level with its
-remote before it does anything, so running it between the merge and the push aborts. The script pushes
-only the manifest commit it makes itself — the merge commit has to be pushed by hand first.
-
-After step 5, `main`'s manifest names `…/download/v<ver>/…` and the catalog served from `main` offers
-the stable version. Verify, don't assume:
-
-```bash
-curl -sS 'https://raw.githubusercontent.com/nrg80/subdl-scribe/main/manifest.json' \
-  | python3 -c "import json,sys;print(json.load(sys.stdin)[0]['versions'][0]['sourceUrl'])"
-# expect: .../download/v<version>/Jellyfin.Plugin.SubdlSync_<version>.zip   (no -dev)
-```
-
-**Do not fast-forward `main` to `develop` and stop there.** That points `main` at the `-dev` tag and
-publishes a prerelease URL as the installable version — the exact thing the branch-derived tag
-prevents. `main` has to be released on.
-
-The same applies to a **docs-only change that has to appear on `main`**: `git branch -f main develop`
-carries `develop`'s `manifest.json` with it, so `main` silently starts serving the prerelease again.
-This happened here while documenting this very section. The fix is to take the code and docs from
-`develop` but keep `main`'s own manifest:
-
-```bash
-git checkout main
-git checkout develop -- README.md docs/RELEASE.md   # the content you want
-git checkout main -- manifest.json                  # keep main's released manifest
-git commit -m "docs: …" && git push origin main
-```
-
-Whenever `main` is touched, end with the manifest assertion below — it is cheap and it is the only
-thing that catches this class of mistake.
+Restoring the deleted branch, if that is ever decided:
+`git push origin a12b8b4d3b6335c8f061ac03ce77fce007f5a7ff:refs/heads/main` puts back the exact tip it had
+(a docs-only commit). The stable release it served — tag `v12.1.12.169` — was never deleted.
 
 **Never rehearse the release flow against a cloned copy without cutting the API off.** `REPO_SLUG` is
 hardcoded to `nrg80/subdl-scribe` and the token is read from `/opt/data/.secrets.json`, so a
@@ -155,12 +86,6 @@ GitHub. In a sandbox run it found the existing release and tried to re-upload it
 rejected the duplicate name and the asset stayed intact, but that was luck, not containment. For any
 rehearsal use `--dry-run`, or point the clone's `origin` at a local bare repository *and* expect the
 API calls to still reach GitHub; a real test release must go to a different `REPO_SLUG`.
-
-**Verify `main` by installing from it.** The whole point of the branch split is that a user who
-installs from the README's URL gets the released line, so the end-to-end check is: add
-`…/subdl-scribe/main/manifest.json` as a Jellyfin repository, install from the catalog, and confirm
-the loaded assembly version and that the downloaded DLL matches the release asset's hash. A 200 on
-the raw URL does not prove the catalog resolves.
 
 ## CI
 
