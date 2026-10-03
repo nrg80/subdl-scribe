@@ -62,10 +62,24 @@ its own version, and no manual branch move is needed.
 
 ## Releasing on `main` (prerelease → released line)
 
+**Not every version reaches `main` — only the ones picked for it.** `develop` releases freely and
+often; `main` moves deliberately, one chosen version at a time, on the maintainer's decision. There is
+no automatic promotion and nothing that carries `main` along:
+
+- no CI workflow touches `main` (`build.yaml` and `test.yaml` are triggered by `develop` only; none of
+  the workflows creates a tag or a release),
+- no scheduled job runs `release.sh`,
+- `scripts/release.sh` pushes only the branch it runs on — never a second one.
+
+So a version stays on `develop` until someone decides otherwise, and skipping versions is normal:
+`main` may go from `12.1.12.169` straight to `12.1.12.175`, because a release on `main` is a *release*,
+not a merge of everything that happened in between. (The merge in step 2 does bring the code forward —
+the point is that the *release* is a choice, not a side effect.)
+
 Normal work happens on `develop`: every release there is tagged `v<ver>-dev` and marked prerelease,
-and the two test instances follow it. The released line advances separately, on purpose. A release on
-`main` is not a promotion of a branch pointer — **the version that users install is the one `main`'s
-manifest names**, so `main` must be released on, not merely fast-forwarded.
+and the two test instances follow it. A release on `main` is not a promotion of a branch pointer —
+**the version that users install is the one `main`'s manifest names**, so `main` must be released on,
+not merely fast-forwarded.
 
 A release cut on `develop` leaves `main` a commit behind and both branches changed in `manifest.json`:
 
