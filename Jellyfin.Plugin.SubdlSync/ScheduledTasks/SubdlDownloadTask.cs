@@ -164,10 +164,10 @@ public class SubdlDownloadTask : IScheduledTask
     private void RecordWorker(Plugin plugin, string outcome, string detail)
     {
         // The dry-run note is a FLAG, not text: the line shows light, date and outcome only.
-        plugin.WorkerRuns.Finish("SubdlSyncDownloadTask", Name, outcome, detail, plugin.Configuration.DownloadDryRun);
+        plugin.WorkerRuns.Finish(Registry.WorkerRunRegistry.DownloadWorkerKey, Name, outcome, detail, plugin.Configuration.DownloadDryRun);
     }
 
     /// <summary>Marks the start of this worker's run, so the recorded time is the run's beginning.</summary>
     private void RecordWorkerStart(Plugin plugin)
-        => plugin.WorkerRuns.Start("SubdlSyncDownloadTask", Name);
+        => plugin.WorkerRuns.Start(Registry.WorkerRunRegistry.DownloadWorkerKey, Name);
 }

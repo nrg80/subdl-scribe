@@ -618,6 +618,52 @@ public sealed class SubdlEventDispatcher : IDisposable
             onlyItems = null;
         }
 
+        // An ARRIVAL cycle has no waiting scheduled task to write the direction rows: Download and
+        // Upload were only ever recorded by SubdlDownloadTask/SubdlUploadTask, and an event never
+        // goes through them. Observed live 03.10.2026: two real arrival cycles ran (Ted Lasso 06:40,
+        // Dark Matter 09:45), both directions did their work, yet the GUI kept showing the previous
+        // scheduled run — only the Seeder row moved. The dispatcher therefore records those two rows
+        // itself, but ONLY for the arrival triggers: on a scheduled or manual run the waiting task
+        // owns them, and two writers on one row would fight.
+        if (IsArrivalTrigger(trigger))
+        {
+            RecordArrivalDirectionStart(dir);
+        }
+
+        try
+        {
+            await RunCycleBodyAsync(trigger, dir, onlyLibs, onlyItems).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Before the rows are written, so a failure is RED rather than green. The outer caller
+            // calls this again — it fills only the fates that are still null, so that is a no-op.
+            MarkCycleFailure(ex.Message);
+            throw;
+        }
+        finally
+        {
+            if (IsArrivalTrigger(trigger))
+            {
+                RecordArrivalDirectionFinish(dir);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The cycle's work: seed and run each direction, then the follow-up rounds.
+    /// <para>
+    /// Split out of <see cref="RunCycleAsync"/> so the arrival rows can be written in a
+    /// <c>finally</c>. Every exit — an early return while the seed lock is busy just as much as an
+    /// exception out of the pipeline — then leaves a finished row instead of one stuck on "run".
+    /// </para>
+    /// </summary>
+    /// <param name="trigger">Cycle trigger reason.</param>
+    /// <param name="dir">Direction this cycle works.</param>
+    /// <param name="onlyLibs">Libraries the event arrived in, or null for a full scan.</param>
+    /// <param name="onlyItems">Item ids the event collected, or null for full coverage.</param>
+    private async Task RunCycleBodyAsync(string trigger, CycleDirection dir, System.Collections.Generic.ISet<string>? onlyLibs, System.Collections.Generic.ISet<string>? onlyItems)
+    {
         // Rev.3: clear stale stop markers at cycle start so a leftover marker
         // from a previous crashed/restarted run cannot abort this cycle before it begins.
         Pipeline.PipelineStopSignal.ClearStaleMarkers(Plugin.Instance?.DataFolderPath ?? string.Empty);
@@ -1241,6 +1287,66 @@ public sealed class SubdlEventDispatcher : IDisposable
         _seederOutcome = outcome;
         _seederDetail = detail;
         Plugin.Instance?.WorkerRuns.Finish(Registry.WorkerRunRegistry.SeederKey, "Seeder", outcome, detail);
+    }
+
+    /// <summary>
+    /// Marks the arrival cycle's directions as RUNNING, so a cycle that dies mid-scan shows the
+    /// attempt instead of the previous cycle's green.
+    /// </summary>
+    /// <param name="dir">Direction this cycle works.</param>
+    private void RecordArrivalDirectionStart(CycleDirection dir)
+    {
+        var runs = Plugin.Instance?.WorkerRuns;
+        if (runs == null)
+        {
+            return;
+        }
+
+        if (dir != CycleDirection.UploadOnly)
+        {
+            runs.Start(Registry.WorkerRunRegistry.DownloadWorkerKey, "Download");
+        }
+
+        if (dir != CycleDirection.DownloadOnly)
+        {
+            runs.Start(Registry.WorkerRunRegistry.UploadWorkerKey, "Upload");
+        }
+    }
+
+    /// <summary>
+    /// Writes the arrival cycle's direction rows, ranked by the same rule the waiting tasks use
+    /// (<see cref="Registry.WorkerRunRegistry.DescribeCycle"/>), so a row reads identically whether
+    /// an arrival or a schedule produced the cycle. Without it a quota stop or a failed arrival
+    /// cycle would keep showing the previous run's green — exactly the blindness it fixes.
+    /// </summary>
+    /// <param name="dir">Direction this cycle works.</param>
+    private void RecordArrivalDirectionFinish(CycleDirection dir)
+    {
+        var plugin = Plugin.Instance;
+        if (plugin == null)
+        {
+            return;
+        }
+
+        var (seedOutcome, seedDetail) = GetSeederOutcome();
+
+        if (dir != CycleDirection.UploadOnly)
+        {
+            var (downOutcome, downDetail) = GetDirectionOutcome(upload: false);
+            var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
+                cycleFinished: true, seedOutcome, seedDetail, downOutcome, downDetail);
+            plugin.WorkerRuns.Finish(
+                Registry.WorkerRunRegistry.DownloadWorkerKey, "Download", outcome, detail, plugin.Configuration.DownloadDryRun);
+        }
+
+        if (dir != CycleDirection.DownloadOnly)
+        {
+            var (upOutcome, upDetail) = GetDirectionOutcome(upload: true);
+            var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
+                cycleFinished: true, seedOutcome, seedDetail, upOutcome, upDetail);
+            plugin.WorkerRuns.Finish(
+                Registry.WorkerRunRegistry.UploadWorkerKey, "Upload", outcome, detail, plugin.Configuration.DryRun);
+        }
     }
 
     /// <summary>

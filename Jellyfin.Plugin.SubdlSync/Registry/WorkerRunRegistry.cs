@@ -180,6 +180,17 @@ public sealed class WorkerRunRegistry
     public const string SeederKey = "SubDLSeeder";
 
     /// <summary>
+    /// The download task's worker key. A named constant rather than a literal because the dispatcher
+    /// writes this row too when an ARRIVAL cycle produced it — on that path the waiting task never runs.
+    /// </summary>
+    public const string DownloadWorkerKey = "SubdlSyncDownloadTask";
+
+    /// <summary>
+    /// The upload task's worker key; see <see cref="DownloadWorkerKey"/> for why it is a constant.
+    /// </summary>
+    public const string UploadWorkerKey = "SubdlSyncUploadTask";
+
+    /// <summary>
     /// The status a worker reports for the cycle it took part in.
     /// <para>
     /// Colour criteria (user-approved 30.09.2026), one principle for every worker:
@@ -281,8 +292,8 @@ public sealed class WorkerRunRegistry
     public static readonly (string Key, string Name)[] KnownWorkers =
     [
         (SeederKey, "Seeder"),
-        ("SubdlSyncDownloadTask", "Download"),
-        ("SubdlSyncUploadTask", "Upload"),
+        (DownloadWorkerKey, "Download"),
+        (UploadWorkerKey, "Upload"),
         ("SubDLPostprocessTask", "Postproc."),
         ("SubdlSyncDatabaseRefreshTask", "Database"),
         ("SubdlSyncOshashRefreshTask", "OSHash"),

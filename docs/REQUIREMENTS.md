@@ -1004,6 +1004,12 @@ One Normal line names the file, how many codes were written, which languages (di
 
 Reporting the task's own "ok" is wrong twice over: it claims success when the wait cap expires while the seeder is still scanning, and it hides a quota stop behind a green light. the fallback word substitutes "not recorded" so a row cannot show a bare outcome word. **Test: T85.**
 
+**F-M289:** **The direction rows are written by whoever OWNS the cycle — on an arrival cycle that is the dispatcher, not the waiting task.**
+
+An arrival cycle starts in the dispatcher and never passes through `SubdlDownloadTask`/`SubdlUploadTask`; those two only record their row while they wait. Before this rule an arrival cycle therefore did its work, logged it and left the Download and Upload rows untouched: they kept showing the last SCHEDULED run, and only the Seeder row moved. The rows were truthful about the wrong run — the failure mode is a reader concluding nothing had happened.
+
+The dispatcher records both direction rows for the arrival triggers (`event`, `arrival-followup`) and only for those: on a scheduled or manual run the waiting task owns its row, and a second writer would fight it. The ranking is `DescribeCycle` (F-M267), so a row reads identically whichever path produced the cycle. The dispatcher marks both rows `running` at cycle start, so a cycle that dies mid-scan shows the attempt rather than the previous green. **Test: T102.**
+
 **F-M268:** **One colour rule for every worker: green = the work ran and ended without an exception, yellow = the work did not happen but nothing is broken, red = something is broken, grey = not run.**
 
 The palette: the page accent is `#00a4dc`. `run` → accent; `ok` → `#107c10`; `failed` → `#a4262c`; `cancelled` and `deferred` → `#ffc107` (quota, run-lock deferral, user stop); `skipped` and `never` → `#767676`; a dry-run note → `#9a9a9a`.
@@ -1192,6 +1198,9 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T99:** The candidate loop's two exits can both be reached: a budget below keep-best is raised, so "keep X" writes X files; a budget above keep-best is never lowered (F-M242/F-M50).
 **T100:** A deferred direction shows its own stored cause under the Workers list (never a generic "rate limit"), that line sits below the quota box rather than inside it, the bars keep their 75 %/95 % colours at every fill level, and the line disappears once the scheduler holds no fire for that direction (F-M288)
+
+
+**T102:** An arrival cycle updates the Download, Upload and Seeder rows together, and each direction's row carries that cycle's fate (green on work done, yellow on a quota stop, red on a failure); a scheduled cycle leaves the arrival path out of it entirely (F-M289)
 
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)
