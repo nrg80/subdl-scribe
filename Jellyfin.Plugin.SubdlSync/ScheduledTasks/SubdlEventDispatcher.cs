@@ -897,7 +897,17 @@ public sealed class SubdlEventDispatcher : IDisposable
             var progress = new Progress<double>();
             var (upSummary, downSummary) = await ExecutePipelineAsync(upload, config, filter, progress).ConfigureAwait(false);
             // If this direction was stopped by marker, stop the whole cycle.
-            if ((upload && upSummary?.StopRequested == true) || (!upload && downSummary?.StopRequested == true))
+            // F-M293 (user decision 03.10.2026): gated on the MARKER, not on StopRequested alone.
+            // A shutdown also leaves StopRequested true (the pipeline keeps its partial result and
+            // flags the stop), and this call sets Cancelled/"user stop" for BOTH directions — so a
+            // restart at 14:18 painted the download as a user stop although its run had finished
+            // clean ten minutes earlier, and the upload as stopped by a button nobody pressed.
+            // Measured on prod: 'cycle end ("event", dir Both) — user stop.' was logged for a
+            // restart, which is the line the user then read off the page.
+            if ((upload && upSummary?.StopRequested == true
+                    && Pipeline.PipelineStopSignal.HasMarker(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: true))
+                || (!upload && downSummary?.StopRequested == true
+                    && Pipeline.PipelineStopSignal.HasMarker(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: false)))
             {
                 RequestUserStop($"stop marker {(upload ? "upload" : "download")}");
             }

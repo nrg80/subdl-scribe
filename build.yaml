@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.173"
+version: "12.1.12.174"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,7 +26,27 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
-  v12.1.12.173: A direction whose deferred fire is still pending is painted yellow even when
+  v12.1.12.174: A Jellyfin restart is no longer reported as a user stop. Both cancel the running
+    task identically and the token carries no reason, so the catch treated them the same - it
+    wrote a stop marker and called RequestUserStop, which records cancelled/"user stop" for BOTH
+    directions at once. Measured on prod: a restart at 14:18 painted the download as a user stop
+    although its run had finished clean at 14:08, and the upload as stopped by a button nobody
+    pressed; 58 uploads that had reached SubDL sat behind an action the user never took. The stop
+    marker is the discriminator - the Stop endpoint writes it before it signals, a shutdown never
+    does - so it is now tested without being consumed and everything else records ok/"restart".
+    Postprocessing and the OSHash refresh have no stop button, so for them every cancellation is a
+    restart by construction.
+
+    "Deferred" now means a fire was scheduled, for ANY worker, and the moment is named. A pending
+    re-fire is the deferral itself: it exists only because a run could not finish, the row
+    describes the past while the fire describes what is owed. Lamps: a pending fire turns a green
+    row yellow for every worker that can hold one - download, upload, database refresh, OSHash
+    refresh, postprocessing; red, grey and running are left alone. The line under the Workers list
+    names each deferred worker with its own cause and the due moment, gated on the fire alone so a
+    restart cannot blank it. Two earlier versions missed on the same day: one named ordinary
+    backlog pickup as if the direction were stuck, the other vanished after a restart while the
+    fire was still pending. The seeder holds no fire of its own and never appears.
+  v12.1.12.173: A pending deferred fire paints the direction row yellow. A direction whose deferred fire is still pending is painted yellow even when
     its last run ended green, and the deferral line under the Workers list appears only while
     the direction is actually stopped. Measured on prod: the download hit its daily limit at
     06:08 leaving 384 of 412 queued items due and armed its fire for 04:37 the next day; it

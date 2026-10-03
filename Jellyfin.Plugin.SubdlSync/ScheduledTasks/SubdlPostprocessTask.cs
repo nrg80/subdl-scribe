@@ -81,7 +81,12 @@ public class SubdlPostprocessTask : IScheduledTask
         }
         catch (OperationCanceledException)
         {
-            plugin.WorkerRuns.Finish("SubDLPostprocessTask", Name, Registry.WorkerRunRegistry.Outcome.Cancelled, "cancelled");
+            // F-M293 (user decision 03.10.2026): there is no stop button for this worker, so a
+            // cancellation can only be a Jellyfin restart or a task cancel — never a user stop.
+            // Reporting it as "cancelled"/"user stop" made a restart look like something the user
+            // had done. The work that landed stays counted either way; the row says "restart".
+            // A fire that was pending at that moment stays pending and re-fires (F-M294).
+            plugin.WorkerRuns.Finish("SubDLPostprocessTask", Name, Registry.WorkerRunRegistry.Outcome.Ok, "restart");
             throw;
         }
         catch (Exception ex)

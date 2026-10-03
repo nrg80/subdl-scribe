@@ -144,11 +144,24 @@ public class SubdlDownloadTask : IScheduledTask
         }
         catch (OperationCanceledException)
         {
-            // F-M131 (15.09.2026, user decision): the stop button aborts the
-            // CURRENT run(s) — dispatcher unwinds the cycle gracefully.
-            Pipeline.PipelineStopSignal.WriteMarker(plugin.DataFolderPath, upload: false);
-            dispatcher.RequestUserStop("download task cancelled");
-            RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Cancelled, "user stop");
+            // F-M131 (15.09.2026, user decision): the stop button aborts the CURRENT run — the
+            // dispatcher unwinds the cycle gracefully.
+            // F-M293 (user decision 03.10.2026): a JELLYFIN RESTART is not a user stop. This catch
+            // used to write a stop marker and call RequestUserStop unconditionally, and that call
+            // sets Cancelled for BOTH directions — so a restart at 14:18 painted the download as
+            // "user stop" although its own run had finished clean at 14:08, and the upload side as
+            // stopped by a button nobody pressed. The stop marker is the discriminator: the Stop
+            // endpoint writes it BEFORE it signals, a shutdown never does. Without it this is a
+            // restart, and the work that did land is reported as such.
+            if (Pipeline.PipelineStopSignal.HasMarker(plugin.DataFolderPath, upload: false))
+            {
+                dispatcher.RequestUserStop("download task cancelled");
+                RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Cancelled, "user stop");
+            }
+            else
+            {
+                RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Ok, "restart");
+            }
         }
     }
 

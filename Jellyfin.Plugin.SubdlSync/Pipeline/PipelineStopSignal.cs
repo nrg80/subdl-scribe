@@ -74,6 +74,32 @@ public static class PipelineStopSignal
     }
 
     /// <summary>
+    /// Returns true when a stop marker exists for this direction WITHOUT consuming it.
+    /// <para>
+    /// F-M293 (user decision 03.10.2026): a Jellyfin restart must not be reported as a user stop.
+    /// The Stop endpoint writes this marker before it signals; a shutdown cancels the task without
+    /// ever doing so. That difference is the only reliable way to tell the two apart from inside a
+    /// cancelled task — the CancellationToken carries no reason.
+    /// </para>
+    /// </summary>
+    /// <param name="dataDir">The plugin data directory.</param>
+    /// <param name="upload">Direction.</param>
+    /// <returns>True when the marker file exists.</returns>
+    public static bool HasMarker(string dataDir, bool upload)
+    {
+        if (string.IsNullOrEmpty(dataDir))
+        {
+            return false;
+        }
+
+        var fileName = upload ? ".stop-upload" : ".stop-download";
+        lock (Lock)
+        {
+            return File.Exists(Path.Combine(dataDir, fileName));
+        }
+    }
+
+    /// <summary>
     /// Returns true if a stop marker exists for this direction. Deletes the marker
     /// so the next run is not affected. Does NOT throw — the caller should break out
     /// of its loop and let normal post-run cleanup run.

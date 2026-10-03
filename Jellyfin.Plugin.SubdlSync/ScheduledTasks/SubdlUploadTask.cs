@@ -130,11 +130,18 @@ public class SubdlUploadTask : IScheduledTask
         }
         catch (OperationCanceledException)
         {
-            // F-M131 (15.09.2026, user decision): the stop button aborts the
-            // CURRENT run(s) — dispatcher unwinds the cycle gracefully.
-            Pipeline.PipelineStopSignal.WriteMarker(plugin.DataFolderPath, upload: true);
-            dispatcher.RequestUserStop("upload task cancelled");
-            RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Cancelled, "user stop");
+            // F-M131 (15.09.2026): the stop button aborts the CURRENT run.
+            // F-M293 (user decision 03.10.2026): a restart is not a user stop — see the download
+            // twin for the full reasoning. The stop marker decides; without one this is a restart.
+            if (Pipeline.PipelineStopSignal.HasMarker(plugin.DataFolderPath, upload: true))
+            {
+                dispatcher.RequestUserStop("upload task cancelled");
+                RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Cancelled, "user stop");
+            }
+            else
+            {
+                RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Ok, "restart");
+            }
         }
     }
 

@@ -325,6 +325,60 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     }
 
     /// <summary>
+    /// Every pending one-shot fire, keyed by the WORKER it belongs to (F-M294, user decision
+    /// 03.10.2026: "defer whenever a fire was scheduled, whichever worker").
+    /// <para>
+    /// The GUI needs this to paint a worker's lamp yellow and to name the moment. Only DEFERRED
+    /// re-fires appear here — the regular anchors are computed from the interval and carry no
+    /// stored fire, so a worker that is simply waiting for its next window is not "deferred".
+    /// </para>
+    /// <para>
+    /// The seeder has no fire of its own: it runs inside a cycle, driven by whichever direction
+    /// triggered it. The five keys below are exactly the workers that can hold one.
+    /// </para>
+    /// </summary>
+    /// <returns>Worker key → the moment (UTC) that worker's fire is due. Empty when nothing is pending.</returns>
+    public System.Collections.Generic.Dictionary<string, DateTime> GetPendingFires()
+    {
+        var result = new System.Collections.Generic.Dictionary<string, DateTime>(StringComparer.Ordinal);
+
+        // Read in one pass each; the fields are written by the tick and read here by an HTTP thread.
+        // A torn read would at worst name a moment one tick off, never a wrong worker.
+        var down = _recoveryFireDownloadUtc;
+        var up = _recoveryFireUploadUtc;
+        var post = _postprocessDeferredUntil;
+        var prune = _pruneDeferredUntil;
+        var oshash = _oshashDeferredUntil;
+
+        if (down.HasValue)
+        {
+            result[Registry.WorkerRunRegistry.DownloadWorkerKey] = down.Value;
+        }
+
+        if (up.HasValue)
+        {
+            result[Registry.WorkerRunRegistry.UploadWorkerKey] = up.Value;
+        }
+
+        if (post != DateTime.MinValue)
+        {
+            result["SubDLPostprocessTask"] = post;
+        }
+
+        if (prune != DateTime.MinValue)
+        {
+            result["SubdlSyncDatabaseRefreshTask"] = prune;
+        }
+
+        if (oshash != DateTime.MinValue)
+        {
+            result["SubdlSyncOshashRefreshTask"] = oshash;
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// F-M67: overload variant — one-shot recovery fire 10–30 min after a
     /// transient service_busy stop. The quota reset is not involved; the window
     /// is short because the SubDL server is usually back within minutes.
