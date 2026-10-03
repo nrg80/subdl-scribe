@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.169"
+version: "12.1.12.170"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,17 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.170: An arrival cycle now updates the Download and Upload rows too.
+    An arrival cycle starts in the dispatcher and never passes through the
+    download or upload task, and those two were the only writers of their own
+    row. So an arrival run did its work, logged it, and left the rows showing
+    the last SCHEDULED run: measured 03.10.2026, the 06:40 and 09:45 arrival
+    cycles worked both directions while the rows still read 05:58 and 06:08 -
+    only the Seeder row moved. The rows were truthful about the wrong run, and
+    a reader would conclude nothing had happened. The dispatcher now owns both
+    rows for the arrival triggers and only for those - on a scheduled run the
+    waiting task owns them - and ranks them with the same rule, so a row reads
+    the same whichever path produced the cycle.
   v12.1.12.169: Release commits carry the maintainer's own identity.
     The release script forced "SubDL Scribe <noreply@localhost>" on the commit that
     writes the manifest, so every release produced one commit that belonged to nobody:
