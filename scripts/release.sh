@@ -215,8 +215,14 @@ if [[ $DRY_RUN -eq 1 ]]; then
 fi
 
 git add manifest.json
-git -c user.name="SubDL Scribe" -c user.email="noreply@localhost" \
-    commit -q -m "release: ${VER}" || ok "(manifest unchanged)"
+# NO identity override (fixed 03.10.2026). This line used to force
+# "SubDL Scribe <noreply@localhost>" on the release commit, so every release produced
+# one commit that belongs to nobody: GitHub counted it for no account, the contributor
+# list showed a name next to the maintainer's, and 13 commits carried an author the
+# user never wrote. The commit now inherits the repository's own identity, which is the
+# account's verified address - one author per repository, and the release commits are
+# attributed like every other commit in the history.
+git commit -q -m "release: ${VER}" || ok "(manifest unchanged)"
 git push --quiet origin develop
 
 # --- 5. tag, and check what the TAG carries ---------------------------------
