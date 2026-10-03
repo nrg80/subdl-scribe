@@ -1,6 +1,10 @@
 # SubDL Scribe
 
-SubDL Scribe is a Jellyfin plugin that downloads missing subtitles from [SubDL](https://subdl.com) for the languages and libraries you select, and uploads your own embedded subtitles back to SubDL.
+SubDL Scribe keeps your Jellyfin library subtitled and gives back to [SubDL](https://subdl.com). It
+**downloads** missing subtitles for the languages and libraries you select, and **uploads** the
+subtitle tracks already embedded in your own media files.
+
+The upload direction is **off by default** — see [Upload](#upload-off-by-default).
 
 Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 
@@ -26,7 +30,7 @@ Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 
 ### Manual
 
-1. Download `Jellyfin.Plugin.SubdlSync_12.1.12.169.zip` from the [releases page](../../releases).
+1. Download `Jellyfin.Plugin.SubdlSync_12.1.12.175.zip` from the [releases page](../../releases).
 2. Create a folder for the plugin under your Jellyfin `plugins/` directory and extract the ZIP into it:
 
    ```
@@ -50,6 +54,12 @@ Open **Dashboard → Plugins → SubDL Scribe** and fill in:
 
 Save.
 
+## Upload (off by default)
+
+Uploads the subtitle tracks embedded in your media files to SubDL, through **your own** SubDL
+account — enable it under **Dashboard → Plugins → SubDL Scribe → Upload → Upload enabled**. Quality
+gates and duplicate protection apply here exactly as on the download side.
+
 ## Build
 
 ```bash
@@ -63,8 +73,8 @@ scripts/release.sh --dry-run   # build + verify, touch nothing
 scripts/release.sh             # the real thing
 ```
 
-The branch picks the channel: `develop` publishes a prerelease (`v<ver>-dev`). It is the only release
-branch — see [Branches](docs/RELEASE.md#branches) for what that means for installs.
+The branch picks the channel: `develop` publishes a prerelease (`v<ver>-dev`), `main` publishes the
+stable release. See [Branches](docs/RELEASE.md#branches) for what that means for installs.
 
 Do not release by tagging and pushing alone: a release must carry exactly one asset. See [docs/RELEASE.md](docs/RELEASE.md).
 
