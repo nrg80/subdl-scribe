@@ -137,6 +137,12 @@
                         <h3>Workers</h3>
                         <div class="fieldDescription" id="WorkersLine" style="margin-bottom:0.25em;">&mdash;</div>
                         <div id="WorkerRunList"></div>
+                        <!-- The LOCAL deferral line (F-M288): sits under the last worker light, in the
+                             page's normal text colour. Empty while nothing is deferred, so it costs no
+                             space. It is NOT part of the quota box — those bars describe the server's
+                             allowance, this line describes our own wait, and mixing the two made a
+                             partly-used allowance read as a problem (user decision 03.10.2026). -->
+                        <div class="fieldDescription" id="SubdlLocalDeferLine" style="margin-top:0.5em;"></div>
 
                         <!-- One refresh for EVERY live readout (user order 30.09.2026: "es reicht wenn er
                              unter General tab sitzt woanders laufen keine live daten rein"). It sits at
@@ -1153,6 +1159,10 @@ workers.forEach(function (w) {
                                 box.textContent = 'Unavailable (' + res.error + ')';
                             }
                             box.style.display = 'block';
+                            // The deferral line is fed by this same answer — a stale line would outlive
+                            // the data it came from, so it is cleared with every failed read.
+                            var dlErr = document.querySelector('#SubdlLocalDeferLine');
+                            if (dlErr) { dlErr.textContent = ''; }
                             return;
                         }
                         // (15.09.2026): docs-shaped rendering —
@@ -1162,29 +1172,34 @@ workers.forEach(function (w) {
                         if (!res || !res.search) {
                             box.textContent = 'Unavailable (bad response)';
                             box.style.display = 'block';
+                            var dlBad = document.querySelector('#SubdlLocalDeferLine');
+                            if (dlBad) { dlBad.textContent = ''; }
                             return;
                         }
                         function resetLocal(iso) {
                             return isNaN(new Date(iso).getTime()) ? '' : subdlFmtTime(iso);
                         }
-                        // note = an extra line under the bar; forceWarn = paint it YELLOW regardless of
-                        // the fill percentage. Both were added 03.10.2026 for the LOCAL deferral: the
-                        // server counters can sit at 3/1000 (bar blue, everything fine) while the
-                        // direction is already deferred — the bar has to say so.
-                        function renderBar(label, used, limit, reset, note, forceWarn) {
+                        // The bar colour states ONE thing only: how full the SERVER allowance is.
+                        // 75 % -> yellow, 95 % -> red, below that the accent. A local deferral does not
+                        // recolour it (03.10.2026, user decision): the fill and our own wait are separate
+                        // facts, and a yellow bar at 66 % read as if the allowance were nearly spent.
+                        // The local deferral is reported as its own line below the Workers list.
+                        function renderBar(label, used, limit, reset) {
                             var pct = (limit > 0) ? Math.min(100, (used / limit) * 100) : 0;
-                            var cls = forceWarn ? 'warn' : (pct >= 95 ? 'danger' : (pct >= 75 ? 'warn' : ''));
+                            var cls = pct >= 95 ? 'danger' : (pct >= 75 ? 'warn' : '');
                             return '<div class="subdl-quota-row">' +
                                 '<div class="subdl-quota-label"><span>' + label + '</span><span>' + n(used) + ' / ' + n(limit) + '</span></div>' +
                                 '<div class="subdl-bar"><div class="subdl-bar-fill ' + cls + '" style="width:' + pct.toFixed(1) + '%;"></div></div>' +
                                 (reset ? '<div style="font-size:0.85em;opacity:0.75;">resets ' + reset + '</div>' : '') +
-                                (note ? '<div style="font-size:0.85em;color:#ffc107;">' + note + '</div>' : '') +
                                 '</div>';
                         }
-                        // The LOCAL deferral and its cause. Yellow, worded like the
-                        // Workers row, so the box and the worker light tell the same story. The
-                        // deferral time comes from the scheduler's pending fire — the same value the
-                        // server-side log names as the restart time.
+                        // The LOCAL deferral and its cause. Worded like the Workers row, so the line
+                        // and the worker light tell the same story. It sits BELOW the Workers list in
+                        // the page's normal text colour (03.10.2026, user decision) — not under the
+                        // quota bars and not in a warning colour: a deferral is a state, not an alarm,
+                        // and the bars describe the server allowance only.
+                        // The deferral time comes from the scheduler's pending fire — the same value
+                        // the server-side log names as the restart time.
                         var loc = res.local || {};
                         // The CAUSE is the server's own wording ("download quota/rate limit — rescheduled",
                         // "run lock busy — rescheduled", "cycle already active"), never a label invented
@@ -1200,10 +1215,15 @@ workers.forEach(function (w) {
                                 + (when ? ' — next attempt ' + when : '');
                         }
                         var localLines = [localNote(false), localNote(true)].filter(function (x) { return x; });
+                        var deferLine = document.querySelector('#SubdlLocalDeferLine');
+                        if (deferLine) {
+                            // Plain text, page default colour. Empty when nothing is deferred — then the
+                            // line carries no text and takes no visual space.
+                            deferLine.textContent = localLines.join('  ·  ');
+                        }
                         var lines = [];
                         lines.push('<div style="font-weight:600;">Plan: ' + (res.plan || 'Free') + '</div>');
-                        lines.push(renderBar('Search', res.search.used, res.search.limit, resetLocal(res.search.reset_at),
-                            localLines.join(' | '), localLines.length > 0));
+                        lines.push(renderBar('Search', res.search.used, res.search.limit, resetLocal(res.search.reset_at)));
                         if (res.downloads) {
                             lines.push(renderBar('Downloads', res.downloads.used, res.downloads.limit, resetLocal(res.downloads.reset_at)));
                         }

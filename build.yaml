@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.167"
+version: "12.1.12.168"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,13 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.168: The quota bars are a server reading again, and the deferral note moved below the workers.
+    Version .167 let a local deferral repaint the API/search bar yellow, so a bar at 66 % looked
+    like a nearly spent allowance when the counter said nothing of the kind. The colour is decided
+    by the fill alone again - 75 % yellow, 95 % red - and a local deferral no longer touches it.
+    The note about it now sits under the Workers list, in the page's normal text colour: the bars
+    describe the server's allowance, the note describes our own wait, and the two are read side by
+    side instead of over each other.
   v12.1.12.167: The plugin no longer stops itself. The one limit left is SubDL's.
     A per-run hourly call bucket sat in our own code and could end a whole run when it
     filled up. SubDL publishes DAILY counters only, so that bucket was our invention, and

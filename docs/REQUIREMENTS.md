@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.167.
+**Status:** Implementation — v12.1.12.168.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -612,9 +612,11 @@ Status: a missing key reports **red**; the settings page refuses to save it and 
 
 **The plugin enforces no quota of its own (03.10.2026, user decision).** No code path counts API calls, no counter can run out, and no run is stopped for making "too many" calls. **Only SubDL stops a run**: on a real HTTP 429 the server's own counters are read and the `QuotaStopDecision` decides between a short respacing and a day-long stop (F-M238). A per-run hourly bucket lived in `GlobalRateLimiter` until this date and DID stop runs; it was the plugin's own invention — SubDL publishes **daily** counters only — and it stopped runs the server would have allowed (measured live: 735 of 2000 searches and 16 of 50 downloads still free when the bucket fired). The class now only spaces calls; it cannot refuse one.
 
-**F-M288:** **The quota box names the LOCAL deferral and its cause — and the bar turns yellow with it.**
+**F-M288:** **A LOCAL deferral is reported under the Workers list, in plain text — the quota bars stay a pure server reading.**
 
-The server counters alone cannot show why a direction is idle. They can read `3 / 1000` (bar blue, everything looking fine) while the plugin's own per-run cap has already stopped the direction, so the box needs its own line for it. Under the API/search bar the box therefore carries one yellow line per deferred direction, and the bar itself is painted `#ffc107` — the same colour the Workers row uses for the same state, so the two readouts cannot tell different stories.
+The server counters alone cannot show why a direction is idle. They can read `3 / 1000` (bar blue, everything looking fine) while the direction is deferred, so the deferral needs its own line.
+
+That line sits **under the Workers list**, in the page's normal text colour, and is not part of the quota box. It carried yellow and recoloured the bar in a first version (03.10.2026, reverted the same day on the user's report): a bar painted yellow at 66 % reads as "the allowance is nearly spent" when the fill says nothing of the kind, and the box's job is to report the SERVER's allowance. The two facts are stated side by side instead of over each other — the bars keep the 75 %/95 % rule unchanged, the line states our own wait.
 
 **The cause is passed through, never guessed.** `deferred` covers three unrelated situations: the run lock being busy, our own quota/rate cap, and a user stop. The line carries the direction's own stored wording ("download quota/rate limit — rescheduled", "cycle already active", "run lock busy — rescheduled") instead of a label invented in the page. A lock deferral painted as a rate limit sends the reader after a quota problem that does not exist.
 
@@ -1006,7 +1008,7 @@ Reporting the task's own "ok" is wrong twice over: it claims success when the wa
 
 The palette: the page accent is `#00a4dc`. `run` → accent; `ok` → `#107c10`; `failed` → `#a4262c`; `cancelled` and `deferred` → `#ffc107` (quota, run-lock deferral, user stop); `skipped` and `never` → `#767676`; a dry-run note → `#9a9a9a`.
 
-The accent is also the link colour (F-M229) and the required-field colour (F-M228). Red is reserved for destructive and failed states. The quota bar uses the same palette for fill, warning (`#ffc107`) and danger (`#a4262c`). A deferred direction paints the bar yellow regardless of its fill percentage: the fill describes the SERVER's allowance, the yellow describes OUR deferral, and the two are independent (F-M288).
+The accent is also the link colour (F-M229) and the required-field colour (F-M228). Red is reserved for destructive and failed states. The quota bar uses the same palette for fill, warning (`#ffc107` at 75 %) and danger (`#a4262c` at 95 %). The bar's colour is decided by the fill ALONE — a local deferral never recolours it; that state is stated as its own line under the Workers list (F-M288).
 
 **F-M193 [B1]:** **`/user/mySubtitles` is NOT paginated — the counters must count DISTINCT upload ids.** The endpoint ignores `page`, `per_page`, `offset`, `limit` and `start`. The listing deduplicates by the upload id and breaks on the first page that adds no new id; rows with `UploadId <= 0` are kept unconditionally. The status line does not claim "in N pages".
 
@@ -1189,7 +1191,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T98:** With `MaxCandidatesPerLanguage = 3` and `KeepBestPerLanguage = 4` the effective download cap AND the search's early-stop threshold are both 4; with the default pair they are both 3, and `0` stays unlimited on both (F-M95/F-M50).
 
 **T99:** The candidate loop's two exits can both be reached: a budget below keep-best is raised, so "keep X" writes X files; a budget above keep-best is never lowered (F-M242/F-M50).
-**T100:** A deferred direction shows its own stored cause in the quota box (never a generic "rate limit"), the bar turns yellow with it, and the line disappears once the scheduler holds no fire for that direction (F-M288)
+**T100:** A deferred direction shows its own stored cause under the Workers list (never a generic "rate limit"), that line sits below the quota box rather than inside it, the bars keep their 75 %/95 % colours at every fill level, and the line disappears once the scheduler holds no fire for that direction (F-M288)
 
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)
