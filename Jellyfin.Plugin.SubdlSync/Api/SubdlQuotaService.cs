@@ -114,6 +114,85 @@ public class SubdlQuota : ControllerBase
     // (15.09.2026): v2/me shape — plan + separated counters.
     // The UI renders exactly the docs structure: plan, search, downloads,
     // errors. All strings resolved server-side; UI only formats numbers.
+    /// <summary>
+    /// Adds the LOCAL deferral state to the answer (03.10.2026): whether each direction is deferred
+    /// right now, WHY, and when its deferred next attempt is due.
+    /// <para>
+    /// The server counters cannot express this. They can read 3/1000 while the direction is already
+    /// deferred, so a box built from them alone shows blue bars and no hint that nothing will run for
+    /// the next quarter of an hour. The values come from the worker row (the direction's fate and its
+    /// own wording) and the scheduler (the pending recovery fire) — the same sources the Workers list
+    /// and the server log read, so all three agree.
+    /// </para>
+    /// <para>
+    /// The reason is passed through verbatim rather than summarised: a deferral is a run-lock push
+    /// just as often as it is a rate limit, and a label saying "rate limit" on a lock deferral would
+    /// send the reader looking for a quota problem that does not exist.
+    /// </para>
+    /// </summary>
+    /// <returns>An object the config page renders under the bars; all fields false/null when nothing is deferred.</returns>
+    private static object LocalRateLimitState()
+    {
+        DateTime? upUntil = null, downUntil = null;
+        string upReason = string.Empty, downReason = string.Empty;
+        bool upStopped = false, downStopped = false;
+        try
+        {
+            var coord = Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSchedulerCoordinator.Instance;
+            if (coord != null)
+            {
+                upUntil = coord.GetPendingFireUtc(upload: true);
+                downUntil = coord.GetPendingFireUtc(upload: false);
+            }
+
+            // The REASON comes from the worker's own row, not from a blanket label. "Deferred" covers
+            // several unrelated causes — the run lock, a spent SubDL allowance, a user stop — and the
+            // config page must not call a lock deferral a rate limit (measured 03.10.2026: the upload
+            // was deferred at 05:43 only because a DownloadOnly cycle was already running, with no
+            // allowance consumed at all). The row's Detail carries the cause verbatim, so it is passed
+            // through instead of being guessed.
+            var registry = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns;
+            if (registry != null)
+            {
+                var (upOutcome, upDetail) = ReadWorker(registry, "SubdlSyncUploadTask");
+                var (downOutcome, downDetail) = ReadWorker(registry, "SubdlSyncDownloadTask");
+                upStopped = string.Equals(upOutcome, Registry.WorkerRunRegistry.Outcome.Deferred, StringComparison.Ordinal);
+                downStopped = string.Equals(downOutcome, Registry.WorkerRunRegistry.Outcome.Deferred, StringComparison.Ordinal);
+                upReason = upStopped ? (upDetail ?? string.Empty) : string.Empty;
+                downReason = downStopped ? (downDetail ?? string.Empty) : string.Empty;
+
+                // A deferral with no pending fire is over — the task already ran again. Then the row
+                // is stale and must not paint a yellow line for a direction that is moving.
+                if (upStopped && upUntil == null) { upStopped = false; upReason = string.Empty; }
+                if (downStopped && downUntil == null) { downStopped = false; downReason = string.Empty; }
+            }
+        }
+        catch
+        {
+            // The plugin may not be fully started (page requested during a restart) — the box then
+            // simply carries no local note; it must never fail the quota call itself.
+        }
+
+        return new
+        {
+            uploadStopped = upStopped,
+            downloadStopped = downStopped,
+            uploadReason = upReason,
+            downloadReason = downReason,
+            uploadDeferUntil = upUntil?.ToString("O"),
+            downloadDeferUntil = downUntil?.ToString("O")
+        };
+    }
+
+    /// <summary>
+    /// The stored outcome and detail of one worker row, or empty strings when it has none.
+    /// </summary>
+    private static (string? Outcome, string? Detail) ReadWorker(Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry registry, string key)
+    {
+        var row = registry.Get(key);
+        return (row?.Outcome, row?.Detail);
+    }
+
     private static object Wrap(JsonElement me, DateTime fetchedUtc, bool cached)
     {
         string plan = "Free";
@@ -133,6 +212,6 @@ public class SubdlQuota : ControllerBase
         }
 
         // FetchedAt: ISO-8601 UTC; the UI renders it in the viewer's timezone (user decision 09.09.2026)
-        return new { plan, search, downloads, cached, fetchedAt = fetchedUtc.ToString("O") };
+        return new { plan, search, downloads, cached, local = LocalRateLimitState(), fetchedAt = fetchedUtc.ToString("O") };
     }
 }

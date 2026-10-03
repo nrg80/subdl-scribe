@@ -61,7 +61,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // the retry lines back into it so a hidden retry still shows up in the run log.
         retry.Log = msg => api.RaiseLog(msg);
         var tmdb = new TmdbImdbResolver(http, config.TmdbApiKey);
-        // F-M20/F-M26: ONE global limiter shared by upload + download (same SubDL account)
+        // F-M20/F-M26: ONE pacing rhythm shared by upload + download (same SubDL account).
+        // It spaces calls and jitters transfers — it holds no budget and refuses nothing.
         var limiter = new GlobalRateLimiter(config.UploadsPerHour, config.MinCallPauseSec);
         var fileRetries = new FileRetryTracker(db, loggerFactory.CreateLogger<FileRetryTracker>());
         var idNotFound = new IdNotFoundTracker(db, loggerFactory.CreateLogger<IdNotFoundTracker>());
@@ -110,8 +111,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // the retry lines back into it so a hidden retry still shows up in the run log.
         retry.Log = msg => api.RaiseLog(msg);
         var tmdb = new TmdbImdbResolver(http, config.TmdbApiKey);
-        // F-M20/F-M26: same global limiter instance semantics — one bucket per run bundle.
-        // The upload task builds its own bundle; both clamp against the same configured cap.
+        // F-M20/F-M26: same pacing semantics as the upload bundle — no shared budget, because
+        // there is none left to share (F-M20, 03.10.2026).
         var limiter = new GlobalRateLimiter(config.UploadsPerHour, config.MinCallPauseSec);
         var searchTracker = new DownloadSearchTracker(db, loggerFactory.CreateLogger<DownloadSearchTracker>());
         var fileRetries = new FileRetryTracker(db, loggerFactory.CreateLogger<FileRetryTracker>());

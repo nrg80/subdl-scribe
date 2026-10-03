@@ -16,11 +16,16 @@ namespace Jellyfin.Plugin.SubdlScribe.Api
 {
     /// <summary>
     /// In-run watchdog (NF-4): aborts a pipeline run when no heartbeat has been
-    /// recorded for a grace period scaled from the configured rate limit.
-    /// The grace is a multiple of the rate period (3600 / calls-per-hour),
-    /// linearly interpolated: 3x at the minimum rate (1/h → 3h), 20x at the
-    /// maximum (500/h → ~2.4 min). Waiting out a configured rate pause is
-    /// always legal; only a genuinely frozen run exceeds the grace.
+    /// recorded for a fixed grace period of <see cref="Grace"/>.
+    /// <para>
+    /// The grace used to be scaled from the configured rate limit (2.4–3.8 min). That
+    /// was wrong in both directions: it could abort a legal transfer — one file download is
+    /// allowed 5 minutes (FileTransferTimeout), a value the scaled grace never reached — and
+    /// it tied a robustness limit to a pacing setting. With the local call budget removed
+    /// (F-M20) there is nothing left to scale from, so the grace is a constant that covers
+    /// the longest legal single operation with room to spare.
+    /// </para>
+    /// <para>The heartbeat keeps the watchdog quiet while the run is making progress.</para>
     /// </summary>
     /// F-M209: torn down on EVERY exit path, so a run that leaves on an exception leaves no timer
     /// and no subscription behind.
@@ -28,7 +33,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Api
     {
         private readonly CancellationTokenSource _cts = new();
         private readonly CancellationToken _linked;
-        private readonly Func<TimeSpan> _grace;
+        private readonly TimeSpan _grace;
         private readonly Action<string>? _onAbort;
         private readonly string _name;
         private readonly object _lock = new();
@@ -37,10 +42,9 @@ namespace Jellyfin.Plugin.SubdlScribe.Api
         private Task? _monitor;
 
         /// <summary>
-        /// Initializes a watchdog. <paramref name="grace"/> is evaluated at
-        /// check time so live config changes apply mid-run.
+        /// Initializes a watchdog with a fixed idle grace.
         /// </summary>
-        public RunWatchdog(string name, CancellationToken userToken, Func<TimeSpan> grace, Action<string>? onAbort = null)
+        public RunWatchdog(string name, CancellationToken userToken, TimeSpan grace, Action<string>? onAbort = null)
         {
             _name = name;
             _grace = grace;
@@ -52,16 +56,11 @@ namespace Jellyfin.Plugin.SubdlScribe.Api
         public CancellationToken Token => _linked;
 
         /// <summary>
-        /// Grace from the configured calls-per-hour, linearly scaled:
-        /// multiple = 3 + (rate-1)/499 * 17 (3x @ 1/h … 20x @ 500/h).
+        /// Gets the fixed idle grace: 6 minutes. It covers the 5-minute file-transfer
+        /// timeout (SubdlApiClient.FileTransferTimeout) with room to spare, so a slow but
+        /// working transfer is never mistaken for a frozen run.
         /// </summary>
-        public static TimeSpan GraceFromRate(int callsPerHour)
-        {
-            int rate = Math.Clamp(callsPerHour, 1, 500);
-            double periodSec = 3600.0 / rate;
-            double multiple = 3.0 + ((rate - 1) / 499.0) * 17.0;
-            return TimeSpan.FromSeconds(multiple * periodSec);
-        }
+        public static TimeSpan Grace => TimeSpan.FromMinutes(6);
 
         /// <summary>Record a heartbeat — the run is alive and making progress.</summary>
         public void Heartbeat()
@@ -85,7 +84,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Api
                 while (!_linked.IsCancellationRequested)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(10), _linked).ConfigureAwait(false);
-                    TimeSpan grace = _grace();
+                    TimeSpan grace = _grace;
                     TimeSpan idle;
                     lock (_lock)
                     {
@@ -104,7 +103,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Api
                             _aborted = true;
                         }
 
-                        _onAbort?.Invoke($"[{_name}] Watchdog: no progress for {idle.TotalMinutes:F1} min (grace {grace.TotalMinutes:F1} min from rate limit) — aborting run.");
+                        _onAbort?.Invoke($"[{_name}] Watchdog: no progress for {idle.TotalMinutes:F1} min (grace {grace.TotalMinutes:F1} min) — aborting run.");
                         _ = _cts.CancelAsync();
                         return;
                     }

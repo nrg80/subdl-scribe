@@ -115,7 +115,11 @@ public class PluginConfiguration : BasePluginConfiguration
     {
         // F-M18: default = NO library selected (explicit opt-in)
         SelectedLibraries = new List<string>();
-        // F-M20 (merged 08.09.2026): one combined value = operating rate AND hard cap; clamped 100-500 (range)
+        // F-M20 (03.10.2026, user decision): the transfer RATE per hour, clamped 100-500. It paces
+        // the interval between two real transfers (3600/rate, ±30 %, F-M26) — it is NOT a ceiling.
+        // The plugin kept a per-run hourly call bucket here until 03.10.2026 and could stop a run on
+        // it; SubDL publishes DAILY counters only, so that budget was our own invention and stopped
+        // runs the server would have allowed. Removed.
         // (17.09.2026): default raised 100 -> 400, range 100-500 (user decision, Matrix DM)
         UploadsPerHour = 400;
         // F-M22: default DryRun OFF — user explicitly wants uploads to run live when enabled.
@@ -166,15 +170,19 @@ public class PluginConfiguration : BasePluginConfiguration
     public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets uploads per hour (F-M20, merged 08.09.2026).
-    /// Combined operating value and hard cap; clamped to 1–500.
+    /// Gets or sets the transfer rate per hour (F-M20). It sets the pacing interval between two
+    /// real transfers (3600/rate, ±30 %) and is the base for the bare-call interval when no
+    /// explicit pause is configured. It is a RATE, not a ceiling: nothing counts calls against it
+    /// and nothing can be refused for exceeding it.
     /// </summary>
     public int UploadsPerHour { get; set; }
 
     /// <summary>
-    /// (user decision 15.09.2026): explicit minimum pause between two API
-    /// calls in seconds (0.1–10, default 0.5). Overrides the derived 3600/cap
-    /// spacing when smaller. SubDL allows 600 req/min = 0.1 s spacing.
+    /// (user decision 15.09.2026; range/default confirmed 03.10.2026): explicit pause
+    /// between two API calls in seconds (0.1–10, default 0.5). Overrides the derived
+    /// 3600/cap spacing when smaller. SubDL allows 600 req/min = 0.1 s spacing, so the
+    /// floor is the server's own fastest allowed rate and the range never permits an
+    /// unpaused burst.
     /// </summary>
     public double MinCallPauseSec { get; set; } = 0.5;
 
@@ -226,8 +234,8 @@ public class PluginConfiguration : BasePluginConfiguration
     // day number 1..28 + "HH:mm" (monthly).
     // NOTE: an additional per-fire jitter (Random.Shared.Next(0, 31) minutes on top of the
     // diced anchor) was described here but is NOT implemented — no call site adds it. The
-    // anti-herd function comes from the diced anchor itself plus the roll-over and
-    // recovery offsets (F-M51, F-M182). Do not assume an anchor jitter exists.
+    // anti-herd function comes from the diced anchor itself plus the recovery offsets
+    // (F-M51, F-M182). Do not assume an anchor jitter exists.
 
     /// <summary>Diced daily fire time, "HH:mm". Empty = not diced yet.</summary>
     public string RandomDailyTime { get; set; } = string.Empty;

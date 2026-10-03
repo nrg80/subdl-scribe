@@ -793,10 +793,10 @@ workers.forEach(function (w) {
                         config.ArrivalDebounceMinutes = (function () { var v = parseInt(document.querySelector('#ArrivalDebounceMinutes').value, 10); return isNaN(v) ? 5 : Math.min(120, Math.max(1, v)); })();                                                config.RefetchInterval = document.querySelector('#RefetchInterval').value;
                         config.JobSpacingMinutes = (function () { var v = parseInt(document.querySelector('#JobSpacingMinutes').value, 10); return isNaN(v) ? 15 : Math.min(120, Math.max(5, v)); })();
 
-                        config.UploadsPerHour = Math.min(500, Math.max(100, uph)); // Range 100..500
+                        config.UploadsPerHour = Math.min(500, Math.max(100, uph)); // Rate 100..500 (F-M20)
                         var mcp = parseFloat(String(document.querySelector('#MinCallPauseSec').value).replace(',', '.'));
                         if (isNaN(mcp)) { mcp = 0.5; }
-                        config.MinCallPauseSec = Math.min(5, Math.max(0.1, mcp)); // 0.1..5
+                        config.MinCallPauseSec = Math.min(10, Math.max(0.1, mcp)); // 0.1..10
                         config.FollowUpRoundsDownload = document.querySelector('#FollowUpRoundsDownload').checked;
                         config.FollowUpRoundsUpload = document.querySelector('#FollowUpRoundsUpload').checked;
                         config.UploadOnArrival = document.querySelector('#UploadOnArrival').checked;

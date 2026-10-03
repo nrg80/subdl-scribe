@@ -121,8 +121,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
 
     /// <summary>
     /// (user decision 25.09.2026: stop rescheduling at the limit): every
-    /// reschedule of a slot (lock-busy defer, rate-limit spacing, hourly-cap
-    /// roll-over) is COUNTED. After <see cref="MaxRescheduleAttempts"/> (16) the
+    /// reschedule of a slot (lock-busy defer, rate-limit spacing) is COUNTED. After <see cref="MaxRescheduleAttempts"/> (16) the
     /// rescheduling stops instead of silently pushing the same work forward
     /// forever. The slot's next REGULAR anchor picks the work up again — which is
     /// why giving up is a warning, not an error. Reset on a real fire, and at the
@@ -293,7 +292,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
 
     /// <summary>
     /// Fires at the exact given time — the caller already applied its own
-    /// offset (lock retry: now + JobSpacingMinutes; hourly cap: roll-over + JobSpacingMinutes).
+    /// offset (lock retry and rate-limit deferral: now + JobSpacingMinutes).
     /// No second jitter on top. Do NOT use this overload for daily-limit quota anchors:
     /// those need the coordinator's 30..300 min dice — use ScheduleRecoveryFire instead
     /// (F-M182, 23.09.2026: alreadyJittered:true silently disabled the anti-herd jitter).
@@ -302,7 +301,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     /// reschedule limit (16) is exhausted (user decision 25.09.2026).</returns>
     public bool ScheduleRecoveryFireAt(bool upload, DateTime fireAtUtc)
     {
-        // The respacing path (lock-busy / hourly cap / rate limit): every REQUEST is
+        // The respacing path (lock-busy / rate limit): every REQUEST is
         // counted, before the duplicate check, so repeated triggers for the same slot
         // cannot push the work forward forever (user decision 25.09.2026:
         // "stop rescheduling at the limit"). The duplicate check below still keeps the
@@ -425,8 +424,8 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         }
         else if (alreadyJittered)
         {
-            // Lock-busy / rate-limit / hourly-cap reschedule: the caller already
-            // computed the exact time (now or roll-over + JobSpacingMinutes) and no
+            // Lock-busy / rate-limit reschedule: the caller already
+            // computed the exact time (now + JobSpacingMinutes) and no
             // jitter applies to it. The old text claimed a quota reset with a
             // 30..300 min jitter that never happened here — misleading in the log.
             LogUtil.Normal(_logger, 

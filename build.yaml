@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.166"
+version: "12.1.12.167"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,22 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.167: The plugin no longer stops itself. The one limit left is SubDL's.
+    A per-run hourly call bucket sat in our own code and could end a whole run when it
+    filled up. SubDL publishes DAILY counters only, so that bucket was our invention, and
+    it stopped runs the server would have allowed: in two measured runs 735 of 2000 searches
+    and 16 of 50 downloads were still free when it fired. It is gone. What remains is the
+    pacing - the gap between two transfers and the pause between calls - and the run stops
+    only when SubDL itself says no (HTTP 429), decided against the live server counters.
+    With it go the roll-over anchor and the "wait until the next hour" behaviour: a deferral
+    now lands a plain job spacing after the stop, the same knob every other wait already uses,
+    instead of a moving point an hour away that the settings page could not explain.
+    The watchdog's grace no longer scales with the rate either. One file transfer is allowed
+    five minutes, and the scaled value was shorter, so a slow but working download could be
+    aborted as "frozen"; the grace is a fixed six minutes now.
+    Smaller, same round: the call pause runs to 10 seconds instead of 5, and the rate field
+    is labelled "Transfer rate" because that is what it is - a pace, not a ceiling.
+    The quota box also names a local deferral and its cause and turns the bar yellow with it.
   v12.1.12.166: The two candidate settings now agree with each other, and the search obeys them.
     "Max candidates per language" used to be ignored by the search, which stopped at a hard-coded
     three per language no matter what the setting said, and a budget below "keep X" made that

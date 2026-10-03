@@ -380,13 +380,13 @@ public sealed class DownloadPipeline : IDisposable
         // reset, no second bookkeeping row to keep in step.
         LogUtil.Detail(_config.LogMode, _logger, "[SubDL-D] target languages: {Languages}", string.Join(",", targets));
 
-        // NF-4: in-run watchdog — grace scales with the configured rate limit.
+        // NF-4: in-run watchdog — fixed 6-min grace, independent of the pacing knob.
         // ApiActivity fires after EVERY completed API round-trip (search pages,
         // downloads, uploads, retries) — the heartbeat that keeps the watchdog
         // quiet while the run is making legal slow progress.
         _watchdog = new RunWatchdog(
             "SubDL-D", ct,
-            () => RunWatchdog.GraceFromRate(_config.UploadsPerHour),
+            RunWatchdog.Grace,
             msg => _logger.LogError("{Msg}", msg));
         _api.ApiActivity += _watchdog.Heartbeat;
         var runCt = _watchdog.Token;
@@ -454,9 +454,9 @@ public sealed class DownloadPipeline : IDisposable
 
         // F-M183 (user report 23.09.2026): the run counters used items.Count (= every
         // item in the selected libraries, e.g. 1125) as their denominator, but the
-        // queue filter below skips non-queued items — so a run that exhausted the
-        // hourly cap after 400 queue items reported "400/1125" (25%) while it had
-        // actually consumed 400 of only 727 queued items (55%). Count the queue as
+        // queue filter below skips non-queued items — so a run stopped after 400 queue
+        // items reported "400/1125" (25%) while it had actually consumed 400 of only
+        // 727 queued items (55%). Count the queue as
         // the denominator: the number the run can really work, and the one that
         // makes the hourly-cap decision legible.
         int queuedTotal = QueueFilter == null
@@ -703,7 +703,7 @@ public sealed class DownloadPipeline : IDisposable
 
         // F-M152: NO in-run wait — the task stops clean and the SchedulerCoordinator
         // re-fires this direction once at anchor + jitter (30..300 min, diced per fire —
-        // the coordinator's dice; the hourly-cap roll-over fire uses JobSpacingMinutes instead).
+        // the coordinator's dice; a plain deferral uses JobSpacingMinutes instead).
         // F-M182 (user report 23.09.2026): this used ScheduleRecoveryFireAt, which sets
         // alreadyJittered:true — the fire landed EXACTLY on the reset (verified live:
         // 21.09. download, reset 02:00 local → fire 02:00 local, +0 min) while the log
@@ -1242,23 +1242,18 @@ public sealed class DownloadPipeline : IDisposable
             }
         }
 
-        // F-M20/F-M26: global hourly cap applies to the search call too (shared bucket).
-        // ThrottleAsync = slot + jittered pause (F-M48 fix 08.09.2026: the old
-        // TryAcquireSlot-only path fired up to 100 searches in ~9 s → HTTP 429 from
-        // SubDL, every result silently discarded as "no candidates").
-        // (14.09.2026): exhausted bucket → run stops NOW and the scheduler
-        // fires at the roll-over (+jitter). No in-run waiting, no long lock hold.
-        if (!await _limiter.ThrottleAsync(ct).ConfigureAwait(false))
-        {
-            LogUtil.Normal(_logger, "[SubDL-D] Hourly API cap ({Cap}/h) — run stops until roll-over.", _config.UploadsPerHour);
-            ScheduleHourlyFireIfExhausted(upload: false);
-            _stopRun = true;
-            return;
-        }
-        // (16.09.2026, user decision): the extra delay after ThrottleAsync was a
-        // double pause (ThrottleAsync already waits InterCallPauseMs) — every search
-        // call effectively waited 2× MinCallPauseSec. Removed; the throttle pause is
-        // the only inter-call pause now.
+        // F-M20/F-M26: the configured rate paces this search; the plugin holds no budget of
+        // its own. A per-run hourly bucket sat here until 03.10.2026 and could stop the whole run
+        // via `_stopRun`. It was our own invention — SubDL publishes DAILY counters only — and it
+        // stopped runs the server would have allowed (735 of 2000 searches still free when it
+        // fired). Enforcement belongs to SubDL: a real 429 is answered below by the
+        // QuotaStopDecision path, which reads the live counters before it decides.
+        // The pause stays (F-M48 fix 08.09.2026): without it the search path fired up to 100
+        // requests in ~9 s, SubDL answered 429 and every result was silently discarded as
+        // "no candidates".
+        await _limiter.PauseAsync(ct).ConfigureAwait(false);
+        // (16.09.2026, user decision): this pause is the only one before a search. An
+        // extra delay sat here once and doubled it — every search waited 2× MinCallPauseSec.
 
         // One search per item with the server-side filters (season, episode, target
         // languages) — strict, no fallbacks (user decision 08.09.2026). The client-side
@@ -1345,6 +1340,11 @@ public sealed class DownloadPipeline : IDisposable
                 }
                 else if (stop == QuotaStop.NextDayFire)
                 {
+                    // Count the stop, or the dispatcher cannot tell it from an "ok" cycle: it would
+                    // paint the download light GREEN and mark every item this run never worked as
+                    // Done, removing it from the queue. `QuotaStopped` is the only flag the
+                    // dispatcher reads (SubdlEventDispatcher.CleanupDirectionQueue).
+                    summary.QuotaStopped++;
                     // Day-long: anchor on the server's reset (or the fail-safe midnight),
                     // exactly like the download-429 path. Without this the search path
                     // stopped without scheduling anything and nothing retried until the
@@ -1359,6 +1359,9 @@ public sealed class DownloadPipeline : IDisposable
                 }
                 else
                 {
+                    // A spent allowance with a clean stop and no fire — still a quota stop (the work
+                    // did not happen), so the counter and the queue guard apply.
+                    summary.QuotaStopped++;
                     _logger.LogWarning(
                         "[SubDL-D] Search allowance spent — run stopped at {File}; no recovery fire (continue-after-limit is off or arrival run) (F-M238).",
                         Path.GetFileName(mediaPath));
@@ -1622,14 +1625,10 @@ public sealed class DownloadPipeline : IDisposable
                     break;
                 }
 
-                // (14.09.2026): exhausted bucket → stop + scheduler fire at
-                // roll-over (+jitter); no in-run waiting.
-                if (!await _limiter.TryAcquireSlotAsync(ct).ConfigureAwait(false))
-                {
-                    LogUtil.Normal(_logger, "[SubDL-D] Hourly API cap ({Cap}/h) — run stops until roll-over.", _config.UploadsPerHour);
-                    ScheduleHourlyFireIfExhausted(upload: false);
-                    return;
-                }
+                // F-M26: the pause before a REAL download (download→download), ±30 %.
+                // The local call budget that stood here until 03.10.2026 is removed (F-M20): it could
+                // only ever stop the run, and the plugin no longer counts its own calls.
+                await Task.Delay(_limiter.TransferPauseMs(), ct).ConfigureAwait(false);
 
                 _watchdog?.Heartbeat();
                 var (bytes, packFile) = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
@@ -1877,12 +1876,10 @@ public sealed class DownloadPipeline : IDisposable
                         }
                         else
                         {
-                            // F-M20/F-M26: HI variant download goes through the same global limiter
-                            if (!_limiter.TryAcquireSlot())
-                            {
-                                LogUtil.Normal(_logger, "[SubDL-D] Hourly API cap ({Cap}/h) — HI variant skipped this run.", _config.UploadsPerHour);
-                            }
-                            else
+                            // F-M26: the HI variant is a SECOND real download for this item, so it
+                            // carries the transfer pause (main subtitle → HI variant). The local cap that
+                            // used to skip the fetch (F-M20) is gone — nothing here can refuse it any more,
+                            // because the plugin holds no budget of its own. Only SubDL can say no.
                             {
                             // (16.09.2026): pause between two real downloads
                             // (main subtitle → HI variant) = the steered rate-limit
@@ -2477,35 +2474,6 @@ public sealed class DownloadPipeline : IDisposable
     private static HashSet<string> Tokenize(string s) =>
         new(s.Split(new[] { '.', '_', ' ', '-' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>F-M43 Stufe 2: SRT cue span vs item runtime, tolerance from config. Returns (ok, reason).</summary>
-    /// <summary>
-    /// Bounded wait for a free rate-limiter slot when the local hourly cap
-    /// is exhausted mid-run (default 50 min, clamp 1–120).
-    /// </summary>
-    /// <summary>
-    /// (user decision 14.09.2026): the hourly-cap wait is delegated to
-    /// the scheduler — on an exhausted bucket the run stops immediately and a
-    /// recovery fire is scheduled at the bucket roll-over + JobSpacingMinutes.
-    /// Replaces the in-run bounded wait (old RateLimitWaitMinutes):
-    /// no lock held for up to 2 h, the scheduler owns ALL waiting now.
-    /// </summary>
-    private void ScheduleHourlyFireIfExhausted(bool upload)
-    {
-        var rollover = _limiter.NextRollOverUtc;
-        if (rollover == null)
-        {
-            return; // capacity free again — no fire needed
-        }
-        // (25.09.2026, user decision): the offset is JobSpacingMinutes — the same
-        // GUI value that already spaces run-lock re-fires and the other background
-        // jobs, so the user has ONE knob for it instead of a hidden constant.
-        // Previously a random 300..900 s (5-15 min), briefly a hard-coded 30 min.
-        // Clamped 5..120 like every other reader of this setting (matches the GUI range).
-        var offsetMinutes = Math.Clamp(_config.JobSpacingMinutes, 5, 120);
-        var fireAt = rollover.Value.AddMinutes(offsetMinutes);
-        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload, fireAt);
-    }
-
 
     /// <summary>
     /// Decode SRT bytes with BOM detection (UTF-8/UTF-16LE/UTF-16BE) before
@@ -2533,6 +2501,7 @@ public sealed class DownloadPipeline : IDisposable
         return System.Text.Encoding.UTF8.GetString(bytes);
     }
 
+    /// <summary>F-M43 Stufe 2: SRT cue span vs item runtime, tolerance from config. Returns (ok, reason).</summary>
     private bool RuntimeMatches(BaseItem item, byte[] srtBytes, out string? reason)
     {
         reason = null;

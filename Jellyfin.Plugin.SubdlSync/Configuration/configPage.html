@@ -207,13 +207,13 @@
                         </div>
 <h3>Rate Limit</h3>
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="UploadsPerHour">Max. Upload or Download Rate per hour (100&ndash;500)</label>
+                            <label class="inputLabel inputLabelUnfocused" for="UploadsPerHour">Transfer rate per hour (100&ndash;500)</label>
                             <input id="UploadsPerHour" name="UploadsPerHour" type="number" is="emby-input" min="100" max="500" />
-                            <div class="fieldDescription">Default: 400.</div>
+                            <div class="fieldDescription">Paces the gap between two real transfers (uploads or downloads). Default: 400. It is a rate, not a limit &mdash; only SubDL stops a run.</div>
                         </div>
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="MinCallPauseSec">Min. pause between API calls, seconds (0.1&#8211;5)</label>
-                            <input id="MinCallPauseSec" name="MinCallPauseSec" type="number" inputmode="decimal" is="emby-input" min="0.1" max="5" step="0.1" />
+                            <label class="inputLabel inputLabelUnfocused" for="MinCallPauseSec">Min. pause between API calls, seconds (0.1&#8211;10)</label>
+                            <input id="MinCallPauseSec" name="MinCallPauseSec" type="number" inputmode="decimal" is="emby-input" min="0.1" max="10" step="0.1" />
                             <div class="fieldDescription">Delay between requests in seconds. Default: 0.5.</div>
                         </div>
 
@@ -1167,18 +1167,43 @@ workers.forEach(function (w) {
                         function resetLocal(iso) {
                             return isNaN(new Date(iso).getTime()) ? '' : subdlFmtTime(iso);
                         }
-                        function renderBar(label, used, limit, reset) {
+                        // note = an extra line under the bar; forceWarn = paint it YELLOW regardless of
+                        // the fill percentage. Both were added 03.10.2026 for the LOCAL deferral: the
+                        // server counters can sit at 3/1000 (bar blue, everything fine) while the
+                        // direction is already deferred — the bar has to say so.
+                        function renderBar(label, used, limit, reset, note, forceWarn) {
                             var pct = (limit > 0) ? Math.min(100, (used / limit) * 100) : 0;
-                            var cls = pct >= 95 ? 'danger' : (pct >= 75 ? 'warn' : '');
+                            var cls = forceWarn ? 'warn' : (pct >= 95 ? 'danger' : (pct >= 75 ? 'warn' : ''));
                             return '<div class="subdl-quota-row">' +
                                 '<div class="subdl-quota-label"><span>' + label + '</span><span>' + n(used) + ' / ' + n(limit) + '</span></div>' +
                                 '<div class="subdl-bar"><div class="subdl-bar-fill ' + cls + '" style="width:' + pct.toFixed(1) + '%;"></div></div>' +
                                 (reset ? '<div style="font-size:0.85em;opacity:0.75;">resets ' + reset + '</div>' : '') +
+                                (note ? '<div style="font-size:0.85em;color:#ffc107;">' + note + '</div>' : '') +
                                 '</div>';
                         }
+                        // The LOCAL deferral and its cause. Yellow, worded like the
+                        // Workers row, so the box and the worker light tell the same story. The
+                        // deferral time comes from the scheduler's pending fire — the same value the
+                        // server-side log names as the restart time.
+                        var loc = res.local || {};
+                        // The CAUSE is the server's own wording ("download quota/rate limit — rescheduled",
+                        // "run lock busy — rescheduled", "cycle already active"), never a label invented
+                        // here: a run-lock deferral is not a rate limit, and calling it one sends the
+                        // reader after the wrong problem. The direction name is added, the rest is verbatim.
+                        function localNote(down) {
+                            var stopped = down ? loc.downloadStopped : loc.uploadStopped;
+                            var until = down ? loc.downloadDeferUntil : loc.uploadDeferUntil;
+                            if (!stopped && !until) { return ''; }
+                            var when = until ? resetLocal(until) : '';
+                            var reason = (down ? loc.downloadReason : loc.uploadReason) || 'deferred';
+                            return (down ? 'Download' : 'Upload') + ': ' + reason
+                                + (when ? ' — next attempt ' + when : '');
+                        }
+                        var localLines = [localNote(false), localNote(true)].filter(function (x) { return x; });
                         var lines = [];
                         lines.push('<div style="font-weight:600;">Plan: ' + (res.plan || 'Free') + '</div>');
-                        lines.push(renderBar('Search', res.search.used, res.search.limit, resetLocal(res.search.reset_at)));
+                        lines.push(renderBar('Search', res.search.used, res.search.limit, resetLocal(res.search.reset_at),
+                            localLines.join(' | '), localLines.length > 0));
                         if (res.downloads) {
                             lines.push(renderBar('Downloads', res.downloads.used, res.downloads.limit, resetLocal(res.downloads.reset_at)));
                         }
@@ -1382,10 +1407,10 @@ workers.forEach(function (w) {
                         config.ArrivalDebounceMinutes = (function () { var v = parseInt(document.querySelector('#ArrivalDebounceMinutes').value, 10); return isNaN(v) ? 5 : Math.min(120, Math.max(1, v)); })();                                                config.RefetchInterval = document.querySelector('#RefetchInterval').value;
                         config.JobSpacingMinutes = (function () { var v = parseInt(document.querySelector('#JobSpacingMinutes').value, 10); return isNaN(v) ? 15 : Math.min(120, Math.max(5, v)); })();
 
-                        config.UploadsPerHour = Math.min(500, Math.max(100, uph)); // Range 100..500
+                        config.UploadsPerHour = Math.min(500, Math.max(100, uph)); // Rate 100..500 (F-M20)
                         var mcp = parseFloat(String(document.querySelector('#MinCallPauseSec').value).replace(',', '.'));
                         if (isNaN(mcp)) { mcp = 0.5; }
-                        config.MinCallPauseSec = Math.min(5, Math.max(0.1, mcp)); // 0.1..5
+                        config.MinCallPauseSec = Math.min(10, Math.max(0.1, mcp)); // 0.1..10
                         config.FollowUpRoundsDownload = document.querySelector('#FollowUpRoundsDownload').checked;
                         config.FollowUpRoundsUpload = document.querySelector('#FollowUpRoundsUpload').checked;
                         config.UploadOnArrival = document.querySelector('#UploadOnArrival').checked;

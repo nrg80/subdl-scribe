@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.166.
+**Status:** Implementation — v12.1.12.167.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -135,13 +135,17 @@ The name is the only thing Jellyfin, MediaElch and every reader here can see. An
 
 **F-M21 [B1]:** Update interval: **manual / daily / twice daily / twice weekly / weekly / monthly**. A scheduled interval fires at the per-installation diced random anchor (F-M51); **manual** leaves no scheduled fire at all and keeps the dashboard and config-page triggers; "on new file" = F-M1a. **Default: Weekly**, shared by both directions (F-M111).
 
-**F-M26b [D]:** **Hourly-cap roll-over fire is offset by the job spacing.** When the shared hourly bucket is exhausted mid-run, the run stops and a one-shot recovery fire is scheduled at the bucket roll-over **+ the job spacing** (both directions, the roll-over fire), clamped 5–120. Default 15.
+**F-M26b [D]:** **A deferred direction waits the job spacing — one knob, no hidden clock.** Whenever a stop defers a direction, the one-shot recovery fire lands **JobSpacingMinutes after the stop** (both directions), clamped 5–120, default 15. **Test: T22.**
+
+**The fire used to be anchored to a roll-over (removed 03.10.2026, user decision).** A per-run hourly bucket anchored it, and that bucket started at the **first API call of the run** — so its "roll-over" was a moving point nobody could predict from the settings page: a run that began at 04:50 and stopped at 04:55 fired at 06:05, and the only explanation lived in the code. Both the anchor and the bucket that produced it are gone (F-M20). What replaced them is the plain deferral every other stop already uses (run-lock retry, overload, postprocessing), so one knob now means one thing everywhere.
+
+**The stop reason is never invented.** A deferral is recorded with the direction's own stored wording, so a run-lock push is not reported as a quota problem (F-M288).
 
 One knob for all spacing — the user configures it through the existing **Job spacing (minutes)** field, with no separate control to discover.
 
-Anti-herd spreading is not needed here: the offset is per installation and rides the account's own hourly roll-over, not a shared wall-clock event. The daily-limit reset keeps its randomised 30–300 min offset (F-M152, F-M182).
+Anti-herd spreading is not needed here: the offset is per installation. The daily-limit reset keeps its randomised 30–300 min offset (F-M152, F-M182).
 
-The coordinator must not add a second offset on top: this path uses the recovery-fire scheduler, whose `alreadyJittered: true` leaves the caller's offset alone. The offset must not affect the daily-limit reset. **Test: T22.**
+The coordinator must not add a second offset on top: this path uses the recovery-fire scheduler, whose `alreadyJittered: true` leaves the caller's offset alone. The offset must not affect the daily-limit reset.
 
 **F-M249:** **The file-name parser recognises a bare episode marker without a season, and a broadcast date in the middle of the name with the title after it.** Every other shape keeps its result.
 
@@ -338,7 +342,7 @@ The run's stored statistics stay untouched (F-M247).
 
 Measured 02.10.2026, both directions: the refetch stamp, the file-retry counter, the id-resolution budget, `EnsureMedia`, `ObserveEmbed` and the file-missing deletion all executed in a dry run, and the dispatcher marked every reported item `Done` and deleted it from the cycle queue — one dry run consumed the work it described. The guard rule: **a write is dry-run-guarded at its own site**, so moving an exit cannot silently expose it. Sanctioned exceptions: a write that makes state stale-free rather than claiming a fact (recording a success, clearing a stamp), and the worker-run record, which reports that the run happened. **Test: T97, L1–L6.**
 
-**F-M184:** **Duplicate handling delegated to postprocessing:** the upload path does not search SubDL for duplicates before uploading. A duplicate upload is accepted by the API ("sent for review"), resolves to `rejected` on the SubDL dashboard, and the postprocessing job deletes that entry and marks the local row `remote-duplicate`. This removes one search call per item from the hourly bucket and the daily search quota; the cost is one upload per duplicate. A local self-echo guard (registry, per media/language pair) still prevents uploading the same pair twice.
+**F-M184:** **Duplicate handling delegated to postprocessing:** the upload path does not search SubDL for duplicates before uploading. A duplicate upload is accepted by the API ("sent for review"), resolves to `rejected` on the SubDL dashboard, and the postprocessing job deletes that entry and marks the local row `remote-duplicate`. This removes one search call per item from the daily search quota; the cost is one upload per duplicate. A local self-echo guard (registry, per media/language pair) still prevents uploading the same pair twice.
 
 **F-M227:** **Every plugin task appears under one heading in the dashboard.** Only `SubDL Postprocessing` reported the category `SubDL Scribe`; the other four reported the default category, so the dashboard split the plugin's work across two groups. Rule: every task this plugin schedules reports `Category => "SubDL Scribe"`; a new task must not inherit a Jellyfin category. **Test: T42.**
 
@@ -354,7 +358,7 @@ Measured 02.10.2026, both directions: the refetch stamp, the file-retry counter,
 
 **F-M17y:** **Delayed upload postprocessing:** after an upload run (normal finish or stop), on the postprocessing schedule (F-M176; not tied to the run and not to a fixed delay — SubDL review latency varies), the plugin queries `/user/mySubtitles` and resolves every locally pending-review entry whose status is `rejected`: an entry with "Duplicate upload" is deleted on SubDL and marked duplicate-remote; any other rejected entry is deleted without a mark. Accepted entries are not touched. All steps logged at Debug. The task runs on its own cadence and diced anchor (F-M210), independent of any run.
 
-**F-M176:** **Postprocessing reschedule spacing:** if postprocessing cannot start because the global run lock is busy (F-M94h: immediate `false`, no waiting) or it hits the hourly rate limit, it schedules a one-shot re-fire in the job spacing (5–120 min). The re-fire still respects the diced anchor and does not move the next regular run. A busy lock is first checked for staleness; only a living previous run causes a deferral.
+**F-M176:** **Postprocessing reschedule spacing:** if postprocessing cannot start because the global run lock is busy (F-M94h: immediate `false`, no waiting), it schedules a one-shot re-fire in the job spacing (5–120 min). A local rate limit can no longer defer it (F-M20). The re-fire still respects the diced anchor and does not move the next regular run. A busy lock is first checked for staleness; only a living previous run causes a deferral.
 
 **F-M94h:** **ONE global run lock for all six state-mutating components** (seeder, downloader, uploader, postprocessing, database refresh, OSHash refresh) — they all touch the same state, so one mutual exclusion is what the design needs. **Overlap is never waited out:** a caller that cannot acquire is refused immediately (a 20-s in-process hand-off grace) and reschedules itself by the job spacing.
 
@@ -546,7 +550,7 @@ The give-up line names the server as not answering in time, never as a caller ca
 
 **F-M24b [B1]:** **Credentials never in logs:** password/API key/token are never written at any log level (redaction before writing, also in Debug)
 
-**F-M25 [NOT IMPLEMENTED]:** A per-run start offset (random wait before the first upload) is not implemented — no code path delays a run, no config property backs it. The anti-herd function is carried by the per-installation diced fire times (F-M51), the hourly-cap roll-over offset (the job spacing, F-M26b) and the daily-limit recovery jitter (F-M182, 30–300 min). Manually triggered runs start immediately.
+**F-M25 [NOT IMPLEMENTED]:** A per-run start offset (random wait before the first upload) is not implemented — no code path delays a run, no config property backs it. The anti-herd function is carried by the per-installation diced fire times (F-M51), the per-stop deferral offset (the job spacing, F-M26b) and the daily-limit recovery jitter (F-M182, 30–300 min). Manually triggered runs start immediately.
 
 **F-M26a:** **Which pause applies where (single source of truth).** the bare-call pause — bare API calls, deterministic. the transfer pause — real transfers, ±30 %.
 
@@ -598,13 +602,23 @@ Status: a missing key reports **red**; the settings page refuses to save it and 
 
 **F-M62:** **429 classification fix:** a 429 carrying no rate headers and naming neither `service_busy` nor `rate_limit` is treated as the conservative fallback (server-level 429, next-midnight anchor), not as the daily allowance — a 429 whose kind cannot be named must never be guessed in the direction that discards a day of work. The real daily allowance carries a reset signal.
 
-**F-M206:** **A respacing log line must not claim a quota reset.** A fire carrying an exact, caller-computed time (lock-busy, hourly-cap, rate-limit respacing) applies **no jitter** and must log `respaced by JobSpacingMinutes after lock-busy or rate-limit (no jitter)`. The quota-reset wording (reset anchor + 30–300 min jitter) is confined to the branch that actually dices it. **Test: T25.**
+**F-M206:** **A respacing log line must not claim a quota reset.** A fire carrying an exact, caller-computed time (lock-busy, rate-limit respacing) applies **no jitter** and must log `respaced by JobSpacingMinutes after lock-busy or rate-limit (no jitter)`. The quota-reset wording (reset anchor + 30–300 min jitter) is confined to the branch that actually dices it. **Test: T25.**
 
 **F-M191b — Unresolvable IMDb id ⇒ DROP it, never keep it.** When `/find` returns every result array empty, TMDB does not index that IMDb id at all — for a series item it is an episode id TMDB has no record of. Keeping it "as the best available" uploads an episode IMDb id in the SERIES slot, exactly what this rule forbids. Both ids are dropped so the caller's type-free title search resolves the show by name.
 
 ## 10. Scheduler, Quota and Timing
 
-**F-M20 [B1]:** Configurable rate limit: uploads/hour (**default 400**) or a minimum pause between API calls (0.1–10 s, default 0.5 s, GUI-capped at 0.1–5 s). A configured pause replaces the rate-derived pause; the two are not compared. the rate limiter clamps the rate to **1–2000**; the run watchdog clamps its grace calculation to **1–500**. The default of 400 sits inside both.
+**F-M20 [B1]:** Configurable pacing — a transfer rate (**default 400/h**) and a pause between API calls (**0.1–10 s, default 0.5 s**) — **and no local call limit of any kind**. A configured pause replaces the rate-derived one; the two are not compared. The range is the server's own fastest allowed rate at the floor (SubDL allows 600 req/min = 0.1 s) and a slow, polite pace at the top; it never permits an unpaused burst. The GUI range and the limiter clamp are identical (0.1–10), so a value entered in the page is the value the limiter uses. The rate is clamped to **1–2000**.
+
+**The plugin enforces no quota of its own (03.10.2026, user decision).** No code path counts API calls, no counter can run out, and no run is stopped for making "too many" calls. **Only SubDL stops a run**: on a real HTTP 429 the server's own counters are read and the `QuotaStopDecision` decides between a short respacing and a day-long stop (F-M238). A per-run hourly bucket lived in `GlobalRateLimiter` until this date and DID stop runs; it was the plugin's own invention — SubDL publishes **daily** counters only — and it stopped runs the server would have allowed (measured live: 735 of 2000 searches and 16 of 50 downloads still free when the bucket fired). The class now only spaces calls; it cannot refuse one.
+
+**F-M288:** **The quota box names the LOCAL deferral and its cause — and the bar turns yellow with it.**
+
+The server counters alone cannot show why a direction is idle. They can read `3 / 1000` (bar blue, everything looking fine) while the plugin's own per-run cap has already stopped the direction, so the box needs its own line for it. Under the API/search bar the box therefore carries one yellow line per deferred direction, and the bar itself is painted `#ffc107` — the same colour the Workers row uses for the same state, so the two readouts cannot tell different stories.
+
+**The cause is passed through, never guessed.** `deferred` covers three unrelated situations: the run lock being busy, our own quota/rate cap, and a user stop. The line carries the direction's own stored wording ("download quota/rate limit — rescheduled", "cycle already active", "run lock busy — rescheduled") instead of a label invented in the page. A lock deferral painted as a rate limit sends the reader after a quota problem that does not exist.
+
+**A deferral without a pending fire is not shown.** When the scheduler holds no fire for that direction the task has already moved on, and a stale row must not paint a yellow line for a direction that is running again. The line is only rendered when the fire exists; the time it names is that fire, in the viewer's zone.
 
 **F-M272:** **The page has THREE refresh cadences, and none of them is "10 s for everything".**
 
@@ -634,13 +648,13 @@ A dry run reports the hearing-impaired choice — the HI variant is selected bey
 
 The pause between two real transfers (upload→upload, download→download) is the base interval ±30 % (the transfer pause).
 
-The pause between two API calls carrying no transfer (empty search, skip, metadata lookup) is **deterministic** (the bare-call pause): exactly the configured minimum pause when configured, otherwise `3600/cap`.
+The pause between two API calls carrying no transfer (empty search, skip, metadata lookup) is **deterministic** (the bare-call pause): exactly the configured minimum pause when configured, otherwise `3600/rate`.
 
-The band is base ±30 %, floor 1 s. With the default cap of 400/h that is 6.3–11.7 s.
+The band is base ±30 %, floor 1 s. With the default rate of 400/h that is 6.3–11.7 s.
 
 A failed or skipped candidate gets **no** transfer pause — nothing was transferred — and stays on the bare-call pause (F-M26a).
 
-The "derive from the hourly cap" sentinel `-1` is **not** clamped; only a real value is clamped. **Test: T21.**
+The "derive from the rate" sentinel `-1` is **not** clamped; only a real value is clamped. **Test: T21.**
 
 **F-M49 [D]:** **Daily-limit resume per direction:** two independent checkboxes, "Continue after daily limit" (Download) and "Continue after daily API limit" (Upload). **Both default ON.** ON → wait once until reset (max 24 h) and retry; OFF → clean stop.
 
@@ -648,7 +662,7 @@ The "derive from the hourly cap" sentinel `-1` is **not** clamped; only a real v
 
 **F-M65:** **One-shot night recovery fire per direction:** a run stopped on the daily limit schedules one re-fire after the quota reset plus a random 30–300 min jitter (away from the 00:00 UTC herd), diced freshly per fire by cryptographic RNG — see F-M182.
 
-**F-M182:** **Jittered recovery fire after the daily limit:** when a pipeline stops on the daily quota, the direction is re-fired once after the server-reported reset plus a random 30–300 minutes. The offset is diced freshly per fire (cryptographic RNG) and rolled independently per direction, so the retry does not land on the 00:00 UTC reset moment every API consumer hits. The jitter applies to the **quota-anchor path only**; fires carrying their own offset (run-lock retry, hourly-cap roll-over) keep their exact time. Log lines name the reset anchor, the resulting fire time in the local zone, and the jitter window applied.
+**F-M182:** **Jittered recovery fire after the daily limit:** when a pipeline stops on the daily quota, the direction is re-fired once after the server-reported reset plus a random 30–300 minutes. The offset is diced freshly per fire (cryptographic RNG) and rolled independently per direction, so the retry does not land on the 00:00 UTC reset moment every API consumer hits. The jitter applies to the **quota-anchor path only**; fires carrying their own offset (run-lock retry, rate-limit respacing) keep their exact time. Log lines name the reset anchor, the resulting fire time in the local zone, and the jitter window applied.
 
 **F-M116:** **Scheduler state persisted:** the next scheduled download/upload fire times, the anchor markers, the catch-up flag and the lock-busy deferrals are persisted and restored on restart.
 
@@ -920,7 +934,7 @@ The pre-migration XML totals are adopted once, guarded by the one-time adoption 
 
 The pre-migration XML totals stay in place, unread, so a downgrade finds them. **Test: T26.**
 
-**F-M209:** **A run's in-run watchdog is torn down on EVERY exit path.** 
+**F-M209:** **A run's in-run watchdog is torn down on EVERY exit path, and its grace is a constant 6 minutes.** The grace does not scale with any setting: it must cover the longest legal single operation, and one file transfer is allowed 5 minutes, so a scaled value could abort a working run (the old scale gave 2.4–3.8 min). Waiting out a configured pause is always legal; only a genuinely frozen run exceeds the grace. **Test: T28.**
 
 **F-M226:** **Every plugin line's level is visible — as a text marker, written at the normal level (F-M224).** The marker `[N]` (Normal), `[V]` (Verbose and up), `[D]` (Debug and up) sits in front of the message, written by the normal level/the per-item level/the detail level/the trace level. Warnings and errors carry no marker. **Test: T41.**
 
@@ -992,7 +1006,7 @@ Reporting the task's own "ok" is wrong twice over: it claims success when the wa
 
 The palette: the page accent is `#00a4dc`. `run` → accent; `ok` → `#107c10`; `failed` → `#a4262c`; `cancelled` and `deferred` → `#ffc107` (quota, run-lock deferral, user stop); `skipped` and `never` → `#767676`; a dry-run note → `#9a9a9a`.
 
-The accent is also the link colour (F-M229) and the required-field colour (F-M228). Red is reserved for destructive and failed states. The quota bar uses the same palette for fill, warning (`#ffc107`) and danger (`#a4262c`).
+The accent is also the link colour (F-M229) and the required-field colour (F-M228). Red is reserved for destructive and failed states. The quota bar uses the same palette for fill, warning (`#ffc107`) and danger (`#a4262c`). A deferred direction paints the bar yellow regardless of its fill percentage: the fill describes the SERVER's allowance, the yellow describes OUR deferral, and the two are independent (F-M288).
 
 **F-M193 [B1]:** **`/user/mySubtitles` is NOT paginated — the counters must count DISTINCT upload ids.** The endpoint ignores `page`, `per_page`, `offset`, `limit` and `start`. The listing deduplicates by the upload id and breaks on the first page that adds no new id; rows with `UploadId <= 0` are kept unconditionally. The status line does not claim "in N pages".
 
@@ -1057,7 +1071,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T19:** A renamed or moved sidecar stays one row; different text stays two (F-M199)
 **T20:** An automatic save updates only the plugin's own fields (F-M201)
 **T21:** The transfer pause is spread ±30 %, the bare-call pause is constant (F-M26/F-M26a)
-**T22:** The hourly-cap roll-over fire lands the job spacing after the roll-over, with no added jitter (F-M26b)
+**T22:** A deferral lands exactly `JobSpacingMinutes` after the STOP moment (no roll-over anchor, no added jitter), it carries the direction's own stored cause rather than a generic "rate limit", and the unchanged items stay `Queued` with the worker row reading `deferred` (F-M26b/F-M288)
+**T101:** No code path counts API calls against a local limit: the limiter exposes no bucket, no counter and no refusing call, and a run that makes 4000 calls in a minute is never stopped by the plugin (only a real HTTP 429 stops it) (F-M20)
 **T23:** An overlapping trigger reschedules instead of widening the running cycle (F-M204)
 **T24:** Sixteen reschedules are accepted, the seventeenth is refused once (F-M205)
 **T25:** A respaced fire never claims a quota reset (F-M206)
@@ -1174,6 +1189,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T98:** With `MaxCandidatesPerLanguage = 3` and `KeepBestPerLanguage = 4` the effective download cap AND the search's early-stop threshold are both 4; with the default pair they are both 3, and `0` stays unlimited on both (F-M95/F-M50).
 
 **T99:** The candidate loop's two exits can both be reached: a budget below keep-best is raised, so "keep X" writes X files; a budget above keep-best is never lowered (F-M242/F-M50).
+**T100:** A deferred direction shows its own stored cause in the quota box (never a generic "rate limit"), the bar turns yellow with it, and the line disappears once the scheduler holds no fire for that direction (F-M288)
+
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)
 **T80:** A container rewrite is reported at `Normal`, the per-track detail at `Verbose` (F-M262)

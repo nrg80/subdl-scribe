@@ -338,11 +338,11 @@ public sealed class UploadPipeline
             return summary;
         }
 
-        // NF-4: in-run watchdog — grace scales with the configured rate limit.
+        // NF-4: in-run watchdog — fixed 6-min grace, independent of the pacing knobs.
         // ApiActivity fires after every completed API round-trip.
         using var watchdog = new RunWatchdog(
             "SubDL", ct,
-            () => RunWatchdog.GraceFromRate(_config.UploadsPerHour),
+            RunWatchdog.Grace,
             msg => _logger.LogError("{Msg}", msg));
         _api.ApiActivity += watchdog.Heartbeat;
         var runCt = watchdog.Token;
@@ -1328,15 +1328,10 @@ public sealed class UploadPipeline
                 // F-M184: the release-match duplicate check that lived here used the
                 // phase-2 batched search result (existingAll) — both are removed; the
                 // duplicate verdict now comes from postprocessing.
-                // (14.09.2026): exhausted bucket → stop + scheduler fire at
-                // roll-over (+jitter); no in-run waiting.
-                if (!await _limiter.TryAcquireSlotAsync(runCt).ConfigureAwait(false))
-                {
-                    summary.RateLimitHits++;
-                    LogUtil.Normal(_logger, "[SubDL] Hourly API cap ({Cap}/h) — run stops until roll-over.", _config.UploadsPerHour);
-                    ScheduleHourlyFireIfExhausted(upload: true);
-                    return summary;
-                }
+                // F-M20 (03.10.2026, user decision): the local call budget is removed — the plugin
+                // counts no calls of its own and cannot refuse one. SubDL alone decides (daily
+                // counters, answered below by the 429/QuotaStopDecision path).
+                // The upload→upload transfer pause (F-M26) sits at the end of this loop, unchanged.
 
                 var result = await UploadSrtContentAsync(
                     cand.IsLoose ? cand.LoosePath : null,
@@ -1574,35 +1569,6 @@ public sealed class UploadPipeline
     /// the size floor and the content-hash dedup. Returns the reject reason
     /// (or null when the content passes) plus the computed content hash.
     /// </summary>
-    /// <summary>
-    /// Bounded wait for a free rate-limiter slot when the local hourly cap
-    /// is exhausted mid-run (default 50 min, clamp 1–120).
-    /// </summary>
-    /// <summary>
-    /// (user decision 14.09.2026): the hourly-cap wait is delegated to
-    /// the scheduler — on an exhausted bucket the run stops immediately and a
-    /// recovery fire is scheduled at the bucket roll-over + JobSpacingMinutes.
-    /// Replaces the in-run bounded wait (old RateLimitWaitMinutes):
-    /// no lock held for up to 2 h, the scheduler owns ALL waiting now.
-    /// </summary>
-    /// F-M26b: the roll-over fire lands at the bucket roll-over + the job spacing (5-120, default 15).
-    private void ScheduleHourlyFireIfExhausted(bool upload)
-    {
-        var rollover = _limiter.NextRollOverUtc;
-        if (rollover == null)
-        {
-            return; // capacity free again — no fire needed
-        }
-        // (25.09.2026, user decision): the offset is JobSpacingMinutes — the same
-        // GUI value that already spaces run-lock re-fires and the other background
-        // jobs, so the user has ONE knob for it instead of a hidden constant.
-        // Previously a random 300..900 s (5-15 min), briefly a hard-coded 30 min.
-        // Clamped 5..120 like every other reader of this setting (matches the GUI range).
-        var offsetMinutes = Math.Clamp(_config.JobSpacingMinutes, 5, 120);
-        var fireAt = rollover.Value.AddMinutes(offsetMinutes);
-        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload, fireAt);
-    }
-
 
     private string? ScreenContentQa(string srtContent, string lang, long runtimeMs, out string contentHash)
     {
@@ -2033,8 +1999,8 @@ public sealed class UploadPipeline
         // F-M152 (rev.10): anchor = server reset (exact, from v2 headers) or
         // fail-safe next 00:00 UTC. No local dicing - the coordinator adds the
         // 30..300 min jitter per fire (direction-independent; the coordinator's dice,
-        // SubdlSchedulerCoordinator. F-M152). Not to be confused with the hourly-cap
-        // roll-over fire below, which offsets by JobSpacingMinutes.
+        // SubdlSchedulerCoordinator. F-M152). Not to be confused with the plain deferral
+        // (F-M26b), which offsets by JobSpacingMinutes.
         var effectiveReset = _api.Edge429NoHeaders || !_api.RateLimitResetUtc.HasValue
             ? NextMidnightUtc()
             : _api.RateLimitResetUtc.Value;
@@ -2498,7 +2464,6 @@ public sealed class UploadPipeline
         return result;
     }
 
-    private bool TryAcquireRateSlot() => _limiter.TryAcquireSlot();
 
     /// <summary>
     /// F-M152 (rev.10): the later of the API reset (v2 headers) and the
@@ -2594,7 +2559,7 @@ public sealed class UploadPipeline
         }
 
         var logger = loggerFactory.CreateLogger("SubDL-UploadPostprocessing");
-        LogUtil.Detail(logger, "[SubDL-Postprocessing] effective rate limiter: MinCallPauseSec={Pause}, MaxCallsPerHour={Cap}.", cfg.MinCallPauseSec, cfg.UploadsPerHour);
+        LogUtil.Detail(logger, "[SubDL-Postprocessing] effective pacing: MinCallPauseSec={Pause} (no local call budget, F-M20).", cfg.MinCallPauseSec);
 
         try
         {
@@ -2626,15 +2591,9 @@ public sealed class UploadPipeline
 
             try
             {
-                if (!await limiter.ThrottleAsync(ct).ConfigureAwait(false))
-                {
-                    _postprocessingRunning = false;
-                    var spacing = JobSpacingMinutes();
-                    SubdlSchedulerCoordinator.Instance?.SchedulePostprocessFire(DateTime.UtcNow.AddMinutes(spacing));
-                    _postprocessingLastResult = $"rate-limited: rescheduled in {spacing} min";
-                    logger.LogWarning("[SubDL] Upload postprocessing: hourly API cap exhausted before login; rescheduled in {Spacing} min.", spacing);
-                    return;
-                }
+                // F-M20 (03.10.2026): no local budget left to exhaust — the pause is the
+                // whole throttle and the login always goes ahead.
+                await limiter.PauseAsync(ct).ConfigureAwait(false);
                 await api.LoginAsync(ct).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -2646,15 +2605,9 @@ public sealed class UploadPipeline
             List<OwnSubtitleEntry>? allMySubtitles = null;
             try
             {
-                if (!await limiter.ThrottleAsync(ct).ConfigureAwait(false))
-                {
-                    _postprocessingRunning = false;
-                    var spacing = JobSpacingMinutes();
-                    SubdlSchedulerCoordinator.Instance?.SchedulePostprocessFire(DateTime.UtcNow.AddMinutes(spacing));
-                    _postprocessingLastResult = $"rate-limited: rescheduled in {spacing} min";
-                    logger.LogWarning("[SubDL] Upload postprocessing: hourly API cap exhausted before fetching mySubtitles; rescheduled in {Spacing} min.", spacing);
-                    return;
-                }
+                // F-M20 (03.10.2026): no local budget left to exhaust — the pause is the
+                // whole throttle and this fetch always goes ahead.
+                await limiter.PauseAsync(ct).ConfigureAwait(false);
                 allMySubtitles = await api.ListMySubtitlesAsync(ct, maxPages: maxPages).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -2720,15 +2673,9 @@ public sealed class UploadPipeline
                 bool deleted = false;
                 try
                 {
-                    if (!await limiter.ThrottleAsync(ct).ConfigureAwait(false))
-                    {
-                        var spacing = JobSpacingMinutes();
-                        SubdlSchedulerCoordinator.Instance?.SchedulePostprocessFire(DateTime.UtcNow.AddMinutes(spacing));
-                        _postprocessingRunning = false;
-                        _postprocessingLastResult = $"rate-limited: rescheduled in {spacing} min";
-                        logger.LogWarning("[SubDL] Upload postprocessing: hourly API cap exhausted before delete of upload {UploadId}; rescheduled in {Spacing} min.", rejected.UploadId, spacing);
-                        return;
-                    }
+                    // F-M20 (03.10.2026): the local call budget is gone, so this delete always
+                    // goes ahead — only the pause remains. No cap can defer it any more.
+                    await limiter.PauseAsync(ct).ConfigureAwait(false);
                     var delStart = DateTime.UtcNow;
                     using var deleteCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                     deleted = await api.DeleteMySubtitleAsync(rejected.UploadId, deleteCts.Token).ConfigureAwait(false);
