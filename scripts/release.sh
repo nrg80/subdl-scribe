@@ -16,6 +16,12 @@
 # workflows only build and test; they never touch a release. See
 # docs/RELEASE.md for why, and .github/workflows/ for the removed workflows.
 #
+# The BRANCH decides the channel: `develop` publishes a prerelease tagged
+# `v<ver>-dev`, `main` publishes the released line tagged `v<ver>`. Run it on the
+# branch whose channel you mean — there is no flag for it, so a stable release
+# cannot be produced by accident and a prerelease cannot silently become the
+# version the README hands out.
+#
 # Usage:
 #   scripts/release.sh                 # version from build.yaml
 #   scripts/release.sh --dry-run       # build + verify, print the plan, touch nothing
@@ -123,14 +129,27 @@ PY
 )" || die "changelog extraction failed"
 ok "changelog  : $(echo "$CHANGELOG_ENTRY" | head -1 | cut -c1-64)…"
 
-TAG="v${VER}-dev"
+# The branch picks the channel, and the tag is derived from it rather than from
+# a flag — so the channel cannot drift from the branch it was cut from, and the
+# tag name always says which channel a ZIP came from.
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+case "$BRANCH" in
+    develop) PRERELEASE=1; TAG="v${VER}-dev"; CHANNEL="prerelease" ;;
+    main)    PRERELEASE=0; TAG="v${VER}";     CHANNEL="stable"     ;;
+    *)       if [[ $DRY_RUN -eq 1 ]]; then
+                 PRERELEASE=1; TAG="v${VER}-dev"; CHANNEL="prerelease"
+                 ok "note: '$BRANCH' is not a release branch — dry run shows the develop channel"
+             else
+                 die "must release from develop or main (on $BRANCH)"
+             fi ;;
+esac
+ok "channel    : $CHANNEL  (tag $TAG)"
+
 if [[ $DRY_RUN -eq 0 ]]; then
-    BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-    [[ "$BRANCH" == "develop" ]] || die "must release from develop (on $BRANCH)"
     [[ -z "$(git status --porcelain)" ]] || die "working tree not clean — commit first"
-    git fetch --quiet origin develop
-    [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/develop)" ]] \
-        || die "develop is not pushed / behind origin"
+    git fetch --quiet origin "$BRANCH"
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse "origin/$BRANCH")" ]] \
+        || die "$BRANCH is not pushed / behind origin"
     git rev-parse "$TAG" >/dev/null 2>&1 && die "tag $TAG already exists"
     TOKEN="${GITHUB_TOKEN:-}"
     if [[ -z "$TOKEN" && -f /opt/data/.secrets.json ]]; then
@@ -223,7 +242,7 @@ git add manifest.json
 # account's verified address - one author per repository, and the release commits are
 # attributed like every other commit in the history.
 git commit -q -m "release: ${VER}" || ok "(manifest unchanged)"
-git push --quiet origin develop
+git push --quiet origin "$BRANCH"
 
 # --- 5. tag, and check what the TAG carries ---------------------------------
 say "Tag $TAG"
@@ -254,11 +273,11 @@ REL_ID="$(curl -sS -m 30 -H "$AUTH" "$API/repos/$REPO_SLUG/releases/tags/$TAG" \
 if [[ -n "$REL_ID" ]]; then
     ok "release exists (id $REL_ID) — reusing"
 else
-    python3 - "$TAG" "$CHANGELOG_ENTRY" <<'PY' > /tmp/subdl-release-payload.json
+    python3 - "$TAG" "$CHANGELOG_ENTRY" "$BRANCH" "$PRERELEASE" <<'PY' > /tmp/subdl-release-payload.json
 import json, sys
 print(json.dumps({
-    "tag_name": sys.argv[1], "target_commitish": "develop", "name": sys.argv[1],
-    "body": sys.argv[2], "draft": False, "prerelease": True,
+    "tag_name": sys.argv[1], "target_commitish": sys.argv[3], "name": sys.argv[1],
+    "body": sys.argv[2], "draft": False, "prerelease": sys.argv[4] == "1",
 }))
 PY
     REL_ID="$(curl -sS -m 60 -X POST -H "$AUTH" -H 'Accept: application/vnd.github+json' \
@@ -312,4 +331,4 @@ ok "downloaded md5 matches the build: $GOT"
 say "Done — $TAG"
 printf '  release : https://github.com/%s/releases/tag/%s\n' "$REPO_SLUG" "$TAG"
 printf '  asset   : %s  (md5 %s)\n' "$KEEP" "$MD5"
-printf '  manifest: https://raw.githubusercontent.com/%s/develop/manifest.json\n' "$REPO_SLUG"
+printf '  manifest: https://raw.githubusercontent.com/%s/%s/manifest.json\n' "$REPO_SLUG" "$BRANCH"

@@ -63,6 +63,9 @@ scripts/release.sh --dry-run   # build + verify, touch nothing
 scripts/release.sh             # the real thing
 ```
 
+The branch picks the channel: run it on `develop` for a prerelease (`v<ver>-dev`), on `main` for the
+released line (`v<ver>`).
+
 Do not release by tagging and pushing alone: a release must carry exactly one asset. See [docs/RELEASE.md](docs/RELEASE.md).
 
 ## Documentation

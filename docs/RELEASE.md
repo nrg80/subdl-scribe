@@ -11,7 +11,18 @@ scripts/release.sh
 
 `scripts/release.sh --dry-run` builds and verifies without committing, tagging or uploading.
 
-The script aborts when the tree is dirty, the branch is not `develop`, `develop` is not pushed, the tag already exists, or the version in `build.yaml` and the csproj disagree.
+**The branch picks the channel:**
+
+| branch | tag | release |
+|---|---|---|
+| `develop` | `v<ver>-dev` | prerelease |
+| `main` | `v<ver>` | stable |
+
+So a stable release cannot be cut by accident, and a prerelease cannot silently become the version
+users install. Run the script on the branch whose channel you mean.
+
+The script aborts when the tree is dirty, the branch is neither `develop` nor `main`, that branch is
+not pushed, the tag already exists, or the version in `build.yaml` and the csproj disagree.
 
 ## What the script verifies
 
@@ -19,7 +30,7 @@ The script aborts when the tree is dirty, the branch is not `develop`, `develop`
 - `category` is exactly `Subtitles`
 - a changelog entry exists for this version
 - the plugin description is identical in `build.yaml` and in the plugin card, is at most 260 characters, and names both required keys
-- tree clean, branch `develop`, pushed to `origin/develop`
+- tree clean, branch is `develop` or `main`, and that branch is pushed
 - the tag does not exist yet
 - the ZIP carries the plugin DLL, its two dependencies (`LanguageDetection`, `LiteDB`) and `build.yaml`, and no `meta.json`
 - version and category inside the ZIP, not in the working tree
@@ -45,10 +56,13 @@ The manifest carries exactly one version entry.
 catalog yields the version `main` holds. `develop` carries the prereleases (`-dev`) and is what the
 two test instances subscribe to.
 
-`scripts/release.sh` writes and pushes the manifest to `develop` only — it refuses to run on any
-other branch — so it does not advance `main`. **Move `main` after a release** when the new version
-is meant to become the installable one: `git branch -f main develop && git push origin main`.
-Until that is done, the catalog served from `main` keeps offering the version it already has.
+`scripts/release.sh` writes and pushes the manifest to **the branch it runs on**, so a release cut on
+`main` advances `main` and a release cut on `develop` advances `develop`. Each branch therefore serves
+its own version, and no manual branch move is needed.
+
+Promoting a tested prerelease to the released line is still an explicit step: merge or fast-forward
+`develop` into `main`, then run the script on `main` so a stable tag and the matching manifest entry
+are produced. Fast-forwarding alone would leave `main` pointing at a `-dev` release.
 
 ## CI
 
