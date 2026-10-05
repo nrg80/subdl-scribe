@@ -417,6 +417,38 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool QaDownloadVerifyLanguage { get; set; } = true;
 
     /// <summary>
+    /// F-M295 (development): download QA gate — cue-vs-speech drift detection.
+    /// Decodes the audio, derives speech islands, and decides whether the subtitle
+    /// holds ONE constant offset to the spoken audio or whether that offset MOVES
+    /// partway through the file. A moving offset means no single correction value
+    /// is valid, so the file is rejected rather than saved and later "corrected"
+    /// into a partly wrong subtitle.
+    /// <para>
+    /// Off by default: the gate costs one full audio decode per candidate file
+    /// (about a minute of CPU on a 44 min episode) and its verdict is a DIRECTION,
+    /// not a correction value. Measured limit: a clean control file yields no
+    /// finding, planted steps of known size and position are recovered 6/6, and on
+    /// genuinely drifting files 77 % recall at 36 % precision with positions
+    /// scattering ±1–2 min. It answers "does it drift", not "shift by N".
+    /// </para>
+    /// Default: false.
+    /// </summary>
+    public bool QaDownloadDriftCheck { get; set; }
+
+    /// <summary>
+    /// F-M295 (development): reject a subtitle whose offset DRIFTS instead of only
+    /// logging it. Only read while <see cref="QaDownloadDriftCheck"/> is on.
+    /// <para>
+    /// Off means the drift is reported in the log and the file is saved anyway —
+    /// the honest default, because a drifting subtitle is still better than none
+    /// and the plugin cannot repair it. On means the candidate is rejected and the
+    /// next one is tried, on the reading that a drifting file wastes a library slot.
+    /// </para>
+    /// Default: false.
+    /// </summary>
+    public bool QaDownloadDriftReject { get; set; }
+
+    /// <summary>
     /// F-M261 (user decision 30.09.2026): allocate missing language codes to the media files
     /// themselves. Expert / General.
     /// <para>

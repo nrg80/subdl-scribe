@@ -318,6 +318,17 @@ The download chain runs against each candidate in score order, before the file i
 
 **The same language verification runs here verbatim** (F-M15), on the downloaded bytes, with its own per-direction switch.
 
+**F-M295 [D] (development):** **Drift gate — cue vs. speech: does the subtitle hold ONE offset, or does that offset MOVE?**
+Decodes the audio, derives speech islands from the frame envelope, anchors each cue to the last island start before it, and compares the model "one offset" against "two offsets split at a candidate cue" by their marginal likelihood (Bayes factor). Recursion left and right finds further boundaries. Two switches: **analyse** (report only) and **reject**; both default off.
+
+**What it decides — and what it refuses to:** a direction plus a span. A drifting file has NO valid single offset, so a correction value printed here would be read as an instruction and would be wrong. The gate therefore never emits a shift.
+
+**Measured, on the reference set:** a clean control file yields **0 findings**; steps planted at a known time and size come back **6/6**; genuinely drifting files give **77 % recall at 36 % precision**, positions scattering **±1–2 min**. The scatter is set by the material (an SDH cue leads the speech by a per-cue varying amount, ~1.5 s MAD), not by the search.
+
+**Rejected approaches, with their numbers** — recorded so they are not retried: nearest-island single cue (21 % precision — in dense dialogue the nearest start is always ~0 s away, so the likelihood flattens and the offset lands anywhere: measured +10.70 s against a truth of +4.65 s); binary-mask cross-correlation (found ±25 s jumps in the KNOWN-CLEAN file, scatter 12.7 s); full-surface correlation vs. the anchored method (2.37 s vs. 2.49 s mean error — equally poor, because a file drifting from −2 s to +10 s has no valid single offset, so every number is an average over the drift); joint optimisation over k windows (synthetic 2/6 vs. 6/6, recall 22 % vs. 77 % — with a free offset per segment each extra boundary pays for itself, so k pins to its upper limit).
+
+**Cost and failure posture:** one full audio decode per candidate file (~14 s per 44 min episode, measured). No ffmpeg, unreadable audio, no speech, too few cues → the gate reports "did not run" and the file passes, like every other gate. **Tests: T108 (synthetic: clean / planted steps / ramp, plus the factored-marginal equality), T109 (end-to-end on a real episode: the plain subtitle steady, the SDH variant drifting).**
+
 **F-M46 [D]:** **Overall selection:** one best candidate per (item, language) by combined score from F-M43–F-M45. The keep-best count is configurable (default 1); above 1 the QA-passed candidates are saved as numbered sidecars. No candidate passing → the language counts as "not available".
 
 ### 4.2 Dry Run — Download
@@ -1242,6 +1253,10 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T106:** A Jellyfin restart during a run records `ok`/"restart" for the affected worker — not `cancelled`/"user stop": no stop marker exists, so neither the task catch nor the in-cycle path reports a user stop, and both directions keep their own fate; a real stop through the endpoint still records `cancelled`/"user stop" for the direction it names (F-M293)
 
 **T107:** Every worker holding a pending deferred fire shows a yellow `defer` lamp and its own line under the Workers list naming the worker, its stored cause and the moment the fire is due; the fire overrides `ok` AND `cancelled` — a direction with a pending fire is never shown as cancelled — while `failed` and `run` are left alone; the line is gated on the fire alone, so it survives a restart and disappears once the fire is consumed; the seeder never appears (F-M294)
+
+**T108:** The drift detector, driven with synthetic material, reports NO drift for cues that track the speech at a constant offset, recovers planted steps of known size and time at 20 and 30 min with a span matching the planted total, and reports drift for a ramped offset — and the factored two-offset marginal used in the port equals the explicit outer log-sum-exp (worst deviation < 1e-6 over 20 random trials) (F-M295)
+
+**T109:** End-to-end on a real episode: the plain subtitle comes back steady while the hearing-impaired variant of the same episode comes back drifting with a span and boundaries named, and the verdict states a span rather than a correction value (F-M295)
 
 
 

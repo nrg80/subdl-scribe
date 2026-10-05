@@ -1791,6 +1791,43 @@ public sealed class DownloadPipeline : IDisposable
                     continue; // next candidate
                 }
 
+                // F-M295 (development): cue-vs-speech drift gate. Runs after the
+                // structure/runtime gates (a broken file never reaches the audio
+                // decode) and before the write. It answers whether the offset to
+                // the spoken audio is CONSTANT — a moving offset has no valid
+                // single correction, so saving it as-is plants a subtitle that is
+                // right in one part and wrong in another. Off by default; see
+                // PluginConfiguration.QaDownloadDriftCheck for the measured limits.
+                if (_config.QaDownloadDriftCheck)
+                {
+                    string? ffmpegForDrift = FfmpegTools.ResolvePath(_config, _logger);
+                    var drift = await Qa.DriftGate.RunAsync(
+                        mediaPath, DecodeSrt(bytes), ffmpegForDrift, _logger, ct).ConfigureAwait(false);
+
+                    if (drift.Ran && drift.Drifts)
+                    {
+                        // Reported always — a drifting file is a finding, whether or
+                        // not it is rejected, and the line states the SPAN, never a
+                        // correction value (the gate cannot supply one).
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — drift {Release}: {Verdict}",
+                            Path.GetFileName(mediaPath), lang, cand.ReleaseName, drift.Describe());
+
+                        if (_config.QaDownloadDriftReject)
+                        {
+                            summary.RejectedCandidates++; // F-M286 (QA gate)
+                            qaRejectedReleases.Add(cand.SubdlId);
+                            continue; // next candidate
+                        }
+                    }
+                    else if (_config.LogMode >= LogLevelMode.Verbose)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — drift gate: {Verdict}",
+                            Path.GetFileName(mediaPath), lang, drift.Describe());
+                    }
+                }
+
                 string content = DecodeSrt(bytes);
                 string contentHash = ContentHashRegistry.ComputeHash(content);
 
