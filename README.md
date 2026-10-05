@@ -8,6 +8,16 @@ The upload direction is **off by default** — see [Upload](#upload-off-by-defau
 
 Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 
+## How this plugin is developed
+
+The code, the specification and this README are written by an **AI agent** under the maintainer's
+direction. The maintainer supplies the requirements, the design decisions and the tests — they come
+from his own library and the failures it produced — and reviews, measures and approves every change.
+
+The [Jellyfin project asks](https://jellyfin.org/docs/general/contributing/llm-policies/) that projects
+shared in its community disclose LLM involvement, so it is disclosed here. Anyone who would rather not
+run LLM-written software can decide on that basis.
+
 ## Requirements
 
 - Jellyfin **12.1.x** (targetAbi `12.1.0.0`)
