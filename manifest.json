@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.178",
-        "changelog": "v12.1.12.178: A drifting subtitle was refused - \"no single offset is valid, left as downloaded\" -\n    which was right about the average and wrong about the conclusion. The segments the drift gate\n    already found ARE the repair: each cue is now shifted by the offset of its OWN segment, a\n    staircase. Over the 36 drifting episodes of this library the worst single-cue residual falls\n    from a 10.74 s median to 4.51 s, 33 of 36 better, and a permutation test puts the staircase 14x\n    better on the real ordering than on a shuffled one, so the steps are structure and not\n    overfitting. Two of the 36 come out worse and no reference-free signal separates them from the\n    33, so the anchor path wins when a same-language reference exists and the untouched original is\n    kept either way. The order guard is the mirror of the anchor path's: the staircase ADDS its\n    shift, so it is bounded from below - with the sign reversed it left a 1.92 s residual and\n    guarded 22 cues instead of 6.",
+        "version": "12.1.12.179",
+        "changelog": "v12.1.12.179: The Download tab showed FOUR \"methods\" where the operator expects one. Three\n    h4 sections - Auto-sync, Anchor-sync, Drift check - each described the same job and each\n    carried its own essay, so a single mechanism read as four. They are now ONE section,\n    \"Subtitle correction (to the audio)\", with ONE short intro and all five switches beneath it.\n    Two of the old texts also contradicted the code: \"one whose offset moves, which the audio\n    sync above cannot correct\" and \"has no valid single correction\" - both false since the\n    staircase landed in .178, and both green in the test, because T114 only checked LENGTH\n    (300 chars) and a banned-vocabulary list. \"cannot correct\" is 46 characters and carries no\n    number, so a false sentence hid behind being short. T114 now matches the refuted claims\n    across the intros, the descriptions AND the switch labels - a planted \"never shifted\" label\n    fails only with the label scope included. Six faults planted, six caught.\n    The drift check's reject is also documented where it acts: it consumes that gate's verdict,\n    so without the drift check switched on the reject does nothing.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.178-dev/Jellyfin.Plugin.SubdlSync_12.1.12.178.zip",
-        "checksum": "d96113c344570f0a45aefc60354628a5",
-        "timestamp": "2026-10-06T18:04:59Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.179-dev/Jellyfin.Plugin.SubdlSync_12.1.12.179.zip",
+        "checksum": "586dfeff705ec54ae0503b95844a135e",
+        "timestamp": "2026-10-06T18:23:49Z"
       }
     ]
   }
