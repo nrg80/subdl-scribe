@@ -523,18 +523,18 @@
                             <div class="fieldDescription">Max. cue span vs. runtime in seconds. 0 = off. Default: 600.</div>
                         </div>
 
-                        <h4 style="margin:1em 0 .3em 0;">Auto-sync (shift to the audio)</h4>
+                        <h4 style="margin:1em 0 .3em 0;">Subtitle correction (to the audio)</h4>
                         <div class="fieldDescription" style="margin-bottom:.6em;">
-                            Shifts a fetched subtitle to the spoken track — by one constant offset, or
-                            segment by segment when the offset moves. The original is kept beside it as
-                            &lt;name&gt;.&lt;lang&gt;.srt.unsynchronized.
+                            Puts a fetched subtitle onto the spoken track: by one constant offset, or
+                            segment by segment when the offset moves — or against a plain same-language
+                            reference. The drift check reports the same measurement instead of applying it.
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaDownloadAutoSync" name="QaDownloadAutoSync" type="checkbox" is="emby-checkbox" />
-                                <span>Auto-sync to the audio</span>
+                                <span>Correct the offset automatically</span>
                             </label>
-                            <div class="fieldDescription">Costs one audio decode per saved file. Default: on.</div>
+                            <div class="fieldDescription">Shifts the file onto the audio before saving, by one offset or segment by segment. The untouched original stays beside it as &lt;name&gt;.&lt;lang&gt;.srt.unsynchronized. Costs one audio decode per saved file. Default: on.</div>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
@@ -543,40 +543,26 @@
                             </label>
                             <div class="fieldDescription">Priority: a track in the subtitle's language, then English, then the first untagged track. Default: on.</div>
                         </div>
-
-                        <h4 style="margin:1em 0 .3em 0;">Anchor-sync (repair against a reference subtitle)</h4>
-                        <div class="fieldDescription" style="margin-bottom:.6em;">
-Repairs a DRIFTING subtitle — one whose offset moves, which the audio sync above cannot
-                            correct — by comparing it to a plain subtitle in the SAME language. The repair is
-                            kept only if it improves the worst line, so a subtitle already in sync is never moved.
-                        </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaDownloadAnchorSync" name="QaDownloadAnchorSync" type="checkbox" is="emby-checkbox" />
-                                <span>Repair drifting subtitles against a reference</span>
+                                <span>Repair a drifting file against a reference</span>
                             </label>
-                            <div class="fieldDescription">Needs a plain subtitle in the same language — beside the file or embedded. Without one nothing is changed. Default: on.</div>
-                        </div>
-
-                        <h4 style="margin:1em 0 .3em 0;">Drift check (cue vs. speech)</h4>
-                        <div class="fieldDescription" style="margin-bottom:.6em;">
-                            Decodes the audio and checks whether the subtitle holds ONE offset to the spoken
-                            track. A file whose offset moves has no valid single correction. Costs one audio
-                            decode per candidate file. Reports a direction and a span, never a shift value.
+                            <div class="fieldDescription">Compares it with a plain subtitle in the same language — beside the file or embedded — and keeps the repair only if it improves the worst line. Needs such a reference; without one nothing is changed. Default: on.</div>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaDownloadDriftCheck" name="QaDownloadDriftCheck" type="checkbox" is="emby-checkbox" />
-                                <span>Drift check (report only)</span>
+                                <span>Drift check (report only, never a shift)</span>
                             </label>
-                            <div class="fieldDescription">Analyse downloaded subtitles for a moving offset. Default: off.</div>
+                            <div class="fieldDescription">Measure whether the subtitle holds ONE offset to the spoken track, and how far it moves when it does not. Costs one audio decode per candidate file. Default: off.</div>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaDownloadDriftReject" name="QaDownloadDriftReject" type="checkbox" is="emby-checkbox" />
-                                <span>Reject drifting files (instead of saving)</span>
+                                <span>Reject drifting files (instead of correcting)</span>
                             </label>
-                            <div class="fieldDescription">Rejects a subtitle that drifts and tries the next candidate. Off: the drift is logged and the file is saved. Default: off.</div>
+                            <div class="fieldDescription">Rejects a subtitle that drifts and tries the next candidate. Needs the drift check above. Off: the drift is corrected segment by segment like any other offset. Default: off.</div>
                         </div>
 
                         

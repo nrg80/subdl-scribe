@@ -1862,11 +1862,11 @@ public sealed class DownloadPipeline : IDisposable
                     }
                 }
 
-                // F-M296: the auto-sync itself. Reuses the verdict the drift gate just
-                // produced when that switch is on (one audio decode, not two) and runs
-                // the same gate itself when it is not. On a drifting file this writes
-                // NOTHING: no single offset exists, so any shift would move one part
-                // right and spoil another.
+                // F-M296/F-M300: the auto-sync itself. Reuses the verdict the drift gate just
+                // produced when that switch is on (one audio decode, not two) and runs the
+                // same gate itself when it is not. A CONSTANT offset is applied as one shift;
+                // a MOVING one as a staircase, one offset per segment. Only a missing verdict,
+                // a step beyond MaxShiftSec or an unusable segment list leaves the file alone.
                 byte[] writeBytes = bytes;
                 string content = DecodeSrt(bytes);
                 string? unsyncPayload = null;

@@ -16,15 +16,15 @@ and **removes the shift before the file is saved**.
   +4 / +8 / +12 s came back as −3.20 / +1.80 / +3.80 / +7.80 / +11.80 s, so the correction is accurate to
   about **0.2 s**. The untouched original is kept beside the corrected file as
   `<name>.<lang>.srt.unsynchronized`, so a correction is reversible without spending download quota
-  again. A subtitle whose offset **moves** is never shifted — it has no single valid offset — and is
-  only reported. Costs one audio decode per saved file.
-- **Anchor-sync (reference)** — repairs a **drifting** subtitle, the case the audio path cannot touch,
-  by comparing it line-by-line with a plain subtitle in the **same language** beside the file or
+  again. A subtitle whose offset **moves** is corrected **segment by segment** — the boundaries the
+  drift check already found are the repair — which took the worst line over 36 drifting episodes from a
+  10.74 s median to 4.51 s. Costs one audio decode per saved file.
+- **Anchor-sync (reference)** — the route that needs no audio: it repairs a **drifting** subtitle by
+  comparing it line-by-line with a plain subtitle in the **same language** beside the file or
   embedded in the container. Identical lines are the same line, so the difference is that line's true
-  error. Measured over **36 drifting episodes: worst line 10.74 s → 0.17 s, 36 of 36 improved.** The
-  repair is kept only when it improves the worst single line — a subtitle already in sync is **never**
-  moved. Needs a plain same-language reference; without one nothing is changed and the finding is
-  reported instead.
+  error. The repair is kept only when it improves the worst single line — a subtitle already in sync is
+  **never** moved. Needs a plain same-language reference; without one nothing is changed and the
+  finding is reported instead.
 
 Both sit on the **Download** tab under **Quality gates (before download save)** and are **on by
 default** — no episode needs a manual delay again.

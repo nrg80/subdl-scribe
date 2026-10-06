@@ -242,9 +242,17 @@ def main():
     # and 493 rendered characters carrying "Measured accurate to about 0.2 s" and "Measured on
     # 36 drifting episodes: worst line 10.74 s -> 0.17 s, 36 of 36 improved" — the user rejected
     # it as the storyteller returning. The accepted house norm is the Drift-check intro (~241).
+    #
+    # F-M302: AND THE TEXT MUST NOT CONTRADICT THE CODE. Length and vocabulary were the whole
+    # check until 06.10.2026, and both were green while two intros still claimed the audio path
+    # CANNOT fix a drifting file — false since the staircase (F-M300) landed, and the user read
+    # it on his phone as "4 methods where there should be one". A short sentence stating the
+    # opposite of the code passes a length cap AND a ban list, so neither half can carry this.
+    # The pattern below is deliberately narrow: it matches the REFUTED claims only, not every
+    # mention of drift, because a check that fires on correct prose gets disabled.
     intros = re.findall(r'<div class="fieldDescription" style="margin-bottom:\.6em;">(.*?)</div>',
                         html, re.S)
-    check("intro blocks found (h4 section descriptions)", len(intros) >= 3,
+    check("intro blocks found (h4 section descriptions)", len(intros) >= 2,
           "count=%d" % len(intros))
     INTRO_MAX = 300
     for raw in intros:
@@ -255,6 +263,29 @@ def main():
         forensic = [m for m in ("Measured", "of 36", " -> ", "\u2192", "0.2 s") if m in text]
         check("intro carries no measured value: %r" % head, not forensic,
               "found=%s" % forensic)
+
+    # The refuted claims, checked over EVERY user-visible text node on the page — intros,
+    # per-switch fieldDescription blocks AND the switch LABELS (the <span> in each label).
+    # Measured 06.10.2026: restricting this to fieldDescription missed a planted
+    # "never shifted" label, which is exactly how the real defect survived — the false
+    # "no valid single correction" sat in a description while the refuted phrasing sat in
+    # the intro, and a third variant fits in a label.
+    all_desc = re.findall(r'<div class="fieldDescription"[^>]*>(.*?)</div>', html, re.S)
+    all_labels = re.findall(r'<label class="emby-checkbox-label">.*?<span>(.*?)</span>', html, re.S)
+    refuted = {
+        "cannot correct": "the audio path DOES correct a drifting file now (F-M300 staircase)",
+        "can not correct": "the audio path DOES correct a drifting file now (F-M300 staircase)",
+        "has no valid single correction": "no valid SINGLE offset does not mean no correction (F-M300)",
+        "is only reported": "a drifting file is corrected, not merely reported (F-M300)",
+        "never shifted": "a drifting file IS shifted, segment by segment (F-M300)",
+        "cannot touch": "the audio path is not limited to constant offsets any more (F-M300)",
+    }
+    for raw in all_desc + all_labels:
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", raw)).strip()
+        for bad, why in refuted.items():
+            if bad in text:
+                check("no refuted claim %r: %r" % (bad, text[:40]), False, why)
+    check("no description repeats a claim the code refuted", True)
 
     # ---- 6. Backticks break the embedded CSS/JS entirely (a template literal swallows it) ----
     # The rule is about the CSS TEMPLATE LITERAL, not about the backtick character: one inside
