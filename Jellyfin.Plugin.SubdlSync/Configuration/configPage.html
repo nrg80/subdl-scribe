@@ -525,12 +525,9 @@
 
                         <h4 style="margin:1em 0 .3em 0;">Auto-sync (shift to the audio)</h4>
                         <div class="fieldDescription" style="margin-bottom:.6em;">
-                            Shifts a fetched subtitle by the ONE constant offset measured against the
-                            spoken track, before it is saved. Measured accurate to about 0.2 s. The
-                            untouched original is kept beside it as &lt;name&gt;.&lt;lang&gt;.srt.unsynchronized, and the
-                            registered hash is the one of the CORRECTED file. A subtitle whose offset
-                            MOVES is never shifted — it has no single valid offset — and is only
-                            reported.
+                            Shifts a fetched subtitle by the ONE constant offset measured against the spoken track.
+                            The original is kept beside it as &lt;name&gt;.&lt;lang&gt;.srt.unsynchronized; a subtitle
+                            whose offset MOVES has no single valid offset and is only reported.
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
@@ -544,24 +541,21 @@
                                 <input id="QaDownloadAudioTrackByLanguage" name="QaDownloadAudioTrackByLanguage" type="checkbox" is="emby-checkbox" />
                                 <span>Pick the audio track by language</span>
                             </label>
-                            <div class="fieldDescription">Priority: a track in the subtitle's language, then English, then the first untagged track. Without this the first track is read, which is the wrong one in about 9% of files here (Italian releases). Default: on.</div>
+                            <div class="fieldDescription">Priority: a track in the subtitle's language, then English, then the first untagged track. Default: on.</div>
                         </div>
 
                         <h4 style="margin:1em 0 .3em 0;">Anchor-sync (repair against a reference subtitle)</h4>
                         <div class="fieldDescription" style="margin-bottom:.6em;">
-                            Repairs a DRIFTING subtitle — one whose offset moves, which the audio sync above cannot
-                            touch — by comparing it to a plain subtitle in the SAME language. Identical lines are the
-                            same line, so the difference is that line's true error; a cut becomes a step between two
-                            anchors instead of a value to average. Measured on 36 drifting episodes: worst line
-                            10.74 s &rarr; 0.17 s, 36 of 36 improved. The repair is kept only if it improves the worst
-                            line, so a subtitle already in sync is never moved.
+Repairs a DRIFTING subtitle — one whose offset moves, which the audio sync above cannot
+                            correct — by comparing it to a plain subtitle in the SAME language. The repair is
+                            kept only if it improves the worst line, so a subtitle already in sync is never moved.
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaDownloadAnchorSync" name="QaDownloadAnchorSync" type="checkbox" is="emby-checkbox" />
                                 <span>Repair drifting subtitles against a reference</span>
                             </label>
-                            <div class="fieldDescription">Needs a plain subtitle in the same language — beside the file, or embedded in the container. Without one nothing is changed and the finding is only reported. Default: on.</div>
+                            <div class="fieldDescription">Needs a plain subtitle in the same language — beside the file or embedded. Without one nothing is changed. Default: on.</div>
                         </div>
 
                         <h4 style="margin:1em 0 .3em 0;">Drift check (cue vs. speech)</h4>

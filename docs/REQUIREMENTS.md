@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.175.
+**Status:** Implementation — v12.1.12.176.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -27,7 +27,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 13 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 13 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
-- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 13 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 12 requirements
 - [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 24 requirements
 - [16. Non-Goals](#16-non-goals)
@@ -1076,6 +1076,8 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M230:** **The Libraries description states function and default in one line.** Wording: `Only selected libraries are processed. None: no upload or download. Default: None.` Field descriptions state function plus default value, nothing else. **Test: T45.**
 
+**F-M299:** **An intro block under an `h4` heading describes what the section does — measurements never appear on the settings page.** A section intro explains the mechanism and the one consequence the operator must act on; measured values, episode counts, before/after numbers, accuracy figures and share-of-files statistics are **spec and commit material**, not UI text. Two intro blocks shipped at **392 and 493 rendered characters** carrying `Measured accurate to about 0.2 s` and `Measured on 36 drifting episodes: worst line 10.74 s → 0.17 s, 36 of 36 improved`; the operator rejected that as the storyteller returning, and the same detail already lives in §4.3/§4.4 and in the commit message. **Budget: 300 rendered characters** per intro, the accepted house norm being the Drift-check intro (~241) and the two rewritten intros at 222 and 256. The same holds for a `fieldDescription` under a checkbox: it states what the switch does and its default, and a diagnostic figure such as a failure share belongs in the log line that measures it. **Test: T114.**
+
 **F-M229:** **Links in the settings page use the same accent blue as the rest of the page.** Jellyfin's stylesheet ships only `a{color:inherit}`, so the links in the field descriptions fell back to the browser default `#0000EE`. Rule: `#SubdlSyncConfigPage a { color: #00a4dc; }` — exactly one blue, no separate hover shade. Scope: link colour only; the destructive red and the status colours are untouched. **Test: T44.**
 
 **F-M228:** **The settings page marks required fields in the accent colour `#00a4dc`, without extra spacing.** Red is reserved for destructive and failed states, so a red marker made a mandatory field look like a fault. The inline variant carries no margin of its own. Scope: the four markers and their two style rules. **Test: T43.**
@@ -1503,6 +1505,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T112:** The reference rule and the anchor correction: a same-language plain sidecar is preferred over an embedded track; the hearing-impaired file never serves as its own reference, and when the target language offers ONLY an HI track the correction is refused rather than anchored to it; a wrong-language candidate and an unknown target language are both refused; against a real extracted pair (Invasion S01E06, plain English against English SDH) a synchronised file is left alone — 137 anchor pairs at a 0.00 s median and 0.75 s worst, no improvement to be had, correction REFUSED; and a step of known size planted into a clean file is removed, with cue order and cue text unchanged (F-M297)
 
 **T113:** Driving the registry decision itself (not a copy of its arithmetic): an `uploaded` row survives a `duplicate-content` skip — after the identity move that the language-tag gate triggers, a skip over the same content leaves the row `uploaded` with its reason cleared and increments no reject; and the same skip over content that is NOT up still writes `rejected` with its reason intact, so the two cases are told apart rather than both being called settled. The second half is what makes the check meaningful: a rule that simply treats every `duplicate-content` skip as settled passes the first half and fails here (F-M298)
+
+**T114:** Driving the rendered page text, not the markup: every intro block under an `h4` heading measures at most **300 rendered characters** (tags stripped, whitespace collapsed) and carries **no measured value** — the ban list is the forensic vocabulary itself (`Measured`, a before/after arrow, an episode count, an accuracy figure), so re-introducing "Measured on 36 drifting episodes: worst line 10.74 s → 0.17 s" fails here rather than passing as prose. The budget is a ceiling and not a target: the check reads the same text a phone renders, so an HTML comment or an entity cannot buy length. Both halves are needed — the length alone would pass a short sentence full of measurements, and the vocabulary alone would pass an unmeasured essay (F-M299)
 
 
 

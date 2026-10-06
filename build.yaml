@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.176"
+version: "12.1.12.177"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,12 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.177: The two download-sync section intros had grown to 392 and 493 characters of
+    measured detail - "accurate to about 0.2 s", "36 drifting episodes: worst line 10.74 s to
+    0.17 s, 36 of 36 improved" - which is spec and commit material, not settings-page text. Both
+    are cut to what the section does (222 and 256), and a structural check now holds every h4
+    intro under 300 rendered characters and free of measured values, so the storytelling cannot
+    creep back. The same pass drops a failure share from the audio-track switch.
   v12.1.12.176: The two download sync quality gates were off by default, so a fresh install
     never repaired a drifting or mis-anchored subtitle until someone found the switches. Both
     now default to ON - the measured cost is one audio decode per saved file (11 s wall / 21 s

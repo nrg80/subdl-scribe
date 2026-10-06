@@ -236,9 +236,43 @@ def main():
     else:
         check("configPage.js found next to the page", False, js_path)
 
+    # ---- 8. Intro text stays OPERATIONAL: no measured values, and a length budget ----
+    # F-M299: the block under an h4 heading says what the section DOES. Measurements, episode
+    # counts and before/after numbers are spec and commit material. Two intros shipped at 392
+    # and 493 rendered characters carrying "Measured accurate to about 0.2 s" and "Measured on
+    # 36 drifting episodes: worst line 10.74 s -> 0.17 s, 36 of 36 improved" — the user rejected
+    # it as the storyteller returning. The accepted house norm is the Drift-check intro (~241).
+    intros = re.findall(r'<div class="fieldDescription" style="margin-bottom:\.6em;">(.*?)</div>',
+                        html, re.S)
+    check("intro blocks found (h4 section descriptions)", len(intros) >= 3,
+          "count=%d" % len(intros))
+    INTRO_MAX = 300
+    for raw in intros:
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", raw)).strip()
+        head = text[:46]
+        check("intro <= %d rendered chars: %r" % (INTRO_MAX, head),
+              len(text) <= INTRO_MAX, "len=%d" % len(text))
+        forensic = [m for m in ("Measured", "of 36", " -> ", "\u2192", "0.2 s") if m in text]
+        check("intro carries no measured value: %r" % head, not forensic,
+              "found=%s" % forensic)
+
     # ---- 6. Backticks break the embedded CSS/JS entirely (a template literal swallows it) ----
-    check("exactly two backticks in the file (the CSS comment pair)",
-          html.count("`") == 2, "count=%d" % html.count("`"))
+    # The rule is about the CSS TEMPLATE LITERAL, not about the backtick character: one inside
+    # the literal closes it early, the script throws, and NO stylesheet is injected while the
+    # page still renders — it reads as a CSS-specificity bug. Backticks in `//` comments are
+    # inert and are the documented way to quote a status word. Counting the whole file cannot
+    # tell the two apart and fails on correct code (it did: 10 total, 2 of them the literal).
+    css_lit = re.search(r"var css = `(.*?)`;", html, re.S)
+    check("the CSS template literal exists", css_lit is not None)
+    if css_lit:
+        check("the CSS template literal is closed exactly once (no stray backtick inside)",
+              css_lit.group(1).count("`") == 0,
+              "inner backticks=%d" % css_lit.group(1).count("`"))
+    # And the whole file must hold no MORE than the literal's two delimiters plus the comment
+    # quotes that are legitimately there — verified per script block below where line numbers
+    # are meaningful, so this is only a coarse net for a third, unbalanced delimiter.
+    check("no third backtick outside a comment or the CSS literal",
+          html.count("`") % 2 == 0, "count=%d" % html.count("`"))
 
     # ---- 7. The embedded script must parse ----
     blocks = re.findall(r"<script>(.*?)</script>", html, re.S)
