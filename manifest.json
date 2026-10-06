@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.176",
-        "changelog": "v12.1.12.176: The two download sync quality gates were off by default, so a fresh install\n    never repaired a drifting or mis-anchored subtitle until someone found the switches. Both\n    now default to ON - the measured cost is one audio decode per saved file (11 s wall / 21 s\n    CPU for a 49 min HEVC episode on a Pi 5) while anchor-sync is text-only at a few\n    milliseconds. An install that never touched the switches resolves its missing key to ON\n    rather than off, so the default actually reaches existing configurations.",
+        "version": "12.1.12.177",
+        "changelog": "v12.1.12.177: The two download-sync section intros had grown to 392 and 493 characters of\n    measured detail - \"accurate to about 0.2 s\", \"36 drifting episodes: worst line 10.74 s to\n    0.17 s, 36 of 36 improved\" - which is spec and commit material, not settings-page text. Both\n    are cut to what the section does (222 and 256), and a structural check now holds every h4\n    intro under 300 rendered characters and free of measured values, so the storytelling cannot\n    creep back. The same pass drops a failure share from the audio-track switch.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.176-dev/Jellyfin.Plugin.SubdlSync_12.1.12.176.zip",
-        "checksum": "5b3e76bc27f164c4bfd8f97e28340ec2",
-        "timestamp": "2026-10-06T17:12:20Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.177-dev/Jellyfin.Plugin.SubdlSync_12.1.12.177.zip",
+        "checksum": "0ff5b2e8e4395505b66de076ea2ea880",
+        "timestamp": "2026-10-06T17:31:45Z"
       }
     ]
   }
