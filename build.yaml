@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.175"
+version: "12.1.12.176"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,12 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.176: The two download sync quality gates were off by default, so a fresh install
+    never repaired a drifting or mis-anchored subtitle until someone found the switches. Both
+    now default to ON - the measured cost is one audio decode per saved file (11 s wall / 21 s
+    CPU for a 49 min HEVC episode on a Pi 5) while anchor-sync is text-only at a few
+    milliseconds. An install that never touched the switches resolves its missing key to ON
+    rather than off, so the default actually reaches existing configurations.
   v12.1.12.175: A pending deferred fire now decides the worker's word and colour for every row
     that does not claim something stronger, not only for a green one. The previous version
     overrode green alone, so the download sat on a yellow "cancel" while its fire for 04:37 was
