@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.179",
-        "changelog": "v12.1.12.179: The Download tab showed FOUR \"methods\" where the operator expects one. Three\n    h4 sections - Auto-sync, Anchor-sync, Drift check - each described the same job and each\n    carried its own essay, so a single mechanism read as four. They are now ONE section,\n    \"Subtitle correction (to the audio)\", with ONE short intro and all five switches beneath it.\n    Two of the old texts also contradicted the code: \"one whose offset moves, which the audio\n    sync above cannot correct\" and \"has no valid single correction\" - both false since the\n    staircase landed in .178, and both green in the test, because T114 only checked LENGTH\n    (300 chars) and a banned-vocabulary list. \"cannot correct\" is 46 characters and carries no\n    number, so a false sentence hid behind being short. T114 now matches the refuted claims\n    across the intros, the descriptions AND the switch labels - a planted \"never shifted\" label\n    fails only with the label scope included. Six faults planted, six caught.\n    The drift check's reject is also documented where it acts: it consumes that gate's verdict,\n    so without the drift check switched on the reject does nothing.",
+        "version": "12.1.12.180",
+        "changelog": "v12.1.12.180: The correction section showed FIVE switches for ONE mechanism, and the operator\n    said so plainly: \"Ein toggle, nicht 5\". It is now one switch, \"Correct subtitle timing\", doing\n    what all five described: shift the file onto the audio (one constant offset, or segment by\n    segment when the offset moves), or repair it line-by-line against a same-language reference\n    when the item has one. Which audio track is read is no longer a setting — choosing it by\n    language is simply right. The drift-report and drift-reject switches are gone: they belonged\n    to the model in which a moving offset could only be reported or refused, and the staircase\n    replaced that model.\n    Two findings from reviewing the result: the reference repair hung off its own removed switch,\n    so unticking the one visible toggle would have left the reference route running — it now\n    follows the same switch. And the UI wiring check asserts ABSENCE of the four removed ids in\n    both markup and JS, because a leftover document.querySelector on a removed element throws at\n    load and takes every binding on the page with it.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.179-dev/Jellyfin.Plugin.SubdlSync_12.1.12.179.zip",
-        "checksum": "586dfeff705ec54ae0503b95844a135e",
-        "timestamp": "2026-10-06T18:23:49Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.180-dev/Jellyfin.Plugin.SubdlSync_12.1.12.180.zip",
+        "checksum": "cb86893f4a1d55387d16a5ab7efc5948",
+        "timestamp": "2026-10-06T18:55:58Z"
       }
     ]
   }
