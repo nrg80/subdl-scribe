@@ -20,10 +20,10 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T116.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 29 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 30 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 6 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
-  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 5 requirements
+  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 6 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -466,6 +466,30 @@ so the steps are **measured, never computed**.
 library, the worst single-cue residual against the same-language plain subtitle went from a **10.74 s
 median to 4.51 s**, with **33 of 36 improved**.
 
+**Where the REMAINING error comes from: the boundary, not the step height.** Measured 06.10.2026 on
+real material with an embedded same-language **TEXT** track as ground truth — six episodes of
+*Person of Interest* S03–S05, two known steps planted (−2.5 s at 15 min, a further −4.5 s at 25 min,
+**7.00 s** off before the correction). The extracted embedded subtitle was kept aside and used ONLY
+to score, so it took no part in the measurement. Result: **5 of 6 improved** — 7.00 → 5.00, 4.90, 4.50,
+5.10, 5.10 s — and **one came out worse** (S05E01, 7.00 → **19.40 s**). All six control runs, the
+untouched embedded subtitle put through the same gate, read −0.4 to −0.7 s with **no** drift: the
+yardstick is sound, so those are real scores.
+
+The applied offsets themselves are close to right (−2.8 to −3.0 s, and −7.4 s). What is wrong is
+**where the step starts**: the detector placed it **1.5–1.8 min early** (23.2 min against a true
+25.0 min), so the cues inside that window receive the far side's offset — **|7.4| − |2.5| = 4.9 s**,
+which is exactly the residual measured on three of the episodes. That is the same **±1–2 min**
+positional uncertainty stated in §4.3.1, now visible as a per-episode score instead of a caveat.
+
+**Two consequences that are stated because they were measured.** The residual of **4.5–5.1 s** agrees
+with the 10.74 → 4.51 s median above, so the CALIBRATION is right — but T115's `≤ 1.0 s` bound holds on
+its **synthetic** episode only, where the boundaries sit where the test put them; it is **not** a
+real-material expectation and must not be quoted as one. And the **order guard is a failure signal**:
+the failing episode guarded **147 cues** against **19** and **21** on the two next-worst and **0** on
+the rest, while T115 allows at most 12 of 661. A guard firing on hundreds of cues carries one shift
+through the file and flattens the staircase into a single constant shift — which is the state S05E01
+ended in.
+
 **The limit, stated because it is measured.** **Two of the 36 come out worse** — S01E04
 (**8.00 → 21.30 s**) and S01E06 (**2.47 → 11.91 s**). **No reference-free signal separated them from the
 33 successes.** Six candidates were tried, all computed from the run itself: monotone distortion
@@ -493,6 +517,22 @@ everywhere makes the guard fire on nearly every cue and carry one shift through 
 it right.
 
 **Test: T115.**
+
+**F-M305 [D] (development):** **A real-material score is taken against an embedded same-language
+TEXT subtitle that the gate never sees, the control run comes first, and a broad order-guard fire is
+read as a failure.** The synthetic episode T115 runs on puts the boundaries where the test put them,
+so it cannot fail on boundary placement — the one thing that decides the result on real audio. A
+score therefore needs material whose ground truth is independent of the measurement: an embedded
+`subrip`/`ass`/`ssa`/`mov_text` track of the same language, extracted, kept aside, used only to score.
+A picture track (`hdmv_pgs_subtitle`) is not ground truth. **Two runs per episode, and the control
+decides whether the episode may be scored at all:** the UNTOUCHED embedded subtitle must read offset
+~0 with **no** drift — that is the control's best possible outcome and the strongest available
+evidence that it is in sync with the audio track. Measured: it read −0.4 to −0.7 s on all six episodes,
+so all six could be scored; had it read far from zero, the container's audio would hold a different
+version and the episode would measure that mismatch instead of the correction. The **order-guard
+count is read together with the result**, because a guard firing on hundreds of cues flattens the
+staircase into one constant shift and can turn a 7 s error into a 19 s one while the step heights
+still look right. **Test: T118.**
 
 **F-M300 [D] (development):** **A subtitle whose offset MOVES is repaired segment by segment — one
 offset per segment, the boundaries the drift gate already found — instead of being left as downloaded.**
@@ -1606,10 +1646,12 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T114:** Driving the rendered page text, not the markup: every intro block under an `h4` heading measures at most **300 rendered characters** (tags stripped, whitespace collapsed) and carries **no measured value** — the ban list is the forensic vocabulary itself (`Measured`, a before/after arrow, an episode count, an accuracy figure), so re-introducing "Measured on 36 drifting episodes: worst line 10.74 s → 0.17 s" fails here rather than passing as prose. The budget is a ceiling and not a target: the check reads the same text a phone renders, so an HTML comment or an entity cannot buy length. Both halves are needed — the length alone would pass a short sentence full of measurements, and the vocabulary alone would pass an unmeasured essay (F-M299). **It also asserts that no user-visible text contradicts the code (F-M302, F-M303).** This is the half that was missing, and its absence shipped a defect: two intros claimed the audio path *cannot correct* a drifting file — false since F-M300 — while both the length cap and the ban list stayed green, because "…which the audio sync above cannot correct" is 46 characters and carries no number. The refuted phrasings are matched across the `h4` intros, the per-switch `fieldDescription` blocks **and the switch labels**, and the scope is proved by planting: a `never shifted` label, a `cannot touch` label, `has no valid single correction`, `is only reported`, `cannot correct` and a 350-character intro were each planted on 06.10.2026 — the label cases fail ONLY with the label scope included, which is why a description-only check is not enough. Finally, the three former `h4` sections are one: a single `Subtitle correction` heading carries the one intro and its **ONE** switch, and the four removed ids are asserted **absent** from both the markup and the inline script (F-M303, F-M304)
 
-**T115:** The staircase correction, driven on the SAME synthetic episode whose cues were built from a known burst list, and judged against that burst list — the ground truth that took no part in the measurement, because a correction scored with the detector that produced it is the exact inverse of its own measurement and always reports success. Two steps (+2.5 s at 20 min, +2.0 s at 30 min) are planted over a +4.0 s constant offset; the detector must report `Drifts` WITH at least two segments, the applied shift must move the worst distance to a true cue position from **8.60 s** to no more than one misplaced step above the per-cue jitter, the cue count and the cue order must be unchanged, and the order guard must stay rare (at most **12 of 661** cues — a broad fire would carry one cue's shift through the file and flatten the staircase into a single constant shift). Two assertions carry this test and neither can be replaced by the other: the **applied shifts read back per segment** must reproduce the planted steps (−2.50 s and −2.00 s between consecutive segments, sampled in each segment's middle so the guard's legitimate bite at the edges is not read as a lost step), which is what proves the staircase survived — and the constant case must report **no** segments at all, so a constant offset cannot silently be routed through the staircase path. A guard implemented with the wrong SIGN fails here and nowhere else: measured, the mirrored rule left a **1.92 s** residual and guarded **22** cues against **6** with the direction right. The negative-first-cue case is refused, never clamped (F-M300)
+**T115:** The staircase correction, driven on the SAME synthetic episode whose cues were built from a known burst list, and judged against that burst list — the ground truth that took no part in the measurement, because a correction scored with the detector that produced it is the exact inverse of its own measurement and always reports success. Two steps (+2.5 s at 20 min, +2.0 s at 30 min) are planted over a +4.0 s constant offset; the detector must report `Drifts` WITH at least two segments, the applied shift must move the worst distance to a true cue position from **8.60 s** to no more than one misplaced step above the per-cue jitter (**a bound of this tightness holds on THIS synthetic episode only, where the boundaries sit where the test put them — on real material the residual is set by the detector's ±1–2 min boundary placement and measures 4.5–5.1 s; see F-M305/T118**), the cue count and the cue order must be unchanged, and the order guard must stay rare (at most **12 of 661** cues — a broad fire would carry one cue's shift through the file and flatten the staircase into a single constant shift). Two assertions carry this test and neither can be replaced by the other: the **applied shifts read back per segment** must reproduce the planted steps (−2.50 s and −2.00 s between consecutive segments, sampled in each segment's middle so the guard's legitimate bite at the edges is not read as a lost step), which is what proves the staircase survived — and the constant case must report **no** segments at all, so a constant offset cannot silently be routed through the staircase path. A guard implemented with the wrong SIGN fails here and nowhere else: measured, the mirrored rule left a **1.92 s** residual and guarded **22** cues against **6** with the direction right. The negative-first-cue case is refused, never clamped (F-M300)
 
 **T116:** The specification's structure, checked without a build or a host: every Contents counter equals the number of definition lines in its section (sub-headings and superseded entries included), every requirement id is defined exactly once, the test numbering is gapless from T1, every test a requirement names exists as a definition, and the header status names the version `build.yaml` builds. The check must FAIL on each of these when it is planted — a wrong counter, a duplicated definition, a deleted test number, a reference to a test that was never written, a stale status — because a suite that cannot fail proves nothing; all six were planted on 06.10.2026 and all six were caught. The last assertion is the guard on the guard: a definition-shaped line (opening with a bolded id) that the counting pattern does NOT recognise must fail the run rather than vanish from the count, since five shapes occur — `**F-Mnnn:**`, `**F-Mnnn [tier]:**`, `**F-Mnnn [tier] (superseded …):**`, `**Tnn (superseded …):**` and the em-dash form `**F-Mnnn — text.**` — and a pattern that expects only the first silently shrinks every count while staying green (F-M301, NF-9)
 **T117:** The correction section's wiring, driven against the page file and the built DLL: exactly ONE checkbox in the section; its id present in the markup and bound on load (default-on aware) and on save; the four removed ids (`QaDownloadDriftCheck`, `QaDownloadDriftReject`, `QaDownloadAudioTrackByLanguage`, `QaDownloadAnchorSync`) ABSENT from the markup and from the inline script; `configPage.html` declared as an `EmbeddedResource`, so the page actually ships inside the DLL; and `QaDownloadAutoSync` defaulting to `true` in C#. The ABSENCE assertions carry the test: a presence-only check passes over a stale switch, while a leftover `getElementById` on a removed element throws at load and takes every binding on the page with it. The check also reads the LIVE page over the API and reports what it finds there — a note, not an assertion, so a built-but-undeployed DLL is visible instead of assumed (F-M304)
+
+**T118:** The staircase scored against REAL material whose ground truth is independent of the measurement: an embedded same-language **TEXT** track is extracted out of the container, kept aside, and used only to score — the gate never sees it. Two runs per episode. The **control runs first** and decides whether the episode may be scored at all: the untouched embedded subtitle must come back with **no drift** and an offset near zero, which is the control's best possible outcome and must NOT be reported as a failure (it is the evidence that the embedded subtitle is in sync with the audio, i.e. that the yardstick is sound). Only then are two known steps planted (−2.5 s at 15 min, a further −4.5 s at 25 min) and the correction scored back against the subtitle the gate never saw, per segment as well as in aggregate — the per-segment table is what separates a spurious segment from an unlucky one, and an aggregate number hides a region that was correct before and damaged after. Measured 06.10.2026 on six POI episodes: 5 of 6 improved (7.00 → 4.50..5.10 s) and one worsened (7.00 → 19.40 s), with the residual traced to the boundary being placed 1.5–1.8 min early rather than to the step height, and the failing episode distinguished by an order-guard fire on **147** cues against 0–21 elsewhere. The `≤ 1.0 s` bound of T115 is a SYNTHETIC expectation and is asserted nowhere here (F-M305)
 
 
 

@@ -50,9 +50,24 @@ public static class StairRun
 
     public static async Task<int> Main(string[] args)
     {
+        // 2026-10-06: second entry, `measure`. The three episodes that drifted worst in the field
+        // have NO text subtitle in the container (PGS image only, or none at all), so the plant-and-
+        // score route above has no ground truth to score against. This mode measures what the
+        // shipped code DOES to a given subtitle against the AUDIO — the only yardstick those files
+        // have — and reports it before and after the correction. The subtitle is never handed to
+        // the gate as truth; it is the thing being measured.
+        //
+        // Usage: stairrun measure <mediaFile> <srtFile> [audioMap]
+        if (args.Length >= 3 && args[0] == "measure")
+        {
+            return await MeasureAsync(args[1], args[2], args.Length > 3 ? args[3] : "0:a:0")
+                .ConfigureAwait(false);
+        }
+
         if (args.Length < 2)
         {
             Console.WriteLine("usage: stairrun <mediaFile> <subStreamIndex> [audioMap]");
+            Console.WriteLine("       stairrun measure <mediaFile> <srtFile> [audioMap]");
             return 2;
         }
 
@@ -140,6 +155,20 @@ public static class StairRun
 
         if (!v.Drifts)
         {
+            if (clean)
+            {
+                // The CONTROL's best possible outcome: the gate finds NO drift on an UNTOUCHED file.
+                // That is what a correct gate does, and it is the strongest available evidence that
+                // the embedded subtitle really is in sync with the audio — so the scoring yardstick
+                // this episode is judged with is sound. Reporting it as a failure (which this branch
+                // did until 06.10.2026) inverted the meaning of the one run that validates the other.
+                Console.WriteLine();
+                Console.WriteLine($"  CONTROL OK: the untouched embedded subtitle reads "
+                    + $"{v.MedianOffsetSec:+0.00;-0.00}s and NO drift — the yardstick is sound");
+                Console.WriteLine("CONTROL DONE");
+                return 0;
+            }
+
             Console.WriteLine("  FAIL: two planted steps of 2.5s and 4.5s were not detected");
             return 1;
         }
@@ -246,6 +275,88 @@ public static class StairRun
         Console.WriteLine();
         Console.WriteLine(fails == 0 ? (clean ? "CONTROL DONE" : "STAIRCASE OK") : $"{fails} CHECK(S) FAILED");
         return fails == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Measures the shipped correction against the AUDIO on a real file that carries no text
+    /// subtitle. Reports the verdict, the segments, and the applied shift — the same numbers the
+    /// field episode produced, so a regression is visible instead of argued about.
+    /// </summary>
+    private static async Task<int> MeasureAsync(string media, string srtPath, string audioMap)
+    {
+        if (!File.Exists(media) || !File.Exists(srtPath))
+        {
+            Console.WriteLine($"missing input: media={File.Exists(media)} srt={File.Exists(srtPath)}");
+            return 2;
+        }
+
+        string ffmpeg = FindFfmpeg();
+        string text = await File.ReadAllTextAsync(srtPath).ConfigureAwait(false);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(20));
+
+        Console.WriteLine("=== F-M300 staircase — measured against the AUDIO (no text subtitle in container) ===");
+        Console.WriteLine($"    {Path.GetFileName(media)}");
+        Console.WriteLine($"    {Path.GetFileName(srtPath)}");
+        Console.WriteLine($"    audioMap {audioMap}   ffmpeg {ffmpeg}");
+        Console.WriteLine();
+
+        var sw = Stopwatch.StartNew();
+        DriftVerdict v = await DriftGate
+            .RunAsync(media, text, ffmpeg, new NullLogger(), cts.Token, audioMap)
+            .ConfigureAwait(false);
+        sw.Stop();
+
+        Console.WriteLine($"  gate [{sw.Elapsed.TotalSeconds:0.0}s] {v.Describe()}");
+        if (!v.Ran)
+        {
+            Console.WriteLine($"  the gate did not run ({v.SkipReason})");
+            return 1;
+        }
+
+        Console.WriteLine($"    drifts={v.Drifts}  median={v.MedianOffsetSec:+0.00;-0.00}s  "
+            + $"segments={v.SegmentOffsetsSec.Count}  span={v.SpanSec:0.00}s");
+        for (int i = 0; i < v.SegmentOffsetsSec.Count; i++)
+        {
+            Console.WriteLine($"      seg {i}: from {v.SegmentStartTimesSec[i] / 60:0.0}min"
+                + $"  offset {v.SegmentOffsetsSec[i]:+0.00;-0.00}s");
+        }
+
+        if (!v.Drifts)
+        {
+            Console.WriteLine();
+            Console.WriteLine("  VERDICT: the code finds NO drift here — the file is left alone.");
+            return 0;
+        }
+
+        (bool ok, string corrected, string why, int guarded) = SubtitleSync.ShiftByStaircase(
+            text, v.SegmentStartTimesSec, v.SegmentOffsetsSec);
+        Console.WriteLine();
+        Console.WriteLine($"  correction: ok={ok} guarded={guarded} ({why})");
+
+        if (!ok)
+        {
+            Console.WriteLine("  VERDICT: the code REFUSES — the file is left alone.");
+            return 0;
+        }
+
+        // Re-measure the corrected text: what the code's own gate says about its own output.
+        // That is the number the log line carries, and the only one this material can supply.
+        DriftVerdict after = await DriftGate
+            .RunAsync(media, corrected, ffmpeg, new NullLogger(), cts.Token, audioMap)
+            .ConfigureAwait(false);
+        Console.WriteLine($"  after        {after.Describe()}");
+        Console.WriteLine($"    drifts={after.Drifts}  median={after.MedianOffsetSec:+0.00;-0.00}s  "
+            + $"segments={after.SegmentOffsetsSec.Count}  span={after.SpanSec:0.00}s");
+
+        Console.WriteLine();
+        Console.WriteLine("  NOTE: this measures the code against the AUDIO only. It cannot say the file is");
+        Console.WriteLine("        now correct — only whether the code found drift, what it did, and whether");
+        Console.WriteLine("        its own gate still sees drift afterwards. A true score needs ground truth");
+        Console.WriteLine("        this container does not carry.");
+
+        await File.WriteAllTextAsync("/tmp/stair-corrected.srt", corrected).ConfigureAwait(false);
+        Console.WriteLine("  corrected file: /tmp/stair-corrected.srt");
+        return 0;
     }
 
     /// <summary>Cue start times, in seconds.</summary>
