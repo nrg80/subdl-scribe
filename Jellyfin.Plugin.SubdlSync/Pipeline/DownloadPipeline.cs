@@ -1791,6 +1791,34 @@ public sealed class DownloadPipeline : IDisposable
                     continue; // next candidate
                 }
 
+                // F-M296 (development): the auto-sync. Two settings act here.
+                //
+                // (1) WHICH TRACK the audio gates read. Both audio-reading gates used
+                // to decode 0:a:0 with a comment defending the hard index; measured on
+                // this library that picks the wrong track in ~9 % of (file, language)
+                // cases — typically an Italian release whose first track is the dub.
+                // The choice is by language now, unless the switch is off.
+                //
+                // (2) WHETHER the fetched subtitle is SHIFTED by the constant offset the
+                // audio reports, and the original kept beside it. The shift happens
+                // BEFORE the hash is computed, because the registered hash must describe
+                // the file that lies on disk (user specification). A file whose offset
+                // MOVES is never shifted.
+                string audioMap = "0:a:0";
+                var audioChoice = Qa.AudioTrackChoice.Choose(
+                    _mediaSourceManager.GetMediaStreams(item.Id), lang);
+                if (_config.QaDownloadAudioTrackByLanguage && audioChoice.TrackCount > 0)
+                {
+                    audioMap = "0:a:" + audioChoice.Position.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    if (audioChoice.Priority != 3 || audioChoice.Position != 0)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — audio track {Pos} of {N} ({Reason})",
+                            Path.GetFileName(mediaPath), lang, audioChoice.Position,
+                            audioChoice.TrackCount, audioChoice.Reason);
+                    }
+                }
+
                 // F-M295 (development): cue-vs-speech drift gate. Runs after the
                 // structure/runtime gates (a broken file never reaches the audio
                 // decode) and before the write. It answers whether the offset to
@@ -1798,11 +1826,17 @@ public sealed class DownloadPipeline : IDisposable
                 // single correction, so saving it as-is plants a subtitle that is
                 // right in one part and wrong in another. Off by default; see
                 // PluginConfiguration.QaDownloadDriftCheck for the measured limits.
+                Qa.DriftVerdict? drift = null;
+                string? ffmpegForDrift = null;
+                if (_config.QaDownloadDriftCheck || _config.QaDownloadAutoSync)
+                {
+                    ffmpegForDrift = FfmpegTools.ResolvePath(_config, _logger);
+                }
+
                 if (_config.QaDownloadDriftCheck)
                 {
-                    string? ffmpegForDrift = FfmpegTools.ResolvePath(_config, _logger);
-                    var drift = await Qa.DriftGate.RunAsync(
-                        mediaPath, DecodeSrt(bytes), ffmpegForDrift, _logger, ct).ConfigureAwait(false);
+                    drift = await Qa.DriftGate.RunAsync(
+                        mediaPath, DecodeSrt(bytes), ffmpegForDrift, _logger, ct, audioMap).ConfigureAwait(false);
 
                     if (drift.Ran && drift.Drifts)
                     {
@@ -1828,7 +1862,79 @@ public sealed class DownloadPipeline : IDisposable
                     }
                 }
 
+                // F-M296: the auto-sync itself. Reuses the verdict the drift gate just
+                // produced when that switch is on (one audio decode, not two) and runs
+                // the same gate itself when it is not. On a drifting file this writes
+                // NOTHING: no single offset exists, so any shift would move one part
+                // right and spoil another.
+                byte[] writeBytes = bytes;
                 string content = DecodeSrt(bytes);
+                string? unsyncPayload = null;
+                if (_config.QaDownloadAutoSync)
+                {
+                    Qa.DriftVerdict syncVerdict = drift
+                        ?? await Qa.DriftGate.RunAsync(mediaPath, content, ffmpegForDrift, _logger, ct, audioMap)
+                            .ConfigureAwait(false);
+
+                    double shift = syncVerdict.Ran && !syncVerdict.Drifts ? syncVerdict.MedianOffsetSec : 0;
+                    if (!syncVerdict.Ran)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — auto-sync not applied: {Reason}",
+                            Path.GetFileName(mediaPath), lang,
+                            "not measured: " + (syncVerdict.SkipReason ?? "not run"));
+                    }
+                    else if (syncVerdict.Drifts)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — auto-sync not applied: {Verdict}",
+                            Path.GetFileName(mediaPath), lang, syncVerdict.Describe());
+                    }
+                    else if (Math.Abs(shift) < Qa.SubtitleSync.MinShiftSec)
+                    {
+                        if (_config.LogMode >= LogLevelMode.Verbose)
+                        {
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL-D] {File} [{Lang}] — auto-sync: already in sync ({Shift:+0.00;-0.00}s)",
+                                Path.GetFileName(mediaPath), lang, shift);
+                        }
+                    }
+                    else if (Math.Abs(shift) > Qa.SubtitleSync.MaxShiftSec)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — auto-sync not applied: shift {Shift:+0.0;-0.0}s "
+                            + "beyond the {Limit:0}s limit",
+                            Path.GetFileName(mediaPath), lang, shift, Qa.SubtitleSync.MaxShiftSec);
+                    }
+                    else
+                    {
+                        // SIGN: the correction is MINUS the detector's value — measured, see
+                        // SubtitleSync's header. Adding it doubled the error on every file.
+                        double apply = -shift;
+                        (bool ok, string shifted, string why) = Qa.SubtitleSync.ShiftBy(content, apply);
+                        if (ok)
+                        {
+                            // The ORIGINAL is kept, uncompressed and untouched, exactly as
+                            // fetched — that is the whole point of keeping it. The suffix
+                            // sits after ".srt" so the sidecar listing (baseName + "*.srt")
+                            // does not pick it up.
+                            (bool bom, bool crlf) = Qa.SubtitleSync.StyleOfBytes(bytes);
+                            unsyncPayload = content;
+                            writeBytes = Qa.SubtitleSync.Encode(shifted, bom, crlf);
+                            content = shifted;
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL-D] {File} [{Lang}] — auto-sync {Shift:+0.00;-0.00}s applied ({Why})",
+                                Path.GetFileName(mediaPath), lang, apply, why);
+                        }
+                        else
+                        {
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL-D] {File} [{Lang}] — auto-sync not applied: {Why}",
+                                Path.GetFileName(mediaPath), lang, why);
+                        }
+                    }
+                }
+
                 string contentHash = ContentHashRegistry.ComputeHash(content);
 
                 // 13.09.2026 (user decision): F-M39 re-download skip REMOVED — the
@@ -1863,7 +1969,36 @@ public sealed class DownloadPipeline : IDisposable
                         continue;
                     }
 
-                    await AtomicWriteAsync(targetPath, bytes, ct).ConfigureAwait(false);
+                    await AtomicWriteAsync(targetPath, writeBytes, ct).ConfigureAwait(false);
+
+                    // F-M296: the untouched original, kept beside the corrected file. This
+                    // is what makes the correction reversible without re-downloading (which
+                    // would cost quota and might return the same drifting file). Guarded by
+                    // the dry-run flag like every other write (F-M287) — the flag is checked
+                    // again here rather than relying on the enclosing branch.
+                    if (unsyncPayload != null && !_config.DownloadDryRun)
+                    {
+                        try
+                        {
+                            string unsyncPath = Qa.SubtitleSync.UnsyncPathFor(targetPath);
+                            (bool ub, bool uc) = Qa.SubtitleSync.StyleOfBytes(bytes);
+                            await AtomicWriteAsync(unsyncPath, Qa.SubtitleSync.Encode(unsyncPayload, ub, uc), ct)
+                                .ConfigureAwait(false);
+                            if (_config.LogMode >= LogLevelMode.Verbose)
+                            {
+                                LogUtil.PerItem(_config.LogMode, _logger,
+                                    "[SubDL-D] original kept as {Path}", Path.GetFileName(unsyncPath));
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            // The corrected file is already on disk and correct — a failure to
+                            // keep the original must not undo it, but it must be visible.
+                            _logger.LogWarning(ex, "[SubDL-D] could not keep the unsynchronized original for {File}",
+                                Path.GetFileName(targetPath));
+                        }
+                    }
+
                     Registry.MarkAndFlush(() => Registry.PatchMediaMetadata(mediaHash, resolvedImdb, season, isSeries ? episode : null, null, resolvedTmdb));
                     // F-M260: the real flag, not the hard-coded false it used to be. A
                     // hearing-impaired file recorded as hi=false made the HI reader (F-M254) ask
@@ -1939,7 +2074,62 @@ public sealed class DownloadPipeline : IDisposable
                             }
                             if (hiBytesUsable && hiStructureOk && hiRuntimeOk)
                             {
-                                string hiHash = ContentHashRegistry.ComputeHash(DecodeSrt(hiBytes));
+                                // F-M296: the HI variant goes through the SAME auto-sync as the
+                                // regular one. Leaving it out would have produced the absurd case
+                                // of a corrected main subtitle beside an uncorrected HI file of
+                                // the same episode. The HI pool is exactly where the drift gate
+                                // measured its findings (all 38 measured HI files drifted), so
+                                // this is the case the sync more often CANNOT fix — and then it
+                                // writes nothing and says so.
+                                byte[] hiWriteBytes = hiBytes!;
+                                string hiContent = DecodeSrt(hiBytes!);
+                                string? hiUnsync = null;
+                                if (_config.QaDownloadAutoSync)
+                                {
+                                    var hiVerdict = await Qa.DriftGate.RunAsync(
+                                        mediaPath, hiContent, ffmpegForDrift, _logger, ct, audioMap).ConfigureAwait(false);
+                                    double hiShift = hiVerdict.Ran && !hiVerdict.Drifts ? hiVerdict.MedianOffsetSec : 0;
+                                    if (!hiVerdict.Ran || hiVerdict.Drifts
+                                        || Math.Abs(hiShift) < Qa.SubtitleSync.MinShiftSec
+                                        || Math.Abs(hiShift) > Qa.SubtitleSync.MaxShiftSec)
+                                    {
+                                        LogUtil.PerItem(_config.LogMode, _logger,
+                                            "[SubDL-D] HI auto-sync not applied for {File} [{Lang}]: {Reason} ({Release})",
+                                            Path.GetFileName(mediaPath), lang,
+                                            !hiVerdict.Ran
+                                                ? "not measured: " + (hiVerdict.SkipReason ?? "not run")
+                                                : hiVerdict.Drifts
+                                                    ? hiVerdict.Describe()
+                                                    : Math.Abs(hiShift) > Qa.SubtitleSync.MaxShiftSec
+                                                        ? $"shift {hiShift:+0.0;-0.0}s beyond the limit"
+                                                        : $"already in sync ({hiShift:+0.00;-0.00}s)",
+                                            hi.ReleaseName);
+                                    }
+                                    else
+                                    {
+                                        // SIGN: MINUS the detector's value, as in the main path.
+                                        double hiApply = -hiShift;
+                                        (bool hOk, string hShifted, string hWhy) = Qa.SubtitleSync.ShiftBy(hiContent, hiApply);
+                                        if (hOk)
+                                        {
+                                            (bool hb, bool hc) = Qa.SubtitleSync.StyleOfBytes(hiBytes!);
+                                            hiUnsync = hiContent;
+                                            hiWriteBytes = Qa.SubtitleSync.Encode(hShifted, hb, hc);
+                                            hiContent = hShifted;
+                                            LogUtil.PerItem(_config.LogMode, _logger,
+                                                "[SubDL-D] HI auto-sync {Shift:+0.00;-0.00}s applied for {File} [{Lang}] ({Why})",
+                                                hiApply, Path.GetFileName(mediaPath), lang, hWhy);
+                                        }
+                                        else
+                                        {
+                                            LogUtil.PerItem(_config.LogMode, _logger,
+                                                "[SubDL-D] HI auto-sync not applied for {File} [{Lang}]: {Why}",
+                                                Path.GetFileName(mediaPath), lang, hWhy);
+                                        }
+                                    }
+                                }
+
+                                string hiHash = ContentHashRegistry.ComputeHash(hiContent);
                                 if (!Registry.IsContentKnown(hiHash))
                                 {
                                     if (!_config.DownloadDryRun)
@@ -1947,7 +2137,25 @@ public sealed class DownloadPipeline : IDisposable
                                         // F-M260: the shared builder, not a hand-written
                                         // concatenation — the same rule the reader parses.
                                         string hiPath = SidecarNaming.Build(mediaPath, lang, hearingImpaired: true);
-                                        await AtomicWriteAsync(hiPath, hiBytes, ct).ConfigureAwait(false);
+                                        await AtomicWriteAsync(hiPath, hiWriteBytes, ct).ConfigureAwait(false);
+                                        if (hiUnsync != null)
+                                        {
+                                            try
+                                            {
+                                                string hiUnsyncPath = Qa.SubtitleSync.UnsyncPathFor(hiPath);
+                                                (bool hub, bool huc) = Qa.SubtitleSync.StyleOfBytes(hiBytes!);
+                                                await AtomicWriteAsync(
+                                                    hiUnsyncPath, Qa.SubtitleSync.Encode(hiUnsync, hub, huc), ct)
+                                                    .ConfigureAwait(false);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogWarning(ex,
+                                                    "[SubDL-D] could not keep the unsynchronized HI original for {File}",
+                                                    Path.GetFileName(hiPath));
+                                            }
+                                        }
+
                                         Registry.MarkAndFlush(() => Registry.MarkDownloaded(
                                             hiHash, mediaHash, lang, true, hi.SubdlId,
                                             Path.GetFileName(hiPath), hiPath));

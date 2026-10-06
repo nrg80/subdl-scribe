@@ -523,6 +523,30 @@
                             <div class="fieldDescription">Max. cue span vs. runtime in seconds. 0 = off. Default: 600.</div>
                         </div>
 
+                        <h4 style="margin:1em 0 .3em 0;">Auto-sync (shift to the audio)</h4>
+                        <div class="fieldDescription" style="margin-bottom:.6em;">
+                            Shifts a fetched subtitle by the ONE constant offset measured against the
+                            spoken track, before it is saved. Measured accurate to about 0.2 s. The
+                            untouched original is kept beside it as &lt;name&gt;.&lt;lang&gt;.srt.unsynchronized, and the
+                            registered hash is the one of the CORRECTED file. A subtitle whose offset
+                            MOVES is never shifted — it has no single valid offset — and is only
+                            reported.
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="QaDownloadAutoSync" name="QaDownloadAutoSync" type="checkbox" is="emby-checkbox" />
+                                <span>Auto-sync to the audio</span>
+                            </label>
+                            <div class="fieldDescription">Costs one audio decode per saved file. Default: off.</div>
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="QaDownloadAudioTrackByLanguage" name="QaDownloadAudioTrackByLanguage" type="checkbox" is="emby-checkbox" />
+                                <span>Pick the audio track by language</span>
+                            </label>
+                            <div class="fieldDescription">Priority: a track in the subtitle's language, then English, then the first untagged track. Without this the first track is read, which is the wrong one in about 9% of files here (Italian releases). Default: on.</div>
+                        </div>
+
                         <h4 style="margin:1em 0 .3em 0;">Drift check (cue vs. speech)</h4>
                         <div class="fieldDescription" style="margin-bottom:.6em;">
                             Decodes the audio and checks whether the subtitle holds ONE offset to the spoken
@@ -933,6 +957,8 @@
                         document.querySelector('#QaDownloadVerifyLanguage').checked = config.QaDownloadVerifyLanguage;
                         document.querySelector('#QaDownloadDriftCheck').checked = !!config.QaDownloadDriftCheck;
                         document.querySelector('#QaDownloadDriftReject').checked = !!config.QaDownloadDriftReject;
+                        document.querySelector('#QaDownloadAutoSync').checked = !!config.QaDownloadAutoSync;
+                        document.querySelector('#QaDownloadAudioTrackByLanguage').checked = config.QaDownloadAudioTrackByLanguage !== false;
                         document.querySelector('#DownloadScoreWeightGroup').value = config.DownloadScoreWeightGroup;
                         document.querySelector('#DownloadScoreWeightToken').value = config.DownloadScoreWeightToken;
                         document.querySelector('#DownloadScoreWeightDownload').value = config.DownloadScoreWeightDownload;
@@ -1507,6 +1533,8 @@ workers.forEach(function (w) {
                         config.QaDownloadVerifyLanguage = document.querySelector('#QaDownloadVerifyLanguage').checked;
                         config.QaDownloadDriftCheck = document.querySelector('#QaDownloadDriftCheck').checked;
                         config.QaDownloadDriftReject = document.querySelector('#QaDownloadDriftReject').checked;
+                        config.QaDownloadAutoSync = document.querySelector('#QaDownloadAutoSync').checked;
+                        config.QaDownloadAudioTrackByLanguage = document.querySelector('#QaDownloadAudioTrackByLanguage').checked;
                         config.DownloadScoreWeightGroup = parseInt(document.querySelector('#DownloadScoreWeightGroup').value) || 1000;
                         config.DownloadScoreWeightToken = parseInt(document.querySelector('#DownloadScoreWeightToken').value) || 10;
                         config.DownloadScoreWeightDownload = parseInt(document.querySelector('#DownloadScoreWeightDownload').value, 10); if (isNaN(config.DownloadScoreWeightDownload)) { config.DownloadScoreWeightDownload = 1; }

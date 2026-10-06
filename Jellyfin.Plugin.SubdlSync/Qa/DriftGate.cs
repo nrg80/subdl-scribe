@@ -76,13 +76,15 @@ public static class DriftGate
     /// <param name="ffmpegPath">Resolved ffmpeg path; empty/absent fails open.</param>
     /// <param name="logger">Logger.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="audioMap">Audio stream to decode, e.g. <c>0:a:1</c>. Defaults to the first.</param>
     /// <returns>The verdict.</returns>
     public static async Task<DriftVerdict> RunAsync(
         string mediaPath,
         string srtText,
         string? ffmpegPath,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        string audioMap = "0:a:0")
     {
         if (string.IsNullOrWhiteSpace(ffmpegPath) || !File.Exists(ffmpegPath))
         {
@@ -98,7 +100,7 @@ public static class DriftGate
         float[] samples;
         try
         {
-            samples = await DecodeMonoAsync(ffmpegPath, mediaPath, ct).ConfigureAwait(false);
+            samples = await DecodeMonoAsync(ffmpegPath, mediaPath, ct, audioMap).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -164,11 +166,22 @@ public static class DriftGate
            + (int.Parse(m.Groups[g + 3].Value, CultureInfo.InvariantCulture) / 1000.0);
 
     /// <summary>
-    /// Decodes the first audio stream to mono float samples at
-    /// <see cref="SampleRate"/>. Reads the raw stream from stdout, so no temp file
-    /// is written.
+    /// Decodes one audio stream to mono float samples at <see cref="SampleRate"/>.
+    /// Reads the raw stream from stdout, so no temp file is written.
     /// </summary>
-    public static async Task<float[]> DecodeMonoAsync(string ffmpegPath, string mediaPath, CancellationToken ct)
+    /// <param name="ffmpegPath">ffmpeg executable.</param>
+    /// <param name="mediaPath">Container to read.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="audioMap">
+    /// Audio stream to decode, e.g. <c>0:a:1</c>. Defaults to the first. The caller
+    /// decides the track by language (F-M296, <see cref="AudioTrackChoice"/>): a
+    /// hard <c>0:a:0</c> reads the wrong track on ~9 % of this library's files,
+    /// typically an Italian release whose first track is the dub and whose English
+    /// original sits on track 1.
+    /// </param>
+    /// <returns>The samples.</returns>
+    public static async Task<float[]> DecodeMonoAsync(
+        string ffmpegPath, string mediaPath, CancellationToken ct, string audioMap = "0:a:0")
     {
         var psi = new ProcessStartInfo
         {
@@ -183,10 +196,11 @@ public static class DriftGate
         psi.ArgumentList.Add("-i");
         psi.ArgumentList.Add(mediaPath);
         psi.ArgumentList.Add("-map");
-        // First audio stream only. No trailing '?' — an index that does not exist
+        // One named audio stream only. No trailing '?' — an index that does not exist
         // must fail loudly rather than silently write a different stream (the trap
-        // documented in FfmpegTools.ExtractAllAsync).
-        psi.ArgumentList.Add("0:a:0");
+        // documented in FfmpegTools.ExtractAllAsync). The track itself is chosen by
+        // LANGUAGE in AudioTrackChoice; the index is the result, not the rule.
+        psi.ArgumentList.Add(audioMap);
         psi.ArgumentList.Add("-ac");
         psi.ArgumentList.Add("1");
         psi.ArgumentList.Add("-ar");

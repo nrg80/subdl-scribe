@@ -14,9 +14,10 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 22 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 23 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 5 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
+  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 1 requirement
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -346,6 +347,126 @@ The report names, per language, the chosen release with its score and its hearin
 **It stops before the download call,** so no file is transferred — but the searches DO cost API quota, one per language set (two while the HI switch is on, F-M241). The GUI text must name both: "without saving files" and "without API calls" are not the same claim.
 
 The run's stored statistics stay untouched (F-M247).
+
+### 4.3 Auto-Sync — Download
+
+**F-M296 [D] (development):** **A fetched subtitle is shifted by the ONE constant offset the audio
+measures — and is left untouched when that offset moves.**
+
+The feature has two halves that must not be confused: **which** track the audio is read from, and
+**whether** the file is then moved. Both were measured against this library before either was built.
+
+#### 4.3.1 Method — the audio track is chosen by LANGUAGE, not by stream order
+
+**Rule.** Priority: **(1)** a track whose language equals the subtitle's language, **(2)** an English
+track, **(3)** the first track without a language tag, else the first track at all.
+
+**Why a rule was needed at all.** Both audio-reading gates decoded `0:a:0` — the first audio stream —
+with a comment defending the hard index, and the reasoning behind that comment is sound about
+*what to do when a stream is missing* while being wrong about *which stream to read*. Measured over
+**304 files of this library that carry sidecar subtitles**, the rule above picks a different track than
+`0:a:0` in **34 of 387 (file, subtitle-language) cases (~9 %)**; 353 cases are unchanged. The recurring
+shape is an **Italian release whose first track is the Italian dub** with the English original on
+track 1 — a German subtitle then wants English (prio 2) and an English one wants English too (prio 1),
+while the hard index reads the dub. **76 files carry no language tag on their first track at all.**
+Priority distribution: 158 / 122 / 107.
+
+**The 2-vs-3-letter trap, and why it is written down.** A subtitle file name carries `en`/`de`
+(2 letters); a container tag carries `eng`/`deu` (3). Comparing the two sets directly **never matches**.
+A first attempt at counting this reported *"subtitle language in NO audio track: 252 of 304"* and
+*"wrong first track: 0"* — both pure artefacts of the mismatch, one of which reads as a finding. The
+implementation therefore carries an **explicit ISO map**, and the rule that **a zero or a perfect value
+is root-caused rather than reported** applies.
+
+**What it does not claim.** On the one multi-track file measured closely (Italian + English audio)
+both tracks returned the **same verdict** — span 17.4 s vs. 18.1 s, median 8.4 s vs. 7.8 s, deviation
+0.6–0.7 s — because the envelope reads sound, not language. The rule's value is that it removes the
+assumption *"the first track is the right one"*, which is measurably false on ~9 % of these files. It
+is switched by `QaDownloadAudioTrackByLanguage` (**default on**); with it off the old `0:a:0` is read.
+
+#### 4.3.2 Method — a constant offset is corrected, a moving one is only reported
+
+**What is measured.** The same arithmetic that the drift gate (F-M295) runs also yields the single
+best offset. The two questions were validated together: planted constant shifts of
+**−3.0 / +2.0 / +4.0 / +8.0 / +12.0 s** came back as **−3.20 / +1.80 / +3.80 / +7.80 / +11.80 s** — an
+error of about **0.2 s** in every case (the residual is the ~0.3 s per-cue SDH lead moving the median).
+At every one of those values the detector reported `drifts=False, boundaries=0`: **a large constant
+shift is not mistaken for drift**. That separation is what makes the feature possible at all.
+
+**The sign is MEASURED, and getting it wrong doubles the error.** The correction is **minus** the
+detector's value (`srt_time − measured = synced`). Established on a real episode with a planted +5.0 s:
+the detector read **+4.50 s**, applying **−4.50 s** landed the file **0.50 s** from its plain subtitle,
+while applying **+4.50 s** landed it at **+9.50 s**. The first version of the pipeline added the value
+and every corrected file came out **exactly twice as far off as it went in**. A unit test cannot catch
+this — the shift function is correct in isolation; only the sign of what is handed to it was wrong.
+The end-to-end test (T111) therefore applies **both** directions and prints both outcomes, so a future
+sign flip fails loudly instead of silently doubling.
+
+**The floor is measured, not chosen — 0.20 s was too low.** The plain subtitle of a real episode, the
+file nothing is wrong with, measures **−0.50 s** against its own audio: that is this material's
+measurement floor (a cue leads the speech onset by a per-cue varying amount), and it is the same order
+as a small real offset. With a floor of 0.20 s the feature therefore **moved a file that was already in
+sync** — caught by the end-to-end test, not by reasoning. `MinShiftSec` is **1.0 s**, at which a finding
+is at least twice the floor and applying it can still be expected to remove more error than it adds.
+
+**The refusal that makes it safe.** A drifting file has **no valid single offset** (see F-M295): every
+number is an average over the drift and describes no real state, so shifting by it moves one part right
+and spoils another. Therefore:
+
+- `Drifts = true` ⇒ **nothing is written**, no file is moved, and the finding is logged with its span
+  and boundaries — exactly as the gate alone would.
+- gate did not run (no ffmpeg, unreadable audio, no speech, too few cues) ⇒ **nothing is written**. An
+  unavailable analysis tool is not a licence to guess.
+- `|offset| < 1.0 s` ⇒ nothing is written; that is within this material's measurement floor.
+- `|offset| > 20 s` ⇒ nothing is written; beyond that the figure is treated as implausible.
+- the shift would push the **first cue below zero** ⇒ **refused, not clamped**. Clamping one cue would
+  change its relation to its neighbour while the rest of the file still moved, which is a silent
+  integrity break in exchange for a smaller number.
+
+**Applied to times only.** Text is carried through byte-for-byte, the cue count and cue order are
+unchanged, and the corrected file is written in the byte style of the payload it came from (BOM / line
+endings read from the fetched bytes). The correction never re-encodes a file as a side effect.
+
+#### 4.3.3 Order of operations, and what the database is told
+
+**Order (user specification):**
+
+1. fetch the candidate bytes,
+2. **sync** — measure and, if the offset is constant, shift,
+3. **normalize** (idempotent, F-M185; before or after the shift makes no difference),
+4. **write two files**: the corrected `<base>.<lang>.srt` **and** the untouched original as
+   `<base>.<lang>.srt.unsynchronized`,
+5. **register the hash of the CORRECTED subtitle.**
+
+The hash describes the file that lies on disk and that later goes up to SubDL, so the duplicate guards
+(`IsContentKnown`, `IsSidecarUploaded`, `SidecarRejectedReason`) keep seeing the truth. **A correction
+must never lift a duplicate guard** — had the hash been registered over the pre-shift bytes, every
+corrected file would have looked new and been re-downloaded and re-uploaded.
+
+**Why the suffix sits AFTER `.srt`.** The sidecar listing is
+`Directory.EnumerateFiles(dir, baseName + "*.srt")` (F-M251). Measured against that pattern:
+`<base>.<lang>.srt.unsynchronized` is **ignored** (correct), while the swapped
+`<base>.<lang>.unsynchronized.srt` **matches** — and the name parser then reads `unsynchronized` as a
+language code, inventing a language. Jellyfin does not index the suffix form as an external subtitle
+track either, so exactly one new track appears per corrected file.
+
+**The original is kept on purpose.** It makes the correction reversible without spending download
+quota again — and re-downloading may return the same drifting file. A failure to write the original
+does not undo the corrected file; it is logged as a warning.
+
+**The hearing-impaired variant is synced too.** The HI file goes through the same gate and the same
+rules. Leaving it out would produce a corrected main subtitle beside an uncorrected HI file of the
+same episode — and the HI pool is where the drift gate measured its findings (all 38 measured HI files
+drifted), so this is precisely the case the sync often **cannot** fix and then reports instead.
+
+**Cost and posture.** One full audio decode per saved file (~14 s per 44 min episode), on top of the
+one the drift gate spends when `QaDownloadDriftCheck` is on. When both switches are on the verdict is
+**measured once and shared**, not decoded twice. Switch `QaDownloadAutoSync`, **default off**.
+
+**Tests: T110 (synthetic: track priority with the 2-vs-3-letter cases, exact shift, refusal on a
+negative first cue, byte style, the suffix against the real listing pattern), T111 (end-to-end on a
+real episode: the plain subtitle comes back near zero, a planted shift is measured and removed, and
+the result is checked against the plain subtitle, which took no part in the measurement).**
 
 ## 5. Upload Postprocessing
 
@@ -1257,6 +1378,10 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T108:** The drift detector, driven with synthetic material, reports NO drift for cues that track the speech at a constant offset, recovers planted steps of known size and time at 20 and 30 min with a span matching the planted total, and reports drift for a ramped offset — and the factored two-offset marginal used in the port equals the explicit outer log-sum-exp (worst deviation < 1e-6 over 20 random trials) (F-M295)
 
 **T109:** End-to-end on a real episode: the plain subtitle comes back steady while the hearing-impaired variant of the same episode comes back drifting with a span and boundaries named, and the verdict states a span rather than a correction value (F-M295)
+
+**T110:** The auto-sync's two file-level halves, without audio: the audio-track rule picks (1) the track in the subtitle's language, (2) English, (3) the first untagged track, with the 2-vs-3-letter codes (`en` against `eng`, `de` against `deu`/`ger`, `zh` against `zho`/`chi`) resolving as equal and `und`/null resolving as "no language"; a planted constant shift moves every timestamp by exactly that amount while text, cue count and cue order stay unchanged; a shift that would push the first cue below zero is REFUSED (not clamped) and the file is returned unchanged; the corrected file carries the same BOM/line-ending shape as the payload it came from; and `<base>.<lang>.srt.unsynchronized` does NOT match the sidecar listing pattern `baseName + "*.srt"` while the swapped order does (F-M296)
+
+**T111:** End-to-end against real audio, driving the FEATURE (not a copy of its arithmetic): the sign of the correction is established on the material itself by planting +5 s and applying BOTH directions — the one landing within 0.7 s of the plain subtitle is `−detector`, and that is asserted, so a sign flip fails here instead of doubling every corrected file; a subtitle already in sync comes back `applied=False`; and a shift planted at +2.5 / −1.8 / +6.0 s is measured and removed, with the corrected text lying within 0.7 s of the plain subtitle by MEDIAN offset — a file that took no part in the measurement. The check is a MEDIAN and not a spread: a constant shift leaves the spread at 0.00 s whatever its size, so an earlier version of this test passed even on files it had made twice as bad (F-M296)
 
 
 

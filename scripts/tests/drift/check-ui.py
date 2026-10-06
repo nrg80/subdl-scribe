@@ -25,6 +25,18 @@ CHECKS = [
     ('load binds DriftReject', r"#QaDownloadDriftReject'\)\.checked = !!config\.QaDownloadDriftReject"),
     ('save reads DriftCheck', r"config\.QaDownloadDriftCheck = document\.querySelector\('#QaDownloadDriftCheck'\)\.checked"),
     ('save reads DriftReject', r"config\.QaDownloadDriftReject = document\.querySelector\('#QaDownloadDriftReject'\)\.checked"),
+
+    # F-M296: the auto-sync pair. The track switch defaults to ON, so its load binding
+    # must resolve an absent value (an older config) to TRUE, not to false — the usual
+    # `!!config.X` would silently turn a default-on feature off on every existing install.
+    ('markup #QaDownloadAutoSync', r'id="QaDownloadAutoSync"'),
+    ('markup #QaDownloadAudioTrackByLanguage', r'id="QaDownloadAudioTrackByLanguage"'),
+    ('load binds AutoSync', r"#QaDownloadAutoSync'\)\.checked = !!config\.QaDownloadAutoSync"),
+    ('load binds AudioTrackByLanguage (default-on aware)',
+     r"#QaDownloadAudioTrackByLanguage'\)\.checked = config\.QaDownloadAudioTrackByLanguage !== false"),
+    ('save reads AutoSync', r"config\.QaDownloadAutoSync = document\.querySelector\('#QaDownloadAutoSync'\)\.checked"),
+    ('save reads AudioTrackByLanguage',
+     r"config\.QaDownloadAudioTrackByLanguage = document\.querySelector\('#QaDownloadAudioTrackByLanguage'\)\.checked"),
 ]
 
 fails = 0
@@ -36,23 +48,28 @@ for name, pat in CHECKS:
     print(f"  [{'ok' if ok else 'FAIL'}] {name}")
     fails += 0 if ok else 1
 
-# The two checkboxes must not be the same element, and the reject box must be
-# subordinate in meaning to the check box (documented, not enforced in markup).
-n_ids = len(re.findall(r'id="QaDownloadDriftCheck"', src))
-ok_dup = n_ids == 1
-print(f"  [{'ok' if ok_dup else 'FAIL'}] DriftCheck id appears exactly once (got {n_ids})")
-fails += 0 if ok_dup else 1
+# Every new switch must appear exactly once in the markup, and each default must match
+# the C# declaration. A default-on switch read with `!!config.X` turns itself off on every
+# existing install — the reason the pair below is checked separately rather than in a loop.
+for prop, expect_on in (('QaDownloadDriftCheck', False), ('QaDownloadDriftReject', False),
+                        ('QaDownloadAutoSync', False), ('QaDownloadAudioTrackByLanguage', True)):
+    n = len(re.findall(rf'id="{prop}"', src))
+    ok_once = n == 1
+    print(f"  [{'ok' if ok_once else 'FAIL'}] {prop} id appears exactly once (got {n})")
+    fails += 0 if ok_once else 1
 
-# Default posture: both OFF in the C# defaults. A gate that costs a full audio
-# decode per file must not switch itself on.
 CFG = '/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs'
 cfg = open(CFG, encoding='utf-8').read()
-for prop in ('QaDownloadDriftCheck', 'QaDownloadDriftReject'):
+for prop, expect_on in (('QaDownloadDriftCheck', False), ('QaDownloadDriftReject', False),
+                        ('QaDownloadAutoSync', False), ('QaDownloadAudioTrackByLanguage', True)):
     m = re.search(rf'public bool {prop} \{{ get; set; \}}(.*?)(?=\n\n|/// <summary>)', cfg, re.S)
     body = m.group(1) if m else ''
-    ok_off = '= true' not in body
-    print(f"  [{'ok' if ok_off else 'FAIL'}] {prop} defaults to false")
-    fails += 0 if ok_off else 1
+    is_on = '= true' in body
+    ok_default = is_on == expect_on
+    print(f"  [{'ok' if ok_default else 'FAIL'}] {prop} defaults to "
+          f"{'true' if expect_on else 'false'}"
+          + ('' if ok_default else f" (found {'true' if is_on else 'false'})"))
+    fails += 0 if ok_default else 1
 
 # Live delivery: the served page must carry the new markup. Skipped (not failed)
 # when the instance is unreachable — the offline checks above still ran.

@@ -449,6 +449,51 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool QaDownloadDriftReject { get; set; }
 
     /// <summary>
+    /// F-M296 (development): download auto-sync — shift a fetched subtitle by the
+    /// single constant offset measured against the audio, before it is saved.
+    /// <para>
+    /// A downloaded subtitle is frequently whole seconds off: the release's own
+    /// timing does not match this rip. The offset is measurable to about 0.2 s
+    /// (planted shifts of −3 / +2 / +4 / +8 / +12 s came back as −3.20 / +1.80 /
+    /// +3.80 / +7.80 / +11.80 s), and a large constant shift is NOT mistaken for
+    /// drift, which is what makes a correction possible at all.
+    /// </para>
+    /// <para>
+    /// The corrected file is written as usual AND the untouched original is kept
+    /// beside it as <c>&lt;name&gt;.&lt;lang&gt;.srt.unsynchronized</c>. Registered is the
+    /// hash of the CORRECTED file, so the duplicate guard sees exactly what lies on
+    /// disk. A file whose offset MOVES is never shifted — it has no valid single
+    /// offset — and is only reported, exactly as the drift gate (F-M295) reports it.
+    /// </para>
+    /// <para>
+    /// Off by default: it costs one full audio decode per saved file, on top of the
+    /// one the drift gate spends when that switch is on.
+    /// </para>
+    /// Default: false.
+    /// </summary>
+    public bool QaDownloadAutoSync { get; set; }
+
+    /// <summary>
+    /// F-M296 (development): the audio track an audio-reading gate decodes, chosen by
+    /// LANGUAGE rather than by stream order.
+    /// <para>
+    /// Priority: (1) a track in the subtitle's own language, (2) English, (3) the
+    /// first track without a language tag, else the first track. Measured on 304 files
+    /// with sidecar subtitles, this picks a different track than the first in 34 of
+    /// 387 (file, language) cases (~9 %) — typically an Italian release whose first
+    /// track is the Italian dub, with the English original on track 1. 76 files carry
+    /// no language tag on their first track at all.
+    /// </para>
+    /// <para>
+    /// The effect on the VERDICT is small (both tracks of the one multi-track file
+    /// measured closely agreed: span 17.4 vs. 18.1 s); what the switch removes is the
+    /// assumption that the first track is the right one, which is measurably false.
+    /// </para>
+    /// Default: true.
+    /// </summary>
+    public bool QaDownloadAudioTrackByLanguage { get; set; } = true;
+
+    /// <summary>
     /// F-M261 (user decision 30.09.2026): allocate missing language codes to the media files
     /// themselves. Expert / General.
     /// <para>

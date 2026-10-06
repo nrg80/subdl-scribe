@@ -69,6 +69,46 @@ public static class DriftRun
             + $"  {v1.Describe()}");
         failures += ok1 ? 0 : 1;
 
+        // --- Case 1b: a LARGE CONSTANT shift must stay "steady" AND report the
+        // value. A file shifted by a fixed amount is the case a correction CAN
+        // fix, so the gate must (a) not mistake it for drift and (b) name the
+        // amount. The value is compared against the planted one — this is the
+        // direct answer to "does it work for a constant shift".
+        Console.WriteLine();
+        Console.WriteLine("    constant shift, planted vs. reported:");
+        foreach (double shift in new[] { -3.0, 2.0, 4.0, 8.0, 12.0 })
+        {
+            var shifted = BurstsToCues(bursts, offsetSec: shift);
+            DriftVerdict vs = DriftDetector.Detect(
+                shifted.Select(c => c.S).ToArray(),
+                shifted.Select(c => c.E).ToArray(),
+                on, off, dur);
+            double err = vs.MedianOffsetSec - shift;
+            bool okS = vs.Ran && !vs.Drifts && vs.BoundaryCount == 0
+                       && Math.Abs(err) <= 0.35;
+            Console.WriteLine($"      [{((okS ? "PASS" : "FAIL"))}] planted {shift:+0.0;-0.0}s"
+                + $" -> reported {vs.MedianOffsetSec:+0.00;-0.00}s (error {err:+0.00;-0.00}s)"
+                + $", drifts={vs.Drifts}, boundaries={vs.BoundaryCount}");
+            failures += okS ? 0 : 1;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("    constant shift PLUS a step (must drift, not read steady):");
+        {
+            var mixed = BurstsToCues(bursts, offsetSec: 4.0, steps: [(atSec: 20 * 60, sizeSec: +2.5)]);
+            DriftVerdict vm = DriftDetector.Detect(
+                mixed.Select(c => c.S).ToArray(),
+                mixed.Select(c => c.E).ToArray(),
+                on, off, dur);
+            bool okM = vm.Ran && vm.Drifts && vm.SpanSec > 1.5;
+            Console.WriteLine($"      [{((okM ? "PASS" : "FAIL"))}] planted +4.0s then +2.5s"
+                + $" -> drifts={vm.Drifts}, span {vm.SpanSec:0.00}s, "
+                + $"{vm.BoundaryCount} boundary/boundaries");
+            failures += okM ? 0 : 1;
+        }
+
+        Console.WriteLine();
+
         // --- Case 2: clean + two KNOWN steps
         var steppedCues = BurstsToCues(bursts, offsetSec: 0.15, steps:
         [
