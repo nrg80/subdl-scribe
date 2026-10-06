@@ -940,13 +940,27 @@ public sealed class UploadPipeline
                 string? rejectReason = Registry.EmbedRejectedReason(mediaHash, subPos);
                 if (rejectReason != null)
                 {
+                    // F-M298: `duplicate-content` is only a verdict while the content is NOT already up.
+                    // The registry decides that on the CONTENT (see RecordSkippedContent) — replaying a
+                    // stale reject over content that is demonstrably uploaded is what kept the position
+                    // due and made the file re-extract on every run.
+                    string? rejectedContentHash = Registry.GetEmbed(mediaHash, subPos)?.ContentHash;
+                    bool settledNow = Registry.RecordSkippedContent(
+                        mediaHash, false, subPos, lang, streamHi, false, rejectedContentHash, rejectReason);
+
+                    if (settledNow)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
+                            Path.GetFileName(mediaPath), lang);
+
+                        continue;
+                    }
+
                     summary.SkippedStreams++;
                     summary.RejectedCandidates++; // F-M286
                     // Known reject for THIS position — carry the original reason forward verbatim
                     // instead of replacing it with a generic note, so the cause stays readable.
-                    Registry.MarkAndFlush(() => Registry.MarkEmbed(
-                        mediaHash, subPos, lang, streamHi,
-                        SubtitleStatus.Rejected, reason: rejectReason));
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(mediaPath), lang, ExplainReject(rejectReason));
 
                     continue;
@@ -1074,6 +1088,22 @@ public sealed class UploadPipeline
                 string? looseReject = Registry.SidecarRejectedReason(looseHashProbe);
                 if (looseReject != null)
                 {
+                    // F-M298: `duplicate-content` is only a verdict while the content is NOT already up.
+                    // The registry decides that on the CONTENT (see RecordSkippedContent). A sidecar is
+                    // keyed by its content, so the question is asked about exactly the bytes rejected.
+                    bool looseSettled = Registry.RecordSkippedContent(
+                        mediaHash, true, -1, looseLang, looseHi, looseForced, looseHashProbe, looseReject,
+                        fileName: Path.GetFileName(loosePath), path: loosePath);
+
+                    if (looseSettled)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
+                            Path.GetFileName(loosePath), looseLang);
+
+                        continue;
+                    }
+
                     summary.SkippedStreams++;
                     summary.RejectedCandidates++; // F-M286
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(loosePath), looseLang, ExplainReject(looseReject));
@@ -1199,29 +1229,38 @@ public sealed class UploadPipeline
                 string? qaReject = ScreenContentQa(cand.Srt, cand.Lang, runtimeMs, out string contentHash);
                 if (qaReject != null)
                 {
+                    // F-M298: `duplicate-content` says "this text is already known" — and IsContentKnown
+                    // counts a REJECTED row as known just as much as an uploaded one. So this gate fires
+                    // for content that is genuinely UP, and recording "rejected" over an uploaded row made
+                    // a settled file look unsettled: it was re-extracted and re-rejected on every later
+                    // run (prod 06.10.2026: Lanterns S01E08, 39 streams, 0 uploaded / 39 rejected after a
+                    // container tag write moved the media hash). The registry settles this on the CONTENT
+                    // and reports whether it recorded an upload instead of a reject.
+                    bool qaSettledAsUploaded = Registry.RecordSkippedContent(
+                        mediaHash, cand.IsLoose, cand.SubPos, cand.Lang, cand.HearingImpaired, cand.Forced,
+                        contentHash, qaReject,
+                        fileName: cand.IsLoose ? Path.GetFileName(cand.LoosePath) : null,
+                        path: cand.IsLoose ? cand.LoosePath : null);
+
+                    if (qaSettledAsUploaded)
+                    {
+                        summary.SkippedStreams++;
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
+                            Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang);
+
+                        continue;
+                    }
+
                     // F-M286: count the rejection itself. SkippedStreams also carries
                     // non-QA reasons (duplicates, missing ids), so it cannot serve as the
                     // rejected number either.
                     summary.RejectedCandidates++;
                     summary.SkippedStreams++;
-                    // F-M68: persist the QA reject — next runs skip without re-extract/re-QA... 
-                    // Flush immediately — a hard JF kill between reject and run-end
-                    // otherwise loses the entry (live: the 12:03 MS-mismatch vanished on
-                    // the 12:05 deploy restart). Same NF-4 kill-safety the upload path has.
-                    if (cand.IsLoose)
-                    {
-                        // A sidecar is identified by content, not by a position — one verdict row.
-                        Registry.MarkAndFlush(() => Registry.MarkSidecar(
-                            contentHash, mediaHash, cand.Lang, cand.HearingImpaired, cand.Forced,
-                            SubtitleStatus.Rejected, reason: qaReject,
-                            fileName: Path.GetFileName(cand.LoosePath), path: cand.LoosePath));
-                    }
-                    else
-                    {
-                        Registry.MarkAndFlush(() => Registry.MarkEmbed(
-                            mediaHash, cand.SubPos, cand.Lang, cand.HearingImpaired,
-                            SubtitleStatus.Rejected, contentHash: contentHash, reason: qaReject));
-                    }
+                    // The reject row itself was already written by RecordSkippedContent above —
+                    // it flushes immediately (F-M68 kill-safety: a hard JF kill between reject and
+                    // run-end otherwise lost the entry; live, the 12:03 MS-mismatch vanished on the
+                    // 12:05 deploy restart).
 
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang, ExplainReject(qaReject));
 
@@ -1375,28 +1414,39 @@ public sealed class UploadPipeline
 
                         break;
                     case { SkippedItem: true }:
+                        // F-M298: a duplicate-content skip means "SubDL already holds this text" — which
+                        // is what an earlier UPLOAD of the same bytes produces just as much as a remote
+                        // duplicate does. The registry settles this on the CONTENT: writing "rejected"
+                        // over content that is demonstrably up left the position due forever, and the next
+                        // run re-extracted the file to reject it again (prod 06.10.2026: Lanterns S01E08,
+                        // 39 streams rejected while the same text sat uploaded under the pre-rewrite
+                        // identity).
+                        string skippedContentHash = ContentHashRegistry.ComputeHash(cand.Srt);
+                        string skipReason = RejectReason.DuplicateRemote == result.Reason
+                            ? RejectReason.DuplicateRemote
+                            : result.Reason ?? RejectReason.CandidateRejected;
+                        bool skipSettled = Registry.RecordSkippedContent(
+                            mediaHash, cand.IsLoose, cand.SubPos, cand.Lang, cand.HearingImpaired, cand.Forced,
+                            skippedContentHash, skipReason,
+                            fileName: cand.IsLoose ? Path.GetFileName(cand.LoosePath) : null,
+                            path: cand.IsLoose ? cand.LoosePath : null);
+
+                        if (skipSettled)
+                        {
+                            summary.SkippedStreams++;
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
+                                Path.GetFileName(fileName), cand.Lang);
+
+                            break;
+                        }
+
                         summary.SkippedStreams++;
                         summary.RejectedCandidates++; // F-M286
                         // A definitive skip verdict settles the position — but
                         // transient reasons (rate caps inside UploadSrtContentAsync return
                         // as failures, not skips) keep the stream due.
-                        string skipReason = RejectReason.DuplicateRemote == result.Reason
-                            ? RejectReason.DuplicateRemote
-                            : result.Reason ?? RejectReason.CandidateRejected;
-                        if (cand.IsLoose)
-                        {
-                            Registry.MarkAndFlush(() => Registry.MarkSidecar(
-                                ContentHashRegistry.ComputeHash(cand.Srt), mediaHash, cand.Lang, cand.HearingImpaired, cand.Forced,
-                                SubtitleStatus.Rejected, reason: skipReason,
-                                fileName: Path.GetFileName(cand.LoosePath), path: cand.LoosePath));
-                        }
-                        else
-                        {
-                            Registry.MarkAndFlush(() => Registry.MarkEmbed(
-                                mediaHash, cand.SubPos, cand.Lang, cand.HearingImpaired,
-                                SubtitleStatus.Rejected, contentHash: ContentHashRegistry.ComputeHash(cand.Srt),
-                                reason: skipReason));
-                        }
+                        // The reject row itself was already written by RecordSkippedContent above.
 
                         LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(fileName), cand.Lang, ExplainReject(result.Reason));
 

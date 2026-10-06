@@ -933,6 +933,16 @@ The marker counts the CLAIM, not the outcome: a run that fails after being queue
 
 **F-M17z [B2]:** **Upload dedup respects the stored outcome:** a stored verdict — uploaded, or rejected with any reason — counts as "known"; an observation row does not.
 
+**F-M298 [D] (development):** **A `duplicate-content` skip never overwrites an `uploaded` row — the state follows the CONTENT, not the reason.**
+
+The content-known check deliberately counts a **rejected** row as known just as much as an uploaded one: it answers "has this text been dealt with", which is the question its callers ask. A skip raised on that answer therefore fires routinely over content that is **demonstrably up** — most visibly after a container tag write, where the language-tag gate gives the file a NEW media hash and the identity move carries the accepted rows across (F-M61), while the same text is then seen again as "known" and skipped on the next run.
+
+Recording `rejected` in that situation contradicts the evidence: the position looks unsettled, the file is re-extracted on every later run and rejected again, and the rejected counter grows without a single new verdict. Measured on prod 06.10.2026 — Lanterns S01E08: 39 streams, **0 uploaded against 39 rejected**, while the identical text sat as `uploaded` under the pre-rewrite identity (39 skips, one per stream, `duplicate-content`, with a `rejected` row written each time).
+
+The rule: when a skip carries the reason `duplicate-content` **and** the same content hash already holds an `uploaded` row anywhere — embedded or sidecar, under this media hash or under another — the row is written as `uploaded` (reason cleared) and the stream is **not** counted as rejected. In every other case the reject is recorded exactly as before: a skip over content that is genuinely NOT up must keep saying so, or the fix would claim an upload that never happened.
+
+The decision lives in ONE registry method (`RecordSkippedContent`) that every skip path calls — the embedded reject-replay, the sidecar reject-replay, the phase-1 QA gate and the phase-3 upload skip. **Test: T113.**
+
 **F-M243 [D]:** **The HI variant counts as present whether it is a file or an embedded track.** Both evidence sources answer the same question, and Jellyfin's own the hearing-impaired flag decides a stream — read through ONE detector (the hearing-impaired predicate) used by uploader and downloader alike.
 
 A target language counts as having its HI variant when EITHER `<base>.<lang>.sdh.srt` exists on disk OR the item carries an embedded subtitle stream of that language whose the hearing-impaired flag is true. Only when both are absent is the language queued for an HI download.
@@ -1488,6 +1498,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T111:** End-to-end against real audio, driving the FEATURE (not a copy of its arithmetic): the sign of the correction is established on the material itself by planting +5 s and applying BOTH directions — the one landing within 0.7 s of the plain subtitle is `−detector`, and that is asserted, so a sign flip fails here instead of doubling every corrected file; a subtitle already in sync comes back `applied=False`; and a shift planted at +2.5 / −1.8 / +6.0 s is measured and removed, with the corrected text lying within 0.7 s of the plain subtitle by MEDIAN offset — a file that took no part in the measurement. The check is a MEDIAN and not a spread: a constant shift leaves the spread at 0.00 s whatever its size, so an earlier version of this test passed even on files it had made twice as bad (F-M296)
 
 **T112:** The reference rule and the anchor correction: a same-language plain sidecar is preferred over an embedded track; the hearing-impaired file never serves as its own reference, and when the target language offers ONLY an HI track the correction is refused rather than anchored to it; a wrong-language candidate and an unknown target language are both refused; against a real extracted pair (Invasion S01E06, plain English against English SDH) a synchronised file is left alone — 137 anchor pairs at a 0.00 s median and 0.75 s worst, no improvement to be had, correction REFUSED; and a step of known size planted into a clean file is removed, with cue order and cue text unchanged (F-M297)
+
+**T113:** Driving the registry decision itself (not a copy of its arithmetic): an `uploaded` row survives a `duplicate-content` skip — after the identity move that the language-tag gate triggers, a skip over the same content leaves the row `uploaded` with its reason cleared and increments no reject; and the same skip over content that is NOT up still writes `rejected` with its reason intact, so the two cases are told apart rather than both being called settled. The second half is what makes the check meaningful: a rule that simply treats every `duplicate-content` skip as settled passes the first half and fails here (F-M298)
 
 
 

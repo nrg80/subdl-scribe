@@ -1,0 +1,30 @@
+<!--
+  This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+  SPDX-License-Identifier: GPL-3.0-or-later
+
+  SubDL Scribe is free software: you can redistribute it and/or modify it
+  under the terms of the GNU General Public License as published by the
+  Free Software Foundation, either version 3 of the License, or (at your
+  option) any later version.
+
+  SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  See the GNU General Public License for more details.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable>
+    <AssemblyName>dupskip</AssemblyName><RootNamespace>DupSkipNs</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <JellyfinDir>/opt/data/jf-test/jellyfin</JellyfinDir>
+    <PluginDir>/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/bin/Release/net10.0</PluginDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Jellyfin.Plugin.SubdlSync"><HintPath>$(PluginDir)/Jellyfin.Plugin.SubdlSync.dll</HintPath></Reference>
+    <Reference Include="MediaBrowser.Common"><HintPath>$(JellyfinDir)/MediaBrowser.Common.dll</HintPath></Reference>
+    <Reference Include="MediaBrowser.Controller"><HintPath>$(JellyfinDir)/MediaBrowser.Controller.dll</HintPath></Reference>
+    <Reference Include="MediaBrowser.Model"><HintPath>$(JellyfinDir)/MediaBrowser.Model.dll</HintPath></Reference>
+    <Reference Include="LiteDB"><HintPath>$(PluginDir)/LiteDB.dll</HintPath></Reference>
+    <Reference Include="Microsoft.Extensions.Logging.Abstractions"><HintPath>$(JellyfinDir)/Microsoft.Extensions.Logging.Abstractions.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

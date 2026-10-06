@@ -1107,6 +1107,83 @@ public sealed class ContentHashRegistry : IDisposable
             || _db.Sidecars.Exists(x => x.ContentHash == contentHash && x.Status != SubtitleStatus.Observed);
     }
 
+    /// <summary>
+    /// F-M298: True when this exact content already carries an UPLOADED row somewhere — an embedded
+    /// position, a sidecar, under THIS media hash or under another one.
+    /// <para>
+    /// <see cref="IsContentKnown"/> answers "has this text been dealt with" and is deliberately blind
+    /// to WHICH outcome that was: a rejected row counts as known, which is what its callers want.
+    /// This question is the narrower one a duplicate skip has to ask before it writes anything — the
+    /// verdict "rejected" may only be recorded over a text that was not already accepted, or a file
+    /// whose subtitles are on SubDL ends up looking unsettled and is re-extracted and re-rejected on
+    /// every later run while the counter grows.
+    /// </para>
+    /// <para>
+    /// Global on purpose, like <see cref="IsContentKnown"/>: a file rewrite moves the media hash, the
+    /// accepted row stays behind under the previous identity, and the text is still the same text.
+    /// </para>
+    /// </summary>
+    /// <param name="contentHash">Content hash.</param>
+    /// <returns>True when an uploaded row for this content exists.</returns>
+    public bool IsContentUploaded(string? contentHash)
+    {
+        if (string.IsNullOrEmpty(contentHash))
+        {
+            return false;
+        }
+
+        return _db.Embeds.Exists(x => x.ContentHash == contentHash && x.Status == SubtitleStatus.Uploaded)
+            || _db.Sidecars.Exists(x => x.ContentHash == contentHash && x.Status == SubtitleStatus.Uploaded);
+    }
+
+    /// <summary>
+    /// F-M298: records the verdict for a SKIPPED candidate. The state is derived from the CONTENT and
+    /// not from the reason alone: <c>duplicate-content</c> means "SubDL already holds this text", and
+    /// <see cref="IsContentKnown"/> answers that for a REJECTED row exactly as it does for an uploaded
+    /// one — so a skip on that reason is routinely raised over content that is demonstrably up. Writing
+    /// <c>rejected</c> there contradicted the evidence, left the file looking unsettled, and made it be
+    /// re-extracted and re-rejected on every later run (prod 06.10.2026: Lanterns S01E08, 39 streams,
+    /// 0 uploaded against 39 rejected, after a container tag write moved the media hash and carried the
+    /// accepted rows onto the new identity).
+    /// <para>
+    /// Every skip path goes through here so the rule lives once instead of at each call site.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaHash">Parent media hash.</param>
+    /// <param name="isLoose">True for a sidecar file, false for an embedded position.</param>
+    /// <param name="subPos">Embedded stream position (ignored for a sidecar).</param>
+    /// <param name="lang">Language code.</param>
+    /// <param name="hearingImpaired">HI variant.</param>
+    /// <param name="forced">Forced flag.</param>
+    /// <param name="contentHash">Content hash of the skipped text.</param>
+    /// <param name="reason">Reject reason reported by the gate or by SubDL.</param>
+    /// <param name="fileName">Sidecar file name.</param>
+    /// <param name="path">Sidecar full path.</param>
+    /// <returns>True when the row was settled as UPLOADED — in that case nothing was rejected.</returns>
+    public bool RecordSkippedContent(string? mediaHash, bool isLoose, int subPos, string lang,
+        bool hearingImpaired, bool forced, string? contentHash, string? reason,
+        string? fileName = null, string? path = null)
+    {
+        bool settledAsUploaded = RejectReason.DuplicateContent == reason && IsContentUploaded(contentHash);
+
+        if (isLoose)
+        {
+            MarkSidecar(contentHash, mediaHash ?? string.Empty, lang, hearingImpaired, forced,
+                settledAsUploaded ? SubtitleStatus.Uploaded : SubtitleStatus.Rejected,
+                reason: settledAsUploaded ? null : reason,
+                fileName: fileName, path: path);
+        }
+        else
+        {
+            MarkEmbed(mediaHash, subPos, lang, hearingImpaired,
+                settledAsUploaded ? SubtitleStatus.Uploaded : SubtitleStatus.Rejected,
+                contentHash: contentHash,
+                reason: settledAsUploaded ? null : reason);
+        }
+
+        return settledAsUploaded;
+    }
+
     /// <summary>True when this content was rejected by SubDL itself as already held remotely.</summary>
     /// <param name="contentHash">Content hash.</param>
     /// <returns>True when a remote duplicate is recorded.</returns>
