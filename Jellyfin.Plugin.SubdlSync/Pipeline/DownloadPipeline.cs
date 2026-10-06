@@ -1988,7 +1988,7 @@ public sealed class DownloadPipeline : IDisposable
                 // sidecar first (free), then a same-language plain embedded track (one extraction),
                 // else nothing. The HI file never serves as a reference — it is the variant that
                 // drifts, so anchoring to it would anchor a drifting file to another.
-                if (_config.QaDownloadAnchorSync)
+                if (_config.QaDownloadAutoSync)
                 {
                     var cands = new List<Qa.ReferenceChoice.Candidate>();
                     foreach (var sc in SidecarNaming.List(mediaPath))

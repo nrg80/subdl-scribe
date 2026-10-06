@@ -523,46 +523,18 @@
                             <div class="fieldDescription">Max. cue span vs. runtime in seconds. 0 = off. Default: 600.</div>
                         </div>
 
-                        <h4 style="margin:1em 0 .3em 0;">Subtitle correction (to the audio)</h4>
+                        <h4 style="margin:1em 0 .3em 0;">Subtitle correction</h4>
                         <div class="fieldDescription" style="margin-bottom:.6em;">
                             Puts a fetched subtitle onto the spoken track: by one constant offset, or
-                            segment by segment when the offset moves — or against a plain same-language
-                            reference. The drift check reports the same measurement instead of applying it.
+                            segment by segment when the offset moves, or against a plain subtitle in
+                            the same language when the item has one.
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaDownloadAutoSync" name="QaDownloadAutoSync" type="checkbox" is="emby-checkbox" />
-                                <span>Correct the offset automatically</span>
+                                <span>Correct subtitle timing</span>
                             </label>
-                            <div class="fieldDescription">Shifts the file onto the audio before saving, by one offset or segment by segment. The untouched original stays beside it as &lt;name&gt;.&lt;lang&gt;.srt.unsynchronized. Costs one audio decode per saved file. Default: on.</div>
-                        </div>
-                        <div class="checkboxContainer checkboxContainer-withDescription">
-                            <label class="emby-checkbox-label">
-                                <input id="QaDownloadAudioTrackByLanguage" name="QaDownloadAudioTrackByLanguage" type="checkbox" is="emby-checkbox" />
-                                <span>Pick the audio track by language</span>
-                            </label>
-                            <div class="fieldDescription">Priority: a track in the subtitle's language, then English, then the first untagged track. Default: on.</div>
-                        </div>
-                        <div class="checkboxContainer checkboxContainer-withDescription">
-                            <label class="emby-checkbox-label">
-                                <input id="QaDownloadAnchorSync" name="QaDownloadAnchorSync" type="checkbox" is="emby-checkbox" />
-                                <span>Repair a drifting file against a reference</span>
-                            </label>
-                            <div class="fieldDescription">Compares it with a plain subtitle in the same language — beside the file or embedded — and keeps the repair only if it improves the worst line. Needs such a reference; without one nothing is changed. Default: on.</div>
-                        </div>
-                        <div class="checkboxContainer checkboxContainer-withDescription">
-                            <label class="emby-checkbox-label">
-                                <input id="QaDownloadDriftCheck" name="QaDownloadDriftCheck" type="checkbox" is="emby-checkbox" />
-                                <span>Drift check (report only, never a shift)</span>
-                            </label>
-                            <div class="fieldDescription">Measure whether the subtitle holds ONE offset to the spoken track, and how far it moves when it does not. Costs one audio decode per candidate file. Default: off.</div>
-                        </div>
-                        <div class="checkboxContainer checkboxContainer-withDescription">
-                            <label class="emby-checkbox-label">
-                                <input id="QaDownloadDriftReject" name="QaDownloadDriftReject" type="checkbox" is="emby-checkbox" />
-                                <span>Reject drifting files (instead of correcting)</span>
-                            </label>
-                            <div class="fieldDescription">Rejects a subtitle that drifts and tries the next candidate. Needs the drift check above. Off: the drift is corrected segment by segment like any other offset. Default: off.</div>
+                            <div class="fieldDescription">Shifts the file onto the audio before saving, or repairs it line-by-line against a same-language reference when one exists. The untouched original stays beside it as &lt;name&gt;.&lt;lang&gt;.srt.unsynchronized. Costs one audio decode per saved file. Default: on.</div>
                         </div>
 
                         
@@ -952,11 +924,7 @@
                         document.querySelector('#AllocateMissingLanguageCodes').checked = config.AllocateMissingLanguageCodes;
                         document.querySelector('#QaDownloadMinCues').checked = config.QaDownloadMinCues;
                         document.querySelector('#QaDownloadVerifyLanguage').checked = config.QaDownloadVerifyLanguage;
-                        document.querySelector('#QaDownloadDriftCheck').checked = !!config.QaDownloadDriftCheck;
-                        document.querySelector('#QaDownloadDriftReject').checked = !!config.QaDownloadDriftReject;
                         document.querySelector('#QaDownloadAutoSync').checked = config.QaDownloadAutoSync !== false;
-                        document.querySelector('#QaDownloadAudioTrackByLanguage').checked = config.QaDownloadAudioTrackByLanguage !== false;
-                        document.querySelector('#QaDownloadAnchorSync').checked = config.QaDownloadAnchorSync !== false;
                         document.querySelector('#DownloadScoreWeightGroup').value = config.DownloadScoreWeightGroup;
                         document.querySelector('#DownloadScoreWeightToken').value = config.DownloadScoreWeightToken;
                         document.querySelector('#DownloadScoreWeightDownload').value = config.DownloadScoreWeightDownload;
@@ -1529,11 +1497,7 @@ workers.forEach(function (w) {
                         config.AllocateMissingLanguageCodes = document.querySelector('#AllocateMissingLanguageCodes').checked;
                         config.QaDownloadMinCues = document.querySelector('#QaDownloadMinCues').checked;
                         config.QaDownloadVerifyLanguage = document.querySelector('#QaDownloadVerifyLanguage').checked;
-                        config.QaDownloadDriftCheck = document.querySelector('#QaDownloadDriftCheck').checked;
-                        config.QaDownloadDriftReject = document.querySelector('#QaDownloadDriftReject').checked;
                         config.QaDownloadAutoSync = document.querySelector('#QaDownloadAutoSync').checked;
-                        config.QaDownloadAudioTrackByLanguage = document.querySelector('#QaDownloadAudioTrackByLanguage').checked;
-                        config.QaDownloadAnchorSync = document.querySelector('#QaDownloadAnchorSync').checked;
                         config.DownloadScoreWeightGroup = parseInt(document.querySelector('#DownloadScoreWeightGroup').value) || 1000;
                         config.DownloadScoreWeightToken = parseInt(document.querySelector('#DownloadScoreWeightToken').value) || 10;
                         config.DownloadScoreWeightDownload = parseInt(document.querySelector('#DownloadScoreWeightDownload').value, 10); if (isNaN(config.DownloadScoreWeightDownload)) { config.DownloadScoreWeightDownload = 1; }

@@ -2,88 +2,92 @@
 # This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# F-M295 UI wiring check. A checkbox that exists in the markup but is bound
-# nowhere is worse than a missing one: the setting looks present, saves as
-# undefined, and silently reverts to the default on the next load. So all four
-# bindings are asserted, in the file that is actually delivered.
+# F-M304 UI wiring check. ONE toggle, and it must be wired in the file that is actually
+# delivered: a checkbox that exists in the markup but is bound nowhere is worse than a missing
+# one — the setting looks present, saves as undefined, and silently reverts on the next load.
 #
-# Which file is delivered is not a guess: the live page is fetched and compared
-# against the repo file. configPage.js is NOT referenced by any page or loader in
-# this repository (checked: no script src, no ConfigJs call), so configPage.html
-# is the live one — asserted here so a future reader does not have to re-derive it.
+# WHY THIS FILE NOW ALSO ASSERTS ABSENCE. Four switches were removed from the correction
+# section (drift report, drift reject, track-by-language, reference repair) because five
+# checkboxes described ONE mechanism. A wiring check that only looks for what should be there
+# cannot see a stale checkbox left behind, and a leftover `document.querySelector('#X')` for a
+# removed element throws at load and takes the whole page's bindings with it. So every removed
+# id is asserted ABSENT in the markup AND in the JS.
+#
+# Which file is delivered is not a guess: configPage.html is an EmbeddedResource in the
+# .csproj, so it ships inside the DLL — a GUI change needs a real build, release and deploy,
+# not a file copy. Asserted here so the next reader does not have to re-derive it.
 import re
 import subprocess
 import sys
 
 HTML = '/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Configuration/configPage.html'
+CSPROJ = '/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Jellyfin.Plugin.SubdlSync.csproj'
 LIVE_URL = 'http://localhost:8096/web/configurationpage?name=SubDL%20Scribe'
 
+# Present: the one switch the section is.
 CHECKS = [
-    ('markup #QaDownloadDriftCheck', r'id="QaDownloadDriftCheck"'),
-    ('markup #QaDownloadDriftReject', r'id="QaDownloadDriftReject"'),
-    ('load binds DriftCheck', r"#QaDownloadDriftCheck'\)\.checked = !!config\.QaDownloadDriftCheck"),
-    ('load binds DriftReject', r"#QaDownloadDriftReject'\)\.checked = !!config\.QaDownloadDriftReject"),
-    ('save reads DriftCheck', r"config\.QaDownloadDriftCheck = document\.querySelector\('#QaDownloadDriftCheck'\)\.checked"),
-    ('save reads DriftReject', r"config\.QaDownloadDriftReject = document\.querySelector\('#QaDownloadDriftReject'\)\.checked"),
-
-    # F-M296: the auto-sync pair. BOTH switches now default to ON, so each load binding
-    # must resolve an absent value (an older config) to TRUE, not to false — the usual
-    # `!!config.X` would silently turn a default-on feature off on every existing install.
     ('markup #QaDownloadAutoSync', r'id="QaDownloadAutoSync"'),
-    ('markup #QaDownloadAudioTrackByLanguage', r'id="QaDownloadAudioTrackByLanguage"'),
     ('load binds AutoSync (default-on aware)',
      r"#QaDownloadAutoSync'\)\.checked = config\.QaDownloadAutoSync !== false"),
-    ('load binds AudioTrackByLanguage (default-on aware)',
-     r"#QaDownloadAudioTrackByLanguage'\)\.checked = config\.QaDownloadAudioTrackByLanguage !== false"),
-    ('save reads AutoSync', r"config\.QaDownloadAutoSync = document\.querySelector\('#QaDownloadAutoSync'\)\.checked"),
-    ('save reads AudioTrackByLanguage',
-     r"config\.QaDownloadAudioTrackByLanguage = document\.querySelector\('#QaDownloadAudioTrackByLanguage'\)\.checked"),
+    ('save reads AutoSync',
+     r"config\.QaDownloadAutoSync = document\.querySelector\('#QaDownloadAutoSync'\)\.checked"),
+]
 
-    # F-M297: the anchor-sync switch. It defaults to ON as well, so its binding carries the
-    # same default-on shape — `!!config.X` here would switch the repair off on every install
-    # that predates it.
-    ('markup #QaDownloadAnchorSync', r'id="QaDownloadAnchorSync"'),
-    ('load binds AnchorSync (default-on aware)',
-     r"#QaDownloadAnchorSync'\)\.checked = config\.QaDownloadAnchorSync !== false"),
-    ('save reads AnchorSync', r"config\.QaDownloadAnchorSync = document\.querySelector\('#QaDownloadAnchorSync'\)\.checked"),
+# Gone: folded into the one switch. Each must be absent from markup AND from the JS, and its
+# C# property must no longer be bound by the page.
+REMOVED = [
+    'QaDownloadDriftCheck',
+    'QaDownloadDriftReject',
+    'QaDownloadAudioTrackByLanguage',
+    'QaDownloadAnchorSync',
 ]
 
 fails = 0
 src = open(HTML, encoding='utf-8').read()
 
-print("=== F-M295 GUI wiring ===")
+print("=== F-M304 GUI wiring — one correction switch ===")
 for name, pat in CHECKS:
     ok = re.search(pat, src) is not None
     print(f"  [{'ok' if ok else 'FAIL'}] {name}")
     fails += 0 if ok else 1
 
-# Every new switch must appear exactly once in the markup, and each default must match
-# the C# declaration. A default-on switch read with `!!config.X` turns itself off on every
-# existing install — the reason the pair below is checked separately rather than in a loop.
-for prop, expect_on in (('QaDownloadDriftCheck', False), ('QaDownloadDriftReject', False),
-                        ('QaDownloadAutoSync', True), ('QaDownloadAnchorSync', True),
-                        ('QaDownloadAudioTrackByLanguage', True)):
-    n = len(re.findall(rf'id="{prop}"', src))
-    ok_once = n == 1
-    print(f"  [{'ok' if ok_once else 'FAIL'}] {prop} id appears exactly once (got {n})")
-    fails += 0 if ok_once else 1
+for prop in REMOVED:
+    n = len(re.findall(rf'{prop}', src))
+    ok = n == 0
+    print(f"  [{'ok' if ok else 'FAIL'}] {prop} fully removed from the page (found {n})")
+    fails += 0 if ok else 1
 
+# The correction section itself must hold exactly ONE checkbox — the whole point of the
+# change. Counted on the section slice so an unrelated checkbox elsewhere cannot mask it.
+sec_start = src.find('Subtitle correction')
+sec_end = src.find('id="DownloadLangModal"')
+if sec_start < 0 or sec_end < 0 or sec_end < sec_start:
+    print("  [FAIL] the correction section boundaries were not found")
+    fails += 1
+else:
+    section = src[sec_start:sec_end]
+    boxes = len(re.findall(r'<input[^>]*type="checkbox"', section))
+    ok = boxes == 1
+    print(f"  [{'ok' if ok else 'FAIL'}] the correction section holds exactly ONE checkbox "
+          f"(got {boxes})")
+    fails += 0 if ok else 1
+
+# The page ships inside the DLL, so the claim above must be true of the built artefact path.
+proj = open(CSPROJ, encoding='utf-8').read()
+ok = 'EmbeddedResource Include="Configuration\\configPage.html"' in proj
+print(f"  [{'ok' if ok else 'FAIL'}] configPage.html is an EmbeddedResource (ships in the DLL)")
+fails += 0 if ok else 1
+
+# Defaults of what REMAINS exposed. The removed props keep their C# defaults; only the one
+# visible switch is bound, and it must resolve an absent value (an older config) to TRUE —
+# `!!config.X` would silently switch a default-on correction off on every existing install.
 CFG = '/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs'
 cfg = open(CFG, encoding='utf-8').read()
-for prop, expect_on in (('QaDownloadDriftCheck', False), ('QaDownloadDriftReject', False),
-                        ('QaDownloadAutoSync', True), ('QaDownloadAnchorSync', True),
-                        ('QaDownloadAudioTrackByLanguage', True)):
-    m = re.search(rf'public bool {prop} \{{ get; set; \}}(.*?)(?=\n\n|/// <summary>)', cfg, re.S)
-    body = m.group(1) if m else ''
-    is_on = '= true' in body
-    ok_default = is_on == expect_on
-    print(f"  [{'ok' if ok_default else 'FAIL'}] {prop} defaults to "
-          f"{'true' if expect_on else 'false'}"
-          + ('' if ok_default else f" (found {'true' if is_on else 'false'})"))
-    fails += 0 if ok_default else 1
+m = re.search(r'public bool QaDownloadAutoSync \{ get; set; \}(.*?)(?=\n\n|/// <summary>)', cfg, re.S)
+ok = bool(m) and '= true' in m.group(1)
+print(f"  [{'ok' if ok else 'FAIL'}] QaDownloadAutoSync defaults to true in C#")
+fails += 0 if ok else 1
 
-# Live delivery: the served page must carry the new markup. Skipped (not failed)
-# when the instance is unreachable — the offline checks above still ran.
 print()
 try:
     live = subprocess.run(['curl', '-sk', '--max-time', '20', LIVE_URL],
@@ -91,9 +95,10 @@ try:
     if not live:
         print("  [skip] live page unreachable — offline checks only")
     else:
-        ok_live = 'QaDownloadDriftCheck' in live
-        print(f"  [{'ok' if ok_live else 'note'}] live page carries the new markup "
-              f"({'yes' if ok_live else 'not yet — deployed build predates this change'})")
+        one = 'Correct subtitle timing' in live
+        stale = 'QaDownloadDriftCheck' in live
+        print(f"  [{'ok' if one and not stale else 'note'}] live page carries the ONE switch "
+              f"({'yes' if one else 'no'}), removed switches absent ({'yes' if not stale else 'no'})")
 except Exception as ex:
     print(f"  [skip] live check: {str(ex)[:60]}")
 
