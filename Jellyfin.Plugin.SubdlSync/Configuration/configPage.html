@@ -537,7 +537,7 @@
                                 <input id="QaDownloadAutoSync" name="QaDownloadAutoSync" type="checkbox" is="emby-checkbox" />
                                 <span>Auto-sync to the audio</span>
                             </label>
-                            <div class="fieldDescription">Costs one audio decode per saved file. Default: off.</div>
+                            <div class="fieldDescription">Costs one audio decode per saved file. Default: on.</div>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
@@ -561,7 +561,7 @@
                                 <input id="QaDownloadAnchorSync" name="QaDownloadAnchorSync" type="checkbox" is="emby-checkbox" />
                                 <span>Repair drifting subtitles against a reference</span>
                             </label>
-                            <div class="fieldDescription">Needs a plain subtitle in the same language — beside the file, or embedded in the container. Without one nothing is changed and the finding is only reported. Default: off.</div>
+                            <div class="fieldDescription">Needs a plain subtitle in the same language — beside the file, or embedded in the container. Without one nothing is changed and the finding is only reported. Default: on.</div>
                         </div>
 
                         <h4 style="margin:1em 0 .3em 0;">Drift check (cue vs. speech)</h4>
@@ -974,9 +974,9 @@
                         document.querySelector('#QaDownloadVerifyLanguage').checked = config.QaDownloadVerifyLanguage;
                         document.querySelector('#QaDownloadDriftCheck').checked = !!config.QaDownloadDriftCheck;
                         document.querySelector('#QaDownloadDriftReject').checked = !!config.QaDownloadDriftReject;
-                        document.querySelector('#QaDownloadAutoSync').checked = !!config.QaDownloadAutoSync;
+                        document.querySelector('#QaDownloadAutoSync').checked = config.QaDownloadAutoSync !== false;
                         document.querySelector('#QaDownloadAudioTrackByLanguage').checked = config.QaDownloadAudioTrackByLanguage !== false;
-                        document.querySelector('#QaDownloadAnchorSync').checked = !!config.QaDownloadAnchorSync;
+                        document.querySelector('#QaDownloadAnchorSync').checked = config.QaDownloadAnchorSync !== false;
                         document.querySelector('#DownloadScoreWeightGroup').value = config.DownloadScoreWeightGroup;
                         document.querySelector('#DownloadScoreWeightToken').value = config.DownloadScoreWeightToken;
                         document.querySelector('#DownloadScoreWeightDownload').value = config.DownloadScoreWeightDownload;

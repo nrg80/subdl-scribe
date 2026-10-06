@@ -26,22 +26,25 @@ CHECKS = [
     ('save reads DriftCheck', r"config\.QaDownloadDriftCheck = document\.querySelector\('#QaDownloadDriftCheck'\)\.checked"),
     ('save reads DriftReject', r"config\.QaDownloadDriftReject = document\.querySelector\('#QaDownloadDriftReject'\)\.checked"),
 
-    # F-M296: the auto-sync pair. The track switch defaults to ON, so its load binding
+    # F-M296: the auto-sync pair. BOTH switches now default to ON, so each load binding
     # must resolve an absent value (an older config) to TRUE, not to false — the usual
     # `!!config.X` would silently turn a default-on feature off on every existing install.
     ('markup #QaDownloadAutoSync', r'id="QaDownloadAutoSync"'),
     ('markup #QaDownloadAudioTrackByLanguage', r'id="QaDownloadAudioTrackByLanguage"'),
-    ('load binds AutoSync', r"#QaDownloadAutoSync'\)\.checked = !!config\.QaDownloadAutoSync"),
+    ('load binds AutoSync (default-on aware)',
+     r"#QaDownloadAutoSync'\)\.checked = config\.QaDownloadAutoSync !== false"),
     ('load binds AudioTrackByLanguage (default-on aware)',
      r"#QaDownloadAudioTrackByLanguage'\)\.checked = config\.QaDownloadAudioTrackByLanguage !== false"),
     ('save reads AutoSync', r"config\.QaDownloadAutoSync = document\.querySelector\('#QaDownloadAutoSync'\)\.checked"),
     ('save reads AudioTrackByLanguage',
      r"config\.QaDownloadAudioTrackByLanguage = document\.querySelector\('#QaDownloadAudioTrackByLanguage'\)\.checked"),
 
-    # F-M297: the anchor-sync switch. Like the audio auto-sync it defaults to OFF, so the
-    # usual `!!config.X` binding is the correct one here.
+    # F-M297: the anchor-sync switch. It defaults to ON as well, so its binding carries the
+    # same default-on shape — `!!config.X` here would switch the repair off on every install
+    # that predates it.
     ('markup #QaDownloadAnchorSync', r'id="QaDownloadAnchorSync"'),
-    ('load binds AnchorSync', r"#QaDownloadAnchorSync'\)\.checked = !!config\.QaDownloadAnchorSync"),
+    ('load binds AnchorSync (default-on aware)',
+     r"#QaDownloadAnchorSync'\)\.checked = config\.QaDownloadAnchorSync !== false"),
     ('save reads AnchorSync', r"config\.QaDownloadAnchorSync = document\.querySelector\('#QaDownloadAnchorSync'\)\.checked"),
 ]
 
@@ -58,7 +61,7 @@ for name, pat in CHECKS:
 # the C# declaration. A default-on switch read with `!!config.X` turns itself off on every
 # existing install — the reason the pair below is checked separately rather than in a loop.
 for prop, expect_on in (('QaDownloadDriftCheck', False), ('QaDownloadDriftReject', False),
-                        ('QaDownloadAutoSync', False), ('QaDownloadAnchorSync', False),
+                        ('QaDownloadAutoSync', True), ('QaDownloadAnchorSync', True),
                         ('QaDownloadAudioTrackByLanguage', True)):
     n = len(re.findall(rf'id="{prop}"', src))
     ok_once = n == 1
@@ -68,7 +71,7 @@ for prop, expect_on in (('QaDownloadDriftCheck', False), ('QaDownloadDriftReject
 CFG = '/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs'
 cfg = open(CFG, encoding='utf-8').read()
 for prop, expect_on in (('QaDownloadDriftCheck', False), ('QaDownloadDriftReject', False),
-                        ('QaDownloadAutoSync', False), ('QaDownloadAnchorSync', False),
+                        ('QaDownloadAutoSync', True), ('QaDownloadAnchorSync', True),
                         ('QaDownloadAudioTrackByLanguage', True)):
     m = re.search(rf'public bool {prop} \{{ get; set; \}}(.*?)(?=\n\n|/// <summary>)', cfg, re.S)
     body = m.group(1) if m else ''

@@ -459,9 +459,10 @@ rules. Leaving it out would produce a corrected main subtitle beside an uncorrec
 same episode — and the HI pool is where the drift gate measured its findings (all 38 measured HI files
 drifted), so this is precisely the case the sync often **cannot** fix and then reports instead.
 
-**Cost and posture.** One full audio decode per saved file (~14 s per 44 min episode), on top of the
-one the drift gate spends when `QaDownloadDriftCheck` is on. When both switches are on the verdict is
-**measured once and shared**, not decoded twice. Switch `QaDownloadAutoSync`, **default off**.
+**Cost and posture.** One full audio decode per saved file, measured on the production Pi 5 with a
+49 min HEVC episode: **11 s wall / 21 s CPU** (median of three runs; the decode runs at ~1.9 cores of
+the four available, so it does not monopolise the box). When `QaDownloadDriftCheck` is also on the
+verdict is **measured once and shared**, not decoded twice. Switch `QaDownloadAutoSync`, **default on**.
 
 **Tests: T110 (synthetic: track priority with the 2-vs-3-letter cases, exact shift, refusal on a
 negative first cue, byte style, the suffix against the real listing pattern), T111 (end-to-end on a
@@ -559,13 +560,15 @@ the margin is not met, and the correction is refused. That is the intended outco
 
 #### 4.4.5 Switches, order, and cost
 
-- Switch `QaDownloadAnchorSync` (**default off**), under *Download → Quality Gates* beside the
+- Switch `QaDownloadAnchorSync` (**default on**), under *Download → Quality Gates* beside the
   auto-sync switches.
 - Order is unchanged from §4.3.3: fetch → **sync** → normalize → write the corrected file **and** the
   `.unsynchronized` original → register the hash of the corrected file.
-- An embedded reference costs **one ffmpeg extraction**; a sidecar costs nothing. The reference is
-  chosen from the item's stream list the pipeline already holds for the language gate, so no extra
-  probe is made.
+- An embedded reference costs **one ffmpeg extraction** (measured 2.5 s on the Pi 5); a sidecar costs
+  nothing. The reference is chosen from the item's stream list the pipeline already holds for the
+  language gate, so no extra probe is made. The correction itself is **text only** — no audio decode:
+  the anchor match and the monotone fit were measured at **3–7 ms** for 540–1500 cues, so this switch
+  is essentially free next to the audio path.
 
 **Tests: T112 (the reference rule: sidecar preferred over embedded, the HI file never serving as its
 own reference, an HI-only or wrong-language candidate refused, unknown target language refused; plus

@@ -466,12 +466,13 @@ public class PluginConfiguration : BasePluginConfiguration
     /// offset — and is only reported, exactly as the drift gate (F-M295) reports it.
     /// </para>
     /// <para>
-    /// Off by default: it costs one full audio decode per saved file, on top of the
-    /// one the drift gate spends when that switch is on.
+    /// On by default. The cost is one full audio decode per saved file — measured at
+    /// 11 s wall / 21 s CPU for a 49 min HEVC episode on the Pi 5 — and the run shares
+    /// one decode between the drift gate and this switch when both are on.
     /// </para>
-    /// Default: false.
+    /// Default: true.
     /// </summary>
-    public bool QaDownloadAutoSync { get; set; }
+    public bool QaDownloadAutoSync { get; set; } = true;
 
     /// <summary>
     /// F-M297 (development): anchor-sync — repair a DRIFTING subtitle against a same-language
@@ -499,10 +500,14 @@ public class PluginConfiguration : BasePluginConfiguration
     /// never moved.
     /// </para>
     /// <para>
-    /// Default: false.
+    /// On by default. Costs no audio decode at all: the work is text comparison against
+    /// the reference, measured at a few milliseconds per episode. An embedded reference
+    /// does cost one ffmpeg extraction (measured 2.5 s on the Pi 5) — a sidecar beside the
+    /// file costs nothing.
     /// </para>
+    /// Default: true.
     /// </summary>
-    public bool QaDownloadAnchorSync { get; set; }
+    public bool QaDownloadAnchorSync { get; set; } = true;
 
     /// <summary>
     /// F-M296 (development): the audio track an audio-reading gate decodes, chosen by

@@ -26,11 +26,10 @@ and **removes the shift before the file is saved**.
   moved. Needs a plain same-language reference; without one nothing is changed and the finding is
   reported instead.
 
-Both sit on the **Download** tab under **Quality gates (before download save)** and are **off by
-default** — they cost CPU, and the honest default is not to touch a file unless you asked.
+Both sit on the **Download** tab under **Quality gates (before download save)** and are **on by
+default** — no episode needs a manual delay again.
 
-> These two are on the prerelease channel (`develop`) and arrive on the stable channel with the next
-> release. The rest of this README describes the current stable build.
+> Both are on the prerelease channel (`develop`) and reach the stable catalog with the next release.
 
 Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 
