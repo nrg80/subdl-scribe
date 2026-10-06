@@ -6,6 +6,32 @@ subtitle tracks already embedded in your own media files.
 
 The upload direction is **off by default** — see [Upload](#upload-off-by-default).
 
+## Subtitles that are seconds out of sync
+
+A downloaded subtitle is often off by whole seconds: the release's own timing does not match your rip.
+Jellyfin plays it anyway, and you nudge the delay in the player every episode. SubDL Scribe measures it
+and **removes the shift before the file is saved**.
+
+- **Auto-sync (audio)** — the offset is measured against the spoken track. Planted shifts of −3 / +2 /
+  +4 / +8 / +12 s came back as −3.20 / +1.80 / +3.80 / +7.80 / +11.80 s, so the correction is accurate to
+  about **0.2 s**. The untouched original is kept beside the corrected file as
+  `<name>.<lang>.srt.unsynchronized`, so a correction is reversible without spending download quota
+  again. A subtitle whose offset **moves** is never shifted — it has no single valid offset — and is
+  only reported. Costs one audio decode per saved file.
+- **Anchor-sync (reference)** — repairs a **drifting** subtitle, the case the audio path cannot touch,
+  by comparing it line-by-line with a plain subtitle in the **same language** beside the file or
+  embedded in the container. Identical lines are the same line, so the difference is that line's true
+  error. Measured over **36 drifting episodes: worst line 10.74 s → 0.17 s, 36 of 36 improved.** The
+  repair is kept only when it improves the worst single line — a subtitle already in sync is **never**
+  moved. Needs a plain same-language reference; without one nothing is changed and the finding is
+  reported instead.
+
+Both sit on the **Download** tab under **Quality gates (before download save)** and are **off by
+default** — they cost CPU, and the honest default is not to touch a file unless you asked.
+
+> These two are on the prerelease channel (`develop`) and arrive on the stable channel with the next
+> release. The rest of this README describes the current stable build.
+
 Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 
 ## How this plugin is developed
