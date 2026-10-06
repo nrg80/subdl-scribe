@@ -468,6 +468,110 @@ negative first cue, byte style, the suffix against the real listing pattern), T1
 real episode: the plain subtitle comes back near zero, a planted shift is measured and removed, and
 the result is checked against the plain subtitle, which took no part in the measurement).**
 
+### 4.4 Anchor-Sync — Download (F-M297, development)
+
+**F-M297 [D] (development):** **A drifting subtitle is repaired against a same-language plain
+reference, and the repair is kept only when it improves the worst single line.**
+
+#### 4.4.1 Why the audio path cannot carry this alone (measured)
+
+The audio correction of §4.3.2 works on constant offsets. On a **drifting** file it was measured over
+**36 episodes**: **33 improved, 2 were made worse**, worst single-cue residual **10.74 s → 4.51 s**.
+Six candidate numbers were then tested as a threshold to catch the two failures — monotone
+distortion, split-half disagreement, remaining drift after the correction, run-back against the
+main direction, outlier offset, raw drift span. **None separated the 2 from the 33.** A gate built
+from the distribution of the very files it judges is a circle, so it was not built.
+
+Run on a **clean** file the audio path invents damage: the plain English track of *Invasion* S01E06 —
+which sits at **0.00 s** by text against its own plain sibling, 137 anchors, the whole episode — came
+back from the audio path with **ten segments** and offsets hopping from **−2.70 s to +17.90 s**, with
+the detector's own re-measurement showing a **+4.90 s** span afterwards.
+
+**The cause is structural, not a tuning problem.** A drifting file has no single offset, the
+detector's positional uncertainty is ±1–2 min, and its boundaries therefore do not land on the real
+ones. Worse, the k-window model (`cue-speech-v6`) that would name the boundaries returns the **same
+expected boundary count (7.00) on every one of the 36 files**, clean or drifting — a quantity that
+does not vary with the thing it is meant to measure.
+
+#### 4.4.2 Method — identical TEXT is the same line
+
+Two cues carrying identical text **are the same line**, so `target − reference` is that line's true
+error **to the centisecond**. No model, no audio, no artefact — and a jump in that difference is a
+real cut. A cut is then a **step between two anchors**, never a value to be averaged across: the
+first version interpolated a ramp between 60 s bins and dragged a step backwards over two minutes,
+leaving lines 2.44 s early while the median looked excellent (12.45 s → 0.49 s).
+
+Four rules, each one a measured repair:
+
+1. **Nearest anchor**, not a windowed median and not interpolation — keeps a step confined to the gap
+   between two adjacent anchors.
+2. **Monotone, in whichever direction fits.** A drift curve does not reverse, but the direction is a
+   property of the file: PAVA is a non-decreasing fit, so applied to a falling sequence it collapses
+   to the mean and every cue receives the same shift (measured **9.05 s → 9.05 s**, spread unchanged,
+   middle worse). **4 of the 36 files drift downward**, so both directions are fitted and the smaller
+   sum of squared residuals wins.
+3. **Order is never traded for a smaller number.** Where anchors are sparse a cue can sit nearer a
+   *later* anchor, take the offset from the far side of a step, move backwards past its neighbour and
+   — the list being re-sorted by start — **swap with it**. Measured: two lines of dialogue inverted and
+   one squeezed to 0.26 s while every timing number looked fine.
+4. **The guard compares against the previous cue's END**, not its start. Two neighbours whose shifts
+   differ by slightly more than the gap keep their start order while their ends collide; a player
+   renders that as stacked text. Measured: a 0.111 s overlap and a cue squeezed to 0.20 s.
+
+**Three passes**, each re-measuring the anchors; one pass leaves residue.
+
+#### 4.4.3 The reference, and the rule that chooses it
+
+The correction needs a reference that is **in the same language** and **not hearing-impaired**:
+
+- **Same language** is not a nicety. Anchoring is by identical text, so a reference in another
+  language yields **zero anchors** — measured on a real container carrying 42 subtitle tracks. The
+  feature would then do nothing while looking like it ran.
+- **Not hearing-impaired**, because the HI file is the one that **drifts** (37 of 40 ranked files are
+  HI). Anchoring a drifting file to another drifting file is the circularity this whole exercise
+  exists to avoid.
+
+Priority: **(1)** a same-language plain **sidecar** beside the media (free — already on disk, and a
+file the user placed is the better witness), **(2)** a same-language plain **embedded track**
+(one ffmpeg extraction), **(3)** **nothing** — the file is reported and left alone. The audio path is
+not a substitute, because it cannot tell a repair from a spoilage on the file it is handed.
+
+**Measured on a real container**: *Invasion* S01E06 carries a plain English track and an English SDH
+track whose **137 anchors sit at 0.00 s across the whole episode** — that pair is the clean control
+the port is tested against. Embedded text tracks are read with ffmpeg's **subtitle-relative** index
+(`0:s:N`), never the container index.
+
+#### 4.4.4 The self-check that can refuse
+
+A correction measured with the tool that produced it proves nothing: it is the exact inverse of its
+own measurement. The check here is the anchor residual against the **reference**, a file that took no
+part in the correction, and the result is accepted **only when the worst single-cue residual
+improves** by more than 0.2 s.
+
+The **worst** value decides because the median hides exactly what a listener notices — the earlier
+run above had an excellent median and one line 2.44 s early. Measured over the 36 files, this rule
+flags **exactly the 2 real failures and 0 of the 33 successes**, and the same two with all three
+statistics (median, p90, worst) — which is why a plain "is it worse" comparison needs no invented
+threshold.
+
+**On a clean pair nothing is moved**: the Invasion pair measures worst 0.75 s before and 0.65 s after,
+the margin is not met, and the correction is refused. That is the intended outcome, not a failure.
+
+#### 4.4.5 Switches, order, and cost
+
+- Switch `QaDownloadAnchorSync` (**default off**), under *Download → Quality Gates* beside the
+  auto-sync switches.
+- Order is unchanged from §4.3.3: fetch → **sync** → normalize → write the corrected file **and** the
+  `.unsynchronized` original → register the hash of the corrected file.
+- An embedded reference costs **one ffmpeg extraction**; a sidecar costs nothing. The reference is
+  chosen from the item's stream list the pipeline already holds for the language gate, so no extra
+  probe is made.
+
+**Tests: T112 (the reference rule: sidecar preferred over embedded, the HI file never serving as its
+own reference, an HI-only or wrong-language candidate refused, unknown target language refused; plus
+a real extracted reference pair where a synchronised file stays put and a planted step is removed
+with cue order and text unchanged).**
+
 ## 5. Upload Postprocessing
 
 **F-M287 [B1] (user decision 02.10.2026):** **Everything a run writes that is reachable from a dry run sits behind the dry-run flag — the guard belongs at the WRITE, not at the mode's exit.**
@@ -1382,6 +1486,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T110:** The auto-sync's two file-level halves, without audio: the audio-track rule picks (1) the track in the subtitle's language, (2) English, (3) the first untagged track, with the 2-vs-3-letter codes (`en` against `eng`, `de` against `deu`/`ger`, `zh` against `zho`/`chi`) resolving as equal and `und`/null resolving as "no language"; a planted constant shift moves every timestamp by exactly that amount while text, cue count and cue order stay unchanged; a shift that would push the first cue below zero is REFUSED (not clamped) and the file is returned unchanged; the corrected file carries the same BOM/line-ending shape as the payload it came from; and `<base>.<lang>.srt.unsynchronized` does NOT match the sidecar listing pattern `baseName + "*.srt"` while the swapped order does (F-M296)
 
 **T111:** End-to-end against real audio, driving the FEATURE (not a copy of its arithmetic): the sign of the correction is established on the material itself by planting +5 s and applying BOTH directions — the one landing within 0.7 s of the plain subtitle is `−detector`, and that is asserted, so a sign flip fails here instead of doubling every corrected file; a subtitle already in sync comes back `applied=False`; and a shift planted at +2.5 / −1.8 / +6.0 s is measured and removed, with the corrected text lying within 0.7 s of the plain subtitle by MEDIAN offset — a file that took no part in the measurement. The check is a MEDIAN and not a spread: a constant shift leaves the spread at 0.00 s whatever its size, so an earlier version of this test passed even on files it had made twice as bad (F-M296)
+
+**T112:** The reference rule and the anchor correction: a same-language plain sidecar is preferred over an embedded track; the hearing-impaired file never serves as its own reference, and when the target language offers ONLY an HI track the correction is refused rather than anchored to it; a wrong-language candidate and an unknown target language are both refused; against a real extracted pair (Invasion S01E06, plain English against English SDH) a synchronised file is left alone — 137 anchor pairs at a 0.00 s median and 0.75 s worst, no improvement to be had, correction REFUSED; and a step of known size planted into a clean file is removed, with cue order and cue text unchanged (F-M297)
 
 
 

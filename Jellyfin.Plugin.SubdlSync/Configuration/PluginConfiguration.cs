@@ -474,6 +474,37 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool QaDownloadAutoSync { get; set; }
 
     /// <summary>
+    /// F-M297 (development): anchor-sync — repair a DRIFTING subtitle against a same-language
+    /// plain reference, and keep the repair only when it improves the worst single line.
+    /// <para>
+    /// The audio auto-sync above cannot repair a drifting file: it was measured over 36
+    /// episodes at 33 improved / 2 made worse, and no threshold on any number read off
+    /// that run separated the two. On a clean file it invents damage — the plain track of
+    /// Invasion S01E06, steady at 0.00 s by text, came back with ten segments hopping from
+    /// −2.70 s to +17.90 s.
+    /// </para>
+    /// <para>
+    /// This path uses TEXT instead of audio. Two cues carrying identical text are the same
+    /// line, so <c>target − reference</c> is that line's true error to the centisecond, and
+    /// a cut is a STEP between two anchors rather than a value to average across. Measured
+    /// on the 36 drifting episodes of this library: worst single-cue residual
+    /// <b>10.74 s → 0.17 s</b>, median <b>4.16 s → 0.00 s</b>, 36 of 36 improved.
+    /// </para>
+    /// <para>
+    /// The reference must be the SAME LANGUAGE and NOT hearing-impaired: anchoring is by
+    /// identical text, so a reference in another language yields zero anchors, and the HI
+    /// file is the one that drifts. Priority: a same-language plain sidecar, then a
+    /// same-language plain embedded track, else nothing — the file is reported untouched.
+    /// A correction that does not improve the worst line is discarded, so a clean file is
+    /// never moved.
+    /// </para>
+    /// <para>
+    /// Default: false.
+    /// </para>
+    /// </summary>
+    public bool QaDownloadAnchorSync { get; set; }
+
+    /// <summary>
     /// F-M296 (development): the audio track an audio-reading gate decodes, chosen by
     /// LANGUAGE rather than by stream order.
     /// <para>

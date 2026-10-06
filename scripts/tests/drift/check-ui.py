@@ -37,6 +37,12 @@ CHECKS = [
     ('save reads AutoSync', r"config\.QaDownloadAutoSync = document\.querySelector\('#QaDownloadAutoSync'\)\.checked"),
     ('save reads AudioTrackByLanguage',
      r"config\.QaDownloadAudioTrackByLanguage = document\.querySelector\('#QaDownloadAudioTrackByLanguage'\)\.checked"),
+
+    # F-M297: the anchor-sync switch. Like the audio auto-sync it defaults to OFF, so the
+    # usual `!!config.X` binding is the correct one here.
+    ('markup #QaDownloadAnchorSync', r'id="QaDownloadAnchorSync"'),
+    ('load binds AnchorSync', r"#QaDownloadAnchorSync'\)\.checked = !!config\.QaDownloadAnchorSync"),
+    ('save reads AnchorSync', r"config\.QaDownloadAnchorSync = document\.querySelector\('#QaDownloadAnchorSync'\)\.checked"),
 ]
 
 fails = 0
@@ -52,7 +58,8 @@ for name, pat in CHECKS:
 # the C# declaration. A default-on switch read with `!!config.X` turns itself off on every
 # existing install — the reason the pair below is checked separately rather than in a loop.
 for prop, expect_on in (('QaDownloadDriftCheck', False), ('QaDownloadDriftReject', False),
-                        ('QaDownloadAutoSync', False), ('QaDownloadAudioTrackByLanguage', True)):
+                        ('QaDownloadAutoSync', False), ('QaDownloadAnchorSync', False),
+                        ('QaDownloadAudioTrackByLanguage', True)):
     n = len(re.findall(rf'id="{prop}"', src))
     ok_once = n == 1
     print(f"  [{'ok' if ok_once else 'FAIL'}] {prop} id appears exactly once (got {n})")
@@ -61,7 +68,8 @@ for prop, expect_on in (('QaDownloadDriftCheck', False), ('QaDownloadDriftReject
 CFG = '/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs'
 cfg = open(CFG, encoding='utf-8').read()
 for prop, expect_on in (('QaDownloadDriftCheck', False), ('QaDownloadDriftReject', False),
-                        ('QaDownloadAutoSync', False), ('QaDownloadAudioTrackByLanguage', True)):
+                        ('QaDownloadAutoSync', False), ('QaDownloadAnchorSync', False),
+                        ('QaDownloadAudioTrackByLanguage', True)):
     m = re.search(rf'public bool {prop} \{{ get; set; \}}(.*?)(?=\n\n|/// <summary>)', cfg, re.S)
     body = m.group(1) if m else ''
     is_on = '= true' in body

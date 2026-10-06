@@ -51,6 +51,21 @@ public static class AutoSyncRun
             return RealAutoSync.RunAsync(args).GetAwaiter().GetResult();
         }
 
+        if (args.Length >= 1 && args[0] == "anchor")
+        {
+            return AnchorSyncTest.Run(args);
+        }
+
+        if (args.Length >= 1 && args[0] == "corpus")
+        {
+            return AnchorCorpus.Run(args);
+        }
+
+        if (args.Length >= 1 && args[0] == "refusal")
+        {
+            return AnchorRefusal.Run(args);
+        }
+
         Console.WriteLine("=== F-M296 auto-sync — track choice and constant shift ===");
         Console.WriteLine();
         int failures = 0;
