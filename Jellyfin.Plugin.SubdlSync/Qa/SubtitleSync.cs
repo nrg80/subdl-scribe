@@ -10,30 +10,43 @@
 // implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 //
-// F-M296: the download auto-sync. It SHIFTS a downloaded subtitle by the single
-// constant offset the audio says it carries — but only while the offset really
-// is constant.
+// F-M296/F-M300: the download auto-sync. It SHIFTS a downloaded subtitle by the offset
+// measured against the audio — a single constant while the offset really is constant, and a
+// STAIRCASE, one offset per segment, once the offset moves.
 //
-// WHY THIS IS SEPARATE FROM THE DRIFT GATE
+// WHY THE STAIRCASE IS NOT A SECOND VARIANT BESIDE THE CONSTANT ONE
 //
-// The drift gate (F-M295) answers "does the offset move?". That question and
-// "how far is the file off?" are two halves of the same arithmetic and were
-// measured together: planted constant shifts of -3.0 / +2.0 / +4.0 / +8.0 /
-// +12.0 s come back as -3.20 / +1.80 / +3.80 / +7.80 / +11.80 s — accurate to
-// about 0.2 s (the residual is the ~0.3 s SDH lead per cue moving the median).
-// Crucially, at every one of those values the detector reported `drifts=False,
-// boundaries=0`: a LARGE CONSTANT SHIFT IS NOT MISTAKEN FOR DRIFT. That is what
-// makes this feature possible at all — the shift is measurable and the moving
-// case is separable from it.
+// Both cases are one measurement answering two questions. "Does the offset move?" and "how far
+// is the file off?" come out of the same detector run: planted constant shifts of -3.0 / +2.0 /
+// +4.0 / +8.0 / +12.0 s come back as -3.20 / +1.80 / +3.80 / +7.80 / +11.80 s and report
+// `drifts=False` at every one of them, so a LARGE CONSTANT SHIFT IS NOT MISTAKEN FOR DRIFT.
+// When it does report `drifts=True`, the segments it found ARE the repair, because the step
+// structure is real and not an artefact of the search: on the same files a permutation test puts
+// the staircase fit 14x better on the real ordering than on a shuffled one (0.30 s against
+// 4.13 s residual), it finds 4-5 steps per episode whose sizes sum to the total drift
+// (11.98 s against 10.92 s), and each step lands between two adjacent dialogue lines.
 //
-// WHAT IT REFUSES TO DO
+// THE FORMER REFUSAL WAS RIGHT ABOUT THE AVERAGE AND WRONG ABOUT THE CONCLUSION
 //
-// A drifting file has NO valid single offset. Shifting it by the average would
-// move one part right and spoil another, and the measurement is explicit that
-// the average describes no real state (a file drifting from -2 s to +10 s has
-// no offset). So: `Drifts = true` ⇒ nothing is written, the file is reported.
-// The same refusal applies when the gate could not run (no ffmpeg, no speech,
-// too few cues) — a tool being unavailable is not a licence to guess.
+// A drifting file has no valid SINGLE offset — shifting it by the average moves one part right
+// and spoils another — and that part still holds. But "no single offset" does not mean "no
+// correction": measured over the 36 drifting episodes of this library, shifting each cue by the
+// offset of ITS OWN segment takes the worst single-cue residual from a 10.74 s median to 4.51 s,
+// with 33 of 36 better.
+//
+// THE LIMIT, STATED BECAUSE IT IS MEASURED
+//
+// Two of the 36 (S01E04 8.00 -> 21.30 s, S01E06 2.47 -> 11.91 s) come out WORSE, and no
+// reference-free signal separated them from the 33 successes — six candidates were tried
+// (monotone distortion, split-half disagreement, remaining drift after the correction, run-back
+// against the main direction, outlier offset, raw drift span) and every one of them OVERLAPS.
+// With 2 failures in 36, any threshold computed from that same distribution is a circle. The
+// staircase is therefore applied and those two are accepted as the price of a ~6 s average gain,
+// UNLESS a same-language reference subtitle exists — then the anchor path (F-M297) is the better
+// route and the caller prefers it. This file only applies what it is handed.
+//
+// The gate still refuses when it could not run at all (no ffmpeg, no speech, too few cues):
+// a tool being unavailable is not a licence to guess.
 //
 // THE ORIGINAL IS KEPT, ALWAYS
 //
@@ -170,16 +183,46 @@ public static class SubtitleSync
             return new Result(false, 0, srtText, null, "not measured: " + (verdict.SkipReason ?? "not run"));
         }
 
-        // The refusal that makes this feature safe: a moving offset has no single
-        // valid correction, so the file passes through untouched and is reported.
+        // F-M300: a moving offset is repaired by a STAIRCASE, not refused. Each cue is moved by
+        // the offset of its own segment; see the header for the measurement, and for the two
+        // files of the 36 that this makes worse — which is why a same-language reference
+        // (F-M297) wins when one exists.
         if (verdict.Drifts)
         {
+            if (verdict.SegmentOffsetsSec.Count == 0)
+            {
+                return new Result(
+                    false,
+                    0,
+                    srtText,
+                    null,
+                    $"drifts ({verdict.SpanSec:0.0}s over {verdict.BoundaryCount} boundary/boundaries) but no segment offsets were reported — left as downloaded");
+            }
+
+            (bool sok, string sshifted, string swhy, int sguarded) = ShiftByStaircase(
+                srtText, verdict.SegmentStartTimesSec, verdict.SegmentOffsetsSec);
+            if (!sok)
+            {
+                return new Result(false, 0, srtText, null, "staircase not applied: " + swhy);
+            }
+
+            double largest = verdict.SegmentOffsetsSec.Max(Math.Abs);
+            if (largest > MaxShiftSec)
+            {
+                return new Result(
+                    false,
+                    0,
+                    srtText,
+                    null,
+                    $"staircase step {largest:0.0}s beyond the {MaxShiftSec:0}s limit — not applied");
+            }
+
             return new Result(
-                false,
-                0,
-                srtText,
+                true,
+                largest,
+                sshifted,
                 null,
-                $"drifts ({verdict.SpanSec:0.0}s over {verdict.BoundaryCount} boundary/boundaries) — no single offset, left as downloaded");
+                $"staircase over {verdict.SegmentOffsetsSec.Count} segments across a {verdict.SpanSec:0.0}s drift ({sguarded} cue(s) order-guarded)");
         }
 
         double shift = verdict.MedianOffsetSec;
@@ -207,6 +250,147 @@ public static class SubtitleSync
         }
 
         return new Result(true, applied, shifted, null, $"shifted {applied:+0.00;-0.00}s");
+    }
+
+    /// <summary>
+    /// Minimum gap kept between one cue's end and the next cue's start, in seconds.
+    /// <para>
+    /// The same value and the same reasoning as <see cref="AnchorSync.MinGapSec"/>: these
+    /// subtitles butt cue against cue — measured, <b>560 of 724 gaps are below 0.04 s</b> with a
+    /// median of <b>0.002 s</b>. A guard set tighter would fire on almost every cue.
+    /// </para>
+    /// </summary>
+    public const double MinGapSec = 0.04;
+
+    /// <summary>
+    /// Applies a STAIRCASE shift: each cue is moved by the offset of its OWN segment
+    /// (F-M300). This is what repairs a drifting file, where one constant offset cannot.
+    /// <para>
+    /// Segment <c>k</c> covers the cues from <paramref name="segmentStartTimesSec"/>[k] up to
+    /// the next entry, so a cue belongs to the last segment that starts at or before it.
+    /// </para>
+    /// <para>
+    /// The order guard is <see cref="MinGapSec"/> against the previous cue's END, exactly as
+    /// the anchor path does it: at a step the two neighbours shift by different amounts, and a
+    /// step wider than the gap between them would otherwise make the earlier cue's end land
+    /// after the later cue's start — which a player renders as stacked text. Where the guard
+    /// bites, the previous shift is carried forward, so the step is absorbed at that cue
+    /// instead of inverting the order.
+    /// </para>
+    /// </summary>
+    /// <param name="srtText">SRT text.</param>
+    /// <param name="segmentStartTimesSec">Segment start times, ascending; first is the file start.</param>
+    /// <param name="segmentOffsetsSec">One measured offset per segment, same length.</param>
+    /// <returns>(ok, shifted text, reason, steps actually kept) — the last is the count of order-guard bites.</returns>
+    public static (bool Ok, string Text, string Reason, int Guarded) ShiftByStaircase(
+        string srtText,
+        IReadOnlyList<double> segmentStartTimesSec,
+        IReadOnlyList<double> segmentOffsetsSec)
+    {
+        if (string.IsNullOrEmpty(srtText))
+        {
+            return (false, srtText, "empty content", 0);
+        }
+
+        if (segmentOffsetsSec.Count == 0 || segmentOffsetsSec.Count != segmentStartTimesSec.Count)
+        {
+            return (false, srtText, "no segments to apply", 0);
+        }
+
+        // The timestamps come in PAIRS: match 2k is cue k's start, match 2k+1 its end. Walking
+        // the matches directly (rather than splitting into blocks) keeps the text between them
+        // byte-for-byte and survives a file whose block separators are unorthodox.
+        var matches = TsRegex.Matches(srtText);
+        if (matches.Count < 2)
+        {
+            return (false, srtText, "no timestamps found", 0);
+        }
+
+        int cues = matches.Count / 2;
+        var starts = new double[cues];
+        var ends = new double[cues];
+        for (int k = 0; k < cues; k++)
+        {
+            starts[k] = ToSec(matches[2 * k]);
+            ends[k] = ToSec(matches[(2 * k) + 1]);
+        }
+
+        // Desired shift per cue: MINUS its own segment's offset (srt_time − measured = synced).
+        // The sign is the one the constant path proved by measurement; see the header.
+        var desired = new double[cues];
+        int seg = 0;
+        for (int k = 0; k < cues; k++)
+        {
+            while (seg + 1 < segmentStartTimesSec.Count && segmentStartTimesSec[seg + 1] <= starts[k])
+            {
+                seg++;
+            }
+
+            desired[k] = -segmentOffsetsSec[seg];
+        }
+
+        // Order guard, against the previous cue's END. The shift is ADDED here, so the gap
+        // becomes `gap + eff[k] − eff[k−1]`: a step that moves cue k far EARLIER than its
+        // neighbour would push it back over that neighbour's end, which a player renders as
+        // stacked text. The bound is therefore a LOWER bound on eff[k] — the mirror image of
+        // AnchorSync's rule, which subtracts its shifts and so bounds them from above. Getting
+        // the direction wrong mangles every cue at a step: measured by the test below, it turned
+        // a 0.4 s residual into 1.92 s and "guarded" 22 cues that needed no guard.
+        var eff = new double[cues];
+        int guarded = 0;
+        for (int k = 0; k < cues; k++)
+        {
+            if (k == 0)
+            {
+                eff[0] = desired[0];
+                continue;
+            }
+
+            double gap = starts[k] - ends[k - 1];
+            // A gap already below the floor must not be SHRUNK further (these subtitles butt cue
+            // against cue — 560 of 724 gaps under 0.04 s in the real material, so demanding the
+            // floor here would fire on nearly every cue and carry one shift through the whole
+            // file); where there is room, the floor is kept.
+            double lower = gap < MinGapSec ? eff[k - 1] : eff[k - 1] - gap + MinGapSec;
+            eff[k] = Math.Max(desired[k], lower);
+            if (eff[k] > desired[k] + 1e-9)
+            {
+                guarded++;
+            }
+        }
+
+        // Refuse rather than clamp a cue below zero: clamping one cue silently changes its
+        // relation to its neighbour while the rest still moves.
+        double minStart = starts.Min();
+        if (minStart + eff[0] < 0)
+        {
+            return (false, srtText, $"first cue {minStart:0.00}s would go negative under {eff[0]:+0.00;-0.00}s", 0);
+        }
+
+        var sb = new StringBuilder(srtText.Length);
+        int last = 0;
+        for (int k = 0; k < cues; k++)
+        {
+            for (int h = 0; h < 2; h++)
+            {
+                Match m = matches[(2 * k) + h];
+                sb.Append(srtText, last, m.Index - last);
+                sb.Append(Fmt((h == 0 ? starts[k] : ends[k]) + eff[k]));
+                last = m.Index + m.Length;
+            }
+        }
+
+        sb.Append(srtText, last, srtText.Length - last);
+
+        double maxShift = 0;
+        for (int k = 0; k < cues; k++)
+        {
+            maxShift = Math.Max(maxShift, Math.Abs(eff[k]));
+        }
+
+        return (true, sb.ToString(),
+            $"staircase over {segmentOffsetsSec.Count} segments, largest shift {maxShift:0.00}s ({guarded} cue(s) order-guarded)",
+            guarded);
     }
 
     /// <summary>

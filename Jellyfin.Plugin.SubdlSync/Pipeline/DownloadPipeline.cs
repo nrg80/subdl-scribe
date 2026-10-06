@@ -1886,9 +1886,53 @@ public sealed class DownloadPipeline : IDisposable
                     }
                     else if (syncVerdict.Drifts)
                     {
-                        LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — auto-sync not applied: {Verdict}",
-                            Path.GetFileName(mediaPath), lang, syncVerdict.Describe());
+                        // F-M300: a drifting file IS repaired — by a staircase, one offset per
+                        // segment. The former refusal was right that no SINGLE offset exists and
+                        // wrong that nothing can be done: measured, this takes the worst-cue
+                        // residual over 36 drifting episodes from a 10.74 s median to 4.51 s.
+                        // Two of the 36 come out worse and no reference-free signal separates
+                        // them; the anchor path (F-M297, below) is preferred when a reference
+                        // exists, and the untouched original is kept either way.
+                        if (syncVerdict.SegmentOffsetsSec.Count == 0)
+                        {
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL-D] {File} [{Lang}] — auto-sync not applied: {Verdict} (no segments reported)",
+                                Path.GetFileName(mediaPath), lang, syncVerdict.Describe());
+                        }
+                        else
+                        {
+                            double largest = syncVerdict.SegmentOffsetsSec.Max(Math.Abs);
+                            if (largest > Qa.SubtitleSync.MaxShiftSec)
+                            {
+                                LogUtil.PerItem(_config.LogMode, _logger,
+                                    "[SubDL-D] {File} [{Lang}] — auto-sync not applied: staircase step "
+                                    + "{Step:+0.0;-0.0}s beyond the {Limit:0}s limit",
+                                    Path.GetFileName(mediaPath), lang, largest, Qa.SubtitleSync.MaxShiftSec);
+                            }
+                            else
+                            {
+                                (bool sOk, string sShifted, string sWhy, int sGuarded) = Qa.SubtitleSync.ShiftByStaircase(
+                                    content, syncVerdict.SegmentStartTimesSec, syncVerdict.SegmentOffsetsSec);
+                                if (sOk)
+                                {
+                                    (bool sbom, bool scrlf) = Qa.SubtitleSync.StyleOfBytes(bytes);
+                                    unsyncPayload = content;
+                                    writeBytes = Qa.SubtitleSync.Encode(sShifted, sbom, scrlf);
+                                    content = sShifted;
+                                    LogUtil.PerItem(_config.LogMode, _logger,
+                                        "[SubDL-D] {File} [{Lang}] — auto-sync STAIRCASE over {Segments} segments "
+                                        + "across a {Span:0.0}s drift ({Why})",
+                                        Path.GetFileName(mediaPath), lang,
+                                        syncVerdict.SegmentOffsetsSec.Count, syncVerdict.SpanSec, sWhy);
+                                }
+                                else
+                                {
+                                    LogUtil.PerItem(_config.LogMode, _logger,
+                                        "[SubDL-D] {File} [{Lang}] — auto-sync not applied: {Why}",
+                                        Path.GetFileName(mediaPath), lang, sWhy);
+                                }
+                            }
+                        }
                     }
                     else if (Math.Abs(shift) < Qa.SubtitleSync.MinShiftSec)
                     {
@@ -2165,7 +2209,36 @@ public sealed class DownloadPipeline : IDisposable
                                     var hiVerdict = await Qa.DriftGate.RunAsync(
                                         mediaPath, hiContent, ffmpegForDrift, _logger, ct, audioMap).ConfigureAwait(false);
                                     double hiShift = hiVerdict.Ran && !hiVerdict.Drifts ? hiVerdict.MedianOffsetSec : 0;
-                                    if (!hiVerdict.Ran || hiVerdict.Drifts
+
+                                    // F-M300: the HI variant, like the main one, is repaired by
+                                    // a STAIRCASE when the offset moves — the HI pool is exactly
+                                    // where the drift lives (all 38 measured HI files drifted),
+                                    // so refusing here would leave every HI file uncorrected.
+                                    if (hiVerdict.Ran && hiVerdict.Drifts && hiVerdict.SegmentOffsetsSec.Count > 0
+                                        && hiVerdict.SegmentOffsetsSec.Max(Math.Abs) <= Qa.SubtitleSync.MaxShiftSec)
+                                    {
+                                        (bool hsOk, string hsShifted, string hsWhy, int hsGuarded) = Qa.SubtitleSync.ShiftByStaircase(
+                                            hiContent, hiVerdict.SegmentStartTimesSec, hiVerdict.SegmentOffsetsSec);
+                                        if (hsOk)
+                                        {
+                                            (bool hsb, bool hsc) = Qa.SubtitleSync.StyleOfBytes(hiBytes!);
+                                            hiUnsync = hiContent;
+                                            hiWriteBytes = Qa.SubtitleSync.Encode(hsShifted, hsb, hsc);
+                                            hiContent = hsShifted;
+                                            LogUtil.PerItem(_config.LogMode, _logger,
+                                                "[SubDL-D] HI auto-sync STAIRCASE over {Segments} segments across a "
+                                                + "{Span:0.0}s drift for {File} [{Lang}] ({Why}) ({Release})",
+                                                hiVerdict.SegmentOffsetsSec.Count, hiVerdict.SpanSec,
+                                                Path.GetFileName(mediaPath), lang, hsWhy, hi.ReleaseName);
+                                        }
+                                        else
+                                        {
+                                            LogUtil.PerItem(_config.LogMode, _logger,
+                                                "[SubDL-D] HI auto-sync not applied for {File} [{Lang}]: {Why}",
+                                                Path.GetFileName(mediaPath), lang, hsWhy);
+                                        }
+                                    }
+                                    else if (!hiVerdict.Ran || hiVerdict.Drifts
                                         || Math.Abs(hiShift) < Qa.SubtitleSync.MinShiftSec
                                         || Math.Abs(hiShift) > Qa.SubtitleSync.MaxShiftSec)
                                     {

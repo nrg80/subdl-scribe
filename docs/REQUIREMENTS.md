@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.176.
+**Status:** Implementation — v12.1.12.178.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -14,10 +14,10 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 23 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 24 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 5 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
-  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 1 requirement
+  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 2 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -350,8 +350,9 @@ The run's stored statistics stay untouched (F-M247).
 
 ### 4.3 Auto-Sync — Download
 
-**F-M296 [D] (development):** **A fetched subtitle is shifted by the ONE constant offset the audio
-measures — and is left untouched when that offset moves.**
+**F-M296 [D] (development):** **A fetched subtitle is shifted to the audio: by the ONE constant offset
+the detector measures while that offset is constant, and by a STAIRCASE — one offset per segment —
+when it moves (F-M300).**
 
 The feature has two halves that must not be confused: **which** track the audio is read from, and
 **whether** the file is then moved. Both were measured against this library before either was built.
@@ -384,7 +385,7 @@ both tracks returned the **same verdict** — span 17.4 s vs. 18.1 s, median 8.4
 assumption *"the first track is the right one"*, which is measurably false on ~9 % of these files. It
 is switched by `QaDownloadAudioTrackByLanguage` (**default on**); with it off the old `0:a:0` is read.
 
-#### 4.3.2 Method — a constant offset is corrected, a moving one is only reported
+#### 4.3.2 Method — a constant offset is corrected, a moving one is corrected as a staircase
 
 **What is measured.** The same arithmetic that the drift gate (F-M295) runs also yields the single
 best offset. The two questions were validated together: planted constant shifts of
@@ -409,25 +410,93 @@ as a small real offset. With a floor of 0.20 s the feature therefore **moved a f
 sync** — caught by the end-to-end test, not by reasoning. `MinShiftSec` is **1.0 s**, at which a finding
 is at least twice the floor and applying it can still be expected to remove more error than it adds.
 
-**The refusal that makes it safe.** A drifting file has **no valid single offset** (see F-M295): every
-number is an average over the drift and describes no real state, so shifting by it moves one part right
-and spoils another. Therefore:
+**The refusal list, and what replaced one of its entries.** A drifting file has **no valid single
+offset** (see F-M295): every number is an average over the drift and describes no real state, so
+shifting by *it* moves one part right and spoils another. That is correct about the average. The
+conclusion once drawn from it — "so nothing can be done" — was wrong, and F-M300 corrects it. The
+remaining refusals stand:
 
-- `Drifts = true` ⇒ **nothing is written**, no file is moved, and the finding is logged with its span
-  and boundaries — exactly as the gate alone would.
 - gate did not run (no ffmpeg, unreadable audio, no speech, too few cues) ⇒ **nothing is written**. An
   unavailable analysis tool is not a licence to guess.
-- `|offset| < 1.0 s` ⇒ nothing is written; that is within this material's measurement floor.
-- `|offset| > 20 s` ⇒ nothing is written; beyond that the figure is treated as implausible.
-- the shift would push the **first cue below zero** ⇒ **refused, not clamped**. Clamping one cue would
-  change its relation to its neighbour while the rest of the file still moved, which is a silent
+- `Drifts = true` **with no segment offsets reported** ⇒ nothing is written; the segment list is what
+  the staircase needs, and without it there is no correction to apply.
+- a **single staircase step** above 20 s ⇒ nothing is written; beyond that the figure is implausible.
+- `|offset| < 1.0 s` on a **constant** offset ⇒ nothing is written; that is within this material's
+  measurement floor.
+- `|offset| > 20 s` on a constant offset ⇒ nothing is written.
+- a shift that would push the **first cue below zero** ⇒ **refused, not clamped**. Clamping one cue
+  would change its relation to its neighbour while the rest of the file still moved, which is a silent
   integrity break in exchange for a smaller number.
 
 **Applied to times only.** Text is carried through byte-for-byte, the cue count and cue order are
 unchanged, and the corrected file is written in the byte style of the payload it came from (BOM / line
 endings read from the fetched bytes). The correction never re-encodes a file as a side effect.
 
-#### 4.3.3 Order of operations, and what the database is told
+#### 4.3.3 STAIRCASE — a moving offset is repaired segment by segment (F-M300)
+
+**Rule.** When the detector reports `Drifts = true`, each cue is shifted by the offset of **its own
+segment**: the boundaries the detector already found divide the cue list, and segment *k* covers the
+cues from its start time up to the next boundary. The applied shift is **minus** that offset — the same
+sign the constant path proved by measurement (§4.3.2).
+
+**Why the segments ARE the repair, and why the structure is not overfitting.** A staircase model has
+one parameter per segment, so it fits *anything* better than a single offset; that is not evidence. The
+evidence is a permutation test on the same files: the same staircase fit applied to a **shuffled**
+ordering gives **4.13 s** residual against **0.30 s** on the real ordering — **14× better**, which a
+model fitting noise cannot achieve. The structure itself was measured:
+
+- **4–5 steps per episode** (median 4), **all positive** in the 22 episodes that were examined for it.
+- Step height **median +2.84 s**, range **+1.07 to +3.77 s**.
+- Step spacing **median 8.5 min** — S02E01 at **10.5 / 18.1 / 27.1 / 35.5 min**, i.e. act breaks.
+- The steps **sum to the total drift** (**11.98 s** against a measured **10.92 s**), so they explain it
+  completely rather than approximately.
+- Each step lands **between two adjacent dialogue lines** — a cut, not a smooth ramp.
+
+The last point is what rules out a framerate error: a framerate error makes every interval equally
+steep, whereas a stepwise-constant curve with jumps is a re-cut. **The grid is not fixed**: boundaries
+on 5-minute multiples matched only 48 % against 40 % chance (not significant, spacing scatter 2.55 min),
+so the steps are **measured, never computed**.
+
+**The measurement, on the material it was built for.** Over the **36 drifting episodes** of this
+library, the worst single-cue residual against the same-language plain subtitle went from a **10.74 s
+median to 4.51 s**, with **33 of 36 improved**.
+
+**The limit, stated because it is measured.** **Two of the 36 come out worse** — S01E04
+(**8.00 → 21.30 s**) and S01E06 (**2.47 → 11.91 s**). **No reference-free signal separated them from the
+33 successes.** Six candidates were tried, all computed from the run itself: monotone distortion
+(4.55 s good vs. 3.42 s bad), split-half disagreement (22.80 vs. 7.80), remaining drift after the
+correction (22.10 vs. 10.90), run-back against the main direction (26.8 vs. 11.7), outlier offset
+(14.35 vs. 11.75), raw drift span (0.90 vs. 13.10). **Every one of them overlaps.** With 2 failures in
+36, any threshold computed from that same distribution is a circle — so no gate is built on them, and
+the staircase is applied with those two accepted as the price of a ~6 s average gain.
+
+**Consequence for the order of the two paths.** When a same-language reference subtitle exists, the
+anchor path (F-M297) is the better route and is preferred: it is reference-anchored, needs no audio, and
+its own guard refuses a repair that does not improve the worst line. The staircase is the route for the
+case the anchor path cannot serve — no reference sidecar and none embedded.
+
+**Order guard, and why its direction is the mirror image of the anchor path's.** At a step the two
+neighbours move by different amounts. Where that would push a cue back across its neighbour's end — the
+case a player renders as stacked text — the previous cue's shift is carried forward. The guard is
+measured against the **previous cue's END**, and because the staircase **adds** its shift the bound is a
+**lower** one (`eff[k] ≥ eff[k−1] − gap + MinGapSec`), the mirror image of `AnchorSync`, which subtracts
+and therefore bounds from above. A gap already below `MinGapSec` must not be shrunk further: measured on
+a real episode, **560 of 724 gaps are below 0.04 s** with a median of **0.002 s**, so demanding the floor
+everywhere makes the guard fire on nearly every cue and carry one shift through the whole file.
+**Getting this direction wrong is not cosmetic**: the synthetic test measured a **1.92 s** residual and
+**22** guarded cues with the sign reversed, against **one misplaced step** and **6** guarded cues with
+it right.
+
+**Test: T115.**
+
+**F-M300 [D] (development):** **A subtitle whose offset MOVES is repaired segment by segment — one
+offset per segment, the boundaries the drift gate already found — instead of being left as downloaded.**
+
+This supersedes the "a drifting file is only reported" clause of F-M296. The average describes no real
+state, so it must not be applied; the **segments** are not an average, they are the steps themselves.
+Method, measurements and the two measured failures: §4.3.3. **Test: T115.**
+
+#### 4.3.4 Order of operations, and what the database is told
 
 **Order (user specification):**
 
@@ -454,31 +523,40 @@ track either, so exactly one new track appears per corrected file.
 quota again — and re-downloading may return the same drifting file. A failure to write the original
 does not undo the corrected file; it is logged as a warning.
 
-**The hearing-impaired variant is synced too.** The HI file goes through the same gate and the same
-rules. Leaving it out would produce a corrected main subtitle beside an uncorrected HI file of the
-same episode — and the HI pool is where the drift gate measured its findings (all 38 measured HI files
-drifted), so this is precisely the case the sync often **cannot** fix and then reports instead.
+**The HI variant is synced by the same staircase.** It goes through the same gate and the same rules.
+Leaving it out would produce a corrected main subtitle beside an uncorrected HI file of the same
+episode — and the HI pool is where the drift gate measured its findings (all 38 measured HI files
+drifted), so this is precisely the case the staircase exists for.
 
 **Cost and posture.** One full audio decode per saved file, measured on the production Pi 5 with a
 49 min HEVC episode: **11 s wall / 21 s CPU** (median of three runs; the decode runs at ~1.9 cores of
 the four available, so it does not monopolise the box). When `QaDownloadDriftCheck` is also on the
-verdict is **measured once and shared**, not decoded twice. Switch `QaDownloadAutoSync`, **default on**.
+verdict is **measured once and shared**, not decoded twice. A staircase costs **no extra decode**: it
+is the same verdict, applied per segment. Switch `QaDownloadAutoSync`, **default on**.
 
 **Tests: T110 (synthetic: track priority with the 2-vs-3-letter cases, exact shift, refusal on a
 negative first cue, byte style, the suffix against the real listing pattern), T111 (end-to-end on a
 real episode: the plain subtitle comes back near zero, a planted shift is measured and removed, and
-the result is checked against the plain subtitle, which took no part in the measurement).**
+the result is checked against the plain subtitle, which took no part in the measurement), T115 (the
+staircase: detected segments, both planted steps surviving the order guard, the residual bound, and
+the constant case reporting no segments).**
 
 ### 4.4 Anchor-Sync — Download (F-M297, development)
 
 **F-M297 [D] (development):** **A drifting subtitle is repaired against a same-language plain
 reference, and the repair is kept only when it improves the worst single line.**
 
-#### 4.4.1 Why the audio path cannot carry this alone (measured)
+#### 4.4.1 Why the anchor path is preferred when a reference exists (measured)
 
-The audio correction of §4.3.2 works on constant offsets. On a **drifting** file it was measured over
-**36 episodes**: **33 improved, 2 were made worse**, worst single-cue residual **10.74 s → 4.51 s**.
-Six candidate numbers were then tested as a threshold to catch the two failures — monotone
+The audio path reaches a drifting file too, but only through the staircase of §4.3.3, and that route
+carries a **measured 2-in-36 failure rate with no way to detect the failure** (§4.4.3). The anchor path
+is therefore the better route whenever a same-language plain reference exists: it needs no audio, no
+model and no threshold, and its own guard refuses a repair that does not improve the worst line.
+
+The audio path's own measurements on drifting files bound what the staircase can be trusted with.
+Over **36 drifting episodes** the staircase takes the worst single-cue residual from a **10.74 s
+median to 4.51 s**, with **33 improved and 2 made worse**. Six candidate numbers were tested as a
+threshold to catch the two failures — monotone
 distortion, split-half disagreement, remaining drift after the correction, run-back against the
 main direction, outlier offset, raw drift span. **None separated the 2 from the 33.** A gate built
 from the distribution of the very files it judges is a circle, so it was not built.
@@ -1507,6 +1585,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T113:** Driving the registry decision itself (not a copy of its arithmetic): an `uploaded` row survives a `duplicate-content` skip — after the identity move that the language-tag gate triggers, a skip over the same content leaves the row `uploaded` with its reason cleared and increments no reject; and the same skip over content that is NOT up still writes `rejected` with its reason intact, so the two cases are told apart rather than both being called settled. The second half is what makes the check meaningful: a rule that simply treats every `duplicate-content` skip as settled passes the first half and fails here (F-M298)
 
 **T114:** Driving the rendered page text, not the markup: every intro block under an `h4` heading measures at most **300 rendered characters** (tags stripped, whitespace collapsed) and carries **no measured value** — the ban list is the forensic vocabulary itself (`Measured`, a before/after arrow, an episode count, an accuracy figure), so re-introducing "Measured on 36 drifting episodes: worst line 10.74 s → 0.17 s" fails here rather than passing as prose. The budget is a ceiling and not a target: the check reads the same text a phone renders, so an HTML comment or an entity cannot buy length. Both halves are needed — the length alone would pass a short sentence full of measurements, and the vocabulary alone would pass an unmeasured essay (F-M299)
+
+**T115:** The staircase correction, driven on the SAME synthetic episode whose cues were built from a known burst list, and judged against that burst list — the ground truth that took no part in the measurement, because a correction scored with the detector that produced it is the exact inverse of its own measurement and always reports success. Two steps (+2.5 s at 20 min, +2.0 s at 30 min) are planted over a +4.0 s constant offset; the detector must report `Drifts` WITH at least two segments, the applied shift must move the worst distance to a true cue position from **8.60 s** to no more than one misplaced step above the per-cue jitter, the cue count and the cue order must be unchanged, and the order guard must stay rare (at most **12 of 661** cues — a broad fire would carry one cue's shift through the file and flatten the staircase into a single constant shift). Two assertions carry this test and neither can be replaced by the other: the **applied shifts read back per segment** must reproduce the planted steps (−2.50 s and −2.00 s between consecutive segments, sampled in each segment's middle so the guard's legitimate bite at the edges is not read as a lost step), which is what proves the staircase survived — and the constant case must report **no** segments at all, so a constant offset cannot silently be routed through the staircase path. A guard implemented with the wrong SIGN fails here and nowhere else: measured, the mirrored rule left a **1.92 s** residual and guarded **22** cues against **6** with the direction right. The negative-first-cue case is refused, never clamped (F-M300)
 
 
 

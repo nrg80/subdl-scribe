@@ -264,6 +264,20 @@ public static class DriftDetector
         }
 
         double span = segOffsets.Count > 1 ? segOffsets[^1] - segOffsets[0] : 0;
+
+        // F-M300: the segments are handed out with the verdict, because on a drifting file
+        // they ARE the repair. The step structure is real, not overfitting — measured on the
+        // same files with a permutation test: the staircase fits 14x better on the real
+        // ordering than on a shuffled one (0.30 s vs 4.13 s residual), 4-5 steps per episode,
+        // and the steps sum to the total drift (11.98 s against 10.92 s). The correction
+        // therefore shifts each cue by ITS OWN segment's offset instead of averaging the
+        // drift over the file, which is what the single-offset path must not do.
+        var segStarts = new List<double>(edges.Count - 1);
+        for (int i = 0; i < edges.Count - 1; i++)
+        {
+            segStarts.Add(baseCueStarts[Math.Clamp(edges[i], 0, nCue - 1)]);
+        }
+
         return new DriftVerdict
         {
             Ran = true,
@@ -272,7 +286,9 @@ public static class DriftDetector
             SpanSec = Math.Abs(span),
             BoundaryCount = consensus.Count,
             BoundaryTimesSec = consensus.OrderBy(x => x.T).Select(x => x.T).ToList(),
-            MaxBayesFactor = consensus.Max(x => x.Bf)
+            MaxBayesFactor = consensus.Max(x => x.Bf),
+            SegmentOffsetsSec = segOffsets,
+            SegmentStartTimesSec = segStarts
         };
     }
 

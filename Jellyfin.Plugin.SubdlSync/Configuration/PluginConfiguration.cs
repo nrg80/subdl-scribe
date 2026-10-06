@@ -462,13 +462,22 @@ public class PluginConfiguration : BasePluginConfiguration
     /// The corrected file is written as usual AND the untouched original is kept
     /// beside it as <c>&lt;name&gt;.&lt;lang&gt;.srt.unsynchronized</c>. Registered is the
     /// hash of the CORRECTED file, so the duplicate guard sees exactly what lies on
-    /// disk. A file whose offset MOVES is never shifted — it has no valid single
-    /// offset — and is only reported, exactly as the drift gate (F-M295) reports it.
+    /// disk. A file whose offset MOVES is repaired by the staircase of F-M300, not by
+    /// a single offset — no average over a drift is ever applied.
+    /// </para>
+    /// <para>
+    /// F-M300 (development): a DRIFTING file is no longer refused. The segments the gate found are
+    /// the repair — each cue is shifted by the offset of its own segment, a staircase — which took
+    /// the worst-cue residual over 36 drifting episodes from a 10.74 s median to 4.51 s, 33 of 36
+    /// better. Two of the 36 come out worse and no reference-free signal separates them, so a
+    /// same-language reference (F-M297) is preferred when one exists and the untouched original is
+    /// kept either way.
     /// </para>
     /// <para>
     /// On by default. The cost is one full audio decode per saved file — measured at
     /// 11 s wall / 21 s CPU for a 49 min HEVC episode on the Pi 5 — and the run shares
-    /// one decode between the drift gate and this switch when both are on.
+    /// one decode between the drift gate and this switch when both are on. A staircase adds no
+    /// second decode; it is the same verdict applied per segment.
     /// </para>
     /// Default: true.
     /// </summary>

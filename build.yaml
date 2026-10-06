@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.177"
+version: "12.1.12.178"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,17 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.178: A drifting subtitle was refused - "no single offset is valid, left as downloaded" -
+    which was right about the average and wrong about the conclusion. The segments the drift gate
+    already found ARE the repair: each cue is now shifted by the offset of its OWN segment, a
+    staircase. Over the 36 drifting episodes of this library the worst single-cue residual falls
+    from a 10.74 s median to 4.51 s, 33 of 36 better, and a permutation test puts the staircase 14x
+    better on the real ordering than on a shuffled one, so the steps are structure and not
+    overfitting. Two of the 36 come out worse and no reference-free signal separates them from the
+    33, so the anchor path wins when a same-language reference exists and the untouched original is
+    kept either way. The order guard is the mirror of the anchor path's: the staircase ADDS its
+    shift, so it is bounded from below - with the sign reversed it left a 1.92 s residual and
+    guarded 22 cues instead of 6.
   v12.1.12.177: The two download-sync section intros had grown to 392 and 493 characters of
     measured detail - "accurate to about 0.2 s", "36 drifting episodes: worst line 10.74 s to
     0.17 s, 36 of 36 improved" - which is spec and commit material, not settings-page text. Both

@@ -99,6 +99,21 @@ public sealed class DriftVerdict
     /// <summary>Gets the largest Bayes factor seen (evidence strength).</summary>
     public double MaxBayesFactor { get; init; }
 
+    /// <summary>
+    /// Gets the offset of each segment, when the offset DRIFTS. Segment k covers the cues
+    /// from <see cref="SegmentStartTimesSec"/>[k] up to the next entry (the last one to the
+    /// end of the file). Empty when the offset is constant. This is what makes a drifting
+    /// file repairable: the correction is a STAIRCASE, one offset per segment, and the
+    /// steps are the boundaries the detector already found (F-M300).
+    /// </summary>
+    public IReadOnlyList<double> SegmentOffsetsSec { get; init; } = [];
+
+    /// <summary>
+    /// Gets the start time of each segment in seconds, ascending and the same length as
+    /// <see cref="SegmentOffsetsSec"/>. The first entry is the first cue of the file.
+    /// </summary>
+    public IReadOnlyList<double> SegmentStartTimesSec { get; init; } = [];
+
     /// <summary>Gets why the gate did not run, when it did not.</summary>
     public string? SkipReason { get; init; }
 
