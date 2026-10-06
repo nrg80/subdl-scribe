@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.177",
-        "changelog": "v12.1.12.177: The two download-sync section intros had grown to 392 and 493 characters of\n    measured detail - \"accurate to about 0.2 s\", \"36 drifting episodes: worst line 10.74 s to\n    0.17 s, 36 of 36 improved\" - which is spec and commit material, not settings-page text. Both\n    are cut to what the section does (222 and 256), and a structural check now holds every h4\n    intro under 300 rendered characters and free of measured values, so the storytelling cannot\n    creep back. The same pass drops a failure share from the audio-track switch.",
+        "version": "12.1.12.178",
+        "changelog": "v12.1.12.178: A drifting subtitle was refused - \"no single offset is valid, left as downloaded\" -\n    which was right about the average and wrong about the conclusion. The segments the drift gate\n    already found ARE the repair: each cue is now shifted by the offset of its OWN segment, a\n    staircase. Over the 36 drifting episodes of this library the worst single-cue residual falls\n    from a 10.74 s median to 4.51 s, 33 of 36 better, and a permutation test puts the staircase 14x\n    better on the real ordering than on a shuffled one, so the steps are structure and not\n    overfitting. Two of the 36 come out worse and no reference-free signal separates them from the\n    33, so the anchor path wins when a same-language reference exists and the untouched original is\n    kept either way. The order guard is the mirror of the anchor path's: the staircase ADDS its\n    shift, so it is bounded from below - with the sign reversed it left a 1.92 s residual and\n    guarded 22 cues instead of 6.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.177-dev/Jellyfin.Plugin.SubdlSync_12.1.12.177.zip",
-        "checksum": "0ff5b2e8e4395505b66de076ea2ea880",
-        "timestamp": "2026-10-06T17:31:45Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.178-dev/Jellyfin.Plugin.SubdlSync_12.1.12.178.zip",
+        "checksum": "d96113c344570f0a45aefc60354628a5",
+        "timestamp": "2026-10-06T18:04:59Z"
       }
     ]
   }
