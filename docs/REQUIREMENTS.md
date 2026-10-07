@@ -259,7 +259,7 @@ The file-retry counter is recorded as a success, so a dry run neither burns a re
 
 There is no download-side completion mark any more. The pipeline asks `SubtitleCoverage` which required PAIRS have no evidence (14.2b) and returns when the answer is empty; that answer is derived fresh on every run, so it cannot be overtaken by a deletion and needs no stored language set and no validation pass. See F-M283 for why the stored mark had to go.
 
-**F-M187:** **Downloaded bytes have exactly one decode path.** Every conversion of downloaded subtitle bytes to text goes through one path, which honours a UTF-16 byte-order mark (LE/BE, stripped) and falls back to UTF-8. The download side hashes the decode path, and the upload side later reads the written file as UTF-8/UTF-16 text, so the two must agree. The file on disk stays **byte-identical** to SubDL's payload — normalization applies in memory for hashing and upload, never to the stored file.
+**F-M187:** **Downloaded bytes have exactly one decode path.** Every conversion of downloaded subtitle bytes to text goes through one path, which honours a UTF-16 byte-order mark (LE/BE, stripped) and falls back to UTF-8. The download side hashes the decode path, and the upload side later reads the written file as UTF-8/UTF-16 text, so the two must agree. An **uncorrected** file on disk stays **byte-identical** to SubDL's payload — normalization applies in memory for hashing and upload, never to the stored file. The one exception is a file the correction CHANGED: that goes out canonical (F-M296), because the bytes on disk must be the bytes the stored hash describes. The archived original is always the fetched bytes verbatim (F-M306).
 
 **F-M251:** **One name parser, not two.** Both directions read names through the same parser; the download side holds no copy of the name logic.
 
@@ -574,9 +574,18 @@ not undo the corrected file; it is logged as a warning.
 **F-M306 [D] (development):** **The untouched original is kept as a ONE-ENTRY ARCHIVE, and nothing else.**
 
 **Rule.** The pipeline writes `<base>.<lang>.srt.unsynchronized.zip`, holding **exactly ONE entry**
-whose name is `<base>.<lang>.srt.unsynchronized` and whose payload is the **unmodified** fetched
-bytes, carrying the payload's own byte style (BOM / line endings). **No loose copy is written beside
+whose name is `<base>.<lang>.srt.unsynchronized` and whose payload is the **fetched bytes, verbatim**
+— the download's own buffer, with **no encode step in between**. **No loose copy is written beside
 it** — the archive is the only artefact kept.
+
+**No round trip (defect fixed 07.10.2026).** The payload used to be
+`Encode(DecodeSrt(bytes), StyleOfBytes(bytes))` — a decode/re-encode of the bytes it was meant to
+preserve. On a payload that already carried a BOM the encoder prepended a **second** one: measured on
+a real library file, **55 108 B became 55 111 B** with the header `EF BB BF EF BB BF`. The archive is the
+one artefact whose whole purpose is to BE the uncorrected file, so it is the buffer as received. Every
+assertion in the test file stayed green through the defect: the fixture carried no BOM, and the helper
+faithfully archived whatever argument it was handed — the defect was in the ARGUMENT, which is why
+T118 now asserts the argument (and the fixture carries a BOM).
 
 **Why only the archive (operator order, 07.10.2026).** `Nur das zip ablegen. Wenn ich es entpacken
 will mache ich das selber.` Unpacking is the operator's step, not the pipeline's, so the pipeline
@@ -616,7 +625,8 @@ is the same verdict, applied per segment. This is the **ONE switch of the correc
 
 **Tests: T110 (synthetic: track priority with the 2-vs-3-letter cases, exact shift, refusal on a
 negative first cue, byte style, the suffix against the real listing pattern), T118 (the archived
-original: one entry, byte-identical payload, a name that matches neither listing pattern), T111 (end-to-end on a
+original: one entry, the payload byte-identical to the fetched bytes and carrying a BOM so a doubled
+one is visible, a name that matches neither listing pattern), T111 (end-to-end on a
 real episode: the plain subtitle comes back near zero, a planted shift is measured and removed, and
 the result is checked against the plain subtitle, which took no part in the measurement), T114 (the
 staircase: detected segments, both planted steps surviving the order guard, the residual bound, and
@@ -1562,7 +1572,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T117:** The staircase scored against REAL material with the AUDIO as the only yardstick — no subtitle takes part, neither embedded nor as a sidecar. Per episode one audio decode, then the detector runs on the result and the verdict is read as the **per-segment offset curve**: segments, offset span and the largest absolute offset. A corrected file passes when it shows **no drift**: one segment, or offsets that sit near zero with a span inside the material's measurement floor. The **control runs first** and decides whether the episode may be scored at all: the UNTOUCHED material goes through the same measurement, and a file that already looks wrong there means the yardstick is misaligned to that material — that is a finding about the yardstick and must NOT be reported as a failure of the correction. A subtitle reference may be used to FIND a defect but is never the number this test is accepted on, because the residual would be computed relative to a reference that may itself drift, which counts the same error twice and flatters the result. The order-guard count is read together with the result, and a broad fire is a failure signal rather than a detail: it means the staircase was flattened into one constant shift. The `<= 1.0 s` bound of T114 is a SYNTHETIC expectation and is asserted nowhere here (F-M305).
 
-**T118:** The archived original, driven on the real writer and read back as an archive, not as a byte blob: after a corrected save **only** `<base>.<lang>.srt.unsynchronized.zip` exists beside the corrected file — the loose `<base>.<lang>.srt.unsynchronized` does **NOT** (asserted, not assumed: a leftover loose copy is exactly the regression a presence-only check misses); the archive holds **exactly ONE entry**; the entry is named `<base>.<lang>.srt.unsynchronized`, so unpacking it cannot clobber the corrected `<base>.<lang>.srt`; its payload is the unmodified fetched bytes, compared byte for byte so a re-encode or a line-ending change fails here; and the written name matches **neither** listing pattern this plugin uses — `baseName + "*.srt"` (F-M251) nor the seeder's `"*.srt"` — so the archive can never be read as a subtitle. The same is asserted for the HI track, which goes through the same helper (F-M306)
+**T118:** The archived original, driven on the real writer and read back as an archive, not as a byte blob: after a corrected save **only** `<base>.<lang>.srt.unsynchronized.zip` exists beside the corrected file — the loose `<base>.<lang>.srt.unsynchronized` does **NOT** (asserted, not assumed: a leftover loose copy is exactly the regression a presence-only check misses); the archive holds **exactly ONE entry**; the entry is named `<base>.<lang>.srt.unsynchronized`, so unpacking it cannot clobber the corrected `<base>.<lang>.srt`; its payload is the fetched bytes **verbatim** — the download's own buffer, asserted at the CALL SITE so a decode/re-encode round trip fails here (on a BOM-carrying payload that round trip prepended a second BOM; measured 55 108 B → 55 111 B), and the fixture carries a BOM for exactly that reason; and the written name matches **neither** listing pattern this plugin uses — `baseName + "*.srt"` (F-M251) nor the seeder's `"*.srt"` — so the archive can never be read as a subtitle. The same is asserted for the HI track, which goes through the same helper (F-M306)
+
 **T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M294, F-M288)
 
 

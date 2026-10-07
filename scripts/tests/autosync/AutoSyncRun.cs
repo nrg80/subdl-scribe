@@ -411,7 +411,13 @@ public static class AutoSyncRun
         f += !seederSees ? 0 : 1;
 
         // Build the real archive from real bytes, then read it back as an archive.
-        byte[] payload = SubtitleSync.Encode("1\n00:00:01,000 --> 00:00:03,000\nHallo\n", bom: true, crlf: true);
+        // F-M306: the payload carries a BOM on purpose. The archive is fed the FETCHED bytes and
+        // nothing else; it used to be fed `Encode(DecodeSrt(bytes), StyleOfBytes(bytes))`, and that
+        // decode/encode round trip prepended a SECOND BOM to a payload that already had one.
+        // Measured on a real file: 55 108 B came back as 55 111 B with the header EF BB BF EF BB BF.
+        // A fixture WITHOUT a BOM cannot see that, which is why this one has three extra bytes.
+        string sampleText = "1\n00:00:01,000 --> 00:00:03,000\nHallo\n";
+        byte[] payload = SubtitleSync.Encode(sampleText, bom: true, crlf: true);
         byte[] zipBytes = SubtitleSync.BuildUnsyncArchive(System.IO.Path.GetFileName(unsync), payload);
 
         int entries = 0;
@@ -438,14 +444,20 @@ public static class AutoSyncRun
         Check("the entry carries the copy's file name", nameInZip, entryName ?? "(none)");
         f += nameInZip ? 0 : 1;
 
-        // Byte for byte — this is the assertion a re-encode fails.
+        // Byte for byte — this is the assertion a re-encode fails. The payload carries a BOM,
+        // which is what makes the doubled-BOM defect visible here instead of silently passing.
         bool identical = roundTrip != null && roundTrip.Length == payload.Length
                          && roundTrip.SequenceEqual(payload);
-        Check("the payload is BYTE-IDENTICAL to the plain copy", identical,
+        bool singleBom = payload.Length >= 6
+                         && payload[0] == 0xEF && payload[1] == 0xBB && payload[2] == 0xBF
+                         && !(payload[3] == 0xEF && payload[4] == 0xBB && payload[5] == 0xBF);
+        Check("the payload is BYTE-IDENTICAL to the plain copy", identical && singleBom,
             identical
-                ? $"{payload.Length} bytes equal (bom {payload[0]:X2} {payload[1]:X2} {payload[2]:X2})"
+                ? (singleBom
+                    ? $"{payload.Length} bytes equal, single BOM (EF BB BF)"
+                    : $"{payload.Length} bytes equal but the BOM is DOUBLED (EF BB BF EF BB BF)")
                 : $"differ: zip={roundTrip?.Length ?? -1} bytes, copy={payload.Length} bytes");
-        f += identical ? 0 : 1;
+        f += identical && singleBom ? 0 : 1;
 
         // Deterministic: the same input yields the same bytes on every run, which is what
         // makes a byte comparison a usable test at all.
@@ -521,18 +533,20 @@ public static class AutoSyncRun
                 $"EncodeCanonical {canonical}/4");
             f += canonical == 4 ? 0 : 1;
 
-            // The ARCHIVED original is the deliberate exception: it keeps the fetched payload's
-            // own byte style, because that artefact exists to be the uncorrected file. Both
-            // tracks must still do it, so the assertion is that the style encoder is used and
-            // used ONLY for the two archive payloads.
-            int styleEncoded = System.Text.RegularExpressions.Regex.Matches(
-                src, @"(hi)?[Oo]riginalBytes\s*=\s*Qa\.SubtitleSync\.Encode\(").Count;
-            int canonicalWritesOnly = System.Text.RegularExpressions.Regex.Matches(
-                src, @"ContentHashRegistry\.EncodeCanonical\(").Count;
-            Check("the archived original keeps its own byte style (both tracks)",
-                styleEncoded == 2 && canonicalWritesOnly == 4,
-                $"archive style-encoded {styleEncoded}/2, canonical total {canonicalWritesOnly}/4");
-            f += styleEncoded == 2 && canonicalWritesOnly == 4 ? 0 : 1;
+            // F-M306: the archive is fed the FETCHED bytes, never a decoded/re-encoded copy of
+            // them. The round trip `Encode(DecodeSrt(bytes), StyleOfBytes(bytes))` prepended a
+            // SECOND BOM to a payload that already carried one — measured on a real file, 55 108 B
+            // came out as 55 111 B with the header EF BB BF EF BB BF — while every assertion in this
+            // file stayed green: the fixture carried no BOM, and the helper faithfully archived
+            // whatever it was handed. The defect was in the ARGUMENT, so the argument is asserted.
+            int archiveArgs = System.Text.RegularExpressions.Regex.Matches(
+                src, @"BuildUnsyncArchive\(\s*(hi)?[Uu]nsyncName\s*,\s*(hi)?[Bb]ytes!?\s*\)").Count;
+            int reencoded = System.Text.RegularExpressions.Regex.Matches(
+                src, @"(hi)?[Oo]riginalBytes\s*=").Count;
+            Check("the archive is fed the FETCHED bytes, not a re-encoded copy",
+                archiveArgs == 2 && reencoded == 0,
+                $"BuildUnsyncArchive(…, bytes) {archiveArgs}/2, re-encode sites {reencoded} (want 0)");
+            f += archiveArgs == 2 && reencoded == 0 ? 0 : 1;
         }
 
         Console.WriteLine();

@@ -1993,12 +1993,17 @@ public sealed class DownloadPipeline : IDisposable
                         try
                         {
                             string unsyncName = Path.GetFileName(Qa.SubtitleSync.UnsyncPathFor(targetPath));
-                            (bool ub, bool uc) = Qa.SubtitleSync.StyleOfBytes(bytes);
-                            byte[] originalBytes = Qa.SubtitleSync.Encode(unsyncPayload, ub, uc);
+                            // F-M306: the FETCHED BYTES, verbatim — not the decoded text re-encoded.
+                            // The round trip DecodeSrt -> Encode put a SECOND BOM in front of a
+                            // payload that already had one: measured on a real file, 55 108 B came
+                            // back as 55 111 B with the header EF BB BF EF BB BF. The archive exists
+                            // to BE the uncorrected file, so it is the bytes as received, with no
+                            // encode step in between. `bytes` is the download's own buffer and is
+                            // never reassigned; the correction writes to writeBytes.
                             string unsyncZip = Qa.SubtitleSync.UnsyncZipPathFor(targetPath);
                             await AtomicWriteAsync(
                                 unsyncZip,
-                                Qa.SubtitleSync.BuildUnsyncArchive(unsyncName, originalBytes),
+                                Qa.SubtitleSync.BuildUnsyncArchive(unsyncName, bytes),
                                 ct).ConfigureAwait(false);
                             if (_config.LogMode >= LogLevelMode.Verbose)
                             {
@@ -2190,15 +2195,15 @@ public sealed class DownloadPipeline : IDisposable
                                             {
                                                 // F-M306: the HI track is archived through the same
                                                 // helper — one implementation, both tracks, and no
-                                                // loose copy here either.
+                                                // loose copy here either. The FETCHED bytes, verbatim
+                                                // (see the main path: a decode/encode round trip
+                                                // doubled the BOM).
                                                 string hiUnsyncName = Path.GetFileName(
                                                     Qa.SubtitleSync.UnsyncPathFor(hiPath));
-                                                (bool hub, bool huc) = Qa.SubtitleSync.StyleOfBytes(hiBytes!);
-                                                byte[] hiOriginalBytes = Qa.SubtitleSync.Encode(hiUnsync, hub, huc);
                                                 string hiUnsyncZip = Qa.SubtitleSync.UnsyncZipPathFor(hiPath);
                                                 await AtomicWriteAsync(
                                                     hiUnsyncZip,
-                                                    Qa.SubtitleSync.BuildUnsyncArchive(hiUnsyncName, hiOriginalBytes),
+                                                    Qa.SubtitleSync.BuildUnsyncArchive(hiUnsyncName, hiBytes!),
                                                     ct).ConfigureAwait(false);
                                             }
                                             catch (Exception ex)
