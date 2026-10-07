@@ -39,7 +39,8 @@ public readonly struct StatusCounterDelta
         long typeCorrected,
         long tmdbYearMisses,
         long rejectedDownload,
-        long rejectedUpload)
+        long rejectedUpload,
+        long fittedToAudio)
     {
         Uploaded = uploaded;
         Downloaded = downloaded;
@@ -47,6 +48,7 @@ public readonly struct StatusCounterDelta
         TmdbYearMisses = tmdbYearMisses;
         RejectedDownload = rejectedDownload;
         RejectedUpload = rejectedUpload;
+        FittedToAudio = fittedToAudio;
     }
 
     /// <summary>Gets subtitles uploaded by this run.</summary>
@@ -67,10 +69,13 @@ public readonly struct StatusCounterDelta
     /// <summary>Gets the F-M286 upload candidates discarded from the upload.</summary>
     public long RejectedUpload { get; }
 
+    /// <summary>Gets the F-M308 downloaded subtitles fitted to their audio track.</summary>
+    public long FittedToAudio { get; }
+
     /// <summary>Gets a value indicating whether this delta leaves the statistics row untouched.</summary>
     public bool IsEmpty
         => Uploaded == 0 && Downloaded == 0 && TypeCorrected == 0 && TmdbYearMisses == 0
-           && RejectedDownload == 0 && RejectedUpload == 0;
+           && RejectedDownload == 0 && RejectedUpload == 0 && FittedToAudio == 0;
 
     /// <summary>
     /// F-M247: builds the delta for one direction run, discarding everything a dry run produced.
@@ -96,6 +101,7 @@ public readonly struct StatusCounterDelta
                 + (uploadDry ? 0 : upload?.TypeCorrectedByFileName ?? 0),
             tmdbYearMisses: downloadDry ? 0 : download?.TmdbYearFilterMisses ?? 0,
             rejectedDownload: downloadDry ? 0 : download?.RejectedCandidates ?? 0,
-            rejectedUpload: uploadDry ? 0 : upload?.RejectedCandidates ?? 0);
+            rejectedUpload: uploadDry ? 0 : upload?.RejectedCandidates ?? 0,
+            fittedToAudio: downloadDry ? 0 : download?.FittedToAudio ?? 0);
     }
 }

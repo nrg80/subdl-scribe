@@ -1091,7 +1091,8 @@ public sealed class SubdlEventDispatcher : IDisposable
                 delta.TypeCorrected,
                 delta.TmdbYearMisses,
                 delta.RejectedDownload,
-                delta.RejectedUpload);
+                delta.RejectedUpload,
+                delta.FittedToAudio);
         }
         catch (Exception ex)
         {

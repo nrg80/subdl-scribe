@@ -129,16 +129,18 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// <param name="tmdbYearMisses">F-M218: TMDb searches that needed the year filter dropped.</param>
     /// <param name="rejectedDownload">F-M286: download candidates fetched and thrown away.</param>
     /// <param name="rejectedUpload">F-M286: upload candidates discarded from the upload.</param>
+    /// <param name="fittedToAudio">F-M308: downloaded subtitles fitted to their audio track.</param>
     public void AddStatusCounters(
         long uploaded,
         long downloaded,
         long typeCorrected = 0,
         long tmdbYearMisses = 0,
         long rejectedDownload = 0,
-        long rejectedUpload = 0)
+        long rejectedUpload = 0,
+        long fittedToAudio = 0)
     {
         if (uploaded == 0 && downloaded == 0 && typeCorrected == 0 && tmdbYearMisses == 0
-            && rejectedDownload == 0 && rejectedUpload == 0)
+            && rejectedDownload == 0 && rejectedUpload == 0 && fittedToAudio == 0)
         {
             return; // nothing happened — do not touch the row (keeps Updated meaningful)
         }
@@ -152,6 +154,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         row.TmdbYearFilterMisses += tmdbYearMisses;
         row.RejectedDownload += rejectedDownload;
         row.RejectedUpload += rejectedUpload;
+        row.FittedToAudio += fittedToAudio; // F-M308
         row.Updated = DateTime.UtcNow;
         db.StatusStats.Upsert(row);
     }
@@ -170,6 +173,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         row.TmdbYearFilterMisses = 0;
         row.RejectedDownload = 0;
         row.RejectedUpload = 0;
+        row.FittedToAudio = 0; // F-M308
         row.SinceUtc = DateTime.UtcNow;
         row.Updated = DateTime.UtcNow;
         db.StatusStats.Upsert(row);

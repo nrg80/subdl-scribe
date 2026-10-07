@@ -544,6 +544,14 @@ public class StatusStatsEntity
     /// </summary>
     public long RejectedUpload { get; set; }
 
+    /// <summary>
+    /// F-M308: downloaded subtitles that were FITTED to their audio track — the correction applied,
+    /// not merely offered. The volume counter counts subtitles that arrived; this one counts the ones
+    /// the run had to move, which is why it is reported next to the corrections and not next to the
+    /// volume. Download only: the upload direction has no audio fit.
+    /// </summary>
+    public long FittedToAudio { get; set; }
+
     /// <summary>Start of the counting period; set by "Reset statistics", null before first use.</summary>
     public DateTime? SinceUtc { get; set; }
 

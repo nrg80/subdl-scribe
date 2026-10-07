@@ -77,7 +77,10 @@ public sealed class SubdlDbContext : IDisposable
     // (`QaRejectedDownload`/`QaRejectedUpload` -> `RejectedDownload`/`RejectedUpload`) because they
     // now count every fetched-and-discarded candidate, not the QA gates alone. An older build reading
     // this file finds neither field and reports 0, which is why the marker moves with the rename.
-    public const int CurrentSchemaVersion = 3;
+    // F-M308 (07.10.2026): raised to 4. The status row gained `FittedToAudio` — the count of
+    // downloaded subtitles the run fitted to their audio track. An older build reading this file
+    // finds no such field and reports 0, which is why the marker moves with the addition.
+    public const int CurrentSchemaVersion = 4;
 
     /// <summary>
     /// The open LiteDB engine. Deliberately NOT readonly: LiteDB's <c>Rebuild()</c> closes the

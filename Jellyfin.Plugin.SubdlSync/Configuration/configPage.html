@@ -122,8 +122,12 @@
                         </div>
 
                         <h3>Statistics</h3>
-                        <div class="fieldDescription" id="StatsLine" style="margin-bottom:0.25em;">&mdash;</div>
-                        <div class="fieldDescription" id="StatsQualityLine" style="margin-bottom:0.25em;">&mdash;</div>
+                        <!-- F-M308: the counters as a TABLE, filled by subdlRenderStats. The rows are
+                             built in JS (one per counter), so adding a counter means adding a row
+                             there and nothing here. Kept as a div-grid rather than a <table>: the
+                             Workers list beside it uses the same pattern, and an Emby theme that
+                             styles <table> would otherwise restyle one of the two lists. -->
+                        <div id="StatsTable"></div>
                         <div class="fieldDescription" id="StatsSinceLine" style="margin-bottom:0.5em;">&mdash;</div>
 
 <div style="margin-top:0.5em;">
@@ -597,6 +601,30 @@
            NEVER put a backtick in these comments: this whole block is a JS template
            literal, so a backtick ends the string early and the CSS silently never gets
            injected (the rows then fall back to plain flex and nothing lines up). */
+        /* F-M308: the statistics counters as a BOUNDED table — one row per counter, label and
+           number in two columns so the numbers line up under each other. The earlier form was a
+           run-on sentence in which every counter sat in prose, each label at a different offset,
+           and the user could not read it. A table makes them comparable at a glance and is the form the user asked for
+           ("gerne auch als tabelle bündig untereinander"). max-content on the label column lets
+           it size to the longest label, so the numbers form one vertical line; overflow-x:auto
+           keeps a narrow phone from cutting a row off.
+           NO backticks in this comment: it sits inside a JS template literal, and one backtick
+           ends the string early so the CSS silently never gets injected. */
+        #StatsTable {
+            display: grid;
+            grid-template-columns: max-content max-content;
+            align-items: baseline;
+            column-gap: 1.1em;
+            row-gap: 0.15em;
+            overflow-x: auto;
+            font-size: 1em;
+            margin-bottom: 0.25em;
+        }
+        #StatsTable .subdl-stat-row { display: contents; }
+        #StatsTable > .subdl-stat-row > * { min-width: 0; white-space: nowrap; }
+        #StatsTable .subdl-stat-value { text-align: right; font-variant-numeric: tabular-nums; }
+        #StatsTable .subdl-stat-total { font-weight: 600; }
+
         #WorkerRunList {
             display: grid;
             grid-template-columns: 1.4em max-content max-content 1fr;
@@ -938,27 +966,40 @@
                             return subdlFmtDateTime(iso);
                         };
                         var subdlRenderStats = function (s) {
-                            var el = document.querySelector('#StatsLine');
+                            var el = document.querySelector('#StatsTable');
                             if (!el) { return; }
-                            if (!s) { el.textContent = '—'; return; }
-                            el.textContent =
-                                s.Uploaded + ' subtitles uploaded, ' +
-                                s.Downloaded + ' subtitles downloaded since the last reset.';
-
-                            // F-M218 quality line: what the volume counters cannot show —
-                            // where the run had to work around Jellyfin's metadata, and how
-                            // much the QA gates filtered out.
-                            var q = document.querySelector('#StatsQualityLine');
-                            if (q) {
-                                q.textContent =
-                                    'Corrections and rejects: ' +
-                                    (s.TypeCorrectedByFileName || 0) + ' items the file name typed ' +
-                                    '(Jellyfin had the wrong type), ' +
-                                    (s.TmdbYearFilterMisses || 0) + ' titles found only after dropping ' +
-                                    'Jellyfin\u2019s year, ' +
-                                    (s.RejectedDownload || 0) + ' downloads / ' +
-                                    (s.RejectedUpload || 0) + ' uploads rejected after being fetched.';
-                            }
+                            if (!s) { el.innerHTML = ''; return; }
+                            // F-M308: one ROW per counter, label left / number right, so the numbers
+                            // form one vertical line and are comparable. Each label names the direction
+                            // it belongs to ("uploads" / "downloads") — the previous run-on sentence
+                            // packed both directions and both meanings into one line the user could not
+                            // read. The two volume counters keep their own rows; the quality rows follow.
+                            // The wording states what happened, not the code's vocabulary: type is
+                            // movie/series, a search without the year tag, a fetch that was thrown away,
+                            // and a subtitle the run moved onto its audio track.
+                            var rows = [
+                                ['Subtitles uploaded', s.Uploaded || 0, true],
+                                ['Subtitles downloaded', s.Downloaded || 0, true],
+                                ['Type (movie/series) adjusted, both directions', s.TypeCorrectedByFileName || 0],
+                                ['Uploads: rejected after being fetched', s.RejectedUpload || 0],
+                                ['Downloads: rejected after being fetched', s.RejectedDownload || 0],
+                                ['Downloads: searches run without the year tag', s.TmdbYearFilterMisses || 0],
+                                ['Downloads: fitted to the audio track', s.FittedToAudio || 0]
+                            ];
+                            el.innerHTML = '';
+                            rows.forEach(function (r) {
+                                var row = document.createElement('div');
+                                row.className = 'subdl-stat-row';
+                                var lab = document.createElement('span');
+                                lab.className = 'subdl-stat-label' + (r[2] ? ' subdl-stat-total' : '');
+                                lab.textContent = r[0];
+                                var val = document.createElement('span');
+                                val.className = 'subdl-stat-value' + (r[2] ? ' subdl-stat-total' : '');
+                                val.textContent = String(r[1]);
+                                row.appendChild(lab);
+                                row.appendChild(val);
+                                el.appendChild(row);
+                            });
 
                             // The period stamp sits on its own line, last — it belongs to
                             // all of the counters above, not to a sentence in the middle.

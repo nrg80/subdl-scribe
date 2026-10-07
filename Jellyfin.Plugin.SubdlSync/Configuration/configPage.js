@@ -324,27 +324,40 @@
                             return subdlFmtDateTime(iso);
                         };
                         var subdlRenderStats = function (s) {
-                            var el = document.querySelector('#StatsLine');
+                            var el = document.querySelector('#StatsTable');
                             if (!el) { return; }
-                            if (!s) { el.textContent = '—'; return; }
-                            el.textContent =
-                                s.Uploaded + ' subtitles uploaded, ' +
-                                s.Downloaded + ' subtitles downloaded since the last reset.';
-
-                            // F-M218 quality line: what the volume counters cannot show —
-                            // where the run had to work around Jellyfin's metadata, and how
-                            // much the QA gates filtered out.
-                            var q = document.querySelector('#StatsQualityLine');
-                            if (q) {
-                                q.textContent =
-                                    'Corrections and rejects: ' +
-                                    (s.TypeCorrectedByFileName || 0) + ' items the file name typed ' +
-                                    '(Jellyfin had the wrong type), ' +
-                                    (s.TmdbYearFilterMisses || 0) + ' titles found only after dropping ' +
-                                    'Jellyfin\u2019s year, ' +
-                                    (s.RejectedDownload || 0) + ' downloads / ' +
-                                    (s.RejectedUpload || 0) + ' uploads rejected after being fetched.';
-                            }
+                            if (!s) { el.innerHTML = ''; return; }
+                            // F-M308: one ROW per counter, label left / number right, so the numbers
+                            // form one vertical line and are comparable. Each label names the direction
+                            // it belongs to ("uploads" / "downloads") — the previous run-on sentence
+                            // packed both directions and both meanings into one line the user could not
+                            // read. The two volume counters keep their own rows; the quality rows follow.
+                            // The wording states what happened, not the code's vocabulary: type is
+                            // movie/series, a search without the year tag, a fetch that was thrown away,
+                            // and a subtitle the run moved onto its audio track.
+                            var rows = [
+                                ['Subtitles uploaded', s.Uploaded || 0, true],
+                                ['Subtitles downloaded', s.Downloaded || 0, true],
+                                ['Type (movie/series) adjusted, both directions', s.TypeCorrectedByFileName || 0],
+                                ['Uploads: rejected after being fetched', s.RejectedUpload || 0],
+                                ['Downloads: rejected after being fetched', s.RejectedDownload || 0],
+                                ['Downloads: searches run without the year tag', s.TmdbYearFilterMisses || 0],
+                                ['Downloads: fitted to the audio track', s.FittedToAudio || 0]
+                            ];
+                            el.innerHTML = '';
+                            rows.forEach(function (r) {
+                                var row = document.createElement('div');
+                                row.className = 'subdl-stat-row';
+                                var lab = document.createElement('span');
+                                lab.className = 'subdl-stat-label' + (r[2] ? ' subdl-stat-total' : '');
+                                lab.textContent = r[0];
+                                var val = document.createElement('span');
+                                val.className = 'subdl-stat-value' + (r[2] ? ' subdl-stat-total' : '');
+                                val.textContent = String(r[1]);
+                                row.appendChild(lab);
+                                row.appendChild(val);
+                                el.appendChild(row);
+                            });
 
                             // The period stamp sits on its own line, last — it belongs to
                             // all of the counters above, not to a sentence in the middle.

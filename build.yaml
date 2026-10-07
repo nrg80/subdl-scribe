@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.183"
+version: "12.1.12.184"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,13 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.184: The statistics now read as a table instead of one run-on sentence. Every counter
+    gets its own row with the label on the left and the number on the right, so the numbers line up
+    and can be compared at a glance. Each row names the direction it belongs to, and the wording says
+    what happened rather than naming the code: uploads and downloads that were fetched and then
+    thrown away, the type (movie/series) adjusted, the searches that only matched once the year tag
+    was dropped, and the subtitles the run fitted to their audio track — that last one is a new
+    counter, so the table shows how much of the correction work actually landed.
   v12.1.12.183: The correction is now applied exactly as fitted. A subtitle whose first cue sits
     late enough to veto the shift (a leading title card) used to lift the WHOLE file to
     the largest shift that cue allowed — on one episode that turned a measured -9.00 s

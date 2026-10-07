@@ -309,6 +309,86 @@ def main():
     check("no third backtick outside a comment or the CSS literal",
           html.count("`") % 2 == 0, "count=%d" % html.count("`"))
 
+    # ---- 6b. F-M308/T123: the statistics table ----
+    # One ROW per counter, label left and number right in two bounded columns. Asserted here rather
+    # than trusted, because the counters are the only readout of what a run did, and the failure
+    # modes are all silent: a row that reads a field the API never sends prints 0 forever (the
+    # F-M218 class of bug), a row added to ONE copy of the file pair never renders (the file-pair
+    # trap), and a row claiming a direction the counter does not have states something untrue.
+    #
+    # Cross-checked against the SOURCE, so a rename on the C# side cannot leave the page reading a
+    # field that no longer exists — the two are in different languages and nothing else compares them.
+    check("the statistics render as a table, not a sentence",
+          'id="StatsTable"' in html and "#StatsTable {" in html)
+    check("the table has two bounded columns (numbers line up)",
+          "grid-template-columns: max-content max-content;" in html)
+    # Only the RENDERER counts: the phrase may legitimately appear in a comment that explains why
+    # the sentence form was dropped, and a check that fires on prose gets disabled.
+    renderer = html[html.index("var subdlRenderStats = function (s) {"):]
+    renderer = renderer[:renderer.index("window.subdlRenderStats =")]
+    check("no run-on quality line is left in the renderer",
+          "StatsQualityLine" not in renderer and "Corrections and rejects" not in renderer)
+
+    # Every row must name a field the plugin API actually returns.
+    api_src = os.path.join(os.path.dirname(path), "..", "Api", "SubdlStatusController.cs")
+    api_src = os.path.abspath(api_src)
+    if os.path.exists(api_src):
+        api = open(api_src, encoding="utf-8").read()
+        api_fields = set(re.findall(r"^\s+(\w+) = row\.(\w+),", api, re.M))
+        api_names = {f for _, f in api_fields}
+        used = set(re.findall(r"s\.(\w+) \|\| 0", html))
+        missing = sorted(used - api_names)
+        check("every table row reads a field the API returns", not missing,
+              "not in the API: %s" % ", ".join(missing))
+        # And the fit counter must be a REAL field, not a name invented in the page.
+        check("the fitted-to-audio row reads a field the API sends",
+              "FittedToAudio" in api_names,
+              "FittedToAudio missing from the Stats endpoint")
+
+        # The TWO endpoints must carry the SAME fields. The GUI feeds the reset response straight
+        # back into the renderer, so a field missing from the reset POST renders "undefined" right
+        # after a reset — this happened before with the quality counters, one endpoint over.
+        # Compare the actual SETS, not a sample count: "count == 2" also holds when one block has
+        # a field twice and the other misses it.
+        # Anchor on the COUNTER fields, not on every Ok(new {...}): the controller also returns
+        # DTOs that carry no counters (status checks, directory checks), which made a plain scan
+        # report four blocks and never the two that matter.
+        blocks = []
+        for m in re.finditer(r"return Ok\(new\s*\{(.*?)\}\);", api, re.S):
+            body = m.group(1)
+            fields = set(re.findall(r"^\s+(\w+) = row\.(\w+),", body, re.M))
+            if {f for _, f in fields} & {"Uploaded", "Downloaded"}:
+                blocks.append(fields)
+        check("the status controller exposes two counter DTOs", len(blocks) == 2,
+              "found %d" % len(blocks))
+        if len(blocks) == 2:
+            only_stats = sorted(blocks[0] - blocks[1])
+            only_reset = sorted(blocks[1] - blocks[0])
+            check("the reset response and the stats response carry the same fields",
+                  not only_stats and not only_reset,
+                  "missing in reset: %s | missing in stats: %s"
+                  % (", ".join(f for _, f in only_stats) or "-",
+                     ", ".join(f for _, f in only_reset) or "-"))
+    else:
+        check("the status controller is reachable for the field cross-check", False, api_src)
+
+    # The file-pair trap: the renderer is duplicated in configPage.js. A row added to one copy
+    # only would render in one embedding and not the other.
+    js = os.path.join(os.path.dirname(path), "configPage.js")
+    if os.path.exists(js):
+        jstext = open(js, encoding="utf-8").read()
+        # Match the FIELD ACCESS, not the bare name: "XXFittedToAudio" contains "FittedToAudio"
+        # and would pass a substring test while rendering a field that does not exist.
+        check("both copies of the page carry the table renderer",
+              "StatsTable" in jstext and "s.FittedToAudio" in jstext)
+        # Both copies must carry the SAME renderer — a row in one only is the file-pair trap.
+        def renderer_of(text):
+            i = text.index("var subdlRenderStats = function (s) {")
+            j = text.index("window.subdlRenderStats =", i)
+            return text[i:j]
+        check("the two copies of the renderer are identical",
+              renderer_of(jstext) == renderer_of(html))
+
     # ---- 7. The embedded script must parse ----
     blocks = re.findall(r"<script>(.*?)</script>", html, re.S)
     check("at least one inline script block", len(blocks) >= 1)

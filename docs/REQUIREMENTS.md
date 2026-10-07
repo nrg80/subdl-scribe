@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.183.
+**Status:** Implementation — v12.1.12.184.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -35,7 +35,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 12 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 24 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 25 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -1277,6 +1277,25 @@ type-corrected-from-file-name — items whose type/season/episode came from the 
 
 Every timestamp uses one format — US order (M/D/YYYY) with local AM/PM time — through the timestamp formatter and the time formatter, so stamps cannot drift apart per call site. an unqualified locale call without an explicit locale follows the BROWSER's locale.
 
+**F-M308 [B1] (user decision 07.10.2026):** **The statistics counters are a TABLE, one row per counter, and the table names the direction each count belongs to.**
+
+Form: label left, number right, both columns bounded so the numbers form **one vertical line** — the
+counters are compared at a glance, and a run-on sentence makes that impossible (the user could not read
+the previous single line). The two volume counters lead; the quality counters follow. Every quality row
+names its direction where the data is per-direction (`Uploads:` / `Downloads:`), and where one counter
+covers both directions the row says so instead of picking one.
+
+The wording states what happened, not the code's vocabulary. Four counters, plus the fit:
+
+  type (movie/series) adjusted — the item's type came from the FILE NAME and was corrected, both directions.
+  uploads rejected after being fetched — upload candidates fetched and then thrown away.
+  downloads rejected after being fetched — download candidates fetched and then thrown away.
+  searches run without the year tag — TMDb searches that only matched once the year filter was dropped.
+  fitted to the audio track — downloaded subtitles the run MOVED onto their audio track (F-M307), counted
+  when the correction is APPLIED; the upload direction has no audio fit, so its row is a download row.
+
+**Test: T123.** See F-M218, F-M286.
+
 **F-M286 [B1] (user decision 02.10.2026):** **A reject counter counts what the run SPENT, and every counter is printed somewhere.**
 
 Scope: **every path that fetches and then discards** — no bytes, content already known, broken content, hearing-impaired gate, und-off, unmappable language, self-echo, duplicate-remote, forced. A stored `Rejected` verdict without an increment is a silent discard.
@@ -1598,6 +1617,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T121:** The two defects of F-M307 are regression cases and must fail loudly if they return: **(a)** a shifted cue window that falls outside the audio scores 0 and is **excluded** — the fit must never return a boundary-runner shift on cues that were not moved (the clipped behaviour returned shifts at the search limit); **(b)** the before/after report is scored with the **real cue ends**, asserted against a known value, because a report over one frame at the cue start silently makes the deploy rule revert good files. (F-M307)
 **T122:** The streaming decoder, asserted as two ABSENCES on the plugin source, because neither shows up in a log line and both would return silently: the sample-materialising decoder is gone (no `ms.ToArray()` and no `new float[…]` on the audio path — it held a 514 MB `byte[]` and a 514 MB `float[]` at once and the OOM killer took the 140-minute files) while the streaming entry point exists; and **nothing persists the level curve** — no file, no cache, no database column, and no curve-shaped field in `Data/Entities.cs`. Negative-controlled: planting `new float[…]` back into the audio path turns the assertion RED (measured 07.10.2026), so the two absences are guarded and not merely declared. (F-M307)
+**T123:** The statistics table renders one ROW per counter with the label and its number in two bounded columns, and every row names the direction its count belongs to where the data is per-direction. Asserted on the page source, because the numbers are the only readout of what a run did: the eight rows exist, the two volume counters carry the total weight, the fitted-to-audio row reads the `FittedToAudio` field (F-M308) and not a field that never leaves 0, and no row claims a direction the counter does not have. The page source is the same file pair that is checked structurally — a row added to one copy only is the F-M218 file-pair trap. (F-M308)
 ## 20. References
 
 - Plugin template: github.com/jellyfin/jellyfin-plugin-template

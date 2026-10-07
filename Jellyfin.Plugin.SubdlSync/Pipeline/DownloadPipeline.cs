@@ -120,6 +120,12 @@ public class DownloadRunSummary
     public int TmdbYearFilterMisses { get; set; }
 
     /// <summary>
+    /// F-M308: subtitles this run FITTED to their audio track. Counts the correction when it is
+    /// APPLIED — a fit that was measured and then refused by its own deploy rule is not a fit.
+    /// </summary>
+    public int FittedToAudio { get; set; }
+
+    /// <summary>
     /// User pressed the stop button during this run.
     /// </summary>
     public bool StopRequested { get; set; }
@@ -1846,6 +1852,7 @@ public sealed class DownloadPipeline : IDisposable
                         unsyncPayload = content;
                         writeBytes = ContentHashRegistry.EncodeCanonical(syncResult.Corrected);
                         content = syncResult.Corrected;
+                        summary.FittedToAudio++; // F-M308
                         LogUtil.PerItem(_config.LogMode, _logger,
                             "[SubDL-D] {File} [{Lang}] — auto-sync {Reason}",
                             Path.GetFileName(mediaPath), lang, syncResult.Reason);
