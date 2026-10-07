@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.61
-**Status:** Implementation — v12.1.12.180.
+**Status:** Implementation — v12.1.12.181.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -529,9 +529,8 @@ This supersedes the "a drifting file is only reported" clause of F-M296. The ave
 state, so it must not be applied; the **segments** are not an average, they are the steps themselves.
 Method, measurements and the two measured failures: §4.3.3. **Test: T114.**
 
-**F-M302:** **A user-facing text must not contradict the code, and length plus a ban list cannot carry that.** T113 checked two things — ≤300 rendered characters and no measured value — and **both stayed green** while two intros still claimed the audio path *cannot correct* a drifting file. False since F-M300, and the operator read it on his phone as "4 methods where there should be one". A short sentence stating the opposite of the code satisfies a length cap AND a ban list, so the check now also matches the **refuted claims** — `cannot correct` / `can not correct`, `has no valid single correction`, `is only reported`, `never shifted`, `cannot touch` — across **every user-visible text node**: the section intros, the per-switch `fieldDescription` blocks **and the switch labels** (a planted `never shifted` label proved that a description-only scope misses it). The list stays narrow on purpose: it names the refuted phrasings, not every mention of drift, because a check that fires on correct prose gets disabled. **Test: T113, extended.**
-
-**F-M303:** **The correction sections are ONE section, and it carries ONE switch.** The three `h4` blocks — Auto-sync, Anchor-sync, Drift check — each described the same job and each carried its own essay, which read as three separate methods where the operator expects one; he read it on his phone as "4 methods where there should be one" and then as "Ein toggle, nicht 5". They are now ONE block with ONE switch, `QaDownloadAutoSync`, governing the ONE correction, and the block carries **no intermediate heading** — the operator removed the `Subtitle correction` line on 07.10.2026 ("Wir brauchen keine Zwischenüberschrift da"), so the switch is the entry point, not a heading above it. What the switch does sits in its **own** `fieldDescription`: the audio path of §4.3, constant as one shift and moving as a staircase. The audio track is chosen by language (§4.3.1) — not a choice the operator makes, so it carries no switch. **The behaviour stays.** The removed entries keep their defaults in the configuration file (`QaDownloadAudioTrackByLanguage` `true`; `QaDownloadDriftCheck` and `QaDownloadDriftReject` `false`), so an existing installation behaves as the page shows. **Test: T113, extended.**
+**F-M302:** **A user-facing text must not contradict the code, and length plus a ban list cannot carry that.** A short sentence stating the opposite of the code satisfies a length cap AND a ban list, so T113 also matches the **refuted claims** — `cannot correct` / `can not correct`, `has no valid single correction`, `is only reported`, `never shifted`, `cannot touch` — across **every user-visible text node**: the section intros, the per-switch `fieldDescription` blocks **and the switch labels**, since a description-only scope misses a label. The list stays narrow on purpose: it names the refuted phrasings, not every mention of drift, because a check that fires on correct prose gets disabled. **Test: T113, extended.**
+**F-M303:** **The correction sections are ONE section, and it carries ONE switch.** One block, one switch, `QaDownloadAutoSync`, governing the ONE correction — and the block carries **no intermediate heading**: the switch is the entry point, not a heading above it. What the switch does sits in its **own** `fieldDescription`: the audio path of §4.3, constant as one shift and moving as a staircase. The audio track is chosen by language (§4.3.1) — not a choice the operator makes, so it carries no switch. **The behaviour stays.** The removed entries keep their defaults in the configuration file (`QaDownloadAudioTrackByLanguage` `true`; `QaDownloadDriftCheck` and `QaDownloadDriftReject` `false`), so an existing installation behaves as the page shows. **Test: T113, extended.**
 **F-M304 [D] (development):** **A switch switches the whole of what it names, and the page offers no switch for something that is simply right.**
 
 **Rule — the switch governs every route that moves the file.** One visible switch, `QaDownloadAutoSync`, governs the constant shift (§4.3.2) **and** the staircase (§4.3.3) — every path that moves a file. A switch that does not switch what it names is worse than no switch.
@@ -573,64 +572,11 @@ not undo the corrected file; it is logged as a warning.
 
 **F-M306 [D] (development):** **The untouched original is kept as a ONE-ENTRY ARCHIVE, and nothing else.**
 
-**Rule.** The pipeline writes `<base>.<lang>.srt.unsynchronized.zip`, holding **exactly ONE entry**
-whose name is `<base>.<lang>.srt.unsynchronized` and whose payload is the **fetched bytes, verbatim**
-— the download's own buffer, with **no encode step in between**. **No loose copy is written beside
-it** — the archive is the only artefact kept.
+**Rule.** The pipeline writes `<base>.<lang>.srt.unsynchronized.zip`, holding **exactly ONE entry** whose name is `<base>.<lang>.srt.unsynchronized` and whose payload is the **fetched bytes, verbatim** — the download's own buffer, with **no encode step in between** (a decode/re-encode round trip prepends a second BOM to a payload that already has one). **No loose copy is written beside it**: unpacking is the operator's step. Why the name sits where it does, see §4.3.4.
 
-**No round trip (defect fixed 07.10.2026).** The payload used to be
-`Encode(DecodeSrt(bytes), StyleOfBytes(bytes))` — a decode/re-encode of the bytes it was meant to
-preserve. On a payload that already carried a BOM the encoder prepended a **second** one: measured on
-a real library file, **55 108 B became 55 111 B** with the header `EF BB BF EF BB BF`. The archive is the
-one artefact whose whole purpose is to BE the uncorrected file, so it is the buffer as received. Every
-assertion in the test file stayed green through the defect: the fixture carried no BOM, and the helper
-faithfully archived whatever argument it was handed — the defect was in the ARGUMENT, which is why
-T118 now asserts the argument (and the fixture carries a BOM).
-
-**Why only the archive (operator order, 07.10.2026).** `Nur das zip ablegen. Wenn ich es entpacken
-will mache ich das selber.` Unpacking is the operator's step, not the pipeline's, so the pipeline
-leaves exactly one artefact. Two forms of the same bytes also meant two writes that could fail
-independently for no gain, and the loose copy had no reader anywhere in the plugin.
-
-**Why the name sits after `.srt`, and why the entry carries it.** Both listing patterns this plugin
-uses — the sidecar listing `baseName + "*.srt"` (F-M251) and the seeder's `"*.srt"` — match on the
-`.srt` **ending**; a name ending in `.zip` matches neither, so the archive is invisible to both and
-can never be read as a subtitle. The entry keeps the `.unsynchronized` name so that unpacking it into
-the media folder yields a file that is recognisable and that cannot clobber the corrected
-`<base>.<lang>.srt` — the name still ends in `.srt.unsynchronized`, never in `.srt`.
-
-**Both tracks.** The HI variant goes through the **same helper** as the main one, so the two cannot
-drift apart and neither track needs a second implementation.
-
-**Why not a switch.** It is the same act the correction already performs, described once:
-`QaDownloadAutoSync` governs it (F-M304).
-
-**Failure posture.** A failure to write the archive does **not** undo the corrected file; it is logged
-as a warning. Nothing here may cost a saved subtitle.
-
-**Deterministic.** The entry carries a fixed timestamp and the archive holds no directory entry, so the
-same input yields the same bytes on every run — otherwise a byte comparison could never be a test.
+**Both tracks, one helper** — the HI variant goes through the same one, so the two cannot drift apart. **Deterministic:** a fixed entry timestamp and no directory entry, so the same input yields the same bytes, which is what lets T118 compare byte for byte. **Failure posture:** a failed write is logged as a warning and never undoes the corrected file. Governed by `QaDownloadAutoSync` (F-M304) — no second switch.
 
 **Test: T118.**
-
-**The HI variant is synced by the same staircase.** It goes through the same gate and the same rules.
-Leaving it out would produce a corrected main subtitle beside an uncorrected HI file of the same
-episode — and the HI pool is where the drift gate measured its findings (all 38 measured HI files
-drifted), so this is precisely the case the staircase exists for.
-
-**Cost and posture.** One full audio decode per saved file, measured on the production Pi 5 with a
-49 min HEVC episode: **11 s wall / 21 s CPU** (median of three runs; the decode runs at ~1.9 cores of
-the four available, so it does not monopolise the box). A staircase costs **no extra decode**: it
-is the same verdict, applied per segment. This is the **ONE switch of the correction section**, `QaDownloadAutoSync`, **default on**; it runs the drift gate itself, so the verdict is measured once rather than decoded twice. The reporting-only entries the section once carried are off and no longer on the page (F-M303).
-
-**Tests: T110 (synthetic: track priority with the 2-vs-3-letter cases, exact shift, refusal on a
-negative first cue, byte style, the suffix against the real listing pattern), T118 (the archived
-original: one entry, the payload byte-identical to the fetched bytes and carrying a BOM so a doubled
-one is visible, a name that matches neither listing pattern), T111 (end-to-end on a
-real episode: the plain subtitle comes back near zero, a planted shift is measured and removed, and
-the result is checked against the plain subtitle, which took no part in the measurement), T114 (the
-staircase: detected segments, both planted steps surviving the order guard, the residual bound, and
-the constant case reporting no segments).**
 
 ## 5. Upload Postprocessing
 
@@ -1133,8 +1079,7 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M230:** **The Libraries description states function and default in one line.** Wording: `Only selected libraries are processed. None: no upload or download. Default: None.` Field descriptions state function plus default value, nothing else. **Test: T45.**
 
-**F-M299:** **An intro block under a section heading describes what the section does — measurements never appear on the settings page.** A section intro explains the mechanism and the one consequence the operator must act on; measured values, episode counts, before/after numbers, accuracy figures and share-of-files statistics are **spec and commit material**, not UI text. Two intro blocks shipped at **392 and 493 rendered characters** carrying `Measured accurate to about 0.2 s` and `Measured on 36 drifting episodes: worst line 10.74 s → 0.17 s, 36 of 36 improved`; the operator rejected that as the storyteller returning, and the same detail already lives in §4.3/§4.4 and in the commit message. **Budget: 300 rendered characters** per intro, the accepted house norm being the Drift-check intro (~241) and the two rewritten intros at 222 and 256. The same holds for a `fieldDescription` under a checkbox: it states what the switch does and its default, and a diagnostic figure such as a failure share belongs in the log line that measures it. **Test: T113.**
-
+**F-M299:** **An intro block under a section heading describes what the section does — measurements never appear on the settings page.** Measured values, episode counts, before/after numbers, accuracy figures and share-of-files statistics are **spec and commit material**, not UI text. **Budget: 300 rendered characters** per intro. The same holds for a `fieldDescription` under a checkbox: it states what the switch does and its default, and a diagnostic figure such as a failure share belongs in the log line that measures it. **Test: T113.**
 **F-M229:** **Links in the settings page use the same accent blue as the rest of the page.** Jellyfin's stylesheet ships only `a{color:inherit}`, so the links in the field descriptions fell back to the browser default `#0000EE`. Rule: `#SubdlSyncConfigPage a { color: #00a4dc; }` — exactly one blue, no separate hover shade. Scope: link colour only; the destructive red and the status colours are untouched. **Test: T44.**
 
 **F-M228:** **The settings page marks required fields in the accent colour `#00a4dc`, without extra spacing.** Red is reserved for destructive and failed states, so a red marker made a mandatory field look like a fault. The inline variant carries no margin of its own. Scope: the four markers and their two style rules. **Test: T43.**

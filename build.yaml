@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.180"
+version: "12.1.12.181"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,11 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.181: The archived original is now stored exactly as SubDL delivered it. Files that
+    already carried a byte-order mark were saved with a SECOND one in front, because the archive
+    was decoded and re-encoded before being written; measured, 55108 bytes came back as 55111.
+    Only a corrected file now goes out normalized — UTF-8, no BOM, LF — so the bytes on disk are
+    the bytes the stored hash describes. A file the correction did not touch is unchanged.
   v12.1.12.180: The correction section showed FIVE switches for ONE mechanism, and the operator
     said so plainly: "Ein toggle, nicht 5". It is now one switch, "Correct subtitle timing", doing
     what all five described: shift the file onto the audio (one constant offset, or segment by
