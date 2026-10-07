@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.186.
+**Status:** Implementation — v12.1.12.187.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -35,7 +35,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 12 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 27 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 30 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -1324,13 +1324,43 @@ same helper under the same threshold as the general branch, so it changed nothin
 policy that did not exist. A missing ffmpeg is reported once per run by `FfmpegTools` at Warning
 level, which is visible at Normal. **Test: T124.** See F-M24a, F-M286, F-M307.
 
+**F-M313 [B1] (user decision 07.10.2026):** **The statistics row counts the LOOSE subtitle files the seeder renamed so their name carries the language, in its own row.**
+
+F-M278 renames an unlabelled sidecar to the shape this plugin writes. That is work on a file the operator owns, and it was visible only in the log. It gets its own row — `Loose subtitles: language codes added` — rather than sharing the container row, because it is a different act on a different kind of file: a container gets a language tag **inside**, a loose `.srt` gets a new **name**. One number for both could be read as either.
+
+**No direction prefix**, for exactly the reason the container row has none: the seeder serves both directions.
+
+Counted on the MOVE, not on the attempt. Every refusal — the target name taken, a directory that cannot be listed, a filesystem error — leaves the file where it was and must not appear in the statistics as work that was done.
+
+**F-M312 [B1] (defect fixed 07.10.2026):** **A dry run does not rename either.**
+
+The container rewrite was already suppressed by F-M263, but this rename had **no dry-run guard at all**: the seeder contained not a single `DryRun` check, and the gate's switch covers the container only. So a dry run moved the user's files around while its documentation promises it "writes nothing" (F-M22). The seeder now has one predicate for the whole class — `DryRunActive`, true when **either** direction has a dry run armed — because the seeder belongs to no direction; tying it to one switch would let the other dry run edit the library. Detection still runs: the value of a dry run is answering what it WOULD do. The file is then recorded under its CURRENT name, the one really on disk.
+
+**Test: T127.** See F-M22, F-M259, F-M263, F-M278, F-M311.
+
+**F-M311 [B1] (user decision 07.10.2026):** **The statistics row counts the media FILES whose language codes the seeder wrote, and that row carries no direction.**
+
+The seeder's allocation pass (F-M261) rewrites media containers, and until now that was visible only in the log. It is work the run did to the LIBRARY, not work that entered or left it, and the row reported only the latter — a run that edited 40 files read exactly like one that edited none.
+
+The count is one per FILE, not per code (user decision): a file that got three tags counts once, because the question the line answers is "how many media files did the run edit". The gate keeps reporting the per-track number on its own Normal line, where the languages themselves are named.
+
+**No direction prefix.** Every other quality row is prefixed because its counter is produced inside a direction; this one is not — the seeder serves both, and the allocation pass sits BEFORE the direction checks, so it runs on every scan whichever direction was asked for. A `Downloads:` prefix would claim a scope the count does not have. The label therefore reads `Media files: language codes added`.
+
+Counted only when the write actually happened: a dry run `stand`s the write down (F-M263), the switch `Allocate missing language codes` is off by default, and a detector that cannot decide writes nothing on purpose (F-M261). All three leave the counter at 0 — no dry-run filter is needed at the statistics boundary, because the count cannot exist in a run that wrote nothing. **Test: T126.** See F-M261, F-M308.
+
 **F-M308 [B1] (user decision 07.10.2026):** **The statistics counters are a TABLE, one row per counter, and the table names the direction each count belongs to.**
 
 Form: label left, number right, both columns bounded so the numbers form **one vertical line** — the
 counters are compared at a glance, and a run-on sentence makes that impossible (the user could not read
-the previous single line). The two volume counters lead; the quality counters follow. Every quality row
-names its direction where the data is per-direction (`Uploads:` / `Downloads:`), and where one counter
-covers both directions the row says so instead of picking one.
+the previous single line).
+
+**The order is the user's (07.10.2026):** the two volume counters lead with **download first** (it is the
+direction every install runs, and it sat second before), then the counter that covers **both** directions,
+then the remaining rows **grouped by direction — all downloads, then uploads**. A reader meets one
+direction's numbers together instead of hopping between the two. Every quality row names its direction
+where the data is per-direction (`Uploads:` / `Downloads:`), and where one counter covers both directions
+the row says so instead of picking one. The order is asserted (T123) because a regrouping that reverts is
+invisible: the table still renders, no number changes, it just reads the old way.
 
 The wording states what happened, not the code's vocabulary. Four counters, plus the fit:
 
@@ -1338,8 +1368,11 @@ The wording states what happened, not the code's vocabulary. Four counters, plus
   uploads rejected after being fetched — upload candidates fetched and then thrown away.
   downloads rejected after being fetched — download candidates fetched and then thrown away.
   searches run without the year tag — TMDb searches that only matched once the year filter was dropped.
-  fitted to the audio track — downloaded subtitles the run MOVED onto their audio track (F-M307), counted
-  when the correction is APPLIED; the upload direction has no audio fit, so its row is a download row.
+  timing aligned on a spoken track — downloaded subtitles the run MOVED onto their audio track
+  (F-M307), counted when the correction is APPLIED; the upload direction has no such row, because
+  it has no audio to align against. The label is worded like the switch above it ("Correct subtitle
+  timing", "...on a spoken track") and follows the `Downloads:` pattern of the rows around it, so
+  the table speaks one language instead of mixing "fitted" (the code's word) into the user's view.
 
 **Test: T123.** See F-M218, F-M286.
 
@@ -1664,9 +1697,11 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T121:** The two defects of F-M307 are regression cases and must fail loudly if they return: **(a)** a shifted cue window that falls outside the audio scores 0 and is **excluded** — the fit must never return a boundary-runner shift on cues that were not moved (the clipped behaviour returned shifts at the search limit); **(b)** the before/after report is scored with the **real cue ends**, asserted against a known value, because a report over one frame at the cue start silently makes the deploy rule revert good files. (F-M307)
 **T122:** The streaming decoder, asserted as two ABSENCES on the plugin source, because neither shows up in a log line and both would return silently: the sample-materialising decoder is gone (no `ms.ToArray()` and no `new float[…]` on the audio path — it held a 514 MB `byte[]` and a 514 MB `float[]` at once and the OOM killer took the 140-minute files) while the streaming entry point exists; and **nothing persists the level curve** — no file, no cache, no database column, and no curve-shaped field in `Data/Entities.cs`. Negative-controlled: planting `new float[…]` back into the audio path turns the assertion RED (measured 07.10.2026), so the two absences are guarded and not merely declared. (F-M307)
-**T123:** The statistics table renders one ROW per counter with the label and its number in two bounded columns, and every row names the direction its count belongs to where the data is per-direction. Asserted on the page source, because the numbers are the only readout of what a run did: the eight rows exist, the two volume counters carry the total weight, the fitted-to-audio row reads the `FittedToAudio` field (F-M308) and not a field that never leaves 0, and no row claims a direction the counter does not have. The page source is the same file pair that is checked structurally — a row added to one copy only is the F-M218 file-pair trap. The **reset** is guarded on the SOURCE: every counter on the status row must be zeroed by `ResetStatusStats()`, and every counter PARAMETER must appear in the writer's early-out — a counter added later and forgotten in either place fails silently, showing an old total beside a button that claims to have cleared it, or dropping a run that only did the new work. Both were planted and confirmed RED. (F-M308)
+**T123:** The statistics table renders one ROW per counter with the label and its number in two bounded columns, and every row names the direction its count belongs to where the data is per-direction. The **row order** is asserted too (user order 07.10.2026): the volume rows lead with download before upload, then the both-directions row, then the remaining rows grouped by direction with all downloads before the uploads, and every row appears exactly once. Asserted because a regrouping that reverts changes no number: the table still renders correctly, it just reads the old way. Asserted on the page source, because the numbers are the only readout of what a run did: the eight rows exist, the two volume counters carry the total weight, the fitted-to-audio row reads the `FittedToAudio` field (F-M308) and not a field that never leaves 0, and no row claims a direction the counter does not have. The page source is the same file pair that is checked structurally — a row added to one copy only is the F-M218 file-pair trap. The **reset** is guarded on the SOURCE: every counter on the status row must be zeroed by `ResetStatusStats()`, and every counter PARAMETER must appear in the writer's early-out — a counter added later and forgotten in either place fails silently, showing an old total beside a button that claims to have cleared it, or dropping a run that only did the new work. Both were planted and confirmed RED. (F-M308)
 **T124:** The fit's logging split, asserted on the source: the run START line names the fit switch (`audio fit=`), the run DONE line carries the fit counter (`fitted to audio`), and the per-file track line is emitted only under the fit switch and only at Verbose. Asserted because the levels are what make the feature falsifiable in the field: a fit that leaves no Normal trace cannot be told from a fit that never ran, and the counter is required to be printed somewhere. Planting a missing `fitted to audio` in the DONE line and a track line moved to Normal each turn it RED. (F-M309)
 **T125:** The alignment time is credited against the transfer pacing, with a floor at zero, driven against the real limiter: an unbooked credit returns the jittered pause; a credit above the pause lands on exactly 0 and never negative (asserted at two rates, because one base value would make the bound look like an artefact); a partial credit pulls the pause under the ceiling that credit implies; the credit is spent once and not carried; zero and negative bookings are discarded, asserted through the pause because a negative booking would ADD to it. Plus, on the source: both transfer gaps use the crediting pause, both alignments go through the measuring helper, exactly one raw call remains (the helper's own), the helper books the measurement to the limiter and keeps the run total. The three source-level checks exist because every numeric case passes in a state where the measurement is taken and never credited — the feature would silently do nothing. All failure modes planted and confirmed RED. (F-M310)
+**T126:** The seeder's language-code counter reaches the statistics row and survives all four paths it must cross — row field, writer, reset, API — plus the GUI row that displays it. Asserted end to end on the sources because a counter that is added but never carried dies silently at any one of them: the value is produced in the seeder, forwarded on the snapshot, consumed by the dispatcher and written by the plugin, and every hop is a place where a rename or a forgotten parameter leaves a permanent 0 beside a working reset button. The row must carry NO direction prefix, because the seeder serves both directions; the reset must zero the new counter; the API must publish it in BOTH of its responses; and the GUI row must read the published field and appear exactly once in the order F-M308 prescribes. Six failure modes planted (counter not zeroed, counter not incremented, field missing from the endpoint, row removed, row wrongly prefixed, row reading an invented field), all six confirmed RED. (F-M311)
+**T127:** The loose-subtitle counter reaches the statistics row and the dry run does not rename. On the source, because both failures are silent: a rename performed by a dry run contradicts the report rather than the log, and a counter wired to the attempt instead of the move counts tidying that never happened. Asserted: the seeder has a dry-run predicate naming BOTH switches (checked on the predicate body, not the call site — an earlier form of this check was true for any file containing the call and could never fail), the rename consults it ABOVE the move, `renamed` is set AT the move and nowhere else, the row counts renames and not registry rows, and the second counter follows the same accumulate-across-scans / consume-once rule as F-M311's. Four failure modes planted (guard removed, predicate narrowed to one direction, `renamed` set at entry, the row counting `Rows`), all four confirmed RED. (F-M312, F-M313)
 ## 20. References
 
 - Plugin template: github.com/jellyfin/jellyfin-plugin-template

@@ -31,6 +31,13 @@ using Jellyfin.Plugin.SubdlScribe.Data;
 
 namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
 
+/// <summary>
+/// F-M313: what one sidecar observation pass produced. Two numbers, deliberately not one.
+/// </summary>
+/// <param name="Rows">Registry rows created or changed.</param>
+/// <param name="Renamed">Loose files renamed so their name carries the detected language (F-M278).</param>
+public readonly record struct SidecarObservation(int Rows, int Renamed);
+
 /// <summary>Result of one seeder pass: fresh candidate lists per direction.</summary>
 public sealed class SeedSnapshot
 {
@@ -39,6 +46,21 @@ public sealed class SeedSnapshot
 
     /// <summary>Library candidates for the download queue.</summary>
     public List<QueueItem> Download { get; } = new();
+
+    /// <summary>
+    /// F-M311: language codes this scan WROTE into media containers. Carried on the snapshot because
+    /// the count is produced by the scan and consumed by the statistics row, which is written from
+    /// the dispatcher — the seeder has no other channel to the row.
+    /// </summary>
+    public int LanguageCodesAllocated { get; set; }
+
+    /// <summary>
+    /// F-M313: LOOSE subtitle files this scan renamed so their name carries the detected language
+    /// (F-M278). Kept apart from <see cref="LanguageCodesAllocated"/> because it is a different act
+    /// on a different kind of file — a container gets a tag INSIDE, a loose .srt gets a new NAME —
+    /// and a reader seeing one number must be able to tell which happened.
+    /// </summary>
+    public int LooseSubtitlesRenamed { get; set; }
 }
 
 /// <summary>One queue entry (shared by seeder and dispatcher).</summary>
@@ -284,7 +306,10 @@ public sealed class SubdlSeeder
                 // item and the streams are cheap here; the write is idempotent after the first pass.
                 // F-M259: the same for the loose .srt files beside the media.
                 ObserveEmbeddedFacts(item, mediaPath);
-                ObserveSidecarFacts(mediaPath);
+                // F-M313: the pass reports two numbers; the rename count is what the statistics line
+                // shows. `Rows` is not counted there — registry rows are bookkeeping, not work the
+                // operator asked about.
+                snapshot.LooseSubtitlesRenamed += ObserveSidecarFacts(mediaPath).Renamed;
 
                 // F-M261 (user decision 30.09.2026): allocate missing language codes BEFORE the
                 // queue decision. This is a seeder job and not a pipeline job, and the order is the
@@ -294,7 +319,10 @@ public sealed class SubdlSeeder
                 // demonstrably carries. Only a resolution that has already happened can change that
                 // answer. The pipeline's own gate stays for the upload direction and for a directed
                 // download fire, where the seeder did not run.
-                AllocateMissingLanguageCodes(mediaPath, item);
+                // F-M311: the return value is the number of codes WRITTEN (0 in a dry run or with
+                // the switch off), and it goes on the snapshot because only the dispatcher may
+                // write the statistics row.
+                snapshot.LanguageCodesAllocated += AllocateMissingLanguageCodes(mediaPath, item);
 
                 // Event path: only the changed libraries (user decision 12.09.2026,
                 // extended 12.09.2026: targeted growth — each changed library JOINS
@@ -808,20 +836,30 @@ public sealed class SubdlSeeder
     /// </summary>
     /// <param name="mediaPath">Media file to inspect and, when needed, to rewrite.</param>
     /// <param name="item">Jellyfin item the file belongs to.</param>
-    private void AllocateMissingLanguageCodes(string mediaPath, BaseItem item)
+    /// <summary>
+    /// F-M261 with F-M311: resolves untagged tracks and writes the found languages back, returning
+    /// how many codes were actually WRITTEN (0 when the switch is off, when the detector could not
+    /// decide, or in a dry run — the write half stands down there). The return value is what the
+    /// statistics row counts; the method's own reporting stays as it was.
+    /// </summary>
+    /// <param name="mediaPath">Media file to inspect.</param>
+    /// <param name="item">The Jellyfin item owning it.</param>
+    /// <returns>1 when this file was written, 0 when nothing was written. One per FILE, not per
+    /// code: the statistics line answers "how many media files did the run edit".</returns>
+    private int AllocateMissingLanguageCodes(string mediaPath, BaseItem item)
     {
         try
         {
             var config = Plugin.Instance?.Configuration;
             if (config?.AllocateMissingLanguageCodes != true)
             {
-                return;
+                return 0;
             }
 
             var db = Plugin.Instance?.SharedDbContext;
             if (db == null)
             {
-                return;
+                return 0;
             }
 
             var registry = new Registry.ContentHashRegistry(db);
@@ -837,7 +875,7 @@ public sealed class SubdlSeeder
 
             if (!anyUntagged)
             {
-                return;
+                return 0;
             }
 
             var resolved = gate.RunAsync(
@@ -846,7 +884,7 @@ public sealed class SubdlSeeder
 
             if (resolved.Written == 0)
             {
-                return;
+                return 0;
             }
 
             // The file was rewritten: it has a new identity. Move everything it owned across, or it
@@ -882,12 +920,22 @@ public sealed class SubdlSeeder
             // The remaining tracks of the file (the ones whose tag was already readable) are still
             // recorded by the normal pass.
             ObserveEmbeddedFacts(item, mediaPath);
+
+            // F-M311 (user decision 07.10.2026): the statistics line counts FILES, not codes — so a
+            // file that got three tags counts once, not three times. Which is the question the line
+            // answers: "how many files did the run edit", not "how many tags exist now". The GATE
+            // keeps reporting the per-track number (its own Normal line names the count and the
+            // languages); only what reaches the statistics row is collapsed to one per file.
+            // Deliberately `1`, not `resolved.Written`: the file was written, and how OFTEN is a
+            // detail the per-file line carries.
+            return 1;
         }
         catch (Exception ex)
         {
             // Never a precondition: the item is queued by the rules that applied before this gate.
             LogUtil.Detail(_logger, "[SubDL-Seed] language allocation skipped for {File}: {Msg}",
                 System.IO.Path.GetFileName(mediaPath), ex.Message);
+            return 0;
         }
     }
 
@@ -960,6 +1008,15 @@ public sealed class SubdlSeeder
     }
 
     /// <summary>
+    /// F-M312: true when EITHER direction has a dry run armed, so the write halves must stand down.
+    /// One predicate for the whole seeder, mirroring <c>LanguageTagGate.DryRunActive</c> — the seeder
+    /// belongs to no direction (it scans before both), so tying a write to one switch would let the
+    /// other dry run edit the library, which is exactly what F-M22 forbids.
+    /// </summary>
+    private static bool DryRunActive()
+        => Plugin.Instance?.Configuration is { } c && (c.DryRun || c.DownloadDryRun);
+
+    /// <summary>
     /// Moves an unlabelled sidecar onto the name this plugin writes, once its language is known.
     /// <para>
     /// F-M278 (user decision 01.10.2026). Only ever called for a file whose name carried NO language
@@ -977,9 +1034,15 @@ public sealed class SubdlSeeder
     /// <param name="mediaPath">Media file the sidecar belongs to.</param>
     /// <param name="loosePath">Current path of the unlabelled sidecar.</param>
     /// <param name="lang">The language resolved from the file's text.</param>
+    /// <param name="forced">True when the sidecar name marks a forced track.</param>
+    /// <param name="renamed">F-M313: true when the file was really moved under a new name. False on
+    /// every refusal (target taken, unlistable directory, filesystem error, dry run) — the caller
+    /// counts only real moves, so the statistics line cannot claim a rename that did not happen.</param>
     /// <returns>The path the file is at after this call — the new one, or the original on any refusal.</returns>
-    private string RenameSidecar(string mediaPath, string loosePath, string lang, bool forced)
+    private string RenameSidecar(string mediaPath, string loosePath, string lang, bool forced, out bool renamed)
     {
+        // F-M313: false on EVERY exit that is not a real move, set true only at the move below.
+        renamed = false;
         try
         {
             string? dir = System.IO.Path.GetDirectoryName(loosePath);
@@ -1004,6 +1067,20 @@ public sealed class SubdlSeeder
                 return loosePath; // cannot list the directory — do not guess at a free name
             }
 
+            // F-M312 (defect fixed 07.10.2026): a dry run must not rename either. The container
+            // rewrite is suppressed by F-M263, but this rename had NO dry-run guard at all — the
+            // seeder contains not a single DryRun check, and the gate's switch only covers the
+            // container. So a dry run moved the user's files around while reporting that it writes
+            // nothing (F-M22). Detection still runs (the run's value is what it WOULD do), and the
+            // caller records the file under its CURRENT name — the name that is really on disk.
+            if (DryRunActive())
+            {
+                LogUtil.Normal(_logger,
+                    "[SubDL-Seed] {Old} names no language — detected {Lang}; dry run: NOT renamed (F-M312).",
+                    System.IO.Path.GetFileName(loosePath), lang);
+                return loosePath;
+            }
+
             string target = Registry.SidecarNaming.PlanTarget(mediaPath, lang, hearingImpaired: false, taken, forced);
             string targetName = System.IO.Path.GetFileName(target);
 
@@ -1018,6 +1095,7 @@ public sealed class SubdlSeeder
             LogUtil.Normal(_logger,
                 "[SubDL-Seed] {Old} names no language — detected {Lang}, renamed to {New}",
                 System.IO.Path.GetFileName(loosePath), lang, targetName);
+            renamed = true;
             return target;
         }
         catch (Exception ex)
@@ -1046,25 +1124,33 @@ public sealed class SubdlSeeder
     /// </para>
     /// </summary>
     /// <param name="mediaPath">Media file path.</param>
-    /// <returns>Number of rows created or changed.</returns>
-    private int ObserveSidecarFacts(string mediaPath)
+    /// <returns>Number of rows created or changed, and — via <see cref="SidecarObservation.Renamed"/>
+    /// — how many loose files were renamed so their name carries the language (F-M313). Two numbers
+    /// because they are not the same: a file can be renamed while its row already exists (nothing
+    /// written), and a file can be recorded without any rename (its name was already correct).</returns>
+    private SidecarObservation ObserveSidecarFacts(string mediaPath)
     {
         try
         {
             var db = Plugin.Instance?.SharedDbContext;
             if (db == null)
             {
-                return 0;
+                return new SidecarObservation(0, 0);
             }
 
             var registry = new Registry.ContentHashRegistry(db);
             string? mediaHash = registry.GetMediaHash(mediaPath);
             if (string.IsNullOrEmpty(mediaHash))
             {
-                return 0;
+                return new SidecarObservation(0, 0);
             }
 
             int written = 0;
+            // F-M313: loose files renamed in this call, separate from `written` (which counts registry
+            // rows). Both are needed and they are NOT the same number: a file can be renamed while its
+            // row already exists (nothing written), or be recorded with no rename at all (its name was
+            // already correct). One counter for both would be true in neither case.
+            int looseRenamed = 0;
             // F-M239/F-M259: the shared name reader (SidecarNaming.List), NOT the seeder's own
             // FindLooseSrts below — that copy returns bare paths and carries no language or HI
             // marker, so it cannot answer the question this method records. Reading a name here with
@@ -1133,7 +1219,14 @@ public sealed class SubdlSeeder
                 if (wasUnlabeled)
                 {
                     string before = loosePath;
-                    factPath = RenameSidecar(mediaPath, loosePath, resolvedLang!, looseForced);
+                    factPath = RenameSidecar(mediaPath, loosePath, resolvedLang!, looseForced, out bool renamed);
+                    if (renamed)
+                    {
+                        // F-M313: one per loose file whose NAME now carries the language. Counted on
+                        // the move itself, not on the attempt: a refusal leaves the file where it was
+                        // and must not appear in the statistics as work that was done.
+                        looseRenamed++;
+                    }
 
                     // A rename leaves any existing row pointing at a name that no longer exists, and
                     // the refresh task forgets a sidecar whose stored path is gone — it would destroy
@@ -1153,13 +1246,13 @@ public sealed class SubdlSeeder
                 }
             }
 
-            return written;
+            return new SidecarObservation(written, looseRenamed);
         }
         catch (Exception ex)
         {
             LogUtil.Detail(_logger, "[SubDL-Seed] sidecar facts not recorded for {File}: {Msg}",
                 System.IO.Path.GetFileName(mediaPath), ex.Message);
-            return 0;
+            return new SidecarObservation(0, 0);
         }
     }
 

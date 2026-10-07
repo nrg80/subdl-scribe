@@ -973,18 +973,32 @@
                             // form one vertical line and are comparable. Each label names the direction
                             // it belongs to ("uploads" / "downloads") — the previous run-on sentence
                             // packed both directions and both meanings into one line the user could not
-                            // read. The two volume counters keep their own rows; the quality rows follow.
+                            // read.
+                            // The ORDER is the user's (07.10.2026): the two volume counters lead with
+                            // the download direction FIRST — it is the direction every install runs,
+                            // and it was the one sitting second; then the counter that covers both
+                            // directions; then the remaining rows grouped BY DIRECTION, downloads
+                            // before uploads, so a reader meets one direction's numbers together
+                            // instead of hopping between the two. T123 asserts this order on the
+                            // source, because a regrouping that silently reverts is invisible: the
+                            // table still renders, it just reads the old way.
                             // The wording states what happened, not the code's vocabulary: type is
                             // movie/series, a search without the year tag, a fetch that was thrown away,
-                            // and a subtitle the run moved onto its audio track.
+                            // a subtitle whose timing the run aligned on a spoken track, and a media
+                            // file whose language codes the seeder wrote, and a LOOSE subtitle file
+                            // the seeder renamed so its name carries the language. The last two rows are
+                            // the only ones that are NOT a direction: they count FILES the run edited on
+                            // disk, and the seeder serves both directions, so neither carries a prefix.
                             var rows = [
-                                ['Subtitles uploaded', s.Uploaded || 0, true],
                                 ['Subtitles downloaded', s.Downloaded || 0, true],
+                                ['Subtitles uploaded', s.Uploaded || 0, true],
                                 ['Type (movie/series) adjusted, both directions', s.TypeCorrectedByFileName || 0],
-                                ['Uploads: rejected after being fetched', s.RejectedUpload || 0],
                                 ['Downloads: rejected after being fetched', s.RejectedDownload || 0],
                                 ['Downloads: searches run without the year tag', s.TmdbYearFilterMisses || 0],
-                                ['Downloads: fitted to the audio track', s.FittedToAudio || 0]
+                                ['Downloads: timing aligned on a spoken track', s.FittedToAudio || 0],
+                                ['Uploads: rejected after being fetched', s.RejectedUpload || 0],
+                                ['Media files: language codes added', s.LanguageCodesAllocated || 0],
+                                ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0]
                             ];
                             el.innerHTML = '';
                             rows.forEach(function (r) {

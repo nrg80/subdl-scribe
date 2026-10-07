@@ -329,6 +329,41 @@ def main():
     check("no run-on quality line is left in the renderer",
           "StatsQualityLine" not in renderer and "Corrections and rejects" not in renderer)
 
+    # The ORDER of the rows is the user's (07.10.2026): volumes first with DOWNLOAD leading, then
+    # the both-directions counter, then the rest grouped by direction (downloads, then uploads).
+    # Asserted because a regrouping that reverts is invisible — the table still renders, it just
+    # reads the old way, and no number changes. The labels are matched as they appear in `rows`.
+    order = re.findall(r"\['([^']+)'", renderer)
+    expected_prefix = [
+        "Subtitles downloaded",
+        "Subtitles uploaded",
+        "Type (movie/series) adjusted, both directions",
+    ]
+    check("the volume rows lead, download first, then the both-directions row",
+          order[:3] == expected_prefix,
+          "got: %s" % " | ".join(order[:3]))
+    dl = [i for i, o in enumerate(order) if o.startswith("Downloads:")]
+    up = [i for i, o in enumerate(order) if o.startswith("Uploads:")]
+    check("the remaining rows are grouped by direction, downloads before uploads",
+          bool(dl) and bool(up) and max(dl) < min(up),
+          "downloads at %s, uploads at %s" % (dl, up))
+    check("every quality row is present exactly once",
+          len(order) == 9 and len(set(order)) == 9,
+          "%d row(s): %s" % (len(order), order))
+    # F-M311/F-M313: the last two rows are the only ones that are NOT a direction — they count FILES
+    # the seeder edited on disk, and the seeder serves both directions. A direction prefix on either
+    # would claim a scope the count does not have. Asserted because both sit among prefixed rows and
+    # "Downloads:" is the tempting thing to write.
+    check("the language-code row carries no direction prefix",
+          "Media files: language codes added" in order,
+          "row missing or renamed: %s" % order)
+    check("the loose-subtitle row carries no direction prefix either",
+          "Loose subtitles: language codes added" in order,
+          "row missing or renamed: %s" % order)
+    check("the two language-code rows read the fields the API sends",
+          "LanguageCodesAllocated" in html and "LooseSubtitlesRenamed" in html,
+          "a row reads a field name the API does not publish")
+
     # Every row must name a field the plugin API actually returns.
     api_src = os.path.join(os.path.dirname(path), "..", "Api", "SubdlStatusController.cs")
     api_src = os.path.abspath(api_src)
@@ -344,6 +379,11 @@ def main():
         check("the fitted-to-audio row reads a field the API sends",
               "FittedToAudio" in api_names,
               "FittedToAudio missing from the Stats endpoint")
+        # F-M311: same for the language-code counter — a name invented in the page would render a
+        # permanent 0 and look like a feature that never fires.
+        check("the language-code row reads a field the API sends",
+              "LanguageCodesAllocated" in api_names,
+              "LanguageCodesAllocated missing from the Stats endpoint")
 
         # The reset must zero EVERY counter the API publishes. This is a source cross-check
         # because the failure is silent in the worst way: add a column, forget the reset, and the
@@ -459,6 +499,66 @@ def main():
               src.count("summary.FittedToAudio++;") == 2)
     else:
         check("DownloadPipeline.cs reachable for the logging check", False, dl)
+
+    # ---- 6d. F-M311: the seeder's counter must not be lost before a run reports it ----
+    # The scan does not always get a run (no arrivals, empty queue), and it has edited files either
+    # way — so the pending counter must ACCUMULATE across scans and be cleared exactly once, by the
+    # writer. An assignment here loses every number produced by a scan whose direction ended without
+    # a run: the work would be on disk and absent from the statistics forever. Asserted on the
+    # source because the visible symptom is only ever "the counter reads 0".
+    disp = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "SubdlEventDispatcher.cs"))
+    if os.path.exists(disp):
+        dsrc = open(disp, encoding="utf-8").read()
+        check("the seeder's language-code count accumulates across scans",
+              "_pendingLanguageCodesAllocated += snapshot.LanguageCodesAllocated;" in dsrc)
+        check("and is consumed exactly once, by the statistics writer",
+              dsrc.count("_pendingLanguageCodesAllocated = 0;") == 1
+              and dsrc.count("_pendingLanguageCodesAllocated += ") == 1)
+    else:
+        check("SubdlEventDispatcher.cs reachable for the counter check", False, disp)
+
+    # ---- 6e. F-M312/F-M313: a dry run must not RENAME a loose subtitle either ----
+    # The container rewrite was already suppressed (F-M263), but this rename had NO dry-run guard:
+    # the seeder contained not one DryRun check, and the gate's switch covers the container only — so
+    # a dry run moved the user's files while reporting that it writes nothing (F-M22). Asserted on the
+    # source because the symptom is silent and rare: it only shows on an install that has unlabelled
+    # sidecars AND a dry run armed, and nothing in the log contradicts the report.
+    sd = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "SubdlSeeder.cs"))
+    if os.path.exists(sd):
+        sdsrc = open(sd, encoding="utf-8").read()
+        # The predicate must exist AND cover BOTH directions: the seeder serves no single direction,
+        # so tying the write to one switch would let the other dry run edit the library (F-M22).
+        # Matched on the PREDICATE BODY, not on the call site: an earlier form of this check tested a
+        # condition that was true for any file containing the call — it could never fail.
+        pred_start = sdsrc.find("private static bool DryRunActive()")
+        pred_body = sdsrc[pred_start:sdsrc.find(";", pred_start)] if pred_start >= 0 else ""
+        check("the seeder has a dry-run predicate covering both directions",
+              pred_start >= 0 and "DryRun" in pred_body and "DownloadDryRun" in pred_body,
+              "DryRunActive must consult BOTH switches: %r" % pred_body[:70])
+        check("and the rename consults it BEFORE moving the file",
+              "if (DryRunActive())" in sdsrc
+              and sdsrc.index("if (DryRunActive())") < sdsrc.index("File.Move(loosePath, target)"),
+              "the dry-run guard must sit above the move")
+        # The counter must count the MOVE, not the attempt: driving it off the path comparison would
+        # count a refusal whose target happened to differ, and off the call itself a dry run.
+        check("the rename counter is driven by the move, not the attempt",
+              "out bool renamed" in sdsrc and "renamed = true;" in sdsrc
+              and sdsrc.index("File.Move(loosePath, target)") < sdsrc.index("renamed = true;"),
+              "renamed must be set at the move")
+        check("the loose row counts renames, not registry rows",
+              ".Renamed;" in sdsrc and "snapshot.LooseSubtitlesRenamed += ObserveSidecarFacts(mediaPath).Renamed;" in sdsrc,
+              "the statistics row must read Renamed, not Rows")
+    else:
+        check("SubdlSeeder.cs reachable for the dry-run check", False, sd)
+
+    # ---- 6f. F-M313: the second seeder counter follows the same accumulate-and-consume rule ----
+    if os.path.exists(disp):
+        dsrc2 = open(disp, encoding="utf-8").read()
+        check("the loose-subtitle count accumulates across scans",
+              "_pendingLooseSubtitlesRenamed += snapshot.LooseSubtitlesRenamed;" in dsrc2)
+        check("and is consumed exactly once",
+              dsrc2.count("_pendingLooseSubtitlesRenamed = 0;") == 1
+              and dsrc2.count("_pendingLooseSubtitlesRenamed += ") == 1)
 
     # ---- 7. The embedded script must parse ----
     blocks = re.findall(r"<script>(.*?)</script>", html, re.S)

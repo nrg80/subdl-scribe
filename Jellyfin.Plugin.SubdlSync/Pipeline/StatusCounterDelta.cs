@@ -12,8 +12,8 @@
 namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 
 /// <summary>
-/// F-M247 (user decision 28.09.2026: "Dryrun geht nie in die Statistik"): the six cumulative
-/// counters a finished run contributes — with a dry run contributing nothing.
+/// F-M247 (user decision 28.09.2026: "Dryrun geht nie in die Statistik"): the cumulative counters a
+/// finished run contributes — with a dry run contributing nothing.
 /// <para>
 /// A dry run does real work: it searches, ranks, runs the id test and the QA gates, and every
 /// one of those steps bumps a counter in its summary. But it saves and uploads NOTHING. Letting
@@ -40,7 +40,9 @@ public readonly struct StatusCounterDelta
         long tmdbYearMisses,
         long rejectedDownload,
         long rejectedUpload,
-        long fittedToAudio)
+        long fittedToAudio,
+        long languageCodesAllocated,
+        long looseSubtitlesRenamed)
     {
         Uploaded = uploaded;
         Downloaded = downloaded;
@@ -49,6 +51,8 @@ public readonly struct StatusCounterDelta
         RejectedDownload = rejectedDownload;
         RejectedUpload = rejectedUpload;
         FittedToAudio = fittedToAudio;
+        LanguageCodesAllocated = languageCodesAllocated;
+        LooseSubtitlesRenamed = looseSubtitlesRenamed;
     }
 
     /// <summary>Gets subtitles uploaded by this run.</summary>
@@ -72,10 +76,17 @@ public readonly struct StatusCounterDelta
     /// <summary>Gets the F-M308 downloaded subtitles fitted to their audio track.</summary>
     public long FittedToAudio { get; }
 
+    /// <summary>Gets the F-M311 media files whose language codes were written into their container.</summary>
+    public long LanguageCodesAllocated { get; }
+
+    /// <summary>Gets the F-M313 loose subtitle files renamed so their name carries the language.</summary>
+    public long LooseSubtitlesRenamed { get; }
+
     /// <summary>Gets a value indicating whether this delta leaves the statistics row untouched.</summary>
     public bool IsEmpty
         => Uploaded == 0 && Downloaded == 0 && TypeCorrected == 0 && TmdbYearMisses == 0
-           && RejectedDownload == 0 && RejectedUpload == 0 && FittedToAudio == 0;
+           && RejectedDownload == 0 && RejectedUpload == 0 && FittedToAudio == 0
+           && LanguageCodesAllocated == 0 && LooseSubtitlesRenamed == 0;
 
     /// <summary>
     /// F-M247: builds the delta for one direction run, discarding everything a dry run produced.
@@ -88,8 +99,12 @@ public readonly struct StatusCounterDelta
     /// </summary>
     /// <param name="upload">The upload summary, or null when this run was a download.</param>
     /// <param name="download">The download summary, or null when this run was an upload.</param>
+    /// <param name="languageCodesAllocated">F-M311: codes the SEEDER wrote for this run. Not part of
+    /// either summary — the seeder runs before both directions — so it arrives on its own and is
+    /// passed through untouched. Zero already when a dry run or the switch stood the write down, so
+    /// no dry-run filter is needed here: the count cannot exist in a run that wrote nothing.</param>
     /// <returns>The counters to add to the statistics row.</returns>
-    public static StatusCounterDelta From(RunSummary? upload, DownloadRunSummary? download)
+    public static StatusCounterDelta From(RunSummary? upload, DownloadRunSummary? download, long languageCodesAllocated = 0, long looseSubtitlesRenamed = 0)
     {
         bool uploadDry = upload?.IsDryRun == true;
         bool downloadDry = download?.IsDryRun == true;
@@ -102,6 +117,8 @@ public readonly struct StatusCounterDelta
             tmdbYearMisses: downloadDry ? 0 : download?.TmdbYearFilterMisses ?? 0,
             rejectedDownload: downloadDry ? 0 : download?.RejectedCandidates ?? 0,
             rejectedUpload: uploadDry ? 0 : upload?.RejectedCandidates ?? 0,
-            fittedToAudio: downloadDry ? 0 : download?.FittedToAudio ?? 0);
+            fittedToAudio: downloadDry ? 0 : download?.FittedToAudio ?? 0,
+            languageCodesAllocated: languageCodesAllocated,
+            looseSubtitlesRenamed: looseSubtitlesRenamed);
     }
 }

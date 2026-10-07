@@ -139,6 +139,20 @@ public sealed class SubdlEventDispatcher : IDisposable
     private volatile string? _seederOutcome;
     private volatile string? _seederDetail;
     private volatile int _lastSeedNewItems;  // Items the last seed ADDED (new material)
+
+    // F-M311: media files whose language codes a scan WROTE and that no run has reported yet.
+    // Accumulated across scans and consumed ONCE by the statistics writer. Both halves matter: the
+    // allocation pass is direction-independent (it sits before the direction checks and edits each
+    // file once, and the second scan of a cycle finds the tags already on disk), so a cycle that
+    // seeds both directions produces the count only on its first scan — but a scan whose direction
+    // then ends WITHOUT a run (no arrivals, empty queue) would lose its number if this were
+    // assigned rather than added.
+    private int _pendingLanguageCodesAllocated;
+
+    // F-M313: loose subtitle files a scan RENAMED so their name carries the language (F-M278).
+    // Same channel and same rule as the counter above: accumulated across scans, consumed once by
+    // the statistics writer. Kept separate because it is a different act on a different file kind.
+    private int _pendingLooseSubtitlesRenamed;
     // Rev.3: the ITEM IDS the last seed added (per direction) — the
     // final sweep run processes ONLY these, never the retry-queued leftovers
     // of the earlier run in the same cycle.
@@ -1071,13 +1085,20 @@ public sealed class SubdlEventDispatcher : IDisposable
         Pipeline.RunSummary? upSummary,
         Pipeline.DownloadRunSummary? downSummary)
     {
+        // F-M311: the seeder's language-code writes belong to this run. Consumed here so the second
+        // direction of the same cycle cannot report them a second time.
+        long langAllocated = _pendingLanguageCodesAllocated;
+        _pendingLanguageCodesAllocated = 0;
+        long looseRenamed = _pendingLooseSubtitlesRenamed;
+        _pendingLooseSubtitlesRenamed = 0;
+
         // F-M247 (user decision 28.09.2026: "Dryrun geht nie in die Statistik"): the dry-run
         // filter lives in StatusCounterDelta.From, not here — this method stays a plain
         // write, and the rule sits in one testable place. A dry run does real work (search,
         // ranking, id test, QA) and so fills its summary, but it writes nothing to SubDL or
         // to disk; counting it reported subtitles nobody ever wrote. Live 28.09.2026: 771 of
         // the 858 "downloaded" entries came from one afternoon of dry runs.
-        var delta = Pipeline.StatusCounterDelta.From(upSummary, downSummary);
+        var delta = Pipeline.StatusCounterDelta.From(upSummary, downSummary, langAllocated, looseRenamed);
         if (delta.IsEmpty)
         {
             return;
@@ -1092,7 +1113,9 @@ public sealed class SubdlEventDispatcher : IDisposable
                 delta.TmdbYearMisses,
                 delta.RejectedDownload,
                 delta.RejectedUpload,
-                delta.FittedToAudio);
+                delta.FittedToAudio,
+                delta.LanguageCodesAllocated,
+                delta.LooseSubtitlesRenamed);
         }
         catch (Exception ex)
         {
@@ -1554,6 +1577,16 @@ public sealed class SubdlEventDispatcher : IDisposable
             try
             {
                 snapshot = _seeder.Scan(config, onlyLibraries, dir, onlyItemIds);
+                // F-M311: hand the scan's writes to the statistics row. ADDED, not overwritten.
+                // A scan does NOT always get a run: the direction ends before it when no arrivals
+                // were queued ("no arrivals queued — no run") or when its queue holds nothing to do,
+                // and the seeder has edited files either way. Assigning would let the NEXT scan's
+                // number wipe the first one's before any run could report it — the work would then
+                // be done on disk and absent from the statistics forever. Adding keeps it until a
+                // run consumes it. Double counting is impossible: the counter is cleared exactly
+                // once, by the writer, and only a scan adds to it.
+                _pendingLanguageCodesAllocated += snapshot.LanguageCodesAllocated;
+                _pendingLooseSubtitlesRenamed += snapshot.LooseSubtitlesRenamed;
                 RecordSeeder(
                     Registry.WorkerRunRegistry.Outcome.Ok,
                     string.Format(

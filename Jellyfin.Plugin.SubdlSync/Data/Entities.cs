@@ -552,6 +552,26 @@ public class StatusStatsEntity
     /// </summary>
     public long FittedToAudio { get; set; }
 
+    /// <summary>
+    /// F-M311: media FILES whose language codes were written by the seeder's allocation pass — not a
+    /// download and not an upload. One count is one file that got at least one real tag where it had
+    /// none (or had <c>und</c>), counted only when the write actually happened: a dry run, a disabled
+    /// switch or a detector that could not decide all leave it at 0. Collapsed to one per file on
+    /// purpose — a file with three tags is one file edited, and that is the question the line
+    /// answers. It belongs on the status row because the row otherwise reports only what entered the
+    /// library, never that the library itself was rewritten.
+    /// </summary>
+    public long LanguageCodesAllocated { get; set; }
+
+    /// <summary>
+    /// F-M313: LOOSE subtitle files renamed so their NAME carries the detected language (F-M278). A
+    /// separate counter from the one above because it is a different act on a different kind of file:
+    /// a container gets a language tag INSIDE, a loose .srt gets a new name. Counted only on a real
+    /// move — a refusal (target taken, unlistable directory, filesystem error) and a dry run leave
+    /// both the file and the counter untouched.
+    /// </summary>
+    public long LooseSubtitlesRenamed { get; set; }
+
     /// <summary>Start of the counting period; set by "Reset statistics", null before first use.</summary>
     public DateTime? SinceUtc { get; set; }
 

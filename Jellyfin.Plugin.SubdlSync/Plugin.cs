@@ -130,6 +130,8 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// <param name="rejectedDownload">F-M286: download candidates fetched and thrown away.</param>
     /// <param name="rejectedUpload">F-M286: upload candidates discarded from the upload.</param>
     /// <param name="fittedToAudio">F-M308: downloaded subtitles fitted to their audio track.</param>
+    /// <param name="languageCodesAllocated">F-M311: media files whose language codes were written into their container.</param>
+    /// <param name="looseSubtitlesRenamed">F-M313: loose subtitle files renamed so their name carries the language.</param>
     public void AddStatusCounters(
         long uploaded,
         long downloaded,
@@ -137,10 +139,13 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         long tmdbYearMisses = 0,
         long rejectedDownload = 0,
         long rejectedUpload = 0,
-        long fittedToAudio = 0)
+        long fittedToAudio = 0,
+        long languageCodesAllocated = 0,
+        long looseSubtitlesRenamed = 0)
     {
         if (uploaded == 0 && downloaded == 0 && typeCorrected == 0 && tmdbYearMisses == 0
-            && rejectedDownload == 0 && rejectedUpload == 0 && fittedToAudio == 0)
+            && rejectedDownload == 0 && rejectedUpload == 0 && fittedToAudio == 0
+            && languageCodesAllocated == 0 && looseSubtitlesRenamed == 0)
         {
             return; // nothing happened — do not touch the row (keeps Updated meaningful)
         }
@@ -155,6 +160,8 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         row.RejectedDownload += rejectedDownload;
         row.RejectedUpload += rejectedUpload;
         row.FittedToAudio += fittedToAudio; // F-M308
+        row.LanguageCodesAllocated += languageCodesAllocated; // F-M311
+        row.LooseSubtitlesRenamed += looseSubtitlesRenamed; // F-M313
         row.Updated = DateTime.UtcNow;
         db.StatusStats.Upsert(row);
     }
@@ -174,6 +181,8 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         row.RejectedDownload = 0;
         row.RejectedUpload = 0;
         row.FittedToAudio = 0; // F-M308
+        row.LanguageCodesAllocated = 0; // F-M311
+        row.LooseSubtitlesRenamed = 0; // F-M313
         row.SinceUtc = DateTime.UtcNow;
         row.Updated = DateTime.UtcNow;
         db.StatusStats.Upsert(row);

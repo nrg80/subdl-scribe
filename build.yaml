@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.186"
+version: "12.1.12.187"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,12 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.187: The statistics table counts what the run did to the files themselves. Two new rows
+    say how many media files had language codes written into them and how many loose subtitle files
+    were renamed so their name carries the language — both were visible only in the log before. The
+    table is also reordered: the two volume counters lead with the download direction first, and the
+    remaining rows are grouped by direction instead of alternating. Also fixes a real defect: a dry
+    run renamed loose subtitle files on disk while reporting that it writes nothing.
   v12.1.12.186: The time the audio alignment spends no longer counts against the download pacing.
     The alignment runs between two downloads, so its duration sat inside a wait that was meant for
     transferring; it is now measured and taken off the next wait, never below zero, and only in the
