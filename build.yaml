@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.185"
+version: "12.1.12.186"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,12 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.186: The time the audio alignment spends no longer counts against the download pacing.
+    The alignment runs between two downloads, so its duration sat inside a wait that was meant for
+    transferring; it is now measured and taken off the next wait, never below zero, and only in the
+    download direction. An alignment that found nothing to correct costs the same as one that
+    corrected a file, so both are credited. The run's closing line reports the cost: how many
+    subtitles were aligned and how many seconds it took.
   v12.1.12.185: The audio fit now says what it did at the normal log level instead of only in the
     per-file detail. The run's start line names the switch (audio fit=on/off) and the run's closing
     line carries the counter (N fitted to audio), so a fit that ran is distinguishable from a fit

@@ -90,6 +90,50 @@ public sealed class GlobalRateLimiter
     }
 
     /// <summary>
+    /// F-M310: milliseconds of audio alignment not yet credited against the transfer rhythm.
+    /// Written on the thread that measured a fit, read at the next pause.
+    /// </summary>
+    private long _fitMsPending;
+
+    /// <summary>
+    /// F-M310: books the duration of one audio alignment. The alignment runs AFTER a subtitle was
+    /// downloaded and BEFORE the next real download, so it sits inside a transfer pause that was
+    /// sized for a download only — the rhythm was charging the run for time it spent correcting,
+    /// not transferring. Nothing is banked: the credit can only bring the NEXT pause down.
+    /// </summary>
+    /// <param name="ms">Measured milliseconds. Zero and negative values are ignored.</param>
+    public void AddFitMs(long ms)
+    {
+        if (ms <= 0)
+        {
+            return;
+        }
+
+        // Interlocked although both pipelines walk their items sequentially today: the limiter is
+        // shared across the directions, and "sequential" is a property of the caller, not of this
+        // class — assuming it here would make the arithmetic silently wrong the day it changes.
+        System.Threading.Interlocked.Add(ref _fitMsPending, ms);
+    }
+
+    /// <summary>
+    /// F-M310: the pause before a real transfer, less the alignment time booked since the last
+    /// one. Floor 0: the plugin never waits a negative time, and an alignment longer than the
+    /// pause simply means no further wait. The credit is CONSUMED here — taking it twice would
+    /// shrink two pauses for one alignment.
+    /// </summary>
+    /// <returns>Delay in milliseconds, never below zero.</returns>
+    public int TransferPauseMsLessFit()
+    {
+        int pause = TransferPauseMs();
+
+        // Exchange, not read-then-clear: two concurrent readers must not both spend the same
+        // credit, which is exactly what the two-call form would allow.
+        long credit = System.Threading.Interlocked.Exchange(ref _fitMsPending, 0);
+
+        return (int)Math.Max(0, pause - credit);
+    }
+
+    /// <summary>
     /// Waits one bare-call pause. This is the whole throttle now — it cannot fail, because
     /// there is no bucket left to run dry (F-M20).
     /// </summary>

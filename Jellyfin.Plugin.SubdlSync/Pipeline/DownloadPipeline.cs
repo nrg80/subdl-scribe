@@ -126,6 +126,13 @@ public class DownloadRunSummary
     public int FittedToAudio { get; set; }
 
     /// <summary>
+    /// F-M310: total milliseconds the run spent aligning subtitles to their audio. The counter
+    /// above says HOW MANY were aligned; this says what the alignment COST, which is the number
+    /// that tells whether the correction is a footnote or the bulk of a run's wall time.
+    /// </summary>
+    public long FitMsTotal { get; set; }
+
+    /// <summary>
     /// User pressed the stop button during this run.
     /// </summary>
     public bool StopRequested { get; set; }
@@ -269,6 +276,34 @@ public sealed class DownloadPipeline : IDisposable
     /// scheduled run continues with the fresh quota.
     /// </summary>
     private int _dailyLimitWaits;
+
+    /// <summary>
+    /// F-M310: runs the audio alignment and books the time it took. Measured around the CALL,
+    /// not around the write: a fit that ran and concluded "no measurable gain" cost just as much
+    /// as one that corrected the file, and the rhythm should not charge the run for either.
+    /// The measurement is in a finally block because a cancelled or failed fit also spent the
+    /// time; swallowing the cost would credit the run for work it did not do.
+    /// </summary>
+    private async Task<Qa.SubtitleSync.Result> SyncMeasuredAsync(
+        string mediaPath, string content, string audioMap, string? ffmpegForDrift,
+        DownloadRunSummary summary, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            return await Qa.SubtitleSync.SyncAsync(mediaPath, content, audioMap, ffmpegForDrift, _logger, ct)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            sw.Stop();
+            long ms = (long)sw.Elapsed.TotalMilliseconds;
+            _limiter.AddFitMs(ms);
+            summary.FitMsTotal += ms;
+        }
+    }
+
+
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DownloadPipeline"/> class.
@@ -535,9 +570,10 @@ public sealed class DownloadPipeline : IDisposable
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
         LogUtil.Normal(_logger, 
-            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio | {Rejected} rejected after fetch | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued",
+            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {Rejected} rejected after fetch | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued",
             summary.Downloaded,
             summary.FittedToAudio,
+            (summary.FitMsTotal / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
             summary.RejectedCandidates,
             summary.SkippedNoCandidates,
             summary.NotAvailable,
@@ -1640,7 +1676,10 @@ public sealed class DownloadPipeline : IDisposable
                 // F-M26: the pause before a REAL download (download→download), ±30 %.
                 // The local call budget that stood here until 03.10.2026 is removed (F-M20): it could
                 // only ever stop the run, and the plugin no longer counts its own calls.
-                await Task.Delay(_limiter.TransferPauseMs(), ct).ConfigureAwait(false);
+                // F-M310: the alignment of the PREVIOUS subtitle (main or HI) ran inside this gap, so
+                // its measured time comes off the pause — an alignment of a whole season's files is
+                // real work the transfer rhythm should not be charging for. Floor 0.
+                await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
 
                 _watchdog?.Heartbeat();
                 var (bytes, packFile) = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
@@ -1854,8 +1893,8 @@ public sealed class DownloadPipeline : IDisposable
                 string? unsyncPayload = null;
                 if (_config.QaDownloadAutoSync)
                 {
-                    Qa.SubtitleSync.Result syncResult = await Qa.SubtitleSync.SyncAsync(
-                        mediaPath, content, audioMap, ffmpegForDrift, _logger, ct).ConfigureAwait(false);
+                    Qa.SubtitleSync.Result syncResult = await SyncMeasuredAsync(
+                        mediaPath, content, audioMap, ffmpegForDrift, summary, ct).ConfigureAwait(false);
 
                     if (syncResult.Applied)
                     {
@@ -2022,7 +2061,11 @@ public sealed class DownloadPipeline : IDisposable
                             // interval (3600/cap). Bare API calls stay on
                             // MinCallPauseSec; failed/skipped candidates get no
                             // Transfer pause (transaction semantics intact).
-                            await Task.Delay(_limiter.TransferPauseMs(), ct).ConfigureAwait(false);
+                            // F-M310: the main subtitle was aligned in exactly this gap, so that
+                            // measured time comes off the pause. Both pauses carry it, because both
+                            // gaps contain an alignment — this one the main track's, the next one the
+                            // HI track's. Floor 0.
+                            await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
                             var hiBytes = await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false);
                             var hiStats = hiBytes != null && hiBytes.Length >= 100 ? Qa.QaGates.ParseSrt(DecodeSrt(hiBytes)) : null;
                             bool hiStructureOk = hiStats != null
@@ -2054,8 +2097,8 @@ public sealed class DownloadPipeline : IDisposable
                                     // the main track — one implementation, both tracks, so the two
                                     // cannot drift apart. The HI pool is where the drift lives,
                                     // and the fit's own deploy rule decides per file.
-                                    Qa.SubtitleSync.Result hiSync = await Qa.SubtitleSync.SyncAsync(
-                                        mediaPath, hiContent, audioMap, ffmpegForDrift, _logger, ct).ConfigureAwait(false);
+                                    Qa.SubtitleSync.Result hiSync = await SyncMeasuredAsync(
+                                        mediaPath, hiContent, audioMap, ffmpegForDrift, summary, ct).ConfigureAwait(false);
                                     if (hiSync.Applied)
                                     {
                                         hiUnsync = hiContent;

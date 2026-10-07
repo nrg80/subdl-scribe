@@ -46,6 +46,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Jellyfin.Plugin.SubdlScribe.Api;
 using Jellyfin.Plugin.SubdlScribe.Qa;
 using Jellyfin.Plugin.SubdlScribe.Registry;
 using MediaBrowser.Model.Entities;
@@ -76,6 +77,7 @@ public static class AutoSyncRun
         failures += UnsyncSuffix();
         failures += UnsyncArchive();
         failures += StreamingDecoder();
+        failures += FitTimeCredit();
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -162,6 +164,141 @@ public static class AutoSyncRun
         Language = lang,
         Index = 0
     };
+
+    /// <summary>
+    /// Case 8: F-M310 — the time an audio alignment spent comes off the next transfer pause,
+    /// with a floor at zero. Arithmetic, but the arithmetic is the whole feature: the claim is
+    /// that a measured alignment is given back and that nothing is banked, and both halves are
+    /// wrong in ways a log line would not show (a credit taken twice shrinks two pauses for one
+    /// alignment; a negative pause would fire instantly and make the rhythm meaningless).
+    /// Driven against the real limiter, because the floor and the exchange live there.
+    /// </summary>
+    /// <returns>Number of failed checks.</returns>
+    private static int FitTimeCredit()
+    {
+        int f = 0;
+        Console.WriteLine("[8] the alignment time comes off the transfer pause (F-M310)");
+
+        // Rate 400 -> base pause 9 s, jittered +-30 % (6.3-11.7 s). A zero credit must return
+        // the untouched jittered pause, so the assertion is a range, not a number.
+        var lim = new GlobalRateLimiter(400);
+
+        int plain = lim.TransferPauseMs();
+        bool plainInBand = plain >= 6300 && plain <= 11700;
+        Check("no alignment booked -> the pause is the jittered one",
+            plainInBand, $"rate 400 -> {plain} ms (band 6300-11700)");
+        f += plainInBand ? 0 : 1;
+
+        // A credit far above the pause must land on exactly 0, not negative.
+        lim.AddFitMs(60_000);
+        int floored = lim.TransferPauseMsLessFit();
+        Check("alignment longer than the pause -> 0, never negative",
+            floored == 0, $"60 s alignment against a ~9 s pause -> {floored} ms");
+        f += floored == 0 ? 0 : 1;
+
+        // The credit is CONSUMED: the next pause must be the full one again, not short a second
+        // time. This is the half that a plain read would get wrong.
+        int after = lim.TransferPauseMsLessFit();
+        bool consumed = after >= 6300 && after <= 11700;
+        Check("the credit is spent once, not carried",
+            consumed, $"pause after the credit was consumed -> {after} ms");
+        f += consumed ? 0 : 1;
+
+        // A partial credit must shorten the pause by exactly that much: same rate, same jitter
+        // draw is impossible, so assert the BOUND instead — a 5 s credit can never yield a pause
+        // above 11.7-5 = 6.7 s, while without it the pause could reach 11.7 s.
+        for (int i = 0; i < 40; i++)
+        {
+            var l2 = new GlobalRateLimiter(400);
+            l2.AddFitMs(5_000);
+            int p = l2.TransferPauseMsLessFit();
+            if (p > 6_700)
+            {
+                Check("a 5 s credit pulls the pause down",
+                    false, $"got {p} ms, above the 6700 ms ceiling a 5 s credit implies");
+                f += 1;
+                break;
+            }
+
+            if (i == 39)
+            {
+                Check("a 5 s credit pulls the pause down",
+                    true, "40 draws stayed at or below 6700 ms");
+            }
+        }
+
+        // Zero and negative bookings must be IGNORED, not booked. Asserted through the pause,
+        // because the booked amount is private by design: a negative credit would ADD to the
+        // pause (pause - (-9000) = pause + 9 s), which breaks the jitter band upward. A pause
+        // still inside the band is the evidence that the booking was discarded.
+        var l3 = new GlobalRateLimiter(400);
+        l3.AddFitMs(0);
+        l3.AddFitMs(-9_000);
+        int negPause = l3.TransferPauseMsLessFit();
+        bool ignored = negPause >= 6300 && negPause <= 11700;
+        Check("zero and negative bookings are ignored (the pause never grows)",
+            ignored, $"after 0 and -9000 -> {negPause} ms (band 6300-11700)");
+        f += ignored ? 0 : 1;
+
+        // The floor holds at a SECOND rate too, so the bound is not an artefact of one base value.
+        // Rate 100 -> 36 s base, jittered 25.2-46.8 s. The credit is chosen ABOVE that maximum:
+        // a credit of exactly 36 s would only floor when the jitter drew low, so it would assert
+        // a property the code does not have (and, before this was fixed, failed exactly that way).
+        var l4 = new GlobalRateLimiter(100);
+        l4.AddFitMs(50_000);
+        int exact = l4.TransferPauseMsLessFit();
+        Check("the floor holds at another rate (credit above the jitter maximum)",
+            exact == 0, $"50 s credit against a 25.2-46.8 s pause -> {exact} ms");
+        f += exact == 0 ? 0 : 1;
+
+        // And the pipeline must actually USE the crediting pause at both transfer gaps, while the
+        // alignment itself must be measured. Asserted on the source: a fit that runs unmeasured
+        // leaves the credit at zero and the feature silently does nothing.
+        string pipe = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs";
+        if (System.IO.File.Exists(pipe))
+        {
+            string src = System.IO.File.ReadAllText(pipe);
+            int creditSites = src.Split("_limiter.TransferPauseMsLessFit()").Length - 1;
+            bool bothGaps = creditSites == 2;
+            Check("both transfer gaps use the crediting pause",
+                bothGaps, $"{creditSites} site(s), expected 2 (main and HI)");
+            f += bothGaps ? 0 : 1;
+
+            bool measured = src.Split("SyncMeasuredAsync(").Length - 1 == 3;
+            Check("both alignments are measured (one definition, two calls)",
+                measured, $"{src.Split("SyncMeasuredAsync(").Length - 1} occurrence(s), expected 3");
+            f += measured ? 0 : 1;
+
+            // Exactly ONE raw call is correct: the measurement helper itself must call it. Zero
+            // would mean the helper is gone and nothing is measured; two or more would mean a
+            // second alignment path bypasses the stopwatch.
+            int raw = src.Split("SubtitleSync.SyncAsync(").Length - 1;
+            Check("exactly one raw call, inside the measuring helper",
+                raw == 1, $"{raw} raw call(s), expected 1 (the helper's own)");
+            f += raw == 1 ? 0 : 1;
+
+            // The helper must BOOK the measured time, and book it with the limiter (not with a
+            // local variable that nothing reads). A helper that stops the stopwatch but never
+            // credits leaves the feature with no effect at all — the shape this check exists for,
+            // because every other assertion here still passes in that state.
+            bool books = src.Contains("_limiter.AddFitMs(ms);");
+            Check("the helper credits the measured time to the limiter",
+                books, books ? "AddFitMs is called with the measured value" : "the measurement is never credited");
+            f += books ? 0 : 1;
+
+            // And the run total must be kept, or the DONE line would print a permanent 0s.
+            bool total = src.Contains("summary.FitMsTotal += ms;");
+            Check("the helper keeps the run total for the log",
+                total, total ? "FitMsTotal is accumulated" : "FitMsTotal is never written");
+            f += total ? 0 : 1;
+        }
+        else
+        {
+            Console.WriteLine("  [SKIP] pipeline source not reachable from here");
+        }
+
+        return f;
+    }
 
     private static void Check(string label, bool ok, string detail)
     {

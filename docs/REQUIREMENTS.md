@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.185.
+**Status:** Implementation — v12.1.12.186.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -35,7 +35,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 12 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 26 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 27 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -1277,6 +1277,31 @@ type-corrected-from-file-name — items whose type/season/episode came from the 
 
 Every timestamp uses one format — US order (M/D/YYYY) with local AM/PM time — through the timestamp formatter and the time formatter, so stamps cannot drift apart per call site. an unqualified locale call without an explicit locale follows the BROWSER's locale.
 
+**F-M310 [B1] (user decision 07.10.2026):** **The time an audio alignment spends is taken off the next download's pacing wait, never below zero.**
+
+The alignment runs AFTER a subtitle is downloaded and BEFORE the next real download, so its duration sits inside a transfer pause that was sized for a download only — the rhythm was charging the run for time it spent correcting instead of transferring (user request: "die Zeit messen, die der Fit gebraucht hat, und sie von der transfer rate per hour für Downloads abziehen, minimum 0").
+
+Measured and credited in `GlobalRateLimiter`, not in the pipeline: the arithmetic has to be testable, and a bound that only exists as a private field of a Jellyfin-hosted pipeline cannot be exercised. `AddFitMs` books, `TransferPauseMsLessFit` spends.
+
+  both alignments are measured — the main track and the hearing-impaired one, in one helper, so a
+  second alignment path cannot bypass the stopwatch;
+  the measurement wraps the CALL, not the write: an alignment that ran and concluded "no measurable
+  gain" cost the same as one that corrected the file, and the rhythm charges for neither;
+  measured in a `finally` block, because a cancelled or failed alignment also spent the time;
+  the credit is CONSUMED at the pause (`Interlocked.Exchange`, not read-then-clear, so two readers
+  cannot spend it twice) and never banked: it can only bring the next pause down, never pay for a
+  later one, and two pauses are never shortened for one alignment;
+  floor 0 — the plugin never waits a negative time, and an alignment longer than the pause simply
+  means no further wait. Both transfer gaps carry it, because both gaps contain an alignment (this
+  one the main track's, the next one the HI track's);
+  zero and negative bookings are discarded, not booked: a negative value would ADD to the pause.
+  With the alignment switched off nothing is measured, so the credit stays 0 and the pauses are
+  exactly as configured — no special case needed;
+  uploads are NOT affected: they have their own limiter instance and their own rhythm, and the
+  request was for the download direction.
+
+The run's DONE line reports what the alignment cost: `N fitted to audio (Xs)` — the counter says how many, the seconds say whether the correction is a footnote or the bulk of the wall time. **Test: T125.** See F-M26, F-M308, F-M309.
+
 **F-M309 [B1] (user decision 07.10.2026):** **The audio fit is logged on two levels: WHETHER at Normal, WHAT AGAINST at Verbose.**
 
 Normal carries the fit as a run-level fact, in the two lines F-M24d already prescribes:
@@ -1641,6 +1666,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T122:** The streaming decoder, asserted as two ABSENCES on the plugin source, because neither shows up in a log line and both would return silently: the sample-materialising decoder is gone (no `ms.ToArray()` and no `new float[…]` on the audio path — it held a 514 MB `byte[]` and a 514 MB `float[]` at once and the OOM killer took the 140-minute files) while the streaming entry point exists; and **nothing persists the level curve** — no file, no cache, no database column, and no curve-shaped field in `Data/Entities.cs`. Negative-controlled: planting `new float[…]` back into the audio path turns the assertion RED (measured 07.10.2026), so the two absences are guarded and not merely declared. (F-M307)
 **T123:** The statistics table renders one ROW per counter with the label and its number in two bounded columns, and every row names the direction its count belongs to where the data is per-direction. Asserted on the page source, because the numbers are the only readout of what a run did: the eight rows exist, the two volume counters carry the total weight, the fitted-to-audio row reads the `FittedToAudio` field (F-M308) and not a field that never leaves 0, and no row claims a direction the counter does not have. The page source is the same file pair that is checked structurally — a row added to one copy only is the F-M218 file-pair trap. The **reset** is guarded on the SOURCE: every counter on the status row must be zeroed by `ResetStatusStats()`, and every counter PARAMETER must appear in the writer's early-out — a counter added later and forgotten in either place fails silently, showing an old total beside a button that claims to have cleared it, or dropping a run that only did the new work. Both were planted and confirmed RED. (F-M308)
 **T124:** The fit's logging split, asserted on the source: the run START line names the fit switch (`audio fit=`), the run DONE line carries the fit counter (`fitted to audio`), and the per-file track line is emitted only under the fit switch and only at Verbose. Asserted because the levels are what make the feature falsifiable in the field: a fit that leaves no Normal trace cannot be told from a fit that never ran, and the counter is required to be printed somewhere. Planting a missing `fitted to audio` in the DONE line and a track line moved to Normal each turn it RED. (F-M309)
+**T125:** The alignment time is credited against the transfer pacing, with a floor at zero, driven against the real limiter: an unbooked credit returns the jittered pause; a credit above the pause lands on exactly 0 and never negative (asserted at two rates, because one base value would make the bound look like an artefact); a partial credit pulls the pause under the ceiling that credit implies; the credit is spent once and not carried; zero and negative bookings are discarded, asserted through the pause because a negative booking would ADD to it. Plus, on the source: both transfer gaps use the crediting pause, both alignments go through the measuring helper, exactly one raw call remains (the helper's own), the helper books the measurement to the limiter and keeps the run total. The three source-level checks exist because every numeric case passes in a state where the measurement is taken and never credited — the feature would silently do nothing. All failure modes planted and confirmed RED. (F-M310)
 ## 20. References
 
 - Plugin template: github.com/jellyfin/jellyfin-plugin-template
