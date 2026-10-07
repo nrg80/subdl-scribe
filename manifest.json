@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.187",
-        "changelog": "v12.1.12.187: The statistics table counts what the run did to the files themselves. Two new rows\n    say how many media files had language codes written into them and how many loose subtitle files\n    were renamed so their name carries the language — both were visible only in the log before. The\n    table is also reordered: the two volume counters lead with the download direction first, and the\n    remaining rows are grouped by direction instead of alternating. Also fixes a real defect: a dry\n    run renamed loose subtitle files on disk while reporting that it writes nothing.",
+        "version": "12.1.12.188",
+        "changelog": "v12.1.12.188: Wording and one switch. The upload row no longer claims a fetch the upload\n    direction never performs — it reads \"discarded before transfer\", which is what happens.\n    The seeder's sidecar rename now hangs off the same switch as the container write\n    (\"Allocate missing language codes\") instead of the uploader's und-resolution switch,\n    so asking for language codes to be allocated no longer leaves unlabelled file names\n    behind. Note the default: that switch is off, so on a fresh install unlabelled sidecar\n    files are no longer renamed until it is enabled.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.187-dev/Jellyfin.Plugin.SubdlSync_12.1.12.187.zip",
-        "checksum": "3566ab64c78e2f3d01829fa2ed40e7fb",
-        "timestamp": "2026-10-07T14:32:26Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.188-dev/Jellyfin.Plugin.SubdlSync_12.1.12.188.zip",
+        "checksum": "fd2d5c6054a3e65582a99686b8edd151",
+        "timestamp": "2026-10-07T18:06:07Z"
       }
     ]
   }
