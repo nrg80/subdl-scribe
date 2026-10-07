@@ -106,10 +106,10 @@ public static class DriftGate
             return Skip($"only {starts.Length} cues");
         }
 
-        float[] samples;
+        double[] levels;
         try
         {
-            samples = await DecodeMonoAsync(ffmpegPath, mediaPath, ct, audioMap).ConfigureAwait(false);
+            levels = await DecodeFrameLevelsAsync(ffmpegPath, mediaPath, ct, audioMap).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -121,13 +121,16 @@ public static class DriftGate
             return Skip("audio decode failed");
         }
 
-        if (samples.Length == 0)
+        if (levels.Length == 0)
         {
             return Skip("no audio samples");
         }
 
-        double durationSec = samples.Length / (double)SampleRate;
-        (double[] onSec, double[] offSec) = SpeechIslands(samples);
+        // The frames ARE the timeline: one frame per FrameSec, a trailing partial frame
+        // dropped. That is the same duration the old length/sampleRate division produced,
+        // to within one 20 ms frame.
+        double durationSec = levels.Length * FrameSec;
+        (double[] onSec, double[] offSec) = SpeechIslands(levels);
         if (onSec.Length == 0)
         {
             return Skip("no speech islands");
@@ -173,6 +176,171 @@ public static class DriftGate
            + (int.Parse(m.Groups[g + 1].Value, CultureInfo.InvariantCulture) * 60.0)
            + int.Parse(m.Groups[g + 2].Value, CultureInfo.InvariantCulture)
            + (int.Parse(m.Groups[g + 3].Value, CultureInfo.InvariantCulture) / 1000.0);
+
+    /// <summary>
+    /// Frame levels (dB) from a band-passed mono decode, WITHOUT ever holding the
+    /// samples. The raw f32le stream is read in chunks and the energy of each
+    /// <see cref="FrameSec"/> frame is accumulated on the fly.
+    /// <para>
+    /// This is what the two consumers actually need: <see cref="OffsetFit.SpeechProbability"/>
+    /// and <see cref="DriftGate.SpeechIslands"/> both walk the samples frame by frame and
+    /// compute nothing but <c>20*log10(sqrt(mean(v^2)))</c>. Nothing reads an individual
+    /// sample outside that loop, so materialising the samples buys nothing and costs a
+    /// lot: for a 140-minute track the old path held a 514 MB <c>byte[]</c> AND a 514 MB
+    /// <c>float[]</c> at the same time — measured ~1 GB peak, which the OOM killer took
+    /// (exit 137 on the 140-minute files). Streaming the same track holds 3.2 MB.
+    /// </para>
+    /// </summary>
+    /// <param name="ffmpegPath">ffmpeg executable.</param>
+    /// <param name="mediaPath">Container to read.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="audioMap">Audio stream to decode, e.g. <c>0:a:1</c>.</param>
+    /// <returns>One dB level per frame; an empty array when the audio is unusable.</returns>
+    public static async Task<double[]> DecodeFrameLevelsAsync(
+        string ffmpegPath, string mediaPath, CancellationToken ct, string audioMap = "0:a:0")
+    {
+        int frame = (int)Math.Round(SampleRate * FrameSec);
+        var levels = new List<double>(1024);
+        double sum = 0;
+        int inFrame = 0;
+
+        Process? proc = null;
+        try
+        {
+            var psi = BuildDecodeInfo(ffmpegPath, mediaPath, audioMap);
+            proc = Process.Start(psi);
+            if (proc == null)
+            {
+                return [];
+            }
+
+            Task drain = proc.StandardError.ReadToEndAsync(ct);
+            Stream stdout = proc.StandardOutput.BaseStream;
+
+            // A 4-byte remainder can straddle a chunk boundary; it is carried over rather
+            // than dropped, because dropping it would shift every later frame by one sample.
+            byte[] buf = new byte[64 * 1024];
+            byte[] carry = new byte[3];
+            int carryLen = 0;
+            while (true)
+            {
+                int read = await stdout.ReadAsync(buf.AsMemory(), ct).ConfigureAwait(false);
+                if (read <= 0)
+                {
+                    break;
+                }
+
+                int start = 0;
+                if (carryLen > 0)
+                {
+                    int need = 4 - carryLen;
+                    int take = Math.Min(need, read);
+                    Array.Copy(buf, 0, carry, carryLen, take);
+                    carryLen += take;
+                    start = take;
+                    if (carryLen < 4)
+                    {
+                        continue;
+                    }
+
+                    AccumulateFrame(carry, 0, ref sum, ref inFrame, frame, levels);
+                    carryLen = 0;
+                }
+
+                int usable = ((read - start) / 4) * 4;
+                AccumulateFrames(buf, start, usable, ref sum, ref inFrame, frame, levels);
+
+                int rest = read - start - usable;
+                if (rest > 0)
+                {
+                    Array.Copy(buf, start + usable, carry, 0, rest);
+                    carryLen = rest;
+                }
+            }
+
+            await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+            await drain.ConfigureAwait(false);
+
+            // A trailing partial frame is dropped, exactly as the old length/frame division did.
+            return levels.ToArray();
+        }
+        finally
+        {
+            proc?.Dispose();
+        }
+    }
+
+    /// <summary>Accumulates whole 4-byte little-endian floats out of a chunk.</summary>
+    private static void AccumulateFrames(
+        byte[] buf, int offset, int length, ref double sum, ref int inFrame, int frame, List<double> levels)
+    {
+        for (int p = offset; p < offset + length; p += 4)
+        {
+            float v = BitConverter.ToSingle(buf, p);
+            sum += (double)v * v;
+            if (++inFrame == frame)
+            {
+                levels.Add(20.0 * Math.Log10(Math.Sqrt(sum / frame) + 1e-9));
+                sum = 0;
+                inFrame = 0;
+            }
+        }
+    }
+
+    /// <summary>Accumulates a single 4-byte float (the chunk-boundary remainder).</summary>
+    private static void AccumulateFrame(
+        byte[] buf, int offset, ref double sum, ref int inFrame, int frame, List<double> levels)
+    {
+        float v = BitConverter.ToSingle(buf, offset);
+        sum += (double)v * v;
+        if (++inFrame == frame)
+        {
+            levels.Add(20.0 * Math.Log10(Math.Sqrt(sum / frame) + 1e-9));
+            sum = 0;
+            inFrame = 0;
+        }
+    }
+
+    /// <summary>
+    /// The ffmpeg invocation both decoders share: mono, voice band, 16 kHz, raw f32le
+    /// on stdout. Kept in one place so the two paths cannot drift apart — a differing
+    /// filter would change the envelope and silently invalidate the fitted thresholds.
+    /// </summary>
+    private static ProcessStartInfo BuildDecodeInfo(string ffmpegPath, string mediaPath, string audioMap)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+
+        psi.ArgumentList.Add("-v");
+        psi.ArgumentList.Add("error");
+        psi.ArgumentList.Add("-i");
+        psi.ArgumentList.Add(mediaPath);
+        psi.ArgumentList.Add("-map");
+        // One named audio stream only. No trailing '?' — an index that does not exist
+        // must fail loudly rather than silently write a different stream (the trap
+        // documented in FfmpegTools.ExtractAllAsync). The track itself is chosen by
+        // LANGUAGE in AudioTrackChoice; the index is the result, not the rule.
+        psi.ArgumentList.Add(audioMap);
+        psi.ArgumentList.Add("-ac");
+        psi.ArgumentList.Add("1");
+        // F-M307: the fitted score reads the VOICE BAND. Without this filter the envelope
+        // carries music and effects, and the cue table is no longer the quantity the fit was
+        // validated on. The reference implementation passes the same two corners; combined
+        // with the 16 kHz rate above, the filter actually has spectrum to work with.
+        psi.ArgumentList.Add("-af");
+        psi.ArgumentList.Add("highpass=f=300,lowpass=f=3400");
+        psi.ArgumentList.Add("-ar");
+        psi.ArgumentList.Add(SampleRate.ToString(CultureInfo.InvariantCulture));
+        psi.ArgumentList.Add("-f");
+        psi.ArgumentList.Add("f32le");
+        psi.ArgumentList.Add("-");
+        return psi;
+    }
 
     /// <summary>
     /// Decodes one audio stream to mono float samples at <see cref="SampleRate"/>.
@@ -251,30 +419,15 @@ public static class DriftGate
     /// Speech islands from the frame envelope: hysteresis on the 10th/90th
     /// percentile band, minimum length and minimum gap applied.
     /// </summary>
-    public static (double[] OnSec, double[] OffSec) SpeechIslands(float[] samples)
+    public static (double[] OnSec, double[] OffSec) SpeechIslands(double[] levels)
     {
-        int frame = (int)Math.Round(SampleRate * FrameSec);
-        int n = samples.Length / frame;
+        int n = levels.Length;
         if (n < 10)
         {
             return ([], []);
         }
 
-        var level = new double[n];
-        for (int i = 0; i < n; i++)
-        {
-            double sum = 0;
-            int baseIdx = i * frame;
-            for (int j = 0; j < frame; j++)
-            {
-                double v = samples[baseIdx + j];
-                sum += v * v;
-            }
-
-            level[i] = 20.0 * Math.Log10(Math.Sqrt(sum / frame) + 1e-9);
-        }
-
-        double[] sorted = level.OrderBy(v => v).ToArray();
+        double[] sorted = levels.OrderBy(v => v).ToArray();
         double lo = Percentile(sorted, 0.10);
         double hi = Percentile(sorted, 0.90);
         if (hi - lo < 6.0)
@@ -295,13 +448,13 @@ public static class DriftGate
         {
             if (!state)
             {
-                if (level[i] > th)
+                if (levels[i] > th)
                 {
                     state = true;
                     islandStart = i;
                 }
             }
-            else if (level[i] < tl)
+            else if (levels[i] < tl)
             {
                 state = false;
                 double s = islandStart * FrameSec;

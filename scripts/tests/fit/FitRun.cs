@@ -31,7 +31,9 @@ using Jellyfin.Plugin.SubdlScribe.Qa;
 internal static class FitRun
 {
     private const string LabRoot = "/opt/data/drift-lab";
-    private const string CacheDir = "/opt/data/drift-lab/cache16";
+    // Holds the frame LEVELS (not samples) — see DecodeCached. A new directory, because
+    // the old one holds 6.7 GB of raw samples from the byte-array decoder.
+    private const string CacheDir = "/opt/data/drift-lab/cache-levels";
     private static readonly Regex TsRe = new(@"\d{2}:\d{2}:\d{2},\d{3}", RegexOptions.Compiled);
 
     private static int Main()
@@ -87,14 +89,18 @@ internal static class FitRun
 
         // Speech in the second half of every second, near-silence in the first half: a cue
         // starting at 10.0 s stands in silence, and only its SPAN reads speech.
-        var samples = new float[8000 * 4];
-        for (int i = 0; i < samples.Length; i++)
+        // Frame levels directly: 4 s at 20 ms frames, loud in the second half of each
+        // second and near-silent in the first. Built as LEVELS because that is what the
+        // consumer takes now — the old version built samples and let the callee reduce
+        // them to exactly these levels (see DriftGate.DecodeFrameLevelsAsync).
+        var levels = new double[200];
+        for (int i = 0; i < levels.Length; i++)
         {
-            double t = i / 8000.0;
-            samples[i] = (t % 1.0) > 0.5 ? 0.5f : 0.0001f;
+            double t = i * 0.020;
+            levels[i] = (t % 1.0) > 0.5 ? -6.0 : -80.0;
         }
 
-        double[] prob = OffsetFit.SpeechProbability(samples, 8000);
+        double[] prob = OffsetFit.SpeechProbability(levels);
         double[] cumProb = OffsetFit.Cumulative(prob);
         // Speech sits in the SECOND half of each second, near-silence in the first. A cue
         // that STARTS in the silence and reaches into the speech is the case that matters:
@@ -112,9 +118,9 @@ internal static class FitRun
     {
         string original = File.ReadAllText(srtPath);
         (double[] starts, double[] ends) = DriftGate.ParseCues(original);
-        float[] samples = DecodeCached(mkv);
+        double[] levels = DecodeCached(mkv);
         Console.WriteLine($"   {Path.GetFileName(srtPath)}: {starts.Length} cues, "
-                          + $"{samples.Length / (double)DriftGate.SampleRate / 60:0.0} min audio");
+                          + $"{levels.Length * OffsetFit.FrameSec / 60:0.0} min audio");
 
         var cases = new List<(string Label, Func<double, double> Disp)>
         {
@@ -135,7 +141,7 @@ internal static class FitRun
 
             string shifted = Rewrite(original, starts, ends, disp);
             (double[] ps, double[] pe) = DriftGate.ParseCues(shifted);
-            OffsetFit.FitResult r = OffsetFit.Fit(ps, pe, samples, DriftGate.SampleRate);
+            OffsetFit.FitResult r = OffsetFit.Fit(ps, pe, levels);
 
             int good = 0;
             double worst = 0;
@@ -165,14 +171,14 @@ internal static class FitRun
     {
         string text = File.ReadAllText(srtPath);
         (double[] starts, double[] ends) = DriftGate.ParseCues(text);
-        float[] samples = DecodeCached(mkv);
-        OffsetFit.FitResult r = OffsetFit.Fit(starts, ends, samples, DriftGate.SampleRate);
+        double[] levels = DecodeCached(mkv);
+        OffsetFit.FitResult r = OffsetFit.Fit(starts, ends, levels);
 
         // Dump the cue table and the DP inputs, so a disagreement with the Python
         // reference can be attributed to the TABLE or to the FIT. Without this the two
         // are indistinguishable and the comparison is guesswork.
         {
-            double[] pf = OffsetFit.Dilate(OffsetFit.SpeechProbability(samples, DriftGate.SampleRate), OffsetFit.SlackSec);
+            double[] pf = OffsetFit.Dilate(OffsetFit.SpeechProbability(levels), OffsetFit.SlackSec);
             double[] cf = OffsetFit.Cumulative(pf);
             (double[,] S, bool[,] W) = OffsetFit.CueTable(starts, ends, cf, pf.Length);
             int nc = S.GetLength(0), ns = S.GetLength(1);
@@ -211,13 +217,13 @@ internal static class FitRun
         // Dump the probability curve so the decode can be compared with the Python
         // reference frame by frame. Without this, a score difference cannot be
         // attributed to either the audio or the fit.
-        double[] p = OffsetFit.SpeechProbability(samples, DriftGate.SampleRate);
+        double[] p = OffsetFit.SpeechProbability(levels);
         string dump = "/tmp/cs_" + Path.GetFileName(mkv) + ".p.f32";
         var pb = new byte[p.Length * 4];
         Buffer.BlockCopy(Array.ConvertAll(p, v => (float)v), 0, pb, 0, pb.Length);
         File.WriteAllBytes(dump, pb);
-        Console.WriteLine($"      samples {samples.Length} ({samples.Length / (double)DriftGate.SampleRate / 60:0.00} min), "
-                          + $"frames {p.Length}, mean p {p.Average():0.0000} -> {dump}");
+        Console.WriteLine($"      frames {levels.Length} ({levels.Length * OffsetFit.FrameSec / 60:0.00} min), "
+                          + $"mean p {p.Average():0.0000} -> {dump}");
 
         Console.WriteLine();
         Console.WriteLine($"   {label}");
@@ -274,24 +280,33 @@ internal static class FitRun
         }
     }
 
-    private static float[] DecodeCached(string mkv)
+    /// <summary>
+    /// Frame levels for a media file, cached as a small file. The cache holds the LEVELS,
+    /// not the samples: levels are 1/160 of the samples' size (one double per 20 ms frame
+    /// against 320 floats), so a 140-minute track caches as 3.2 MB instead of 514 MB. The
+    /// cache lives on disk here as a TEST convenience and is NOT part of the plugin — the
+    /// plugin holds the levels in memory for the duration of one fit and then drops them.
+    /// </summary>
+    private static double[] DecodeCached(string mkv)
     {
-        string raw = Path.Combine(CacheDir, Path.GetFileName(mkv) + ".f32");
+        string raw = Path.Combine(CacheDir, Path.GetFileName(mkv) + ".levels");
         if (File.Exists(raw))
         {
-            byte[] b = File.ReadAllBytes(raw);
-            var s = new float[b.Length / 4];
-            Buffer.BlockCopy(b, 0, s, 0, s.Length * 4);
-            return s;
+            string[] lines = File.ReadAllLines(raw);
+            var cached = new double[lines.Length];
+            for (int i = 0; i < lines.Length; i++)
+            {
+                cached[i] = double.Parse(lines[i], CultureInfo.InvariantCulture);
+            }
+
+            return cached;
         }
 
-        float[] samples = DriftGate.DecodeMonoAsync(FindFfmpeg(), mkv, CancellationToken.None, "0:a:0")
+        double[] levels = DriftGate.DecodeFrameLevelsAsync(FindFfmpeg(), mkv, CancellationToken.None, "0:a:0")
             .GetAwaiter().GetResult();
         Directory.CreateDirectory(CacheDir);
-        byte[] bytes = new byte[samples.Length * 4];
-        Buffer.BlockCopy(samples, 0, bytes, 0, bytes.Length);
-        File.WriteAllBytes(raw, bytes);
-        return samples;
+        File.WriteAllLines(raw, levels.Select(v => v.ToString("R", CultureInfo.InvariantCulture)));
+        return levels;
     }
 
     private static string FindFfmpeg()

@@ -149,35 +149,26 @@ public static class OffsetFit
     }
 
     /// <summary>
-    /// Speech probability per frame, in [0,1], from a band-passed mono decode. The
+    /// Speech probability per frame, in [0,1], from a band-passed mono decode's frame
+    /// levels. The
     /// method is THRESHOLD-FREE: frame levels are normalised against the file's own
     /// 10th/90th percentile, so no absolute level is assumed and any recording level
     /// works.
     /// </summary>
-    /// <param name="samples">Mono float samples at <c>DriftGate.SampleRate</c>.</param>
-    /// <param name="sampleRate">Sample rate of <paramref name="samples"/>.</param>
+    /// <param name="level">Frame levels in dB, one per <see cref="FrameSec"/> frame.</param>
     /// <returns>The undilated probability curve, one value per <see cref="FrameSec"/> frame.</returns>
-    public static double[] SpeechProbability(float[] samples, int sampleRate)
+    /// <remarks>
+    /// Takes the frame levels rather than the samples: the levels ARE the only thing the
+    /// probability is computed from, so materialising the samples would cost ~1 GB on a
+    /// 140-minute track to produce the same 3 MB of levels (see
+    /// <c>DriftGate.DecodeFrameLevelsAsync</c>).
+    /// </remarks>
+    public static double[] SpeechProbability(double[] level)
     {
-        int frame = (int)Math.Round(sampleRate * FrameSec);
-        int n = samples.Length / frame;
+        int n = level.Length;
         if (n < 2)
         {
             return [];
-        }
-
-        var level = new double[n];
-        for (int i = 0; i < n; i++)
-        {
-            double sum = 0;
-            int b = i * frame;
-            for (int j = 0; j < frame; j++)
-            {
-                double v = samples[b + j];
-                sum += v * v;
-            }
-
-            level[i] = 20.0 * Math.Log10(Math.Sqrt(sum / frame) + 1e-9);
         }
 
         double[] sorted = (double[])level.Clone();
@@ -291,19 +282,17 @@ public static class OffsetFit
     /// </summary>
     /// <param name="starts">Cue start times in seconds.</param>
     /// <param name="ends">Cue end times in seconds.</param>
-    /// <param name="samples">Mono samples of the chosen audio track.</param>
-    /// <param name="sampleRate">Their sample rate.</param>
+    /// <param name="level">Frame levels in dB, one per <see cref="FrameSec"/> frame.</param>
     /// <param name="minSegFraction">Override for <see cref="MinSegFrac"/>, for tests.</param>
     /// <returns>The fit.</returns>
     public static FitResult Fit(
         double[] starts,
         double[] ends,
-        float[] samples,
-        int sampleRate,
+        double[] level,
         double? minSegFraction = null)
     {
-        double[] pFit = Dilate(SpeechProbability(samples, sampleRate), SlackSec);
-        double[] pRaw = SpeechProbability(samples, sampleRate);
+        double[] pFit = Dilate(SpeechProbability(level), SlackSec);
+        double[] pRaw = SpeechProbability(level);
         if (pFit.Length < 4 || starts.Length == 0)
         {
             return FitResult.NotMeasured("audio too short");

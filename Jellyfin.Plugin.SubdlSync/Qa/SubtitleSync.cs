@@ -157,10 +157,10 @@ public static class SubtitleSync
         // drift?" question any more — a constant offset is the same fit with one segment,
         // so the two cases cannot disagree.
         OffsetFit.FitResult fit;
-        float[] samples;
+        double[] levels;
         try
         {
-            samples = await DriftGate.DecodeMonoAsync(ffmpegPath, mediaPath, ct, audioMap)
+            levels = await DriftGate.DecodeFrameLevelsAsync(ffmpegPath, mediaPath, ct, audioMap)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -173,7 +173,7 @@ public static class SubtitleSync
             return new Result(false, 0, srtText, null, "audio decode failed");
         }
 
-        if (samples.Length == 0)
+        if (levels.Length == 0)
         {
             return new Result(false, 0, srtText, null, "not measured: no audio samples");
         }
@@ -186,7 +186,7 @@ public static class SubtitleSync
 
         try
         {
-            fit = OffsetFit.Fit(fst, fen, samples, DriftGate.SampleRate);
+            fit = OffsetFit.Fit(fst, fen, levels);
         }
         catch (Exception ex)
         {
