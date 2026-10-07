@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.186",
-        "changelog": "v12.1.12.186: The time the audio alignment spends no longer counts against the download pacing.\n    The alignment runs between two downloads, so its duration sat inside a wait that was meant for\n    transferring; it is now measured and taken off the next wait, never below zero, and only in the\n    download direction. An alignment that found nothing to correct costs the same as one that\n    corrected a file, so both are credited. The run's closing line reports the cost: how many\n    subtitles were aligned and how many seconds it took.",
+        "version": "12.1.12.187",
+        "changelog": "v12.1.12.187: The statistics table counts what the run did to the files themselves. Two new rows\n    say how many media files had language codes written into them and how many loose subtitle files\n    were renamed so their name carries the language — both were visible only in the log before. The\n    table is also reordered: the two volume counters lead with the download direction first, and the\n    remaining rows are grouped by direction instead of alternating. Also fixes a real defect: a dry\n    run renamed loose subtitle files on disk while reporting that it writes nothing.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.186-dev/Jellyfin.Plugin.SubdlSync_12.1.12.186.zip",
-        "checksum": "4f7dfb287abc17706b203149e3c8caa8",
-        "timestamp": "2026-10-07T11:35:27Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.187-dev/Jellyfin.Plugin.SubdlSync_12.1.12.187.zip",
+        "checksum": "3566ab64c78e2f3d01829fa2ed40e7fb",
+        "timestamp": "2026-10-07T14:32:26Z"
       }
     ]
   }
