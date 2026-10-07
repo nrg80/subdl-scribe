@@ -345,6 +345,47 @@ def main():
               "FittedToAudio" in api_names,
               "FittedToAudio missing from the Stats endpoint")
 
+        # The reset must zero EVERY counter the API publishes. This is a source cross-check
+        # because the failure is silent in the worst way: add a column, forget the reset, and the
+        # old total keeps being displayed next to a reset button that claims to have cleared it —
+        # the same drift the counters were moved out of the configuration XML to remove.
+        ent = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Data", "Entities.cs"))
+        plg = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Plugin.cs"))
+        if os.path.exists(ent) and os.path.exists(plg):
+            ents = open(ent, encoding="utf-8").read()
+            row = ents[ents.index("class StatusStatsEntity"):]
+            row = row[:row.index("\n}")]
+            counters = re.findall(r"public long (\w+) \{ get; set; \}", row)
+            plugin = open(plg, encoding="utf-8").read()
+            body = plugin[plugin.index("public Data.StatusStatsEntity ResetStatusStats()"):]
+            body = body[:body.index("db.StatusStats.Upsert(row);")]
+            not_zeroed = sorted(c for c in counters if ("row.%s = 0;" % c) not in body)
+            check("the reset zeroes every counter on the status row", not not_zeroed,
+                  "not zeroed: %s" % ", ".join(not_zeroed))
+            # And the writer's early-out must know about every PARAMETER: a run that only fitted
+            # subtitles would otherwise be dropped as "nothing happened" and its count lost.
+            # Match on the PARAMETERS, not the entity field names — the two differ on purpose
+            # (`typeCorrected` writes `TypeCorrectedByFileName`, `tmdbYearMisses` writes
+            # `TmdbYearFilterMisses`), and comparing field names to parameter names reports a
+            # complete guard as broken.
+            add = plugin[plugin.index("public void AddStatusCounters("):]
+            add = add[:add.index("db.StatusStats.Upsert(row);")]
+            sig = add[:add.index(")")]
+            params = re.findall(r"long (\w+)(?: = 0)?", sig)
+            guard = add[add.index("if ("):add.index("return; // nothing happened")]
+            not_guarded = sorted(p for p in params if p not in guard)
+            check("the counter writer's early-out covers every counter", not not_guarded,
+                  "missing from the guard: %s" % ", ".join(not_guarded))
+            # And every parameter must actually reach a column: a parameter the guard checks but
+            # the writer never stores silently accepts work and reports nothing.
+            body_after = add[add.index("row.Uploaded"):]
+            unwritten = sorted(p for p in params
+                               if p not in body_after and p not in ("uploaded", "downloaded"))
+            check("every counter parameter is written to the row", not unwritten,
+                  "never written: %s" % ", ".join(unwritten))
+        else:
+            check("Entities.cs and Plugin.cs are reachable for the reset check", False)
+
         # The TWO endpoints must carry the SAME fields. The GUI feeds the reset response straight
         # back into the renderer, so a field missing from the reset POST renders "undefined" right
         # after a reset — this happened before with the quality counters, one endpoint over.
