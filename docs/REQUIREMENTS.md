@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.181.
+**Status:** Implementation — v12.1.12.183.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -430,13 +430,12 @@ remaining refusals stand:
   measurement floor.
 - `|offset| > 20 s` on a constant offset ⇒ nothing is written.
 - a shift that would push a cue **below zero** ⇒ the fitted shift is **applied as measured** and the
-  cue is **clamped to 0**. **Supersedes the former refusal** (operator order, 07.10.2026: *"Bitte immer
-  um die Berechnung verschieben. Negative cues auf 0 setzen"*). The refusal was a measured defect, not a
-  safety net: on BCS S01E04 German the fit's own peak is **−9.00 s** and the leading title card sits at
-  **5.07 s**, so the guard lifted EVERY cue to −5.07 s — where the paired t collapsed to **+0.68 ≤ Z**
-  and the deploy rule reported **"no proven gain"** on a file **nine seconds** out of sync. The operator
-  heard it before any log line showed it. A clamp touches one cue's relation to its neighbour; the
-  refusal silently discarded the whole correction, which is strictly worse.
+  cue is **clamped to 0**. **Supersedes the former whole-file refusal** (operator order, 07.10.2026:
+  *"Bitte immer um die Berechnung verschieben. Negative cues auf 0 setzen"*). **Rule.** The fit decides
+  the offset; the clamp only stops a cue running off the front of the file. A refusal may not replace the
+  fitted value — it discarded the whole correction over one leading cue and reported the file as clean
+  (`no proven gain`) while it was **9.00 s** out of sync. The clamp changes one cue's relation to its
+  neighbour; that is the smaller price, and the fitted shift stands. **Test: T110.**
 
 **Applied to times only.** Text is carried through byte-for-byte, the cue count and cue order are
 unchanged, and the corrected file is written **canonical** (UTF-8, no BOM, LF, trailing whitespace
@@ -585,7 +584,7 @@ not undo the corrected file; it is logged as a warning.
 
 **F-M307 [D] (development, 07.10.2026):** **The offset is a piecewise-constant function of time, fitted by exact dynamic programming. Supersedes the recursive Bayes-factor gate (F-M295) and the staircase applied from gate boundaries (F-M300).**
 
-**How the speech is recognised.** One audio track is decoded (chosen by language, §4.3.1), mono, 16 kHz, band-passed **300–3400 Hz** — the band that carries voice. The signal is cut into **20 ms frames** and each frame's RMS is taken as its level in dB, **while the stream is read** — the raw samples never exist as an array (see the cost note below). The levels are normalised against the file's own distribution: the **10th percentile** of frame level becomes 0 and the **90th percentile** becomes 1, clipped. The result is `p(t)`, a **speech probability between 0 and 1 per frame**. The method is **threshold-free** — no absolute level is assumed, so any recording level works, and it adapts to the file rather than to a calibration. `p(t)` is then dilated by a **0.30 s max-filter** (`SLACK`), which absorbs the fact that a subtitle boundary is not frame-exact and sharpens the peak.
+**How the speech is recognised.** One audio track is decoded (chosen by language, §4.3.1), mono, 16 kHz, band-passed **300–3400 Hz** — the band that carries voice. The signal is cut into **20 ms frames** and each frame's RMS is taken as its level in dB. The levels are normalised against the file's own distribution: the **10th percentile** of frame level becomes 0 and the **90th percentile** becomes 1, clipped. The result is `p(t)`, a **speech probability between 0 and 1 per frame**. The method is **threshold-free** — no absolute level is assumed, so any recording level works, and it adapts to the file rather than to a calibration. `p(t)` is then dilated by a **0.30 s max-filter** (`SLACK`), which absorbs the fact that a subtitle boundary is not frame-exact and sharpens the peak.
 
 **What is compared, and how.** Nothing is cross-correlated and no matrix of coefficients is formed. The comparison is a **single scalar per candidate shift**, and it is an **average, not a correlation coefficient**: nothing is centred, nothing is normalised against a second curve, and no Pearson or cross-correlation figure is computed anywhere in the method.
 
@@ -616,7 +615,22 @@ over **all** placements of change points, where `sigma` is the median absolute c
 
 **What it does not claim.** `p(t)` measures energy in the voice band; it does not classify speech against music, and it does not read words. It therefore measures *where the speech is*, which is what synchronisation needs, and nothing about what is said.
 
-**Cost and failure posture.** One audio decode per candidate file, **streamed**: the decode is read in chunks and reduced to one level per 20 ms frame as it arrives, so the raw samples are never materialised. **Rule.** The decoder returns the **frame levels**, not the samples, because the levels are the only thing any consumer reads — `SpeechProbability` and `SpeechIslands` both walk the frames and compute nothing but `20·log10(sqrt(mean(v²)))`, and nothing reads an individual sample outside that loop. Materialising the samples cost a **514 MB `byte[]` AND a 514 MB `float[]` at the same time** on a 140-minute track — measured ~1 GB peak, which the OOM killer took (**exit 137**, measured 07.10.2026 on the 140-minute files). The streaming decoder holds **3.2 MB** for the same track and **68 MB peak RSS end to end** where the old path needed ~1028 MB; the fits are **bit-identical** (same cue table, same segments, same `mean p`). The levels are **never persisted** — no database column, no cache, no file: they live for one fit and are dropped. No ffmpeg, unreadable audio, no speech, too few cues ⇒ "did not run" and the file passes, as with every other gate, and **nothing is written**. The correction is applied to **times only**: text is carried through byte-for-byte, cue count and cue order are unchanged. Order guard last: no cue overtakes its predecessor's end, and a cue that would land below zero is **clamped to 0** — the fitted shift is applied as measured (as in the list of §4.3.2).
+**Streaming — the decoder returns the FRAME LEVELS, never the samples.** **Rule.** The audio is read in
+chunks and reduced to one level per **20 ms frame** as it arrives; the samples are never materialised as
+an array. The decoder's return value is the level curve, because the levels are the only thing any
+consumer reads — `SpeechProbability` and `SpeechIslands` both walk the frames and compute nothing but
+`20·log10(sqrt(mean(v²)))`, and no code reads an individual sample outside that loop. **Consequence: the
+levels are never persisted** — no database column, no cache, no file. They live for one fit and are
+dropped. **Why.** The whole track in memory costs **~1 GB peak** at 140 minutes (a 514 MB `byte[]` and a
+514 MB `float[]` alive at once) against **3.2 MB** streamed; the fits are **bit-identical**, and the
+140-minute files could not be fitted at all under the old path (the OOM killer took them). **Test: T122.**
+
+**Cost and failure posture.** One audio decode per candidate file, streamed. No ffmpeg, unreadable
+audio, no speech, too few cues ⇒ "did not run" and the file passes, as with every other gate, and
+**nothing is written**. The correction is applied to **times only**: text is carried through
+byte-for-byte, cue count and cue order are unchanged. Order guard last: no cue overtakes its
+predecessor's end, and a cue that would land below zero is **clamped to 0** — the fitted shift is
+applied as measured (as in the list of §4.3.2).
 
 **Tests: T119, T120, T121.** Reference implementation: `/opt/data/drift-lab/RC/sy-1.0.0-rc1` (`core4.py` the fit, `drift_algo5.py` the runner); `CURRENT-RC.txt` names the active candidate. Reasons, measurements and the records of rejected approaches: `METHODIK.md`, section 4.
 ## 5. Upload Postprocessing
@@ -1583,6 +1597,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T120:** Real material is scored against the **audio**, never against another subtitle (F-M305), and the run is repeated on its own output to assert idempotence in the same test — the timeline must be unchanged on the second pass. The control run comes first, as F-M305 requires, and the operator's listening verdict is recorded beside the result. (F-M307)
 
 **T121:** The two defects of F-M307 are regression cases and must fail loudly if they return: **(a)** a shifted cue window that falls outside the audio scores 0 and is **excluded** — the fit must never return a boundary-runner shift on cues that were not moved (the clipped behaviour returned shifts at the search limit); **(b)** the before/after report is scored with the **real cue ends**, asserted against a known value, because a report over one frame at the cue start silently makes the deploy rule revert good files. (F-M307)
+**T122:** The streaming decoder, asserted as two ABSENCES on the plugin source, because neither shows up in a log line and both would return silently: the sample-materialising decoder is gone (no `ms.ToArray()` and no `new float[…]` on the audio path — it held a 514 MB `byte[]` and a 514 MB `float[]` at once and the OOM killer took the 140-minute files) while the streaming entry point exists; and **nothing persists the level curve** — no file, no cache, no database column, and no curve-shaped field in `Data/Entities.cs`. Negative-controlled: planting `new float[…]` back into the audio path turns the assertion RED (measured 07.10.2026), so the two absences are guarded and not merely declared. (F-M307)
 ## 20. References
 
 - Plugin template: github.com/jellyfin/jellyfin-plugin-template

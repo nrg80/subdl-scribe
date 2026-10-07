@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.182"
+version: "12.1.12.183"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,14 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.183: The correction is now applied exactly as fitted. A subtitle whose first cue sits
+    late enough to veto the shift (a leading title card) used to lift the WHOLE file to
+    the largest shift that cue allowed — on one episode that turned a measured -9.00 s
+    into -5.07 s, where the fit read "no proven gain" on a file nine seconds out of sync.
+    The fit now decides, and a cue that would land below zero is clamped to 0. The audio
+    decoder streams: one level per 20 ms frame instead of the whole track in memory, ~1 GB
+    peak down to 68 MB, so long films fit at all. The kept original is named
+    ".srt.unsynced.zip".
   v12.1.12.181: The archived original is now stored exactly as SubDL delivered it. Files that
     already carried a byte-order mark were saved with a SECOND one in front, because the archive
     was decoded and re-encoded before being written; measured, 55108 bytes came back as 55111.

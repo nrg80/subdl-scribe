@@ -75,12 +75,85 @@ public static class AutoSyncRun
         failures += ByteStyle();
         failures += UnsyncSuffix();
         failures += UnsyncArchive();
+        failures += StreamingDecoder();
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
             ? "ALL CASES PASSED"
             : $"{failures} CASE(S) FAILED");
         return failures == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Case 7: the decoder streams frame LEVELS and nothing persists them. Two absences,
+    /// asserted on the source, because both are invisible in a log line and both would
+    /// silently come back: materialising the samples costs ~1 GB peak on a 140-minute
+    /// track (measured, the OOM killer took it), and a cached or stored level curve is a
+    /// second copy of the audio that nothing asked for.
+    /// </summary>
+    private static int StreamingDecoder()
+    {
+        int f = 0;
+        Console.WriteLine("[7] the decoder streams levels; nothing persists them");
+
+        string gate = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Qa/DriftGate.cs";
+        string fit = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Qa/OffsetFit.cs";
+        if (!System.IO.File.Exists(gate) || !System.IO.File.Exists(fit))
+        {
+            Console.WriteLine("  [SKIP] sources not reachable from here");
+            return f;
+        }
+
+        string g = System.IO.File.ReadAllText(gate);
+        string o = System.IO.File.ReadAllText(fit);
+
+        // (a) the streaming decoder exists and is what the paths call
+        Check("the streaming decoder exists",
+            g.Contains("DecodeFrameLevelsAsync", StringComparison.Ordinal),
+            "DecodeFrameLevelsAsync");
+        f += g.Contains("DecodeFrameLevelsAsync", StringComparison.Ordinal) ? 0 : 1;
+
+        // (b) the sample materialiser is GONE. It existed and allocated byte[] + float[]
+        //     at once; a presence-only check on the new name would not notice its return.
+        Check("no sample-materialising decoder is left",
+            !g.Contains("ms.ToArray()", StringComparison.Ordinal)
+            && !g.Contains("new float[", StringComparison.Ordinal),
+            "no ms.ToArray() / new float[] in the decoder");
+        f += !g.Contains("ms.ToArray()", StringComparison.Ordinal)
+             && !g.Contains("new float[", StringComparison.Ordinal) ? 0 : 1;
+
+        // (c) the level curve is what the fit consumes, not samples
+        Check("the fit takes the level curve",
+            o.Contains("SpeechProbability(double[] level)", StringComparison.Ordinal)
+            || o.Contains("SpeechProbability(double[] level)", StringComparison.Ordinal),
+            "SpeechProbability(double[])");
+        f += o.Contains("SpeechProbability(double[] level)", StringComparison.Ordinal) ? 0 : 1;
+
+        // (d) nothing writes the levels anywhere: no file, no cache, no DB column. The
+        //     plugin side only — the fit TEST keeps a local file as a test convenience.
+        bool writesLevels =
+            System.Text.RegularExpressions.Regex.IsMatch(g, @"File\.WriteAll\w*\([^)]*[Ll]evel")
+            || System.Text.RegularExpressions.Regex.IsMatch(o, @"File\.WriteAll\w*\([^)]*[Ll]evel");
+        Check("nothing persists the levels", !writesLevels,
+            writesLevels ? "FOUND a level write in the plugin" : "no level file/cache/column");
+        f += writesLevels ? 1 : 0;
+
+        // (e) no DB entity carries a curve/blob field
+        string entities = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Data/Entities.cs";
+        if (System.IO.File.Exists(entities))
+        {
+            string e = System.IO.File.ReadAllText(entities);
+            bool curveCol =
+                e.Contains("Envelope", StringComparison.Ordinal)
+                || e.Contains("SpeechLevel", StringComparison.Ordinal)
+                || e.Contains("LevelCurve", StringComparison.Ordinal);
+            Check("no database column holds an audio curve", !curveCol,
+                curveCol ? "FOUND a curve column in Entities.cs" : "no curve column");
+            f += curveCol ? 1 : 0;
+        }
+
+        Console.WriteLine();
+        return f;
     }
 
     private static MediaStream Audio(string? lang) => new()
