@@ -108,6 +108,7 @@ public static class RejectReason
     /// <summary>This (file, language, HI) pair was already uploaded in this run.</summary>
     public const string SelfEcho = "duplicate-self-echo";
 
+
     // --- download side: a candidate was fetched, screened and discarded ---
     /// <summary>A download candidate was fetched and failed a gate. The gate is the reason suffix.</summary>
     public const string CandidateRejected = "candidate-rejected";

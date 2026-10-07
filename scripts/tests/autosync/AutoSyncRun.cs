@@ -571,218 +571,178 @@ public static class AutoSyncRun
     }
 
     /// <summary>
-    /// Case 5: the suffix must sit after ".srt", asserted against the real glob the
-    /// sidecar listing uses.
+    /// Case 5: the kept original IS a subtitle now — a loose sidecar in the reserved block, which
+    /// Jellyfin lists as its own selectable track. F-M315 replaced the archive with it.
     /// </summary>
     private static int UnsyncSuffix()
     {
         int f = 0;
-        Console.WriteLine("[5] the .unsynced suffix does not become a subtitle");
+        Console.WriteLine("[5] the kept original is a selectable sidecar (F-M315)");
 
         const string baseName = "Person Of Interest S02e06 The High Road";
+        string media = $"/media/{baseName}.mkv";
         string corrected = $"/media/{baseName}.en.srt";
-        string kept = SubtitleSync.UnsyncZipPathFor(corrected);   // the artefact that IS kept
-        string swapped = $"/media/{baseName}.en.unsynced.srt";
+        var none = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        bool suffixOk = kept == $"/media/{baseName}.en.srt.unsynced.zip";
-        Check("the kept name sits after .srt", suffixOk, kept);
-        f += suffixOk ? 0 : 1;
+        string? kept = SidecarNaming.PlanOriginalTarget(media, "EN", false, none);
+        bool nameOk = kept != null && System.IO.Path.GetFileName(kept) == $"{baseName}.en.99.srt";
+        Check("the first original takes slot 99", nameOk, kept ?? "(null)");
+        f += nameOk ? 0 : 1;
 
-        // The listing pattern is baseName + "*.srt". A path matches when the file name
-        // is that prefix followed by anything then ".srt".
-        bool correctedMatched = MatchesGlob(corrected, baseName);
-        bool unsyncMatched = MatchesGlob(kept, baseName);
-        bool swappedMatched = MatchesGlob(swapped, baseName);
+        // The listing pattern is baseName + "*.srt". The original MUST match it: that match is the
+        // whole point — it is how the file becomes a track the operator can choose.
+        bool listed = kept != null && MatchesGlob(kept, baseName);
+        Check("the sidecar listing SEES the original (that is the point)", listed,
+            listed ? "matched — it appears as its own track" : "not matched — invisible in the player");
+        f += listed ? 0 : 1;
 
-        Check("corrected file IS listed", correctedMatched, "matched");
-        f += correctedMatched ? 0 : 1;
-        Check("the kept artefact is NOT listed", !unsyncMatched,
-            unsyncMatched ? "MATCHED (would be read as a subtitle)" : "ignored");
-        f += !unsyncMatched ? 0 : 1;
-        Check("the swapped order WOULD be listed (why the order matters)", swappedMatched,
-            swappedMatched ? "matched — the name parser then reads \"unsynced\" as a language" : "not matched");
-        f += swappedMatched ? 0 : 1;
+        // And the parser must read it as a normal sidecar: right language, no HI, NOT forced.
+        var parsed = kept == null ? null : SidecarNaming.Parse(System.IO.Path.GetFileNameWithoutExtension(kept), baseName);
+        bool parsedOk = parsed != null && parsed.Value.Lang == "EN"
+                        && !parsed.Value.HearingImpaired && !parsed.Value.Forced;
+        Check("the name parses as EN, not HI, not forced", parsedOk,
+            parsed == null ? "(not parsed)" : $"{parsed.Value.Lang} hi={parsed.Value.HearingImpaired} forced={parsed.Value.Forced}");
+        f += parsedOk ? 0 : 1;
+
+        // Numbering runs DOWNWARD and stops at 90. 99, 98, 97 … never 100, never 89.
+        var taken99 = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { $"{baseName}.en.99.srt" };
+        string? second = SidecarNaming.PlanOriginalTarget(media, "EN", false, taken99);
+        bool secondOk = second != null && System.IO.Path.GetFileName(second) == $"{baseName}.en.98.srt";
+        Check("with 99 taken the next original takes 98", secondOk, second ?? "(null)");
+        f += secondOk ? 0 : 1;
+
+        // Every reserved slot taken → no name at all. Inventing one would overwrite an original.
+        var allTen = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int s = SidecarNaming.OriginalSlotMin; s <= SidecarNaming.OriginalSlotMax; s++)
+        {
+            allTen.Add($"{baseName}.en.{s}.srt");
+        }
+
+        string? overflow = SidecarNaming.PlanOriginalTarget(media, "EN", false, allTen);
+        Check("all ten reserved slots taken → no name (never an overwrite)", overflow == null, overflow ?? "(null)");
+        f += overflow == null ? 0 : 1;
+
+        // The reserved block never collides with a corrected file: the corrected writer stops at 89.
+        string? highestCorrected = null;
+        var allCorrected = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int s = 1; s <= SidecarNaming.CorrectedSlotMax; s++)
+        {
+            allCorrected.Add($"{baseName}.en{(s > 1 ? "." + s : string.Empty)}.srt");
+        }
+
+        highestCorrected = SidecarNaming.PlanTarget(media, "EN", false, allCorrected);
+        // The fallback name must never come out of the reserved block: that is the collision this
+        // whole reservation exists to prevent. Slot 1 (the plain name) is the expected answer, and
+        // its number is below the block by construction.
+        string fallbackName = System.IO.Path.GetFileName(highestCorrected ?? "(null)");
+        bool below = fallbackName == $"{baseName}.en.srt";
+        Check("every corrected slot taken → plain name, never a reserved one", below, fallbackName);
+        f += below ? 0 : 1;
+
+        bool block = SidecarNaming.IsOriginalSlot(90) && SidecarNaming.IsOriginalSlot(99)
+                     && !SidecarNaming.IsOriginalSlot(89) && !SidecarNaming.IsOriginalSlot(1);
+        Check("the reserved block is exactly 90–99", block, "90..99");
+        f += block ? 0 : 1;
 
         Console.WriteLine();
         return f;
     }
 
     /// <summary>
-    /// Case 6: the archived original (F-M306) — one entry, the same bytes, and a name that
-    /// matches neither listing pattern, so the archive can never be read as a subtitle.
+    /// Case 6: the kept original is LOCKED against upload (F-M315) — a normal sidecar whose content
+    /// carries a terminal registry row. The archive (F-M306) is gone; the properties it guaranteed
+    /// (never uploaded, never counted as coverage, name the reader recognizes) are asserted instead.
     /// </summary>
     private static int UnsyncArchive()
     {
         int f = 0;
-        Console.WriteLine("[6] the archived original (.zip) — F-M306");
+        Console.WriteLine("[6] the kept original is locked against upload (F-M315)");
 
         const string baseName = "Person Of Interest S02e06 The High Road";
         string corrected = $"/media/{baseName}.en.srt";
-        string unsync = SubtitleSync.UnsyncPathFor(corrected);
-        string unsyncZip = SubtitleSync.UnsyncZipPathFor(corrected);
 
-        // The name sits after ".srt" like the copy's does, and ends in .zip.
-        bool nameOk = unsyncZip == $"/media/{baseName}.en.srt.unsynced.zip";
-        Check("zip name sits after .srt", nameOk, unsyncZip);
-        f += nameOk ? 0 : 1;
-
-        // Neither listing pattern may see it. Both match on the .srt ENDING.
-        bool sidecarSees = MatchesGlob(unsyncZip, baseName);
-        Check("the sidecar listing does NOT see the archive", !sidecarSees,
-            sidecarSees ? "MATCHED (would be read as a subtitle)" : "ignored");
-
-        f += !sidecarSees ? 0 : 1;
-        bool seederSees = System.IO.Path.GetFileName(unsyncZip)
-            .EndsWith(".srt", StringComparison.OrdinalIgnoreCase);
-        Check("the seeder's \"*.srt\" does NOT see the archive", !seederSees,
-            seederSees ? "MATCHED" : "ignored");
-        f += !seederSees ? 0 : 1;
-
-        // Build the real archive from real bytes, then read it back as an archive.
-        // F-M306: the payload carries a BOM on purpose. The archive is fed the FETCHED bytes and
-        // nothing else; it used to be fed `Encode(DecodeSrt(bytes), StyleOfBytes(bytes))`, and that
-        // decode/encode round trip prepended a SECOND BOM to a payload that already had one.
-        // Measured on a real file: 55 108 B came back as 55 111 B with the header EF BB BF EF BB BF.
-        // A fixture WITHOUT a BOM cannot see that, which is why this one has three extra bytes.
-        string sampleText = "1\n00:00:01,000 --> 00:00:03,000\nHallo\n";
-        byte[] payload = SubtitleSync.Encode(sampleText, bom: true, crlf: true);
-        byte[] zipBytes = SubtitleSync.BuildUnsyncArchive(System.IO.Path.GetFileName(unsync), payload);
-
-        int entries = 0;
-        byte[]? roundTrip = null;
-        string? entryName = null;
-        using (var ms = new System.IO.MemoryStream(zipBytes))
-        using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Read))
-        {
-            entries = zip.Entries.Count;
-            if (entries > 0)
-            {
-                entryName = zip.Entries[0].FullName;
-                using var s = zip.Entries[0].Open();
-                using var outMs = new System.IO.MemoryStream();
-                s.CopyTo(outMs);
-                roundTrip = outMs.ToArray();
-            }
-        }
-
-        Check("the archive holds exactly ONE entry", entries == 1, $"entries={entries}");
-        f += entries == 1 ? 0 : 1;
-
-        bool nameInZip = entryName == System.IO.Path.GetFileName(unsync);
-        Check("the entry carries the copy's file name", nameInZip, entryName ?? "(none)");
-        f += nameInZip ? 0 : 1;
-
-        // Byte for byte — this is the assertion a re-encode fails. The payload carries a BOM,
-        // which is what makes the doubled-BOM defect visible here instead of silently passing.
-        bool identical = roundTrip != null && roundTrip.Length == payload.Length
-                         && roundTrip.SequenceEqual(payload);
-        bool singleBom = payload.Length >= 6
-                         && payload[0] == 0xEF && payload[1] == 0xBB && payload[2] == 0xBF
-                         && !(payload[3] == 0xEF && payload[4] == 0xBB && payload[5] == 0xBF);
-        Check("the payload is BYTE-IDENTICAL to the plain copy", identical && singleBom,
-            identical
-                ? (singleBom
-                    ? $"{payload.Length} bytes equal, single BOM (EF BB BF)"
-                    : $"{payload.Length} bytes equal but the BOM is DOUBLED (EF BB BF EF BB BF)")
-                : $"differ: zip={roundTrip?.Length ?? -1} bytes, copy={payload.Length} bytes");
-        f += identical && singleBom ? 0 : 1;
-
-        // Deterministic: the same input yields the same bytes on every run, which is what
-        // makes a byte comparison a usable test at all.
-        byte[] again = SubtitleSync.BuildUnsyncArchive(System.IO.Path.GetFileName(unsync), payload);
-        bool deterministic = again.SequenceEqual(zipBytes);
-        Check("the archive is deterministic", deterministic,
-            deterministic ? "same bytes on a second build" : "BYTES DIFFER between runs");
-        f += deterministic ? 0 : 1;
-
-        // ---- The artefact count, on a REAL directory. This is where "only the zip" is
-        // proved rather than asserted: the pipeline's own write sequence is replayed on
-        // disk, and the folder must then hold exactly the corrected file and the archive.
-        string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
-            "subdl-unsync-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            System.IO.Directory.CreateDirectory(dir);
-            string tCorrected = System.IO.Path.Combine(dir, $"{baseName}.en.srt");
-            string tZip = SubtitleSync.UnsyncZipPathFor(tCorrected);
-            string tLoose = SubtitleSync.UnsyncPathFor(tCorrected);
-
-            System.IO.File.WriteAllBytes(tCorrected, SubtitleSync.Encode("1\n00:00:01,000 --> 00:00:03,000\nX\n", true, false));
-            System.IO.File.WriteAllBytes(tZip, zipBytes);
-
-            string[] files = System.IO.Directory.GetFiles(dir);
-            Check("the folder holds exactly TWO files", files.Length == 2,
-                $"{files.Length}: " + string.Join(", ", System.Array.ConvertAll(files, System.IO.Path.GetFileName)));
-            f += files.Length == 2 ? 0 : 1;
-
-            bool looseAbsent = !System.IO.File.Exists(tLoose);
-            Check("the LOOSE copy is NOT written", looseAbsent,
-                looseAbsent ? "no <...>.srt.unsynced on disk" : "FOUND a loose copy");
-            f += looseAbsent ? 0 : 1;
-
-            bool zipPresent = System.IO.File.Exists(tZip);
-            Check("the archive IS on disk", zipPresent, System.IO.Path.GetFileName(tZip));
-            f += zipPresent ? 0 : 1;
-        }
-        finally
-        {
-            try { System.IO.Directory.Delete(dir, recursive: true); } catch { /* temp dir */ }
-        }
-
-        // ---- The SOURCE. A helper can be right while the CALLER still writes the loose
-        // copy; the pipeline's own write calls are what decide the artefact on disk.
+        // The archive helpers may stay (they are pure and callers may be gone), but the pipeline must
+        // no longer write one. This is the assertion that catches a half-reverted change.
         const string pipeline = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs";
         if (System.IO.File.Exists(pipeline))
         {
             string src = System.IO.File.ReadAllText(pipeline);
-            // A write of the loose path would look like AtomicWriteAsync(<name containing
-            // "unsyncPath", ...) or the HI equivalent. Both must be gone.
-            bool looseWrite = System.Text.RegularExpressions.Regex.IsMatch(
-                src, @"AtomicWriteAsync\s*\(\s*(hi)?[Uu]nsync(Path|Name)\b");
-            Check("no write targets the loose copy in the pipeline source", !looseWrite,
-                looseWrite ? "FOUND AtomicWriteAsync(unsyncPath/…)" : "only the archive is written");
-            f += !looseWrite ? 0 : 1;
 
-            bool archiveWrite = System.Text.RegularExpressions.Regex.IsMatch(
+            bool noArchiveWrite = !System.Text.RegularExpressions.Regex.IsMatch(
                 src, @"AtomicWriteAsync\s*\(\s*\n?\s*(hi)?[Uu]nsyncZip\b");
-            Check("the pipeline writes the archive path", archiveWrite,
-                archiveWrite ? "AtomicWriteAsync(unsyncZip/…)" : "NOT FOUND — the archive is never written");
-            f += archiveWrite ? 0 : 1;
+            Check("the pipeline writes NO archive any more", noArchiveWrite,
+                noArchiveWrite ? "no AtomicWriteAsync(unsyncZip/…)" : "FOUND a zip write — F-M306 is back");
+            f += noArchiveWrite ? 0 : 1;
 
-            // F-M296: the CORRECTED file must be encoded canonical, never re-encoded back to
-            // the fetched payload's byte style. A helper can be right while the caller still
-            // writes the old shape, so the source is checked as well — this is the regression
-            // that would silently put the stored hash and the file back out of step.
+            // The original IS written, through the reserved-slot planner. Both tracks, one helper.
+            int originalWrites = System.Text.RegularExpressions.Regex.Matches(
+                src, @"AtomicWriteAsync\s*\(\s*\n?\s*(hi)?[Oo]riginalPath\b").Count;
+            Check("the pipeline writes the loose original (both tracks)", originalWrites == 2,
+                $"AtomicWriteAsync(originalPath/…) {originalWrites}/2");
+            f += originalWrites == 2 ? 0 : 1;
+
+            // The lock is the row every downloaded subtitle already gets — MarkDownloaded. The
+            // original IS a downloaded subtitle, so it is registered the same way and no new
+            // vocabulary is introduced. Two sites: the main track and the HI track.
             //
-            // TWO, and that count is the correct one. The pipeline has exactly two corrected
-            // writes: the plain sidecar and the HI sidecar (case matters — the HI variable is
-            // `hiWriteBytes`, so a pattern expecting `writeBytes` alone would miscount). The
-            // other two writes in the file carry the FETCHED bytes untouched (`writeBytes =
-            // bytes`, `hiWriteBytes = hiBytes`) and must NOT be canonical: the original has to
-            // stay exactly as SubDL delivered it, which is what the archive guarantees. An
-            // expectation of FOUR counted those two and could never pass — it measured the
-            // wrong thing, and this assertion stayed red while the behaviour was right.
-            // Measured 07.10.2026: the same 2 against HEAD, before any of this work.
+            // Counting `Registry.MarkDownloaded` overall would be wrong: the corrected files get the
+            // same call, so that number would rise when THEY change. The lock is asserted where it
+            // belongs — on the original's own hash, next to the original's own write.
+            int lockRows = System.Text.RegularExpressions.Regex.Matches(
+                src, @"Registry\.MarkDownloaded\(\s*\n?\s*(hi)?[Oo]riginalHash").Count;
+            Check("the original is registered as downloaded, like every download (both tracks)", lockRows == 2,
+                $"MarkDownloaded(originalHash/…) {lockRows}/2");
+            f += lockRows == 2 ? 0 : 1;
+
+            // And it must be the DOWNLOADED row, not a rejection: the operator kept the file on
+            // purpose, so calling it rejected would make the diagnostics report a defect that does
+            // not exist. This assertion keeps the vocabulary honest.
+            bool noInventedReason = !System.Text.RegularExpressions.Regex.IsMatch(
+                src, "RejectReason" + @"\.OriginalKept");
+            Check("no invented reject reason — the lock reuses the download treatment", noInventedReason,
+                noInventedReason ? "no invented reason" : "FOUND an invented reason");
+            f += noInventedReason ? 0 : 1;
+
+            // The locked bytes must be the ones on disk: canonical encode, so the row's hash and the
+            // file agree. Feeding raw payload bytes would leave the row pointing at a sequence that
+            // exists nowhere, and the duplicate guard would read the file as unknown and upload it.
+            int canonicalOriginal = System.Text.RegularExpressions.Regex.Matches(
+                src, @"ContentHashRegistry\.EncodeCanonical\((hi)?[Uu]nsync").Count;
+            Check("the locked bytes are the bytes written (canonical, both tracks)", canonicalOriginal == 2,
+                $"EncodeCanonical(unsync…) {canonicalOriginal}/2");
+            f += canonicalOriginal == 2 ? 0 : 1;
+
+            // The dry run must still guard the new write (F-M287).
+            int dryRunGuards = System.Text.RegularExpressions.Regex.Matches(
+                src, @"unsyncPayload\s*!=\s*null\s*&&\s*!_config\.DownloadDryRun").Count;
+            Check("the dry run still guards the original's write", dryRunGuards == 1,
+                $"{dryRunGuards} site(s)");
+            f += dryRunGuards == 1 ? 0 : 1;
+
+            // The lock must be one the seeder and the uploader ALREADY honour, not a new branch.
+            // IsContentKnown is what the seeder asks before queueing: a downloaded row counts as
+            // known, an Observed row deliberately does not. Asserted here so a later change that
+            // makes downloads non-terminal is caught.
+            const string registry = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs";
+            bool knownCountsDownloaded = System.IO.File.Exists(registry)
+                && System.Text.RegularExpressions.Regex.IsMatch(
+                    System.IO.File.ReadAllText(registry),
+                    "x" + @"\.Status != SubtitleStatus\.Observed");
+            Check("a downloaded row counts as known content (the existing lock)", knownCountsDownloaded,
+                knownCountsDownloaded ? "IsContentKnown ignores only Observed" : "downloads no longer lock");
+            f += knownCountsDownloaded ? 0 : 1;
+        }
+
+        // F-M296's canonical rule is unchanged by this work.
+        if (System.IO.File.Exists(pipeline))
+        {
+            string src = System.IO.File.ReadAllText(pipeline);
             int canonical = System.Text.RegularExpressions.Regex.Matches(
                 src, @"[Ww]riteBytes\s*=\s*ContentHashRegistry\.EncodeCanonical\(").Count;
-            Check("both corrected-file writes go out canonical", canonical == 2,
+            Check("both corrected-file writes still go out canonical", canonical == 2,
                 $"EncodeCanonical {canonical}/2");
             f += canonical == 2 ? 0 : 1;
-
-            // F-M306: the archive is fed the FETCHED bytes, never a decoded/re-encoded copy of
-            // them. The round trip `Encode(DecodeSrt(bytes), StyleOfBytes(bytes))` prepended a
-            // SECOND BOM to a payload that already carried one — measured on a real file, 55 108 B
-            // came out as 55 111 B with the header EF BB BF EF BB BF — while every assertion in this
-            // file stayed green: the fixture carried no BOM, and the helper faithfully archived
-            // whatever it was handed. The defect was in the ARGUMENT, so the argument is asserted.
-            int archiveArgs = System.Text.RegularExpressions.Regex.Matches(
-                src, @"BuildUnsyncArchive\(\s*(hi)?[Uu]nsyncName\s*,\s*(hi)?[Bb]ytes!?\s*\)").Count;
-            int reencoded = System.Text.RegularExpressions.Regex.Matches(
-                src, @"(hi)?[Oo]riginalBytes\s*=").Count;
-            Check("the archive is fed the FETCHED bytes, not a re-encoded copy",
-                archiveArgs == 2 && reencoded == 0,
-                $"BuildUnsyncArchive(…, bytes) {archiveArgs}/2, re-encode sites {reencoded} (want 0)");
-            f += archiveArgs == 2 && reencoded == 0 ? 0 : 1;
         }
 
         Console.WriteLine();

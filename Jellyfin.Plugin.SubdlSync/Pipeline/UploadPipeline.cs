@@ -1065,6 +1065,12 @@ public sealed class UploadPipeline
                     continue;
                 }
 
+                // F-M315 note: a kept unsynchronized original needs NO branch of its own here. The
+                // download wrote a Rejected row for its content with the reason `original-kept`, and the
+                // rejection check below already honours every terminal row by content — the same path
+                // that keeps a QA-rejected sidecar out of the queue. Adding a second check for this one
+                // reason would read the file twice and make the lock look like a special case.
+
                 if (Registry.IsUploaded(mediaHash, looseLang, looseHi))
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] Loose SRT already uploaded — skipping: {File} ({Lang}{Hi})", Path.GetFileName(loosePath), looseLang, looseHi ? ",HI" : "");

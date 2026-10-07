@@ -1959,37 +1959,77 @@ public sealed class DownloadPipeline : IDisposable
 
                     await AtomicWriteAsync(targetPath, writeBytes, ct).ConfigureAwait(false);
 
-                    // F-M296/F-M306: the untouched original, kept beside the corrected file as a
-                    // ONE-ENTRY ARCHIVE. This is what makes the correction reversible without
-                    // re-downloading (which would cost quota and might return the same drifting
-                    // file). The archive is the ONLY artefact kept: the operator ordered the loose
-                    // copy dropped ("Nur das zip ablegen. Wenn ich es entpacken will mache ich das
-                    // selber"), so unpacking is his step, not the pipeline's. The ENTRY carries the
-                    // `.unsynced` name, so unpacking into the media folder cannot clobber the
-                    // corrected `<base>.<lang>.srt`. Guarded by the dry-run flag like every other
-                    // write (F-M287) — the flag is checked again here rather than relying on the
-                    // enclosing branch.
+                    // F-M306/F-M315: the untouched original is kept beside the corrected file.
+                    //
+                    // Until 07.10.2026 it was kept as a one-entry archive (`<name>.unsynced.zip`),
+                    // which the operator could only reach by unpacking it himself. He ordered that
+                    // replaced (07.10.2026): the original now lands as a LOOSE sidecar named
+                    // `<base>.<lang>.99.srt` — numbered from 99 downward — which Jellyfin lists as
+                    // its own selectable track, titled with the number. He also ordered the archive
+                    // gone; archives already on disk are left exactly as they are.
+                    //
+                    // The name is the ONLY difference from a normal sidecar: same language token,
+                    // same `.sdh` marker when the corrected file is the variant, no marker of its
+                    // own (it is not forced — F-M315). The reserved block 90–99 keeps it away from
+                    // the corrected files, which stop at slot 89.
+                    //
+                    // WATCH THE ENCODING. The bytes written are the ORIGINAL TEXT in the canonical
+                    // form (F-M296: UTF-8, no BOM, LF), NOT the payload as fetched. Byte fidelity
+                    // matters for the archive this replaces (it existed to be the uncorrected file
+                    // bit for bit); a selectable track matters here, and — the decisive reason —
+                    // the registry row written below hashes exactly these bytes, so the lock and
+                    // the file on disk describe the same sequence. Writing the fetched style back
+                    // would leave the row pointing at bytes that exist nowhere, and the duplicate
+                    // guard would read the file as unknown and upload it.
+                    //
+                    // The row is the LOCK, and it is the SAME row the corrected file gets:
+                    // MarkDownloaded. A downloaded row already counts as known content, so both
+                    // readers stop at it without any new vocabulary — the seeder drops the file from
+                    // the queue (IsContentKnown) and the uploader returns duplicate-content. Nothing
+                    // had to be invented for this; every downloaded subtitle is treated this way
+                    // today, and the original is a downloaded subtitle. Guarded by the dry-run flag
+                    // like every other write (F-M287).
                     if (unsyncPayload != null && !_config.DownloadDryRun)
                     {
                         try
                         {
-                            string unsyncName = Path.GetFileName(Qa.SubtitleSync.UnsyncPathFor(targetPath));
-                            // F-M306: the FETCHED BYTES, verbatim — not the decoded text re-encoded.
-                            // The round trip DecodeSrt -> Encode put a SECOND BOM in front of a
-                            // payload that already had one: measured on a real file, 55 108 B came
-                            // back as 55 111 B with the header EF BB BF EF BB BF. The archive exists
-                            // to BE the uncorrected file, so it is the bytes as received, with no
-                            // encode step in between. `bytes` is the download's own buffer and is
-                            // never reassigned; the correction writes to writeBytes.
-                            string unsyncZip = Qa.SubtitleSync.UnsyncZipPathFor(targetPath);
-                            await AtomicWriteAsync(
-                                unsyncZip,
-                                Qa.SubtitleSync.BuildUnsyncArchive(unsyncName, bytes),
-                                ct).ConfigureAwait(false);
-                            if (_config.LogMode >= LogLevelMode.Verbose)
+                            System.Collections.Generic.HashSet<string>? names = SidecarNamesInDirectory(targetDir);
+                            string? originalPath = names == null
+                                ? null
+                                : SidecarNaming.PlanOriginalTarget(mediaPath, lang, effectiveHi, names);
+
+                            if (originalPath == null)
                             {
+                                // Every reserved slot taken, or the directory could not be listed.
+                                // Refusing is the safe direction: an invented name would overwrite
+                                // an original already kept.
                                 LogUtil.PerItem(_config.LogMode, _logger,
-                                    "[SubDL-D] original archived as {Path}", Path.GetFileName(unsyncZip));
+                                    "[SubDL-D] original NOT kept for {File} [{Lang}] — no free slot in the reserved range 90–99",
+                                    Path.GetFileName(mediaPath), lang);
+                            }
+                            else
+                            {
+                                string originalHash = ContentHashRegistry.ComputeHash(unsyncPayload);
+                                await AtomicWriteAsync(
+                                    originalPath,
+                                    ContentHashRegistry.EncodeCanonical(unsyncPayload),
+                                    ct).ConfigureAwait(false);
+
+                                // The lock is the SAME row the corrected file gets: MarkDownloaded.
+                                // A downloaded row is already "known content", and both readers ask
+                                // IsContentKnown / the content hash before doing anything — the seeder
+                                // drops the file from the queue and the uploader returns
+                                // duplicate-content. No new vocabulary, no second mechanism.
+                                Registry.MarkAndFlush(() => Registry.MarkDownloaded(
+                                    originalHash, mediaHash, lang, effectiveHi,
+                                    fileName: Path.GetFileName(originalPath), path: originalPath));
+
+                                if (_config.LogMode >= LogLevelMode.Verbose)
+                                {
+                                    LogUtil.PerItem(_config.LogMode, _logger,
+                                        "[SubDL-D] original kept as {Path} — locked against upload (F-M315)",
+                                        Path.GetFileName(originalPath));
+                                }
                             }
                         }
                         catch (Exception ex)
@@ -1997,7 +2037,7 @@ public sealed class DownloadPipeline : IDisposable
                             // The corrected file is already on disk and correct — a failure to
                             // keep the original must not undo it, but it must be visible.
                             _logger.LogWarning(ex,
-                                "[SubDL-D] could not archive the unsynchronized original for {File}",
+                                "[SubDL-D] could not keep the unsynchronized original for {File}",
                                 Path.GetFileName(targetPath));
                         }
                     }
@@ -2129,28 +2169,55 @@ public sealed class DownloadPipeline : IDisposable
                                         // concatenation — the same rule the reader parses.
                                         string hiPath = SidecarNaming.Build(mediaPath, lang, hearingImpaired: true);
                                         await AtomicWriteAsync(hiPath, hiWriteBytes, ct).ConfigureAwait(false);
+                                        // F-M315: the HI track's original is kept the same way — a loose
+                                        // sidecar in the reserved block, carried with the `.sdh` marker so
+                                        // it sits on the variant's own name space, and locked against
+                                        // upload by a Rejected row on its content. Canonical bytes, so the
+                                        // row and the file describe the same sequence (see the main path).
+                                        //
+                                        // It is NOT marked forced: an unsynchronized original is not a
+                                        // forced subtitle (F-M315).
                                         if (hiUnsync != null)
                                         {
-                                            try
+                                            System.Collections.Generic.HashSet<string>? hiNames = SidecarNamesInDirectory(targetDir);
+                                            string? hiOriginalPath = hiNames == null
+                                                ? null
+                                                : SidecarNaming.PlanOriginalTarget(mediaPath, lang, hearingImpaired: true, hiNames);
+
+                                            if (hiOriginalPath == null)
                                             {
-                                                // F-M306: the HI track is archived through the same
-                                                // helper — one implementation, both tracks, and no
-                                                // loose copy here either. The FETCHED bytes, verbatim
-                                                // (see the main path: a decode/encode round trip
-                                                // doubled the BOM).
-                                                string hiUnsyncName = Path.GetFileName(
-                                                    Qa.SubtitleSync.UnsyncPathFor(hiPath));
-                                                string hiUnsyncZip = Qa.SubtitleSync.UnsyncZipPathFor(hiPath);
-                                                await AtomicWriteAsync(
-                                                    hiUnsyncZip,
-                                                    Qa.SubtitleSync.BuildUnsyncArchive(hiUnsyncName, hiBytes!),
-                                                    ct).ConfigureAwait(false);
+                                                LogUtil.PerItem(_config.LogMode, _logger,
+                                                    "[SubDL-D] HI original NOT kept for {File} [{Lang}] — no free slot in the reserved range 90–99",
+                                                    Path.GetFileName(mediaPath), lang);
                                             }
-                                            catch (Exception ex)
+                                            else
                                             {
-                                                _logger.LogWarning(ex,
-                                                    "[SubDL-D] could not archive the unsynchronized HI original for {File}",
-                                                    Path.GetFileName(hiPath));
+                                                try
+                                                {
+                                                    string hiOriginalHash = ContentHashRegistry.ComputeHash(hiUnsync);
+                                                    await AtomicWriteAsync(
+                                                        hiOriginalPath,
+                                                        ContentHashRegistry.EncodeCanonical(hiUnsync),
+                                                        ct).ConfigureAwait(false);
+
+                                                    // Same row as the HI corrected file (see the main path).
+                                                    Registry.MarkAndFlush(() => Registry.MarkDownloaded(
+                                                        hiOriginalHash, mediaHash, lang, true,
+                                                        fileName: Path.GetFileName(hiOriginalPath), path: hiOriginalPath));
+
+                                                    if (_config.LogMode >= LogLevelMode.Verbose)
+                                                    {
+                                                        LogUtil.PerItem(_config.LogMode, _logger,
+                                                            "[SubDL-D] HI original kept as {Path} — locked against upload (F-M315)",
+                                                            Path.GetFileName(hiOriginalPath));
+                                                    }
+                                                }
+                                                catch (Exception ex)
+                                                {
+                                                    _logger.LogWarning(ex,
+                                                        "[SubDL-D] could not keep the unsynchronized HI original for {File}",
+                                                        Path.GetFileName(hiPath));
+                                                }
                                             }
                                         }
 
@@ -2808,6 +2875,34 @@ public sealed class DownloadPipeline : IDisposable
     }
 
     /// <summary>
+    /// The file names of one directory, or null when it cannot be listed.
+    /// <para>
+    /// F-M315: used to pick a free slot out of the reserved original block. Null and "empty" are kept
+    /// apart on purpose — an empty set would hand out slot 99 to a file that may well be sitting
+    /// there, and the write would then overwrite an original the operator wants to keep. A caller
+    /// that cannot list must refuse, not guess.
+    /// </para>
+    /// </summary>
+    /// <param name="directory">Directory to list.</param>
+    /// <returns>File names, or null when the listing failed.</returns>
+    private static System.Collections.Generic.HashSet<string>? SidecarNamesInDirectory(string directory)
+    {
+        try
+        {
+            var names = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string f in Directory.EnumerateFiles(directory, "*.srt"))
+            {
+                names.Add(Path.GetFileName(f));
+            }
+
+            return names;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// Parses a release file name into (title, year, isSeries) for the TMDb fallback when
     /// Jellyfin's own metadata is unusable.

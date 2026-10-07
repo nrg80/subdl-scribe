@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.188.
+**Status:** Implementation — v12.1.12.189.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -20,10 +20,10 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 31 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 32 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 6 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
-  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 8 requirements
+  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 9 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -574,13 +574,29 @@ spending download quota again — and re-downloading may return the same driftin
 one-entry zip of F-M306 and nothing else; unpacking it is the operator's step. A failure to write it does
 not undo the corrected file; it is logged as a warning.
 
-**F-M306 [D] (development):** **The untouched original is kept as a ONE-ENTRY ARCHIVE, and nothing else.**
+**F-M306 [D] (development):** **The untouched original is kept as a selectable sidecar in the reserved slot block, and is locked against upload.** *(Superseded the one-entry archive on 07.10.2026 by operator order.)*
 
-**Rule.** The pipeline writes `<base>.<lang>.srt.unsynced.zip`, holding **exactly ONE entry** whose name is `<base>.<lang>.srt.unsynced` and whose payload is the **fetched bytes, verbatim** — the download's own buffer, with **no encode step in between** (a decode/re-encode round trip prepends a second BOM to a payload that already has one). **No loose copy is written beside it**: unpacking is the operator's step. Why the name sits where it does, see §4.3.4.
+**Rule.** After a correction the pipeline writes the original beside the corrected file as a **loose sidecar** `<base>.<lang>.99.srt`, **numbered from 99 downward** and taking the first free number down to 90. It carries the corrected file's own language token and its `.sdh` marker when the corrected file is the variant; it carries **no marker of its own** — an unsynchronized original is not a forced subtitle, and saying so would make the file read as something it is not. The reserved block is **90–99**; the writer of *corrected* files therefore stops at slot **89** (F-M315), so a corrected file can never be handed the name of an original. When all ten reserved slots are taken, **no original is written** — the pipeline logs that and refuses, rather than inventing a name that would overwrite one.
 
-**Both tracks, one helper** — the HI variant goes through the same one, so the two cannot drift apart. **Deterministic:** a fixed entry timestamp and no directory entry, so the same input yields the same bytes, which is what lets T118 compare byte for byte. **Failure posture:** a failed write is logged as a warning and never undoes the corrected file. Governed by `QaDownloadAutoSync` (F-M304) — no second switch.
+**Why a loose file and not an archive.** The archive could only be reached by unpacking it by hand. As a sidecar it is **a track the operator selects in the player** — Jellyfin indexes a `.srt` beside the media file by its name, and a numbered slot becomes the track's title. Measured on the test instance 07.10.2026: `For All Mankind S02E01.en.99.srt` came back as `idx=0 lang=eng title='99' ext=True`, next to `title=None` for the unnumbered file. The archive is **no longer written**; archives already on disk are left untouched.
+
+**The lock, and why nothing new was needed.** The original is registered exactly like **every other downloaded subtitle** — `MarkDownloaded`, a `downloaded` row keyed on the content hash of the bytes on disk. Nothing else was invented, and there is no new status and no new reject reason. It locks because the seeder's `IsContentKnown` counts every row **except `observed`** as known content and the uploader applies the same test, so:
+- the seeder drops the file from the queue instead of queueing it, and
+- the uploader returns `duplicate-content` without spending a search request.
+
+Both are existing code paths that every downloaded subtitle already travels. The bytes are written **canonical** (F-M296) and the row hashes **those** bytes, so the row and the file describe the same sequence — writing the fetched byte style instead would leave the row pointing at a sequence that exists nowhere and the file would read as unknown and be uploaded.
+
+**Both tracks, one helper** — the HI variant goes through the same one, so the two cannot drift apart. **Failure posture:** a failed write is logged as a warning and never undoes the corrected file, and a directory that cannot be listed refuses the write rather than guessing at a free slot. Governed by `QaDownloadAutoSync` (F-M304) — no second switch.
 
 **Test: T118.**
+
+**F-M315 [D] (user decision 07.10.2026):** **The slots 90–99 are reserved for kept originals; corrected files stop at 89.**
+
+**Rule.** `SidecarNaming` carries the reservation as a pure property of the number: `IsOriginalSlot(slot)` is true for 90–99 and for nothing else. `PlanTarget` — the name a *corrected* sidecar is moved to, and the name the downloader composes — never returns a reserved slot: it walks 1…89 and, when every one is taken, returns the plain name so the caller's own existence check refuses the move. `PlanOriginalTarget` walks **99…90** and returns **null** when all ten are taken. Slot assignment for originals is downward on purpose: corrected names grow up from 1, originals come down from 99, and a viewer sees the reserved number in the track list.
+
+**Why the cap is not cosmetic.** Without it, the next corrected file of a language whose slots 1–89 are taken would be handed a name an original already occupies — the correction would overwrite the very file it exists to keep. Measured 07.10.2026 against the loop bound of 999: with 1–89 taken the corrected writer returns `<base>.<lang>.srt`, never a reserved number.
+
+**Test: T128.**
 
 **F-M307 [D] (development, 07.10.2026):** **The offset is a piecewise-constant function of time, fitted by exact dynamic programming. Supersedes the recursive Bayes-factor gate (F-M295) and the staircase applied from gate boundaries (F-M300).**
 
@@ -1686,7 +1702,9 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T117:** The staircase scored against REAL material with the AUDIO as the only yardstick — no subtitle takes part, neither embedded nor as a sidecar. Per episode one audio decode, then the detector runs on the result and the verdict is read as the **per-segment offset curve**: segments, offset span and the largest absolute offset. A corrected file passes when it shows **no drift**: one segment, or offsets that sit near zero with a span inside the material's measurement floor. The **control runs first** and decides whether the episode may be scored at all: the UNTOUCHED material goes through the same measurement, and a file that already looks wrong there means the yardstick is misaligned to that material — that is a finding about the yardstick and must NOT be reported as a failure of the correction. A subtitle reference may be used to FIND a defect but is never the number this test is accepted on, because the residual would be computed relative to a reference that may itself drift, which counts the same error twice and flatters the result. The order-guard count is read together with the result, and a broad fire is a failure signal rather than a detail: it means the staircase was flattened into one constant shift. The `<= 1.0 s` bound of T114 is a SYNTHETIC expectation and is asserted nowhere here (F-M305).
 
-**T118:** The archived original, driven on the real writer and read back as an archive, not as a byte blob: after a corrected save **only** `<base>.<lang>.srt.unsynced.zip` exists beside the corrected file — the loose `<base>.<lang>.srt.unsynced` does **NOT** (asserted, not assumed: a leftover loose copy is exactly the regression a presence-only check misses); the archive holds **exactly ONE entry**; the entry is named `<base>.<lang>.srt.unsynced`, so unpacking it cannot clobber the corrected `<base>.<lang>.srt`; its payload is the fetched bytes **verbatim** — the download's own buffer, asserted at the CALL SITE so a decode/re-encode round trip fails here (on a BOM-carrying payload that round trip prepended a second BOM; measured 55 108 B → 55 111 B), and the fixture carries a BOM for exactly that reason; and the written name matches **neither** listing pattern this plugin uses — `baseName + "*.srt"` (F-M251) nor the seeder's `"*.srt"` — so the archive can never be read as a subtitle. The same is asserted for the HI track, which goes through the same helper (F-M306)
+**T118:** The kept original, driven through the real planner and read back through the real name parser: the first original takes slot **99** beside the corrected file; the name **matches** the sidecar listing (that match is the point — it is how the file becomes a selectable track) and parses as the corrected file's own language with `hi=false` and `forced=false`; with 99 taken the next original takes **98**, and the numbering never leaves 90–99; when all ten reserved slots are taken **no name is returned**, so nothing can overwrite an original already kept; and **every corrected slot taken returns the plain name**, never a reserved one — the collision F-M315 exists to prevent. On the pipeline source: **no archive is written any more** (`AtomicWriteAsync(unsyncZip…)` absent), the original **is** written for both tracks through `AtomicWriteAsync(originalPath…)`, it is registered with **`MarkDownloaded` on the original's own hash** for both tracks, and **no invented reject reason** is introduced — counted on `MarkDownloaded(originalHash…)` rather than on `MarkDownloaded` overall, because the corrected files carry the same call and a total would rise when *they* change. The bytes written are **canonical** (F-M296) so the row and the file describe the same sequence, and the **dry run still guards the write** (F-M287). That the lock holds at all rests on `IsContentKnown` counting every row except `observed`, which is asserted as well — a change that made downloads non-terminal would fail here (F-M306, F-M315)
+
+**T128:** The reserved block is exactly **90–99**: `IsOriginalSlot` is true at 90 and 99 and false at 89 and 1. `PlanOriginalTarget` walks **downward** — 99 first, then 98 — and returns **null** when all ten are taken, never a name that would overwrite. `PlanTarget` for corrected files never returns a reserved slot: with slots 1–89 taken it returns the plain `<base>.<lang>.srt` so the caller's own existence check refuses the move. Measured 07.10.2026 against the former loop bound of 999, which would have handed a corrected file slot 90 (F-M315)
 
 **T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M294, F-M288)
 
