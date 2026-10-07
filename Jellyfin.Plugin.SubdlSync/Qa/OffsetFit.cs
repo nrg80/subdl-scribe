@@ -450,7 +450,7 @@ public static class OffsetFit
 
     /// <summary>
     /// Applies the order guard to the per-cue shifts: no cue overtakes its predecessor's
-    /// end, none goes below zero.
+    /// end. A cue that would land below zero is clamped by the writer, not here.
     /// <para>
     /// This runs BEFORE the deploy rule decides, and that order is load-bearing. At a step
     /// the two neighbours move by different amounts, and a step wider than the gap between
@@ -488,17 +488,14 @@ public static class OffsetFit
             }
         }
 
-        if (eff.Length > 0 && starts[0] + eff[0] < 0)
-        {
-            double d = starts[0] + eff[0];
-            for (int k = 0; k < eff.Length; k++)
-            {
-                eff[k] -= d;
-            }
-
-            guarded += eff.Length;
-        }
-
+        // A cue that lands below zero is CLAMPED to zero by the WRITER, never fixed here.
+        // Raising the whole file instead (what this block used to do) silently replaced the
+        // fitted shift with the largest one the first cue allows. Measured on BCS S01E04
+        // German: the fit's own peak is -9.00 s and the leading title card sits at 5.07 s,
+        // so the block lifted EVERY cue to -5.07 s — where t collapsed to +0.68 and the
+        // deploy rule reported "no proven gain" on a file that was nine seconds out
+        // (operator heard it, 07.10.2026). Operator order: apply the fit as measured, clamp
+        // whatever lands below zero.
         return guarded;
     }
 

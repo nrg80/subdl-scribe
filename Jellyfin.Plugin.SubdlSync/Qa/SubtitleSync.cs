@@ -67,9 +67,10 @@
 //
 // THE SHIFT IS APPLIED TO TIMES ONLY
 //
-// Text is carried through byte-for-byte, a shift that would push a cue below zero
-// is refused rather than clamped (clamping would silently change one cue's
-// relation to its neighbour while leaving the rest moved), and a cue is never
+// Text is carried through byte-for-byte, the fitted shift is applied AS MEASURED,
+// and a cue that would land below zero is CLAMPED to zero (operator order,
+// 07.10.2026: the fit decides the offset, the clamp only stops a cue running off
+// the front of the file), and a cue is never
 // pulled further from its own segment's value than the order guard allows - the
 // guard exists because a large step can otherwise push a cue past its neighbour
 // and invert two lines.
@@ -277,6 +278,7 @@ public static class SubtitleSync
 
         var sb = new System.Text.StringBuilder();
         int last = 0;
+        int clamped = 0;
         for (int j = 0; j < cues * 2; j++)
         {
             Match m = matches[j];
@@ -284,7 +286,8 @@ public static class SubtitleSync
             double t = ToSec(m) + shiftsSec[j / 2];
             if (t < 0)
             {
-                return (false, srtText, "a cue would fall below zero — refused, not clamped");
+                t = 0;
+                clamped++;
             }
 
             sb.Append(Fmt(t));
@@ -292,7 +295,9 @@ public static class SubtitleSync
         }
 
         sb.Append(srtText, last, srtText.Length - last);
-        return (true, sb.ToString(), "applied per cue");
+        return (true, sb.ToString(), clamped > 0
+            ? $"applied per cue, {clamped} timestamp(s) clamped to 0"
+            : "applied per cue");
     }
 
     /// <summary>
@@ -401,23 +406,27 @@ public static class SubtitleSync
             }
         }
 
-        // Refuse rather than clamp a cue below zero: clamping one cue silently changes its
-        // relation to its neighbour while the rest still moves.
-        double minStart = starts.Min();
-        if (minStart + eff[0] < 0)
-        {
-            return (false, srtText, $"first cue {minStart:0.00}s would go negative under {eff[0]:+0.00;-0.00}s", 0);
-        }
-
+        // The fitted shift is applied as measured; a cue that would land below zero is
+        // clamped to zero (operator order 07.10.2026). Clamping changes that one cue's
+        // relation to its neighbour, which is the accepted price of not refusing a whole
+        // file over a leading title card.
         var sb = new StringBuilder(srtText.Length);
         int last = 0;
+        int clampedCount = 0;
         for (int k = 0; k < cues; k++)
         {
             for (int h = 0; h < 2; h++)
             {
                 Match m = matches[(2 * k) + h];
                 sb.Append(srtText, last, m.Index - last);
-                sb.Append(Fmt((h == 0 ? starts[k] : ends[k]) + eff[k]));
+                double tv = (h == 0 ? starts[k] : ends[k]) + eff[k];
+                if (tv < 0)
+                {
+                    tv = 0;
+                    clampedCount++;
+                }
+
+                sb.Append(Fmt(tv));
                 last = m.Index + m.Length;
             }
         }
@@ -464,18 +473,21 @@ public static class SubtitleSync
             return (false, srtText, "no timestamps found");
         }
 
-        // Refuse rather than clamp: clamping one cue would change its relation to
-        // its neighbour while the rest of the file still moves.
-        if (minStart + shiftSec < 0)
-        {
-            return (false, srtText, $"first cue {minStart:0.00}s would go negative under {shiftSec:+0.00;-0.00}s");
-        }
-
+        // The shift is applied as measured; a cue that would land below zero is clamped to
+        // zero (operator order 07.10.2026).
         int touched = 0;
+        int clampedFlat = 0;
         string outText = TsRegex.Replace(srtText, m =>
         {
             touched++;
-            return Fmt(ToSec(m) + shiftSec);
+            double tv = ToSec(m) + shiftSec;
+            if (tv < 0)
+            {
+                tv = 0;
+                clampedFlat++;
+            }
+
+            return Fmt(tv);
         });
 
         if (touched == 0)
@@ -483,7 +495,9 @@ public static class SubtitleSync
             return (false, srtText, "no timestamps replaced");
         }
 
-        return (true, outText, $"shifted {touched} timestamps by {shiftSec:+0.00;-0.00}s");
+        return (true, outText, clampedFlat > 0
+            ? $"shifted {touched} timestamps by {shiftSec:+0.00;-0.00}s, {clampedFlat} clamped to 0"
+            : $"shifted {touched} timestamps by {shiftSec:+0.00;-0.00}s");
     }
 
     /// <summary>

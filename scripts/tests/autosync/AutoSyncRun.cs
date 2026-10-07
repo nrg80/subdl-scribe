@@ -71,7 +71,7 @@ public static class AutoSyncRun
 
         failures += TrackChoice();
         failures += ShiftApplied();
-        failures += ShiftRefused();
+        failures += ShiftClamped();
         failures += ByteStyle();
         failures += UnsyncSuffix();
         failures += UnsyncArchive();
@@ -221,22 +221,40 @@ public static class AutoSyncRun
         return f;
     }
 
-    /// <summary>Case 3: a shift that would go negative is refused, not clamped.</summary>
-    private static int ShiftRefused()
+    /// <summary>Case 3: a shift that would go negative is applied, the cue clamped to zero.</summary>
+    private static int ShiftClamped()
     {
         int f = 0;
-        Console.WriteLine("[3] shift refused rather than clamped");
+        Console.WriteLine("[3] shift applied; a cue below zero is clamped");
 
         string src = Sample(); // first cue at 3.545 s
         (bool ok, string outText, string why) = SubtitleSync.ShiftBy(src, -4.0);
-        Check("negative first cue is refused", !ok && outText == src,
-            ok ? "APPLIED (wrong)" : why);
-        f += !ok && outText == src ? 0 : 1;
+        Check("negative first cue is APPLIED, not refused", ok && outText != src,
+            ok ? why : "REFUSED (wrong)");
+        f += ok && outText != src ? 0 : 1;
 
-        // Exactly-zero first cue is allowed (boundary, not negative).
-        (bool okEdge, _, string whyEdge) = SubtitleSync.ShiftBy(src, -3.545);
-        Check("first cue landing exactly on 0 is allowed", okEdge, okEdge ? "applied" : whyEdge);
-        f += okEdge ? 0 : 1;
+        List<double> after = Times(outText);
+        Check("the cue that lands below zero is clamped to 0",
+            after.Count > 0 && Math.Abs(after[0]) < 1e-6,
+            $"first timestamp after the shift: {(after.Count > 0 ? after[0] : double.NaN):0.000}s");
+        f += after.Count > 0 && Math.Abs(after[0]) < 1e-6 ? 0 : 1;
+
+        // The cues AFTER the clamped one must carry the full measured shift — a clamp that
+        // dragged the rest of the file with it would be the old refusal in disguise.
+        List<double> before = Times(src);
+        int idx = 1;
+        Check("every later cue still moves by the full shift",
+            after.Count > idx && Math.Abs((after[idx] - before[idx]) - (-4.0)) < 1e-6,
+            $"cue {idx}: {before[idx]:0.000}s -> {(after.Count > idx ? after[idx] : double.NaN):0.000}s");
+        f += after.Count > idx && Math.Abs((after[idx] - before[idx]) - (-4.0)) < 1e-6 ? 0 : 1;
+
+        // Exactly-zero first cue: boundary case, no clamp needed.
+        (bool okEdge, string edgeText, string whyEdge) = SubtitleSync.ShiftBy(src, -3.545);
+        List<double> edge = Times(edgeText);
+        Check("first cue landing exactly on 0 is allowed",
+            okEdge && edge.Count > 0 && Math.Abs(edge[0]) < 1e-6,
+            okEdge ? $"first {edge[0]:0.000}s" : whyEdge);
+        f += okEdge && edge.Count > 0 && Math.Abs(edge[0]) < 1e-6 ? 0 : 1;
 
         // Content without timestamps is refused, not passed through.
         (bool okBad, _, string whyBad) = SubtitleSync.ShiftBy("no timestamps here", 1.0);

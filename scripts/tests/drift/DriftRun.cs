@@ -291,13 +291,18 @@ public static class DriftRun
             + $"  (drifts={vc.Drifts}, segments={vc.SegmentOffsetsSec.Count}) — constant stays constant");
         failures += noSeg ? 0 : 1;
 
-        // The guard REFUSES a first cue that would go negative rather than clamping it.
+        // The guard APPLIES the shift and CLAMPS the cue that would go negative: the fit
+        // decides the offset, the clamp only stops a cue running off the front of the file.
         string tiny = "1\n00:00:00,100 --> 00:00:01,000\nhello there\n\n"
                     + "2\n00:01:00,000 --> 00:01:02,000\nsecond line here\n\n";
-        (bool negOk, _, string negWhy, _) = SubtitleSync.ShiftByStaircase(
+        (bool negOk, string negText, string negWhy, _) = SubtitleSync.ShiftByStaircase(
             tiny, [0.0, 30.0], [5.0, -1.0]);
-        Console.WriteLine($"      [{(negOk ? "FAIL" : "PASS")}] a negative first cue is refused, not clamped: {negWhy}");
-        failures += negOk ? 1 : 0;
+        List<(double S, double E)> negCues = Parse(negText);
+        double negFirst = negCues.Count > 0 ? negCues[0].S : double.NaN;
+        bool clampedOk = negOk && negCues.Count == 2 && Math.Abs(negFirst) < 1e-6;
+        Console.WriteLine($"      [{(clampedOk ? "PASS" : "FAIL")}] a negative first cue is applied and clamped to 0"
+            + $"  (first cue {negFirst:0.000}s, {negCues.Count} cues): {negWhy}");
+        failures += clampedOk ? 0 : 1;
 
         return failures;
     }
