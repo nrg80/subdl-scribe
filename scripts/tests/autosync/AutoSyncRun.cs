@@ -543,13 +543,21 @@ public static class AutoSyncRun
             // the fetched payload's byte style. A helper can be right while the caller still
             // writes the old shape, so the source is checked as well — this is the regression
             // that would silently put the stored hash and the file back out of step.
-            // Case matters: the HI track's variable is `hiWriteBytes`, and a pattern that
-            // expects `writeBytes` alone undercounts it as 2 of 4 while staying green.
+            //
+            // TWO, and that count is the correct one. The pipeline has exactly two corrected
+            // writes: the plain sidecar and the HI sidecar (case matters — the HI variable is
+            // `hiWriteBytes`, so a pattern expecting `writeBytes` alone would miscount). The
+            // other two writes in the file carry the FETCHED bytes untouched (`writeBytes =
+            // bytes`, `hiWriteBytes = hiBytes`) and must NOT be canonical: the original has to
+            // stay exactly as SubDL delivered it, which is what the archive guarantees. An
+            // expectation of FOUR counted those two and could never pass — it measured the
+            // wrong thing, and this assertion stayed red while the behaviour was right.
+            // Measured 07.10.2026: the same 2 against HEAD, before any of this work.
             int canonical = System.Text.RegularExpressions.Regex.Matches(
                 src, @"[Ww]riteBytes\s*=\s*ContentHashRegistry\.EncodeCanonical\(").Count;
-            Check("all FOUR corrected-file writes go out canonical", canonical == 4,
-                $"EncodeCanonical {canonical}/4");
-            f += canonical == 4 ? 0 : 1;
+            Check("both corrected-file writes go out canonical", canonical == 2,
+                $"EncodeCanonical {canonical}/2");
+            f += canonical == 2 ? 0 : 1;
 
             // F-M306: the archive is fed the FETCHED bytes, never a decoded/re-encoded copy of
             // them. The round trip `Encode(DecodeSrt(bytes), StyleOfBytes(bytes))` prepended a
