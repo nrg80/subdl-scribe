@@ -14,8 +14,9 @@ and **removes the shift before the file is saved**.
 
 The offset is measured against the **spoken track**. Planted shifts of −3 / +2 / +4 / +8 / +12 s came
 back as −3.20 / +1.80 / +3.80 / +7.80 / +11.80 s, so the correction is accurate to about **0.2 s**. The
-untouched original is kept beside the corrected file as `<name>.<lang>.srt.unsynchronized`, so a
-correction is reversible without spending download quota again. A subtitle whose offset **moves** is
+untouched original is kept beside the corrected file as `<name>.<lang>.srt.unsynchronized.zip` — one
+entry, unpack it yourself when you want it — so a correction is reversible without spending download
+quota again. A subtitle whose offset **moves** is
 corrected **segment by segment** — one offset per segment, the boundaries the drift detector found are
 the repair — which took the worst line over 36 drifting episodes from a 10.74 s median to 4.51 s. Costs
 one audio decode per saved file.

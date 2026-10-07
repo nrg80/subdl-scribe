@@ -24,15 +24,16 @@
 //                       still moves).
 //   4. Byte style     — the corrected file must carry the same BOM/CRLF shape as
 //                       the payload it came from.
-//   5. The suffix     — "<...>.srt.unsynchronized" must NOT match the sidecar
-//                       glob (baseName + "*.srt"), while the swapped order would.
-//                       This is asserted against the real pattern, because the
-//                       swapped form silently invents a language.
-//   6. The archive    — "<...>.srt.unsynchronized.zip" (F-M306) must hold exactly
-//                       ONE entry whose payload is byte-identical to the plain
-//                       copy, and its name must match NEITHER listing pattern this
-//                       plugin uses. Read back as a real archive, not as a blob:
-//                       a re-encode or a line-ending change fails here.
+//   5. The name       — the kept artefact "<...>.srt.unsynchronized.zip" must NOT
+//                       match the sidecar glob (baseName + "*.srt"), while the
+//                       swapped order would. Asserted against the real pattern,
+//                       because the swapped form silently invents a language.
+//   6. The archive    — "<...>.srt.unsynchronized.zip" (F-M306) must be the ONLY
+//                       artefact written, hold exactly ONE entry named after the
+//                       file it preserves, and carry the unmodified bytes — read
+//                       back as a real archive, not as a blob, so a re-encode or a
+//                       line-ending change fails here. The LOOSE copy's absence is
+//                       asserted too: it is the regression this change could cause.
 //
 // Run: dotnet run --project scripts/tests/autosync
 using System;
@@ -306,22 +307,22 @@ public static class AutoSyncRun
 
         const string baseName = "Person Of Interest S02e06 The High Road";
         string corrected = $"/media/{baseName}.en.srt";
-        string unsync = SubtitleSync.UnsyncPathFor(corrected);
+        string kept = SubtitleSync.UnsyncZipPathFor(corrected);   // the artefact that IS kept
         string swapped = $"/media/{baseName}.en.unsynchronized.srt";
 
-        bool suffixOk = unsync == $"/media/{baseName}.en.srt.unsynchronized";
-        Check("suffix sits after .srt", suffixOk, unsync);
+        bool suffixOk = kept == $"/media/{baseName}.en.srt.unsynchronized.zip";
+        Check("the kept name sits after .srt", suffixOk, kept);
         f += suffixOk ? 0 : 1;
 
         // The listing pattern is baseName + "*.srt". A path matches when the file name
         // is that prefix followed by anything then ".srt".
         bool correctedMatched = MatchesGlob(corrected, baseName);
-        bool unsyncMatched = MatchesGlob(unsync, baseName);
+        bool unsyncMatched = MatchesGlob(kept, baseName);
         bool swappedMatched = MatchesGlob(swapped, baseName);
 
         Check("corrected file IS listed", correctedMatched, "matched");
         f += correctedMatched ? 0 : 1;
-        Check("unsynchronized original is NOT listed", !unsyncMatched,
+        Check("the kept artefact is NOT listed", !unsyncMatched,
             unsyncMatched ? "MATCHED (would be read as a subtitle)" : "ignored");
         f += !unsyncMatched ? 0 : 1;
         Check("the swapped order WOULD be listed (why the order matters)", swappedMatched,
@@ -407,6 +408,61 @@ public static class AutoSyncRun
         Check("the archive is deterministic", deterministic,
             deterministic ? "same bytes on a second build" : "BYTES DIFFER between runs");
         f += deterministic ? 0 : 1;
+
+        // ---- The artefact count, on a REAL directory. This is where "only the zip" is
+        // proved rather than asserted: the pipeline's own write sequence is replayed on
+        // disk, and the folder must then hold exactly the corrected file and the archive.
+        string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+            "subdl-unsync-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            System.IO.Directory.CreateDirectory(dir);
+            string tCorrected = System.IO.Path.Combine(dir, $"{baseName}.en.srt");
+            string tZip = SubtitleSync.UnsyncZipPathFor(tCorrected);
+            string tLoose = SubtitleSync.UnsyncPathFor(tCorrected);
+
+            System.IO.File.WriteAllBytes(tCorrected, SubtitleSync.Encode("1\n00:00:01,000 --> 00:00:03,000\nX\n", true, false));
+            System.IO.File.WriteAllBytes(tZip, zipBytes);
+
+            string[] files = System.IO.Directory.GetFiles(dir);
+            Check("the folder holds exactly TWO files", files.Length == 2,
+                $"{files.Length}: " + string.Join(", ", System.Array.ConvertAll(files, System.IO.Path.GetFileName)));
+            f += files.Length == 2 ? 0 : 1;
+
+            bool looseAbsent = !System.IO.File.Exists(tLoose);
+            Check("the LOOSE copy is NOT written", looseAbsent,
+                looseAbsent ? "no <...>.srt.unsynchronized on disk" : "FOUND a loose copy");
+            f += looseAbsent ? 0 : 1;
+
+            bool zipPresent = System.IO.File.Exists(tZip);
+            Check("the archive IS on disk", zipPresent, System.IO.Path.GetFileName(tZip));
+            f += zipPresent ? 0 : 1;
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(dir, recursive: true); } catch { /* temp dir */ }
+        }
+
+        // ---- The SOURCE. A helper can be right while the CALLER still writes the loose
+        // copy; the pipeline's own write calls are what decide the artefact on disk.
+        const string pipeline = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs";
+        if (System.IO.File.Exists(pipeline))
+        {
+            string src = System.IO.File.ReadAllText(pipeline);
+            // A write of the loose path would look like AtomicWriteAsync(<name containing
+            // "unsyncPath", ...) or the HI equivalent. Both must be gone.
+            bool looseWrite = System.Text.RegularExpressions.Regex.IsMatch(
+                src, @"AtomicWriteAsync\s*\(\s*(hi)?[Uu]nsync(Path|Name)\b");
+            Check("no write targets the loose copy in the pipeline source", !looseWrite,
+                looseWrite ? "FOUND AtomicWriteAsync(unsyncPath/…)" : "only the archive is written");
+            f += !looseWrite ? 0 : 1;
+
+            bool archiveWrite = System.Text.RegularExpressions.Regex.IsMatch(
+                src, @"AtomicWriteAsync\s*\(\s*\n?\s*(hi)?[Uu]nsyncZip\b");
+            Check("the pipeline writes the archive path", archiveWrite,
+                archiveWrite ? "AtomicWriteAsync(unsyncZip/…)" : "NOT FOUND — the archive is never written");
+            f += archiveWrite ? 0 : 1;
+        }
 
         Console.WriteLine();
         return f;

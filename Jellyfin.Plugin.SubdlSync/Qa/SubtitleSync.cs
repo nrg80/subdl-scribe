@@ -48,20 +48,24 @@
 // The gate still refuses when it could not run at all (no ffmpeg, no speech, too few cues):
 // a tool being unavailable is not a licence to guess.
 //
-// THE ORIGINAL IS KEPT, ALWAYS
+// THE ORIGINAL IS KEPT, ALWAYS — AS A ONE-ENTRY ARCHIVE
 //
-// The unsynchronized bytes are written beside the corrected file as
-// `<base>.<lang>.srt.unsynchronized` before the corrected file lands. The
-// suffix sits AFTER `.srt` on purpose: this plugin finds sidecars with
-// `EnumerateFiles(dir, baseName + "*.srt")`, which ignores that name, while
-// `<base>.<lang>.unsynchronized.srt` WOULD match and the name parser would then
-// read `unsynchronized` as a language code (measured). Jellyfin does not index
+// The unmodified bytes are written beside the corrected file as
+// `<base>.<lang>.srt.unsynchronized.zip` (F-M306), holding one entry named
+// `<base>.<lang>.srt.unsynchronized`, before the corrected file lands. The loose
+// copy is NOT written any more: the operator ordered exactly one artefact kept
+// ("Nur das zip ablegen. Wenn ich es entpacken will mache ich das selber"), so
+// unpacking is his step. The name sits AFTER `.srt` on purpose: this plugin finds
+// sidecars with `EnumerateFiles(dir, baseName + "*.srt")`, which ignores that name,
+// while `<base>.<lang>.unsynchronized.srt` WOULD match and the name parser would
+// then read `unsynchronized` as a language code (measured). Jellyfin does not index
 // the suffix form as an external subtitle track either, so exactly one new track
-// appears per corrected file.
+// appears per corrected file. The entry keeps the `.unsynchronized` name so that
+// unpacking it into the media folder cannot clobber the corrected `<base>.<lang>.srt`.
 //
 // THE ORDER, AND THE HASH (user specification)
 //
-//   fetch → sync → normalize → write `<...>.srt` AND `<...>.srt.unsynchronized`
+//   fetch → sync → normalize → write `<...>.srt` AND the archive
 //   → register the hash OF THE SYNCHRONIZED srt
 //
 // The hash is registered over the corrected content because that is what lies on

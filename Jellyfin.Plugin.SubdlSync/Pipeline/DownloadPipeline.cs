@@ -1976,49 +1976,40 @@ public sealed class DownloadPipeline : IDisposable
 
                     await AtomicWriteAsync(targetPath, writeBytes, ct).ConfigureAwait(false);
 
-                    // F-M296: the untouched original, kept beside the corrected file. This
-                    // is what makes the correction reversible without re-downloading (which
-                    // would cost quota and might return the same drifting file). Guarded by
-                    // the dry-run flag like every other write (F-M287) — the flag is checked
-                    // again here rather than relying on the enclosing branch.
+                    // F-M296/F-M306: the untouched original, kept beside the corrected file as a
+                    // ONE-ENTRY ARCHIVE. This is what makes the correction reversible without
+                    // re-downloading (which would cost quota and might return the same drifting
+                    // file). The archive is the ONLY artefact kept: the operator ordered the loose
+                    // copy dropped ("Nur das zip ablegen. Wenn ich es entpacken will mache ich das
+                    // selber"), so unpacking is his step, not the pipeline's. The ENTRY carries the
+                    // `.unsynchronized` name, so unpacking into the media folder cannot clobber the
+                    // corrected `<base>.<lang>.srt`. Guarded by the dry-run flag like every other
+                    // write (F-M287) — the flag is checked again here rather than relying on the
+                    // enclosing branch.
                     if (unsyncPayload != null && !_config.DownloadDryRun)
                     {
                         try
                         {
-                            string unsyncPath = Qa.SubtitleSync.UnsyncPathFor(targetPath);
+                            string unsyncName = Path.GetFileName(Qa.SubtitleSync.UnsyncPathFor(targetPath));
                             (bool ub, bool uc) = Qa.SubtitleSync.StyleOfBytes(bytes);
                             byte[] originalBytes = Qa.SubtitleSync.Encode(unsyncPayload, ub, uc);
-                            await AtomicWriteAsync(unsyncPath, originalBytes, ct).ConfigureAwait(false);
-
-                            // F-M306: the same bytes again as a one-entry archive. Written from
-                            // `originalBytes` and not re-encoded, so the two halves cannot drift
-                            // apart. A failure here must not cost the copy or the corrected file.
-                            try
-                            {
-                                string unsyncZip = Qa.SubtitleSync.UnsyncZipPathFor(targetPath);
-                                await AtomicWriteAsync(
-                                    unsyncZip,
-                                    Qa.SubtitleSync.BuildUnsyncArchive(Path.GetFileName(unsyncPath), originalBytes),
-                                    ct).ConfigureAwait(false);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex,
-                                    "[SubDL-D] could not archive the unsynchronized original for {File}",
-                                    Path.GetFileName(targetPath));
-                            }
-
+                            string unsyncZip = Qa.SubtitleSync.UnsyncZipPathFor(targetPath);
+                            await AtomicWriteAsync(
+                                unsyncZip,
+                                Qa.SubtitleSync.BuildUnsyncArchive(unsyncName, originalBytes),
+                                ct).ConfigureAwait(false);
                             if (_config.LogMode >= LogLevelMode.Verbose)
                             {
                                 LogUtil.PerItem(_config.LogMode, _logger,
-                                    "[SubDL-D] original kept as {Path}", Path.GetFileName(unsyncPath));
+                                    "[SubDL-D] original archived as {Path}", Path.GetFileName(unsyncZip));
                             }
                         }
                         catch (Exception ex)
                         {
                             // The corrected file is already on disk and correct — a failure to
                             // keep the original must not undo it, but it must be visible.
-                            _logger.LogWarning(ex, "[SubDL-D] could not keep the unsynchronized original for {File}",
+                            _logger.LogWarning(ex,
+                                "[SubDL-D] could not archive the unsynchronized original for {File}",
                                 Path.GetFileName(targetPath));
                         }
                     }
@@ -2195,34 +2186,23 @@ public sealed class DownloadPipeline : IDisposable
                                         {
                                             try
                                             {
-                                                string hiUnsyncPath = Qa.SubtitleSync.UnsyncPathFor(hiPath);
+                                                // F-M306: the HI track is archived through the same
+                                                // helper — one implementation, both tracks, and no
+                                                // loose copy here either.
+                                                string hiUnsyncName = Path.GetFileName(
+                                                    Qa.SubtitleSync.UnsyncPathFor(hiPath));
                                                 (bool hub, bool huc) = Qa.SubtitleSync.StyleOfBytes(hiBytes!);
                                                 byte[] hiOriginalBytes = Qa.SubtitleSync.Encode(hiUnsync, hub, huc);
-                                                await AtomicWriteAsync(hiUnsyncPath, hiOriginalBytes, ct)
-                                                    .ConfigureAwait(false);
-
-                                                // F-M306: the HI track gets the archive too, through
-                                                // the same helper — one implementation, both tracks.
-                                                try
-                                                {
-                                                    string hiUnsyncZip = Qa.SubtitleSync.UnsyncZipPathFor(hiPath);
-                                                    await AtomicWriteAsync(
-                                                        hiUnsyncZip,
-                                                        Qa.SubtitleSync.BuildUnsyncArchive(
-                                                            Path.GetFileName(hiUnsyncPath), hiOriginalBytes),
-                                                        ct).ConfigureAwait(false);
-                                                }
-                                                catch (Exception ex)
-                                                {
-                                                    _logger.LogWarning(ex,
-                                                        "[SubDL-D] could not archive the unsynchronized HI original for {File}",
-                                                        Path.GetFileName(hiPath));
-                                                }
+                                                string hiUnsyncZip = Qa.SubtitleSync.UnsyncZipPathFor(hiPath);
+                                                await AtomicWriteAsync(
+                                                    hiUnsyncZip,
+                                                    Qa.SubtitleSync.BuildUnsyncArchive(hiUnsyncName, hiOriginalBytes),
+                                                    ct).ConfigureAwait(false);
                                             }
                                             catch (Exception ex)
                                             {
                                                 _logger.LogWarning(ex,
-                                                    "[SubDL-D] could not keep the unsynchronized HI original for {File}",
+                                                    "[SubDL-D] could not archive the unsynchronized HI original for {File}",
                                                     Path.GetFileName(hiPath));
                                             }
                                         }

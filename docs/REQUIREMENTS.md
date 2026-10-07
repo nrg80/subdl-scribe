@@ -540,9 +540,8 @@ Method, measurements and the two measured failures: §4.3.3. **Test: T114.**
 1. fetch the candidate bytes,
 2. **sync** — measure and, if the offset is constant, shift,
 3. **normalize** (idempotent, F-M185; before or after the shift makes no difference),
-4. **write the files**: the corrected `<base>.<lang>.srt`, the untouched original as
-   `<base>.<lang>.srt.unsynchronized`, **and** that original again as
-   `<base>.<lang>.srt.unsynchronized.zip` (F-M306),
+4. **write two files**: the corrected `<base>.<lang>.srt` **and** the untouched original as the
+   one-entry archive `<base>.<lang>.srt.unsynchronized.zip` (F-M306),
 5. **register the hash of the CORRECTED subtitle.**
 
 The hash describes the file that lies on disk and that later goes up to SubDL, so the duplicate guards
@@ -550,39 +549,50 @@ The hash describes the file that lies on disk and that later goes up to SubDL, s
 must never lift a duplicate guard** — had the hash been registered over the pre-shift bytes, every
 corrected file would have looked new and been re-downloaded and re-uploaded.
 
-**Why the suffix sits AFTER `.srt`.** The sidecar listing is
-`Directory.EnumerateFiles(dir, baseName + "*.srt")` (F-M251). Measured against that pattern:
-`<base>.<lang>.srt.unsynchronized` is **ignored** (correct), while the swapped
+**Why the name sits AFTER `.srt`.** The sidecar listing is
+`Directory.EnumerateFiles(dir, baseName + "*.srt")` (F-M251). Measured against that pattern: a name
+ending in `.srt.unsynchronized.zip` is **ignored** (correct), while the swapped
 `<base>.<lang>.unsynchronized.srt` **matches** — and the name parser then reads `unsynchronized` as a
-language code, inventing a language. Jellyfin does not index the suffix form as an external subtitle
-track either, so exactly one new track appears per corrected file.
+language code, inventing a language. Jellyfin does not index such a name as an external subtitle track
+either, so exactly one new track appears per corrected file. The archive keeps the `.unsynchronized`
+part in its name for the same reason the name sits where it does: it is the artefact, and it stays
+recognisable.
 
-**The original is kept on purpose.** It makes the correction reversible without spending download
-quota again — and re-downloading may return the same drifting file. A failure to write the original
-does not undo the corrected file; it is logged as a warning.
+**The original is kept on purpose, as an archive.** It makes the correction reversible without
+spending download quota again — and re-downloading may return the same drifting file. It is kept as the
+one-entry zip of F-M306 and nothing else; unpacking it is the operator's step. A failure to write it does
+not undo the corrected file; it is logged as a warning.
 
-**F-M306 [D] (development):** **The preserved original is archived as a zip as well, beside it — the same bytes, one file per archive.**
+**F-M306 [D] (development):** **The untouched original is kept as a ONE-ENTRY ARCHIVE, and nothing else.**
 
-**Rule.** Next to `<base>.<lang>.srt.unsynchronized` the pipeline writes
-`<base>.<lang>.srt.unsynchronized.zip` containing **exactly ONE entry**, whose payload is
-**byte-identical** to the plain copy. The zip is written by the **same helper** as the copy, so both
-halves cannot drift apart and the HI track gets both without a second implementation.
+**Rule.** The pipeline writes `<base>.<lang>.srt.unsynchronized.zip`, holding **exactly ONE entry**
+whose name is `<base>.<lang>.srt.unsynchronized` and whose payload is the **unmodified** fetched
+bytes, carrying the payload's own byte style (BOM / line endings). **No loose copy is written beside
+it** — the archive is the only artefact kept.
 
-**Why the name sits after `.srt` too.** Both listing patterns in this plugin — the sidecar listing
-`baseName + "*.srt"` (F-M251) and the seeder's `"*.srt"` — match on the `.srt` **ending**. A name
-ending in `.zip` matches neither, so the archive is invisible to both and can never be read as a
-subtitle. The same argument that fixed the suffix order applies unchanged.
+**Why only the archive (operator order, 07.10.2026).** `Nur das zip ablegen. Wenn ich es entpacken
+will mache ich das selber.` Unpacking is the operator's step, not the pipeline's, so the pipeline
+leaves exactly one artefact. Two forms of the same bytes also meant two writes that could fail
+independently for no gain, and the loose copy had no reader anywhere in the plugin.
 
-**Why not a switch.** It is the same act as keeping the copy, described once: `QaDownloadAutoSync`
-governs it (F-M304). A switch that does not switch what it names is worse than no switch, and the
-operator rejected a control per step more than once.
+**Why the name sits after `.srt`, and why the entry carries it.** Both listing patterns this plugin
+uses — the sidecar listing `baseName + "*.srt"` (F-M251) and the seeder's `"*.srt"` — match on the
+`.srt` **ending**; a name ending in `.zip` matches neither, so the archive is invisible to both and
+can never be read as a subtitle. The entry keeps the `.unsynchronized` name so that unpacking it into
+the media folder yields a file that is recognisable and that cannot clobber the corrected
+`<base>.<lang>.srt` — the name still ends in `.srt.unsynchronized`, never in `.srt`.
 
-**Failure posture.** Identical to the copy's: a failure to write the archive does **not** undo the
-corrected file, and the plain copy survives it — each half is written independently and a failure is
-logged as a warning. Nothing here may cost a saved subtitle.
+**Both tracks.** The HI variant goes through the **same helper** as the main one, so the two cannot
+drift apart and neither track needs a second implementation.
 
-**Deterministic.** The entry carries a fixed timestamp and the archive holds no directory entry, so
-the same input yields the same bytes on every run — otherwise a byte comparison could never be a test.
+**Why not a switch.** It is the same act the correction already performs, described once:
+`QaDownloadAutoSync` governs it (F-M304).
+
+**Failure posture.** A failure to write the archive does **not** undo the corrected file; it is logged
+as a warning. Nothing here may cost a saved subtitle.
+
+**Deterministic.** The entry carries a fixed timestamp and the archive holds no directory entry, so the
+same input yields the same bytes on every run — otherwise a byte comparison could never be a test.
 
 **Test: T118.**
 
@@ -1529,7 +1539,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T109:** End-to-end on a real episode: the plain subtitle comes back steady while the hearing-impaired variant of the same episode comes back drifting with a span and boundaries named, and the verdict states a span rather than a correction value (F-M295)
 
-**T110:** The auto-sync's two file-level halves, without audio: the audio-track rule picks (1) the track in the subtitle's language, (2) English, (3) the first untagged track, with the 2-vs-3-letter codes (`en` against `eng`, `de` against `deu`/`ger`, `zh` against `zho`/`chi`) resolving as equal and `und`/null resolving as "no language"; a planted constant shift moves every timestamp by exactly that amount while text, cue count and cue order stay unchanged; a shift that would push the first cue below zero is REFUSED (not clamped) and the file is returned unchanged; the corrected file carries the same BOM/line-ending shape as the payload it came from; and `<base>.<lang>.srt.unsynchronized` does NOT match the sidecar listing pattern `baseName + "*.srt"` while the swapped order does (F-M296)
+**T110:** The auto-sync's two file-level halves, without audio: the audio-track rule picks (1) the track in the subtitle's language, (2) English, (3) the first untagged track, with the 2-vs-3-letter codes (`en` against `eng`, `de` against `deu`/`ger`, `zh` against `zho`/`chi`) resolving as equal and `und`/null resolving as "no language"; a planted constant shift moves every timestamp by exactly that amount while text, cue count and cue order stay unchanged; a shift that would push the first cue below zero is REFUSED (not clamped) and the file is returned unchanged; the corrected file carries the same BOM/line-ending shape as the payload it came from; and the kept name `<base>.<lang>.srt.unsynchronized.zip` does NOT match the sidecar listing pattern `baseName + "*.srt"` while the swapped order does (F-M296, F-M306)
 
 **T111:** End-to-end against real audio, driving the FEATURE (not a copy of its arithmetic): the sign of the correction is established on the material itself by planting +5 s and applying BOTH directions — the one landing within 0.7 s of the plain subtitle is `−detector`, and that is asserted, so a sign flip fails here instead of doubling every corrected file; a subtitle already in sync comes back `applied=False`; and a shift planted at +2.5 / −1.8 / +6.0 s is measured and removed, with the corrected text lying within 0.7 s of the plain subtitle by MEDIAN offset — a file that took no part in the measurement. The check is a MEDIAN and not a spread: a constant shift leaves the spread at 0.00 s whatever its size, so an earlier version of this test passed even on files it had made twice as bad (F-M296)
 
@@ -1544,7 +1554,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T117:** The staircase scored against REAL material with the AUDIO as the only yardstick — no subtitle takes part, neither embedded nor as a sidecar. Per episode one audio decode, then the detector runs on the result and the verdict is read as the **per-segment offset curve**: segments, offset span and the largest absolute offset. A corrected file passes when it shows **no drift**: one segment, or offsets that sit near zero with a span inside the material's measurement floor. The **control runs first** and decides whether the episode may be scored at all: the UNTOUCHED material goes through the same measurement, and a file that already looks wrong there means the yardstick is misaligned to that material — that is a finding about the yardstick and must NOT be reported as a failure of the correction. A subtitle reference may be used to FIND a defect but is never the number this test is accepted on, because the residual would be computed relative to a reference that may itself drift, which counts the same error twice and flatters the result. The order-guard count is read together with the result, and a broad fire is a failure signal rather than a detail: it means the staircase was flattened into one constant shift. The `<= 1.0 s` bound of T114 is a SYNTHETIC expectation and is asserted nowhere here (F-M305).
 
-**T118:** The archived original, driven on the real writer and read back as an archive, not as a byte blob: `<base>.<lang>.srt.unsynchronized.zip` exists beside the plain copy after a corrected save; the archive holds **exactly ONE entry**; the entry's payload is **byte-identical** to `<base>.<lang>.srt.unsynchronized` (compared byte for byte, so a re-encode or a line-ending change fails here); and the name matches **neither** listing pattern this plugin uses — `baseName + "*.srt"` (F-M251) nor the seeder's `"*.srt"` — so the archive can never be read as a subtitle. The same two files are asserted for the HI track, which goes through the same helper (F-M306)
+**T118:** The archived original, driven on the real writer and read back as an archive, not as a byte blob: after a corrected save **only** `<base>.<lang>.srt.unsynchronized.zip` exists beside the corrected file — the loose `<base>.<lang>.srt.unsynchronized` does **NOT** (asserted, not assumed: a leftover loose copy is exactly the regression a presence-only check misses); the archive holds **exactly ONE entry**; the entry is named `<base>.<lang>.srt.unsynchronized`, so unpacking it cannot clobber the corrected `<base>.<lang>.srt`; its payload is the unmodified fetched bytes, compared byte for byte so a re-encode or a line-ending change fails here; and the written name matches **neither** listing pattern this plugin uses — `baseName + "*.srt"` (F-M251) nor the seeder's `"*.srt"` — so the archive can never be read as a subtitle. The same is asserted for the HI track, which goes through the same helper (F-M306)
 **T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M294, F-M288)
 
 
