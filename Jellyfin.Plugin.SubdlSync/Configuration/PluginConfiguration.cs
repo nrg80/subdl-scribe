@@ -428,7 +428,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </para>
     /// <para>
     /// The corrected file is written as usual AND the untouched original is kept
-    /// beside it as the one-entry archive <c>&lt;name&gt;.&lt;lang&gt;.srt.unsynchronized.zip</c>
+    /// beside it as the one-entry archive <c>&lt;name&gt;.&lt;lang&gt;.srt.unsynced.zip</c>
     /// (F-M306). Registered is the
     /// hash of the CORRECTED file, so the duplicate guard sees exactly what lies on
     /// disk. A file whose offset MOVES is repaired by the staircase of F-M300, not by

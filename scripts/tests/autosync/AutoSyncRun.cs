@@ -31,11 +31,11 @@
 //                       what that put back. The ARCHIVED original is the exception
 //                       — it keeps its own byte style, which is the whole point of
 //                       keeping it.
-//   5. The name       — the kept artefact "<...>.srt.unsynchronized.zip" must NOT
+//   5. The name       — the kept artefact "<...>.srt.unsynced.zip" must NOT
 //                       match the sidecar glob (baseName + "*.srt"), while the
 //                       swapped order would. Asserted against the real pattern,
 //                       because the swapped form silently invents a language.
-//   6. The archive    — "<...>.srt.unsynchronized.zip" (F-M306) must be the ONLY
+//   6. The archive    — "<...>.srt.unsynced.zip" (F-M306) must be the ONLY
 //                       artefact written, hold exactly ONE entry named after the
 //                       file it preserves, and carry the unmodified bytes — read
 //                       back as a real archive, not as a blob, so a re-encode or a
@@ -349,14 +349,14 @@ public static class AutoSyncRun
     private static int UnsyncSuffix()
     {
         int f = 0;
-        Console.WriteLine("[5] the .unsynchronized suffix does not become a subtitle");
+        Console.WriteLine("[5] the .unsynced suffix does not become a subtitle");
 
         const string baseName = "Person Of Interest S02e06 The High Road";
         string corrected = $"/media/{baseName}.en.srt";
         string kept = SubtitleSync.UnsyncZipPathFor(corrected);   // the artefact that IS kept
-        string swapped = $"/media/{baseName}.en.unsynchronized.srt";
+        string swapped = $"/media/{baseName}.en.unsynced.srt";
 
-        bool suffixOk = kept == $"/media/{baseName}.en.srt.unsynchronized.zip";
+        bool suffixOk = kept == $"/media/{baseName}.en.srt.unsynced.zip";
         Check("the kept name sits after .srt", suffixOk, kept);
         f += suffixOk ? 0 : 1;
 
@@ -372,7 +372,7 @@ public static class AutoSyncRun
             unsyncMatched ? "MATCHED (would be read as a subtitle)" : "ignored");
         f += !unsyncMatched ? 0 : 1;
         Check("the swapped order WOULD be listed (why the order matters)", swappedMatched,
-            swappedMatched ? "matched — the name parser then reads \"unsynchronized\" as a language" : "not matched");
+            swappedMatched ? "matched — the name parser then reads \"unsynced\" as a language" : "not matched");
         f += swappedMatched ? 0 : 1;
 
         Console.WriteLine();
@@ -394,7 +394,7 @@ public static class AutoSyncRun
         string unsyncZip = SubtitleSync.UnsyncZipPathFor(corrected);
 
         // The name sits after ".srt" like the copy's does, and ends in .zip.
-        bool nameOk = unsyncZip == $"/media/{baseName}.en.srt.unsynchronized.zip";
+        bool nameOk = unsyncZip == $"/media/{baseName}.en.srt.unsynced.zip";
         Check("zip name sits after .srt", nameOk, unsyncZip);
         f += nameOk ? 0 : 1;
 
@@ -489,7 +489,7 @@ public static class AutoSyncRun
 
             bool looseAbsent = !System.IO.File.Exists(tLoose);
             Check("the LOOSE copy is NOT written", looseAbsent,
-                looseAbsent ? "no <...>.srt.unsynchronized on disk" : "FOUND a loose copy");
+                looseAbsent ? "no <...>.srt.unsynced on disk" : "FOUND a loose copy");
             f += looseAbsent ? 0 : 1;
 
             bool zipPresent = System.IO.File.Exists(tZip);

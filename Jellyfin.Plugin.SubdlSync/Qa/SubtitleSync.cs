@@ -14,83 +14,65 @@
 // measured against the audio — a single constant while the offset really is constant, and a
 // STAIRCASE, one offset per segment, once the offset moves.
 //
-// WHY THE STAIRCASE IS NOT A SECOND VARIANT BESIDE THE CONSTANT ONE
+// THE METHOD: ONE FIT, NOT TWO CASES (F-M307)
 //
-// Both cases are one measurement answering two questions. "Does the offset move?" and "how far
-// is the file off?" come out of the same detector run: planted constant shifts of -3.0 / +2.0 /
-// +4.0 / +8.0 / +12.0 s come back as -3.20 / +1.80 / +3.80 / +7.80 / +11.80 s and report
-// `drifts=False` at every one of them, so a LARGE CONSTANT SHIFT IS NOT MISTAKEN FOR DRIFT.
-// When it does report `drifts=True`, the segments it found ARE the repair, because the step
-// structure is real and not an artefact of the search: on the same files a permutation test puts
-// the staircase fit 14x better on the real ordering than on a shuffled one (0.30 s against
-// 4.13 s residual), it finds 4-5 steps per episode whose sizes sum to the total drift
-// (11.98 s against 10.92 s), and each step lands between two adjacent dialogue lines.
+// The offset is not a number, it is a FUNCTION of time, and it is fitted as one:
+// a piecewise-constant function, found by exact dynamic programming (OffsetFit).
+// A constant offset is the same fit with one segment, so "the file is uniformly
+// off" and "the offset moves" are no longer two questions with two answers that
+// can contradict each other — they are one question with one answer. That
+// structure is why the earlier split failed: a gate decided WHICH case applied,
+// and every disagreement between the gate and the corrector became a wrong
+// file. The gate and the staircase are gone; this file runs the fit.
 //
-// THE FORMER REFUSAL WAS RIGHT ABOUT THE AVERAGE AND WRONG ABOUT THE CONCLUSION
+// WHAT THE FIT MAXIMISES
 //
-// A drifting file has no valid SINGLE offset — shifting it by the average moves one part right
-// and spoils another — and that part still holds. But "no single offset" does not mean "no
-// correction": measured over the 36 drifting episodes of this library, shifting each cue by the
-// offset of ITS OWN segment takes the worst single-cue residual from a 10.74 s median to 4.51 s,
-// with 33 of 36 better.
+// Speech probability per 20 ms frame, threshold-free: frame levels are normalised
+// against the file's own 10th/90th percentile, so a quiet recording and a loud one
+// produce comparable curves and no absolute loudness threshold is needed. For each
+// cue the score is the mean speech probability over the cue's window at a given
+// shift, on a 0.25 s grid over +-20 s. The fit maximises the total score minus a
+// charge of Z * sigma * sqrt(segment cues) per segment, which is what stops it from
+// inventing a step for every stray cue; sigma is the median absolute score change
+// per grid step, measured on the file's own curve.
 //
-// THE LIMIT, STATED BECAUSE IT IS MEASURED
+// A window that lies OUTSIDE the audio is EXCLUDED, never scored as zero and never
+// clipped. Clipping shortened the window and thereby raised its mean, and the fit
+// then returned +20.0 / -19.25 / +19.75 s on cues that were never moved — the
+// degenerate answer at the edge of the search range, which is the signature of a
+// score that rewards a shorter window.
 //
-// Two of the 36 (S01E04 8.00 -> 21.30 s, S01E06 2.47 -> 11.91 s) come out WORSE, and no
-// reference-free signal separated them from the 33 successes — six candidates were tried
-// (monotone distortion, split-half disagreement, remaining drift after the correction, run-back
-// against the main direction, outlier offset, raw drift span) and every one of them OVERLAPS.
-// With 2 failures in 36, any threshold computed from that same distribution is a circle. The
-// staircase is therefore applied and those two are accepted as the price of a ~6 s average gain,
-// UNLESS a same-language reference subtitle exists — then the anchor path (F-M297) is the better
-// route and the caller prefers it. This file only applies what it is handed.
+// WHAT MAKES IT DEPLOYABLE
 //
-// The gate still refuses when it could not run at all (no ffmpeg, no speech, too few cues):
-// a tool being unavailable is not a licence to guess.
+// The fit only writes when the correction PROVES itself: a paired test over the
+// MOVED cues only, the whole file must not get worse, and the largest shift must
+// reach MinShiftSec. A file that is already correct is therefore left exactly as
+// it is, which is what makes a second run move the timeline by 0.000 s. When the
+// fit proves no gain the file is reported, not guessed at: a tool that cannot
+// measure is not a licence to shift something anyway.
 //
-// THE ORIGINAL IS KEPT, ALWAYS — AS A ONE-ENTRY ARCHIVE
+// THE ORIGINAL IS KEPT, ALWAYS - AS A ONE-ENTRY ARCHIVE
 //
 // The unmodified bytes are written beside the corrected file as
-// `<base>.<lang>.srt.unsynchronized.zip` (F-M306), holding one entry named
-// `<base>.<lang>.srt.unsynchronized`, before the corrected file lands. The loose
-// copy is NOT written any more: the operator ordered exactly one artefact kept
-// ("Nur das zip ablegen. Wenn ich es entpacken will mache ich das selber"), so
-// unpacking is his step. The name sits AFTER `.srt` on purpose: this plugin finds
-// sidecars with `EnumerateFiles(dir, baseName + "*.srt")`, which ignores that name,
-// while `<base>.<lang>.unsynchronized.srt` WOULD match and the name parser would
-// then read `unsynchronized` as a language code (measured). Jellyfin does not index
-// the suffix form as an external subtitle track either, so exactly one new track
-// appears per corrected file. The entry keeps the `.unsynchronized` name so that
-// unpacking it into the media folder cannot clobber the corrected `<base>.<lang>.srt`.
-//
-// THE ORDER, AND THE HASH (user specification)
-//
-//   fetch → sync → normalize → write `<...>.srt` AND the archive
-//   → register the hash OF THE SYNCHRONIZED srt
-//
-// The hash is registered over the corrected content because that is what lies on
-// disk and what later goes up to SubDL. Normalization is idempotent, so whether
-// it runs before or after the shift is immaterial; it runs before the hash, as the
-// upload path already requires (F-M185).
-//
-// THE SIGN, ESTABLISHED BY MEASUREMENT (the expensive mistake here)
-//
-// The detector's number and the correction to apply are related by a sign, and the
-// wrong choice DOUBLES the error instead of removing it. Measured on a real episode
-// with a planted +5.0 s shift: the detector read +4.50 s; applying −4.50 s landed the
-// file 0.50 s from its plain subtitle, while applying +4.50 s landed it at +9.50 s.
-// **The correction is MINUS the detector's value**: `srt_time − measured = synced`.
-// The first version of the pipeline added it, and every corrected file came out
-// exactly twice as far off as it went in. The end-to-end test caught it; a unit test
-// could not, because the shift function was correct in isolation — only the SIGN of
-// what was handed to it was wrong.
+// `<base>.<lang>.srt.unsynced.zip` (F-M306), holding one entry named
+// `<base>.<lang>.srt.unsynced`, before the corrected file lands. The loose
+// copy is NOT written: exactly one artefact is kept, so unpacking is the
+// operator's step. The name sits AFTER `.srt` on purpose: this plugin finds
+// sidecars with `EnumerateFiles(dir, baseName + "*.srt")`, which ignores that
+// name, while `<base>.<lang>.unsynced.srt` WOULD match and the name parser
+// would then read `unsynced` as a language code (measured). Jellyfin does
+// not index the suffix form as an external subtitle track either, so exactly one
+// new track appears per corrected file. The entry keeps the `.unsynced` name
+// so that unpacking it into the media folder cannot clobber the corrected file.
 //
 // THE SHIFT IS APPLIED TO TIMES ONLY
 //
-// Text is carried through byte-for-byte, the source's byte style (BOM / CRLF) is
-// reused, and a shift that would push a cue below zero is refused rather than
-// clamped — clamping would silently change one cue's relation to its neighbour
-// while leaving the rest moved.
+// Text is carried through byte-for-byte, a shift that would push a cue below zero
+// is refused rather than clamped (clamping would silently change one cue's
+// relation to its neighbour while leaving the rest moved), and a cue is never
+// pulled further from its own segment's value than the order guard allows - the
+// guard exists because a large step can otherwise push a cue past its neighbour
+// and invert two lines.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -106,8 +88,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.SubdlScribe.Qa;
 
 /// <summary>
-/// F-M296: shifts a downloaded subtitle by the constant offset measured against
-/// the audio, unless the offset moves.
+/// F-M307: corrects a downloaded subtitle by the piecewise-constant offset fitted
+/// against the audio. The fit is the only correction route (OffsetFit).
 /// </summary>
 public static class SubtitleSync
 {
@@ -121,13 +103,13 @@ public static class SubtitleSync
     /// <summary>
     /// Below this the file is not moved, in seconds.
     /// <para>
-    /// Measured, not chosen: the plain subtitle of a real episode — the very file that
-    /// nothing is wrong with — measures **−0.50 s** against its own audio. That value is
-    /// this material's measurement floor (an SDH/plain cue leads the speech onset by a
-    /// per-cue varying amount), and it is the same order as a small real offset. A floor
-    /// of 0.20 s therefore MOVED a file that was already in sync, which the end-to-end
-    /// test caught. At 1.0 s a finding is at least twice the floor, so applying it can
-    /// still be expected to remove more error than it adds.
+    /// Measured, not chosen: a subtitle file that nothing is wrong with still measures a
+    /// small nonzero offset against its own audio, because a cue leads the speech onset by
+    /// a per-cue varying amount. That is this material's measurement floor, and it is the
+    /// same order as a small real offset, so a lower floor MOVED files that were already in
+    /// sync. At 1.0 s a finding is at least twice the floor, and the fit additionally has to
+    /// prove a gain (see OffsetFit's deploy rule), so the floor is a backstop rather than
+    /// the decision.
     /// </para>
     /// </summary>
     public const double MinShiftSec = 1.0;
@@ -548,8 +530,8 @@ public static class SubtitleSync
 
     /// <summary>Path of the preserved original beside a corrected sidecar.</summary>
     /// <param name="correctedPath">The corrected sidecar's path.</param>
-    /// <returns>Path with <c>.unsynchronized</c> appended after <c>.srt</c>.</returns>
-    public static string UnsyncPathFor(string correctedPath) => correctedPath + ".unsynchronized";
+    /// <returns>Path with <c>.unsynced</c> appended after <c>.srt</c>.</returns>
+    public static string UnsyncPathFor(string correctedPath) => correctedPath + ".unsynced";
 
     /// <summary>Path of the archived original beside a corrected sidecar.</summary>
     /// <param name="correctedPath">The corrected sidecar's path.</param>

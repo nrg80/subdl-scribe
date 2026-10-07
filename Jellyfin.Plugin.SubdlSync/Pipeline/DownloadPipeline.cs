@@ -1906,7 +1906,7 @@ public sealed class DownloadPipeline : IDisposable
                     // file). The archive is the ONLY artefact kept: the operator ordered the loose
                     // copy dropped ("Nur das zip ablegen. Wenn ich es entpacken will mache ich das
                     // selber"), so unpacking is his step, not the pipeline's. The ENTRY carries the
-                    // `.unsynchronized` name, so unpacking into the media folder cannot clobber the
+                    // `.unsynced` name, so unpacking into the media folder cannot clobber the
                     // corrected `<base>.<lang>.srt`. Guarded by the dry-run flag like every other
                     // write (F-M287) — the flag is checked again here rather than relying on the
                     // enclosing branch.
