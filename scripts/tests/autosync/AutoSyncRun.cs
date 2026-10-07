@@ -22,8 +22,15 @@
 //                       REFUSED, never clamped (clamping one cue would change its
 //                       relation to its neighbour while the rest of the file
 //                       still moves).
-//   4. Byte style     — the corrected file must carry the same BOM/CRLF shape as
-//                       the payload it came from.
+//   4. Byte style     — a file this plugin CHANGES is written CANONICAL (UTF-8, no
+//                       BOM, LF) so the bytes on disk are the bytes the hash
+//                       describes. Asserted on the real helper and against the
+//                       pipeline source, because the two used to agree only by
+//                       coincidence: the corrected file was re-encoded back to the
+//                       fetched style, and NormalizeSrt happened to strip exactly
+//                       what that put back. The ARCHIVED original is the exception
+//                       — it keeps its own byte style, which is the whole point of
+//                       keeping it.
 //   5. The name       — the kept artefact "<...>.srt.unsynchronized.zip" must NOT
 //                       match the sidecar glob (baseName + "*.srt"), while the
 //                       swapped order would. Asserted against the real pattern,
@@ -40,6 +47,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Jellyfin.Plugin.SubdlScribe.Qa;
+using Jellyfin.Plugin.SubdlScribe.Registry;
 using MediaBrowser.Model.Entities;
 
 namespace AutoSyncTest;
@@ -292,6 +300,44 @@ public static class AutoSyncRun
             $"bom {rb3}, crlf {rc3} (preamble {u16[0]:X2} {u16[1]:X2})");
         f += rb3 && rc3 ? 0 : 1;
 
+        // ---- F-M296 (operator order, 07.10.2026): what this plugin WRITES is canonical.
+        // The corrected file used to be re-encoded to the fetched payload's byte style, and
+        // the stored hash was taken over the normalized text — the two agreed only because
+        // NormalizeSrt strips exactly what the style puts back. That is a coincidence, not an
+        // invariant, so it is now asserted instead of assumed: the bytes written are the bytes
+        // hashed, whatever style the payload arrived in.
+        foreach (var (label, payload) in new (string, byte[])[]
+        {
+            ("BOM + CRLF", bomCrlf),
+            ("no BOM + LF", lf),
+            ("UTF-16 with BOM", u16),
+        })
+        {
+            string decoded = DecodeLikePayload(payload);
+            byte[] written = ContentHashRegistry.EncodeCanonical(decoded);
+
+            bool noBom = !(written.Length >= 3 && written[0] == 0xEF && written[1] == 0xBB && written[2] == 0xBF);
+            bool lfOnly = !System.Text.Encoding.UTF8.GetString(written).Contains('\r');
+            Check($"written canonical ({label})", noBom && lfOnly,
+                $"noBom {noBom}, lf {lfOnly}");
+            f += noBom && lfOnly ? 0 : 1;
+
+            // The invariant that matters: the hash the registry stores must describe the bytes
+            // that actually land on disk. Asserted by hashing the WRITTEN BYTES DIRECTLY — not by
+            // hashing their decoded text, which routes both sides through NormalizeSrt and so
+            // compares a value with itself. Measured: the tautological form passed even with
+            // EncodeCanonical deliberately broken to emit BOM+CRLF, and caught nothing.
+            string storedHash = ContentHashRegistry.ComputeHash(decoded);
+            string hashOfWrittenBytes =
+                Convert.ToHexString(System.Security.Cryptography.MD5.HashData(written)).ToLowerInvariant();
+
+            Check($"stored hash == MD5 of the bytes ON DISK ({label})", storedHash == hashOfWrittenBytes,
+                storedHash == hashOfWrittenBytes
+                    ? storedHash
+                    : $"stored {storedHash} but disk {hashOfWrittenBytes}");
+            f += storedHash == hashOfWrittenBytes ? 0 : 1;
+        }
+
         Console.WriteLine();
         return f;
     }
@@ -462,6 +508,31 @@ public static class AutoSyncRun
             Check("the pipeline writes the archive path", archiveWrite,
                 archiveWrite ? "AtomicWriteAsync(unsyncZip/…)" : "NOT FOUND — the archive is never written");
             f += archiveWrite ? 0 : 1;
+
+            // F-M296: the CORRECTED file must be encoded canonical, never re-encoded back to
+            // the fetched payload's byte style. A helper can be right while the caller still
+            // writes the old shape, so the source is checked as well — this is the regression
+            // that would silently put the stored hash and the file back out of step.
+            // Case matters: the HI track's variable is `hiWriteBytes`, and a pattern that
+            // expects `writeBytes` alone undercounts it as 2 of 4 while staying green.
+            int canonical = System.Text.RegularExpressions.Regex.Matches(
+                src, @"[Ww]riteBytes\s*=\s*ContentHashRegistry\.EncodeCanonical\(").Count;
+            Check("all FOUR corrected-file writes go out canonical", canonical == 4,
+                $"EncodeCanonical {canonical}/4");
+            f += canonical == 4 ? 0 : 1;
+
+            // The ARCHIVED original is the deliberate exception: it keeps the fetched payload's
+            // own byte style, because that artefact exists to be the uncorrected file. Both
+            // tracks must still do it, so the assertion is that the style encoder is used and
+            // used ONLY for the two archive payloads.
+            int styleEncoded = System.Text.RegularExpressions.Regex.Matches(
+                src, @"(hi)?[Oo]riginalBytes\s*=\s*Qa\.SubtitleSync\.Encode\(").Count;
+            int canonicalWritesOnly = System.Text.RegularExpressions.Regex.Matches(
+                src, @"ContentHashRegistry\.EncodeCanonical\(").Count;
+            Check("the archived original keeps its own byte style (both tracks)",
+                styleEncoded == 2 && canonicalWritesOnly == 4,
+                $"archive style-encoded {styleEncoded}/2, canonical total {canonicalWritesOnly}/4");
+            f += styleEncoded == 2 && canonicalWritesOnly == 4 ? 0 : 1;
         }
 
         Console.WriteLine();
@@ -489,6 +560,25 @@ public static class AutoSyncRun
                          + int.Parse(m.Groups[3].Value)
                          + (int.Parse(m.Groups[4].Value) / 1000.0))
             .ToList();
+    }
+
+    /// <summary>
+    /// Decodes payload bytes the way the pipeline does — UTF-16 with its BOM, else UTF-8 —
+    /// so the canonical round trip is measured on the same input the real path sees.
+    /// </summary>
+    private static string DecodeLikePayload(byte[] bytes)
+    {
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+        {
+            return System.Text.Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+        }
+
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+        {
+            return System.Text.Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+        }
+
+        return System.Text.Encoding.UTF8.GetString(bytes);
     }
 
     private static string Body(string srt)

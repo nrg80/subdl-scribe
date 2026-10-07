@@ -434,8 +434,15 @@ remaining refusals stand:
   integrity break in exchange for a smaller number.
 
 **Applied to times only.** Text is carried through byte-for-byte, the cue count and cue order are
-unchanged, and the corrected file is written in the byte style of the payload it came from (BOM / line
-endings read from the fetched bytes). The correction never re-encodes a file as a side effect.
+unchanged, and the corrected file is written **canonical** (UTF-8, no BOM, LF, trailing whitespace
+trimmed) — the same form F-M185 establishes and the content hash describes. The fetched original is
+untouched by this: it keeps its own byte style inside the archive (F-M306), because that artefact is
+the uncorrected file. **Operator order (07.10.2026):** `Ich wollte wenn ich Dateien ändere sie dann auch
+gleich normalisiert schreiben.` The former rule wrote the corrected file in the fetched payload's own
+byte style, which made the stored hash describe a byte sequence that existed nowhere on disk; the two
+agreed only because `NormalizeSrt` happened to strip exactly what the style put back. Normalizing on the
+way out makes written bytes and hashed bytes identical **by construction**, so the correction and the
+hash can no longer disagree.
 
 #### 4.3.3 STAIRCASE — a moving offset is repaired segment by segment (F-M300)
 
@@ -539,7 +546,8 @@ Method, measurements and the two measured failures: §4.3.3. **Test: T114.**
 
 1. fetch the candidate bytes,
 2. **sync** — measure and, if the offset is constant, shift,
-3. **normalize** (idempotent, F-M185; before or after the shift makes no difference),
+3. **normalize** (idempotent, F-M185) — the correction output is written canonical, so written bytes
+   and hashed bytes are identical by construction,
 4. **write two files**: the corrected `<base>.<lang>.srt` **and** the untouched original as the
    one-entry archive `<base>.<lang>.srt.unsynchronized.zip` (F-M306),
 5. **register the hash of the CORRECTED subtitle.**
@@ -1539,7 +1547,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T109:** End-to-end on a real episode: the plain subtitle comes back steady while the hearing-impaired variant of the same episode comes back drifting with a span and boundaries named, and the verdict states a span rather than a correction value (F-M295)
 
-**T110:** The auto-sync's two file-level halves, without audio: the audio-track rule picks (1) the track in the subtitle's language, (2) English, (3) the first untagged track, with the 2-vs-3-letter codes (`en` against `eng`, `de` against `deu`/`ger`, `zh` against `zho`/`chi`) resolving as equal and `und`/null resolving as "no language"; a planted constant shift moves every timestamp by exactly that amount while text, cue count and cue order stay unchanged; a shift that would push the first cue below zero is REFUSED (not clamped) and the file is returned unchanged; the corrected file carries the same BOM/line-ending shape as the payload it came from; and the kept name `<base>.<lang>.srt.unsynchronized.zip` does NOT match the sidecar listing pattern `baseName + "*.srt"` while the swapped order does (F-M296, F-M306)
+**T110:** The auto-sync's two file-level halves, without audio: the audio-track rule picks (1) the track in the subtitle's language, (2) English, (3) the first untagged track, with the 2-vs-3-letter codes (`en` against `eng`, `de` against `deu`/`ger`, `zh` against `zho`/`chi`) resolving as equal and `und`/null resolving as "no language"; a planted constant shift moves every timestamp by exactly that amount while text, cue count and cue order stay unchanged; a shift that would push the first cue below zero is REFUSED (not clamped) and the file is returned unchanged; the corrected file is written CANONICAL (UTF-8, no BOM, LF) — asserted on the real writer, so a reintroduced re-encode to the fetched byte style fails here — while the archived original keeps its own byte style; and the kept name `<base>.<lang>.srt.unsynchronized.zip` does NOT match the sidecar listing pattern `baseName + "*.srt"` while the swapped order does (F-M296, F-M306)
 
 **T111:** End-to-end against real audio, driving the FEATURE (not a copy of its arithmetic): the sign of the correction is established on the material itself by planting +5 s and applying BOTH directions — the one landing within 0.7 s of the plain subtitle is `−detector`, and that is asserted, so a sign flip fails here instead of doubling every corrected file; a subtitle already in sync comes back `applied=False`; and a shift planted at +2.5 / −1.8 / +6.0 s is measured and removed, with the corrected text lying within 0.7 s of the plain subtitle by MEDIAN offset — a file that took no part in the measurement. The check is a MEDIAN and not a spread: a constant shift leaves the spread at 0.00 s whatever its size, so an earlier version of this test passed even on files it had made twice as bad (F-M296)
 

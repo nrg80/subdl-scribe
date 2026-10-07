@@ -106,6 +106,26 @@ public sealed class ContentHashRegistry : IDisposable
     }
 
     /// <summary>
+    /// Encodes SRT content in the canonical form: UTF-8, no BOM, LF line endings, trailing
+    /// whitespace trimmed — exactly the bytes the registry hash describes.
+    /// </summary>
+    /// <param name="srtContent">Raw content.</param>
+    /// <returns>The bytes to write to disk.</returns>
+    /// <remarks>
+    /// Operator order (07.10.2026): a file this plugin CHANGES is written normalized, so the form on
+    /// disk is the form that was hashed. Writing the corrected file in the fetched payload's own byte
+    /// style made the stored hash describe a byte sequence that existed nowhere on disk: same text,
+    /// but BOM and CRLF put back on the way out. The two are equal only because NormalizeSrt happens
+    /// to strip exactly what the style re-adds — an invariant nobody had asserted. Normalizing on the
+    /// way out makes written bytes and hashed bytes identical BY CONSTRUCTION, with nothing to
+    /// re-derive.
+    /// The fetched original is NOT touched by this: it stays byte-for-byte as received inside the
+    /// one-entry archive (F-M306), because that artefact exists precisely to be the uncorrected file.
+    /// </remarks>
+    public static byte[] EncodeCanonical(string srtContent)
+        => Encoding.UTF8.GetBytes(NormalizeSrt(srtContent));
+
+    /// <summary>
     /// Computes the OSHash of a video file: size plus the first and last 64 KB, summed in 8-byte
     /// words. Cheap, and any change to the file changes the hash.
     /// </summary>

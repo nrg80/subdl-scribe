@@ -1876,9 +1876,10 @@ public sealed class DownloadPipeline : IDisposable
                                     content, syncVerdict.SegmentStartTimesSec, syncVerdict.SegmentOffsetsSec);
                                 if (sOk)
                                 {
-                                    (bool sbom, bool scrlf) = Qa.SubtitleSync.StyleOfBytes(bytes);
+                                    // F-M296: the CORRECTED file is written canonical (UTF-8, no
+                                    // BOM, LF) — the same form ComputeHash below describes.
                                     unsyncPayload = content;
-                                    writeBytes = Qa.SubtitleSync.Encode(sShifted, sbom, scrlf);
+                                    writeBytes = ContentHashRegistry.EncodeCanonical(sShifted);
                                     content = sShifted;
                                     LogUtil.PerItem(_config.LogMode, _logger,
                                         "[SubDL-D] {File} [{Lang}] — auto-sync STAIRCASE over {Segments} segments "
@@ -1923,9 +1924,10 @@ public sealed class DownloadPipeline : IDisposable
                             // fetched — that is the whole point of keeping it. The suffix
                             // sits after ".srt" so the sidecar listing (baseName + "*.srt")
                             // does not pick it up.
-                            (bool bom, bool crlf) = Qa.SubtitleSync.StyleOfBytes(bytes);
+                            // F-M296: the CORRECTED file goes out canonical, not in the fetched
+                            // payload's byte style — see EncodeCanonical.
                             unsyncPayload = content;
-                            writeBytes = Qa.SubtitleSync.Encode(shifted, bom, crlf);
+                            writeBytes = ContentHashRegistry.EncodeCanonical(shifted);
                             content = shifted;
                             LogUtil.PerItem(_config.LogMode, _logger,
                                 "[SubDL-D] {File} [{Lang}] — auto-sync {Shift:+0.00;-0.00}s applied ({Why})",
@@ -2116,9 +2118,9 @@ public sealed class DownloadPipeline : IDisposable
                                             hiContent, hiVerdict.SegmentStartTimesSec, hiVerdict.SegmentOffsetsSec);
                                         if (hsOk)
                                         {
-                                            (bool hsb, bool hsc) = Qa.SubtitleSync.StyleOfBytes(hiBytes!);
+                                            // F-M296: corrected HI file → canonical form too.
                                             hiUnsync = hiContent;
-                                            hiWriteBytes = Qa.SubtitleSync.Encode(hsShifted, hsb, hsc);
+                                            hiWriteBytes = ContentHashRegistry.EncodeCanonical(hsShifted);
                                             hiContent = hsShifted;
                                             LogUtil.PerItem(_config.LogMode, _logger,
                                                 "[SubDL-D] HI auto-sync STAIRCASE over {Segments} segments across a "
@@ -2156,9 +2158,9 @@ public sealed class DownloadPipeline : IDisposable
                                         (bool hOk, string hShifted, string hWhy) = Qa.SubtitleSync.ShiftBy(hiContent, hiApply);
                                         if (hOk)
                                         {
-                                            (bool hb, bool hc) = Qa.SubtitleSync.StyleOfBytes(hiBytes!);
+                                            // F-M296: corrected HI file → canonical form too.
                                             hiUnsync = hiContent;
-                                            hiWriteBytes = Qa.SubtitleSync.Encode(hShifted, hb, hc);
+                                            hiWriteBytes = ContentHashRegistry.EncodeCanonical(hShifted);
                                             hiContent = hShifted;
                                             LogUtil.PerItem(_config.LogMode, _logger,
                                                 "[SubDL-D] HI auto-sync {Shift:+0.00;-0.00}s applied for {File} [{Lang}] ({Why})",
