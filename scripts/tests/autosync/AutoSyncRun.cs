@@ -28,6 +28,11 @@
 //                       glob (baseName + "*.srt"), while the swapped order would.
 //                       This is asserted against the real pattern, because the
 //                       swapped form silently invents a language.
+//   6. The archive    — "<...>.srt.unsynchronized.zip" (F-M306) must hold exactly
+//                       ONE entry whose payload is byte-identical to the plain
+//                       copy, and its name must match NEITHER listing pattern this
+//                       plugin uses. Read back as a real archive, not as a blob:
+//                       a re-encode or a line-ending change fails here.
 //
 // Run: dotnet run --project scripts/tests/autosync
 using System;
@@ -60,6 +65,7 @@ public static class AutoSyncRun
         failures += ShiftRefused();
         failures += ByteStyle();
         failures += UnsyncSuffix();
+        failures += UnsyncArchive();
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -321,6 +327,86 @@ public static class AutoSyncRun
         Check("the swapped order WOULD be listed (why the order matters)", swappedMatched,
             swappedMatched ? "matched — the name parser then reads \"unsynchronized\" as a language" : "not matched");
         f += swappedMatched ? 0 : 1;
+
+        Console.WriteLine();
+        return f;
+    }
+
+    /// <summary>
+    /// Case 6: the archived original (F-M306) — one entry, the same bytes, and a name that
+    /// matches neither listing pattern, so the archive can never be read as a subtitle.
+    /// </summary>
+    private static int UnsyncArchive()
+    {
+        int f = 0;
+        Console.WriteLine("[6] the archived original (.zip) — F-M306");
+
+        const string baseName = "Person Of Interest S02e06 The High Road";
+        string corrected = $"/media/{baseName}.en.srt";
+        string unsync = SubtitleSync.UnsyncPathFor(corrected);
+        string unsyncZip = SubtitleSync.UnsyncZipPathFor(corrected);
+
+        // The name sits after ".srt" like the copy's does, and ends in .zip.
+        bool nameOk = unsyncZip == $"/media/{baseName}.en.srt.unsynchronized.zip";
+        Check("zip name sits after .srt", nameOk, unsyncZip);
+        f += nameOk ? 0 : 1;
+
+        // Neither listing pattern may see it. Both match on the .srt ENDING.
+        bool sidecarSees = MatchesGlob(unsyncZip, baseName);
+        Check("the sidecar listing does NOT see the archive", !sidecarSees,
+            sidecarSees ? "MATCHED (would be read as a subtitle)" : "ignored");
+
+        f += !sidecarSees ? 0 : 1;
+        bool seederSees = System.IO.Path.GetFileName(unsyncZip)
+            .EndsWith(".srt", StringComparison.OrdinalIgnoreCase);
+        Check("the seeder's \"*.srt\" does NOT see the archive", !seederSees,
+            seederSees ? "MATCHED" : "ignored");
+        f += !seederSees ? 0 : 1;
+
+        // Build the real archive from real bytes, then read it back as an archive.
+        byte[] payload = SubtitleSync.Encode("1\n00:00:01,000 --> 00:00:03,000\nHallo\n", bom: true, crlf: true);
+        byte[] zipBytes = SubtitleSync.BuildUnsyncArchive(System.IO.Path.GetFileName(unsync), payload);
+
+        int entries = 0;
+        byte[]? roundTrip = null;
+        string? entryName = null;
+        using (var ms = new System.IO.MemoryStream(zipBytes))
+        using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Read))
+        {
+            entries = zip.Entries.Count;
+            if (entries > 0)
+            {
+                entryName = zip.Entries[0].FullName;
+                using var s = zip.Entries[0].Open();
+                using var outMs = new System.IO.MemoryStream();
+                s.CopyTo(outMs);
+                roundTrip = outMs.ToArray();
+            }
+        }
+
+        Check("the archive holds exactly ONE entry", entries == 1, $"entries={entries}");
+        f += entries == 1 ? 0 : 1;
+
+        bool nameInZip = entryName == System.IO.Path.GetFileName(unsync);
+        Check("the entry carries the copy's file name", nameInZip, entryName ?? "(none)");
+        f += nameInZip ? 0 : 1;
+
+        // Byte for byte — this is the assertion a re-encode fails.
+        bool identical = roundTrip != null && roundTrip.Length == payload.Length
+                         && roundTrip.SequenceEqual(payload);
+        Check("the payload is BYTE-IDENTICAL to the plain copy", identical,
+            identical
+                ? $"{payload.Length} bytes equal (bom {payload[0]:X2} {payload[1]:X2} {payload[2]:X2})"
+                : $"differ: zip={roundTrip?.Length ?? -1} bytes, copy={payload.Length} bytes");
+        f += identical ? 0 : 1;
+
+        // Deterministic: the same input yields the same bytes on every run, which is what
+        // makes a byte comparison a usable test at all.
+        byte[] again = SubtitleSync.BuildUnsyncArchive(System.IO.Path.GetFileName(unsync), payload);
+        bool deterministic = again.SequenceEqual(zipBytes);
+        Check("the archive is deterministic", deterministic,
+            deterministic ? "same bytes on a second build" : "BYTES DIFFER between runs");
+        f += deterministic ? 0 : 1;
 
         Console.WriteLine();
         return f;

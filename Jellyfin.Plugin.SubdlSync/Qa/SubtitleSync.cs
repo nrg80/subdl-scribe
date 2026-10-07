@@ -93,6 +93,8 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.IO;
+using System.IO.Compression;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -489,6 +491,41 @@ public static class SubtitleSync
     /// <param name="correctedPath">The corrected sidecar's path.</param>
     /// <returns>Path with <c>.unsynchronized</c> appended after <c>.srt</c>.</returns>
     public static string UnsyncPathFor(string correctedPath) => correctedPath + ".unsynchronized";
+
+    /// <summary>Path of the archived original beside a corrected sidecar.</summary>
+    /// <param name="correctedPath">The corrected sidecar's path.</param>
+    /// <returns>The copy's path with <c>.zip</c> appended.</returns>
+    /// <remarks>
+    /// F-M306 (development): the preserved original is archived as well, and the name sits after
+    /// <c>.srt</c> for the same reason the plain copy's does — both listing patterns in this
+    /// plugin match on the <c>.srt</c> ENDING, so a name ending in <c>.zip</c> matches neither and
+    /// can never be read as a subtitle.
+    /// </remarks>
+    public static string UnsyncZipPathFor(string correctedPath) => UnsyncPathFor(correctedPath) + ".zip";
+
+    /// <summary>Builds the zip that archives one preserved original.</summary>
+    /// <param name="entryName">Name the single entry carries inside the archive.</param>
+    /// <param name="payload">The original's bytes, written in verbatim.</param>
+    /// <returns>The archive's bytes.</returns>
+    /// <remarks>
+    /// F-M306: one entry, and its payload is byte-identical to the plain copy because the SAME
+    /// bytes are passed to both halves. The fixed timestamp and the deliberate absence of a
+    /// directory entry make the archive deterministic — the same input yields the same bytes on
+    /// every run, which is what lets T118 compare byte for byte instead of comparing sizes.
+    /// </remarks>
+    public static byte[] BuildUnsyncArchive(string entryName, byte[] payload)
+    {
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            ZipArchiveEntry entry = zip.CreateEntry(entryName, CompressionLevel.Optimal);
+            entry.LastWriteTime = new DateTimeOffset(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
+            using Stream s = entry.Open();
+            s.Write(payload, 0, payload.Length);
+        }
+
+        return ms.ToArray();
+    }
 
     private static double ToSec(Match m)
         => (int.Parse(m.Groups["h"].Value, CultureInfo.InvariantCulture) * 3600.0)

@@ -1987,8 +1987,27 @@ public sealed class DownloadPipeline : IDisposable
                         {
                             string unsyncPath = Qa.SubtitleSync.UnsyncPathFor(targetPath);
                             (bool ub, bool uc) = Qa.SubtitleSync.StyleOfBytes(bytes);
-                            await AtomicWriteAsync(unsyncPath, Qa.SubtitleSync.Encode(unsyncPayload, ub, uc), ct)
-                                .ConfigureAwait(false);
+                            byte[] originalBytes = Qa.SubtitleSync.Encode(unsyncPayload, ub, uc);
+                            await AtomicWriteAsync(unsyncPath, originalBytes, ct).ConfigureAwait(false);
+
+                            // F-M306: the same bytes again as a one-entry archive. Written from
+                            // `originalBytes` and not re-encoded, so the two halves cannot drift
+                            // apart. A failure here must not cost the copy or the corrected file.
+                            try
+                            {
+                                string unsyncZip = Qa.SubtitleSync.UnsyncZipPathFor(targetPath);
+                                await AtomicWriteAsync(
+                                    unsyncZip,
+                                    Qa.SubtitleSync.BuildUnsyncArchive(Path.GetFileName(unsyncPath), originalBytes),
+                                    ct).ConfigureAwait(false);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex,
+                                    "[SubDL-D] could not archive the unsynchronized original for {File}",
+                                    Path.GetFileName(targetPath));
+                            }
+
                             if (_config.LogMode >= LogLevelMode.Verbose)
                             {
                                 LogUtil.PerItem(_config.LogMode, _logger,
@@ -2178,9 +2197,27 @@ public sealed class DownloadPipeline : IDisposable
                                             {
                                                 string hiUnsyncPath = Qa.SubtitleSync.UnsyncPathFor(hiPath);
                                                 (bool hub, bool huc) = Qa.SubtitleSync.StyleOfBytes(hiBytes!);
-                                                await AtomicWriteAsync(
-                                                    hiUnsyncPath, Qa.SubtitleSync.Encode(hiUnsync, hub, huc), ct)
+                                                byte[] hiOriginalBytes = Qa.SubtitleSync.Encode(hiUnsync, hub, huc);
+                                                await AtomicWriteAsync(hiUnsyncPath, hiOriginalBytes, ct)
                                                     .ConfigureAwait(false);
+
+                                                // F-M306: the HI track gets the archive too, through
+                                                // the same helper — one implementation, both tracks.
+                                                try
+                                                {
+                                                    string hiUnsyncZip = Qa.SubtitleSync.UnsyncZipPathFor(hiPath);
+                                                    await AtomicWriteAsync(
+                                                        hiUnsyncZip,
+                                                        Qa.SubtitleSync.BuildUnsyncArchive(
+                                                            Path.GetFileName(hiUnsyncPath), hiOriginalBytes),
+                                                        ct).ConfigureAwait(false);
+                                                }
+                                                catch (Exception ex)
+                                                {
+                                                    _logger.LogWarning(ex,
+                                                        "[SubDL-D] could not archive the unsynchronized HI original for {File}",
+                                                        Path.GetFileName(hiPath));
+                                                }
                                             }
                                             catch (Exception ex)
                                             {

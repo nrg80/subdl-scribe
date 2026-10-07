@@ -20,10 +20,10 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 29 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 30 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 6 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
-  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 6 requirements
+  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 7 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -540,8 +540,9 @@ Method, measurements and the two measured failures: §4.3.3. **Test: T114.**
 1. fetch the candidate bytes,
 2. **sync** — measure and, if the offset is constant, shift,
 3. **normalize** (idempotent, F-M185; before or after the shift makes no difference),
-4. **write two files**: the corrected `<base>.<lang>.srt` **and** the untouched original as
-   `<base>.<lang>.srt.unsynchronized`,
+4. **write the files**: the corrected `<base>.<lang>.srt`, the untouched original as
+   `<base>.<lang>.srt.unsynchronized`, **and** that original again as
+   `<base>.<lang>.srt.unsynchronized.zip` (F-M306),
 5. **register the hash of the CORRECTED subtitle.**
 
 The hash describes the file that lies on disk and that later goes up to SubDL, so the duplicate guards
@@ -560,6 +561,31 @@ track either, so exactly one new track appears per corrected file.
 quota again — and re-downloading may return the same drifting file. A failure to write the original
 does not undo the corrected file; it is logged as a warning.
 
+**F-M306 [D] (development):** **The preserved original is archived as a zip as well, beside it — the same bytes, one file per archive.**
+
+**Rule.** Next to `<base>.<lang>.srt.unsynchronized` the pipeline writes
+`<base>.<lang>.srt.unsynchronized.zip` containing **exactly ONE entry**, whose payload is
+**byte-identical** to the plain copy. The zip is written by the **same helper** as the copy, so both
+halves cannot drift apart and the HI track gets both without a second implementation.
+
+**Why the name sits after `.srt` too.** Both listing patterns in this plugin — the sidecar listing
+`baseName + "*.srt"` (F-M251) and the seeder's `"*.srt"` — match on the `.srt` **ending**. A name
+ending in `.zip` matches neither, so the archive is invisible to both and can never be read as a
+subtitle. The same argument that fixed the suffix order applies unchanged.
+
+**Why not a switch.** It is the same act as keeping the copy, described once: `QaDownloadAutoSync`
+governs it (F-M304). A switch that does not switch what it names is worse than no switch, and the
+operator rejected a control per step more than once.
+
+**Failure posture.** Identical to the copy's: a failure to write the archive does **not** undo the
+corrected file, and the plain copy survives it — each half is written independently and a failure is
+logged as a warning. Nothing here may cost a saved subtitle.
+
+**Deterministic.** The entry carries a fixed timestamp and the archive holds no directory entry, so
+the same input yields the same bytes on every run — otherwise a byte comparison could never be a test.
+
+**Test: T118.**
+
 **The HI variant is synced by the same staircase.** It goes through the same gate and the same rules.
 Leaving it out would produce a corrected main subtitle beside an uncorrected HI file of the same
 episode — and the HI pool is where the drift gate measured its findings (all 38 measured HI files
@@ -571,7 +597,8 @@ the four available, so it does not monopolise the box). A staircase costs **no e
 is the same verdict, applied per segment. This is the **ONE switch of the correction section**, `QaDownloadAutoSync`, **default on**; it runs the drift gate itself, so the verdict is measured once rather than decoded twice. The reporting-only entries the section once carried are off and no longer on the page (F-M303).
 
 **Tests: T110 (synthetic: track priority with the 2-vs-3-letter cases, exact shift, refusal on a
-negative first cue, byte style, the suffix against the real listing pattern), T111 (end-to-end on a
+negative first cue, byte style, the suffix against the real listing pattern), T118 (the archived
+original: one entry, byte-identical payload, a name that matches neither listing pattern), T111 (end-to-end on a
 real episode: the plain subtitle comes back near zero, a planted shift is measured and removed, and
 the result is checked against the plain subtitle, which took no part in the measurement), T114 (the
 staircase: detected segments, both planted steps surviving the order guard, the residual bound, and
@@ -1517,8 +1544,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T117:** The staircase scored against REAL material with the AUDIO as the only yardstick — no subtitle takes part, neither embedded nor as a sidecar. Per episode one audio decode, then the detector runs on the result and the verdict is read as the **per-segment offset curve**: segments, offset span and the largest absolute offset. A corrected file passes when it shows **no drift**: one segment, or offsets that sit near zero with a span inside the material's measurement floor. The **control runs first** and decides whether the episode may be scored at all: the UNTOUCHED material goes through the same measurement, and a file that already looks wrong there means the yardstick is misaligned to that material — that is a finding about the yardstick and must NOT be reported as a failure of the correction. A subtitle reference may be used to FIND a defect but is never the number this test is accepted on, because the residual would be computed relative to a reference that may itself drift, which counts the same error twice and flatters the result. The order-guard count is read together with the result, and a broad fire is a failure signal rather than a detail: it means the staircase was flattened into one constant shift. The `<= 1.0 s` bound of T114 is a SYNTHETIC expectation and is asserted nowhere here (F-M305).
 
-
-
+**T118:** The archived original, driven on the real writer and read back as an archive, not as a byte blob: `<base>.<lang>.srt.unsynchronized.zip` exists beside the plain copy after a corrected save; the archive holds **exactly ONE entry**; the entry's payload is **byte-identical** to `<base>.<lang>.srt.unsynchronized` (compared byte for byte, so a re-encode or a line-ending change fails here); and the name matches **neither** listing pattern this plugin uses — `baseName + "*.srt"` (F-M251) nor the seeder's `"*.srt"` — so the archive can never be read as a subtitle. The same two files are asserted for the HI track, which goes through the same helper (F-M306)
 **T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M294, F-M288)
 
 
@@ -1536,6 +1562,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T86:** The refresh detail line names a rebuild fallback without turning the light red (F-M269)
 **T87:** The configuration page's structure and wiring hold without a host (F-M270–F-M273)
 **T88:** An unlabelled sidecar is detected and renamed, and a taken combination takes the next slot (F-M278)
+
 
 ## 20. References
 
