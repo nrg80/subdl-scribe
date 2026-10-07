@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.184",
-        "changelog": "v12.1.12.184: The statistics now read as a table instead of one run-on sentence. Every counter\n    gets its own row with the label on the left and the number on the right, so the numbers line up\n    and can be compared at a glance. Each row names the direction it belongs to, and the wording says\n    what happened rather than naming the code: uploads and downloads that were fetched and then\n    thrown away, the type (movie/series) adjusted, the searches that only matched once the year tag\n    was dropped, and the subtitles the run fitted to their audio track — that last one is a new\n    counter, so the table shows how much of the correction work actually landed.",
+        "version": "12.1.12.185",
+        "changelog": "v12.1.12.185: The audio fit now says what it did at the normal log level instead of only in the\n    per-file detail. The run's start line names the switch (audio fit=on/off) and the run's closing\n    line carries the counter (N fitted to audio), so a fit that ran is distinguishable from a fit\n    that had nothing to do — without raising the log level. The per-file detail keeps the facts\n    needed to reproduce a fit: which audio track was read and which subtitle it was fitted against.\n    Also counts the hearing-impaired track, which goes through the same correction and was missing\n    from the counter, and drops a log branch that had no effect.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.184-dev/Jellyfin.Plugin.SubdlSync_12.1.12.184.zip",
-        "checksum": "626631f7f59efa094ec9455ac12d8c58",
-        "timestamp": "2026-10-07T11:04:53Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.185-dev/Jellyfin.Plugin.SubdlSync_12.1.12.185.zip",
+        "checksum": "8a03e73654c4e8bc02af30b6191645ba",
+        "timestamp": "2026-10-07T11:21:31Z"
       }
     ]
   }
