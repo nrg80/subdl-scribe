@@ -30,14 +30,19 @@ Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 
 ### Manual
 
-1. Download `Jellyfin.Plugin.SubdlSync_12.1.12.175.zip` from the [releases page](../../releases).
+1. Download the ZIP of the latest release from the [releases page](../../releases).
 2. Create a folder for the plugin under your Jellyfin `plugins/` directory and extract the ZIP into it:
 
    ```
    /var/lib/jellyfin/plugins/SubDL Scribe/
    ├── Jellyfin.Plugin.SubdlSync.dll
    ├── LanguageDetection.dll
-   └── LiteDB.dll
+   ├── LiteDB.dll
+   └── licenses/
+       ├── THIRD-PARTY.txt
+       ├── LanguageDetection-Apache-2.0.txt
+       ├── LiteDB-MIT.txt
+       └── SubDL-Scribe-GPL-3.0.txt
    ```
 
 3. Restart Jellyfin.
