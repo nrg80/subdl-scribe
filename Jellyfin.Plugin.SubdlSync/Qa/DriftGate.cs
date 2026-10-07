@@ -51,8 +51,17 @@ namespace Jellyfin.Plugin.SubdlScribe.Qa;
 /// </summary>
 public static class DriftGate
 {
-    /// <summary>Sample rate for the mono envelope decode.</summary>
-    public const int SampleRate = 8000;
+    /// <summary>
+    /// Sample rate for the mono envelope decode.
+    /// <para>
+    /// F-M307: 16 kHz, not 8 kHz. At 8 kHz the Nyquist limit is 4 kHz, so the 300–3400 Hz
+    /// voice band-pass keeps almost the whole spectrum and filters nothing — measured, the
+    /// probability curve then came out FLATTER (correlation 0.996 against the validated
+    /// reference, mean |difference| 0.010) and the flattening is what decides whether a
+    /// short step is kept or dropped. At 16 kHz the band-pass has room to work.
+    /// </para>
+    /// </summary>
+    public const int SampleRate = 16000;
 
     /// <summary>Frame length in seconds for the envelope.</summary>
     public const double FrameSec = DriftDetector.FrameSec;
@@ -203,6 +212,12 @@ public static class DriftGate
         psi.ArgumentList.Add(audioMap);
         psi.ArgumentList.Add("-ac");
         psi.ArgumentList.Add("1");
+        // F-M307: the fitted score reads the VOICE BAND. Without this filter the envelope
+        // carries music and effects, and the cue table is no longer the quantity the fit was
+        // validated on. The reference implementation passes the same two corners; combined
+        // with the 16 kHz rate above, the filter actually has spectrum to work with.
+        psi.ArgumentList.Add("-af");
+        psi.ArgumentList.Add("highpass=f=300,lowpass=f=3400");
         psi.ArgumentList.Add("-ar");
         psi.ArgumentList.Add(SampleRate.ToString(CultureInfo.InvariantCulture));
         psi.ArgumentList.Add("-f");

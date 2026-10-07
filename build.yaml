@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.181"
+version: "12.1.12.182"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"

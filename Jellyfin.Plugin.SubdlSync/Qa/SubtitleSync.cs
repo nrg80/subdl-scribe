@@ -168,10 +168,16 @@ public static class SubtitleSync
             return new Result(false, 0, srtText, null, "ffmpeg not available");
         }
 
-        DriftVerdict verdict;
+        // F-M307: the fit REPLACES the gate's verdict plus the staircase. One route: the
+        // offset is a piecewise-constant function of time, fitted by exact DP, and the
+        // per-cue shift it produces is applied directly. There is no separate "does it
+        // drift?" question any more — a constant offset is the same fit with one segment,
+        // so the two cases cannot disagree.
+        OffsetFit.FitResult fit;
+        float[] samples;
         try
         {
-            verdict = await DriftGate.RunAsync(mediaPath, srtText, ffmpegPath, logger, ct, audioMap)
+            samples = await DriftGate.DecodeMonoAsync(ffmpegPath, mediaPath, ct, audioMap)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -180,82 +186,131 @@ public static class SubtitleSync
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "[SubDL] auto-sync: gate threw for {File}", System.IO.Path.GetFileName(mediaPath));
-            return new Result(false, 0, srtText, null, "gate error");
+            logger.LogDebug(ex, "[SubDL] auto-sync: decode failed for {File}", System.IO.Path.GetFileName(mediaPath));
+            return new Result(false, 0, srtText, null, "audio decode failed");
         }
 
-        if (!verdict.Ran)
+        if (samples.Length == 0)
         {
-            return new Result(false, 0, srtText, null, "not measured: " + (verdict.SkipReason ?? "not run"));
+            return new Result(false, 0, srtText, null, "not measured: no audio samples");
         }
 
-        // F-M300: a moving offset is repaired by a STAIRCASE, not refused. Each cue is moved by
-        // the offset of its own segment; see the header for the measurement, and for the two
-        // files of the 36 that this makes worse — which is why a same-language reference
-        // (F-M297) wins when one exists.
-        if (verdict.Drifts)
+        (double[] fst, double[] fen) = DriftGate.ParseCues(srtText);
+        if (fst.Length < 40)
         {
-            if (verdict.SegmentOffsetsSec.Count == 0)
-            {
-                return new Result(
-                    false,
-                    0,
-                    srtText,
-                    null,
-                    $"drifts ({verdict.SpanSec:0.0}s over {verdict.BoundaryCount} boundary/boundaries) but no segment offsets were reported — left as downloaded");
-            }
+            return new Result(false, 0, srtText, null, $"not measured: only {fst.Length} cues");
+        }
 
-            (bool sok, string sshifted, string swhy, int sguarded) = ShiftByStaircase(
-                srtText, verdict.SegmentStartTimesSec, verdict.SegmentOffsetsSec);
-            if (!sok)
-            {
-                return new Result(false, 0, srtText, null, "staircase not applied: " + swhy);
-            }
+        try
+        {
+            fit = OffsetFit.Fit(fst, fen, samples, DriftGate.SampleRate);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "[SubDL] auto-sync: fit threw for {File}", System.IO.Path.GetFileName(mediaPath));
+            return new Result(false, 0, srtText, null, "fit error");
+        }
 
-            double largest = verdict.SegmentOffsetsSec.Max(Math.Abs);
-            if (largest > MaxShiftSec)
-            {
-                return new Result(
-                    false,
-                    0,
-                    srtText,
-                    null,
-                    $"staircase step {largest:0.0}s beyond the {MaxShiftSec:0}s limit — not applied");
-            }
+        if (!fit.Ran)
+        {
+            return new Result(false, 0, srtText, null, "not measured: " + (fit.SkipReason ?? "not run"));
+        }
 
+        if (fit.Reverted)
+        {
             return new Result(
-                true,
-                largest,
-                sshifted,
+                false,
+                0,
+                srtText,
                 null,
-                $"staircase over {verdict.SegmentOffsetsSec.Count} segments across a {verdict.SpanSec:0.0}s drift ({sguarded} cue(s) order-guarded)");
+                $"no proven gain ({fit.MovedCues} cue(s) moved, t = {fit.TMoved:+0.00;-0.00}) — left as downloaded");
         }
 
-        double shift = verdict.MedianOffsetSec;
-        if (Math.Abs(shift) < MinShiftSec)
+        double largestShift = 0;
+        foreach (double v in fit.AppliedShiftsSec)
         {
-            return new Result(false, 0, srtText, null, $"already in sync ({shift:+0.00;-0.00}s)");
+            largestShift = Math.Max(largestShift, Math.Abs(v));
         }
 
-        if (Math.Abs(shift) > MaxShiftSec)
+        if (largestShift > MaxShiftSec)
         {
-            return new Result(false, 0, srtText, null, $"shift {shift:+0.0;-0.0}s beyond the {MaxShiftSec:0}s limit — not applied");
+            return new Result(
+                false,
+                0,
+                srtText,
+                null,
+                $"shift {largestShift:0.0}s beyond the {MaxShiftSec:0}s limit — not applied");
         }
 
-        // SIGN: the detector's number is "how far the cue sits AFTER the speech", so the
-        // correction is its NEGATIVE. Established by measurement, not by reasoning — with
-        // a planted +5.0 s the detector read +4.50 s, and −4.50 s landed the file on its
-        // plain subtitle while +4.50 s landed it at +9.50 s (the error doubled). See the
-        // file header; the end-to-end test asserts this and prints both directions.
-        double applied = -shift;
-
-        (bool ok, string shifted, string why) = ShiftBy(srtText, applied);
-        if (!ok)
+        (bool aok, string ashifted, string awhy) = ShiftByStaircasePerCue(srtText, fit.AppliedShiftsSec);
+        if (!aok)
         {
-            return new Result(false, 0, srtText, null, why);
+            return new Result(false, 0, srtText, null, "not applied: " + awhy);
         }
 
-        return new Result(true, applied, shifted, null, $"shifted {applied:+0.00;-0.00}s");
+        string how = fit.Segments == 1
+            ? $"constant {fit.AppliedShiftsSec[0]:+0.00;-0.00}s"
+            : $"{fit.Segments} segments ({string.Join(" / ", fit.SegmentOffsetsSec.ConvertAll(v => (-v).ToString("+0.00;-0.00", CultureInfo.InvariantCulture)))})";
+        return new Result(
+            true,
+            largestShift,
+            ashifted,
+            null,
+            $"corrected {how}, {fit.MovedCues} cue(s) moved, t = {fit.TMoved:+0.00;-0.00}, "
+            + $"score {fit.ScoreBefore:0.0000} -> {fit.ScoreAfter:0.0000}, {fit.GuardedCues} order-guarded");
+    }
+
+    /// <summary>
+    /// Applies a PER-CUE shift list: cue <c>k</c> moves by <paramref name="shiftsSec"/>[k].
+    /// <para>
+    /// F-M307 produces the shift per cue rather than per segment, because the order guard
+    /// pulls individual cues away from their segment's value at a step. Applying the guarded
+    /// values directly is what makes the written file identical to the one the deploy rule
+    /// scored — recomputing a staircase from segment offsets here would silently re-introduce
+    /// the very difference the guard exists to remove.
+    /// </para>
+    /// </summary>
+    /// <param name="srtText">SRT text.</param>
+    /// <param name="shiftsSec">One shift per cue, in cue order.</param>
+    /// <returns>(ok, shifted text, reason).</returns>
+    public static (bool Ok, string Text, string Reason) ShiftByStaircasePerCue(
+        string srtText, double[] shiftsSec)
+    {
+        if (string.IsNullOrEmpty(srtText))
+        {
+            return (false, srtText, "empty content");
+        }
+
+        MatchCollection matches = TsRegex.Matches(srtText);
+        if (matches.Count < 2)
+        {
+            return (false, srtText, "no timestamps found");
+        }
+
+        int cues = matches.Count / 2;
+        if (shiftsSec.Length < cues)
+        {
+            return (false, srtText, $"shift list has {shiftsSec.Length} entries for {cues} cues");
+        }
+
+        var sb = new System.Text.StringBuilder();
+        int last = 0;
+        for (int j = 0; j < cues * 2; j++)
+        {
+            Match m = matches[j];
+            sb.Append(srtText, last, m.Index - last);
+            double t = ToSec(m) + shiftsSec[j / 2];
+            if (t < 0)
+            {
+                return (false, srtText, "a cue would fall below zero — refused, not clamped");
+            }
+
+            sb.Append(Fmt(t));
+            last = m.Index + m.Length;
+        }
+
+        sb.Append(srtText, last, srtText.Length - last);
+        return (true, sb.ToString(), "applied per cue");
     }
 
     /// <summary>
