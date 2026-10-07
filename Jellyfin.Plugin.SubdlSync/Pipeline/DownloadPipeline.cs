@@ -401,7 +401,12 @@ public sealed class DownloadPipeline : IDisposable
 
         // F-M24a (fixed 09.09.2026, user decision): run START is Normal-level —
         // critical errors, rate limits, run started/finished.
-        LogUtil.Normal(_logger, "[SubDL] download: started (dry-run={Dry}, refetch={Refetch})", _config.DownloadDryRun, _config.RefetchInterval);
+        // F-M309: the fit is a whole-run activity, so its START belongs at Normal — one line per
+        // run, naming whether it is on. The per-file detail (which audio track, which subtitle it
+        // was fitted against) stays at Verbose. F-M24d's "one summary line per direction" is not
+        // violated: this is the run START line it already prescribes, carrying one more fact.
+        LogUtil.Normal(_logger, "[SubDL] download: started (dry-run={Dry}, refetch={Refetch}, audio fit={Fit})",
+            _config.DownloadDryRun, _config.RefetchInterval, _config.QaDownloadAutoSync ? "on" : "off");
 
         PipelineStopSignal.ClearStaleMarkers(Plugin.Instance?.DataFolderPath ?? string.Empty);
 
@@ -530,8 +535,9 @@ public sealed class DownloadPipeline : IDisposable
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
         LogUtil.Normal(_logger, 
-            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Rejected} rejected after fetch | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued",
+            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio | {Rejected} rejected after fetch | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued",
             summary.Downloaded,
+            summary.FittedToAudio,
             summary.RejectedCandidates,
             summary.SkippedNoCandidates,
             summary.NotAvailable,
@@ -1816,12 +1822,19 @@ public sealed class DownloadPipeline : IDisposable
                 if (_config.QaDownloadAudioTrackByLanguage && audioChoice.TrackCount > 0)
                 {
                     audioMap = "0:a:" + audioChoice.Position.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    if (audioChoice.Priority != 3 || audioChoice.Position != 0)
+                    // F-M309: WHICH audio track, WHICH subtitle — the two facts a Verbose reader
+                    // needs to reproduce a fit. Gated on the fit switch, because with the fit off
+                    // nothing reads the audio and a line claiming "fit reads track 2" would be a
+                    // lie; the run-level "audio fit=on|off" is the Normal line. The default case
+                    // (track 0 of N, no substitution) is as informative as a substitution — a
+                    // reader reproducing a fit needs the track that was READ, not the exceptions.
+                    if (_config.QaDownloadAutoSync)
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — audio track {Pos} of {N} ({Reason})",
+                            "[SubDL-D] {File} [{Lang}] — fit reads audio track {Pos} of {N} ({Reason}); subtitle {Sub}",
                             Path.GetFileName(mediaPath), lang, audioChoice.Position,
-                            audioChoice.TrackCount, audioChoice.Reason);
+                            audioChoice.TrackCount, audioChoice.Reason,
+                            cand.ReleaseName ?? "(unknown)");
                     }
                 }
 
@@ -1857,14 +1870,14 @@ public sealed class DownloadPipeline : IDisposable
                             "[SubDL-D] {File} [{Lang}] — auto-sync {Reason}",
                             Path.GetFileName(mediaPath), lang, syncResult.Reason);
                     }
-                    else if (syncResult.Reason == "ffmpeg not available")
+                    else
                     {
-                        LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — auto-sync not applied: {Reason}",
-                            Path.GetFileName(mediaPath), lang, syncResult.Reason);
-                    }
-                    else if (_config.LogMode >= LogLevelMode.Verbose)
-                    {
+                        // F-M309: ONE branch, not two. The "ffmpeg not available" case had its own
+                        // branch, but it called the same PerItem helper as the general one and was
+                        // therefore gated by the same Verbose threshold — two branches, one
+                        // outcome, and the split only suggested a policy that did not exist. A
+                        // missing ffmpeg is reported ONCE per run by FfmpegTools.LogWarning
+                        // regardless of the mode, which is where it is visible at Normal.
                         LogUtil.PerItem(_config.LogMode, _logger,
                             "[SubDL-D] {File} [{Lang}] — auto-sync not applied: {Reason}",
                             Path.GetFileName(mediaPath), lang, syncResult.Reason);
@@ -2048,6 +2061,10 @@ public sealed class DownloadPipeline : IDisposable
                                         hiUnsync = hiContent;
                                         hiWriteBytes = ContentHashRegistry.EncodeCanonical(hiSync.Corrected);
                                         hiContent = hiSync.Corrected;
+                                        // F-M309: the HI track is a subtitle the run fitted too, so it
+                                        // counts. Without this the counter under-reported exactly the
+                                        // pool where the drift lives (all 38 measured HI files drifted).
+                                        summary.FittedToAudio++;
                                         LogUtil.PerItem(_config.LogMode, _logger,
                                             "[SubDL-D] HI auto-sync {Reason} for {File} [{Lang}] ({Release})",
                                             hiSync.Reason, Path.GetFileName(mediaPath), lang, hi.ReleaseName);

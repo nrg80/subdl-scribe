@@ -430,6 +430,36 @@ def main():
         check("the two copies of the renderer are identical",
               renderer_of(jstext) == renderer_of(html))
 
+    # ---- 6c. F-M309/T124: the fit's logging split ----
+    # Normal must show WHETHER the fit ran and HOW MUCH it did; Verbose must show WHICH audio track
+    # and WHICH subtitle. Asserted on the source because the levels are what make the feature
+    # falsifiable in the field: a fit that leaves no Normal trace cannot be told apart from a fit
+    # that never ran, and F-M286 requires every counter to be printed somewhere.
+    dl = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Pipeline", "DownloadPipeline.cs"))
+    if os.path.exists(dl):
+        src = open(dl, encoding="utf-8").read()
+        check("the run START line names the fit switch at Normal",
+              "audio fit={Fit}" in src)
+        check("the run DONE line carries the fit counter at Normal",
+              "fitted to audio" in src)
+        # The track line must be per-item (Verbose) AND gated on the switch: with the fit off
+        # nothing reads the audio, so a line claiming it did would be false.
+        m = re.search(r"if \(_config\.QaDownloadAutoSync\)\s*\{\s*LogUtil\.PerItem\([^)]*fit reads audio track", src, re.S)
+        check("the per-file track line sits behind the fit switch", m is not None)
+        check("the per-file track line is a per-item line, not a Normal one",
+              m is not None and "LogUtil.PerItem" in m.group(0)
+              and "LogUtil.Normal" not in m.group(0))
+        # And the dead branch must stay gone: a second branch under the same threshold changed
+        # nothing while suggesting a policy that did not exist.
+        check("no dead second branch for a missing ffmpeg",
+              src.count('syncResult.Reason == "ffmpeg not available"') == 0)
+        # The HI track is a fitted subtitle too — its increment must exist, or the counter
+        # under-reports exactly the pool where the drift lives.
+        check("the HI fit counts into the same counter",
+              src.count("summary.FittedToAudio++;") == 2)
+    else:
+        check("DownloadPipeline.cs reachable for the logging check", False, dl)
+
     # ---- 7. The embedded script must parse ----
     blocks = re.findall(r"<script>(.*?)</script>", html, re.S)
     check("at least one inline script block", len(blocks) >= 1)

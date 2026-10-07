@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.184"
+version: "12.1.12.185"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,13 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.185: The audio fit now says what it did at the normal log level instead of only in the
+    per-file detail. The run's start line names the switch (audio fit=on/off) and the run's closing
+    line carries the counter (N fitted to audio), so a fit that ran is distinguishable from a fit
+    that had nothing to do — without raising the log level. The per-file detail keeps the facts
+    needed to reproduce a fit: which audio track was read and which subtitle it was fitted against.
+    Also counts the hearing-impaired track, which goes through the same correction and was missing
+    from the counter, and drops a log branch that had no effect.
   v12.1.12.184: The statistics now read as a table instead of one run-on sentence. Every counter
     gets its own row with the label on the left and the number on the right, so the numbers line up
     and can be compared at a glance. Each row names the direction it belongs to, and the wording says

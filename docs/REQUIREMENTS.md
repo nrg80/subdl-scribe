@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.184.
+**Status:** Implementation — v12.1.12.185.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -35,7 +35,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 12 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 25 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 26 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -1277,6 +1277,28 @@ type-corrected-from-file-name — items whose type/season/episode came from the 
 
 Every timestamp uses one format — US order (M/D/YYYY) with local AM/PM time — through the timestamp formatter and the time formatter, so stamps cannot drift apart per call site. an unqualified locale call without an explicit locale follows the BROWSER's locale.
 
+**F-M309 [B1] (user decision 07.10.2026):** **The audio fit is logged on two levels: WHETHER at Normal, WHAT AGAINST at Verbose.**
+
+Normal carries the fit as a run-level fact, in the two lines F-M24d already prescribes:
+
+  the run START line names the switch — `audio fit=on|off` — so a run with the correction off is
+  distinguishable from a run where every fit simply found nothing to do;
+  the run DONE line carries the counter — `N fitted to audio` — so the one number that says how much
+  of the correction work landed is visible without raising the log level. F-M286 already required
+  every counter to be printed somewhere; this is where the fit's counter is printed.
+
+Verbose carries the per-file detail a reader needs to REPRODUCE a fit: `fit reads audio track {Pos}
+of {N} ({Reason}); subtitle {Release}`. It names the track that was READ — not a substitution — and
+the subtitle it was fitted against, and it is gated on the fit switch, because with the correction off
+nothing reads the audio and the line would be false. It is emitted for track 0 of N as well: the
+exceptions are not the interesting set, the track actually read is.
+
+The verdict lines stay where F-M24a puts per-item work — `auto-sync corrected …` / `not applied: …`
+at Verbose, one branch each. The former separate `ffmpeg not available` branch is GONE: it called the
+same helper under the same threshold as the general branch, so it changed nothing while suggesting a
+policy that did not exist. A missing ffmpeg is reported once per run by `FfmpegTools` at Warning
+level, which is visible at Normal. **Test: T124.** See F-M24a, F-M286, F-M307.
+
 **F-M308 [B1] (user decision 07.10.2026):** **The statistics counters are a TABLE, one row per counter, and the table names the direction each count belongs to.**
 
 Form: label left, number right, both columns bounded so the numbers form **one vertical line** — the
@@ -1618,6 +1640,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T121:** The two defects of F-M307 are regression cases and must fail loudly if they return: **(a)** a shifted cue window that falls outside the audio scores 0 and is **excluded** — the fit must never return a boundary-runner shift on cues that were not moved (the clipped behaviour returned shifts at the search limit); **(b)** the before/after report is scored with the **real cue ends**, asserted against a known value, because a report over one frame at the cue start silently makes the deploy rule revert good files. (F-M307)
 **T122:** The streaming decoder, asserted as two ABSENCES on the plugin source, because neither shows up in a log line and both would return silently: the sample-materialising decoder is gone (no `ms.ToArray()` and no `new float[…]` on the audio path — it held a 514 MB `byte[]` and a 514 MB `float[]` at once and the OOM killer took the 140-minute files) while the streaming entry point exists; and **nothing persists the level curve** — no file, no cache, no database column, and no curve-shaped field in `Data/Entities.cs`. Negative-controlled: planting `new float[…]` back into the audio path turns the assertion RED (measured 07.10.2026), so the two absences are guarded and not merely declared. (F-M307)
 **T123:** The statistics table renders one ROW per counter with the label and its number in two bounded columns, and every row names the direction its count belongs to where the data is per-direction. Asserted on the page source, because the numbers are the only readout of what a run did: the eight rows exist, the two volume counters carry the total weight, the fitted-to-audio row reads the `FittedToAudio` field (F-M308) and not a field that never leaves 0, and no row claims a direction the counter does not have. The page source is the same file pair that is checked structurally — a row added to one copy only is the F-M218 file-pair trap. The **reset** is guarded on the SOURCE: every counter on the status row must be zeroed by `ResetStatusStats()`, and every counter PARAMETER must appear in the writer's early-out — a counter added later and forgotten in either place fails silently, showing an old total beside a button that claims to have cleared it, or dropping a run that only did the new work. Both were planted and confirmed RED. (F-M308)
+**T124:** The fit's logging split, asserted on the source: the run START line names the fit switch (`audio fit=`), the run DONE line carries the fit counter (`fitted to audio`), and the per-file track line is emitted only under the fit switch and only at Verbose. Asserted because the levels are what make the feature falsifiable in the field: a fit that leaves no Normal trace cannot be told from a fit that never ran, and the counter is required to be printed somewhere. Planting a missing `fitted to audio` in the DONE line and a track line moved to Normal each turn it RED. (F-M309)
 ## 20. References
 
 - Plugin template: github.com/jellyfin/jellyfin-plugin-template
