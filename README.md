@@ -1,42 +1,12 @@
 # SubDL Scribe
 
 SubDL Scribe keeps your Jellyfin library subtitled and gives back to [SubDL](https://subdl.com). It
-**downloads** missing subtitles for the languages and libraries you select, and **uploads** the
-subtitle tracks already embedded in your own media files.
+**downloads** missing subtitles for the languages and libraries you select, **synchronizes them to the
+audio track**, and **uploads** the subtitle tracks already embedded in your own media files.
 
-The upload direction is **off by default** — see [Upload](#upload-off-by-default).
-
-## Subtitles that are seconds out of sync
-
-A downloaded subtitle is often off by whole seconds: the release's own timing does not match your rip.
-Jellyfin plays it anyway, and you nudge the delay in the player every episode. SubDL Scribe measures it
-and **removes the shift before the file is saved**.
-
-The offset is measured against the **spoken track**. Planted shifts of −3 / +2 / +4 / +8 / +12 s came
-back as −3.20 / +1.80 / +3.80 / +7.80 / +11.80 s, so the correction is accurate to about **0.2 s**. The
-untouched original is kept beside the corrected file as `<name>.<lang>.srt.unsynchronized.zip` — one
-entry, unpack it yourself when you want it — so a correction is reversible without spending download
-quota again. A subtitle whose offset **moves** is
-corrected **segment by segment** — one offset per segment, the boundaries the drift detector found are
-the repair — which took the worst line over 36 drifting episodes from a 10.74 s median to 4.51 s. Costs
-one audio decode per saved file.
-
-It sits on the **Download** tab under **Quality gates (before download save)** as the one switch
-**Correct subtitle timing**, and it is **on by default** — no episode needs a manual delay again.
-
-> The correction is on the prerelease channel (`develop`) and reaches the stable catalog with the next release.
+Written by an **AI agent** under the maintainer's direction.
 
 Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
-
-## How this plugin is developed
-
-The code, the specification and this README are written by an **AI agent** under the maintainer's
-direction. The maintainer supplies the requirements, the design decisions and the tests — they come
-from his own library and the failures it produced — and reviews, measures and approves every change.
-
-The [Jellyfin project asks](https://jellyfin.org/docs/general/contributing/llm-policies/) that projects
-shared in its community disclose LLM involvement, so it is disclosed here. Anyone who would rather not
-run LLM-written software can decide on that basis.
 
 ## Requirements
 
