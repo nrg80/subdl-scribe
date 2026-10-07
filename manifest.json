@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.188",
-        "changelog": "v12.1.12.188: Wording and one switch. The upload row no longer claims a fetch the upload\n    direction never performs — it reads \"discarded before transfer\", which is what happens.\n    The seeder's sidecar rename now hangs off the same switch as the container write\n    (\"Allocate missing language codes\") instead of the uploader's und-resolution switch,\n    so asking for language codes to be allocated no longer leaves unlabelled file names\n    behind. Note the default: that switch is off, so on a fresh install unlabelled sidecar\n    files are no longer renamed until it is enabled.",
+        "version": "12.1.12.189",
+        "changelog": "v12.1.12.189: The unsynchronized original is no longer an archive but a sidecar you can select\n    in the player, and it is locked against upload. After a correction the untouched file lands\n    beside the corrected one as <base>.<lang>.99.srt — numbered from 99 downward — so Jellyfin\n    lists it as its own track. The slots 90-99 are reserved for it, which is why corrected files\n    now stop at slot 89: without that cap a corrected file could be handed the name of an original\n    and overwrite the very file the correction exists to keep. No new state and no new rejection\n    reason were introduced — the original is registered exactly as every downloaded subtitle\n    already is, which is what keeps it out of the queue and out of the upload. The archive\n    (<name>.srt.unsynced.zip) is no longer written; archives already on disk are left untouched.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.188-dev/Jellyfin.Plugin.SubdlSync_12.1.12.188.zip",
-        "checksum": "fd2d5c6054a3e65582a99686b8edd151",
-        "timestamp": "2026-10-07T18:06:07Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.189-dev/Jellyfin.Plugin.SubdlSync_12.1.12.189.zip",
+        "checksum": "0d56afb3b489afe23af4fe3dfed97b1b",
+        "timestamp": "2026-10-07T20:13:57Z"
       }
     ]
   }
