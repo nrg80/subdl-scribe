@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.187"
+version: "12.1.12.188"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,13 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.188: Wording and one switch. The upload row no longer claims a fetch the upload
+    direction never performs — it reads "discarded before transfer", which is what happens.
+    The seeder's sidecar rename now hangs off the same switch as the container write
+    ("Allocate missing language codes") instead of the uploader's und-resolution switch,
+    so asking for language codes to be allocated no longer leaves unlabelled file names
+    behind. Note the default: that switch is off, so on a fresh install unlabelled sidecar
+    files are no longer renamed until it is enabled.
   v12.1.12.187: The statistics table counts what the run did to the files themselves. Two new rows
     say how many media files had language codes written into them and how many loose subtitle files
     were renamed so their name carries the language — both were visible only in the log before. The

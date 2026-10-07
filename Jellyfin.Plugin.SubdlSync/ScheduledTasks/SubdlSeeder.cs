@@ -1174,16 +1174,25 @@ public sealed class SubdlSeeder
                 if (wasUnlabeled)
                 {
                     // F-M278 (user decision 01.10.2026): the NAME carries no language, so the text has
-                    // to. Same three gates as the uploader's sidecar branch (F-M74), same order, same
-                    // outcome — the toggle decides whether we look at all, the 2 KB floor refuses a
-                    // verdict from too little text, and a detection that returns nothing leaves the
-                    // file exactly as it is. Only a detection that names a language continues.
+                    // to. The 2 KB floor still refuses a verdict from too little text, and a detection
+                    // that returns nothing leaves the file exactly as it is. Only a detection that
+                    // names a language continues.
                     //
                     // Detection needs no ffmpeg here: an .srt is plain text and is already in hand.
+                    //
+                    // F-M314 (user decision 07.10.2026): the gate is `Allocate missing language codes`,
+                    // the SAME switch that governs the container write (F-M261). A rename allocates a
+                    // missing language code too — it writes it into the NAME instead of the container —
+                    // so two different switches for one act would let the operator ask for allocation
+                    // and still be left with a library that reads as unlabelled. It used to hang off
+                    // `UploadResolveUnd`, which is the UPLOADER's und-resolution switch on the Upload
+                    // tab: that decides whether the upload direction looks at an untagged stream, and it
+                    // was never the right owner of a seeder pass that serves BOTH directions. The
+                    // container path never consulted it either — this makes the two halves agree.
                     var config = Plugin.Instance?.Configuration;
-                    if (config?.UploadResolveUnd != true)
+                    if (config?.AllocateMissingLanguageCodes != true)
                     {
-                        continue; // switch off — the uploader owns this file, as before
+                        continue; // allocation off — an unlabelled name is left as it is
                     }
 
                     string normalized = Registry.ContentHashRegistry.NormalizeSrt(content);

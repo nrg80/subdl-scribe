@@ -118,7 +118,7 @@
                                 <input id="AllocateMissingLanguageCodes" name="AllocateMissingLanguageCodes" type="checkbox" is="emby-checkbox" />
                                 <span>Allocate missing language codes to media files</span>
                             </label>
-                            <div class="fieldDescription">A track with no language tag reads as absent, so the file is searched for a language it already carries. With this on, that language is detected offline and written into the container as a real track tag. Default: off.</div>
+                            <div class="fieldDescription">A track with no language tag reads as absent, so the file is searched for a language it already carries. With this on, that language is detected offline and written into the container as a real track tag. A loose subtitle file beside the media whose NAME carries no language is renamed to carry it, instead of being written into anything. Default: off.</div>
                         </div>
 
                         <h3>Statistics</h3>
@@ -996,7 +996,7 @@
                                 ['Downloads: rejected after being fetched', s.RejectedDownload || 0],
                                 ['Downloads: searches run without the year tag', s.TmdbYearFilterMisses || 0],
                                 ['Downloads: timing aligned on a spoken track', s.FittedToAudio || 0],
-                                ['Uploads: rejected after being fetched', s.RejectedUpload || 0],
+                                ['Uploads: discarded before transfer', s.RejectedUpload || 0],
                                 ['Media files: language codes added', s.LanguageCodesAllocated || 0],
                                 ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0]
                             ];

@@ -360,6 +360,21 @@ def main():
     check("the loose-subtitle row carries no direction prefix either",
           "Loose subtitles: language codes added" in order,
           "row missing or renamed: %s" % order)
+    # F-M218 (user decision 07.10.2026): the upload row must NOT say "after being fetched" — the
+    # upload direction fetches nothing, every increment sits on a skip path ahead of the API call.
+    # Asserted because the wording was copied from the download row and reads as plausible: nothing
+    # breaks, the number is right, only the sentence is false. Also asserted positively, so a rename
+    # to something else has to be a deliberate act rather than a silent drift.
+    check("the upload row says discarded before transfer, not fetched",
+          "Uploads: discarded before transfer" in order,
+          "row missing or reverted: %s" % [o for o in order if o.startswith("Uploads:")])
+    check("and no upload row claims a fetch",
+          not any(o.startswith("Uploads:") and "fetch" in o for o in order),
+          "an upload row still speaks of fetching: %s" % [o for o in order if o.startswith("Uploads:")])
+    check("the download row keeps its own wording, fetched is true there",
+          "Downloads: rejected after being fetched" in order,
+          "download row missing or renamed: %s" % [o for o in order if o.startswith("Downloads:")])
+
     check("the two language-code rows read the fields the API sends",
           "LanguageCodesAllocated" in html and "LooseSubtitlesRenamed" in html,
           "a row reads a field name the API does not publish")
@@ -550,6 +565,28 @@ def main():
               "the statistics row must read Renamed, not Rows")
     else:
         check("SubdlSeeder.cs reachable for the dry-run check", False, sd)
+
+    # ---- 6g. F-M314: the rename hangs off the SAME switch as the container write ----
+    # Two switches for one act — allocating a missing language code — let the operator ask for
+    # allocation and still get a library that reads as unlabelled. The rename used to sit on
+    # `UploadResolveUnd`, the UPLOADER's switch on the Upload tab, which never owned a seeder pass
+    # serving both directions. Asserted on the source: the wrong switch still compiles and still
+    # works, so only a reader would notice.
+    if os.path.exists(sd):
+        sdsrc2 = open(sd, encoding="utf-8").read()
+        # The gate for the RENAME specifically: take the block that resolves an unlabelled sidecar.
+        rename_from = sdsrc2.find("bool wasUnlabeled = looseLang == null;")
+        rename_to = sdsrc2.find("string normalized =", rename_from)
+        rename_gate = sdsrc2[rename_from:rename_to] if rename_from >= 0 and rename_to > rename_from else ""
+        check("the sidecar rename is gated by the allocation switch",
+              "AllocateMissingLanguageCodes != true" in rename_gate,
+              "the rename must hang off AllocateMissingLanguageCodes: %r" % rename_gate[-160:])
+        check("and no longer by the uploader's und switch",
+              "if (config?.UploadResolveUnd" not in rename_gate,
+              "UploadResolveUnd still gates the rename")
+        check("the container path and the rename agree on the switch",
+              sdsrc2.count("config?.AllocateMissingLanguageCodes != true") >= 2,
+              "container and rename must consult the same switch")
 
     # ---- 6f. F-M313: the second seeder counter follows the same accumulate-and-consume rule ----
     if os.path.exists(disp):

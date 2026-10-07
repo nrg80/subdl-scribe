@@ -354,7 +354,7 @@
                                 ['Downloads: rejected after being fetched', s.RejectedDownload || 0],
                                 ['Downloads: searches run without the year tag', s.TmdbYearFilterMisses || 0],
                                 ['Downloads: timing aligned on a spoken track', s.FittedToAudio || 0],
-                                ['Uploads: rejected after being fetched', s.RejectedUpload || 0],
+                                ['Uploads: discarded before transfer', s.RejectedUpload || 0],
                                 ['Media files: language codes added', s.LanguageCodesAllocated || 0],
                                 ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0]
                             ];

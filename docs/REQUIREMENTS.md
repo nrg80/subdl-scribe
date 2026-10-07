@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.187.
+**Status:** Implementation — v12.1.12.188.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -102,7 +102,7 @@ Content is the key, not the path, and the hash is the uploader's own function. T
 
 The name is the only thing Jellyfin, MediaElch and every reader here can see. An unlabelled `<container>.srt` is read as "no language" (F-M239), so it proves no coverage, gets no observation row (F-M259) and the item is searched for a language its own disk already holds — the item never settles. Detecting the language and writing it into the name is what ends that.
 
-**The run order is detect, then rename, then record.** Detection reads the file's own text — an `.srt` is plain text, so no ffmpeg pass is involved. The three gates of F-M74 apply unchanged and in the same order: switch `UploadResolveUnd` off, text below the 2 KB floor (F-M16), or no language found all mean **the file is left exactly as it is** — no rename, no row. Only a detection that names a language renames.
+**The run order is detect, then rename, then record.** Detection reads the file's own text — an `.srt` is plain text, so no ffmpeg pass is involved. The gates apply unchanged and in this order: switch **`Allocate missing language codes` off** (F-M314 — the same switch as the container write, NOT `UploadResolveUnd`), text below the 2 KB floor (F-M16), or no language found all mean **the file is left exactly as it is** — no rename, no row. Only a detection that names a language renames.
 
 **A file that already carries a language token is never renamed.** Its name is already the shape this rule produces, and rewriting it would churn files that are correct.
 
@@ -1324,6 +1324,16 @@ same helper under the same threshold as the general branch, so it changed nothin
 policy that did not exist. A missing ffmpeg is reported once per run by `FfmpegTools` at Warning
 level, which is visible at Normal. **Test: T124.** See F-M24a, F-M286, F-M307.
 
+>**F-M314 [D] (user decision 07.10.2026):** **The sidecar rename is gated by the SAME switch as the container write — `Allocate missing language codes` — and no longer by `UploadResolveUnd`.**
+
+A rename allocates a missing language code exactly as the container write does; it writes that code into the NAME instead of into the container. Two different switches for one act would let an operator ask for allocation and still be left with a library that reads as unlabelled — the two halves of one feature disagreeing about whether it is on.
+
+**`UploadResolveUnd` was the wrong owner.** It is the UPLOADER's und-resolution switch (Upload tab): it decides whether the upload direction looks at an untagged stream. The seeder pass serves BOTH directions and never belonged to that switch. The container path never consulted it either — so the container was written under `Allocate missing language codes` while the file beside it was renamed under a different switch. The two now agree.
+
+**The default therefore changes from ON to OFF**, because `Allocate missing language codes` is off by default (F-M261) while `UploadResolveUnd` is on. On a default installation the seeder no longer renames unlabelled sidecars unless the operator asks for allocation. Stated here because it is a behaviour change on existing installs, not a refactor.
+
+**The gate is a gate, not a deletion:** the file is left exactly as it is, and the uploader still owns it. The 2 KB floor and the "no confident verdict" exit are unchanged and still independent of this switch.
+
 **F-M313 [B1] (user decision 07.10.2026):** **The statistics row counts the LOOSE subtitle files the seeder renamed so their name carries the language, in its own row.**
 
 F-M278 renames an unlabelled sidecar to the shape this plugin writes. That is work on a file the operator owns, and it was visible only in the log. It gets its own row — `Loose subtitles: language codes added` — rather than sharing the container row, because it is a different act on a different kind of file: a container gets a language tag **inside**, a loose `.srt` gets a new **name**. One number for both could be read as either.
@@ -1365,7 +1375,12 @@ invisible: the table still renders, no number changes, it just reads the old way
 The wording states what happened, not the code's vocabulary. Four counters, plus the fit:
 
   type (movie/series) adjusted — the item's type came from the FILE NAME and was corrected, both directions.
-  uploads rejected after being fetched — upload candidates fetched and then thrown away.
+  uploads DISCARDED BEFORE TRANSFER — upload candidates dropped before anything was sent, on the
+  QA gates, the und/language checks and the self-echo guard (user decision 07.10.2026). It reads
+  "after being fetched" no longer: the upload direction fetches NOTHING. Every increment site sits
+  on a skip path ahead of the API call — the bytes are extracted, detected on and screened, never
+  transferred — so the download word "fetched" was a copy that stated something false. The two rows
+  now name what each direction actually spent.
   downloads rejected after being fetched — download candidates fetched and then thrown away.
   searches run without the year tag — TMDb searches that only matched once the year filter was dropped.
   timing aligned on a spoken track — downloaded subtitles the run MOVED onto their audio track
