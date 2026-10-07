@@ -11,7 +11,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 in seinem Block, Unterüberschriften eingeschlossen, superseded-Einträge eingeschlossen** — ein
 schlichter Zählwert, der keine Aussage darüber trifft, was noch in Kraft ist. Abschnitt 3 nennt 32
 und hält 32 (mit 3.1 = 8 und 3.2 = 2); Abschnitt 9 nennt 25 und hält 25. Ein Abschnittszähler, der
-seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T116.
+seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 ## Contents
 
@@ -20,7 +20,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T116.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 30 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 29 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 6 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
   - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 6 requirements
@@ -466,29 +466,13 @@ so the steps are **measured, never computed**.
 library, the worst single-cue residual against the same-language plain subtitle went from a **10.74 s
 median to 4.51 s**, with **33 of 36 improved**.
 
-**Where the REMAINING error comes from: the boundary, not the step height.** Measured 06.10.2026 on
-real material with an embedded same-language **TEXT** track as ground truth — six episodes of
-*Person of Interest* S03–S05, two known steps planted (−2.5 s at 15 min, a further −4.5 s at 25 min,
-**7.00 s** off before the correction). The extracted embedded subtitle was kept aside and used ONLY
-to score, so it took no part in the measurement. Result: **5 of 6 improved** — 7.00 → 5.00, 4.90, 4.50,
-5.10, 5.10 s — and **one came out worse** (S05E01, 7.00 → **19.40 s**). All six control runs, the
-untouched embedded subtitle put through the same gate, read −0.4 to −0.7 s with **no** drift: the
-yardstick is sound, so those are real scores.
-
-The applied offsets themselves are close to right (−2.8 to −3.0 s, and −7.4 s). What is wrong is
-**where the step starts**: the detector placed it **1.5–1.8 min early** (23.2 min against a true
-25.0 min), so the cues inside that window receive the far side's offset — **|7.4| − |2.5| = 4.9 s**,
-which is exactly the residual measured on three of the episodes. That is the same **±1–2 min**
-positional uncertainty stated in §4.3.1, now visible as a per-episode score instead of a caveat.
-
-**Two consequences that are stated because they were measured.** The residual of **4.5–5.1 s** agrees
-with the 10.74 → 4.51 s median above, so the CALIBRATION is right — but T115's `≤ 1.0 s` bound holds on
-its **synthetic** episode only, where the boundaries sit where the test put them; it is **not** a
-real-material expectation and must not be quoted as one. And the **order guard is a failure signal**:
-the failing episode guarded **147 cues** against **19** and **21** on the two next-worst and **0** on
-the rest, while T115 allows at most 12 of 661. A guard firing on hundreds of cues carries one shift
-through the file and flattens the staircase into a single constant shift — which is the state S05E01
-ended in.
+**Where the REMAINING error comes from: the boundary, not the step height.** The applied offsets come
+out close to right; what is uncertain is **where the step starts**, because a boundary carries the
+±1–2 min positional uncertainty stated in §4.3.1. The cues inside that window receive the far side's
+offset, and that difference is what the residual measures. The same uncertainty is why an episode can
+come out worse: a boundary drawn through a region that was already correct moves that region off it.
+The result is therefore read **per segment**, never as a file-wide total, because a total hides exactly
+that.
 
 **The limit, stated because it is measured.** **Two of the 36 come out worse** — S01E04
 (**8.00 → 21.30 s**) and S01E06 (**2.47 → 11.91 s**). **No reference-free signal separated them from the
@@ -499,58 +483,55 @@ correction (22.10 vs. 10.90), run-back against the main direction (26.8 vs. 11.7
 36, any threshold computed from that same distribution is a circle — so no gate is built on them, and
 the staircase is applied with those two accepted as the price of a ~6 s average gain.
 
-**Consequence for the order of the two paths.** When a same-language reference subtitle exists, the
-anchor path (F-M297) is the better route and is preferred: it is reference-anchored, needs no audio, and
-its own guard refuses a repair that does not improve the worst line. The staircase is the route for the
-case the anchor path cannot serve — no reference sidecar and none embedded.
+**The staircase is the ONE correction for a moving offset.** There is no second route: the audio is the
+only reference, and the segments the detector found are the repair.
 
-**Order guard, and why its direction is the mirror image of the anchor path's.** At a step the two
-neighbours move by different amounts. Where that would push a cue back across its neighbour's end — the
-case a player renders as stacked text — the previous cue's shift is carried forward. The guard is
-measured against the **previous cue's END**, and because the staircase **adds** its shift the bound is a
-**lower** one (`eff[k] ≥ eff[k−1] − gap + MinGapSec`), the mirror image of `AnchorSync`, which subtracts
-and therefore bounds from above. A gap already below `MinGapSec` must not be shrunk further: measured on
+**Order guard.** At a step the two neighbours move by different amounts. Where that would push a cue
+back across its neighbour's end — the case a player renders as stacked text — the previous cue's shift
+is carried forward. The guard is measured against the **previous cue's END**, and because the staircase
+**adds** its shift the bound is a **lower** one (`eff[k] ≥ eff[k−1] − gap + MinGapSec`). A gap already
+below `MinGapSec` must not be shrunk further: measured on
 a real episode, **560 of 724 gaps are below 0.04 s** with a median of **0.002 s**, so demanding the floor
 everywhere makes the guard fire on nearly every cue and carry one shift through the whole file.
 **Getting this direction wrong is not cosmetic**: the synthetic test measured a **1.92 s** residual and
 **22** guarded cues with the sign reversed, against **one misplaced step** and **6** guarded cues with
 it right.
 
-**Test: T115.**
+**Test: T114.**
 
-**F-M305 [D] (development):** **A real-material score is taken against an embedded same-language
-TEXT subtitle that the gate never sees, the control run comes first, and a broad order-guard fire is
-read as a failure.** The synthetic episode T115 runs on puts the boundaries where the test put them,
-so it cannot fail on boundary placement — the one thing that decides the result on real audio. A
-score therefore needs material whose ground truth is independent of the measurement: an embedded
-`subrip`/`ass`/`ssa`/`mov_text` track of the same language, extracted, kept aside, used only to score.
-A picture track (`hdmv_pgs_subtitle`) is not ground truth. **Two runs per episode, and the control
-decides whether the episode may be scored at all:** the UNTOUCHED embedded subtitle must read offset
-~0 with **no** drift — that is the control's best possible outcome and the strongest available
-evidence that it is in sync with the audio track. Measured: it read −0.4 to −0.7 s on all six episodes,
-so all six could be scored; had it read far from zero, the container's audio would hold a different
-version and the episode would measure that mismatch instead of the correction. The **order-guard
-count is read together with the result**, because a guard firing on hundreds of cues flattens the
-staircase into one constant shift and can turn a 7 s error into a 19 s one while the step heights
-still look right. **Test: T118.**
-
+**F-M305 [D] (development):** **A real-material score is taken against the AUDIO, never against a
+subtitle.** The synthetic episode T114 runs on puts the boundaries where the test put them, so it cannot
+fail on boundary placement — the one thing that decides the result on real audio. A real-material score
+is therefore required, and its yardstick must be independent of every subtitle: **the audio envelope
+itself**, the same input the correction reads. The detector runs on it and the result is read as the
+**per-segment offset curve** — a file that is in sync yields offsets near zero and a small span, a file
+that still drifts yields several segments far apart.
+**A subtitle must not be the yardstick, because that makes the measurement circular.** The residual of a
+correction is computed RELATIVE to the reference, so a reference that itself drifts makes the result look
+better than it is, and the error is counted twice — once in the reference and once in what is measured
+against it. A reference may be used to **find** a defect, never as the number a requirement is accepted on.
+**The control run comes first, and it decides whether a file may be scored at all.** The untouched
+material goes through the same measurement before anything is corrected: an untouched file that already
+looks wrong means the yardstick is misaligned to that material. The **order-guard count is read together
+with the result**, because a guard firing on hundreds of cues flattens the staircase into one constant
+shift while the step heights still look right. **Test: T117.**
 **F-M300 [D] (development):** **A subtitle whose offset MOVES is repaired segment by segment — one
 offset per segment, the boundaries the drift gate already found — instead of being left as downloaded.**
 
 This supersedes the "a drifting file is only reported" clause of F-M296. The average describes no real
 state, so it must not be applied; the **segments** are not an average, they are the steps themselves.
-Method, measurements and the two measured failures: §4.3.3. **Test: T115.**
+Method, measurements and the two measured failures: §4.3.3. **Test: T114.**
 
-**F-M302:** **A user-facing text must not contradict the code, and length plus a ban list cannot carry that.** T114 checked two things — ≤300 rendered characters and no measured value — and **both stayed green** while two intros still claimed the audio path *cannot correct* a drifting file. False since F-M300, and the operator read it on his phone as "4 methods where there should be one". A short sentence stating the opposite of the code satisfies a length cap AND a ban list, so the check now also matches the **refuted claims** — `cannot correct` / `can not correct`, `has no valid single correction`, `is only reported`, `never shifted`, `cannot touch` — across **every user-visible text node**: the `h4` intros, the per-switch `fieldDescription` blocks **and the switch labels** (a planted `never shifted` label proved that a description-only scope misses it). The list stays narrow on purpose: it names the refuted phrasings, not every mention of drift, because a check that fires on correct prose gets disabled. **Test: T114, extended.**
+**F-M302:** **A user-facing text must not contradict the code, and length plus a ban list cannot carry that.** T113 checked two things — ≤300 rendered characters and no measured value — and **both stayed green** while two intros still claimed the audio path *cannot correct* a drifting file. False since F-M300, and the operator read it on his phone as "4 methods where there should be one". A short sentence stating the opposite of the code satisfies a length cap AND a ban list, so the check now also matches the **refuted claims** — `cannot correct` / `can not correct`, `has no valid single correction`, `is only reported`, `never shifted`, `cannot touch` — across **every user-visible text node**: the `h4` intros, the per-switch `fieldDescription` blocks **and the switch labels** (a planted `never shifted` label proved that a description-only scope misses it). The list stays narrow on purpose: it names the refuted phrasings, not every mention of drift, because a check that fires on correct prose gets disabled. **Test: T113, extended.**
 
-**F-M303:** **The correction sections are ONE section, and it carries ONE switch.** The three `h4` blocks — Auto-sync, Anchor-sync, Drift check — each described the same job and each carried its own essay, which read as three separate methods where the operator expects one; he read it on his phone as "4 methods where there should be one" and then as "Ein toggle, nicht 5". They are now a single **Subtitle correction** section with ONE intro and ONE switch, `QaDownloadAutoSync`. The four other switches were removed because each asked the operator to confirm something that is not a choice: the audio track is chosen by language (§4.3.1), and the reporting-only drift check with its reject belonged to the model F-M300 replaced, in which a moving offset could only be reported or refused. **The behaviour stays.** The removed entries keep their defaults in the configuration file (`QaDownloadAudioTrackByLanguage` `true`; `QaDownloadDriftCheck` and `QaDownloadDriftReject` `false`), so an existing installation behaves as the page shows. **Test: T114, extended.**
+**F-M303:** **The correction sections are ONE section, and it carries ONE switch.** The three `h4` blocks — Auto-sync, Anchor-sync, Drift check — each described the same job and each carried its own essay, which read as three separate methods where the operator expects one; he read it on his phone as "4 methods where there should be one" and then as "Ein toggle, nicht 5". They are now a single **Subtitle correction** section with ONE intro and ONE switch, `QaDownloadAutoSync`, governing the ONE correction: the audio path of §4.3, constant as one shift and moving as a staircase. The audio track is chosen by language (§4.3.1) — not a choice the operator makes, so it carries no switch. **The behaviour stays.** The removed entries keep their defaults in the configuration file (`QaDownloadAudioTrackByLanguage` `true`; `QaDownloadDriftCheck` and `QaDownloadDriftReject` `false`), so an existing installation behaves as the page shows. **Test: T113, extended.**
 **F-M304 [D] (development):** **A switch switches the whole of what it names, and the page offers no switch for something that is simply right.**
 
-**Rule — the switch governs every route that moves the file.** One visible switch, `QaDownloadAutoSync`, governs the constant shift (§4.3.2), the staircase (§4.3.3) **and** the reference repair (§4.4). The reference repair originally hung off its own `QaDownloadAnchorSync` entry, so unticking the visible switch would have left that path running while the page showed the mechanism as off — a switch that does not switch what it names is worse than no switch. Found while reviewing the result, fixed in the same change as the switch.
+**Rule — the switch governs every route that moves the file.** One visible switch, `QaDownloadAutoSync`, governs the constant shift (§4.3.2) **and** the staircase (§4.3.3) — every path that moves a file. A switch that does not switch what it names is worse than no switch.
 
-**Rule — the absence of a removed control is asserted, not assumed.** A check that asserts only PRESENCE stays green over a stale checkbox left in the markup. The failure mode that matters is the other one: a leftover `getElementById` on an element that no longer exists returns `null`, the next property read throws, and the throw aborts the whole load handler — every binding on the page dies although the surviving switch's own markup is present and correct. The check therefore asserts the four removed ids (`QaDownloadDriftCheck`, `QaDownloadDriftReject`, `QaDownloadAudioTrackByLanguage`, `QaDownloadAnchorSync`) are absent from the markup **and** from the inline script, and counts the section's checkboxes and fails unless there is exactly **one**.
+**Rule — the absence of a removed control is asserted, not assumed.** A check that asserts only PRESENCE stays green over a stale checkbox left in the markup. The failure mode that matters is the other one: a leftover `getElementById` on an element that no longer exists returns `null`, the next property read throws, and the throw aborts the whole load handler — every binding on the page dies although the surviving switch's own markup is present and correct. The check therefore asserts the removed ids (`QaDownloadDriftCheck`, `QaDownloadDriftReject`, `QaDownloadAudioTrackByLanguage`, `QaDownloadAnchorSync`) are absent from the markup **and** from the inline script, and counts the section's checkboxes and fails unless there is exactly **one**.
 
-**Test: T117.**
+**Test: T116.**
 
 #### 4.3.4 Order of operations, and what the database is told
 
@@ -592,124 +573,9 @@ is the same verdict, applied per segment. This is the **ONE switch of the correc
 **Tests: T110 (synthetic: track priority with the 2-vs-3-letter cases, exact shift, refusal on a
 negative first cue, byte style, the suffix against the real listing pattern), T111 (end-to-end on a
 real episode: the plain subtitle comes back near zero, a planted shift is measured and removed, and
-the result is checked against the plain subtitle, which took no part in the measurement), T115 (the
+the result is checked against the plain subtitle, which took no part in the measurement), T114 (the
 staircase: detected segments, both planted steps surviving the order guard, the residual bound, and
 the constant case reporting no segments).**
-
-### 4.4 Anchor-Sync — Download (F-M297, development)
-
-**F-M297 [D] (development):** **A drifting subtitle is repaired against a same-language plain
-reference, and the repair is kept only when it improves the worst single line.**
-
-#### 4.4.1 Why the anchor path is preferred when a reference exists (measured)
-
-The audio path reaches a drifting file too, but only through the staircase of §4.3.3, and that route
-carries a **measured 2-in-36 failure rate with no way to detect the failure** (§4.4.3). The anchor path
-is therefore the better route whenever a same-language plain reference exists: it needs no audio, no
-model and no threshold, and its own guard refuses a repair that does not improve the worst line.
-
-The audio path's own measurements on drifting files bound what the staircase can be trusted with.
-Over **36 drifting episodes** the staircase takes the worst single-cue residual from a **10.74 s
-median to 4.51 s**, with **33 improved and 2 made worse**. Six candidate numbers were tested as a
-threshold to catch the two failures — monotone
-distortion, split-half disagreement, remaining drift after the correction, run-back against the
-main direction, outlier offset, raw drift span. **None separated the 2 from the 33.** A gate built
-from the distribution of the very files it judges is a circle, so it was not built.
-
-Run on a **clean** file the audio path invents damage: the plain English track of *Invasion* S01E06 —
-which sits at **0.00 s** by text against its own plain sibling, 137 anchors, the whole episode — came
-back from the audio path with **ten segments** and offsets hopping from **−2.70 s to +17.90 s**, with
-the detector's own re-measurement showing a **+4.90 s** span afterwards.
-
-**The cause is structural, not a tuning problem.** A drifting file has no single offset, the
-detector's positional uncertainty is ±1–2 min, and its boundaries therefore do not land on the real
-ones. Worse, the k-window model (`cue-speech-v6`) that would name the boundaries returns the **same
-expected boundary count (7.00) on every one of the 36 files**, clean or drifting — a quantity that
-does not vary with the thing it is meant to measure.
-
-#### 4.4.2 Method — identical TEXT is the same line
-
-Two cues carrying identical text **are the same line**, so `target − reference` is that line's true
-error **to the centisecond**. No model, no audio, no artefact — and a jump in that difference is a
-real cut. A cut is then a **step between two anchors**, never a value to be averaged across: the
-first version interpolated a ramp between 60 s bins and dragged a step backwards over two minutes,
-leaving lines 2.44 s early while the median looked excellent (12.45 s → 0.49 s).
-
-Four rules, each one a measured repair:
-
-1. **Nearest anchor**, not a windowed median and not interpolation — keeps a step confined to the gap
-   between two adjacent anchors.
-2. **Monotone, in whichever direction fits.** A drift curve does not reverse, but the direction is a
-   property of the file: PAVA is a non-decreasing fit, so applied to a falling sequence it collapses
-   to the mean and every cue receives the same shift (measured **9.05 s → 9.05 s**, spread unchanged,
-   middle worse). **4 of the 36 files drift downward**, so both directions are fitted and the smaller
-   sum of squared residuals wins.
-3. **Order is never traded for a smaller number.** Where anchors are sparse a cue can sit nearer a
-   *later* anchor, take the offset from the far side of a step, move backwards past its neighbour and
-   — the list being re-sorted by start — **swap with it**. Measured: two lines of dialogue inverted and
-   one squeezed to 0.26 s while every timing number looked fine.
-4. **The guard compares against the previous cue's END**, not its start. Two neighbours whose shifts
-   differ by slightly more than the gap keep their start order while their ends collide; a player
-   renders that as stacked text. Measured: a 0.111 s overlap and a cue squeezed to 0.20 s.
-
-**Three passes**, each re-measuring the anchors; one pass leaves residue.
-
-#### 4.4.3 The reference, and the rule that chooses it
-
-The correction needs a reference that is **in the same language** and **not hearing-impaired**:
-
-- **Same language** is not a nicety. Anchoring is by identical text, so a reference in another
-  language yields **zero anchors** — measured on a real container carrying 42 subtitle tracks. The
-  feature would then do nothing while looking like it ran.
-- **Not hearing-impaired**, because the HI file is the one that **drifts** (37 of 40 ranked files are
-  HI). Anchoring a drifting file to another drifting file is the circularity this whole exercise
-  exists to avoid.
-
-Priority: **(1)** a same-language plain **sidecar** beside the media (free — already on disk, and a
-file the user placed is the better witness), **(2)** a same-language plain **embedded track**
-(one ffmpeg extraction), **(3)** **nothing** — the file is reported and left alone. The audio path is
-not a substitute, because it cannot tell a repair from a spoilage on the file it is handed.
-
-**Measured on a real container**: *Invasion* S01E06 carries a plain English track and an English SDH
-track whose **137 anchors sit at 0.00 s across the whole episode** — that pair is the clean control
-the port is tested against. Embedded text tracks are read with ffmpeg's **subtitle-relative** index
-(`0:s:N`), never the container index.
-
-#### 4.4.4 The self-check that can refuse
-
-A correction measured with the tool that produced it proves nothing: it is the exact inverse of its
-own measurement. The check here is the anchor residual against the **reference**, a file that took no
-part in the correction, and the result is accepted **only when the worst single-cue residual
-improves** by more than 0.2 s.
-
-The **worst** value decides because the median hides exactly what a listener notices — the earlier
-run above had an excellent median and one line 2.44 s early. Measured over the 36 files, this rule
-flags **exactly the 2 real failures and 0 of the 33 successes**, and the same two with all three
-statistics (median, p90, worst) — which is why a plain "is it worse" comparison needs no invented
-threshold.
-
-**On a clean pair nothing is moved**: the Invasion pair measures worst 0.75 s before and 0.65 s after,
-the margin is not met, and the correction is refused. That is the intended outcome, not a failure.
-
-#### 4.4.5 Switch, order, and cost
-
-- Switch `QaDownloadAutoSync` (**default on**) — the **ONE** switch of the correction section (F-M303,
-  F-M304) — under *Download → Quality Gates*.
-- **This path is governed by that same switch.** It originally hung off its own `QaDownloadAnchorSync`
-  entry, so unticking the visible switch would have left the reference repair running while the page
-  showed the mechanism as off; found while reviewing the result and fixed with the switch itself (F-M304).
-- Order is unchanged from §4.3.3: fetch → **sync** → normalize → write the corrected file **and** the
-  `.unsynchronized` original → register the hash of the corrected file.
-- An embedded reference costs **one ffmpeg extraction** (measured 2.5 s on the Pi 5); a sidecar costs
-  nothing. The reference is chosen from the item's stream list the pipeline already holds for the
-  language gate, so no extra probe is made. The correction itself is **text only** — no audio decode:
-  the anchor match and the monotone fit were measured at **3–7 ms** for 540–1500 cues, so this switch
-  is essentially free next to the audio path.
-
-**Tests: T112 (the reference rule: sidecar preferred over embedded, the HI file never serving as its
-own reference, an HI-only or wrong-language candidate refused, unknown target language refused; plus
-a real extracted reference pair where a synchronised file stays put and a planted step is removed
-with cue order and text unchanged).**
 
 ## 5. Upload Postprocessing
 
@@ -1080,7 +946,7 @@ Recording `rejected` in that situation contradicts the evidence: the position lo
 
 The rule: when a skip carries the reason `duplicate-content` **and** the same content hash already holds an `uploaded` row anywhere — embedded or sidecar, under this media hash or under another — the row is written as `uploaded` (reason cleared) and the stream is **not** counted as rejected. In every other case the reject is recorded exactly as before: a skip over content that is genuinely NOT up must keep saying so, or the fix would claim an upload that never happened.
 
-The decision lives in ONE registry method (`RecordSkippedContent`) that every skip path calls — the embedded reject-replay, the sidecar reject-replay, the phase-1 QA gate and the phase-3 upload skip. **Test: T113.**
+The decision lives in ONE registry method (`RecordSkippedContent`) that every skip path calls — the embedded reject-replay, the sidecar reject-replay, the phase-1 QA gate and the phase-3 upload skip. **Test: T112.**
 
 **F-M243 [D]:** **The HI variant counts as present whether it is a file or an embedded track.** Both evidence sources answer the same question, and Jellyfin's own the hearing-impaired flag decides a stream — read through ONE detector (the hearing-impaired predicate) used by uploader and downloader alike.
 
@@ -1212,7 +1078,7 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M230:** **The Libraries description states function and default in one line.** Wording: `Only selected libraries are processed. None: no upload or download. Default: None.` Field descriptions state function plus default value, nothing else. **Test: T45.**
 
-**F-M299:** **An intro block under an `h4` heading describes what the section does — measurements never appear on the settings page.** A section intro explains the mechanism and the one consequence the operator must act on; measured values, episode counts, before/after numbers, accuracy figures and share-of-files statistics are **spec and commit material**, not UI text. Two intro blocks shipped at **392 and 493 rendered characters** carrying `Measured accurate to about 0.2 s` and `Measured on 36 drifting episodes: worst line 10.74 s → 0.17 s, 36 of 36 improved`; the operator rejected that as the storyteller returning, and the same detail already lives in §4.3/§4.4 and in the commit message. **Budget: 300 rendered characters** per intro, the accepted house norm being the Drift-check intro (~241) and the two rewritten intros at 222 and 256. The same holds for a `fieldDescription` under a checkbox: it states what the switch does and its default, and a diagnostic figure such as a failure share belongs in the log line that measures it. **Test: T114.**
+**F-M299:** **An intro block under an `h4` heading describes what the section does — measurements never appear on the settings page.** A section intro explains the mechanism and the one consequence the operator must act on; measured values, episode counts, before/after numbers, accuracy figures and share-of-files statistics are **spec and commit material**, not UI text. Two intro blocks shipped at **392 and 493 rendered characters** carrying `Measured accurate to about 0.2 s` and `Measured on 36 drifting episodes: worst line 10.74 s → 0.17 s, 36 of 36 improved`; the operator rejected that as the storyteller returning, and the same detail already lives in §4.3/§4.4 and in the commit message. **Budget: 300 rendered characters** per intro, the accepted house norm being the Drift-check intro (~241) and the two rewritten intros at 222 and 256. The same holds for a `fieldDescription` under a checkbox: it states what the switch does and its default, and a diagnostic figure such as a failure share belongs in the log line that measures it. **Test: T113.**
 
 **F-M229:** **Links in the settings page use the same accent blue as the rest of the page.** Jellyfin's stylesheet ships only `a{color:inherit}`, so the links in the field descriptions fell back to the browser default `#0000EE`. Rule: `#SubdlSyncConfigPage a { color: #00a4dc; }` — exactly one blue, no separate hover shade. Scope: link colour only; the destructive red and the status colours are untouched. **Test: T44.**
 
@@ -1465,7 +1331,7 @@ The line under the Workers list names, per worker and in list order, its stored 
 **NF-7:** Cross-platform discipline in code: no hardcoded path separators, no P/Invoke, no case-sensitive file operations without normalization
 **NF-8:** **Manual stop button** ("■ Stop all uploads & downloads", General tab): one click sends `DELETE /ScheduledTasks/Running/{taskId}` for BOTH directions.
 
-**NF-9:** **The specification is checked like the code — it is the eighth test suite.** `scripts/tests/spec-doc/check.py` asserts, without a Jellyfin host: every Contents counter matches the definitions in its section, every requirement id is defined exactly once, the test numbering is gapless from T1, every test a requirement names exists, the header status names the version `build.yaml` builds, and no definition-shaped line escapes the pattern it counts with. **Test: T116.**
+**NF-9:** **The specification is checked like the code — it is the eighth test suite.** `scripts/tests/spec-doc/check.py` asserts, without a Jellyfin host: every Contents counter matches the definitions in its section, every requirement id is defined exactly once, the test numbering is gapless from T1, every test a requirement names exists, the header status names the version `build.yaml` builds, and no definition-shaped line escapes the pattern it counts with. **Test: T115.**
 
 ## 18. Acceptance Criteria
 
@@ -1640,18 +1506,16 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T111:** End-to-end against real audio, driving the FEATURE (not a copy of its arithmetic): the sign of the correction is established on the material itself by planting +5 s and applying BOTH directions — the one landing within 0.7 s of the plain subtitle is `−detector`, and that is asserted, so a sign flip fails here instead of doubling every corrected file; a subtitle already in sync comes back `applied=False`; and a shift planted at +2.5 / −1.8 / +6.0 s is measured and removed, with the corrected text lying within 0.7 s of the plain subtitle by MEDIAN offset — a file that took no part in the measurement. The check is a MEDIAN and not a spread: a constant shift leaves the spread at 0.00 s whatever its size, so an earlier version of this test passed even on files it had made twice as bad (F-M296)
 
-**T112:** The reference rule and the anchor correction: a same-language plain sidecar is preferred over an embedded track; the hearing-impaired file never serves as its own reference, and when the target language offers ONLY an HI track the correction is refused rather than anchored to it; a wrong-language candidate and an unknown target language are both refused; against a real extracted pair (Invasion S01E06, plain English against English SDH) a synchronised file is left alone — 137 anchor pairs at a 0.00 s median and 0.75 s worst, no improvement to be had, correction REFUSED; and a step of known size planted into a clean file is removed, with cue order and cue text unchanged (F-M297)
+**T112:** Driving the registry decision itself (not a copy of its arithmetic): an `uploaded` row survives a `duplicate-content` skip — after the identity move that the language-tag gate triggers, a skip over the same content leaves the row `uploaded` with its reason cleared and increments no reject; and the same skip over content that is NOT up still writes `rejected` with its reason intact, so the two cases are told apart rather than both being called settled. The second half is what makes the check meaningful: a rule that simply treats every `duplicate-content` skip as settled passes the first half and fails here (F-M298)
 
-**T113:** Driving the registry decision itself (not a copy of its arithmetic): an `uploaded` row survives a `duplicate-content` skip — after the identity move that the language-tag gate triggers, a skip over the same content leaves the row `uploaded` with its reason cleared and increments no reject; and the same skip over content that is NOT up still writes `rejected` with its reason intact, so the two cases are told apart rather than both being called settled. The second half is what makes the check meaningful: a rule that simply treats every `duplicate-content` skip as settled passes the first half and fails here (F-M298)
+**T113:** Driving the rendered page text, not the markup: every intro block under an `h4` heading measures at most **300 rendered characters** (tags stripped, whitespace collapsed) and carries **no measured value** — the ban list is the forensic vocabulary itself (`Measured`, a before/after arrow, an episode count, an accuracy figure), so re-introducing "Measured on 36 drifting episodes: worst line 10.74 s → 0.17 s" fails here rather than passing as prose. The budget is a ceiling and not a target: the check reads the same text a phone renders, so an HTML comment or an entity cannot buy length. Both halves are needed — the length alone would pass a short sentence full of measurements, and the vocabulary alone would pass an unmeasured essay (F-M299). **It also asserts that no user-visible text contradicts the code (F-M302, F-M303).** This is the half that was missing, and its absence shipped a defect: two intros claimed the audio path *cannot correct* a drifting file — false since F-M300 — while both the length cap and the ban list stayed green, because "…which the audio sync above cannot correct" is 46 characters and carries no number. The refuted phrasings are matched across the `h4` intros, the per-switch `fieldDescription` blocks **and the switch labels**, and the scope is proved by planting: a `never shifted` label, a `cannot touch` label, `has no valid single correction`, `is only reported`, `cannot correct` and a 350-character intro were each planted on 06.10.2026 — the label cases fail ONLY with the label scope included, which is why a description-only check is not enough. Finally, the three former `h4` sections are one: a single `Subtitle correction` heading carries the one intro and its **ONE** switch, and the four removed ids are asserted **absent** from both the markup and the inline script (F-M303, F-M304)
 
-**T114:** Driving the rendered page text, not the markup: every intro block under an `h4` heading measures at most **300 rendered characters** (tags stripped, whitespace collapsed) and carries **no measured value** — the ban list is the forensic vocabulary itself (`Measured`, a before/after arrow, an episode count, an accuracy figure), so re-introducing "Measured on 36 drifting episodes: worst line 10.74 s → 0.17 s" fails here rather than passing as prose. The budget is a ceiling and not a target: the check reads the same text a phone renders, so an HTML comment or an entity cannot buy length. Both halves are needed — the length alone would pass a short sentence full of measurements, and the vocabulary alone would pass an unmeasured essay (F-M299). **It also asserts that no user-visible text contradicts the code (F-M302, F-M303).** This is the half that was missing, and its absence shipped a defect: two intros claimed the audio path *cannot correct* a drifting file — false since F-M300 — while both the length cap and the ban list stayed green, because "…which the audio sync above cannot correct" is 46 characters and carries no number. The refuted phrasings are matched across the `h4` intros, the per-switch `fieldDescription` blocks **and the switch labels**, and the scope is proved by planting: a `never shifted` label, a `cannot touch` label, `has no valid single correction`, `is only reported`, `cannot correct` and a 350-character intro were each planted on 06.10.2026 — the label cases fail ONLY with the label scope included, which is why a description-only check is not enough. Finally, the three former `h4` sections are one: a single `Subtitle correction` heading carries the one intro and its **ONE** switch, and the four removed ids are asserted **absent** from both the markup and the inline script (F-M303, F-M304)
+**T114:** The staircase correction, driven on the SAME synthetic episode whose cues were built from a known burst list, and judged against that burst list — the ground truth that took no part in the measurement, because a correction scored with the detector that produced it is the exact inverse of its own measurement and always reports success. Two steps (+2.5 s at 20 min, +2.0 s at 30 min) are planted over a +4.0 s constant offset; the detector must report `Drifts` WITH at least two segments, the applied shift must move the worst distance to a true cue position from **8.60 s** to no more than one misplaced step above the per-cue jitter (**a bound of this tightness holds on THIS synthetic episode only, where the boundaries sit where the test put them — on real material the residual is set by the detector's ±1–2 min boundary placement and measures 4.5–5.1 s; see F-M305/T117**), the cue count and the cue order must be unchanged, and the order guard must stay rare (at most **12 of 661** cues — a broad fire would carry one cue's shift through the file and flatten the staircase into a single constant shift). Two assertions carry this test and neither can be replaced by the other: the **applied shifts read back per segment** must reproduce the planted steps (−2.50 s and −2.00 s between consecutive segments, sampled in each segment's middle so the guard's legitimate bite at the edges is not read as a lost step), which is what proves the staircase survived — and the constant case must report **no** segments at all, so a constant offset cannot silently be routed through the staircase path. A guard implemented with the wrong SIGN fails here and nowhere else: measured, the mirrored rule left a **1.92 s** residual and guarded **22** cues against **6** with the direction right. The negative-first-cue case is refused, never clamped (F-M300)
 
-**T115:** The staircase correction, driven on the SAME synthetic episode whose cues were built from a known burst list, and judged against that burst list — the ground truth that took no part in the measurement, because a correction scored with the detector that produced it is the exact inverse of its own measurement and always reports success. Two steps (+2.5 s at 20 min, +2.0 s at 30 min) are planted over a +4.0 s constant offset; the detector must report `Drifts` WITH at least two segments, the applied shift must move the worst distance to a true cue position from **8.60 s** to no more than one misplaced step above the per-cue jitter (**a bound of this tightness holds on THIS synthetic episode only, where the boundaries sit where the test put them — on real material the residual is set by the detector's ±1–2 min boundary placement and measures 4.5–5.1 s; see F-M305/T118**), the cue count and the cue order must be unchanged, and the order guard must stay rare (at most **12 of 661** cues — a broad fire would carry one cue's shift through the file and flatten the staircase into a single constant shift). Two assertions carry this test and neither can be replaced by the other: the **applied shifts read back per segment** must reproduce the planted steps (−2.50 s and −2.00 s between consecutive segments, sampled in each segment's middle so the guard's legitimate bite at the edges is not read as a lost step), which is what proves the staircase survived — and the constant case must report **no** segments at all, so a constant offset cannot silently be routed through the staircase path. A guard implemented with the wrong SIGN fails here and nowhere else: measured, the mirrored rule left a **1.92 s** residual and guarded **22** cues against **6** with the direction right. The negative-first-cue case is refused, never clamped (F-M300)
+**T115:** The specification's structure, checked without a build or a host: every Contents counter equals the number of definition lines in its section (sub-headings and superseded entries included), every requirement id is defined exactly once, the test numbering is gapless from T1, every test a requirement names exists as a definition, and the header status names the version `build.yaml` builds. The check must FAIL on each of these when it is planted — a wrong counter, a duplicated definition, a deleted test number, a reference to a test that was never written, a stale status — because a suite that cannot fail proves nothing; all six were planted on 06.10.2026 and all six were caught. The last assertion is the guard on the guard: a definition-shaped line (opening with a bolded id) that the counting pattern does NOT recognise must fail the run rather than vanish from the count, since five shapes occur — `**F-Mnnn:**`, `**F-Mnnn [tier]:**`, `**F-Mnnn [tier] (superseded …):**`, `**Tnn (superseded …):**` and the em-dash form `**F-Mnnn — text.**` — and a pattern that expects only the first silently shrinks every count while staying green (F-M301, NF-9)
+**T116:** The correction section's wiring, driven against the page file and the built DLL: exactly ONE checkbox in the section; its id present in the markup and bound on load (default-on aware) and on save; the four removed ids (`QaDownloadDriftCheck`, `QaDownloadDriftReject`, `QaDownloadAudioTrackByLanguage`, `QaDownloadAnchorSync`) ABSENT from the markup and from the inline script; `configPage.html` declared as an `EmbeddedResource`, so the page actually ships inside the DLL; and `QaDownloadAutoSync` defaulting to `true` in C#. The ABSENCE assertions carry the test: a presence-only check passes over a stale switch, while a leftover `getElementById` on a removed element throws at load and takes every binding on the page with it. The check also reads the LIVE page over the API and reports what it finds there — a note, not an assertion, so a built-but-undeployed DLL is visible instead of assumed (F-M304)
 
-**T116:** The specification's structure, checked without a build or a host: every Contents counter equals the number of definition lines in its section (sub-headings and superseded entries included), every requirement id is defined exactly once, the test numbering is gapless from T1, every test a requirement names exists as a definition, and the header status names the version `build.yaml` builds. The check must FAIL on each of these when it is planted — a wrong counter, a duplicated definition, a deleted test number, a reference to a test that was never written, a stale status — because a suite that cannot fail proves nothing; all six were planted on 06.10.2026 and all six were caught. The last assertion is the guard on the guard: a definition-shaped line (opening with a bolded id) that the counting pattern does NOT recognise must fail the run rather than vanish from the count, since five shapes occur — `**F-Mnnn:**`, `**F-Mnnn [tier]:**`, `**F-Mnnn [tier] (superseded …):**`, `**Tnn (superseded …):**` and the em-dash form `**F-Mnnn — text.**` — and a pattern that expects only the first silently shrinks every count while staying green (F-M301, NF-9)
-**T117:** The correction section's wiring, driven against the page file and the built DLL: exactly ONE checkbox in the section; its id present in the markup and bound on load (default-on aware) and on save; the four removed ids (`QaDownloadDriftCheck`, `QaDownloadDriftReject`, `QaDownloadAudioTrackByLanguage`, `QaDownloadAnchorSync`) ABSENT from the markup and from the inline script; `configPage.html` declared as an `EmbeddedResource`, so the page actually ships inside the DLL; and `QaDownloadAutoSync` defaulting to `true` in C#. The ABSENCE assertions carry the test: a presence-only check passes over a stale switch, while a leftover `getElementById` on a removed element throws at load and takes every binding on the page with it. The check also reads the LIVE page over the API and reports what it finds there — a note, not an assertion, so a built-but-undeployed DLL is visible instead of assumed (F-M304)
-
-**T118:** The staircase scored against REAL material whose ground truth is independent of the measurement: an embedded same-language **TEXT** track is extracted out of the container, kept aside, and used only to score — the gate never sees it. Two runs per episode. The **control runs first** and decides whether the episode may be scored at all: the untouched embedded subtitle must come back with **no drift** and an offset near zero, which is the control's best possible outcome and must NOT be reported as a failure (it is the evidence that the embedded subtitle is in sync with the audio, i.e. that the yardstick is sound). Only then are two known steps planted (−2.5 s at 15 min, a further −4.5 s at 25 min) and the correction scored back against the subtitle the gate never saw, per segment as well as in aggregate — the per-segment table is what separates a spurious segment from an unlucky one, and an aggregate number hides a region that was correct before and damaged after. Measured 06.10.2026 on six POI episodes: 5 of 6 improved (7.00 → 4.50..5.10 s) and one worsened (7.00 → 19.40 s), with the residual traced to the boundary being placed 1.5–1.8 min early rather than to the step height, and the failing episode distinguished by an order-guard fire on **147** cues against 0–21 elsewhere. The `≤ 1.0 s` bound of T115 is a SYNTHETIC expectation and is asserted nowhere here (F-M305)
+**T117:** The staircase scored against REAL material with the AUDIO as the only yardstick — no subtitle takes part, neither embedded nor as a sidecar. Per episode one audio decode, then the detector runs on the result and the verdict is read as the **per-segment offset curve**: segments, offset span and the largest absolute offset. A corrected file passes when it shows **no drift**: one segment, or offsets that sit near zero with a span inside the material's measurement floor. The **control runs first** and decides whether the episode may be scored at all: the UNTOUCHED material goes through the same measurement, and a file that already looks wrong there means the yardstick is misaligned to that material — that is a finding about the yardstick and must NOT be reported as a failure of the correction. A subtitle reference may be used to FIND a defect but is never the number this test is accepted on, because the residual would be computed relative to a reference that may itself drift, which counts the same error twice and flatters the result. The order-guard count is read together with the result, and a broad fire is a failure signal rather than a detail: it means the staircase was flattened into one constant shift. The `<= 1.0 s` bound of T114 is a SYNTHETIC expectation and is asserted nowhere here (F-M305).
 
 
 

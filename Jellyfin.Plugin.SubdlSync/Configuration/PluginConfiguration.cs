@@ -417,38 +417,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool QaDownloadVerifyLanguage { get; set; } = true;
 
     /// <summary>
-    /// F-M295 (development): download QA gate — cue-vs-speech drift detection.
-    /// Decodes the audio, derives speech islands, and decides whether the subtitle
-    /// holds ONE constant offset to the spoken audio or whether that offset MOVES
-    /// partway through the file. A moving offset means no single correction value
-    /// is valid, so the file is rejected rather than saved and later "corrected"
-    /// into a partly wrong subtitle.
-    /// <para>
-    /// Off by default: the gate costs one full audio decode per candidate file
-    /// (about a minute of CPU on a 44 min episode) and its verdict is a DIRECTION,
-    /// not a correction value. Measured limit: a clean control file yields no
-    /// finding, planted steps of known size and position are recovered 6/6, and on
-    /// genuinely drifting files 77 % recall at 36 % precision with positions
-    /// scattering ±1–2 min. It answers "does it drift", not "shift by N".
-    /// </para>
-    /// Default: false.
-    /// </summary>
-    public bool QaDownloadDriftCheck { get; set; }
-
-    /// <summary>
-    /// F-M295 (development): reject a subtitle whose offset DRIFTS instead of only
-    /// logging it. Only read while <see cref="QaDownloadDriftCheck"/> is on.
-    /// <para>
-    /// Off means the drift is reported in the log and the file is saved anyway —
-    /// the honest default, because a drifting subtitle is still better than none
-    /// and the plugin cannot repair it. On means the candidate is rejected and the
-    /// next one is tried, on the reading that a drifting file wastes a library slot.
-    /// </para>
-    /// Default: false.
-    /// </summary>
-    public bool QaDownloadDriftReject { get; set; }
-
-    /// <summary>
     /// F-M296 (development): download auto-sync — shift a fetched subtitle by the
     /// single constant offset measured against the audio, before it is saved.
     /// <para>
@@ -482,41 +450,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Default: true.
     /// </summary>
     public bool QaDownloadAutoSync { get; set; } = true;
-
-    /// <summary>
-    /// F-M297 (development): anchor-sync — repair a DRIFTING subtitle against a same-language
-    /// plain reference, and keep the repair only when it improves the worst single line.
-    /// <para>
-    /// The audio auto-sync above cannot repair a drifting file: it was measured over 36
-    /// episodes at 33 improved / 2 made worse, and no threshold on any number read off
-    /// that run separated the two. On a clean file it invents damage — the plain track of
-    /// Invasion S01E06, steady at 0.00 s by text, came back with ten segments hopping from
-    /// −2.70 s to +17.90 s.
-    /// </para>
-    /// <para>
-    /// This path uses TEXT instead of audio. Two cues carrying identical text are the same
-    /// line, so <c>target − reference</c> is that line's true error to the centisecond, and
-    /// a cut is a STEP between two anchors rather than a value to average across. Measured
-    /// on the 36 drifting episodes of this library: worst single-cue residual
-    /// <b>10.74 s → 0.17 s</b>, median <b>4.16 s → 0.00 s</b>, 36 of 36 improved.
-    /// </para>
-    /// <para>
-    /// The reference must be the SAME LANGUAGE and NOT hearing-impaired: anchoring is by
-    /// identical text, so a reference in another language yields zero anchors, and the HI
-    /// file is the one that drifts. Priority: a same-language plain sidecar, then a
-    /// same-language plain embedded track, else nothing — the file is reported untouched.
-    /// A correction that does not improve the worst line is discarded, so a clean file is
-    /// never moved.
-    /// </para>
-    /// <para>
-    /// On by default. Costs no audio decode at all: the work is text comparison against
-    /// the reference, measured at a few milliseconds per episode. An embedded reference
-    /// does cost one ffmpeg extraction (measured 2.5 s on the Pi 5) — a sidecar beside the
-    /// file costs nothing.
-    /// </para>
-    /// Default: true.
-    /// </summary>
-    public bool QaDownloadAnchorSync { get; set; } = true;
 
     /// <summary>
     /// F-M296 (development): the audio track an audio-reading gate decodes, chosen by

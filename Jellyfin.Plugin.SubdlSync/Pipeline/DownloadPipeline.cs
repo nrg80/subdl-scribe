@@ -1819,62 +1819,23 @@ public sealed class DownloadPipeline : IDisposable
                     }
                 }
 
-                // F-M295 (development): cue-vs-speech drift gate. Runs after the
-                // structure/runtime gates (a broken file never reaches the audio
-                // decode) and before the write. It answers whether the offset to
-                // the spoken audio is CONSTANT — a moving offset has no valid
-                // single correction, so saving it as-is plants a subtitle that is
-                // right in one part and wrong in another. Off by default; see
-                // PluginConfiguration.QaDownloadDriftCheck for the measured limits.
-                Qa.DriftVerdict? drift = null;
                 string? ffmpegForDrift = null;
-                if (_config.QaDownloadDriftCheck || _config.QaDownloadAutoSync)
+                if (_config.QaDownloadAutoSync)
                 {
                     ffmpegForDrift = FfmpegTools.ResolvePath(_config, _logger);
                 }
 
-                if (_config.QaDownloadDriftCheck)
-                {
-                    drift = await Qa.DriftGate.RunAsync(
-                        mediaPath, DecodeSrt(bytes), ffmpegForDrift, _logger, ct, audioMap).ConfigureAwait(false);
-
-                    if (drift.Ran && drift.Drifts)
-                    {
-                        // Reported always — a drifting file is a finding, whether or
-                        // not it is rejected, and the line states the SPAN, never a
-                        // correction value (the gate cannot supply one).
-                        LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — drift {Release}: {Verdict}",
-                            Path.GetFileName(mediaPath), lang, cand.ReleaseName, drift.Describe());
-
-                        if (_config.QaDownloadDriftReject)
-                        {
-                            summary.RejectedCandidates++; // F-M286 (QA gate)
-                            qaRejectedReleases.Add(cand.SubdlId);
-                            continue; // next candidate
-                        }
-                    }
-                    else if (_config.LogMode >= LogLevelMode.Verbose)
-                    {
-                        LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — drift gate: {Verdict}",
-                            Path.GetFileName(mediaPath), lang, drift.Describe());
-                    }
-                }
-
-                // F-M296/F-M300: the auto-sync itself. Reuses the verdict the drift gate just
-                // produced when that switch is on (one audio decode, not two) and runs the
-                // same gate itself when it is not. A CONSTANT offset is applied as one shift;
-                // a MOVING one as a staircase, one offset per segment. Only a missing verdict,
-                // a step beyond MaxShiftSec or an unusable segment list leaves the file alone.
+                // F-M296/F-M300: the auto-sync — the ONE correction method. A CONSTANT offset
+                // is applied as one shift; a MOVING one as a staircase, one offset per segment.
+                // Only a missing verdict, a step beyond MaxShiftSec or an unusable segment list
+                // leaves the file alone.
                 byte[] writeBytes = bytes;
                 string content = DecodeSrt(bytes);
                 string? unsyncPayload = null;
                 if (_config.QaDownloadAutoSync)
                 {
-                    Qa.DriftVerdict syncVerdict = drift
-                        ?? await Qa.DriftGate.RunAsync(mediaPath, content, ffmpegForDrift, _logger, ct, audioMap)
-                            .ConfigureAwait(false);
+                    Qa.DriftVerdict syncVerdict = await Qa.DriftGate.RunAsync(
+                        mediaPath, content, ffmpegForDrift, _logger, ct, audioMap).ConfigureAwait(false);
 
                     double shift = syncVerdict.Ran && !syncVerdict.Drifts ? syncVerdict.MedianOffsetSec : 0;
                     if (!syncVerdict.Ran)
@@ -1975,82 +1936,6 @@ public sealed class DownloadPipeline : IDisposable
                             LogUtil.PerItem(_config.LogMode, _logger,
                                 "[SubDL-D] {File} [{Lang}] — auto-sync not applied: {Why}",
                                 Path.GetFileName(mediaPath), lang, why);
-                        }
-                    }
-                }
-
-                // F-M297 (development): the anchor-sync. Repairs a DRIFTING file — the case the
-                // audio sync above cannot touch — by anchoring it to a plain subtitle in the SAME
-                // language. Runs after the audio path so a file the audio path already fixed is not
-                // measured twice: `content` carries that result.
-                //
-                // The reference is chosen from what the item already has: a same-language plain
-                // sidecar first (free), then a same-language plain embedded track (one extraction),
-                // else nothing. The HI file never serves as a reference — it is the variant that
-                // drifts, so anchoring to it would anchor a drifting file to another.
-                if (_config.QaDownloadAutoSync)
-                {
-                    var cands = new List<Qa.ReferenceChoice.Candidate>();
-                    foreach (var sc in SidecarNaming.List(mediaPath))
-                    {
-                        cands.Add(new Qa.ReferenceChoice.Candidate(sc.Lang, sc.HearingImpaired, sc.Path, null));
-                    }
-
-                    foreach (var tr in SidecarNaming.EmbeddedTracks(_mediaSourceManager.GetMediaStreams(item.Id)))
-                    {
-                        cands.Add(new Qa.ReferenceChoice.Candidate(tr.Lang, tr.HearingImpaired, null, tr.SubPos));
-                    }
-
-                    Qa.ReferenceChoice.Decision pick = Qa.ReferenceChoice.Choose(cands, lang);
-
-                    string? refText = null;
-                    if (pick.Origin == Qa.ReferenceChoice.Origin.Sidecar && pick.Path != null)
-                    {
-                        try
-                        {
-                            refText = await File.ReadAllTextAsync(pick.Path, ct).ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "[SubDL] anchor-sync: reference unreadable {Ref}", pick.Path);
-                        }
-                    }
-                    else if (pick.Origin == Qa.ReferenceChoice.Origin.Embedded && pick.SubPos is int subPos)
-                    {
-                        var (texts, _) = await FfmpegTools
-                            .ExtractAllAsync(ffmpegForDrift!, mediaPath, [subPos], _logger, _config, ct)
-                            .ConfigureAwait(false);
-                        refText = texts.TryGetValue(subPos, out string? t) ? t : null;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(refText))
-                    {
-                        LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — anchor-sync not applied: {Reason}",
-                            Path.GetFileName(mediaPath), lang, pick.Reason);
-                    }
-                    else
-                    {
-                        Qa.AnchorSync.Result ar = Qa.AnchorSync.Correct(
-                            Qa.AnchorSync.Parse(refText), Qa.AnchorSync.Parse(content));
-                        if (ar.Applied)
-                        {
-                            // Same protocol as the audio path: the untouched original is kept, and
-                            // the hash is registered over what now lies on disk.
-                            (bool abom, bool acrlf) = Qa.SubtitleSync.StyleOfBytes(bytes);
-                            string rebuilt = RenderCues(ar.Cues);
-                            unsyncPayload ??= content;
-                            writeBytes = Qa.SubtitleSync.Encode(rebuilt, abom, acrlf);
-                            content = rebuilt;
-                            LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL-D] {File} [{Lang}] — anchor-sync applied via {Origin}: {Reason}",
-                                Path.GetFileName(mediaPath), lang, pick.Origin, ar.Reason);
-                        }
-                        else
-                        {
-                            LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL-D] {File} [{Lang}] — anchor-sync not applied ({Origin}): {Reason}",
-                                Path.GetFileName(mediaPath), lang, pick.Origin, ar.Reason);
                         }
                     }
                 }
@@ -2893,43 +2778,6 @@ public sealed class DownloadPipeline : IDisposable
             if (bytes[0] == 0xFE && bytes[1] == 0xFF) return System.Text.Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
         }
         return System.Text.Encoding.UTF8.GetString(bytes);
-    }
-
-    /// <summary>
-    /// F-M297: renders corrected cues back to SRT text.
-    /// <para>
-    /// Only the timestamps are written; the text of each cue is carried through byte-for-byte,
-    /// because a correction may move a cue in time and must never alter what it says. The
-    /// timestamp format matches the plugin's other writers (comma decimal, three places).
-    /// </para>
-    /// </summary>
-    /// <param name="cues">Cues in order.</param>
-    /// <returns>SRT content with LF line endings; the caller applies the byte style.</returns>
-    private static string RenderCues(IReadOnlyList<Qa.AnchorSync.Cue> cues)
-    {
-        var sb = new System.Text.StringBuilder();
-        for (int i = 0; i < cues.Count; i++)
-        {
-            sb.Append(i + 1).Append('\n');
-            sb.Append(FmtTs(cues[i].StartSec)).Append(" --> ").Append(FmtTs(cues[i].EndSec)).Append('\n');
-            sb.Append(cues[i].Text.Replace("\r\n", "\n", StringComparison.Ordinal)).Append("\n\n");
-        }
-
-        return sb.ToString();
-    }
-
-    /// <summary>F-M297: one SRT timestamp, comma decimal, clamped at zero.</summary>
-    /// <param name="t">Time in seconds.</param>
-    /// <returns>Timestamp text.</returns>
-    private static string FmtTs(double t)
-    {
-        t = Math.Max(0.0, t);
-        int h = (int)(t / 3600.0);
-        int mi = (int)((t - (h * 3600.0)) / 60.0);
-        double s = t - (h * 3600.0) - (mi * 60.0);
-        return string.Create(
-            System.Globalization.CultureInfo.InvariantCulture,
-            $"{h:00}:{mi:00}:{s:00.000}").Replace('.', ',');
     }
 
     /// <summary>F-M43 Stufe 2: SRT cue span vs item runtime, tolerance from config. Returns (ok, reason).</summary>

@@ -255,7 +255,7 @@ public static class SubtitleSync
     /// <summary>
     /// Minimum gap kept between one cue's end and the next cue's start, in seconds.
     /// <para>
-    /// The same value and the same reasoning as <see cref="AnchorSync.MinGapSec"/>: these
+    /// The same reasoning applies as on the anchor route this constant once came from: these
     /// subtitles butt cue against cue — measured, <b>560 of 724 gaps are below 0.04 s</b> with a
     /// median of <b>0.002 s</b>. A guard set tighter would fire on almost every cue.
     /// </para>
@@ -332,10 +332,9 @@ public static class SubtitleSync
         // Order guard, against the previous cue's END. The shift is ADDED here, so the gap
         // becomes `gap + eff[k] − eff[k−1]`: a step that moves cue k far EARLIER than its
         // neighbour would push it back over that neighbour's end, which a player renders as
-        // stacked text. The bound is therefore a LOWER bound on eff[k] — the mirror image of
-        // AnchorSync's rule, which subtracts its shifts and so bounds them from above. Getting
-        // the direction wrong mangles every cue at a step: measured by the test below, it turned
-        // a 0.4 s residual into 1.92 s and "guarded" 22 cues that needed no guard.
+        // stacked text. The bound is therefore a LOWER bound on eff[k]. Getting the direction
+        // wrong mangles every cue at a step: measured by the test below, it turned a 0.4 s
+        // residual into 1.92 s and "guarded" 22 cues that needed no guard.
         var eff = new double[cues];
         int guarded = 0;
         for (int k = 0; k < cues; k++)
