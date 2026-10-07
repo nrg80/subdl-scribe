@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.181",
-        "changelog": "v12.1.12.181: The archived original is now stored exactly as SubDL delivered it. Files that\n    already carried a byte-order mark were saved with a SECOND one in front, because the archive\n    was decoded and re-encoded before being written; measured, 55108 bytes came back as 55111.\n    Only a corrected file now goes out normalized — UTF-8, no BOM, LF — so the bytes on disk are\n    the bytes the stored hash describes. A file the correction did not touch is unchanged.",
+        "version": "12.1.12.183",
+        "changelog": "v12.1.12.183: The correction is now applied exactly as fitted. A subtitle whose first cue sits\n    late enough to veto the shift (a leading title card) used to lift the WHOLE file to\n    the largest shift that cue allowed — on one episode that turned a measured -9.00 s\n    into -5.07 s, where the fit read \"no proven gain\" on a file nine seconds out of sync.\n    The fit now decides, and a cue that would land below zero is clamped to 0. The audio\n    decoder streams: one level per 20 ms frame instead of the whole track in memory, ~1 GB\n    peak down to 68 MB, so long films fit at all. The kept original is named\n    \".srt.unsynced.zip\".",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.181-dev/Jellyfin.Plugin.SubdlSync_12.1.12.181.zip",
-        "checksum": "6d128e633583c6d4d410a77a232ed520",
-        "timestamp": "2026-10-07T03:08:41Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.183-dev/Jellyfin.Plugin.SubdlSync_12.1.12.183.zip",
+        "checksum": "8e2f821d167ab1ff692a86b8bc3e5a95",
+        "timestamp": "2026-10-07T10:46:02Z"
       }
     ]
   }
