@@ -252,7 +252,11 @@ def main():
     # mention of drift, because a check that fires on correct prose gets disabled.
     intros = re.findall(r'<div class="fieldDescription" style="margin-bottom:\.6em;">(.*?)</div>',
                         html, re.S)
-    check("intro blocks found (h4 section descriptions)", len(intros) >= 2,
+    # The count is the guard against a VACUOUS pass: the loop below polices whatever this
+    # regex finds, so finding nothing would green-light every page. It was `>= 2` while the
+    # correction section carried its own h4; that heading was removed on operator order
+    # (07.10.2026) and the page now has ONE section description, so the guard is `>= 1`.
+    check("intro blocks found (section descriptions)", len(intros) >= 1,
           "count=%d" % len(intros))
     INTRO_MAX = 300
     for raw in intros:

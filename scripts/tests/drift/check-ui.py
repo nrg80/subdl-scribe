@@ -57,9 +57,13 @@ for prop in REMOVED:
     print(f"  [{'ok' if ok else 'FAIL'}] {prop} fully removed from the page (found {n})")
     fails += 0 if ok else 1
 
-# The correction section itself must hold exactly ONE checkbox — the whole point of the
-# change. Counted on the section slice so an unrelated checkbox elsewhere cannot mask it.
-sec_start = src.find('Subtitle correction')
+# The correction block itself must hold exactly ONE checkbox — the whole point of the change.
+# Counted on a slice so an unrelated checkbox elsewhere cannot mask it, and the slice is bounded
+# by the runtime-tolerance control and the language modal rather than by a heading: the
+# `Subtitle correction` h4 was removed on operator order (07.10.2026), no intermediate heading
+# above the block. Bounding it on the switch id alone would count forward from the switch and
+# miss a stale checkbox sitting before it.
+sec_start = src.find('id="DownloadRuntimeToleranceSec"')
 sec_end = src.find('id="DownloadLangModal"')
 if sec_start < 0 or sec_end < 0 or sec_end < sec_start:
     print("  [FAIL] the correction section boundaries were not found")

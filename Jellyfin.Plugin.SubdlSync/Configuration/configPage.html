@@ -523,17 +523,12 @@
                             <div class="fieldDescription">Max. cue span vs. runtime in seconds. 0 = off. Default: 600.</div>
                         </div>
 
-                        <h4 style="margin:1em 0 .3em 0;">Subtitle correction</h4>
-                        <div class="fieldDescription" style="margin-bottom:.6em;">
-                            Puts a fetched subtitle onto the spoken track: by one constant offset, or
-                            segment by segment when the offset moves.
-                        </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaDownloadAutoSync" name="QaDownloadAutoSync" type="checkbox" is="emby-checkbox" />
                                 <span>Correct subtitle timing</span>
                             </label>
-                            <div class="fieldDescription">Shifts the file onto the audio before saving — one offset for a constant shift, segment by segment when the offset moves. The untouched original stays beside it as &lt;name&gt;.&lt;lang&gt;.srt.unsynchronized. Costs one audio decode per saved file. Default: on.</div>
+                            <div class="fieldDescription">Aligns a fetched subtitle segment-wise on a spoken track. Keeps a copy of the original file. Default: on.</div>
                         </div>
 
                         
