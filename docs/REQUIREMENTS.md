@@ -1,6 +1,6 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.61
+**Version:** 2.62
 **Status:** Implementation — v12.1.12.181.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
@@ -20,10 +20,10 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 30 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 31 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 6 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
-  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 7 requirements
+  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 8 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -325,7 +325,7 @@ The download chain runs against each candidate in score order, before the file i
 
 **The same language verification runs here verbatim** (F-M15), on the downloaded bytes, with its own per-direction switch.
 
-**F-M295 [D] (development):** **Drift gate — cue vs. speech: does the subtitle hold ONE offset, or does that offset MOVE?**
+**F-M295 [D] (superseded by F-M307, 07.10.2026):** **Drift gate — cue vs. speech: does the subtitle hold ONE offset, or does that offset MOVE?**
 Decodes the audio, derives speech islands from the frame envelope, anchors each cue to the last island start before it, and compares the model "one offset" against "two offsets split at a candidate cue" by their marginal likelihood (Bayes factor). Recursion left and right finds further boundaries. Two switches: **analyse** (report only) and **reject**; both default off.
 
 **What it decides — and what it refuses to:** a direction plus a span. A drifting file has NO valid single offset, so a correction value printed here would be read as an instruction and would be wrong. The gate therefore never emits a shift.
@@ -522,7 +522,7 @@ material goes through the same measurement before anything is corrected: an unto
 looks wrong means the yardstick is misaligned to that material. The **order-guard count is read together
 with the result**, because a guard firing on hundreds of cues flattens the staircase into one constant
 shift while the step heights still look right. **Test: T117.**
-**F-M300 [D] (development):** **A subtitle whose offset MOVES is repaired segment by segment — one
+**F-M300 [D] (superseded by F-M307, 07.10.2026):** **A subtitle whose offset MOVES is repaired segment by segment — one
 offset per segment, the boundaries the drift gate already found — instead of being left as downloaded.**
 
 This supersedes the "a drifting file is only reported" clause of F-M296. The average describes no real
@@ -577,6 +577,32 @@ not undo the corrected file; it is logged as a warning.
 **Both tracks, one helper** — the HI variant goes through the same one, so the two cannot drift apart. **Deterministic:** a fixed entry timestamp and no directory entry, so the same input yields the same bytes, which is what lets T118 compare byte for byte. **Failure posture:** a failed write is logged as a warning and never undoes the corrected file. Governed by `QaDownloadAutoSync` (F-M304) — no second switch.
 
 **Test: T118.**
+
+**F-M307 [D] (development, 07.10.2026):** **The offset is a PIECEWISE-CONSTANT function of time, fitted by EXACT dynamic programming — this is the standard method, superseding the recursive Bayes-factor gate (F-M295) and the staircase applied from gate boundaries (F-M300).**
+
+**Rule.** Maximise over all change-point placements: the sum of speech scores at each cue's shift, minus a charge of `Z · sigma · sqrt(segment cues)` per segment, where `sigma` is measured from the data as the median |change of cue score| per grid step. Solved exactly by DP over (block, state) pairs on a coarse cue grid (`BLOCK_CUES = 40`, state grid `0.25 s`, range ±20 s). Constant offset, slow drift and one hard cut are the same fit with one, many or two segments. **The do-nothing fit — one segment, shift exactly 0 — always competes inside the same objective**, so leaving a file alone is a real alternative and wins when the evidence is weak.
+
+**The charge is sqrt-shaped, and that is the whole point.** A segment of L cues picks the best of 161 candidate shifts and so gains ~`sigma·sqrt(L)` by luck. Charging exactly that (times Z) is what prevents invented steps: the luck available grows as `sqrt(L)` while the charge grows with `L`, and splitting is never free because `sqrt(a)+sqrt(b) > sqrt(a+b)`. **A fixed shift-size threshold cannot replace it** — a threshold cannot tell a real 3 s step from noise, a sqrt-charge can.
+
+**Deploy rule — a correction must PROVE itself.** A shift is written only if the cues it moves show a mean speech-score gain above `Z` standard errors of that mean (**paired test over the MOVED cues only** — averaging over the whole file dilutes a 9 %-step's evidence tenfold and rejects real corrections), the whole file does not get worse, and the largest shift is at least `MinShiftSec`. This is what makes the operation idempotent: on an already-synced file there is no proven gain, so nothing is applied, so a second run cannot drift.
+
+**Constants, all measured.** `Z = 1.0`; `MIN_SEG_FRAC = 0.12` (**a fraction of the file's cues, not a cue count**, so it is scale-invariant between a 45-minute episode and a 100-minute film), floor 40 cues; probability curve dilated by `SLACK = 0.30 s` (swept 0/0.1/0.2 → 90/78/79 %, **0.30 → 94 %**); `SLACK` exists only to sharpen the peak and is never used for reporting, so before/after stay comparable.
+
+**Measured.** Planted staircases on a confirmed-good file: **93 %** of cues within 1 s (0/+4/+7 s → 100 %, five fine steps → 71 %, 0/−3/+3 s → 100 %, untouched file → 100 %, left byte-identical). Real PoI S02E14 SDH: 5 segments **+1.75/−1.00/−4.25/−6.75/−9.50 s**, whole-file score 0.4972 → 0.5157, tail 35–45 min residual **−0.3 to −0.5 s** (was +8.8/+9.0 s). Deployed and re-run: **idempotent on every file, second run moves the timeline by 0.000 s**. Listening verdict of the operator (07.10.2026) on three further samples: *„sehr gut"* (PoI S01E23.de, −0.50 s), *„auch"* good (BCS S01E06, three steps; Dirty Dancing, three steps over 100 min).
+
+**The limit, stated because it is measured.** A step shorter than ~**12 % of the file's cues** is not recovered: below that the charge cannot pay for a segment and the fit emits junk segments. **Consequence:** a short scene that is out of sync on its own stays out of sync. Below 12 % the previous measurement showed junk shifts of +17.5 s on cues that were never moved — so the floor is a guard, not a tuning value.
+
+**Two defects that produced false verdicts, both fixed and both worth guarding against in code.** (1) A shifted span falling outside the audio must score 0 and be EXCLUDED, never clipped: clipping shortened the span and raised its mean, and the fit then returned +20.0/−19.25/+19.75 s on segments that were never moved. (2) The before/after report must be scored with the REAL cue ends: passing zeros measured one frame at each cue start and produced a wrong before-score (0.396 instead of 0.538), which made the deploy rule revert good files.
+
+**Language-neutral.** No subtitle text is read — only cue times and the audio. Script, case and SDH notation are irrelevant, so the method needs no per-language calibration.
+
+**Cost and failure posture.** One audio decode per candidate file, as F-M295. No ffmpeg, unreadable audio, no speech, too few cues ⇒ "did not run" and the file passes, as every other gate; nothing is written. Where the fit is refused the file is returned **byte-identical**, never partially moved. Order guard last: no cue overtakes its predecessor's end, none below zero — refused, not clamped (as in the list of §4.3.2).
+
+**Rejected approaches, with their numbers** — recorded so they are not retried: **recursive bisection** taking a split only when the two halves' best shifts differ by ≥ 2 s — a step over 77 of 819 cues is diluted over a half-file of ~410 cues, so it **never split at all** and the whole file came back as one segment **with the step still in it** (the score was never the problem; the decision rule was); onset voting (a cue is within 0.40 s of some onset ~40 % of the time by chance); cross-correlation of activity curves; curve **span** and **island density** as reliability gates (correct 0.047–0.11 vs. wrong 0.020–0.097, fully overlapping); **independent block argmax** (lets one 40-cue block pick an extreme shift for free). **A paired test on ~200 cues could not detect a 2 s step on the confirmed-good file (t = 1.1)** — so a test must be calibrated for power before "no significant candidate" is read as "no error".
+
+**Tests: T119** (the four planted staircases plus the untouched control, scored per cue against the planted truth), **T120** (real material scored against the AUDIO per F-M305, plus the idempotence re-run) **and T121** (the two defects above as regression cases: a shifted span outside the audio, and a before-score computed with the real cue ends).
+
+Reference implementation: `/opt/data/drift-lab/RC/sy-1.0.0-rc1` (`core4.py` the fit, `drift_algo5.py` the runner), hashes in its `README.md`; `CURRENT-RC.txt` names the active candidate.
 
 ## 5. Upload Postprocessing
 
@@ -1536,6 +1562,12 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T86:** The refresh detail line names a rebuild fallback without turning the light red (F-M269)
 **T87:** The configuration page's structure and wiring hold without a host (F-M270–F-M273)
 **T88:** An unlabelled sidecar is detected and renamed, and a taken combination takes the next slot (F-M278)
+
+**T119:** The DP fit is measured against a PLANTED truth, per cue, on a file the operator has confirmed as good: four staircases (0/+4/+7 s, five fine steps, 0/−3/+3 s, and an untouched control) are planted and the applied correction must be within 1 s of the planted truth on at least the share recorded in F-M307 (93 % mean; the control file must be left **byte-identical**). A configuration change that lowers the mean or touches the control file fails. (F-M307)
+
+**T120:** Real material is scored against the AUDIO, never against another subtitle (F-M305): the fit runs on real episodes and the result is read as the per-segment offset curve, with the operator's listening verdict recorded beside it; the run is then repeated on its own output and the timeline must move by **0.000 s** — idempotence is part of the test, not a separate check. The control run comes first, as F-M305 requires. (F-M307)
+
+**T121:** The two defects of F-M307 are regression cases and must fail loudly if they return: **(a)** a shifted cue span that falls outside the audio scores 0 and is EXCLUDED — the fit must never return a boundary-runner shift (+20.0/−19.25/+19.75 s was the clipped behaviour) on cues that were not moved; **(b)** the before/after report is scored with the REAL cue ends, asserted against a known value (one frame at the cue start yields 0.396 where the cue span yields 0.538), because a wrong before-score silently makes the deploy rule revert good files. (F-M307)
 
 
 ## 20. References
