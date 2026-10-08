@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.212",
-        "changelog": "v12.1.12.212: The id-resolution give-up is gone. An item whose id could not be resolved used to be\n    retired after three failed attempts, which meant the ladder never ran again for it; now the next\n    run tries again, and the setting with its field is gone. The database refresh and the OSHash\n    refresh each got a manual start button on the configuration page, under their own description,\n    and their disabling option is now labelled \"Manual\" instead of \"Never\" - the stored value is\n    unchanged, so an existing configuration keeps meaning what it meant. The upload postprocessing\n    interval keeps \"Never\" because it has no such button.\n  v12.1.12.212: The id-resolution give-up is gone. An item whose id could not be resolved used to be\n    retired after three failed attempts, which meant the ladder never ran again for it; now the next\n    run tries again. The setting and its field are gone with it. Also: the database and OSHash\n    refreshes each got a manual start button on the configuration page, under their own description,\n    so they can be run on the spot instead of waiting for the schedule. Both changes keep every\n    existing cadence setting exactly as it was.",
+        "version": "12.1.12.213",
+        "changelog": "v12.1.12.213: Upload postprocessing joins the other two jobs with a manual start button under its\n    description, and its disabling option is now labelled \"Manual\" instead of \"Never\" - the stored\n    value is unchanged, so an existing setting keeps meaning what it meant. Its button calls the job's\n    own endpoint rather than the generic task starter, so a press with the upload direction switched\n    off says so instead of looking like a finished run.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.212-dev/Jellyfin.Plugin.SubdlSync_12.1.12.212.zip",
-        "checksum": "46795b53342da80da6ad0884c1f91cdb",
-        "timestamp": "2026-10-08T21:03:08Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.213-dev/Jellyfin.Plugin.SubdlSync_12.1.12.213.zip",
+        "checksum": "ce58dd214063a6347bc09b53fac1f78f",
+        "timestamp": "2026-10-08T21:07:28Z"
       }
     ]
   }
