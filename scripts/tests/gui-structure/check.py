@@ -1053,14 +1053,39 @@ def main():
           "every service with a manual button must label its disabling option Manual")
     check("the postprocessing section carries a manual run button",
           'id="RunPostprocessNow"' in html)
-    # This one calls its own endpoint, NOT the task starter — the endpoint is what reports "upload
-    # switched off" (F-M291/T104), while the task route would confirm a start and do nothing.
+    # This one calls its own endpoint rather than the generic task starter: the endpoint is the job's
+    # dedicated manual route and it answers in words instead of a bare start confirmation.
     check("RunPostprocessNow calls the postprocessing endpoint",
           "ApiClient.getUrl('Plugins/SubdlSync/PostprocessUploads')" in html,
-          "the generic task starter would answer a start and then silently do nothing")
-    check("RunPostprocessNow surfaces the 'skipped' answer instead of claiming success",
-          "res.status === 'skipped'" in html and "res.reason" in html,
-          "a refusal must be spoken, not reported as a finished run")
+          "postprocessing has its own manual route; use it")
+
+    # F-M291 (operator order 08.10.2026, "Nur die automatischen runs vom Postprocessing an den upload
+    # binden, manuell darf immer"): the upload binding belongs to the AUTOMATIC path ONLY. This is a
+    # half-removal by nature — the failure mode is not a crash but a manual run that silently declines —
+    # so it is asserted from BOTH sides, and each side alone would pass on a broken file.
+    ctrl = read_source("Api", "SubdlPostprocessController.cs")
+    task = read_source("ScheduledTasks", "SubdlPostprocessTask.cs")
+    sched = read_source("ScheduledTasks", "SubdlSchedulerCoordinator.cs")
+    if ctrl and task and sched:
+        # Assert the GATE CONSTRUCT, not the word: both files legitimately NAME UploadEnabled in the
+        # comment that explains why the gate was removed, and a word-level ban went RED on a correct
+        # file (measured). Match an `if` that tests the flag — that is the shape a re-added gate takes.
+        gate = re.compile(r"if\s*\(\s*!?\s*[\w.]*UploadEnabled\s*\)")
+        check("the manual endpoint no longer refuses when upload is off",
+              gate.search(ctrl) is None,
+              "a manual trigger must run regardless of the upload switch")
+        check("the task no longer refuses when upload is off",
+              gate.search(task) is None,
+              "the dashboard's run button reaches the work through this task")
+        # ...and the AUTOMATIC path must still be bound, or the removal took the rule with it.
+        check("the automatic path is still bound to the upload switch",
+              "config.UploadEnabled\n                && ppInterval is not (UpdateInterval.Never" in sched,
+              "removing the rule entirely would let the schedule run with upload off")
+    # The description states the rule in the operator's own words.
+    check("the description names the inhibited scheduled run",
+          "Scheduled run is inhibited if upload is disabled" in html
+          and "the button below always runs" in html,
+          "the page must say which of the two paths is bound")
 
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:

@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.213.
+**Status:** Implementation — v12.1.12.214.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -850,16 +850,7 @@ Measured 02.10.2026, both directions: the refetch stamp, the file-retry counter 
 
 **F-M17y:** **Delayed upload postprocessing:** after an upload run (normal finish or stop), on the postprocessing schedule (F-M176; not tied to the run and not to a fixed delay — SubDL review latency varies), the plugin queries `/user/mySubtitles` and resolves every locally pending-review entry whose status is `rejected`: an entry with "Duplicate upload" is deleted on SubDL and marked duplicate-remote; any other rejected entry is deleted without a mark. Accepted entries are not touched. All steps logged at Debug. The task runs on its own cadence and diced anchor (F-M210), independent of any run.
 
-**F-M291 (user decision 03.10.2026):** **With the upload direction switched off, postprocessing does not run either.**
-
-Its whole subject is work that only exists because upload is on: it resolves locally pending-review entries against `/user/mySubtitles`, and an entry can only be pending review if something was uploaded. With upload off there is nothing to resolve, so the task does not go looking — it does not call SubDL, does not touch the database and does not write a run.
-
-Enforced at three points, and each one is needed:
-- **the anchor is not armed** in the scheduler while `UploadEnabled` is false, so no fire is ever queued;
-- **the task refuses** even so — a fire armed before the toggle was switched off, or one queued earlier, must not do the work either;
-- **the manual endpoint** (`POST /Plugins/SubdlSync/PostprocessUploads`) refuses for the same reason and answers `{"status":"skipped","reason":"upload disabled"}` rather than silently doing nothing.
-
-The recorded outcome is `skipped`/"upload disabled" — GREY, because nothing is broken and nothing ran; green would claim a run that did not happen. Wording matches the upload task's own line for the same condition. **Test: T104.**
+**F-M291 (operator order 08.10.2026, revised):** **The upload binding applies to the SCHEDULED run only — a manual run always works.** *"Nur die automatischen runs vom Postprocessing an den upload binden, manuell darf immer."* With the upload direction off the scheduled run has no subject (an entry can only be pending review if something was uploaded), so **the anchor is not armed**. Enforced at that ONE point: the two downstream gates are removed, because both refused a MANUAL run — the dashboard button reaches the work through `SubdlPostprocessTask`, and the job's route is `POST /Plugins/SubdlSync/PostprocessUploads`. A fire queued before the toggle went off still runs (idempotent work, accepted). The page states it: *"Scheduled run is inhibited if upload is disabled; the button below always runs."* **Test: T104.**
 
 **F-M176:** **Postprocessing reschedule spacing:** if postprocessing cannot start because the global run lock is busy (F-M94h: immediate `false`, no waiting), it schedules a one-shot re-fire in the job spacing (5–120 min). A local rate limit can no longer defer it (F-M20). The re-fire still respects the diced anchor and does not move the next regular run. A busy lock is first checked for staleness; only a living previous run causes a deferral.
 
@@ -1979,7 +1970,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M294, F-M288)
 
 
-**T104:** With upload switched off, postprocessing does not run: no anchor is armed, a fire that slips through records grey `skipped`/"upload disabled" instead of calling SubDL, and the manual endpoint answers `skipped`/`upload disabled` (F-M291)
+**T104:** The upload binding binds the SCHEDULED run only: with upload switched off no anchor is armed, while BOTH manual routes still work — the dashboard button (through `SubdlPostprocessTask`) and the job's own endpoint — neither of which carries an upload gate any more. Asserted from both sides, because a half-removal fails as a manual run that silently declines rather than as a crash: the gates are absent from the endpoint and the task, AND the anchor gate is still present, or removing the rule entirely would let the schedule run with upload off. The page names the asymmetry. (F-M291)
 
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)
