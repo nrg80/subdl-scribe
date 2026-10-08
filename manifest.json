@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.211",
-        "changelog": "v12.1.12.211: Two settings became one. \"Auto-Sync attempts and max. download/search limit\" now\n    decides how many candidates per language are SEARCHED and how many the downloader may pull\n    before giving up; \"Max candidates per language\" is gone. At the old default of 3 the cap always\n    stopped the walk first, so the correction attempts never took effect - the two numbers could\n    contradict each other silently. With Auto-Sync on, only candidates the fit could not resolve\n    count against the limit, not ones a quality gate refused. With Auto-Sync off the walk stopped\n    after the first candidate of each language; it now pulls the configured number.",
+        "version": "12.1.12.212",
+        "changelog": "v12.1.12.212: The id-resolution give-up is gone. An item whose id could not be resolved used to be\n    retired after three failed attempts, which meant the ladder never ran again for it; now the next\n    run tries again, and the setting with its field is gone. The database refresh and the OSHash\n    refresh each got a manual start button on the configuration page, under their own description,\n    and their disabling option is now labelled \"Manual\" instead of \"Never\" - the stored value is\n    unchanged, so an existing configuration keeps meaning what it meant. The upload postprocessing\n    interval keeps \"Never\" because it has no such button.\n  v12.1.12.212: The id-resolution give-up is gone. An item whose id could not be resolved used to be\n    retired after three failed attempts, which meant the ladder never ran again for it; now the next\n    run tries again. The setting and its field are gone with it. Also: the database and OSHash\n    refreshes each got a manual start button on the configuration page, under their own description,\n    so they can be run on the spot instead of waiting for the schedule. Both changes keep every\n    existing cadence setting exactly as it was.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.211-dev/Jellyfin.Plugin.SubdlSync_12.1.12.211.zip",
-        "checksum": "034f76993563c2a9a296face6892c98b",
-        "timestamp": "2026-10-08T20:43:35Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.212-dev/Jellyfin.Plugin.SubdlSync_12.1.12.212.zip",
+        "checksum": "46795b53342da80da6ad0884c1f91cdb",
+        "timestamp": "2026-10-08T21:03:08Z"
       }
     ]
   }
