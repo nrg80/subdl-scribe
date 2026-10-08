@@ -20,10 +20,10 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 33 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 36 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 6 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
-  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 10 requirements
+  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 13 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -275,15 +275,15 @@ There is no download-side completion mark any more. The pipeline asks `SubtitleC
 
 The HI block of the download loop is guarded by the *effective* flag, not the candidate's: when the file just saved already was the HI variant, no second download follows.
 
-**F-M242 [D]:** **"Best subtitles to keep per language" saves exactly that many numbered files.** With `KeepBestPerLanguage = X` the pipeline saves the top X QA-passed candidates per (item, language): the slots are `<basename>.<lang>.01.srt` … `<basename>.<lang>.NN.srt` (F-M316). Fewer usable candidates than X saves fewer files, never an error.
+**F-M319 [D] (operator order 08.10.2026, supersedes F-M242):** **A language receives exactly ONE corrected file. The "best subtitles to keep per language" setting is REMOVED.**
 
-The candidate loop has two exits: `savedCount >= keepBest` and the download budget (F-M50), whichever comes first. Because the budget is raised to `keepBest`, the keep-best exit is reachable and the setting is never silently cut short — before 02.10.2026 the budget broke the loop first. `KeepBestPerLanguage = 1` (the default) is unchanged. **Test: T99.**
+**The rule.** The candidate walk ends at the first candidate whose correction proves itself against the audio. An **unprocessed** file does not end it: it is a fallback, kept so the repeat costs no content (F-M317/F-M318).
 
-The GUI caps the saved-slot count at 10.
+**Why the setting went.** It existed to save X numbered files per language. Once the slot encodes WHICH KIND a file is (F-M317) and the walk repeats until a correction is proven (F-M318), the count had one meaningful value left — `1`, its own default — and every other value asked for the same language twice. The setting, its GUI field, the slot preview, the second parameter of `DownloadBudget` and the tests built on them are gone together.
 
-While `KeepBestPerLanguage > 1` the dry run names the slots it would fill (`DRY-RUN slot 2/3 … → <name>.en.02.srt`), so the setting is verifiable without spending quota. With the default of 1 there is one slot and the line is not written. The slot preview carries the slot number, not the hearing-impaired marker: it runs before any file is fetched (F-M277).
+**A removed setting must be removed at every layer** (config type, page, pipeline): a field left on the config type is a knob the next reader wires back up. Asserted in T131.
 
-**F-M95:** **The search's early stop is the download cap, derived — never a literal.** The page walk stops once every requested language has at least N candidates, where N is the effective download budget (F-M50); `0` disables the early stop. Until 02.10.2026 the threshold was hard-coded to 3, so raising "Max candidates per language" widened the download budget but never the search: the walk still stopped after three candidates per language and the loop never saw a fourth.
+**F-M95:** **The search's early stop is the download cap, derived — never a literal.** The page walk stops once every requested language has at least N candidates, where N is the configured download budget (F-M50); `0` disables the early stop. Until 02.10.2026 the threshold was hard-coded to 3, so raising "Max candidates per language" widened the download budget but never the search: the walk still stopped after three candidates per language and the loop never saw a fourth. **One setting, one number:** the helper that derives the threshold takes the budget alone (F-M319).
 
 **F-M241 [D]:** **Two searches, one per side of the hearing-impaired split.** The regular slot is filled from a `&hi=0` search and the HI slot from a `&hi=1` search; the HI search runs only while the switch is on, so a user who does not want HI pays one search exactly as before.
 
@@ -321,7 +321,7 @@ The download chain runs against each candidate in score order, before the file i
 
 **F-M45 [D]:** **IMDB/TMDB match** (default on, switchable off): candidates matched against item IDs. Default is a hard criterion (no ID → no download); switchable off for title-based fallback.
 
-**F-M50 [D]:** **Download budget per (item, language):** max N candidate downloads before the language counts as "not available" (default 3, 0 = unlimited). The configured budget is raised to the keep-best count (F-M242) when that is higher — a budget below it would make "keep X saves X files" unreachable. **Test: T98.**
+**F-M50 [D]:** **Download budget per (item, language):** max N candidate downloads before the language counts as "not available" (default 3, 0 = unlimited). It is the ONLY budget on the download side — the raise to a keep-best count went with that setting (F-M319) and the QA retry limit is the fit's own budget, not a second download budget (F-M318/F-M320). **Test: T98.**
 
 **The same language verification runs here verbatim** (F-M15), on the downloaded bytes, with its own per-direction switch.
 
@@ -336,7 +336,7 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 
 **Cost and failure posture:** one full audio decode per candidate file (~14 s per 44 min episode, measured). No ffmpeg, unreadable audio, no speech, too few cues → the gate reports "did not run" and the file passes, like every other gate. **Tests: T108 (synthetic: clean / planted steps / ramp, plus the factored-marginal equality), T109 (end-to-end on a real episode: the plain subtitle steady, the SDH variant drifting).**
 
-**F-M46 [D]:** **Overall selection:** one best candidate per (item, language) by combined score from F-M43–F-M45. The keep-best count is configurable (default 1); above 1 the QA-passed candidates are saved as numbered sidecars. No candidate passing → the language counts as "not available".
+**F-M46 [D]:** **Overall selection:** one best candidate per (item, language) by combined score from F-M43–F-M45 — the best CORRECTED one where a correction can be proven (F-M318/F-M319). No candidate passing → the language counts as "not available".
 
 ### 4.2 Dry Run — Download
 
@@ -346,7 +346,7 @@ It runs: the id quality gate (F-M151b), the searches (F-M241), the release scori
 
 It does not run: the file fetch, the quality gates of 4.1 (language verify, minimum cue count, runtime match), the file write, the download mark and the registry write.
 
-The report names, per language, the chosen release with its score and its hearing-impaired flag. While the hearing-impaired switch is on, the candidate from the hearing-impaired pool is named as well (F-M241). While `KeepBestPerLanguage > 1`, the slots it would fill are named (F-M242).
+The report names, per language, the chosen release with its score and its hearing-impaired flag. While the hearing-impaired switch is on, the candidate from the hearing-impaired pool is named as well (F-M241).
 
 **The report stops at the candidate, not at the file.** A dry run fetches nothing, so it cannot know the byte size, and it never reaches the point where the name is built from the fetched file — the hearing-impaired marker of the F-M260 name is therefore NOT part of a dry run. What a dry run answers is *which release* per language, not *which file*.
 
@@ -608,6 +608,57 @@ Both are existing code paths that every downloaded subtitle already travels. The
 
 **Test: T129.**
 
+**F-M317 [D] (operator order 08.10.2026):** **The slot encodes WHICH KIND the file is: aligned takes 01 upward, unprocessed takes 99 downward.**
+
+**Rule.** A downloaded subtitle is written into one of two ranges, and the range is decided by one question: was it ALIGNED?
+
+- **Aligned** (the fit applied a correction, or the fit switch is off and nothing was moved but the file is the corrected artifact) → `<base>.<lang>.<NN>.srt` with `NN` = `01`, `02`, `03` … **upward**, counted by its own counter.
+- **Unprocessed** (the fit refused — "no proven gain" — or the fit is off and the file is left as downloaded) → the **reserved block**, `99`, `98`, `97` … **downward**, exactly as an original was numbered before.
+
+**"Regardless of whether a corrected version exists"** is the operator's own wording and it is the load-bearing part: an unprocessed file takes a reserved slot **even when there is no corrected sibling beside it**. The reserved block therefore stops being only the home of *the original of a correction* and becomes the home of **everything that was not aligned**.
+
+**The counter must be separate from the corrected slot number.** With one shared counter an unprocessed file consumes slot `01` and pushes the next aligned file to `02`, while the rule the operator stated is that alignment starts at `01`. `correctedSlotCount` and `hiCorrectedSlotCount` are therefore incremented on the aligned path only.
+
+**The file that is not aligned IS the original, so it is written ONCE.** The reserved-slot write that used to run *after* a correction as a second file must not run on this path — otherwise the same subtitle lands on disk twice. Measured consequence to preserve: on the unprocessed path the file is written to the reserved slot, `unsyncPayload` stays null, and the second write is skipped by its own `unsyncPayload != null` guard.
+
+**When all ten reserved slots are taken** the write is **refused** and counted (`summary.Failed++` on the main path, `summary.RejectedCandidates++` on the HI path) with a distinct log line — this is the one path where a fetched subtitle is not written at all, so it must not be silent. Inventing a name would overwrite an unprocessed file already kept.
+
+**Both tracks carry the rule.** The HI branch follows the same two ranges with its own counter, for the reason the HI pool is where the drift lives: it is the pool most likely to land in the reserved block, and one rule on one branch only would put an aligned file at `01` beside an unprocessed one at `01`.
+
+**What this changes about F-M315.** F-M315's reservation (90–99, corrected stops at 89) stands; its *scope* widens. The block no longer holds only the original kept beside a correction — it now also holds every file that could not be aligned. `CorrectedSlotMax = 89` remains correct and unreachable in practice: the aligned writer counts from 01 with its own counter, so it does not walk up into the block.
+
+**GUI text (operator wording, 08.10.2026).** The switch description reads: *"Aligns a fetched subtitle segment-wise on a spoken track. Corrected files are numbered from index 01 upward; a copy of the original — and any file the alignment could not process — is kept from index 99 downward. Inconclusive alignment outcomes are dropped."* "Dropped" means **the ALIGNMENT RESULT is dropped**, not the file: nothing is moved and the file lies on disk as downloaded, in the reserved block. The operator's follow-up intent: such a file may be re-fetched once and put through alignment again.
+
+**Test: T130.**
+
+**F-M318 [D] (operator order 08.10.2026):** **The download REPEATS until a candidate's correction proves itself, capped at the QA retry limit.**
+
+**The rule.** A fetched subtitle whose correction the fit REFUSES does not end the walk. The pipeline keeps fetching lower-ranked candidates — up to **`DownloadQaRetryLimit`** candidates refused by the fit (default 3, the same knob the QA-reject give-up already uses; `0` = no cap) — and stops at the first candidate whose correction proves itself against the audio.
+
+**Why the walk used to end at the first refusal.** The save counter drove the walk's stop, and an unprocessed file is memorized as a download (F-M317 keeps it) and incremented it — so the loop broke right after the first refusal and the "repeat" could never happen, leaving the item with one unprocessed file. The counter that decides the walk is **`correctedSaved`**, and with the count setting removed the stop is simply the first corrected file (F-M319): an unprocessed file is a FALLBACK, never a "best".
+
+**"Refused" is not one thing.** Only a verdict on the FILE justifies another download. A verdict on the AUDIO or the tooling (`ffmpeg not available`, `audio decode failed`, `not measured: no audio samples`) would come back word for word for every candidate, while each attempt still costs daily quota and writes another unprocessed file — up to ten for one episode. Such a refusal therefore ends the hunt, and says so: `correction hunt abandoned after N candidate(s): the fit refused for a reason no other candidate can change (<reason>)`. The distinction lives in `SubtitleSync.RefusalIsCandidateSpecific` — one predicate, exact prefixes, so "not measured: only 12 cues" (about the FILE, hunt continues) and "not measured: no audio samples" (about the AUDIO, hunt stops) cannot be confused.
+
+**Every refusal is still kept.** Each refused candidate lands in the reserved block as an unprocessed file (`99`, `98`, `97` … F-M317), so the repeat never costs content — and the hunt therefore also has a physical ceiling: when the ten reserved slots are taken, the write is refused and counted (F-M317).
+
+**The order is a precondition, not a detail.** The repeat sits AFTER every other download gate (FPS, no-bytes, language verification, structure, min-cues, runtime). A candidate whose CONTENT fails a gate never reaches the fit, so a download spent on one would be spent on a file the plugin is about to discard — the walk is worth continuing only because everything admitted to the fit has already passed those gates. The order is asserted as a property (T131), so a later edit that moves the fit above the gates goes red instead of silently costing quota.
+
+**The interaction with `DownloadMaxCandidatesPerLanguage`.** That budget still caps the total fetches; the refusal budget is a second, independent stop. Whichever is reached first ends the walk, and each has its own log line naming how many candidates were left untried.
+
+**Test: T131.**
+
+**F-M320 [D] (operator order 08.10.2026):** **The QA retry limit bounds the FIT. No other gate gives up, and nothing closes a pair.**
+
+**The rule.** `DownloadQaRetryLimit` (default 3) is the fit's budget — how many candidates may be fetched hoping for a provable correction (F-M318). It no longer counts anything else. A gate rejection (language, structure, min-cues, runtime, FPS, no-bytes) is **not** a budget: the candidate is discarded, counted in `RejectedCandidates`, memorized by release id (F-M200, so it is never fetched twice), and the walk moves on.
+
+**What was removed, at all four places it lived.** The failed-run counter (`QaFailTracker.RecordFailure`/`IsExhausted`) incremented once per saveless run of a (item, language) pair and, at the limit, the pair was CLOSED — by the pipeline's own work list, by the seeder's queue gate, by the refresh task's "actionable" filter, and by the run-end "language marked not-available" verdict. All four are gone with the counter, and so are the two status counters that reported them (`SkippedQaGiveUp`, `QaGiveUpLanguages`).
+
+**Why it had to go.** It was the second give-up in a system that now has a designed one. A file whose candidates are all badly ripped used to be declared "settled as unavailable" after N rejections and was then never searched again — indistinguishable, in the record, from a language SubDL genuinely does not carry. With the counter removed the file is searched again every cycle, and what bounds the work is the download budget per run (F-M50) plus the burned-release memory (F-M200), neither of which hides a live file.
+
+**What `QaFailTracker` still is:** the burned-candidate record and nothing else. Its fail counter, `IsExhausted`, `RecordFailure` and the `qa-fail:` keys are gone; a reset after a real save now clears only the burned candidates.
+
+**Test: T132.**
+
 **F-M307 [D] (development, 07.10.2026):** **The offset is a piecewise-constant function of time, fitted by exact dynamic programming. Supersedes the recursive Bayes-factor gate (F-M295) and the staircase applied from gate boundaries (F-M300).**
 
 **How the speech is recognised.** One audio track is decoded (chosen by language, §4.3.1), mono, 16 kHz, band-passed **300–3400 Hz** — the band that carries voice. The signal is cut into **20 ms frames** and each frame's RMS is taken as its level in dB. The levels are normalised against the file's own distribution: the **10th percentile** of frame level becomes 0 and the **90th percentile** becomes 1, clipped. The result is `p(t)`, a **speech probability between 0 and 1 per frame**. The method is **threshold-free** — no absolute level is assumed, so any recording level works, and it adapts to the file rather than to a calibration. `p(t)` is then dilated by a **0.30 s max-filter** (`SLACK`), which absorbs the fact that a subtitle boundary is not frame-exact and sharpens the peak.
@@ -633,9 +684,11 @@ over **all** placements of change points, where `sigma` is the median absolute c
 
 **The do-nothing fit competes.** One segment with shift exactly **0** is always an alternative inside the same objective, evaluated with the shift **fixed at zero** — not free to take the best value. A file with no drift therefore scores better left alone, and is left alone.
 
-**Deploy rule — a correction must prove itself.** A shift is written only if all of the following hold: the cues the fit actually moves show a mean score gain above `Z` standard errors of that mean (**paired test over the moved cues only**); the file as a whole does not get worse; and the largest shift is at least `MinShiftSec`. Consequences, both intended: a file already in sync is returned **byte-identical**, and a repeat run changes nothing.
+**Deploy rule — a correction must prove itself.** A shift is written only if all of the following hold: the cues the fit actually moves show a mean score gain above `DeployZ` standard errors of that mean (**paired test over the moved cues only**); the file as a whole does not get worse; and the largest shift is at least `MinShiftSec`. Consequences, both intended: a file already in sync is returned **byte-identical**, and a repeat run changes nothing.
 
-**Constants.** `Z = 1.0`. `MIN_SEG_FRAC = 0.12` — the shortest segment is a **fraction of the file's cues**, not a cue count, so the resolution is the same for a 45-minute episode and a feature film; floor 40 cues. `BLOCK_CUES = 40`. State grid `0.25 s`, range `±20 s`. `SLACK = 0.30 s`. `MinShiftSec` as in the refusal list of §4.3.2.
+**`DeployZ` is separate from `Z`, and the two must not be merged.** `Z` is the charge inside the DP and decides where segments are placed; `DeployZ` only decides whether a result is written. Tightening the deploy rule by raising `Z` would move the segmentation underneath it — the measured separation below was taken at `Z = 1.0`. Measured on **34 real fits of one series** (one morning, all language variants) against the operator's listening verdicts: every file he reported as audibly **wrong** sat at `t = 1.06 / 1.15 / 1.38 / 1.51`, every file he confirmed as **good** at `t = 2.66` and `8.45` — nothing in between, so the gap separates the groups completely, while `Z = 1.0` let all four bad files through because they cleared it by a hair. At `DeployZ = 2.0` the four are refused and no good file is lost. Refusal is the intended outcome there: those fits had landed on the wrong piece of sound (adjacent-segment jumps of **10.25–34.00 s**, against at most **5.50 s** for every good one), so leaving the file as downloaded is correct. Caveat to carry: this is a threshold fitted on the run it judges, so watch for a run of refusals and re-derive the bound as verdicts accumulate.
+
+**Constants.** `Z = 1.0` (DP charge). `DeployZ = 2.0` (deploy rule). `MIN_SEG_FRAC = 0.12` — the shortest segment is a **fraction of the file's cues**, not a cue count, so the resolution is the same for a 45-minute episode and a feature film; floor 40 cues. `BLOCK_CUES = 40`. State grid `0.25 s`, range `±20 s`. `SLACK = 0.30 s`. `MinShiftSec` as in the refusal list of §4.3.2.
 
 **Language-neutral.** The rule reads cue times and the audio only. Script, case and SDH notation change nothing, so there is no per-language calibration and no language-specific parameter.
 
@@ -1421,7 +1474,7 @@ The wording states what happened, not the code's vocabulary. Four counters, plus
 
 Scope: **every path that fetches and then discards** — no bytes, content already known, broken content, hearing-impaired gate, und-off, unmappable language, self-echo, duplicate-remote, forced. A stored `Rejected` verdict without an increment is a silent discard.
 
-Not counted: anything the run did not spend on — an empty hearing-impaired pool, candidates keep-best left untried, a retry that re-runs a gate already counted.
+Not counted: anything the run did not spend on — an empty hearing-impaired pool, candidates the walk left untried, a retry that re-runs a gate already counted.
 
 The number reconciles with the day's quota (`requests = saved + rejected`) and both run lines print it. **Test: T96, K1–K8.** See F-M218, F-M24d.
 
@@ -1447,7 +1500,7 @@ The daily-limit decision and its anchor are one rule (F-M62, F-M238).
 
 **F-M255 [D]:** **No candidate and no stream is discarded without a line naming it and the reason.**
 
-Every exit inside the candidate walk that does not end in a save, and every per-stream exit of the upload collector, writes one line at Verbose (`[SubDL-D] … reject …` / `[SubDL-V] …`) carrying the release or file, the language, and the measured reason. The gates are named individually: download failure (no bytes, too few bytes, with the byte count), language detection, structure (monotonic flag, cue span), cue count, runtime, content-already-known, keep-best stop (with the number of untried lower-ranked candidates), the QA memory filter (with the ids it removed), and the empty HI pool (with its size). The reason carries the measured value, not a verdict.
+Every exit inside the candidate walk that does not end in a save, and every per-stream exit of the upload collector, writes one line at Verbose (`[SubDL-D] … reject …` / `[SubDL-V] …`) carrying the release or file, the language, and the measured reason. The gates are named individually: download failure (no bytes, too few bytes, with the byte count), language detection, structure (monotonic flag, cue span), cue count, runtime, content-already-known, keep-best stop (with the number of untried lower-ranked candidates), the QA memory filter (with the ids it removed), the correction-hunt stop and its abandonment (with the reason no other candidate could change), and the empty HI pool (with its size). The reason carries the measured value, not a verdict.
 
 Every candidate walk and upload-collector exit carries its measured value (monotonic flag, cue span, byte count).
 
@@ -1628,7 +1681,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T57 (superseded by F-M282/F-M283):** A vanished `.sdh.srt` is an open pair on the next ask, with no invalidation step (F-M240, F-M283)
 **T58:** The HI variant comes from its own search (F-M241)
 
-**T59:** The best-per-language setting writes exactly that many numbered files (F-M242)
+**T59:** One corrected file per language: the walk stops at the first candidate whose correction proves itself, and an unprocessed file never ends it (F-M319/F-M318)
 
 **T60:** The HI answer comes from the registry, and `cc` counts as a marker (F-M243/F-M254)
 
@@ -1677,9 +1730,9 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T97:** A dry run leaves no stored verdict in either direction - the refetch stamp, the file-retry counter, the id-resolution budget, the registry upserts, the file-missing deletion and the cycle-queue removal are all held back, while the worker-run record is still written (F-M22, F-M287)
 
-**T98:** With `MaxCandidatesPerLanguage = 3` and `KeepBestPerLanguage = 4` the effective download cap AND the search's early-stop threshold are both 4; with the default pair they are both 3, and `0` stays unlimited on both (F-M95/F-M50).
+**T98:** The download cap and the search's early-stop threshold are the SAME number, derived from the single setting: with `MaxCandidatesPerLanguage = 3` both are 3, with `2` both are 2, with `0` both stay unlimited. The helper that derives them takes the budget ALONE — asserted structurally as well, so the removed keep-best parameter cannot reappear as a second argument (F-M95/F-M50/F-M319).
 
-**T99:** The candidate loop's two exits can both be reached: a budget below keep-best is raised, so "keep X" writes X files; a budget above keep-best is never lowered (F-M242/F-M50).
+**T99:** The candidate walk's exits are reachable and each is the one that applies: it stops at the first CORRECTED file, and it stops when the download budget is spent. A budget that no setting can raise is asserted to be passed through unchanged, so a deliberate value is never silently widened (F-M319/F-M50).
 **T100:** A deferred direction shows its own stored cause under the Workers list (never a generic "rate limit"), that line sits below the quota box rather than inside it, the bars keep their 75 %/95 % colours at every fill level, and the line disappears once the scheduler holds no fire for that direction (F-M288)
 
 
@@ -1717,6 +1770,12 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T128:** The reserved block is exactly **90–99**: `IsOriginalSlot` is true at 90 and 99 and false at 89 and 1. `PlanOriginalTarget` walks **downward** — 99 first, then 98 — and returns **null** when all ten are taken, never a name that would overwrite. `PlanTarget` for corrected files never returns a reserved slot: with slots 1–89 taken it returns slot 1 (`<base>.<lang>.01.srt`, F-M316) so the caller's own existence check refuses the move. Measured 07.10.2026 against the former loop bound of 999, which would have handed a corrected file slot 90 (F-M315)
 
 **T129:** The sidecar name carries its slot as a two-digit number, always, and the number is what orders the track list. Driven through the real builder and read back through the real parser: `Build` writes `.en.01.srt`, `.en.02.srt`, `.en.99.srt` — never a bare `.en.srt` — and a file written by the OLD form still parses, so the switch needs no migration. The order is asserted as a property of the names, not of the files: sorting a language's names lexicographically must place every corrected slot (1…89) before every reserved original (90…99), which is the ordering F-M315 reserves the block for — with the pre-F-M316 forms the same sort puts `en.srt` last and `en.2.srt` after `en.10.srt`, so this case FAILS against them. The marker shapes are covered too: the slot follows the markers (`.de.sdh.01.srt`), never precedes them, because the reader steps over the slot first and then reads the markers. (F-M316)
+
+**T130:** The slot tells the two kinds of downloaded file apart, and the two ranges are counted separately. Asserted on the real writer with a real directory listing: an **aligned** file is written `<base>.<lang>.01.srt`, the next aligned file `02`, and its kept original `99`; an **unprocessed** file — the fit refused, or the fit switch is off — is written straight into the reserved block as `99`/`98`/`97`, **with no corrected sibling beside it**, and the counter it advances is NOT the corrected one, so the next aligned file still gets `01` rather than being pushed up by an unprocessed predecessor. Asserted as an ABSENCE as well, because the failure is invisible in a file listing: on the unprocessed path exactly ONE file is written for one candidate — the write that used to run after a correction must not also run here, or the same subtitle exists twice. The ten-slot exhaustion case is asserted per branch: with 90–99 all taken, an unprocessed file is REFUSED, counted (`summary.Failed` on the main path, `summary.RejectedCandidates` on the HI path) and logged, never handed an invented name that would overwrite an unprocessed file already kept. The HI variant carries the same two ranges through its own counter. Negative control: plant the single-counter behaviour back (increment `correctedSlotCount` on the unprocessed path too) and require the case to go RED — the ordering `01`-first is the whole point and it must not pass by accident. (F-M317)
+
+**T131:** The download repeats until a correction proves itself, capped at the QA retry limit. Asserted on the REAL refusal strings through the REAL predicate — each case's fragment is first required to still exist in the source, so the case cannot keep passing after the wording drifts: `no proven gain`, a shift beyond the limit, `not measured: only N cues`, `not applied: …` and `fit error` are **candidate-specific** (hunt continues); `ffmpeg not available`, `audio decode failed` and `not measured: no audio samples` are **not** (hunt stops, and the stop is logged with its reason). The cap is asserted to BE `DownloadQaRetryLimit` (default 3) rather than a second knob invented beside it; the stop is asserted to sit against `refusalsThisRun`, and `keep-best` against `correctedSaved` — counting an unprocessed file as a "best" is exactly the bug that made the repeat impossible under the default `KeepBest=1`. **The ORDER is asserted as a property**: all six other download gates (FPS pre-check, no-bytes, language verification, structure, min-cues, runtime) must sit textually BEFORE the fit in the MAIN path, so a repeat never spends a download on a file a gate is about to discard. Negative controls (two): plant `if (savedCount >= keepBest)` back, and move the fit above the gates — each must turn the case RED. (F-M318)
+
+**T132:** The QA retry limit bounds the fit and nothing else. Asserted as an ABSENCE, because removing a give-up is invisible in a passing run: the pipeline contains no `IsExhausted` call, the `QaFailTracker` has no `IsExhausted`/`RecordFailure`/`CounterKey`, the seeder's queue gate and the refresh task's actionable filter no longer filter by a QA verdict, and the two counters that used to report it (`SkippedQaGiveUp`, `QaGiveUpLanguages`) are gone from the run summary. The three surviving consumers are asserted too, so the removal did not take the wrong thing with it: `GetSkippedCandidates` still feeds the walk's memory filter, `RecordSkippedCandidates` still burns this run's discards, and the fit still reads `DownloadQaRetryLimit` as its refusal budget (F-M318). Negative control: plant `IsExhausted` back into the pipeline source and require the case to go RED. (F-M320)
 
 **T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M294, F-M288)
 

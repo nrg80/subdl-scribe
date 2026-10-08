@@ -991,47 +991,38 @@ internal static class Program
         }
 
         // ── M  the search width, the download cap and keep-best agree (F-M95/F-M50/F-M242) ──
-        // Three settings met in one loop and none of them was checked against the others. The
-        // search received a HARD-CODED 3 while its own comment named
-        // DownloadMaxCandidatesPerLanguage, so raising the setting widened the download budget but
-        // never the search — the page walk stopped after three candidates per language and the
-        // loop could not see a fourth. Independently, a budget below the keep-best count made
-        // F-M242 unreachable: with KeepBest=4 and the default budget 3 the budget break fired
-        // before the fourth slot could be filled.
+        // One setting, two derived numbers. The search used to receive a HARD-CODED 3 while its own
+        // comment named DownloadMaxCandidatesPerLanguage, so raising the setting widened the download
+        // budget but never the search — the page walk stopped after three candidates per language and
+        // the loop could not see a fourth.
+        //
+        // F-M319 (operator order 08.10.2026): "best subtitles to keep per language" (F-M242) is GONE,
+        // and with it the SECOND parameter these checks used to pass. The contradictions they covered
+        // (a budget below keep-best making F-M242 unreachable, 0 raised to keep-best) cannot exist
+        // without that setting, so what is asserted now is the single decision that remains.
         {
-            // The configured default pair, unchanged: the effective numbers must stay 3 / 3, so
-            // the fix does not silently widen every existing installation's quota use.
-            Check("M1 the default budget is passed through unchanged",
-                  DownloadBudget.EffectiveDownloadCap(3, 1) == 3);
+            // The configured budget is passed through unchanged, so no existing installation's quota
+            // use moves.
+            Check("M1 the configured budget is passed through unchanged",
+                  DownloadBudget.EffectiveDownloadCap(3) == 3);
             Check("M2 the search threshold equals the unchanged budget",
-                  DownloadBudget.SearchEarlyStopThreshold(3, 1) == 3,
+                  DownloadBudget.SearchEarlyStopThreshold(3) == 3,
                   "-> today's behaviour, so the fix is not a hidden quota increase");
 
-            // The contradiction: the user asks for more files than the budget would let the loop try.
-            Check("M3 keep-best above the budget raises the cap (F-M242 reachable)",
-                  DownloadBudget.EffectiveDownloadCap(3, 4) == 4,
-                  "-> without this the budget break fires before slot 4 exists");
-            Check("M4 the search threshold follows the raised cap (F-M95)",
-                  DownloadBudget.SearchEarlyStopThreshold(3, 4) == 4,
-                  "-> else the loop may try 4 candidates the search never fetched");
-
-            // 0 means unlimited in F-M50 and must stay unlimited — it is NOT raised to keepBest.
+            // 0 means unlimited in F-M50 and must stay unlimited.
             Check("M5 unlimited stays unlimited (F-M50)",
-                  DownloadBudget.EffectiveDownloadCap(0, 4) == 0);
+                  DownloadBudget.EffectiveDownloadCap(0) == 0);
             Check("M6 an unlimited budget disables the early stop (F-M95/F-M50)",
-                  DownloadBudget.SearchEarlyStopThreshold(0, 4) == 0,
+                  DownloadBudget.SearchEarlyStopThreshold(0) == 0,
                   "-> 0 is the documented 'no early stop', not a threshold of zero");
 
-            // A budget ALREADY above keep-best is never lowered: the user set it deliberately.
-            Check("M7 a budget above keep-best is not lowered",
-                  DownloadBudget.EffectiveDownloadCap(10, 2) == 10);
-            Check("M8 a nonsensical keep-best cannot produce a zero threshold",
-                  DownloadBudget.SearchEarlyStopThreshold(3, 0) == 3,
-                  "-> keepBest is clamped to 1, so the search never stops after zero candidates");
+            // A deliberate budget is never lowered by a second setting — there is no second setting.
+            Check("M7 a budget of 10 stays 10",
+                  DownloadBudget.EffectiveDownloadCap(10) == 10);
 
             // The formula is only half the fix: a correct helper that nobody calls leaves the
-            // behaviour unchanged. These two are STRUCTURAL — they read the pipeline source and
-            // assert the numbers are wired in, so the literal cannot come back unnoticed.
+            // behaviour unchanged. These are STRUCTURAL — they read the pipeline source and assert the
+            // numbers are wired in, so the literal cannot come back unnoticed.
             {
                 string srcPath = Path.Combine(AppContext.BaseDirectory, "DownloadPipeline.source.cs");
                 string src = File.Exists(srcPath) ? File.ReadAllText(srcPath) : "";
@@ -1047,14 +1038,18 @@ internal static class Program
                 Check("M13 the download loop compares against the derived cap",
                       src.Contains("attempts >= downloadCap", StringComparison.Ordinal),
                       "-> not against the raw setting");
+                // F-M319: the removed setting must not survive in the pipeline as a dead call.
+                Check("M14 the budget helper is called with ONE argument",
+                      !Regex.IsMatch(src, @"EffectiveDownloadCap\(\s*[^)]*,"),
+                      "-> a second argument would be the dead keepBest parameter again");
             }
 
             // The two numbers are one decision, not two: this is the drift that caused the bug.
-            foreach (var (budget, keep) in new[] { (3, 1), (3, 4), (2, 2), (10, 2), (0, 4) })
+            foreach (int budget in new[] { 3, 2, 10, 0, 1 })
             {
-                Check($"M9.{budget}/{keep} search and download agree",
-                      DownloadBudget.SearchEarlyStopThreshold(budget, keep)
-                          == DownloadBudget.EffectiveDownloadCap(budget, keep));
+                Check($"M9.{budget} search and download agree",
+                      DownloadBudget.SearchEarlyStopThreshold(budget)
+                          == DownloadBudget.EffectiveDownloadCap(budget));
             }
         }
 

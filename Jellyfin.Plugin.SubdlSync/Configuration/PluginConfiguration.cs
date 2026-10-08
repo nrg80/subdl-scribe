@@ -357,17 +357,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public int DownloadMaxCandidatesPerLanguage { get; set; } = 3;
 
     /// <summary>
-    /// (user decision 11.09.2026): download the best X subtitles per
-    /// language instead of only the best one. X = 1 (default) keeps today's
-    /// behaviour (one .srt per language, JF shows one track). X &gt; 1 saves the
-    /// top X QA-passed candidates per language as numbered sidecar files
-    /// ("name.en.02.srt", "name.en.03.srt", ...) — Jellyfin then offers X
-    /// selectable tracks for that language. Each saved subtitle still consumes
-    /// download quota, so keep X small.
-    /// </summary>
-    public int DownloadKeepBestPerLanguage { get; set; } = 1;
-
-    /// <summary>
     /// F-M60 (user decision 09.09.2026): max consecutive file-access/extraction
     /// failures per item (file not found, ffmpeg extraction failed) before the
     /// item is skipped as "file-missing" in both pipelines — instead of failing
@@ -390,14 +379,19 @@ public class PluginConfiguration : BasePluginConfiguration
     public int IdRetryLimit { get; set; } = 3;
 
     /// <summary>
-    /// (user decision 11.09.2026): how many consecutive QA failures
-    /// (structure reject / runtime reject on downloaded candidates) a (item,
-    /// language) pair may accumulate before it is skipped without any SubDL
-    /// search or fetch until a save succeeds. Rationale: a broken-JF-runtime
-    /// item (stub/bad ffprobe) burns up to MaxCandidatesPerLanguage fetches per
-    /// refetch cycle forever; the counter ends that loop (live evidence:
-    /// 21 fetches/day wasted on test stubs). A saved subtitle resets the
-    /// counter. 0 = never give up (old behaviour). Default: 3.
+    /// F-M320 (operator order 08.10.2026): how many candidates may be FETCHED hoping for a correction
+    /// the alignment can prove against the audio — the correction hunt's budget (F-M318).
+    /// <para>
+    /// It used to be a give-up counter: N saveless runs of a (item, language) pair closed the pair
+    /// without any SubDL search or fetch until a save succeeded. That is gone. The operator's rule is
+    /// that this limit bounds the FIT, not the other gates — a gate rejection (language, structure,
+    /// min-cues, runtime) is a verdict on the candidate, not a budget, and the walk simply moves on.
+    /// What still bounds a hopeless file is the download budget per run (F-M50) plus the
+    /// burned-release memory (F-M200), neither of which hides a live file.
+    /// </para>
+    /// <para>
+    /// <c>0</c> means no cap on the correction hunt. Default: 3.
+    /// </para>
     /// </summary>
     public int DownloadQaRetryLimit { get; set; } = 3;
     /// <summary>

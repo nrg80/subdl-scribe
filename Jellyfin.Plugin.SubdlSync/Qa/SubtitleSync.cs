@@ -129,6 +129,43 @@ public static class SubtitleSync
         string Reason);
 
     /// <summary>
+    /// F-M318 (operator order 08.10.2026): whether a refusal says something about THE CANDIDATE or
+    /// about the AUDIO/tooling.
+    /// <para>
+    /// This is what separates a hunt worth continuing from quota spent for nothing. The fit refuses
+    /// for two kinds of reason, and they look identical in the log:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>a verdict on the FILE ("no proven gain", a shift beyond the limit, too few cues) — another
+    /// candidate may well align, so the download repeats;</item>
+    /// <item>a verdict on the AUDIO or the tooling ("ffmpeg not available", "audio decode failed", "no
+    /// audio samples") — every candidate would be refused for exactly the same reason, so walking on
+    /// burns the daily quota to reach an identical answer.</item>
+    /// </list>
+    /// <para>
+    /// The tool/audio reasons are therefore matched by their exact prefix and answered <c>false</c>.
+    /// Everything else is treated as candidate-specific: a verdict this method does not know is more
+    /// likely about the file than about the machine, and refusing to retry a fixable file is the worse
+    /// error of the two.
+    /// </para>
+    /// </summary>
+    /// <param name="reason">The refusal reason from <see cref="SyncAsync"/>.</param>
+    /// <returns>True when fetching another candidate could produce a different answer.</returns>
+    public static bool RefusalIsCandidateSpecific(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return true; // an unlabelled refusal is not evidence about the audio
+        }
+
+        // Exact prefixes, not a substring test: "not measured: only 12 cues" IS about the file and
+        // must keep the hunt alive, while "not measured: no audio samples" is about the audio.
+        return !reason.StartsWith("ffmpeg not available", StringComparison.Ordinal)
+               && !reason.StartsWith("audio decode failed", StringComparison.Ordinal)
+               && !reason.StartsWith("not measured: no audio samples", StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Measures and applies the shift for one downloaded subtitle.
     /// </summary>
     /// <param name="mediaPath">Media file the subtitle belongs to.</param>

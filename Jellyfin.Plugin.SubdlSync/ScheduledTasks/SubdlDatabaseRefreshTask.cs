@@ -631,14 +631,12 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 continue;
             }
 
-            // A pair SubDL settled as unavailable is not missing work — the QA budget said so.
-            var qaFails = new Registry.QaFailTracker(db);
-            var actionable = openPairs
-                .Where(r => !qaFails.IsExhausted(
-                    media.JellyfinItemId!,
-                    r.Language,
-                    Plugin.Instance?.Configuration.DownloadQaRetryLimit ?? 3))
-                .ToList();
+            // F-M320 (operator order 08.10.2026): the QA retry limit is the FIT's budget and no longer
+            // makes a pair actionless. The filter that used to sit here called an item "not missing
+            // work" once its candidates had been gate-rejected enough times — a give-up the operator
+            // removed, and the reason a file with only badly ripped candidates was never searched
+            // again. Every open pair is actionable now.
+            var actionable = openPairs;
             if (actionable.Count == 0)
             {
                 continue;

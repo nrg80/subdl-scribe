@@ -62,10 +62,13 @@
 // THE DEPLOY RULE
 //
 // A shift is written only if all of: the cues the fit actually moves show a mean score
-// gain above Z standard errors of that mean (a PAIRED test over the MOVED cues only —
+// gain above DeployZ standard errors of that mean (a PAIRED test over the MOVED cues only —
 // averaging over the whole file dilutes a 9 %-step's evidence tenfold and rejects real
 // corrections); the file as a whole does not get worse; and the largest shift is at
-// least MinShiftSec. Consequences, both intended: a file already in sync is returned
+// least MinShiftSec. DeployZ is a SEPARATE constant from Z: Z is the charge inside the
+// DP and shapes the segments, DeployZ only decides whether a result is written. Raising
+// Z to tighten the deploy rule would change the segmentation underneath it.
+// Consequences, both intended: a file already in sync is returned
 // byte-identical, and a repeat run changes nothing (idempotence).
 //
 // THE MEASURED LIMIT
@@ -117,8 +120,36 @@ public static class OffsetFit
     /// <summary>Floor for the shortest segment, in cues.</summary>
     public const int MinSegFloor = 40;
 
-    /// <summary>Significance of a step, in standard errors of its own gain.</summary>
+    /// <summary>
+    /// Significance of a step, in standard errors of its own gain, as charged INSIDE the
+    /// fit. This is the DP charge only — it decides where segments are placed. Do not
+    /// raise it to make the deploy rule stricter: that changes the segmentation, and the
+    /// measured separation below (1.51 s against 2.66 s) was taken at 1.0.
+    /// </summary>
     public const double Z = 1.0;
+
+    /// <summary>
+    /// Significance the deploy rule demands of the cues the fit MOVES, in standard errors
+    /// of their mean gain. Separate from <see cref="Z"/> on purpose: that one is the DP
+    /// charge and shapes the segments, this one only decides whether the result is written.
+    /// <para>
+    /// Measured on 34 real fits of one series (one morning, all language variants), against
+    /// the operator's own listening verdicts: every file he reported as audibly WRONG sat
+    /// at t = 1.06 / 1.15 / 1.38 / 1.51, every file he confirmed as GOOD at t = 2.66 and
+    /// 8.45. Nothing sits between 1.51 and 2.66, so the gap separates the two groups
+    /// completely, while <see cref="Z"/> = 1.0 let all four bad files through — they cleared
+    /// it by a hair and were written. At 2.0 the four are refused (left as downloaded) and
+    /// no good file is lost.
+    /// </para>
+    /// <para>
+    /// This is a threshold fitted on the run it judges, which this class's own notes warn
+    /// against — but the failure it catches is not a subtle one: those fits had landed on
+    /// the wrong piece of sound (adjacent-segment jumps of 10.25-34.00 s against at most
+    /// 5.50 s for the good ones), so a weak paired test is the observable symptom of a
+    /// wrong fit. Watch for a run of refusals; re-derive the bound as verdicts accumulate.
+    /// </para>
+    /// </summary>
+    public const double DeployZ = 2.0;
 
     /// <summary>
     /// A segment whose shift sits this close to the search bound has no measurable
@@ -378,7 +409,7 @@ public static class OffsetFit
             largest = Math.Max(largest, Math.Abs(v));
         }
 
-        bool reverted = moved == 0 || tMoved <= Z || scoreAfter < scoreBefore - 1e-9
+        bool reverted = moved == 0 || tMoved <= DeployZ || scoreAfter < scoreBefore - 1e-9
                         || largest < SubtitleSync.MinShiftSec;
         if (reverted)
         {

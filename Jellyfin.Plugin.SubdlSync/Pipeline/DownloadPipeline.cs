@@ -97,12 +97,6 @@ public class DownloadRunSummary
     /// <summary>Gets or sets the count of items not due for refetch (F-M47 gap).</summary>
     public int SkippedNotDue { get; set; }
 
-    /// <summary>Gets or sets the count of items fully skipped because every missing language hit its QA retry limit.</summary>
-    public int SkippedQaGiveUp { get; set; }
-
-    /// <summary>Gets or sets the total count of (item, language) pairs skipped for the QA retry limit this run.</summary>
-    public int QaGiveUpLanguages { get; set; }
-
     /// <summary>
     /// F-M286: candidates this run FETCHED and then threw away — every reject path, not the QA
     /// gates alone. The four gates (language/structure/min-cues/runtime) are a subset; a candidate
@@ -899,9 +893,15 @@ public sealed class DownloadPipeline : IDisposable
             .Required(TargetLanguages, _config.DownloadHearingImpaired);
         var openPairs = Registry.OpenPairs(mediaPath, required, EmbeddedPresentLanguagesOf(item));
 
-        var openStale = openPairs
-            .Where(r => !_qaFails.IsExhausted(item.Id.ToString(), r.Language, _config.DownloadQaRetryLimit))
-            .ToList();
+        // F-M320 (operator order 08.10.2026): a gate rejection no longer closes a pair. The QA retry
+        // limit is the FIT's budget (F-M318) — it says how often another candidate may be fetched
+        // hoping for a provable correction, not how often a language may be tried. The give-up filter
+        // that used to sit here removed a pair from the work list after N gate rejections, which made
+        // a file whose candidates are all badly ripped look "settled as unavailable" and stopped it
+        // ever being searched again. What still bounds the work on such a file is the download budget
+        // (F-M50) per run, plus the burned-release memory (F-M200) so the same discard is never
+        // fetched twice.
+        var openStale = openPairs.ToList();
 
         if (openStale.Count == 0)
         {
@@ -1268,27 +1268,12 @@ public sealed class DownloadPipeline : IDisposable
         // whether the whole file can be marked complete.
         var closedLangs = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // QA-exhausted (item, language) pairs are removed BEFORE the search —
-        // their candidates passed the id/release gates but fell through the QA gates
-        // too often (e.g. stub items with broken JF runtimes). No search call, no
-        // fetches, counter persists until a save succeeds or the limit changes.
-        int qaSkippedLangs = missing.RemoveAll(lang => _qaFails.IsExhausted(item.Id.ToString(), lang, _config.DownloadQaRetryLimit));
-        if (qaSkippedLangs > 0)
-        {
-            summary.QaGiveUpLanguages += qaSkippedLangs;
-            if (_config.LogMode >= LogLevelMode.Verbose)
-            {
-                LogUtil.PerItem(_config.LogMode, _logger, 
-                    "[SubDL-D] {File} — {N} language(s) skipped (QA retry limit {Limit} reached): {Langs} — no search, no fetch until a save succeeds",
-                    Path.GetFileName(mediaPath), qaSkippedLangs, _config.DownloadQaRetryLimit, string.Join(",", missing));
-            }
-            if (missing.Count == 0)
-            {
-                summary.SkippedItems++;
-                summary.SkippedQaGiveUp++;
-                return;
-            }
-        }
+        // F-M320 (operator order 08.10.2026): the QA retry limit is the FIT's budget (F-M318), so it no
+        // longer removes a language from the search. The removal that used to sit here — "QA-exhausted
+        // pairs are removed BEFORE the search" — was the other half of the give-up the operator
+        // removed; keeping it would have left the same silence at a different place in the run. What
+        // bounds a hopeless file now is the download budget per run (F-M50) and the burned-release
+        // memory (F-M200), both of which leave the search itself intact.
 
         // F-M20/F-M26: the configured rate paces this search; the plugin holds no budget of
         // its own. A per-run hourly bucket sat here until 03.10.2026 and could stop the whole run
@@ -1565,9 +1550,29 @@ public sealed class DownloadPipeline : IDisposable
             // so the next run walks fresh candidates only.
             var qaRejectedReleases = new List<string>();
             int savedCount = 0;
-            int keepBest = Math.Max(1, _config.DownloadKeepBestPerLanguage);
+            // F-M317 (operator order 08.10.2026): corrected and unprocessed files take their
+            // numbers from OPPOSITE ENDS of the range, so they need counters of their own. One
+            // shared counter would let an unprocessed file consume slot 01 and push a corrected
+            // file to 02 — the operator's rule is that a corrected file starts at 01.
+            int correctedSlotCount = 0;
+            int hiCorrectedSlotCount = 0;
             int downloadCap = DownloadBudget.EffectiveDownloadCap(
-                _config.DownloadMaxCandidatesPerLanguage, keepBest);
+                _config.DownloadMaxCandidatesPerLanguage);
+
+            // F-M318 (operator order 08.10.2026): the fit's refusal does NOT end the walk — the
+            // operator asked for the download to REPEAT until a candidate's correction proves itself
+            // against the audio, capped at the QA retry limit:
+            //
+            //   refusalsThisRun  — candidates fetched and refused by the fit this run. Each one is
+            //                      KEPT, so it is also the number of unprocessed files written.
+            //   refusalBudget    — how many of those are spent before the walk stops hunting.
+            //   correctedSaved   — candidates whose correction WAS applied. Only these end the walk
+            //                      (F-M319): an unprocessed file is a fallback, never a "best", and
+            //                      letting it end the walk is what made the repeat impossible.
+            int refusalsThisRun = 0;
+            int refusalBudget = Math.Max(0, _config.DownloadQaRetryLimit);
+            int correctedSaved = 0;
+            bool correctionHuntAbandoned = false;
             foreach (var (cand, _) in ranked)
             {
                 // F-M50: download budget per (item, language) — each candidate download
@@ -1593,7 +1598,21 @@ public sealed class DownloadPipeline : IDisposable
                     break;
                 }
 
+                // F-M318: enough candidates were fetched and refused by the fit — stop hunting for a
+                // provable correction. This sits BEFORE the fetch on purpose: breaking after the
+                // refusal would burn one more download from the daily quota and keep a file the
+                // budget says not to keep.
+                if (refusalBudget > 0 && refusalsThisRun >= refusalBudget)
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] {File} [{Lang}] — correction hunt stopped: {N} candidate(s) fetched and refused by the fit (limit {Limit}); {Kept} unprocessed file(s) kept, {M} lower-ranked candidate(s) not tried",
+                        Path.GetFileName(mediaPath), lang, refusalsThisRun, refusalBudget,
+                        refusalsThisRun, Math.Max(0, ranked.Count - attempts));
+                    break;
+                }
+
                 attempts++;
+
                 // F-M43 Stufe 1 — FPS pre-check (skip criterion when candidate fps unknown)
                 if (videoFps.HasValue && cand.Fps > 0 && _config.DownloadFpsTolerancePercent > 0)
                 {
@@ -1627,23 +1646,10 @@ public sealed class DownloadPipeline : IDisposable
                             cand.HearingImpaired ? "yes" : "no");
                     }
 
-                    // F-M242: show the slots the run WOULD fill, not just the first candidate.
-                    // KeepBestPerLanguage decides how many numbered files a language gets
-                    // ("name.en.01.srt", "name.en.02.srt", …); while the loop was cut short by an
-                    // unconditional break the setting had no effect at all, and a dry run that
-                    // reported one candidate per language could not reveal that.
-                    if (_config.LogMode >= LogLevelMode.Verbose && keepBest > 1)
-                    {
-                        var slots = ranked.Take(keepBest).ToList();
-                        for (int s = 0; s < slots.Count; s++)
-                        {
-                            LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL-D] DRY-RUN slot {Slot}/{KeepBest} {File} [{Lang}] → {Name}",
-                                s + 1, keepBest, Path.GetFileName(mediaPath), lang,
-                                // F-M260: same builder as the real save, so the preview cannot drift.
-                                Path.GetFileName(SidecarNaming.Build(mediaPath, lang, hearingImpaired: false, slot: s + 1)));
-                        }
-                    }
+                    // F-M319: the slot preview is GONE with the setting. It existed to show the X
+                    // slots "best subtitles to keep" would fill (F-M242). One corrected file per
+                    // language means there is exactly one slot, and a one-line preview of a single
+                    // fixed name would say nothing the DRY-RUN line above does not already say.
 
                     // F-M241: the HI answer comes from the hi=1 search's own pool. A dry run must
                     // report it, because the real selection happens after the file download, which
@@ -1891,6 +1897,11 @@ public sealed class DownloadPipeline : IDisposable
                 byte[] writeBytes = bytes;
                 string content = DecodeSrt(bytes);
                 string? unsyncPayload = null;
+                // F-M318: does THIS candidate's refusal justify walking to the next one? Only a
+                // verdict on the file does; a verdict on the audio (or a missing ffmpeg) would be
+                // repeated identically for every candidate, so the walk stops after the save.
+                bool huntForCorrection = false;
+                string huntReason = "not measured";
                 if (_config.QaDownloadAutoSync)
                 {
                     Qa.SubtitleSync.Result syncResult = await SyncMeasuredAsync(
@@ -1911,6 +1922,11 @@ public sealed class DownloadPipeline : IDisposable
                     }
                     else
                     {
+                        // F-M318: a verdict on the FILE keeps the hunt alive; a verdict on the audio
+                        // or the tooling does not — see RefusalIsCandidateSpecific.
+                        huntForCorrection = Qa.SubtitleSync.RefusalIsCandidateSpecific(syncResult.Reason);
+                        huntReason = syncResult.Reason;
+
                         // F-M309: ONE branch, not two. The "ffmpeg not available" case had its own
                         // branch, but it called the same PerItem helper as the general one and was
                         // therefore gated by the same Verbose threshold — two branches, one
@@ -1932,14 +1948,58 @@ public sealed class DownloadPipeline : IDisposable
 
                 try
                 {
-                    // Slot 1 = "<base>.<lang>.01.srt", further slots
-                    // "<base>.<lang>.02.srt", "<base>.<lang>.03.srt", ... (F-M316, two digits) — Jellyfin
-                    // listet jede externe Datei als eigene wählbare Spur.
+                    // F-M317 (operator order 08.10.2026): the SLOT now encodes WHICH KIND of file
+                    // this is, and the two kinds number from opposite ends:
+                    //
+                    //   corrected ("aligned")          -> 01, 02, 03 … upward, its own counter
+                    //   unprocessed (fit refused, or    -> 99, 98, 97 … downward
+                    //   the fit switch is off)
+                    //
+                    // "Regardless of whether a corrected version exists" is the operator's own
+                    // wording: an unprocessed file takes a reserved slot even when nothing was
+                    // corrected beside it. So the reserved block is no longer only the home of the
+                    // ORIGINAL OF a correction — it is the home of everything that was not aligned.
+                    //
+                    // The two counters are separate ON PURPOSE. With one shared counter an
+                    // unprocessed file would consume slot 01 and push the next CORRECTED file to 02,
+                    // while the rule the operator stated is that alignment starts at 01.
+                    //
+                    // Slot 1 = "<base>.<lang>.01.srt", further slots "<base>.<lang>.02.srt", …
+                    // (F-M316, two digits) — Jellyfin lists every external file as its own
+                    // selectable track, in the order the NAMES sort.
                     // F-M260: the name comes from the shared builder, so a name composed here is
                     // one SidecarNaming.Parse recognizes by construction. A hearing-impaired file
                     // gets the ".sdh" marker the reader demands — without it the file never counted
                     // as HI again and the F-M254 reader reported the variant as absent forever.
-                    string targetPath = SidecarNaming.Build(mediaPath, lang, effectiveHi, savedCount + 1);
+                    bool alignedForNaming = unsyncPayload != null;
+                    string? targetPath;
+                    if (alignedForNaming)
+                    {
+                        targetPath = SidecarNaming.Build(mediaPath, lang, effectiveHi, correctedSlotCount + 1);
+                    }
+                    else
+                    {
+                        // Unprocessed: the file IS the original, so it lands in the reserved block
+                        // itself. No corrected sibling is written beside it.
+                        System.Collections.Generic.HashSet<string>? namesForSlot =
+                            SidecarNamesInDirectory(Path.GetDirectoryName(mediaPath) ?? ".");
+                        targetPath = namesForSlot == null
+                            ? null
+                            : SidecarNaming.PlanOriginalTarget(mediaPath, lang, effectiveHi, namesForSlot);
+                        if (targetPath == null)
+                        {
+                            // All ten reserved slots taken, or the directory could not be listed.
+                            // Refusing is the safe direction — an invented name would overwrite an
+                            // unprocessed file already kept — but it is NOT silent: this is the one
+                            // path where a fetched subtitle is not written at all.
+                            summary.Failed++;
+                            ReportOutcome(item, ItemOutcome.RealFailure);
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL-D] SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 90–99; nothing written",
+                                Path.GetFileName(mediaPath), lang);
+                            continue;
+                        }
+                    }
 
                     // (10.09.2026, user decision): per-run read-only guard — one cheap
                     // probe write per DIRECTORY (cached for the run) before the first real
@@ -1993,6 +2053,9 @@ public sealed class DownloadPipeline : IDisposable
                     {
                         try
                         {
+                            // F-M317: the corrected file took its number from the corrected counter, and
+                            // the slot it used is now ON DISK — SidecarNamesInDirectory must see it, or
+                            // the original could be handed the same name.
                             System.Collections.Generic.HashSet<string>? names = SidecarNamesInDirectory(targetDir);
                             string? originalPath = names == null
                                 ? null
@@ -2053,19 +2116,46 @@ public sealed class DownloadPipeline : IDisposable
                     summary.Downloaded++;
                     ReportOutcome(item, ItemOutcome.Done);
                     savedCount++;
-                    savedAny = true;
+                    // F-M317: only an ALIGNED file advances the corrected counter. An unprocessed
+                    // file already took its number from the reserved block and must not consume a
+                    // corrected slot.
+                    if (alignedForNaming)
+                    {
+                        correctedSlotCount++;
+                        correctedSaved++;
+                        savedAny = true;
+                    }
+                    else
+                    {
+                        // F-M318: the refusal is MEMORIZED as a download (the file IS kept) but it is
+                        // NOT a "best" — so `savedAny` stays false here on purpose, and the walk keeps
+                        // hunting for a candidate whose correction proves itself.
+                        refusalsThisRun++;
+
+                        // ...but only a verdict about the FILE is worth another download. A verdict
+                        // about the audio or the tooling ("ffmpeg not available") would be repeated
+                        // word for word for every candidate, so the walk ends after this save instead
+                        // of spending the daily quota to reach an identical answer.
+                        if (!huntForCorrection)
+                        {
+                            correctionHuntAbandoned = true;
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL-D] {File} [{Lang}] — correction hunt abandoned after {N} candidate(s): the fit refused for a reason no other candidate can change ({Reason})",
+                                Path.GetFileName(mediaPath), lang, refusalsThisRun, huntReason);
+                        }
+                    }
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] SAVED {Path} (lang={Lang}, score {Score}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb}) for {File} — best-slot {N}/{Keep}",
+                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] SAVED {Path} (lang={Lang}, score {Score}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb}) for {File}",
                             Path.GetFileName(targetPath), lang, Score(cand, videoBase), cand.ReleaseName,
                             string.IsNullOrEmpty(cand.OriginalName) ? "—" : cand.OriginalName,
                             string.IsNullOrEmpty(cand.Author) ? "—" : cand.Author,
-                            resolvedImdb ?? "—", resolvedTmdb ?? "—", Path.GetFileName(mediaPath), savedCount, keepBest);
+                            resolvedImdb ?? "—", resolvedTmdb ?? "—", Path.GetFileName(mediaPath), savedCount);
                     }
 
                     // F-M42b + F-M241: the hearing-impaired variant, from the SECOND search's own
-                    // pool. This block sits BEFORE the keepBest break on purpose — it used to sit
-                    // after it, and with the default KeepBestPerLanguage=1 the break always fired
+                    // pool. This block sits BEFORE the corrected-file break on purpose — it used to sit
+                    // after it, and with the walk ending at the first save the break always fired
                     // first, so the block was unreachable and no HI variant was ever fetched
                     // (measured: zero "SAVED HI variant" lines in every log). The HI candidate
                     // comes from the hi=1 search, not from the regular pool: the two pools share
@@ -2165,10 +2255,51 @@ public sealed class DownloadPipeline : IDisposable
                                 {
                                     if (!_config.DownloadDryRun)
                                     {
+                                        // F-M317 (operator order 08.10.2026): the HI variant follows the
+                                        // SAME rule as the main track — aligned 01, 02, 03 … upward, not
+                                        // aligned 99, 98, 97 … downward. The HI pool is where the drift
+                                        // lives, so it is the pool most likely to land in the reserved
+                                        // block; leaving this branch on the old rule would put a corrected
+                                        // HI file at 01 beside an unaligned one at 01 as well.
                                         // F-M260: the shared builder, not a hand-written
                                         // concatenation — the same rule the reader parses.
-                                        string hiPath = SidecarNaming.Build(mediaPath, lang, hearingImpaired: true);
+                                        bool hiAligned = hiUnsync != null;
+                                        string? hiPath;
+                                        if (hiAligned)
+                                        {
+                                            hiPath = SidecarNaming.Build(
+                                                mediaPath, lang, hearingImpaired: true, hiCorrectedSlotCount + 1);
+                                        }
+                                        else
+                                        {
+                                            System.Collections.Generic.HashSet<string>? hiSlotNames =
+                                                SidecarNamesInDirectory(targetDir);
+                                            hiPath = hiSlotNames == null
+                                                ? null
+                                                : SidecarNaming.PlanOriginalTarget(
+                                                    mediaPath, lang, hearingImpaired: true, hiSlotNames);
+                                        }
+
+                                        if (hiPath == null)
+                                        {
+                                            // Every reserved slot taken, or the directory could not be
+                                            // listed. Refusing is the safe direction — an invented name
+                                            // would overwrite an unprocessed file already kept — and it is
+                                            // counted, because this is the one path where a fetched
+                                            // subtitle is not written at all.
+                                            summary.RejectedCandidates++;
+                                            LogUtil.PerItem(_config.LogMode, _logger,
+                                                "[SubDL-D] HI SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 90–99; nothing written ({Release})",
+                                                Path.GetFileName(mediaPath), lang, hi.ReleaseName);
+                                        }
+                                        else
+                                        {
                                         await AtomicWriteAsync(hiPath, hiWriteBytes, ct).ConfigureAwait(false);
+                                        if (hiAligned)
+                                        {
+                                            hiCorrectedSlotCount++;
+                                        }
+
                                         // F-M315: the HI track's original is kept the same way — a loose
                                         // sidecar in the reserved block, carried with the `.sdh` marker so
                                         // it sits on the variant's own name space, and locked against
@@ -2235,6 +2366,7 @@ public sealed class DownloadPipeline : IDisposable
                                                 string.IsNullOrEmpty(hi.Author) ? "—" : hi.Author,
                                                 resolvedImdb ?? "—", resolvedTmdb ?? "—");
                                         }
+                                        }
                                     }
                                     else
                                     {
@@ -2281,16 +2413,29 @@ public sealed class DownloadPipeline : IDisposable
                     }
                     }
 
-                    // X best per language — keep walking when more slots are open.
-                    if (savedCount >= keepBest)
+                    // F-M319 (operator order 08.10.2026): the walk ends after the FIRST corrected file.
+                    // The "best X per language" setting is gone, so there is no count left to compare
+                    // against — what remains is the rule the setting's default always expressed: one
+                    // corrected file per language. An unprocessed file is a FALLBACK and does NOT end
+                    // the walk; only a proven correction does.
+                    if (correctedSaved >= 1)
                     {
                         // F-M255: name the candidates this stop leaves untried — otherwise they are
                         // absent from the record although the next run will walk them.
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — keep-best reached ({Saved}/{Keep}); {N} lower-ranked candidate(s) not tried this run",
-                            Path.GetFileName(mediaPath), lang, savedCount, keepBest,
+                            "[SubDL-D] {File} [{Lang}] — corrected file saved; {N} lower-ranked candidate(s) not tried this run",
+                            Path.GetFileName(mediaPath), lang,
                             Math.Max(0, ranked.Count - attempts));
 
+                        break;
+                    }
+
+                    // F-M318: a refusal no other candidate can change ends the hunt here. Continuing
+                    // would download every remaining candidate to receive the same refusal word for
+                    // word, while each one still costs daily quota and writes another unprocessed file
+                    // — up to ten of them for one episode.
+                    if (correctionHuntAbandoned)
+                    {
                         break;
                     }
 
@@ -2309,24 +2454,28 @@ public sealed class DownloadPipeline : IDisposable
                 }
             }
 
-            // Run end (before the next language starts): record the
-            // burned releases and count the run as failed (give-up after
-            // DownloadQaRetryLimit consecutive failed runs).
+            // Run end (before the next language starts): remember the burned releases so the next run
+            // walks FRESH candidates.
+            //
+            // F-M320 (operator order 08.10.2026): the failed-run counter and its give-up are GONE
+            // here. It counted every saveless run of a (item, language) pair and closed the pair after
+            // DownloadQaRetryLimit of them — the same give-up the operator removed, one layer up, and
+            // it closed a pair on GATE rejections, which are now explicitly not a budget. The counter
+            // itself survives for the FIT (F-M318 uses its value as the refusal budget), so it is no
+            // longer incremented on gate rejections: RecordSkippedCandidates below is what remembers
+            // this run's discards, and it is keyed by release id, which is the grain that matters.
             if (!savedAny && attempts > 0)
             {
                 if (qaRejectedReleases.Count > 0)
                 {
                     _qaFails.RecordSkippedCandidates(item.Id.ToString(), lang, qaRejectedReleases);
-                }
 
-                _qaFails.RecordFailure(item.Id.ToString(), lang);
-
-                if (_config.LogMode >= LogLevelMode.Verbose)
-                {
-                    LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — run failed without save; {N} download(s) memorized, failed-run counter now {C} (give-up at {Limit})",
-                        Path.GetFileName(mediaPath), lang, qaRejectedReleases.Count,
-                        _qaFails.IsExhausted(item.Id.ToString(), lang, _config.DownloadQaRetryLimit) ? _config.DownloadQaRetryLimit : -1,
-                        _config.DownloadQaRetryLimit);
+                    if (_config.LogMode >= LogLevelMode.Verbose)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — run ended without save; {N} download(s) memorized, next run takes fresh candidates",
+                            Path.GetFileName(mediaPath), lang, qaRejectedReleases.Count);
+                    }
                 }
             }
 
@@ -2342,11 +2491,6 @@ public sealed class DownloadPipeline : IDisposable
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — no candidate passed checks (F-M46), language marked not-available",
                         Path.GetFileName(mediaPath), lang);
-                }
-                // F-M88c: QA-exhausted or all candidates rejected = terminal as well
-                if (_qaFails.IsExhausted(item.Id.ToString(), lang, _config.DownloadQaRetryLimit))
-                {
-                    closedLangs.Add(lang);
                 }
             }
         }
@@ -2594,7 +2738,7 @@ public sealed class DownloadPipeline : IDisposable
             // as before.
             // F-M95: the threshold is derived from the two candidate settings, never a literal.
             int earlyStop = DownloadBudget.SearchEarlyStopThreshold(
-                _config.DownloadMaxCandidatesPerLanguage, _config.DownloadKeepBestPerLanguage);
+                _config.DownloadMaxCandidatesPerLanguage);
             // F-M282: the regular search runs only when a REGULAR file is open. When the variant is
             // the only thing missing, `langs` is empty and this call would be a search for nothing —
             // worse, it used to be the call that re-fetched a subtitle already on disk.

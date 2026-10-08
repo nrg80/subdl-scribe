@@ -75,6 +75,9 @@ public static class AutoSyncRun
         failures += ShiftClamped();
         failures += ByteStyle();
         failures += UnsyncSuffix();
+        failures += CorrectionHunt();
+        failures += QaBudgetIsTheFits();
+        failures += SlotTellsKind();
         failures += UnsyncArchive();
         failures += StreamingDecoder();
         failures += FitTimeCredit();
@@ -720,6 +723,414 @@ public static class AutoSyncRun
             string.Join(" | ", oldOrdered.Select(n => n.Replace(baseName + ".", "…"))));
         f += oldBareLast ? 0 : 1;
         f += oldTenBeforeTwo ? 0 : 1;
+
+        Console.WriteLine();
+        return f;
+    }
+
+    /// <summary>
+    /// Case 5f: the QA retry limit bounds the FIT — no other gate gives up and nothing closes a pair
+    /// (F-M320, operator order 08.10.2026).
+    /// <para>
+    /// Asserted as an ABSENCE, which is the only way a removed give-up can be asserted at all: a
+    /// passing run looks identical whether the give-up is there or not. The three surviving
+    /// consumers are asserted in the SAME case, because "the removal took the wrong thing with it" is
+    /// the failure this pattern invites — the memory filter and the fit's budget must still be wired.
+    /// </para>
+    /// </summary>
+    private static int QaBudgetIsTheFits()
+    {
+        int f = 0;
+        Console.WriteLine("[5f] the QA retry limit bounds the fit, not the gates (F-M320)");
+
+        const string pipeline = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs";
+        const string tracker = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Registry/QaFailTracker.cs";
+        const string seeder = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlSeeder.cs";
+        const string refresh = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlDatabaseRefreshTask.cs";
+        foreach (string p in new[] { pipeline, tracker, seeder, refresh })
+        {
+            if (!System.IO.File.Exists(p))
+            {
+                Console.WriteLine($"  [SKIP] {System.IO.Path.GetFileName(p)} not reachable from here");
+                return f;
+            }
+        }
+
+        string src = System.IO.File.ReadAllText(pipeline);
+
+        // 1. The QA give-up is gone from the pipeline. Scoped to `_qaFails` on purpose: `_fileRetries`
+        // and `_idNotFound` are different budgets (F-M60 file-missing, F-M66 id-not-found) that the
+        // operator did not touch, and a blanket search for "IsExhausted" would demand their removal
+        // too — the assertion would then be about the wrong mechanism.
+        bool noGiveUpCall = !src.Contains("_qaFails.IsExhausted", StringComparison.Ordinal);
+        Check("the pipeline applies no QA give-up to a work list any more", noGiveUpCall,
+            noGiveUpCall ? "no _qaFails.IsExhausted call" : "a QA give-up is still applied to a work list");
+        f += noGiveUpCall ? 0 : 1;
+
+        // ...and the two budgets that are NOT the QA one are asserted to still be there, so this
+        // scoping is a decision rather than an oversight.
+        bool otherBudgetsKept = src.Contains("_fileRetries.IsExhausted(", StringComparison.Ordinal)
+                                && src.Contains("_idNotFound.IsExhausted(", StringComparison.Ordinal);
+        Check("the file-missing (F-M60) and id-not-found (F-M66) budgets are untouched",
+            otherBudgetsKept,
+            otherBudgetsKept ? "both other budgets still applied" : "an unrelated budget was removed too");
+        f += otherBudgetsKept ? 0 : 1;
+
+        // 2. The counter itself is gone from the tracker — the method, its key and its writes.
+        string trackerSrc = System.IO.File.ReadAllText(tracker);
+        string[] counterParts = { "IsExhausted", "RecordFailure", "CounterKey", "GetCounter", "qa-fail:" };
+        string? stillThere = null;
+        foreach (string part in counterParts)
+        {
+            if (trackerSrc.Contains(part, StringComparison.Ordinal))
+            {
+                stillThere = part;
+                break;
+            }
+        }
+
+        Check("QaFailTracker is the burned-candidate record ONLY (counter removed)", stillThere is null,
+            stillThere is null ? "no counter left in the tracker" : $"\"{stillThere}\" is still in the tracker");
+        f += stillThere is null ? 0 : 1;
+
+        // 3. Both other readers stop filtering on a QA verdict.
+        bool seederClean = !System.IO.File.ReadAllText(seeder)
+            .Contains("qaFails.IsExhausted", StringComparison.Ordinal);
+        Check("the seeder's queue gate no longer drops a pair on a QA verdict", seederClean,
+            seederClean ? "queue gate asks coverage only" : "the seeder still filters on the counter");
+        f += seederClean ? 0 : 1;
+
+        bool refreshClean = !System.IO.File.ReadAllText(refresh)
+            .Contains("qaFails.IsExhausted", StringComparison.Ordinal);
+        Check("the refresh task's actionable filter is unchanged by a QA verdict", refreshClean,
+            refreshClean ? "every open pair is actionable" : "the refresh task still filters on the counter");
+        f += refreshClean ? 0 : 1;
+
+        // 4. The two run-summary counters are gone with their source.
+        bool summaryClean = !src.Contains("SkippedQaGiveUp", StringComparison.Ordinal)
+                            && !src.Contains("QaGiveUpLanguages", StringComparison.Ordinal);
+        Check("the give-up status counters are gone with the give-up", summaryClean,
+            summaryClean ? "neither counter remains" : "a counter remains that nothing can increment");
+        f += summaryClean ? 0 : 1;
+
+        // 5. THE SURVIVORS — what the removal must NOT have taken.
+        bool memoryKept = src.Contains("_qaFails.GetSkippedCandidates(", StringComparison.Ordinal);
+        Check("the walk still consults the burned-release memory", memoryKept,
+            memoryKept ? "GetSkippedCandidates still filters the walk" : "the memory filter was removed too");
+        f += memoryKept ? 0 : 1;
+
+        bool burnKept = src.Contains("_qaFails.RecordSkippedCandidates(", StringComparison.Ordinal);
+        Check("this run's discards are still memorized", burnKept,
+            burnKept ? "RecordSkippedCandidates still called" : "discards are no longer burned — quota would repeat");
+        f += burnKept ? 0 : 1;
+
+        bool budgetKept = src.Contains("int refusalBudget = Math.Max(0, _config.DownloadQaRetryLimit);",
+                                       StringComparison.Ordinal);
+        Check("the fit still takes the limit as its budget", budgetKept,
+            budgetKept ? "DownloadQaRetryLimit → refusalBudget" : "the fit lost its budget");
+        f += budgetKept ? 0 : 1;
+
+        // NEGATIVE CONTROL: plant the give-up back and require RED.
+        string planted = src.Replace(
+            "var openStale = openPairs.ToList();",
+            "var openStale = openPairs.Where(r => _qaFails.IsExhausted(item.Id.ToString(), r.Language, 3)).ToList();",
+            StringComparison.Ordinal);
+        bool plantLanded = planted != src;
+        bool controlRed = plantLanded && planted.Contains("_qaFails.IsExhausted", StringComparison.Ordinal);
+        Check("NEGATIVE CONTROL: planting the give-up back turns this check RED", controlRed,
+            !plantLanded ? "(the plant did not land — the work list moved; fix this test)"
+                         : "planted → check goes red as required");
+        f += controlRed ? 0 : 1;
+
+        Console.WriteLine();
+        return f;
+    }
+
+    /// <summary>
+    /// Case 5e: the correction hunt repeats until a fit proves itself, capped at the QA retry limit
+    /// (F-M318, operator order 08.10.2026).
+    /// <para>
+    /// The load-bearing distinction is that not every refusal deserves another download: a verdict on
+    /// the FILE ("no proven gain") may come out differently for another candidate, while a verdict on
+    /// the AUDIO ("ffmpeg not available", "audio decode failed") comes out identically for all of them.
+    /// The REAL reason strings are run through the real predicate — and each one is first asserted to
+    /// still exist in the source, so this test cannot keep passing after the wording drifts.
+    /// </para>
+    /// </summary>
+    private static int CorrectionHunt()
+    {
+        int f = 0;
+        Console.WriteLine("[5e] the correction hunt repeats, capped at the QA retry limit (F-M318)");
+
+        const string syncSource = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Qa/SubtitleSync.cs";
+        const string pipeline = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs";
+        if (!System.IO.File.Exists(syncSource) || !System.IO.File.Exists(pipeline))
+        {
+            Console.WriteLine("  [SKIP] sources not reachable from here");
+            return f;
+        }
+
+        string syncSrc = System.IO.File.ReadAllText(syncSource);
+        string src = System.IO.File.ReadAllText(pipeline);
+
+        // Candidate-specific: another candidate MAY align. Asserted by running the real predicate.
+        //
+        // Each case carries a FRAGMENT that must exist in the source. The refusal strings themselves
+        // are built by interpolation ("shift {largestShift:0.0}s beyond …"), so matching them literally
+        // would fail for a reason that has nothing to do with the rule — the fragments are the stable
+        // part and they are what makes this test go red when the wording drifts.
+        (string Reason, bool CandidateSpecific, string Fragment)[] cases =
+        {
+            (@"no proven gain (41 cue(s) moved, t = 1.42) — left as downloaded", true, "no proven gain"),
+            (@"shift 34.0s beyond the 20s limit — not applied", true, "beyond the"),
+            (@"not measured: only 12 cues", true, "not measured: only"),
+            (@"not applied: guard failed", true, "not applied: "),
+            (@"fit error", true, "fit error"),
+            (@"ffmpeg not available", false, "ffmpeg not available"),
+            (@"audio decode failed", false, "audio decode failed"),
+            (@"not measured: no audio samples", false, "not measured: no audio samples"),
+        };
+
+        foreach ((string reason, bool expected, string fragment) in cases)
+        {
+            bool actual = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalIsCandidateSpecific(reason);
+            bool present = syncSrc.Contains(fragment, StringComparison.Ordinal);
+            Check($"refusal \"{reason.Substring(0, Math.Min(34, reason.Length))}…\" → hunt continues: {expected}",
+                actual == expected && present,
+                present ? actual.ToString() : $"(fragment \"{fragment}\" gone from the source — this test has drifted)");
+            f += actual == expected && present ? 0 : 1;
+        }
+
+        // The cap is the QA retry limit, read from the config type — not a second number invented
+        // beside it. Asserted on the default, because that is what an untouched install uses.
+        var cfg = new Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration();
+        Check("the candidate cap IS DownloadQaRetryLimit (default 3, not a second knob)",
+            cfg.DownloadQaRetryLimit == 3, $"default = {cfg.DownloadQaRetryLimit}");
+        f += cfg.DownloadQaRetryLimit == 3 ? 0 : 1;
+
+        bool readsRetryLimit = src.Contains("int refusalBudget = Math.Max(0, _config.DownloadQaRetryLimit);",
+                                            StringComparison.Ordinal);
+        Check("the budget is read from the QA retry limit", readsRetryLimit,
+            readsRetryLimit ? "refusalBudget ← DownloadQaRetryLimit" : "missing");
+        f += readsRetryLimit ? 0 : 1;
+
+        // The stop is checked BEFORE the fetch: breaking after the refusal would burn one more
+        // download from the daily quota and write one more unprocessed file.
+        bool budgetBeforeFetch = System.Text.RegularExpressions.Regex.IsMatch(
+            src, @"refusalBudget > 0 && refusalsThisRun >= refusalBudget");
+        Check("the hunt stops once the budget is spent", budgetBeforeFetch,
+            budgetBeforeFetch ? "checked against refusalsThisRun" : "no budget stop found");
+        f += budgetBeforeFetch ? 0 : 1;
+
+        // F-M319 (operator order 08.10.2026): "best subtitles to keep per language" is GONE, so the
+        // walk's stop is no longer a configured count. What remains is the rule the setting's default
+        // always expressed — one corrected file per language — and the counter that decides it is
+        // still `correctedSaved`: an unprocessed file is a FALLBACK (kept so the repeat costs no
+        // content) and must never end the walk, because that is exactly what made the repeat
+        // impossible.
+        bool walkStopsOnCorrection = src.Contains("if (correctedSaved >= 1)", StringComparison.Ordinal)
+                                     && src.Contains("correctedSaved++;", StringComparison.Ordinal);
+        Check("the walk stops on the first CORRECTED file; an unprocessed file never stops it",
+            walkStopsOnCorrection,
+            walkStopsOnCorrection ? "correctedSaved drives the stop" : "an unprocessed file can end the walk");
+        f += walkStopsOnCorrection ? 0 : 1;
+
+        // The setting must be GONE from every layer, not just unused: a field still on the config type
+        // is a knob the next reader will wire back up. Asserted on the config TYPE and the GUI page.
+        bool settingGone = !src.Contains("DownloadKeepBestPerLanguage", StringComparison.Ordinal);
+        var cfgProbe = new Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration();
+        bool fieldGone = cfgProbe.GetType().GetProperty("DownloadKeepBestPerLanguage") == null;
+        const string guiPage = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Configuration/configPage.html";
+        bool guiGone = !System.IO.File.Exists(guiPage)
+                       || !System.IO.File.ReadAllText(guiPage).Contains("DownloadKeepBestPerLanguage", StringComparison.Ordinal);
+        Check("the keep-best setting is gone from config, pipeline AND the page", settingGone && fieldGone && guiGone,
+            $"pipeline={settingGone} configType={fieldGone} gui={guiGone}");
+        f += settingGone && fieldGone && guiGone ? 0 : 1;
+
+        // The budget helper lost its keepBest parameter with the setting: a parameter nothing can set
+        // is the same dead knob F-M242 was created to fix.
+        bool helperSimplified = src.Contains("DownloadBudget.EffectiveDownloadCap(\n                _config.DownloadMaxCandidatesPerLanguage);",
+                                             StringComparison.Ordinal)
+                                || src.Contains("DownloadBudget.EffectiveDownloadCap(_config.DownloadMaxCandidatesPerLanguage)",
+                                                StringComparison.Ordinal);
+        Check("the download budget is derived from ONE setting, not two", helperSimplified,
+            helperSimplified ? "EffectiveDownloadCap takes the budget alone" : "a dead keepBest parameter remains");
+        f += helperSimplified ? 0 : 1;
+
+        // NEGATIVE CONTROL: put the old, configured stop back and require the check to go RED.
+        string stopPlanted = src.Replace("if (correctedSaved >= 1)", "if (savedCount >= keepBest)",
+                                         StringComparison.Ordinal);
+        bool stopPlantLanded = stopPlanted != src;
+        bool stopControlRed = stopPlantLanded
+                              && !stopPlanted.Contains("if (correctedSaved >= 1)", StringComparison.Ordinal);
+        Check("NEGATIVE CONTROL: a configured keep-best stop again turns this check RED", stopControlRed,
+            !stopPlantLanded ? "(the plant did not land — the comparison moved; fix this test)"
+                             : "planted → check goes red as required");
+        f += stopControlRed ? 0 : 1;
+
+        // An audio-level refusal ends the walk instead of downloading every remaining candidate to
+        // receive the same answer — and it says so, rather than looking like a thin candidate list.
+        bool abandonedBreaks = src.Contains("if (correctionHuntAbandoned)", StringComparison.Ordinal)
+                               && src.Contains("correction hunt abandoned after", StringComparison.Ordinal);
+        Check("an audio-level refusal ends the hunt, and says so in the log", abandonedBreaks,
+            abandonedBreaks ? "abandonment breaks the walk and is logged" : "missing");
+        f += abandonedBreaks ? 0 : 1;
+
+        // The repeat is only worth anything if every other gate has already had its say: a candidate
+        // whose CONTENT fails a gate never reaches the fit, so a download spent on one would be spent
+        // on a file the plugin is going to throw away. This asserts the ORDER, not the gates
+        // themselves (each has its own case) — and it asserts it in the MAIN path only, so the HI
+        // branch's own fit cannot satisfy it by accident.
+        string[] gates =
+        {
+            "F-M43 Stufe 1 — FPS pre-check",
+            "if (bytes == null || bytes.Length < 100)",
+            "Gate 2: language verification",
+            "F-M43 Stufe 2 (structure, fixed part)",
+            "Gate 1: minimum cue count",
+            "F-M43 Stufe 2 (runtime)",
+            "Qa.SubtitleSync.Result syncResult = await SyncMeasuredAsync(",
+        };
+
+        int fitAt = src.IndexOf(gates[^1], StringComparison.Ordinal);
+        int firstOffender = -1;
+        for (int i = 0; i < gates.Length - 1; i++)
+        {
+            int at = src.IndexOf(gates[i], StringComparison.Ordinal);
+            if (at < 0 || fitAt < 0 || at > fitAt)
+            {
+                firstOffender = i;
+                break;
+            }
+        }
+
+        Check("every download gate runs BEFORE the fit (a repeat never downloads a gate-rejected file)",
+            firstOffender < 0,
+            firstOffender < 0
+                ? $"{gates.Length - 1} gates, all before the fit"
+                : $"\"{gates[firstOffender]}\" is missing or sits after the fit");
+
+        // NEGATIVE CONTROL: plant the fit ABOVE the gates and require RED.
+        if (firstOffender < 0)
+        {
+            int fpsAt = src.IndexOf(gates[0], StringComparison.Ordinal);
+            string moved = src.Remove(fitAt, gates[^1].Length).Insert(fpsAt, gates[^1]);
+            int movedFitAt = moved.IndexOf(gates[^1], StringComparison.Ordinal);
+            bool movedRed = movedFitAt >= 0 && movedFitAt < moved.IndexOf(gates[0], StringComparison.Ordinal);
+            Check("NEGATIVE CONTROL: moving the fit above the gates turns this check RED", movedRed,
+                movedRed ? "planted → order check goes red as required" : "(the plant did not land)");
+            f += movedRed ? 0 : 1;
+        }
+        else
+        {
+            f++;
+        }
+
+        Console.WriteLine();
+        return f;
+    }
+
+    /// <summary>
+    /// Case 5c: the slot says WHICH KIND the file is (F-M317, operator order 08.10.2026) — an
+    /// aligned file numbers up from 01, an unprocessed one down from 99, and the two are counted
+    /// SEPARATELY.
+    /// <para>
+    /// The two halves are asserted differently on purpose. The NAMES are pure and asserted on the
+    /// builder. The COUNTERS are not pure — they live in the pipeline's per-candidate loop — so they
+    /// are asserted on the SOURCE, the way this file already asserts the retired archive write. What
+    /// makes that legitimate here is the negative control at the end: the single-counter behaviour is
+    /// planted back into a copy of the source and the check is required to go RED, so the assertion
+    /// is shown to be capable of failing rather than assumed to be.
+    /// </para>
+    /// </summary>
+    private static int SlotTellsKind()
+    {
+        int f = 0;
+        Console.WriteLine("[5c] the slot tells the two kinds of file apart (F-M317)");
+
+        const string baseName = "Person Of Interest S02e06 The High Road";
+        string media = $"/media/{baseName}.mkv";
+
+        // The two ranges, as the pipeline composes them.
+        string firstAligned = System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 1));
+        string secondAligned = System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 2));
+        string firstUnprocessed = System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 99));
+        string secondUnprocessed = System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 98));
+
+        Check("an aligned file starts at 01", firstAligned == $"{baseName}.en.01.srt", firstAligned);
+        Check("the next aligned file takes 02", secondAligned == $"{baseName}.en.02.srt", secondAligned);
+        Check("an unprocessed file lands in the reserved block at 99",
+            firstUnprocessed == $"{baseName}.en.99.srt", firstUnprocessed);
+        Check("numbering runs DOWNWARD from 99",
+            secondUnprocessed == $"{baseName}.en.98.srt", secondUnprocessed);
+        f += firstAligned == $"{baseName}.en.01.srt" ? 0 : 1;
+        f += secondAligned == $"{baseName}.en.02.srt" ? 0 : 1;
+        f += firstUnprocessed == $"{baseName}.en.99.srt" ? 0 : 1;
+        f += secondUnprocessed == $"{baseName}.en.98.srt" ? 0 : 1;
+
+        // An unprocessed file IS the original, so it is written ONCE — the reserved-slot write that
+        // runs AFTER a correction must be skipped on this path. The skip is the existing
+        // `unsyncPayload != null` guard, and this asserts the pipeline still ties the reserved write
+        // to that variable rather than to "not aligned".
+        const string pipeline = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs";
+        if (!System.IO.File.Exists(pipeline))
+        {
+            Console.WriteLine("  [SKIP] DownloadPipeline.cs not reachable from here");
+            return f;
+        }
+
+        string src = System.IO.File.ReadAllText(pipeline);
+
+        bool namesByKind = src.Contains("alignedForNaming", StringComparison.Ordinal)
+                           && src.Contains("correctedSlotCount + 1", StringComparison.Ordinal);
+        Check("the writer chooses the range by whether the file was aligned", namesByKind,
+            namesByKind ? "alignedForNaming drives the slot" : "no aligned/unprocessed split in the writer");
+        f += namesByKind ? 0 : 1;
+
+        bool unprocessedUsesReserved = src.Contains(
+            "SidecarNaming.PlanOriginalTarget(mediaPath, lang, effectiveHi, namesForSlot)", StringComparison.Ordinal);
+        Check("an unprocessed file is written INTO the reserved block (no corrected sibling needed)",
+            unprocessedUsesReserved,
+            unprocessedUsesReserved ? "PlanOriginalTarget used on the unprocessed path" : "missing");
+        f += unprocessedUsesReserved ? 0 : 1;
+
+        // The counter is advanced on the ALIGNED path only. Guarded by the branch, not by a comment:
+        // the increment must sit inside `if (alignedForNaming)`.
+        bool counterGuarded = System.Text.RegularExpressions.Regex.IsMatch(
+            src, @"if\s*\(\s*alignedForNaming\s*\)\s*\{\s*correctedSlotCount\+\+;");
+        Check("the corrected counter advances on the aligned path ONLY", counterGuarded,
+            counterGuarded ? "guarded by alignedForNaming" : "the counter is shared — 01 would be consumed");
+        f += counterGuarded ? 0 : 1;
+
+        // Both branches carry the rule; one branch only would put an aligned HI file at 01 beside an
+        // unprocessed one at 01 as well.
+        bool hiCarries = src.Contains("hiCorrectedSlotCount", StringComparison.Ordinal)
+                         && src.Contains("hiAligned", StringComparison.Ordinal);
+        Check("the HI branch carries the same two ranges", hiCarries,
+            hiCarries ? "hiAligned / hiCorrectedSlotCount present" : "HI branch left on the old rule");
+        f += hiCarries ? 0 : 1;
+
+        // Exhaustion is counted, never silent — this is the one path where a fetched subtitle is not
+        // written at all.
+        bool refusalCounted = src.Contains("not aligned and no free slot in the reserved range 90–99",
+                                          StringComparison.Ordinal);
+        Check("a refused write is logged with its own line, not swallowed", refusalCounted,
+            refusalCounted ? "refusal is reported" : "silent refusal");
+        f += refusalCounted ? 0 : 1;
+
+        // NEGATIVE CONTROL — plant the single-counter behaviour back and require RED. Without this the
+        // source assertions above could be passing for the wrong reason.
+        string planted = src.Replace(
+            "if (alignedForNaming)\n                    {\n                        correctedSlotCount++;",
+            "if (true)\n                    {\n                        correctedSlotCount++;",
+            StringComparison.Ordinal);
+        bool plantLanded = planted != src;
+        bool controlRed = plantLanded && !System.Text.RegularExpressions.Regex.IsMatch(
+            planted, @"if\s*\(\s*alignedForNaming\s*\)\s*\{\s*correctedSlotCount\+\+;");
+        Check("NEGATIVE CONTROL: planting the shared counter back turns this check RED", controlRed,
+            !plantLanded ? "(the plant did not land — the guarded form moved; fix this test)"
+                         : "planted → check goes red as required");
+        f += controlRed ? 0 : 1;
 
         Console.WriteLine();
         return f;

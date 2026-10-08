@@ -243,9 +243,9 @@
                         </div>
 
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="DownloadQaRetryLimit">QA-reject retries before give-up (download)</label>
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadQaRetryLimit">Correction attempts before the fit is given up (download)</label>
                             <input id="DownloadQaRetryLimit" name="DownloadQaRetryLimit" type="number" is="emby-input" min="0" max="20" />
-                            <div class="fieldDescription">Skip after this many QA rejects. 0 = never. Default: 3.</div>
+                            <div class="fieldDescription">How many candidates may be downloaded while hunting for a correction the alignment can prove against the audio. Every refused candidate is kept untouched at index 99 downward. 0 = no cap. Default: 3.</div>
                         </div>
 
 <h3>Skip filters (upload + download)</h3>
@@ -293,13 +293,7 @@
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="DownloadMaxCandidatesPerLanguage">Max candidates per language</label>
                             <input id="DownloadMaxCandidatesPerLanguage" type="number" is="emby-input" min="0" max="20" />
-                            <div class="fieldDescription">Download attempts per file+language, and the search's early stop. 0 = unlimited. Default: 3. Raised to the keep-best count when that is higher.</div>
-                        </div>
-
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="DownloadKeepBestPerLanguage">Best subtitles to keep per language</label>
-                            <input id="DownloadKeepBestPerLanguage" type="number" is="emby-input" min="1" max="10" />
-                            <div class="fieldDescription">Best X subtitles per language, saved as X numbered files. Default: 1.</div>
+                            <div class="fieldDescription">Download attempts per file+language, and the search's early stop. 0 = unlimited. Default: 3.</div>
                         </div>
 
                         <h3>Download — Ranking</h3>
@@ -532,7 +526,7 @@
                                 <input id="QaDownloadAutoSync" name="QaDownloadAutoSync" type="checkbox" is="emby-checkbox" />
                                 <span>Correct subtitle timing</span>
                             </label>
-                            <div class="fieldDescription">Aligns a fetched subtitle segment-wise on a spoken track. Keeps a copy of the original file. Default: on.</div>
+                            <div class="fieldDescription">Aligns a fetched subtitle segment-wise on a spoken track. Corrected files are numbered from index 01 upward; a copy of the original — and any file the alignment could not process — is kept from index 99 downward. Inconclusive alignment outcomes are dropped. Default: on.</div>
                         </div>
 
                         
@@ -953,8 +947,6 @@
                                                 document.querySelector('#DownloadOnArrival').checked = config.DownloadOnArrival;
                         var dmcl = parseInt(config.DownloadMaxCandidatesPerLanguage);
                         document.querySelector('#DownloadMaxCandidatesPerLanguage').value = isNaN(dmcl) ? 3 : dmcl;
-                        var dkb = parseInt(config.DownloadKeepBestPerLanguage);
-                        document.querySelector('#DownloadKeepBestPerLanguage').value = isNaN(dkb) ? 1 : dkb;
                         document.querySelector('#UploadContinueAfterLimit').checked = config.UploadContinueAfterLimit;
                         document.querySelector('#DownloadContinueAfterLimit').checked = config.DownloadContinueAfterLimit;
                         document.querySelector('#DownloadDryRun').checked = config.DownloadDryRun;
@@ -1552,7 +1544,6 @@ workers.forEach(function (w) {
                         config.DownloadScoreWeightDownload = parseInt(document.querySelector('#DownloadScoreWeightDownload').value, 10); if (isNaN(config.DownloadScoreWeightDownload)) { config.DownloadScoreWeightDownload = 1; }
                                                 config.DownloadOnArrival = document.querySelector('#DownloadOnArrival').checked;
                         config.DownloadMaxCandidatesPerLanguage = (function () { var v = parseInt(document.querySelector('#DownloadMaxCandidatesPerLanguage').value, 10); return isNaN(v) ? 3 : v; })();
-                        config.DownloadKeepBestPerLanguage = (function () { var v = parseInt(document.querySelector('#DownloadKeepBestPerLanguage').value, 10); return isNaN(v) ? 1 : Math.min(10, Math.max(1, v)); })();
                         config.DownloadContinueAfterLimit = document.querySelector('#DownloadContinueAfterLimit').checked;
                         config.DownloadDryRun = document.querySelector('#DownloadDryRun').checked;
                         // Union of both library views — a tick in either the

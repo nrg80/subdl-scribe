@@ -574,12 +574,11 @@ public sealed class SubdlSeeder
                 return false;
             }
 
-            // Parity: QA-exhausted pairs drop out of the open list. Asked per PAIR, not per
-            // language: a variant whose pool is empty must not close the regular subtitle of the
-            // same language, and vice versa.
+            // F-M320 (operator order 08.10.2026): the QA retry limit is the FIT's budget, so it no
+            // longer drops a pair out of the open list. A pair whose candidates were all gate-rejected
+            // stays open and is searched again — the burned-release memory (F-M200) keeps the run from
+            // re-fetching the same discards, and the download budget (F-M50) bounds each run.
             var open = OpenPairsOf(item, mediaPath, TargetLanguagesOf(config), config.DownloadOnlyMissing);
-            var qaFails = new Registry.QaFailTracker(db);
-            open.RemoveAll(r => qaFails.IsExhausted(item.Id.ToString(), r.Language, config.DownloadQaRetryLimit));
             return open.Count > 0;
         }
         catch
