@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.192",
-        "changelog": "v12.1.12.192: A subtitle the alignment finds nothing wrong with is no longer treated as a\n    failure. It is kept as the best version of its language, taking index 01 upward like a\n    corrected file, together with an identical copy from index 99 downward - and the download\n    stops there instead of hunting further candidates, which no longer spends quota on a file\n    that cannot be beaten. Only files that are actually wrong (beyond the shift limit, too few\n    cues) keep going into the reserved range and keep the hunt alive.",
+        "version": "12.1.12.193",
+        "changelog": "v12.1.12.193: The audio alignment has its own status light now - in the Workers list and\n    directly under the download switch, with the same words and colours as every other worker.\n    The switch says what it does at last: \"Automatically synchronize subtitle to spoken track\".\n    The statistics count only alignments that really happened, so a subtitle that was already\n    fine is no longer reported as one that the run moved. The postprocessing row is named for\n    its direction: \"Upl. Postproc.\".",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.192-dev/Jellyfin.Plugin.SubdlSync_12.1.12.192.zip",
-        "checksum": "95800329201d7c0ef41cd40f1511cf6f",
-        "timestamp": "2026-10-08T12:57:58Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.193-dev/Jellyfin.Plugin.SubdlSync_12.1.12.193.zip",
+        "checksum": "48e45d531a75dc7c6f4467840869de16",
+        "timestamp": "2026-10-08T13:08:29Z"
       }
     ]
   }
