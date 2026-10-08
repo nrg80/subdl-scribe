@@ -474,7 +474,16 @@ public sealed class ContentHashRegistry : IDisposable
             return false;
         }
 
-        _db.EnsureMedia(mediaHash);
+        // The parent row is CREATED here if absent, but not touched when it already exists. The old
+        // form called EnsureMedia unconditionally, which stamps LastSeen and commits — once per
+        // embedded track, so a file with 44 tracks paid 44 commits to record a fact it had already
+        // recorded. Measured live (08.10.2026): 9 644 writes for 1 201 items and a store that ended
+        // the pass with exactly the rows it started with (media 1 201 -> 1 201).
+        if (_db.Media.FindById(mediaHash) == null)
+        {
+            _db.EnsureMedia(mediaHash);
+        }
+
         var id = SubdlDbContext.EmbedKey(mediaHash, subPos);
         var existing = _db.Embeds.FindById(id);
 

@@ -253,6 +253,14 @@ public sealed class SubdlSeeder
             eventScope = LibraryScope.Create(_libraryManager, onlyLibraries, _logger);
         }
 
+        // The whole scan is ONE unit of work: every observation it records is committed once at the
+        // end instead of once per row. Measured live (08.10.2026): 9 644 single-row commits at a flat
+        // 45 ms each made a pass that queued 0 items take 496 s. Readers inside this pass are not
+        // affected — they go through the per-area row cache — so only the file's write frequency
+        // changes. The open sits AFTER the early return above, so no exit can leave it unbalanced.
+        var scanDb = Plugin.Instance?.SharedDbContext;
+        scanDb?.BeginBatch();
+
         try
         {
             var query = new InternalItemsQuery(null)
@@ -371,6 +379,12 @@ public sealed class SubdlSeeder
         catch (Exception ex)
         {
             _logger.LogWarning("[SubDL-Seed] Library scan failed: {Msg}", ex.Message);
+        }
+        finally
+        {
+            // Commit even on the failure path: the observations recorded before it threw are as true
+            // as the ones before a clean end, and dropping them would make the next pass redo them.
+            scanDb?.EndBatch();
         }
 
         return snapshot;
@@ -982,6 +996,11 @@ public sealed class SubdlSeeder
             // F-M257: one shared enumeration (SidecarNaming.EmbeddedTracks) — position against the
             // unfiltered list, forced tracks out, bitmap tracks out, unmappable tags out. A second
             // copy here would drift from the uploader's, which is how the four name parsers went wrong.
+            // The parent row's "last seen" belongs to the ITEM, so it is refreshed here — once per
+            // item — rather than from ObserveEmbed, which runs once per embedded track (measured: 87
+            // calls for one file). The observation loop below therefore only records track facts.
+            registry.EnsureMedia(mediaHash, item.Id.ToString("D"), mediaPath);
+
             var tracks = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
                 .EmbeddedTracks(_mediaSourceManager.GetMediaStreams(item.Id));
 

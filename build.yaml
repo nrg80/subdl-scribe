@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.203"
+version: "12.1.12.204"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,11 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.204: A library scan is ~50x faster. The store committed once per ROW — and a commit is a
+    disk sync — so a pass over prod's library issued 9 644 writes at 45 ms each and ran eight minutes
+    while queueing nothing. Writes now accumulate and commit in batches, and observing an embedded
+    track no longer restamps its parent media row once per track. Same workload: 4 800 writes in
+    2 846 ms instead of 138 650 ms.
   v12.1.12.203: A run that uploaded subtitles is no longer marked failed afterwards. The status row
     for the audio alignment was written on the upload path too, where there is no download to report,
     so every upload run threw and both the Download and Upload lights turned red although both had
