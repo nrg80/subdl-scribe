@@ -168,7 +168,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
 
             progress.Report(20);
 
-            int removedSearch = 0, removedRetry = 0, removedIdNotFound = 0, removedQa = 0, removedOshash = 0;
+            int removedSearch = 0, removedRetry = 0, removedQa = 0, removedOshash = 0;
             int forgottenSidecars = 0, openFiles = 0, forgottenEmbeds = 0, backfilledForced = 0;
             int removedPrunedSubtitles = 0, removedPrunedMedia = 0;
             Exception? refreshException = null;
@@ -197,9 +197,6 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
 
                 var fileRetries = new Registry.FileRetryTracker(db);
                 removedRetry = fileRetries.PruneDeadItems(ItemExists);
-
-                var idNotFound = new Registry.IdNotFoundTracker(db);
-                removedIdNotFound = idNotFound.PruneDeadItems(ItemExists);
 
                 var qaFails = new Registry.QaFailTracker(db);
                 removedQa = qaFails.PruneDeadItems(ItemExists);
@@ -321,7 +318,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 _logger.LogError(ex, "[SubDL-Refresh] Refresh aborted mid-run — already-flushed parts stay, remainder untouched.");
             }
 
-            int removedTotal = removedSearch + removedRetry + removedIdNotFound + removedQa + removedOshash
+            int removedTotal = removedSearch + removedRetry + removedQa + removedOshash
                                + removedPrunedSubtitles + removedPrunedMedia;
             int changedTotal = removedTotal + forgottenSidecars + openFiles + forgottenEmbeds + backfilledForced;
 
@@ -329,8 +326,8 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL-Refresh] Removed dead state: {Search} search / {Retry} file-retry / {IdNotFound} id-not-found / {Qa} qa-fail / {Oshash} oshash / {PrunedSubs} subtitle / {PrunedMedia} media (dead items). Forgot {Sidecars} vanished subtitle verdict(s); {OpenFiles} item(s) with an open required file; forgot {Embeds} stale embedded row(s).",
-                    removedSearch, removedRetry, removedIdNotFound, removedQa, removedOshash,
+                    "[SubDL-Refresh] Removed dead state: {Search} search / {Retry} file-retry / {Qa} qa-fail / {Oshash} oshash / {PrunedSubs} subtitle / {PrunedMedia} media (dead items). Forgot {Sidecars} vanished subtitle verdict(s); {OpenFiles} item(s) with an open required file; forgot {Embeds} stale embedded row(s).",
+                    removedSearch, removedRetry, removedQa, removedOshash,
                     removedPrunedSubtitles, removedPrunedMedia,
                     forgottenSidecars, openFiles, forgottenEmbeds);
             }

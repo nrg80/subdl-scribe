@@ -999,6 +999,57 @@ def main():
               "if (_config.QaDownloadAutoSync && !huntForCorrection)" in pipe_src,
               "without the gate a run with the Auto-Sync off pulled ONE candidate per language")
 
+    # ---- Manual run buttons for the two refresh tasks (operator order 08.10.2026) ----
+    # "Für database refresh und oscache refresh hätte ich jetzt auch gerne einen manuellen knopf
+    #  unter der jeweiligen Beschreibung."
+    #
+    # Each button sits under ITS OWN description and starts the task by NAME through the same
+    # `subdlStartTask` helper the run buttons use. The point of the pair of assertions below is that
+    # the button is a MANUAL TRIGGER and nothing else: F-M210 makes the cadence setting the only thing
+    # that schedules a job, so a button that also touched `PruneMode`/`OshashRefresh` would be a
+    # second, hidden scheduler.
+    for btn_id, task_name, cfg_id in [
+        ("RunDatabaseRefreshNow", "SubDL Scribe — Database Refresh", "PruneMode"),
+        ("RunOshashRefreshNow", "SubDL Scribe — OSHash Cache Refresh", "OshashRefresh"),
+    ]:
+        check(f"the {cfg_id} section carries a manual run button",
+              f'id="{btn_id}"' in html,
+              "no button means the refresh can only wait for its schedule")
+        # The handler must name THIS task and go through the shared starter.
+        check(f"{btn_id} starts {task_name!r} through subdlStartTask",
+              f"document.querySelector('#{btn_id}').addEventListener('click', function () {{ subdlStartTask('{task_name}'); }})" in html)
+        # ...and the button must not write the cadence: it lives in the same container as the select,
+        # so assert the handler body carries no assignment to the cadence field. This is the
+        # F-M210 half — a manual fire must not reschedule anything.
+        handler = html.split(f"document.querySelector('#{btn_id}').addEventListener", 1)[1].split("});", 1)[0]
+        check(f"{btn_id} does not touch the {cfg_id} cadence",
+              f"{cfg_id}" not in handler and "subdlStartTask" in handler,
+              "a manual button that also sets the interval would be a hidden scheduler (F-M210)")
+
+    # The LABEL follows the button (F-M210a, operator order 08.10.2026: "Never -> manual in beiden
+    # Auswahlmenüs"). The VALUE must stay `Never` — the enum and every stored configuration key on it,
+    # so a renamed label that also renamed the value would silently reset what a user had chosen.
+    for cfg_id, expected in [("PruneMode", "Manual — no scheduled refresh, use the button below"),
+                             ("OshashRefresh", "Manual — trust cached fingerprint, use the button below")]:
+        check(f"{cfg_id} offers a Manual option (F-M210a)",
+              f'<option value="Never">{expected}</option>' in html,
+              "a service with a manual button must offer Manual, not Never")
+        # Scoped to THIS select's own option list. A page-wide search is wrong twice over: the page
+        # carries tab buttons AND a cycle-interval menu that legitimately uses value="Manual"
+        # (measured — the page-wide version went RED on a correct file). Bound the block by the
+        # select's own delimiters instead.
+        # `split` takes LITERAL text, not a pattern: index the id, then take the block up to the
+        # select's own closing tag.
+        _i = html.find(f'id="{cfg_id}"')
+        blk = html[_i:html.find('</select>', _i)] if _i != -1 else ''
+        check(f"{cfg_id} keeps the stored VALUE Never",
+              f'<option value="Never">{expected}</option>' in blk and '<option value="Manual"' not in blk,
+              "renaming the value would reset an existing configuration")
+    # ...and the service WITHOUT a button keeps Never, which is the other half of the rule.
+    check("postprocessing keeps Never (no manual button exists for it)",
+          '<option value="Never">Never</option>' in html,
+          "offering Manual there would promise a button that does not exist")
+
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)

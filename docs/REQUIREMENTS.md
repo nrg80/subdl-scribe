@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.211.
+**Status:** Implementation — v12.1.12.212.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -27,7 +27,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
-- [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 4 requirements
+- [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 5 requirements
 
 - [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 25 requirements
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 13 requirements
@@ -832,7 +832,7 @@ applied as measured (as in the list of §4.3.2).
 
 **F-M287 [B1] (user decision 02.10.2026):** **Everything a run writes that is reachable from a dry run sits behind the dry-run flag — the guard belongs at the WRITE, not at the mode's exit.**
 
-Measured 02.10.2026, both directions: the refetch stamp, the file-retry counter, the id-resolution budget, `EnsureMedia`, `ObserveEmbed` and the file-missing deletion all executed in a dry run, and the dispatcher marked every reported item `Done` and deleted it from the cycle queue — one dry run consumed the work it described. The guard rule: **a write is dry-run-guarded at its own site**, so moving an exit cannot silently expose it. Sanctioned exceptions: a write that makes state stale-free rather than claiming a fact (recording a success, clearing a stamp), and the worker-run record, which reports that the run happened. **Test: T97, L1–L6.**
+Measured 02.10.2026, both directions: the refetch stamp, the file-retry counter the (now removed) id-resolution budget, `EnsureMedia`, `ObserveEmbed` and the file-missing deletion all executed in a dry run, and the dispatcher marked every reported item `Done` and deleted it from the cycle queue — one dry run consumed the work it described. The guard rule: **a write is dry-run-guarded at its own site**, so moving an exit cannot silently expose it. Sanctioned exceptions: a write that makes state stale-free rather than claiming a fact (recording a success, clearing a stamp), and the worker-run record, which reports that the run happened. **Test: T97, L1–L6.**
 
 **F-M184:** **Duplicate handling delegated to postprocessing:** the upload path does not search SubDL for duplicates before uploading. A duplicate upload is accepted by the API ("sent for review"), resolves to `rejected` on the SubDL dashboard, and the postprocessing job deletes that entry and marks the local row `remote-duplicate`. This removes one search call per item from the daily search quota; the cost is one upload per duplicate. A local self-echo guard (registry, per media/language pair) still prevents uploading the same pair twice.
 
@@ -840,9 +840,9 @@ Measured 02.10.2026, both directions: the refetch stamp, the file-retry counter,
 
 **F-M223:** **Every name the user sees says SubDL Scribe — the ASSEMBLY name is the one thing that must NOT follow.** Jellyfin's logger derives its category from the type, so the namespace says SubDL Scribe. The embedded-resource names move with the namespace.ml`/`.js` and the embedded-resource read literal), and all three must change together or the configuration page fails to load. **the assembly name stays the assembly name** — Jellyfin derives the plugin data folder and the configuration file from it, so renaming would orphan the credentials, the state database and the run history. The assembly name is a persistence key, not branding. Free text follows (postprocessing the category, console tags, reset dialog, GPL headers); API routes stay the plugin's own routes. **Test: T38.**
 
-**F-M210:** **Every scheduled job is driven by its OWN setting.** Database refresh, OSHash refresh and upload postprocessing each carry their own cadence setting and their own diced anchor, and must fire on them regardless of any other job's setting. **One exception, and it is not a return to the old coupling:** postprocessing additionally requires the upload direction to be ON (F-M291) — not another *job's* setting but the direction it works for, since with upload off it has no subject at all. the cycle interval governs **only** the automatic pipeline cycles; `Manual` and `OnArrival` there suppress those cycles and nothing else. A job must never sit behind an early return belonging to a different job's configuration.
+**F-M210:** **Every scheduled job is driven by its OWN setting.** Each refresh job also carries a **manual start button** under its own description (operator order 08.10.2026), which starts the task by name through the same helper the run buttons use and touches NO cadence field — the interval setting stays the only thing that schedules it, so the button cannot become a hidden second scheduler. Its disabling option is then labelled **`Manual`** (F-M210a). **Test: T87.** Database refresh, OSHash refresh and upload postprocessing each carry their own cadence setting and their own diced anchor, and must fire on them regardless of any other job's setting. **One exception, and it is not a return to the old coupling:** postprocessing additionally requires the upload direction to be ON (F-M291) — not another *job's* setting but the direction it works for, since with upload off it has no subject at all. the cycle interval governs **only** the automatic pipeline cycles; `Manual` and `OnArrival` there suppress those cycles and nothing else. A job must never sit behind an early return belonging to a different job's configuration.
 
-**F-M210a:** **A service with no manual start button offers "Never"/"off", never "Manual".** `Manual` means "triggered by the dashboard button"; where no such control exists, the disabling option is `Never` (prune, OSHash, postprocessing).
+**F-M210a:** **`Manual` is offered exactly where a manual start button exists, and `Never` everywhere else.** `Manual` means "triggered by the dashboard button"; where no such control exists, the disabling option stays `Never`. Since 08.10.2026 the database refresh and the OSHash refresh both carry a manual button, so **both label their disabling option `Manual`** (operator order: *"Never -> manual in beiden Auswahlmenüs"*); postprocessing has no button and keeps `Never`. The stored VALUE stays `Never` in both enums — only the label changed, so an existing configuration keeps meaning what it meant. **Test: T87.**
 
 **F-M212:** **No fire may be consumed before its task is registered.** Jellyfin's task queue drops the fire (logging `Unable to find scheduled task of type "X"`) when the target task is not yet registered. Every fire path tests the registration **before** it consumes its slot (no marker set, no reschedule counter reset), so the next 30-s tick retries. This applies to **all six** paths: database refresh, OSHash refresh, postprocessing, the refetch cycle, the F-M156 catch-up and the F-M65 recovery fires. **Test: T31.**
 
@@ -885,7 +885,7 @@ The counter is cleared by the reschedule reset on a real fire and by the per-day
 
 **Step 1 — dead rows:** media and subtitle rows whose Jellyfin item is gone are removed, and the count is reported.
 
-**Step 2 — guid-keyed trackers:** the search tracker, the file-retry tracker, the id-not-found tracker and the QA-fail tracker are pruned of rows whose item is gone.
+**Step 2 — guid-keyed trackers:** the search tracker, the file-retry tracker and the QA-fail tracker are pruned of rows whose item is gone.
 
 **Step 3 — OSHash cache paths:** cached paths whose root is no longer listable are dropped.
 
@@ -949,13 +949,13 @@ The repair preserves the data: the failed swap leaves the original file on disk,
 
 ## 7. OSHash Refresh
 
-**F-M119:** **OSHash refresh as scheduler task:** a dedicated task recomputes expired or fingerprint-changed OSHash cache entries on **its own diced WEEKLY anchor** ("D HH:mm", drawn once at install and never re-rolled). It fires **every week**. It holds the global run lock while mutating the shared cache. The OSHash cadence bounds how long a cached fingerprint is trusted (`Never` = fingerprint mismatch only, zero media reads in the steady state), while the fire date comes from the anchor alone. Setting it to `Never` does **not** disable the job.
+**F-M119:** **OSHash refresh as scheduler task:** a dedicated task recomputes expired or fingerprint-changed OSHash cache entries on **its own diced WEEKLY anchor** ("D HH:mm", drawn once at install and never re-rolled). It fires **every week**. It holds the global run lock while mutating the shared cache. The OSHash cadence bounds how long a cached fingerprint is trusted (`Never` = fingerprint mismatch only, zero media reads in the steady state), while the fire date comes from the anchor alone. Setting it to `Manual` (stored value `Never`) does **not** disable the job.
 
 **F-M275:** **The refresh works on a snapshot of the cache and decides per entry from the file's fingerprint.**
 
 For every entry the file is stat-ed for **size** and **modification time**. A file that is missing, or that cannot be stat-ed, leaves its entry untouched and is counted as **missing** — removing entries is the state prune's job (F-M94), not this task's.
 
-A fingerprint mismatch (size or modification time differs) recomputes the media hash. An unchanged fingerprint recomputes only when the entry's trust window has expired; with the cadence set to `Never` the window never expires, so only a mismatch triggers a recomputation.
+A fingerprint mismatch (size or modification time differs) recomputes the media hash. An unchanged fingerprint recomputes only when the entry's trust window has expired; with the cadence set to `Manual` (stored `Never`) the window never expires, so only a mismatch triggers a recomputation.
 
 A recomputed hash is stored together with size and modification time. A file that cannot be hashed keeps its old entry and is counted as **skipped**.
 
@@ -986,6 +986,8 @@ A text subtitle track whose tag is absent, empty, `und` or `undefined` is not a 
 **The resolution counts as PRESENT for the coverage check in the same run**, because Jellyfin's cached list still reports the old tag for a container that was just corrected.
 **The write is a stream copy (`-c copy`)**, and the original is replaced only after the result was read back and found to carry the wanted tag.
 The result is read back out of the file across the stream shapes that exist (audio in front, interleaved, bitmap tracks between, forced tracks between): every corrected track carries the wanted language and none is misassigned. Only files carrying an untagged track are touched, and each once. **Test: T79.**
+
+**F-M66 [D] (operator order 08.10.2026):** **Id resolution has NO give-up — an item without a resolvable id is retried by the next run.** *"Id resolution retrys bitte auch löschen."* The per-item failure counter and its limit are gone from config, page, both pipelines and the refresh; `0`-means-never-give-up was the only surviving meaning, so the rule is now unconditional. An id-less item is skipped for the run and re-enters the ladder next time, which costs one TMDb attempt per run at worst. **Test: L4–L6.**
 
 **F-M59:** **LIFO queue order:** both pipelines process items by the creation stamp descending — newest first. The id-order partition keeps id-resolvable items before the id-less backlog.
 
@@ -1900,7 +1902,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T96:** Every path that fetches and then discards a candidate increments the reject counter, the count reconciles with the day's spend (requests = saved + rejected), and both the download and the upload run line print it (F-M286)
 
-**T97:** A dry run leaves no stored verdict in either direction - the refetch stamp, the file-retry counter, the id-resolution budget, the registry upserts, the file-missing deletion and the cycle-queue removal are all held back, while the worker-run record is still written (F-M22, F-M287)
+**T97:** A dry run leaves no stored verdict in either direction - the refetch stamp, the file-retry counter, the registry upserts, the file-missing deletion and the cycle-queue removal are all held back, while the worker-run record is still written (F-M22, F-M287)
 
 **T98:** The walk's candidate limit and the search's early-stop threshold are the SAME number, derived from the ONE correction-attempts setting (F-M50): with that setting at 3 both are 3, at 2 both are 2, at `0` both stay unlimited. The helper that derives the search's width takes that value ALONE — asserted structurally as well, so a removed second parameter cannot reappear as a second argument (F-M95/F-M50/F-M319).
 

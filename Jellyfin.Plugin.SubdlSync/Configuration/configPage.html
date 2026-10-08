@@ -237,12 +237,6 @@
                         </div>
 
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="IdRetryLimit">ID-resolution retries before give-up (upload + download)</label>
-                            <input id="IdRetryLimit" name="IdRetryLimit" type="number" is="emby-input" min="0" max="20" />
-                            <div class="fieldDescription">Skip item after this many ID failures. 0 = never. Default: 3.</div>
-                        </div>
-
-                        <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="DownloadQaRetryLimit">Auto-Sync attempts and max. download/search limit</label>
                             <input id="DownloadQaRetryLimit" name="DownloadQaRetryLimit" type="number" is="emby-input" min="0" max="20" />
                             <div class="fieldDescription">How many candidates per language are searched, and how many the downloader may pull for a file before it gives up. With Auto-Sync on, each candidate is fitted and the walk repeats until a correction proves itself. With Auto-Sync off, the candidates are pulled through the active quality gates and kept untouched at index 99 downward. 0 = no limit. Default: 3.</div>
@@ -262,23 +256,29 @@
 <h3>Database refresh</h3>
                         <div class="selectContainer">
                             <select is="emby-select" id="PruneMode" name="PruneMode" class="emby-select-withcolor emby-select">
-                                <option value="Never">Never — no scheduled refresh</option>
+                                <option value="Never">Manual — no scheduled refresh, use the button below</option>
                                 <option value="Weekly">Weekly refresh</option>
                                 <option value="Monthly">Monthly refresh</option>
                                 <option value="Yearly">Yearly refresh</option>
                             </select>
                             <div class="fieldDescription">Checks stored state against reality: a deleted subtitle loses its verdict, a vanished file drops its download mark, removed media are cleaned up. Compacts the database. Default: Weekly.</div>
+                            <!-- Operator order 08.10.2026: a manual button under the description, so the
+                                 refresh can be run on the spot instead of waiting for the schedule. The
+                                 interval above stays what it is — this button does not change it. -->
+                            <button is="emby-button" type="button" class="raised button-submit" id="RunDatabaseRefreshNow" style="margin-top:0.6em;">▶ Run database refresh now</button>
                         </div>
 
 <h3>OSHash refresh</h3>
                         <div class="selectContainer">
                             <select is="emby-select" id="OshashRefresh" name="OshashRefresh" class="emby-select-withcolor emby-select">
-                                <option value="Never">Never — trust cached fingerprint</option>
+                                <option value="Never">Manual — trust cached fingerprint, use the button below</option>
                                 <option value="Weekly">Weekly revalidation</option>
                                 <option value="Monthly">Monthly revalidation</option>
                                 <option value="Yearly">Yearly revalidation</option>
                             </select>
                             <div class="fieldDescription">Recheck interval for cached hashes. Default: Monthly.</div>
+                            <!-- Operator order 08.10.2026: same manual button beside its own description. -->
+                            <button is="emby-button" type="button" class="raised button-submit" id="RunOshashRefreshNow" style="margin-top:0.6em;">▶ Run OSHash refresh now</button>
                         </div>
 
                         <h3>Download</h3>
@@ -881,7 +881,6 @@
                         document.querySelector('#FollowUpRoundsDownload').checked = (config.FollowUpRoundsDownload !== false);
                         document.querySelector('#FollowUpRoundsUpload').checked = (config.FollowUpRoundsUpload !== false);
                         document.querySelector('#FileRetryLimit').value = (function () { var v = parseInt(config.FileRetryLimit); return isNaN(v) ? 3 : v; })();
-                        document.querySelector('#IdRetryLimit').value = (function () { var v = parseInt(config.IdRetryLimit); return isNaN(v) ? 3 : v; })();
                         document.querySelector('#DownloadQaRetryLimit').value = (function () { var v = parseInt(config.DownloadQaRetryLimit); return isNaN(v) ? 3 : v; })();
                         document.querySelector('#ArrivalDebounceMinutes').value = (function () { var v = parseInt(config.ArrivalDebounceMinutes); return isNaN(v) ? 1 : v; })();                                                document.querySelector('#RefetchInterval').value = config.RefetchInterval;
                         document.querySelector('#JobSpacingMinutes').value = (function () { var v = parseInt(config.JobSpacingMinutes); return isNaN(v) ? 15 : v; })();
@@ -1371,6 +1370,11 @@ workers.forEach(function (w) {
 
                 document.querySelector('#RunUploadNow').addEventListener('click', function () { subdlStartTask('SubDL/TMDB — Subtitle Upload'); });
                 document.querySelector('#RunDownloadNow').addEventListener('click', function () { subdlStartTask('SubDL/TMDB — Subtitle Download'); });
+                // Operator order 08.10.2026: the two refresh tasks get a manual button under their
+                // own description. Same helper the run buttons use, so the task NAME is the only
+                // difference — these two are "SubDL Scribe — …", not "SubDL/TMDB — …".
+                document.querySelector('#RunDatabaseRefreshNow').addEventListener('click', function () { subdlStartTask('SubDL Scribe — Database Refresh'); });
+                document.querySelector('#RunOshashRefreshNow').addEventListener('click', function () { subdlStartTask('SubDL Scribe — OSHash Cache Refresh'); });
                 document.querySelector('#StopAllNow').addEventListener('click', function () {
                     // NF-8: stop BOTH directions — one click, two marker files.
                     subdlStopTask('SubDL/TMDB — Subtitle Upload');
@@ -1496,7 +1500,6 @@ workers.forEach(function (w) {
                         config.TmdbApiKey = tmdbKey;
                         var uph = parseInt(document.querySelector('#UploadsPerHour').value) || 400;
                         config.FileRetryLimit = (function () { var v = parseInt(document.querySelector('#FileRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
-                        config.IdRetryLimit = (function () { var v = parseInt(document.querySelector('#IdRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
                         config.DownloadQaRetryLimit = (function () { var v = parseInt(document.querySelector('#DownloadQaRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
                         config.ArrivalDebounceMinutes = (function () { var v = parseInt(document.querySelector('#ArrivalDebounceMinutes').value, 10); return isNaN(v) ? 1 : Math.min(120, Math.max(1, v)); })();                                                config.RefetchInterval = document.querySelector('#RefetchInterval').value;
                         config.JobSpacingMinutes = (function () { var v = parseInt(document.querySelector('#JobSpacingMinutes').value, 10); return isNaN(v) ? 15 : Math.min(120, Math.max(5, v)); })();

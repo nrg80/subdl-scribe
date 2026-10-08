@@ -373,6 +373,8 @@ Section("database refresh — prune, driven with a predicate (F-M234)");
 
     db.Counters.Upsert(new CounterEntity { Key = "file-retry:" + aliveItem, Value = 2 });
     db.Counters.Upsert(new CounterEntity { Key = "file-retry:" + deadItem, Value = 5 });
+    // The retired id-not-found counter is planted on purpose: the reset scope still clears it,
+    // so the fixture has to carry one for that assertion to mean anything (F-M66 removal).
     db.Counters.Upsert(new CounterEntity { Key = "id-not-found:" + deadItem, Value = 3 });
 
     db.RejectedCandidates.Upsert(new RejectedCandidateEntity
@@ -432,12 +434,14 @@ Section("database refresh — prune, driven with a predicate (F-M234)");
     Check(!deadKeepsStamp, "the DEAD item lost its search stamp");
     Check(aliveKeepsStamp, "the LIVE item KEPT its search stamp");
 
-    // --- 9b. Counters keyed by a prefixed item id, on the retry budgets. ---
+    // --- 9b. Counters keyed by a prefixed item id, on the retry budget. ---
+    // The id-not-found counter is NOT pruned by a tracker any more: the give-up went with
+    // IdRetryLimit (08.10.2026), the tracker type is gone, and the retired key is cleared by the
+    // reset scope instead (asserted in 10b below). Pruning it here would mean a live consumer.
     var fileRetryPruned = new FileRetryTracker(db).PruneDeadItems(ItemExists);
-    var idNotFoundPruned = new IdNotFoundTracker(db).PruneDeadItems(ItemExists);
     var aliveRetry = db.Counters.FindById("file-retry:" + aliveItem);
     var deadRetry = db.Counters.FindById("file-retry:" + deadItem);
-    Console.WriteLine("   counters pruned: file-retry " + fileRetryPruned + ", id-not-found " + idNotFoundPruned);
+    Console.WriteLine("   counters pruned: file-retry " + fileRetryPruned);
     Check(deadRetry == null, "the DEAD item's retry budget was pruned");
     Check(aliveRetry != null && aliveRetry.Value == 2, "the LIVE item's retry budget SURVIVED with its value",
         aliveRetry?.Value.ToString() ?? "(missing)");

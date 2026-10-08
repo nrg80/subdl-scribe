@@ -147,6 +147,9 @@ public class SubdlReset : ControllerBase
                 // Download side = downloaded sidecars and burned candidates.
                 db.Sidecars.DeleteMany(x => x.Status == SubtitleStatus.Downloaded);
                 db.RejectedCandidates.DeleteAll();
+                // `id-not-found:` is cleaned as a RETIRED key: the give-up budget went with
+                // IdRetryLimit (08.10.2026), so no code writes or reads it any more — a database
+                // carried over from before still holds rows, and this scope is where they go.
                 db.Counters.DeleteMany(x => x.Key.StartsWith("qa-fail:") || x.Key.StartsWith("id-not-found:"));
                 foreach (var media in db.Media.Find(x => x.LastSearchUtc != null))
                 {

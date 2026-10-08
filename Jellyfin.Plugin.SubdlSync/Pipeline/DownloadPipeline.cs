@@ -85,8 +85,6 @@ public class DownloadRunSummary
     /// <summary>Gets or sets the count of items skipped for id-less (hard IMDB match).</summary>
     public int SkippedNoId { get; set; }
 
-    /// <summary>Gets or sets the count of items skipped as id-unresolvable after exhausting the F-M66 retry budget.</summary>
-    public int SkippedIdGaveUp { get; set; }
 
     /// <summary>Gets or sets the count of items skipped by the skip filters (dir/file patterns).</summary>
     public int SkippedByFilter { get; set; }
@@ -232,7 +230,6 @@ public sealed class DownloadPipeline : IDisposable
         }
     }
     private readonly Registry.FileRetryTracker _fileRetries;
-    private readonly Registry.IdNotFoundTracker _idNotFound;
     private readonly Registry.QaFailTracker _qaFails;
 
     /// <summary>In-run watchdog (NF-4); non-null only while a run is active.</summary>
@@ -339,7 +336,6 @@ public sealed class DownloadPipeline : IDisposable
         GlobalRateLimiter limiter,
         DownloadSearchTracker searchTracker,
         Registry.FileRetryTracker fileRetries,
-        Registry.IdNotFoundTracker idNotFound,
         Registry.QaFailTracker qaFails)
     {
         _logger = logger;
@@ -351,7 +347,6 @@ public sealed class DownloadPipeline : IDisposable
         _limiter = limiter;
         _searchTracker = searchTracker;
         _fileRetries = fileRetries;
-        _idNotFound = idNotFound;
         _qaFails = qaFails;
     }
 
@@ -565,7 +560,6 @@ public sealed class DownloadPipeline : IDisposable
         _runSummaryForEvents = null;
         Registry.Flush();
         _searchTracker.Flush(); // F-M47: persist search timestamps after the run
-        _idNotFound.Flush(); // Persist id-resolution failure counters (F-M66) — same kill-safe flush as upload pipeline
         // F-M183 (user report 23.09.2026, supersedes the "saved only" rule for
         // the run-end line): a run that searched 400 items and saved nothing looked
         // identical to a run that did nothing at all — the single "{N} saved" line hid
@@ -590,7 +584,7 @@ public sealed class DownloadPipeline : IDisposable
             summary.SkippedItems,
             summary.SkippedNotDue,
             summary.SkippedByFilter,
-            summary.SkippedNoId + summary.SkippedIdGaveUp,
+            summary.SkippedNoId,
             summary.SkippedNothingMissing,
             summary.OpenFilesSeen,
             summary.Failed,
@@ -1043,7 +1037,6 @@ public sealed class DownloadPipeline : IDisposable
             {
                 imdbId = correctedImdb ?? imdbId;
                 tmdbId = correctedTmdb ?? tmdbId;
-                _idNotFound.RecordSuccess(item.Id.ToString());
             }
             else
             {
@@ -1054,18 +1047,6 @@ public sealed class DownloadPipeline : IDisposable
 
         if (string.IsNullOrWhiteSpace(imdbId))
         {
-            // F-M66: the "requeue with not-found +1" budget applies only to items
-            // with NO id at all — exhausted ones skip the whole ladder (incl. the
-            // 60 s wait and the TMDB calls). An item whose metadata improved (now
-            // carries a TMDB id) always gets the ladder again.
-            if (string.IsNullOrWhiteSpace(tmdbId) && _idNotFound.IsExhausted(item.Id.ToString(), _config.IdRetryLimit))
-            {
-                summary.SkippedItems++;
-                summary.SkippedNoId++;
-                summary.SkippedIdGaveUp++;
-                return;
-            }
-
             // (user decision 12.09.2026 "Ne. Direkt starten."): the 60 s
             // metadata wait is GONE — arrival runs go straight to the TMDB ladder
             // when the JF ids are empty. The ladder itself (tmdb->imdb, title
@@ -1143,31 +1124,18 @@ public sealed class DownloadPipeline : IDisposable
             // the switch that could let it through is gone (no replacement; see F-M45).
             if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId))
             {
-                // F-M22 (defect fixed 02.10.2026): a dry run does not spend the item's
-                // id-resolution budget. This counter's limit (IdRetryLimit) is what gives an
-                // item up, and the give-up is a STORED verdict a later run reads — so three dry
-                // runs could retire an item that a real run never touched. The success side is
-                // deliberately NOT guarded: recording a success clears stale state instead of
-                // creating it, which is the direction F-M22 sanctions ("neither burns a retry
-                // nor leaves the retry state stale").
-                if (!_config.DownloadDryRun)
-                {
-                    _idNotFound.RecordFailure(item.Id.ToString());
-                }
-
                 summary.SkippedItems++;
                 summary.SkippedNoId++;
                 if (_config.LogMode >= LogLevelMode.Verbose)
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL-D] SKIP {File} — no id resolvable (TMDb ladder failed) — requeued, not-found #{Count}",
-                        Path.GetFileName(mediaPath), _idNotFound.IsExhausted(item.Id.ToString(), _config.IdRetryLimit) ? "limit" : "+1");
+                        "[SubDL-D] SKIP {File} — no id resolvable (TMDb ladder failed) — the next run tries again",
+                        Path.GetFileName(mediaPath));
                 }
 
                 return;
             }
 
-            _idNotFound.RecordSuccess(item.Id.ToString()); // resolved via wait or TMDB
         }
 
         // F-M66: the ladder above already resolved TMDB→IMDB and ran the title

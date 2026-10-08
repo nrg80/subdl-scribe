@@ -838,21 +838,23 @@ public static class AutoSyncRun
         string src = System.IO.File.ReadAllText(pipeline);
 
         // 1. The QA give-up is gone from the pipeline. Scoped to `_qaFails` on purpose: `_fileRetries`
-        // and `_idNotFound` are different budgets (F-M60 file-missing, F-M66 id-not-found) that the
-        // operator did not touch, and a blanket search for "IsExhausted" would demand their removal
-        // too — the assertion would then be about the wrong mechanism.
+        // is a different budget (F-M60 file-missing) that the operator did not touch, and a blanket
+        // search for "IsExhausted" would demand its removal too — the assertion would then be about
+        // the wrong mechanism.
+        //
+        // `_idNotFound` USED to be asserted as untouched here. It is gone as well now (operator order
+        // 08.10.2026, "Id resolution retrys bitte auch löschen"): that budget gave an id-less item up
+        // permanently, and the operator chose that the ladder re-runs instead. So the pair became one.
         bool noGiveUpCall = !src.Contains("_qaFails.IsExhausted", StringComparison.Ordinal);
         Check("the pipeline applies no QA give-up to a work list any more", noGiveUpCall,
             noGiveUpCall ? "no _qaFails.IsExhausted call" : "a QA give-up is still applied to a work list");
         f += noGiveUpCall ? 0 : 1;
 
-        // ...and the two budgets that are NOT the QA one are asserted to still be there, so this
-        // scoping is a decision rather than an oversight.
-        bool otherBudgetsKept = src.Contains("_fileRetries.IsExhausted(", StringComparison.Ordinal)
-                                && src.Contains("_idNotFound.IsExhausted(", StringComparison.Ordinal);
-        Check("the file-missing (F-M60) and id-not-found (F-M66) budgets are untouched",
-            otherBudgetsKept,
-            otherBudgetsKept ? "both other budgets still applied" : "an unrelated budget was removed too");
+        // ...and the one budget that is NOT the QA one is asserted to still be there, so this scoping
+        // is a decision rather than an oversight.
+        bool otherBudgetsKept = src.Contains("_fileRetries.IsExhausted(", StringComparison.Ordinal);
+        Check("the file-missing (F-M60) budget is untouched", otherBudgetsKept,
+            otherBudgetsKept ? "the file-missing budget is still applied" : "an unrelated budget was removed too");
         f += otherBudgetsKept ? 0 : 1;
 
         // 2. The counter itself is gone from the tracker — the method, its key and its writes.
@@ -903,10 +905,10 @@ public static class AutoSyncRun
             burnKept ? "RecordSkippedCandidates still called" : "discards are no longer burned — quota would repeat");
         f += burnKept ? 0 : 1;
 
-        bool budgetKept = src.Contains("int refusalBudget = Math.Max(0, _config.DownloadQaRetryLimit);",
+        bool budgetKept = src.Contains("int walkLimit = Math.Max(0, _config.DownloadQaRetryLimit);",
                                        StringComparison.Ordinal);
         Check("the fit still takes the limit as its budget", budgetKept,
-            budgetKept ? "DownloadQaRetryLimit → refusalBudget" : "the fit lost its budget");
+            budgetKept ? "DownloadQaRetryLimit → walkLimit" : "the fit lost its budget");
         f += budgetKept ? 0 : 1;
 
         // NEGATIVE CONTROL: plant the give-up back and require RED.
@@ -987,16 +989,16 @@ public static class AutoSyncRun
             cfg.DownloadQaRetryLimit == 3, $"default = {cfg.DownloadQaRetryLimit}");
         f += cfg.DownloadQaRetryLimit == 3 ? 0 : 1;
 
-        bool readsRetryLimit = src.Contains("int refusalBudget = Math.Max(0, _config.DownloadQaRetryLimit);",
+        bool readsRetryLimit = src.Contains("int walkLimit = Math.Max(0, _config.DownloadQaRetryLimit);",
                                             StringComparison.Ordinal);
         Check("the budget is read from the QA retry limit", readsRetryLimit,
-            readsRetryLimit ? "refusalBudget ← DownloadQaRetryLimit" : "missing");
+            readsRetryLimit ? "walkLimit ← DownloadQaRetryLimit" : "missing");
         f += readsRetryLimit ? 0 : 1;
 
         // The stop is checked BEFORE the fetch: breaking after the refusal would burn one more
         // download from the daily quota and write one more unprocessed file.
         bool budgetBeforeFetch = System.Text.RegularExpressions.Regex.IsMatch(
-            src, @"refusalBudget > 0 && refusalsThisRun >= refusalBudget");
+            src, @"walkLimit > 0 && refusalsThisRun >= walkLimit");
         Check("the hunt stops once the budget is spent", budgetBeforeFetch,
             budgetBeforeFetch ? "checked against refusalsThisRun" : "no budget stop found");
         f += budgetBeforeFetch ? 0 : 1;

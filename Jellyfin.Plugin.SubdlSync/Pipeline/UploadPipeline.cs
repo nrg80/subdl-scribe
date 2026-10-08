@@ -80,9 +80,6 @@ public class RunSummary
     /// </summary>
     public int RejectedCandidates { get; set; }
 
-    /// <summary>Gets or sets the count of items skipped as id-unresolvable after exhausting the F-M66 retry budget.</summary>
-    public int SkippedIdGaveUp { get; set; }
-
     /// <summary>Gets or sets the number of rate-limit hits this run.</summary>
     public int RateLimitHits { get; set; }
 
@@ -169,7 +166,6 @@ public sealed class UploadPipeline
     private readonly PluginConfiguration _config;
     private readonly GlobalRateLimiter _limiter;
     private readonly Registry.FileRetryTracker _fileRetries;
-    private readonly Registry.IdNotFoundTracker _idNotFound;
 
     /// <summary>F-M88c/d: central OSHash cache (oshash-cache.json in the plugin data dir).</summary>
     /// Always use the current Plugin.Instance cache so a DB reset is respected.<
@@ -265,8 +261,7 @@ public sealed class UploadPipeline
         TmdbImdbResolver tmdb,
         PluginConfiguration config,
         GlobalRateLimiter limiter,
-        Registry.FileRetryTracker fileRetries,
-        Registry.IdNotFoundTracker idNotFound)
+        Registry.FileRetryTracker fileRetries)
     {
         _logger = logger;
         _libraryManager = libraryManager;
@@ -276,7 +271,6 @@ public sealed class UploadPipeline
         _config = config;
         _limiter = limiter;
         _fileRetries = fileRetries;
-        _idNotFound = idNotFound;
         // F-M88c/d (user decision): OSHash cache lives in the plugin data dir via
         // the OshashCache property. Read-only shares keep their cache,
         // library folders stay clean.
@@ -577,8 +571,10 @@ public sealed class UploadPipeline
 
             // F-M66/F-M151: id resolution in ONE pass. Raw JF ids first, then the
             // optional upload ID quality gate (default ON) validates/corrects them
-            // against TMDB. Items that remain unresolvable are requeued with the
-            // id-not-found budget.
+            // against TMDB. An item that stays unresolvable is skipped for this run and
+            // retried by the next one: the give-up budget was REMOVED (operator order
+            // 08.10.2026, "Id resolution retrys bitte auch löschen"), so the ladder
+            // re-runs instead of retiring the item.
             var (imdbId, tmdbIdRaw, season, episode, isSeries) = ResolveIdsRaw(item);
 
 
@@ -666,7 +662,6 @@ public sealed class UploadPipeline
             {
                 imdbId = correctedImdb ?? imdbId;
                 tmdbIdRaw = correctedTmdb ?? tmdbIdRaw;
-                _idNotFound.RecordSuccess(item.Id.ToString());
             }
             else
             {
@@ -676,19 +671,6 @@ public sealed class UploadPipeline
 
             if (string.IsNullOrWhiteSpace(imdbId))
             {
-                // The budget applies to ANY item that keeps failing the ladder.
-                if (_idNotFound.IsExhausted(item.Id.ToString(), _config.IdRetryLimit))
-                {
-                    summary.SkippedIdGaveUp++;
-                    if (_config.LogMode >= LogLevelMode.Verbose)
-                    {
-                        LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL] SKIP {File} — id-resolution exhausted ({Count}/{Limit} failed ladders) — no TMDB spend until ids change",
-                            Path.GetFileName(mediaPath), _idNotFound.Peek(item.Id.ToString()), _config.IdRetryLimit);
-                    }
-                    continue;
-                }
-
                 // No 60 s wait; go straight to the TMDB ladder when JF ids are empty.
                 if (string.IsNullOrWhiteSpace(imdbId) && !string.IsNullOrWhiteSpace(tmdbIdRaw) && _tmdb.IsConfigured)
                 {
@@ -724,19 +706,8 @@ public sealed class UploadPipeline
                     }
                 }
 
-                if (!string.IsNullOrWhiteSpace(imdbId))
+                if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbIdRaw))
                 {
-                    _idNotFound.RecordSuccess(item.Id.ToString());
-                }
-                else if (string.IsNullOrWhiteSpace(tmdbIdRaw))
-                {
-                    // F-M22 (defect fixed 02.10.2026): same as the download side — a dry run spends
-                    // no part of the id-resolution budget, because its limit retires the item.
-                    if (!_config.DryRun)
-                    {
-                        _idNotFound.RecordFailure(item.Id.ToString());
-                    }
-
                     summary.SkippedNoImdb++;
                     summary.FilesSkipped++;
                     if (_config.LogMode >= LogLevelMode.Verbose)
@@ -1539,7 +1510,6 @@ public sealed class UploadPipeline
         _tmdb.Trace -= OnTmdbTrace;
         _tmdb.IdMismatch -= OnIdMismatch; // F-M190: detach per-run handler
         Registry.Flush();
-        _idNotFound.Flush(); // Persist id-resolution failure counters (F-M66) — without this every JF restart reset the counters and id-less items (Primer/Coherence test files) waited 60 s + spent TMDB searches in every run forever
         OshashCache.Flush(); // F-M88c: kill-safe flush of the central OSHash cache
         _fileRetries.Flush();
         // (user decision 14.09.2026, REVISED 02.10.2026 — F-M286): the rule used to be "no stats

@@ -927,9 +927,10 @@ internal static class Program
         // ── L  the dry run writes no stored verdict (F-M22) ────────────────────────────
         // The rule has two halves and both were violated in the same shape: a write sat BEFORE the
         // mode's own exit, so the report-only run left state behind that changed what the next real
-        // run found. These checks pin the two trackers the pipelines own, because those are the
-        // stored verdicts with the longest reach: the refetch stamp (hides work for a whole
-        // interval) and the id-resolution budget (retires an item after IdRetryLimit runs).
+        // run found. These checks pin the tracker the pipelines own whose reach is longest: the
+        // refetch stamp, which hides work for a whole interval. The id-resolution budget that used to
+        // be pinned here as well is GONE (operator order 08.10.2026, L4–L6 below assert the removal),
+        // so the stamp is the remaining stored verdict of this class.
         {
             string ldir = Path.Combine(Path.GetTempPath(), "subdl-fm22-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(ldir);
@@ -967,22 +968,23 @@ internal static class Program
                 Check("L3 clearing the stamp makes the item due again", stamp.IsDue(itemId, gap, new List<string> { "EN" }),
                       "-> no invalidation pass exists, so a wrong stamp does not self-heal");
 
-                // The id-resolution budget: the limit is what gives an item up, and giving up is a
-                // stored verdict. 3 failures at limit 3 must exhaust it; a success must clear it.
-                var idnf = new IdNotFoundTracker(ldb, null);
-                string item2 = Guid.NewGuid().ToString();
-                for (int i = 0; i < 3; i++)
-                {
-                    Check($"L4.{i + 1} id-not-found is not exhausted after {i} failure(s)",
-                          !idnf.IsExhausted(item2, 3));
-                    idnf.RecordFailure(item2);
-                }
-
-                Check("L5 the id-resolution budget is exhausted at its limit", idnf.IsExhausted(item2, 3),
-                      "-> and the give-up is read by later runs");
-                idnf.RecordSuccess(item2);
-                Check("L6 a success clears the budget (the direction a dry run MAY touch)",
-                      !idnf.IsExhausted(item2, 3));
+                // L4–L6: the id-resolution give-up is GONE, asserted as an ABSENCE on both sides —
+                // the tracker's type and the `id-not-found:` key. Removing a give-up is invisible in
+                // a passing run, so a positive check cannot carry this; only an absence can. Negative
+                // control (measured): restoring the tracker file and the counter write turns L4 RED.
+                var dlSrc = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "DownloadPipeline.source.cs"));
+                Check("L4 the pipeline reads no id-not-found budget and records no failure",
+                      !dlSrc.Contains("_idNotFound", StringComparison.Ordinal)
+                      && !dlSrc.Contains("IdRetryLimit", StringComparison.Ordinal),
+                      "-> an id-less item is retried by the next run, never retired");
+                var upSrc = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "UploadPipeline.source.cs"));
+                Check("L5 the upload side carries the same removal",
+                      !upSrc.Contains("_idNotFound", StringComparison.Ordinal)
+                      && !upSrc.Contains("IdRetryLimit", StringComparison.Ordinal));
+                Check("L6 no give-up counter is reported by either summary any more",
+                      !dlSrc.Contains("SkippedIdGaveUp", StringComparison.Ordinal)
+                      && !upSrc.Contains("SkippedIdGaveUp", StringComparison.Ordinal),
+                      "-> the count that gave items up cannot be reported either");
             }
             finally
             {

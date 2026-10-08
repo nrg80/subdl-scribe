@@ -348,16 +348,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public int FileRetryLimit { get; set; } = 3;
 
     /// <summary>
-    /// F-M66 (user decision 09.09.2026): how many consecutive id-resolution
-    /// failures (60 s metadata wait + TMDB id→IMDB + TMDB title search all
-    /// failed) an item may accumulate before it is skipped without any TMDB
-    /// calls until its metadata improves. A resolved id resets the counter.
-    /// 0 = never give up (old behaviour: retry the full ladder every run).
-    /// Default: 3.
-    /// </summary>
-    public int IdRetryLimit { get; set; } = 3;
-
-    /// <summary>
     /// F-M320 (operator order 08.10.2026): how many candidates may be FETCHED hoping for a correction
     /// the alignment can prove against the audio — the correction hunt's budget (F-M318).
     /// <para>

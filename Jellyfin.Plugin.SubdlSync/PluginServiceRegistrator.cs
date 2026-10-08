@@ -86,10 +86,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // It spaces calls and jitters transfers — it holds no budget and refuses nothing.
         var limiter = new GlobalRateLimiter(config.UploadsPerHour, config.MinCallPauseSec);
         var fileRetries = new FileRetryTracker(db, loggerFactory.CreateLogger<FileRetryTracker>());
-        var idNotFound = new IdNotFoundTracker(db, loggerFactory.CreateLogger<IdNotFoundTracker>());
         var logger = loggerFactory.CreateLogger<UploadPipeline>();
-        var pipeline = new UploadPipeline(logger, libraryManager, mediaSourceManager, api, tmdb, config, limiter, fileRetries, idNotFound);
-        return new PipelineBundle(pipeline, registry, http, fileRetries, idNotFound);
+        var pipeline = new UploadPipeline(logger, libraryManager, mediaSourceManager, api, tmdb, config, limiter, fileRetries);
+        return new PipelineBundle(pipeline, registry, http, fileRetries);
     }
 
     /// <summary>
@@ -127,11 +126,10 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         var limiter = new GlobalRateLimiter(config.UploadsPerHour, config.MinCallPauseSec);
         var searchTracker = new DownloadSearchTracker(db, loggerFactory.CreateLogger<DownloadSearchTracker>());
         var fileRetries = new FileRetryTracker(db, loggerFactory.CreateLogger<FileRetryTracker>());
-        var idNotFound = new IdNotFoundTracker(db, loggerFactory.CreateLogger<IdNotFoundTracker>());
         var qaFails = new QaFailTracker(db, loggerFactory.CreateLogger<QaFailTracker>());
         var logger = loggerFactory.CreateLogger<DownloadPipeline>();
-        var pipeline = new DownloadPipeline(logger, libraryManager, mediaSourceManager, api, tmdb, config, limiter, searchTracker, fileRetries, idNotFound, qaFails);
-        return new DownloadPipelineBundle(pipeline, registry, http, searchTracker, fileRetries, idNotFound, qaFails);
+        var pipeline = new DownloadPipeline(logger, libraryManager, mediaSourceManager, api, tmdb, config, limiter, searchTracker, fileRetries, qaFails);
+        return new DownloadPipelineBundle(pipeline, registry, http, searchTracker, fileRetries, qaFails);
     }
 
     /// <summary>
@@ -186,14 +184,13 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         /// <summary>
         /// Initializes a new instance of the <see cref="DownloadPipelineBundle"/> class.
         /// </summary>
-        public DownloadPipelineBundle(DownloadPipeline pipeline, ContentHashRegistry registry, HttpClient http, DownloadSearchTracker searchTracker, FileRetryTracker fileRetries, IdNotFoundTracker idNotFound, QaFailTracker qaFails)
+        public DownloadPipelineBundle(DownloadPipeline pipeline, ContentHashRegistry registry, HttpClient http, DownloadSearchTracker searchTracker, FileRetryTracker fileRetries, QaFailTracker qaFails)
         {
             Pipeline = pipeline;
             Registry = registry;
             Http = http;
             SearchTracker = searchTracker;
             FileRetries = fileRetries;
-            IdNotFound = idNotFound;
             QaFails = qaFails;
         }
 
@@ -212,9 +209,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         /// <summary>Gets the per-item file-failure retry tracker (F-M60).</summary>
         public FileRetryTracker FileRetries { get; }
 
-        /// <summary>Gets the per-item id-resolution failure tracker (F-M66).</summary>
-        public IdNotFoundTracker IdNotFound { get; }
-
         /// <summary>Gets the per-(item, language) QA-failure tracker.</summary>
         public QaFailTracker QaFails { get; }
 
@@ -223,7 +217,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         {
             FileRetries.Flush();
             SearchTracker.Flush();
-            IdNotFound.Flush(); // F-M66: persist id-failure counters after the run
             QaFails.Flush(); // Persist qa-failure counters after the run
             Registry.Dispose();
             Http.Dispose();
@@ -238,13 +231,12 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         /// <summary>
         /// Initializes a new instance of the <see cref="PipelineBundle"/> class.
         /// </summary>
-        public PipelineBundle(UploadPipeline pipeline, ContentHashRegistry registry, HttpClient http, FileRetryTracker fileRetries, IdNotFoundTracker idNotFound)
+        public PipelineBundle(UploadPipeline pipeline, ContentHashRegistry registry, HttpClient http, FileRetryTracker fileRetries)
         {
             Pipeline = pipeline;
             Registry = registry;
             Http = http;
             FileRetries = fileRetries;
-            IdNotFound = idNotFound;
         }
 
         /// <summary>Gets the upload pipeline.</summary>
@@ -259,14 +251,10 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         /// <summary>Gets the per-item file-failure retry tracker (F-M60).</summary>
         public FileRetryTracker FileRetries { get; }
 
-        /// <summary>Gets the per-item id-resolution failure tracker (F-M66).</summary>
-        public IdNotFoundTracker IdNotFound { get; }
-
         /// <inheritdoc />
         public void Dispose()
         {
             FileRetries.Flush();
-            IdNotFound.Flush(); // F-M66: persist id-failure counters after the run
             Registry.Dispose();
             Http.Dispose();
         }
