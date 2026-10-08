@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.218",
-        "changelog": "v12.1.12.218: Three page texts. The reset warning is one short sentence again (\"Deletes all persistent\n    state. A backup is kept. Rebuild costs API quota.\"), the postprocessing description drops its trailing\n    pointer at the button beneath it, and the \"Only missing languages\" checkbox states its default (on).",
+        "version": "12.1.12.219",
+        "changelog": "v12.1.12.219: \"Only missing languages\" gets a real second mode. Off now means once per language,\n    whatever the file already carries: only our own recorded download closes a pair, so library\n    sidecars, embedded tracks and the stream list stop counting. The fetched file is numbered against\n    the files actually in the directory instead of overwriting the one already there, and the label\n    drops its old \"(embedded count as present)\" parenthetical.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.218-dev/Jellyfin.Plugin.SubdlSync_12.1.12.218.zip",
-        "checksum": "08f356c11758f821279a84bd81ec1d50",
-        "timestamp": "2026-10-08T21:59:09Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.219-dev/Jellyfin.Plugin.SubdlSync_12.1.12.219.zip",
+        "checksum": "b3b6582e65471605c63c6c7bb4066b85",
+        "timestamp": "2026-10-08T22:13:59Z"
       }
     ]
   }
