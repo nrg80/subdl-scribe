@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.217"
+version: "12.1.12.218"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,9 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.218: Three page texts. The reset warning is one short sentence again ("Deletes all persistent
+    state. A backup is kept. Rebuild costs API quota."), the postprocessing description drops its trailing
+    pointer at the button beneath it, and the "Only missing languages" checkbox states its default (on).
   v12.1.12.217: file-retry is removed from code and GUI - the file-missing give-up, its setting and
     its tracker type are gone. The gone-file case is the Database Refresh's job now (new phase 1b,
     path-keyed and behind the same root fail-safe as its neighbours), which is what the operator's

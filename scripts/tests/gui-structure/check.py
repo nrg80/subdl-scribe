@@ -1160,11 +1160,17 @@ def main():
         check("the automatic path is still bound to the upload switch",
               "config.UploadEnabled\n                && ppInterval is not (UpdateInterval.Never" in sched,
               "removing the rule entirely would let the schedule run with upload off")
-    # The description states the rule in the operator's own words.
+    # The description names the BOUND half and only that. Operator order 08.10.2026: the trailing
+    # "the button below always runs" had to go — the button sits directly beneath this line, so
+    # naming it in the sentence was noise, and the operator asked for it twice on other labels too.
+    # Asserted as a PAIR so a re-added suffix is caught as well as a lost rule: the binding sentence
+    # is what the page must keep, the pointer at the button is what it must not grow back.
     check("the description names the inhibited scheduled run",
-          "Scheduled run is inhibited if upload is disabled" in html
-          and "the button below always runs" in html,
+          "Scheduled run is inhibited if upload is disabled" in html,
           "the page must say which of the two paths is bound")
+    check("the description does not point at the button below it",
+          "the button below always runs" not in html,
+          "the button sits directly under the line; naming it again is the noise the operator removed")
 
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:

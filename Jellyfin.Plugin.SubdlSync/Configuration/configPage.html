@@ -328,7 +328,7 @@
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
                             </select>
-                            <div class="fieldDescription">How often rejected uploads are resolved against /user/mySubtitles. Scheduled run is inhibited if upload is disabled; the button below always runs. Default: Daily.</div>
+                            <div class="fieldDescription">How often rejected uploads are resolved against /user/mySubtitles. Scheduled run is inhibited if upload is disabled. Default: Daily.</div>
                             <!-- Operator order 08.10.2026: the third refresh job gets its manual button too
                                  ("Knopf für upload Postprocessing habe ich dann vergessen. Auch manual dann statt never").
                                  It starts the TASK, like the two refresh buttons above — NOT the job's own
@@ -344,7 +344,7 @@
 
                         <h3>Database</h3>
                         <div class="fieldDescription" style="max-width:60em;">
-                            <b>Reset plugin database.</b> Deletes all persistent state files. Rebuild costs API quota. <b>The upload dedup state goes with them (F-M4)</b> — which pairs are already up has to be re-derived by re-scanning, backups are kept.
+                            <b>Reset plugin database.</b> Deletes all persistent state. A backup is kept. Rebuild costs API quota.
                         </div>
                         <div style="margin-top:0.5em; margin-bottom:1em;">
                             <button is="emby-button" type="button" class="raised" id="ResetRegistry" style="color:#f00;">Reset plugin database…</button>
@@ -492,6 +492,7 @@
                                 <input id="DownloadOnlyMissing" name="DownloadOnlyMissing" type="checkbox" is="emby-checkbox" />
                                 <span>Only missing languages (embedded count as present)</span>
                             </label>
+                            <div class="fieldDescription">Skip files that already carry the language. Default: on.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
