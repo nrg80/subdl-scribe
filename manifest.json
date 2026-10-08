@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.189",
-        "changelog": "v12.1.12.189: The unsynchronized original is no longer an archive but a sidecar you can select\n    in the player, and it is locked against upload. After a correction the untouched file lands\n    beside the corrected one as <base>.<lang>.99.srt — numbered from 99 downward — so Jellyfin\n    lists it as its own track. The slots 90-99 are reserved for it, which is why corrected files\n    now stop at slot 89: without that cap a corrected file could be handed the name of an original\n    and overwrite the very file the correction exists to keep. No new state and no new rejection\n    reason were introduced — the original is registered exactly as every downloaded subtitle\n    already is, which is what keeps it out of the queue and out of the upload. The archive\n    (<name>.srt.unsynced.zip) is no longer written; archives already on disk are left untouched.",
+        "version": "12.1.12.190",
+        "changelog": "v12.1.12.190: Subtitle files now always carry their slot number, two digits, right after the\n    language: <name>.en.01.srt instead of <name>.en.srt. The number is what orders the track list\n    in the player, because Jellyfin sorts external subtitles by file name. A bare <name>.en.srt\n    sorted AFTER <name>.en.99.srt, so a kept original was listed above the corrected file it\n    belongs to, and an unpadded .2.srt sorted after .10.srt. With two digits the list runs\n    alphabetically by language and numerically by slot, corrected files first (01-89), the\n    reserved originals last (90-99). Files written by an earlier version keep their names and\n    still work; nothing is renamed by itself.\n    Also in this version: the slot says WHICH KIND a file is — a corrected file counts up from 01,\n    and one the alignment could not process is kept from 99 downward, whether or not a corrected\n    version exists beside it. When the alignment cannot prove its correction against the audio, the\n    download repeats with the next candidate instead of giving up, bounded by the QA retry limit, and\n    every refused candidate is kept untouched. \"Best subtitles to keep per language\" is removed: one\n    corrected file per language. The QA retry limit now bounds the alignment alone — a candidate the\n    quality gates reject no longer counts against a limit and no longer closes a file.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.189-dev/Jellyfin.Plugin.SubdlSync_12.1.12.189.zip",
-        "checksum": "0d56afb3b489afe23af4fe3dfed97b1b",
-        "timestamp": "2026-10-07T20:13:57Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.190-dev/Jellyfin.Plugin.SubdlSync_12.1.12.190.zip",
+        "checksum": "d808b1a77efc0cf170f96ef09d0bc718",
+        "timestamp": "2026-10-08T10:37:07Z"
       }
     ]
   }
