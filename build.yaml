@@ -26,13 +26,11 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
-  v12.1.12.203: The auto-sync's worker row no longer breaks a run. It is written from the direction
-    loop, which serves download AND upload, and an upload run holds no download summary — the null
-    was dereferenced straight away. The failure landed AFTER the work: a cycle that had just uploaded
-    three subtitles ended "Object reference not set to an instance of an object", and the crash
-    repainted the DOWNLOAD lamp red with it, so both directions read as failed while both had
-    finished green. Reached prod (.201) and test (.202) alike; the download summary is now nullable
-    and the row is simply skipped when there is none.
+  v12.1.12.203: A run that uploaded subtitles is no longer marked failed afterwards. The status row
+    for the audio alignment was written on the upload path too, where there is no download to report,
+    so every upload run threw and both the Download and Upload lights turned red although both had
+    finished green. The row is skipped when there is no download. Also: a failed unpack during a
+    deploy no longer leaves a half-installed plugin.
   v12.1.12.202: The data store is SQLite now, through the Entity Framework Core that Jellyfin already
     ships, and the plugin writes its own file (subdl-scribe.sqlite) — never Jellyfin's database, which
     offers plugins no interface and is rebuilt by its own migrations. A new version that meets an old
