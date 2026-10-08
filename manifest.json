@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.209",
-        "changelog": "v12.1.12.209: The IMDb/TMDb match loses its switch, and a spent allowance no longer starts the\n    downloader. A filename-parsed title search could fetch a wrong-year release with the same name;\n    the hard gate is the only position that stays correct, so the option went and not the gate. And\n    the seeder now asks the SubDL counters once per scan, BEFORE it fills the download queue: with\n    the 50/day download limit or the search allowance spent, the queue is not filled AND the run is\n    refused, so a cycle stops costing its search allowance for saves that cannot happen. Measured on\n    prod the day of the order: the download limit was spent from 05:59, and four further cycles each\n    walked ~1000 queued items, spent the day's search allowance (59 -> 194) and saved nothing.\n    An unreadable counter is NOT treated as spent - a network hiccup must not cost a day.",
+        "version": "12.1.12.210",
+        "changelog": "v12.1.12.210: The allowance gate now works like the download switch, at the switch's own two\n    places, and the check moved out of the seeder. The seeder fills queues and does not decide\n    policy: it takes a plain flag beside DownloadEnabled and asks the API nothing. The dispatcher\n    probes once per cycle before the download seed - only when the cycle covers the download\n    direction - and a spent download OR search allowance then holds the queue back AND stops the\n    run, exactly as switching the direction off does. A read that fails is not a verdict.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.209-dev/Jellyfin.Plugin.SubdlSync_12.1.12.209.zip",
-        "checksum": "1975fc9e07c42146b4a8d32666a424ed",
-        "timestamp": "2026-10-08T19:48:46Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.210-dev/Jellyfin.Plugin.SubdlSync_12.1.12.210.zip",
+        "checksum": "50c3f7478a8476c27f395c65e8269720",
+        "timestamp": "2026-10-08T20:02:16Z"
       }
     ]
   }
