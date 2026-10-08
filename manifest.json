@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.215",
-        "changelog": "v12.1.12.215: The postprocessing button now starts the scheduled task instead of calling the job's\n    API endpoint. Both run the work, but only the task writes the status row - measured on prod, the endpoint\n    finished correctly while the list stayed empty, so the run looked like it never happened.",
+        "version": "12.1.12.216",
+        "changelog": "v12.1.12.216: All three maintenance menus now read just \"Manual\" - the appended \"no scheduled run,\n    use the button below\" is gone. The button sits directly under its description; nothing else changed.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.215-dev/Jellyfin.Plugin.SubdlSync_12.1.12.215.zip",
-        "checksum": "56b33cf020e795f4384c5bf3afbb942a",
-        "timestamp": "2026-10-08T21:26:56Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.216-dev/Jellyfin.Plugin.SubdlSync_12.1.12.216.zip",
+        "checksum": "07e0c5e7bf9c1116eb39d4f9399bc857",
+        "timestamp": "2026-10-08T21:32:17Z"
       }
     ]
   }
