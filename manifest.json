@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.202",
-        "changelog": "v12.1.12.202: The data store is SQLite now, through the Entity Framework Core that Jellyfin already\n    ships, and the plugin writes its own file (subdl-scribe.sqlite) — never Jellyfin's database, which\n    offers plugins no interface and is rebuilt by its own migrations. A new version that meets an old\n    data file IMPORTS it once: measured against a real file, 117 of 117 rows over ten areas, including\n    the retry budgets and the burned-candidate verdicts, which are work rather than data — losing them\n    re-fetches candidates that were already screened. The old file is kept. 35 KB smaller package\n    (1,337,266 -> 1,301,728 B): not the full engine weight, because the import still needs it to read.\n  Older entries (before v12.1.12.192) were removed on 08.10.2026 to keep this file\n  and the shipped ZIP small. They remain in the git history: git log -- build.yaml .",
+        "version": "12.1.12.203",
+        "changelog": "v12.1.12.203: A run that uploaded subtitles is no longer marked failed afterwards. The status row\n    for the audio alignment was written on the upload path too, where there is no download to report,\n    so every upload run threw and both the Download and Upload lights turned red although both had\n    finished green. The row is skipped when there is no download. Also: a failed unpack during a\n    deploy no longer leaves a half-installed plugin.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.202-dev/Jellyfin.Plugin.SubdlSync_12.1.12.202.zip",
-        "checksum": "8d22b1f3abf3e21e662e98b4798ccc83",
-        "timestamp": "2026-10-08T15:51:52Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.203-dev/Jellyfin.Plugin.SubdlSync_12.1.12.203.zip",
+        "checksum": "4f046a62114d6d9bce425ee12b6038b6",
+        "timestamp": "2026-10-08T17:31:49Z"
       }
     ]
   }
