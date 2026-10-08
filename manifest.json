@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.217",
-        "changelog": "v12.1.12.217: file-retry is removed from code and GUI - the file-missing give-up, its setting and\n    its tracker type are gone. The gone-file case is the Database Refresh's job now (new phase 1b,\n    path-keyed and behind the same root fail-safe as its neighbours), which is what the operator's\n    \"alleinige Aufgabe database refresh\" asks for. Two page texts corrected with it: the reset warning\n    no longer claims the dedup state survives (it is exactly what a reset deletes), and the pacing\n    field drops its \"rate, not a limit\" aside.",
+        "version": "12.1.12.218",
+        "changelog": "v12.1.12.218: Three page texts. The reset warning is one short sentence again (\"Deletes all persistent\n    state. A backup is kept. Rebuild costs API quota.\"), the postprocessing description drops its trailing\n    pointer at the button beneath it, and the \"Only missing languages\" checkbox states its default (on).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.217-dev/Jellyfin.Plugin.SubdlSync_12.1.12.217.zip",
-        "checksum": "b66313d400a7d1810f998d975d3fb5ea",
-        "timestamp": "2026-10-08T21:48:07Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.218-dev/Jellyfin.Plugin.SubdlSync_12.1.12.218.zip",
+        "checksum": "08f356c11758f821279a84bd81ec1d50",
+        "timestamp": "2026-10-08T21:59:09Z"
       }
     ]
   }
