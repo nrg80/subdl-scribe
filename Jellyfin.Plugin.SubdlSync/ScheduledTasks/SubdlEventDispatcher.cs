@@ -716,6 +716,15 @@ public sealed class SubdlEventDispatcher : IDisposable
         _dirDetailDown = null;
         _seederOutcome = null;
         _seederDetail = null;
+        // Operator order 08.10.2026 ("jeder worker meldet nur sich selbst"): the seeder row
+        // SUMS the cycle's legs. A Both cycle seeds the download leg and then the upload leg, and
+        // the second write overwrote the first, so the download leg's numbers vanished from a row
+        // that claims to summarise the cycle. Fresh per cycle, accumulated per leg.
+        _seedLegsScanned = 0;
+        _seedCoveredUp = false;
+        _seedCoveredDown = false;
+        _seedQueuedUp = 0;
+        _seedQueuedDown = 0;
         lock (_lock) { _userStopActive = false; }
         try { _stopCts.Dispose(); } catch { }
         _stopCts = new CancellationTokenSource();
@@ -873,6 +882,69 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// QueueFilter and reports per-item outcomes via ItemResult → bookkeeping here.
     /// </summary>
     /// <summary>
+    /// This direction's own one-line result, for its worker row.
+    /// <para>
+    /// Only the parts that happened are named, so a quiet run reads as quiet instead of as a row of
+    /// zeroes. A run that never reached the pipeline reports that instead of borrowing a neighbour's
+    /// sentence.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction being described.</param>
+    /// <param name="upSummary">Upload run summary, when the upload leg produced one.</param>
+    /// <param name="downSummary">Download run summary, when the download leg produced one.</param>
+    /// <returns>Short detail text for the direction's row.</returns>
+    private static string DescribeDirectionRun(bool upload, Pipeline.RunSummary? upSummary, Pipeline.DownloadRunSummary? downSummary)
+    {
+        var parts = new System.Collections.Generic.List<string>(3);
+        if (upload)
+        {
+            if (upSummary == null)
+            {
+                return "no run — nothing queued";
+            }
+
+            if (upSummary.Uploaded > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} uploaded", upSummary.Uploaded));
+            }
+
+            if (upSummary.Failed > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} failed", upSummary.Failed));
+            }
+
+            if (upSummary.RejectedCandidates > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} rejected", upSummary.RejectedCandidates));
+            }
+        }
+        else
+        {
+            if (downSummary == null)
+            {
+                return "no run — nothing queued";
+            }
+
+            if (downSummary.Downloaded > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} downloaded", downSummary.Downloaded));
+            }
+
+            if (downSummary.Failed > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} failed", downSummary.Failed));
+            }
+
+            if (downSummary.NotAvailable > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} unavailable", downSummary.NotAvailable));
+            }
+        }
+
+        return parts.Count == 0 ? "nothing to do" : string.Join(", ", parts);
+    }
+
+    /// <summary>
     /// Runs one direction against its queue. Orchestrates setup, execution,
     /// result bookkeeping and cleanup.
     /// </summary>
@@ -933,6 +1005,12 @@ public sealed class SubdlEventDispatcher : IDisposable
             // work? Colour rule F-M268, and a dry run reports grey/`skipped` because a dry run aligns
             // nothing (F-M247: a dry run contributes nothing to the statistics).
             RecordAutoSyncRow(config, downSummary);
+            // Operator order 08.10.2026 ("jeder worker meldet nur sich selbst"): this direction's row
+            // states what THIS direction did, built from the run summary only this method holds —
+            // the waiting task never sees it and had to borrow the seeder's sentence instead.
+            // Deliberately BEFORE CleanupDirectionQueue: that call overwrites both fields when the run
+            // was quota-stopped, and a quota stop is this direction's own stronger fate.
+            SetDirectionDetail(upload, DescribeDirectionRun(upload, upSummary, downSummary));
             CleanupDirectionQueue(upload, queue, filter, retriesAtStart, upSummary, downSummary);
         }
         catch (OperationCanceledException)
@@ -1421,6 +1499,62 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// <returns>Outcome word and detail, both possibly null.</returns>
     public (string? Outcome, string? Detail) GetSeederOutcome() => (_seederOutcome, _seederDetail);
 
+    // The current cycle's seeder accounting, one entry per leg. See PrepareCycleState for why.
+    private int _seedLegsScanned;
+    private bool _seedCoveredUp;
+    private bool _seedCoveredDown;
+    private int _seedQueuedUp;
+    private int _seedQueuedDown;
+
+    /// <summary>
+    /// The seeder row's detail for the cycle so far, naming ONLY the directions the cycle's scans
+    /// actually covered.
+    /// <para>
+    /// A gated scan is handed one direction and never fills the foreign queue, so formatting both
+    /// counts unconditionally printed a structural `0` for the direction it never looked at — read
+    /// as "nothing to do" when the truth is "not asked" (operator order 08.10.2026).
+    /// </para>
+    /// </summary>
+    /// <returns>Detail text such as "5 upload queued" or "5 upload, 3 download queued".</returns>
+    private string SeederQueuedDetail()
+    {
+        var parts = new System.Collections.Generic.List<string>(2);
+        if (_seedCoveredUp)
+        {
+            parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} upload", _seedQueuedUp));
+        }
+
+        if (_seedCoveredDown)
+        {
+            parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} download", _seedQueuedDown));
+        }
+
+        return parts.Count == 0 ? "scan finished" : string.Join(", ", parts) + " queued";
+    }
+
+    /// <summary>
+    /// Sets a direction's detail WITHOUT touching its outcome — for a run that ended green and has
+    /// no special fate of its own. A fate recorded deliberately (a quota stop, a user stop) is
+    /// never overwritten, because <see cref="SetDirectionOutcome"/> owns both fields together and
+    /// <see cref="CleanupDirectionQueue"/> runs after this.
+    /// </summary>
+    /// <param name="upload">Direction to record.</param>
+    /// <param name="detail">This direction's own one-line result.</param>
+    private void SetDirectionDetail(bool upload, string detail)
+    {
+        if (upload)
+        {
+            if (_dirOutcomeUp == null)
+            {
+                _dirDetailUp = detail;
+            }
+        }
+        else if (_dirOutcomeDown == null)
+        {
+            _dirDetailDown = detail;
+        }
+    }
+
     /// <summary>
     /// Records the seeder's fate both in memory (for the waiting task) and in the database row
     /// (for the configuration page). Every seeder path must call this, including the ones that
@@ -1430,6 +1564,17 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// <param name="detail">Short human-readable summary.</param>
     private void RecordSeeder(string outcome, string detail)
     {
+        // A Both cycle scans the download leg and then finds the upload leg unchanged, whose pre-check
+        // reports grey "no changes — scan skipped". That write used to REPLACE the scan's own numbers,
+        // so a row claiming to summarise the cycle dropped the leg that actually ran and read as if the
+        // cycle had found nothing. Once a leg of THIS cycle has scanned, a later grey verdict is logged
+        // but does not take the row over; the numbers stay until the cycle ends.
+        if (outcome == Registry.WorkerRunRegistry.Outcome.Skipped && _seedLegsScanned > 0)
+        {
+            LogUtil.Normal(_logger, "[SubDL-Seed] leg skipped after a scan this cycle — seeder row keeps the scan's result ({Detail}).", detail);
+            return;
+        }
+
         _seederOutcome = outcome;
         _seederDetail = detail;
         Plugin.Instance?.WorkerRuns.Finish(Registry.WorkerRunRegistry.SeederKey, "Seeder", outcome, detail);
@@ -1699,13 +1844,23 @@ public sealed class SubdlEventDispatcher : IDisposable
                 // once, by the writer, and only a scan adds to it.
                 _pendingLanguageCodesAllocated += snapshot.LanguageCodesAllocated;
                 _pendingLooseSubtitlesRenamed += snapshot.LooseSubtitlesRenamed;
-                RecordSeeder(
-                    Registry.WorkerRunRegistry.Outcome.Ok,
-                    string.Format(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        "{0} upload, {1} download queued",
-                        snapshot.Upload.Count,
-                        snapshot.Download.Count));
+                // Accumulate the leg, then report the cycle's running total — see SeederQueuedDetail.
+                // The gate mirrors the scan's own: a leg only counts the direction it was asked for,
+                // because the foreign queue is left structurally empty by that gate.
+                if (dir != CycleDirection.DownloadOnly)
+                {
+                    _seedCoveredUp = true;
+                    _seedQueuedUp += snapshot.Upload.Count;
+                }
+
+                if (dir != CycleDirection.UploadOnly)
+                {
+                    _seedCoveredDown = true;
+                    _seedQueuedDown += snapshot.Download.Count;
+                }
+
+                _seedLegsScanned++;
+                RecordSeeder(Registry.WorkerRunRegistry.Outcome.Ok, SeederQueuedDetail());
             }
             catch (Exception ex)
             {

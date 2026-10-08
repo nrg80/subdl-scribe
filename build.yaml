@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.204"
+version: "12.1.12.205"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,12 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.205: Every worker row now reports only its own result - until now the green line handed
+    the seeder's sentence to the download AND upload row, so two rows read identically. The scan also
+    stopped printing the direction it never looked at, and the seeder row sums a both-direction cycle
+    instead of letting the second leg overwrite the first. Settings page: the download tab reads in
+    the order the cycle works - continue after daily limit, follow-up rounds, automatically
+    synchronize. No setting changed value.
   v12.1.12.204: A library scan is ~50x faster. The store committed once per ROW — and a commit is a
     disk sync — so a pass over prod's library issued 9 644 writes at 45 ms each and ran eight minutes
     while queueing nothing. Writes now accumulate and commit in batches, and observing an embedded

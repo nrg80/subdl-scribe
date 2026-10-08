@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.203.
+**Status:** Implementation — v12.1.12.205.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -20,10 +20,10 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 40 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 42 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 6 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
-  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 17 requirements
+  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 19 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -734,6 +734,28 @@ Both are existing code paths that every downloaded subtitle already travels. The
 **What was removed:** `Configuration/configPage.js`, `Api/SubdlConfigController.cs`, the second `PluginPageInfo` entry, the `EmbeddedResource` registration, and the seven assertions that required the copy. **What replaced them:** five assertions of ABSENCE — no file beside the page, no controller, no registration, no resource, and the renderer present exactly once. A page that grows a second script again is the state this rule exists to prevent.
 
 **What stands unchanged:** the renderer's FIELD must still be `s.FittedToAudio`, and the statistics endpoints must still carry `dataType: "json"` (F-M216) — that rule was never about the copy.
+
+**F-M328 [D] (operator order 08.10.2026):** **Every worker row reports only ITS OWN result; no row borrows a neighbour's sentence.**
+
+**The rule.** A worker's light and its detail text are both derived from that worker's own evidence, and from nothing else:
+
+- The cycle's **green** fallback states the DIRECTION's own detail. It used to hand the SEEDER's string to every direction row, so `Seeder` and `Upload` carried the identical sentence while the upload row never said what the upload did. **Measured on the live prod endpoint** (`/Plugins/SubdlSync/WorkerRuns`): two rows, one string — `5 upload, 0 download queued` on both. The seeder's numbers belong on the seeder's row.
+- This holds at the level the rows are WRITTEN, so the check reads the live endpoint and requires that no two rows carry the same detail — not merely that each row's field is non-empty.
+- A direction that never reached the pipeline reports that, instead of borrowing a neighbour's sentence.
+- The direction's own detail is set **before** the cleanup may record a quota stop: a quota stop is that direction's own stronger fate and outranks a green one-line result.
+- A **skipped leg does not overwrite a scan that ran this cycle.** A Both cycle scans the download leg and then finds the upload leg unchanged, whose pre-check reports grey *"no changes — scan skipped"*; that write used to replace the scan's numbers, so a row claiming to summarise the cycle dropped the leg that actually ran and read as if the cycle had found nothing.
+
+**A gated scan names only the directions it covered.** The scan is handed one direction and leaves the foreign queue structurally empty, so a shared line formatting both counts printed a hard `0` for the direction it was never asked about — read as *"nothing to do"* when the truth is *"not asked"*. Both the log line and the worker row format only the covered counts.
+
+**The seeder row SUMS the cycle's legs.** A Both cycle seeds the download leg and then the upload leg; the second write overwrote the first, so the download leg's numbers vanished from a row that claims to summarise the cycle.
+
+**Test: T140.** The order of the download tab's switch blocks is asserted, and the row-level rule above is asserted against the source plus the live endpoint.
+
+**F-M329 [D] (operator order 08.10.2026):** **The download tab reads in the order the cycle works: "Continue after daily limit", then "Follow-up rounds for downloads", then "Automatically synchronize" — all three above the quality gates.**
+
+**The reason is the operator's own:** *"automatically synchronized goes in download gui up right below follow-up rounds and both go below continue after daily limit."* The three controls render correctly in any sequence, so the rule is asserted as an **ORDER**, never as presence — a presence check passes on exactly the layout this rule exists to correct.
+
+**Test: T140.** See F-M328.
 
 **Test: T136.** See F-M216, F-M218, F-M323.
 
@@ -1958,3 +1980,6 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 - Plugin template: github.com/jellyfin/jellyfin-plugin-template
 - Reference plugin (download): Jellyfin OpenSubtitles plugin
 - SubDL API: `https://api.subdl.com`
+
+
+**T140:** One worker row, one worker's own result, and the download tab in the cycle's order. The row-level half is asserted as a **negative pair** on `Registry/WorkerRunRegistry.cs` — the green branch reads `directionDetail`, and the seeder-detail fallback is required **absent** — because both spellings render perfectly and only the pair catches a future drift; measured on the live endpoint, `Seeder` and `Upload` had carried the identical sentence. The dispatcher is asserted for the direction's own summary reaching its row (`DescribeDirectionRun`), for that write sitting **before** the cleanup that may record a quota stop (asserted as an ORDER, because a detail set afterwards is simply overwritten), for the leg-skipped guard, and for the seeder row summing its legs. The scan's own log line is anchored on the **decision** line (`string covered = coversUp && coversDown`), not on the words: planting `false && coversUp && coversDown` keeps the substring and restores the old behaviour, so a word-level check reads a broken line as green. The tab order is asserted on the download tab's slice as four ORDER comparisons plus a count of one. **Mutation-verified:** the three pre-existing controls moved back, the green branch reverted to the seeder's detail, the log line forced to both counts, and the leg guard removed — each confirmed RED, baseline green on restore.

@@ -463,6 +463,22 @@
                             <div class="fieldDescription">On 429/overload, schedule one automatic retry. Default: on.</div>
                         </div>
 
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                        <input id="FollowUpRoundsDownload" name="FollowUpRoundsDownload" type="checkbox" is="emby-checkbox" />
+                        <span>Follow-up rounds for downloads (2..n)</span>
+                        </label>
+                        <div class="fieldDescription">Further runs while new files keep arriving. Default: on.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="QaDownloadAutoSync" name="QaDownloadAutoSync" type="checkbox" is="emby-checkbox" />
+                                <span>Automatically synchronize subtitle to spoken track</span>
+                            </label>
+                            <div class="fieldDescription">Aligns a fetched subtitle segment-wise on a spoken track. A file the alignment finds nothing wrong with is kept as the best version: it takes index 01 upward, together with a copy of it from index 99 downward. A file that could not be aligned — or that is out of sync beyond repair — is kept from index 99 downward as well. Default: on.</div>
+                        </div>
+
                         
 
                         
@@ -490,13 +506,6 @@
                             <div class="fieldDescription">No download without an IMDb/TMDb ID.</div>
                         </div>
 
-                        <div class="checkboxContainer checkboxContainer-withDescription">
-                        <label class="emby-checkbox-label">
-                        <input id="FollowUpRoundsDownload" name="FollowUpRoundsDownload" type="checkbox" is="emby-checkbox" />
-                        <span>Follow-up rounds for downloads (2..n)</span>
-                        </label>
-                        <div class="fieldDescription">Further runs while new files keep arriving. Default: on.</div>
-                        </div>
                     <h3 style="margin-top:1.2em;">Quality gates (before download save)</h3>
                         <div class="fieldDescription" style="margin-bottom:.6em;">Structure, runtime and known-content checks always run. Extra gates reject before saving.</div>
 
@@ -521,13 +530,6 @@
                             <div class="fieldDescription">Max. cue span vs. runtime in seconds. 0 = off. Default: 600.</div>
                         </div>
 
-                        <div class="checkboxContainer checkboxContainer-withDescription">
-                            <label class="emby-checkbox-label">
-                                <input id="QaDownloadAutoSync" name="QaDownloadAutoSync" type="checkbox" is="emby-checkbox" />
-                                <span>Automatically synchronize subtitle to spoken track</span>
-                            </label>
-                            <div class="fieldDescription">Aligns a fetched subtitle segment-wise on a spoken track. A file the alignment finds nothing wrong with is kept as the best version: it takes index 01 upward, together with a copy of it from index 99 downward. A file that could not be aligned — or that is out of sync beyond repair — is kept from index 99 downward as well. Default: on.</div>
-                        </div>
 
                         
                         

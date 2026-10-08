@@ -47,6 +47,21 @@ results = []
 def check(name, ok, detail=""):
     results.append((name, bool(ok), detail))
 
+
+def read_source(*parts):
+    """Read a source file from the repo, or '' when it is not there.
+
+    The GUI check runs host-free and is also pointed at a bare page by the caller, so a missing
+    source tree must skip the code-level assertions rather than crash the page-level ones.
+    """
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..",
+                        "Jellyfin.Plugin.SubdlSync")
+    try:
+        with open(os.path.join(root, *parts), encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT
     path = os.path.abspath(path)
@@ -781,6 +796,67 @@ def main():
             check("node available for syntax check", False, "node not found")
         finally:
             os.unlink(tmp)
+
+    # ---- F-M324 (operator order 08.10.2026): the download tab reads in the order the cycle works ----
+    # "Continue after daily limit" directly above "Follow-up rounds for downloads", and BOTH above
+    # the quality-gates heading, where "Automatically synchronize" used to sit. Asserted as ORDER,
+    # not as presence: all three controls render perfectly in any sequence, so a presence check
+    # passes on the layout the operator just corrected.
+    dl_tab = html.rfind('data-tab-content="download"')
+    dl_end = html.find('data-tab-content=', dl_tab + 1)
+    dl_section = html[dl_tab:dl_end if dl_end != -1 else len(html)]
+    pos_limit = dl_section.find('id="DownloadContinueAfterLimit"')
+    pos_fu = dl_section.find('id="FollowUpRoundsDownload"')
+    pos_sync = dl_section.find('id="QaDownloadAutoSync"')
+    pos_gates = dl_section.find("Quality gates (before download save)")
+    check("download: Continue after daily limit comes before Follow-up rounds",
+          pos_limit != -1 and pos_fu != -1 and pos_limit < pos_fu,
+          "limit=%d follow-up=%d" % (pos_limit, pos_fu))
+    check("download: Follow-up rounds comes before Automatically synchronize",
+          pos_fu != -1 and pos_sync != -1 and pos_fu < pos_sync,
+          "follow-up=%d sync=%d" % (pos_fu, pos_sync))
+    check("download: Follow-up rounds sits ABOVE the quality gates",
+          pos_fu != -1 and pos_gates != -1 and pos_fu < pos_gates,
+          "follow-up=%d gates=%d" % (pos_fu, pos_gates))
+    check("download: Automatically synchronize sits ABOVE the quality gates",
+          pos_sync != -1 and pos_gates != -1 and pos_sync < pos_gates,
+          "sync=%d gates=%d" % (pos_sync, pos_gates))
+    check("download: exactly one Automatically synchronize control",
+          dl_section.count('id="QaDownloadAutoSync"') == 1,
+          "count=%d" % dl_section.count('id="QaDownloadAutoSync"'))
+
+    # ---- F-M324: one worker row, one worker's own result ----
+    # The green branch handed the SEEDER's string to every direction row, so `Seeder` and `Upload`
+    # carried the identical sentence on the live endpoint (measured on prod) while the upload row
+    # never stated its own result. Asserted as a negative pair, because both spellings render.
+    worker_src = read_source("Registry", "WorkerRunRegistry.cs")
+    if worker_src:
+        check("DescribeCycle's green branch reports the DIRECTION's own detail",
+              "string.IsNullOrWhiteSpace(directionDetail) ? \"cycle finished\" : directionDetail!"
+              in worker_src)
+        check("and no longer hands the seeder's detail to the direction row",
+              "IsNullOrWhiteSpace(seederDetail) ? \"cycle finished\" : seederDetail!"
+              not in worker_src)
+    disp_src = read_source("ScheduledTasks", "SubdlEventDispatcher.cs")
+    if disp_src:
+        check("each direction's row gets its OWN run summary",
+              "DescribeDirectionRun(upload" in disp_src)
+        check("and the detail is set before the quota stop may overwrite it",
+              disp_src.find("SetDirectionDetail(upload,") != -1
+              and disp_src.find("SetDirectionDetail(upload,") < disp_src.rfind("CleanupDirectionQueue(upload,"))
+        check("the seeder row sums the cycle's legs instead of re-writing per leg",
+              "_seedQueuedUp +=" in disp_src and "_seedLegsScanned++" in disp_src)
+        check("a skipped leg does not overwrite a scan that ran this cycle",
+              "_seedLegsScanned > 0" in disp_src)
+
+    seed_src = read_source("ScheduledTasks", "SubdlSeeder.cs")
+    if seed_src:
+        # Anchored on the DECISION line, not on the words alone: planting `false && coversUp &&
+        # coversDown` keeps the substring and restores the old behaviour, and a check that reads it
+        # as green is decoration. The gate must decide the text.
+        check("a direction-gated scan does not print the foreign direction's count",
+              "string covered = coversUp && coversDown\n" in seed_src,
+              "the formatted line must branch on the covered pair")
 
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:

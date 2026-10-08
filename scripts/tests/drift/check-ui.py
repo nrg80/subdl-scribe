@@ -58,14 +58,35 @@ for prop in REMOVED:
     fails += 0 if ok else 1
 
 # The correction block itself must hold exactly ONE checkbox — the whole point of the change.
-# Counted on a slice so an unrelated checkbox elsewhere cannot mask it, and the slice is bounded
-# by the runtime-tolerance control and the language modal rather than by a heading: the
-# `Subtitle correction` h4 was removed on operator order (07.10.2026), no intermediate heading
-# above the block. Bounding it on the switch id alone would count forward from the switch and
-# miss a stale checkbox sitting before it.
-sec_start = src.find('id="DownloadRuntimeToleranceSec"')
-sec_end = src.find('id="DownloadLangModal"')
-if sec_start < 0 or sec_end < 0 or sec_end < sec_start:
+# Counted on a slice so an unrelated checkbox elsewhere cannot mask it.
+#
+# REBOUND (operator order 08.10.2026). The slice used to run from the runtime-tolerance control to
+# the language modal, because the switch lived below both quality gates. The download tab was then
+# re-ordered — "Continue after daily limit", then "Follow-up rounds", then the switch, all above the
+# quality gates — so that slice became EMPTY and the check reported 0 boxes on a correct page.
+# The block is now bounded by its NEIGHBOURS' containers: it starts where the follow-up checkbox's
+# container ends and stops where the next checkbox container begins. Bounding it on the switch id
+# alone would count forward from the switch and miss a stale checkbox sitting before it.
+
+
+def _container_end(text, pos):
+    """End offset of the <div> that encloses pos, by counting div tags."""
+    start = text.rfind('<div', 0, pos)
+    if start < 0:
+        return -1
+    depth = 0
+    for m in re.finditer(r'<div\b|</div>', text[start:]):
+        depth += 1 if m.group(0) == '<div' else -1
+        if depth == 0:
+            return start + m.end()
+    return -1
+
+
+fu_end = _container_end(src, src.find('id="FollowUpRoundsDownload"'))
+next_box = src.find('id="DownloadOnlyMissing"')
+sec_start = fu_end
+sec_end = src.rfind('<div', 0, next_box) if next_box > 0 else -1
+if sec_start < 0 or sec_end < 0 or sec_end <= sec_start:
     print("  [FAIL] the correction section boundaries were not found")
     fails += 1
 else:

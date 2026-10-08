@@ -374,7 +374,18 @@ public sealed class SubdlSeeder
                 list.AddRange(withoutIds);
             }
 
-            LogUtil.Normal(_logger, "[SubDL-Seed] scan finished ({Direction}) — {Upload} upload, {Download} download queued", dirLabel, snapshot.Upload.Count, snapshot.Download.Count);
+            // Operator order 08.10.2026: name ONLY the directions this scan covered. The scan is
+            // gated to one direction and leaves the foreign queue structurally empty, so formatting
+            // both counts unconditionally printed a hard `0` for the direction it was never asked
+            // about — read as "nothing to do" when the truth is "not asked".
+            bool coversUp = dir != SubdlEventDispatcher.CycleDirection.DownloadOnly;
+            bool coversDown = dir != SubdlEventDispatcher.CycleDirection.UploadOnly;
+            string covered = coversUp && coversDown
+                ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} upload, {1} download queued", snapshot.Upload.Count, snapshot.Download.Count)
+                : coversUp
+                    ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} upload queued", snapshot.Upload.Count)
+                    : string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} download queued", snapshot.Download.Count);
+            LogUtil.Normal(_logger, "[SubDL-Seed] scan finished ({Direction}) — {Covered}", dirLabel, covered);
         }
         catch (Exception ex)
         {

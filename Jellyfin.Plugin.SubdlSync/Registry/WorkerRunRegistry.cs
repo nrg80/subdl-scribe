@@ -225,7 +225,7 @@ public sealed class WorkerRunRegistry
     /// </summary>
     /// <param name="cycleFinished">False when the wait hit its cap and the cycle is still working.</param>
     /// <param name="seederOutcome">The seeder's fate in THIS cycle, or null when it reported none.</param>
-    /// <param name="seederDetail">The matching seeder detail.</param>
+    /// <param name="seederDetail">The matching seeder detail; ranked in the red/yellow/grey branches only.</param>
     /// <param name="directionOutcome">
     /// This direction's fate (download/upload) in the cycle, or empty/null when it ran without a
     /// special fate.
@@ -281,8 +281,12 @@ public sealed class WorkerRunRegistry
             return (Outcome.Skipped, Fallback(seederDetail));
         }
 
-        // GREEN: the work ran. The seeder's numbers are the most informative thing to show.
-        return (Outcome.Ok, string.IsNullOrWhiteSpace(seederDetail) ? "cycle finished" : seederDetail!);
+        // GREEN: the work ran, and the row states ITS OWN result. Operator order 08.10.2026:
+        // "jeder worker meldet nur sich selbst". The green fallback used to hand the SEEDER's string
+        // to EVERY direction row, so `Seeder` and `Upload` carried the identical sentence on the live
+        // endpoint while the upload row never said what the upload did — measured on prod, two rows,
+        // one string. The seeder's numbers belong on the seeder's row and nowhere else.
+        return (Outcome.Ok, string.IsNullOrWhiteSpace(directionDetail) ? "cycle finished" : directionDetail!);
     }
 
     /// <summary>Detail text that is never empty, so a row cannot show a bare outcome word.</summary>
