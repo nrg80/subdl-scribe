@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.199",
-        "changelog": "v12.1.12.199: Two statistics rows are gone, and with them their counters: the type row and\n    the year-filter row. The behaviour they measured is unchanged - the file name still\n    decides type and episode, a year-filtered search still retries without the year.",
+        "version": "12.1.12.200",
+        "changelog": "v12.1.12.200: The auto-sync is a worker of its own now: it is handed the subtitle and\n    hands back a status and its output, instead of the download guessing its outcome.\n    Its row goes red for its own failures only, not for the download's.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.199-dev/Jellyfin.Plugin.SubdlSync_12.1.12.199.zip",
-        "checksum": "7974f3a8f55001323f16be18dc5f6dbc",
-        "timestamp": "2026-10-08T13:52:19Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.200-dev/Jellyfin.Plugin.SubdlSync_12.1.12.200.zip",
+        "checksum": "d08c011d29f83850779878c52314bfc6",
+        "timestamp": "2026-10-08T14:14:15Z"
       }
     ]
   }
