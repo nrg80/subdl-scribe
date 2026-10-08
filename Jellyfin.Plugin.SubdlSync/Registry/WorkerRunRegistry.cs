@@ -191,6 +191,14 @@ public sealed class WorkerRunRegistry
     public const string UploadWorkerKey = "SubdlSyncUploadTask";
 
     /// <summary>
+    /// F-M322 (operator order 08.10.2026): the auto-sync's own worker key. It gets its own row rather
+    /// than being folded into the Download row, because the alignment is the part of a download run
+    /// the operator watches: a run can fetch 40 files and align none, and the Download row's single
+    /// word cannot tell those two appart.
+    /// </summary>
+    public const string AutoSyncWorkerKey = "SubdlAutoSyncTask";
+
+    /// <summary>
     /// The status a worker reports for the cycle it took part in.
     /// <para>
     /// Colour criteria (user-approved 30.09.2026), one principle for every worker:
@@ -293,8 +301,9 @@ public sealed class WorkerRunRegistry
     [
         (SeederKey, "Seeder"),
         (DownloadWorkerKey, "Download"),
+        (AutoSyncWorkerKey, "Autosync"),
         (UploadWorkerKey, "Upload"),
-        ("SubDLPostprocessTask", "Postproc."),
+        ("SubDLPostprocessTask", "Upl. Postproc."),
         ("SubdlSyncDatabaseRefreshTask", "Database"),
         ("SubdlSyncOshashRefreshTask", "OSHash"),
     ];

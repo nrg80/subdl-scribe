@@ -1187,8 +1187,14 @@ public static class AutoSyncRun
             rangeWired ? "alignedForNaming includes goodAsDownloaded" : "still routed to the reserved block");
         f += rangeWired ? 0 : 1;
 
-        bool huntStops = src.Contains("goodAsDownloaded)\n                        {\n                            huntForCorrection = false;",
-                                      StringComparison.Ordinal);
+        // Asserted with a REGEX over the branch, not on an exact whitespace run: the first version
+        // pinned the indentation between the brace and the assignment, so adding a comment line
+        // inside the branch turned this RED while the behaviour was untouched — a test that fails on
+        // formatting teaches nothing about the rule. What must hold is that the branch containing
+        // `huntForCorrection = false;` is entered on `goodAsDownloaded`.
+        bool huntStops = System.Text.RegularExpressions.Regex.IsMatch(
+            src, @"if\s*\(\s*goodAsDownloaded\s*\)\s*\{[^}]*huntForCorrection\s*=\s*false;",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
         Check("the walk ends for an already-good file (no quota spent hunting)", huntStops,
             huntStops ? "hunt turned off for this refusal" : "the hunt would continue");
         f += huntStops ? 0 : 1;

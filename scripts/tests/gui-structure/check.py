@@ -485,6 +485,78 @@ def main():
         check("the two copies of the renderer are identical",
               renderer_of(jstext) == renderer_of(html))
 
+    # ---- 6h. F-M322: the auto-sync's own light and the switch wording ----
+    # The operator asked for the alignment's status as its own readout, both in the Workers list and
+    # under the download switch, and for the switch to say what it does in plain words. Asserted on the
+    # SOURCE because all three failures are silent: a light wired to a worker the API does not publish
+    # shows "never" forever, a second fetch for the mirrored light could show a different run than the
+    # list right above it, and a switch whose sentence was left on the old wording still renders.
+    #
+    # The two source files below are the authorities the page must agree with: the worker registry
+    # carries the light's WORDS, the pipeline carries its NUMBERS. Read here rather than assumed,
+    # because a page that agrees with a stale copy of either is the silent failure this section exists
+    # to catch — and a renamed worker or counter would otherwise render a permanent "never"/0.
+    worker_src = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Registry", "WorkerRunRegistry.cs"))
+    pipeline_src = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Pipeline", "DownloadPipeline.cs"))
+    if os.path.exists(worker_src):
+        worker_src = open(worker_src, encoding="utf-8").read()
+    else:
+        worker_src = ""
+        check("the worker registry is reachable for the light's word check", False, worker_src)
+    if not os.path.exists(pipeline_src):
+        check("the download pipeline is reachable for the counter check", False, pipeline_src)
+
+    check("the download switch names the spoken track",
+          "Automatically synchronize subtitle to spoken track" in html,
+          "switch wording not updated")
+    check("no page still carries the old switch wording",
+          "Correct subtitle timing" not in html,
+          "old wording left behind")
+
+    check("the auto-sync's row is registered as a worker of its own",
+          "AutoSyncWorkerKey" in worker_src and '"Autosync"' in worker_src,
+          "no Autosync worker registered")
+    check("the postprocessing row is named for the upload direction",
+          '"Upl. Postproc."' in worker_src and '"Postproc."' not in worker_src,
+          "postprocessing row not renamed")
+
+    check("the light under the switch exists in the markup",
+          'id="SubdlAutosyncLight"' in html and 'id="SubdlAutosyncOutcome"' in html,
+          "no mirrored light in the markup")
+
+    # F-M322: the worker registry is the source of the light's words, and the pipeline is the source
+    # of its numbers — both are read just below, because a page that agrees with a stale copy of
+    # either is exactly the silent failure this section exists to catch.
+    # ONE source: the mirrored light must read the row the workers renderer just built, not fetch again.
+    mirror = html[html.index("var ac = document.querySelector('#SubdlAutosyncLight');"):]
+    mirror = mirror[:mirror.index("var subdlLoadWorkers")]
+    check("the mirrored light reads the workers list, it does not fetch again",
+          "workers.forEach" in mirror and "ApiClient.ajax" not in mirror,
+          "the mirror performs its own request")
+    check("the mirrored light uses the same status words as the list",
+          "subdlWorkerOutcome(" in mirror,
+          "the mirror invents its own colours or words")
+
+    # The statistics row says what it counts, and it counts the FILES THE RUN MOVED — the operator's
+    # order is that only successful auto-syncs are measured, so a "no proven gain" file (F-M321) must
+    # not reach this counter. Asserted as a positive/negative pair on the pipeline source.
+    check("the statistics row is named for the auto-sync",
+          "Downloads: Sub Autosync, aligned to the spoken track" in order,
+          "row missing or renamed: %s" % order)
+    if os.path.exists(pipeline_src):
+        pipe = open(pipeline_src, encoding="utf-8").read()
+        # Find the refusal branch and require that the ALREADY-GOOD case does not touch FittedToAudio.
+        branch = pipe[pipe.index("if (goodAsDownloaded)"):]
+        branch = branch[:branch.index("summary.Downloaded++")]
+        check("an already-good file is not counted as a successful alignment",
+              "AlreadyGoodAsDownloaded++" in branch and "FittedToAudio++" not in branch,
+              "the already-good case still bumps the alignment counter")
+        check("the already-good case has its own counter",
+              "public int AlreadyGoodAsDownloaded" in pipe,
+              "no separate counter for files that needed no correction")
+    else:
+        check("the download pipeline is reachable for the counter check", False, pipeline_src)
+
     # ---- 6c. F-M309/T124: the fit's logging split ----
     # Normal must show WHETHER the fit ran and HOW MUCH it did; Verbose must show WHICH audio track
     # and WHICH subtitle. Asserted on the source because the levels are what make the feature

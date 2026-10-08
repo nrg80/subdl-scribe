@@ -927,6 +927,12 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
             // F-M207: single writer for the statistics row; the dry-run filter lives in StatusCounterDelta.
             ApplyStatusCounters(config, upSummary, downSummary);
+            // F-M322 (operator order 08.10.2026): the auto-sync's own worker row, written here because
+            // this is the only place that HOLDS the download run's summary — the waiting download task
+            // never sees it. Its light answers the question the Download row cannot: did the alignment
+            // work? Colour rule F-M268, and a dry run reports grey/`skipped` because a dry run aligns
+            // nothing (F-M247: a dry run contributes nothing to the statistics).
+            RecordAutoSyncRow(config, downSummary);
             CleanupDirectionQueue(upload, queue, filter, retriesAtStart, upSummary, downSummary);
         }
         catch (OperationCanceledException)
@@ -1079,7 +1085,100 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// uploaded rows in the database, 743 in the display). Writing them here keeps both in step.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// F-M322 (operator order 08.10.2026): writes the auto-sync's own worker row for the download run.
+    /// <para>
+    /// The light answers ONE question — did the alignment work — and the operator asked for it as its
+    /// own line, both in the Workers list and under the download switch. It uses the SAME status words
+    /// and colours as every other worker (F-M268), so nothing new had to be invented for it:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>GREEN (`ok`) — the run aligned at least one subtitle, or found every candidate it measured
+    /// already in sync (F-M321). Both are the work DONE; the statistics counter, by the operator's own
+    /// order, covers only the files that were really MOVED.</item>
+    /// <item>YELLOW/GREY (`skipped`) — the alignment is switched off, or the run measured nothing at
+    /// all. Nothing was asked of it and nothing is broken.</item>
+    /// <item>RED (`failed`) — the run reported failures and aligned nothing.</item>
+    /// </list>
+    /// <para>
+    /// A dry run reports skipped with its own note: a dry run writes no file, so it cannot have aligned
+    /// anything, and a green light would claim a correction that exists nowhere (F-M247).
+    /// </para>
+    /// </summary>
+    /// <param name="config">Live configuration.</param>
+    /// <param name="downSummary">The download run's summary, never null at the call site.</param>
+    private void RecordAutoSyncRow(PluginConfiguration config, Pipeline.DownloadRunSummary downSummary)
+    {
+        var runs = Plugin.Instance?.WorkerRuns;
+        if (runs == null)
+        {
+            return;
+        }
+
+        if (downSummary.IsDryRun)
+        {
+            runs.Finish(
+                Registry.WorkerRunRegistry.AutoSyncWorkerKey,
+                "Autosync",
+                Registry.WorkerRunRegistry.Outcome.Skipped,
+                "dry run — nothing aligned",
+                dryRun: true);
+            return;
+        }
+
+        int aligned = downSummary.FittedToAudio;
+        int alreadyGood = downSummary.AlreadyGoodAsDownloaded;
+
+        if (!config.QaDownloadAutoSync)
+        {
+            runs.Finish(
+                Registry.WorkerRunRegistry.AutoSyncWorkerKey,
+                "Autosync",
+                Registry.WorkerRunRegistry.Outcome.Skipped,
+                "alignment switched off");
+            return;
+        }
+
+        if (aligned > 0 || alreadyGood > 0)
+        {
+            string detail = aligned > 0
+                ? $"{aligned} aligned, {alreadyGood} already in sync ({downSummary.FitMsTotal / 1000.0:0.#}s)"
+                : $"{alreadyGood} already in sync — nothing to correct";
+            runs.Finish(Registry.WorkerRunRegistry.AutoSyncWorkerKey, "Autosync", Registry.WorkerRunRegistry.Outcome.Ok, detail);
+            return;
+        }
+
+        // Nothing measured, and the run FAILED on top of it: that is broken, not idle.
+        if (downSummary.Failed > 0)
+        {
+            runs.Finish(
+                Registry.WorkerRunRegistry.AutoSyncWorkerKey,
+                "Autosync",
+                Registry.WorkerRunRegistry.Outcome.Failed,
+                $"{downSummary.Failed} file(s) failed, nothing aligned");
+            return;
+        }
+
+        runs.Finish(
+            Registry.WorkerRunRegistry.AutoSyncWorkerKey,
+            "Autosync",
+            Registry.WorkerRunRegistry.Outcome.Skipped,
+            "nothing to align this run");
+    }
+
+    /// <summary>
+    /// F-M23: updates the persisted cumulative status counters from pipeline summaries.
+    /// <para>
+    /// Stored in the database since 25.09.2026 (was: plugin configuration XML). The XML sits next to
+    /// user settings while the data being counted lives in the database, so a database reset used to
+    /// leave the counters behind and the display drifted from the data (measured 25.09.2026: 311
+    /// uploaded rows in the database, 743 in the display). Writing them here keeps both in step.
+    /// </para>
+    /// </summary>
     /// F-M207: the ONE writer of the cumulative counters; a database reset resets them with it.
+    /// <param name="config">Live configuration.</param>
+    /// <param name="upSummary">The upload run's summary, or null.</param>
+    /// <param name="downSummary">The download run's summary, or null.</param>
     private void ApplyStatusCounters(
         PluginConfiguration config,
         Pipeline.RunSummary? upSummary,

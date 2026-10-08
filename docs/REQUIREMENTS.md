@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.192.
+**Status:** Implementation — v12.1.12.193.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -20,10 +20,10 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 37 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 38 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 6 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
-  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 14 requirements
+  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 15 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -613,13 +613,14 @@ Both are existing code paths that every downloaded subtitle already travels. The
 **Rule.** A downloaded subtitle is written into one of two ranges, and the range is decided by one question: was it ALIGNED?
 
 - **Aligned** (the fit applied a correction, or the fit switch is off and nothing was moved but the file is the corrected artifact) → `<base>.<lang>.<NN>.srt` with `NN` = `01`, `02`, `03` … **upward**, counted by its own counter.
-- **Unprocessed** (the fit refused — "no proven gain" — or the fit is off and the file is left as downloaded) → the **reserved block**, `99`, `98`, `97` … **downward**, exactly as an original was numbered before.
+- **Unprocessed** (the fit found the file **WRONG** — a shift beyond the limit, a first cue that would go negative, too few cues — or the fit is off and the file is left as downloaded) → the **reserved block**, `99`, `98`, `97` … **downward**, exactly as an original was numbered before.
+- **`no proven gain` is NEITHER of the two** — see F-M321. The fit found nothing wrong with the file, so the file IS the best version: it takes `01` upward **and** a byte-identical copy at `99` downward. It is not "unprocessed", because nothing about it needs processing.
 
-**"Regardless of whether a corrected version exists"** is the operator's own wording and it is the load-bearing part: an unprocessed file takes a reserved slot **even when there is no corrected sibling beside it**. The reserved block therefore stops being only the home of *the original of a correction* and becomes the home of **everything that was not aligned**.
+**"Regardless of whether a corrected version exists"** is the operator's own wording and it is the load-bearing part: an unprocessed file takes a reserved slot **even when there is no corrected sibling beside it**. The reserved block therefore stops being only the home of *the original of a correction* and becomes the home of **everything that is not the corrected file** — including the byte-identical copy of an already-good file (F-M321).
 
-**The counter must be separate from the corrected slot number.** With one shared counter an unprocessed file consumes slot `01` and pushes the next aligned file to `02`, while the rule the operator stated is that alignment starts at `01`. `correctedSlotCount` and `hiCorrectedSlotCount` are therefore incremented on the aligned path only.
+**The counter must be separate from the corrected slot number.** With one shared counter an unprocessed file consumes slot `01` and pushes the next aligned file to `02`, while the rule the operator stated is that alignment starts at `01`. `correctedSlotCount` and `hiCorrectedSlotCount` are therefore incremented on the aligned path only — and the already-good case of F-M321 counts as aligned, because `01` is where its best version belongs.
 
-**The file that is not aligned IS the original, so it is written ONCE.** The reserved-slot write that used to run *after* a correction as a second file must not run on this path — otherwise the same subtitle lands on disk twice. Measured consequence to preserve: on the unprocessed path the file is written to the reserved slot, `unsyncPayload` stays null, and the second write is skipped by its own `unsyncPayload != null` guard.
+**A file that is not aligned IS the original, so it is written ONCE — unless it is an already-good file.** On the unprocessed path the subtitle lands in the reserved slot, `unsyncPayload` stays null, and the second write is skipped by its `unsyncPayload != null` guard: writing it again would put the same subtitle on disk twice. An already-good file (F-M321) is the deliberate exception: it takes `01` AND `99`, and the reserved write REUSES the array written to `01`, so the two are byte-identical rather than two separately encoded copies.
 
 **When all ten reserved slots are taken** the write is **refused** and counted (`summary.Failed++` on the main path, `summary.RejectedCandidates++` on the HI path) with a distinct log line — this is the one path where a fetched subtitle is not written at all, so it must not be silent. Inventing a name would overwrite an unprocessed file already kept.
 
@@ -659,22 +660,41 @@ Both are existing code paths that every downloaded subtitle already travels. The
 
 **Test: T132.**
 
-**F-M321 [D] (operator order 08.10.2026):** **A file the fit finds nothing wrong with IS the best version of its language: it takes the corrected range and ends the walk.**
+**F-M321 [D] (operator order 08.10.2026):** **A file the fit finds nothing wrong with is a GOOD file: it is written at 01 upward, its original at 99 downward, and the walk ends.**
 
-**The rule.** `no proven gain` is not a failure — it is the deploy rule DECLINING to move the file. Nothing had to move, or the measured gain did not prove itself, or the needed shift sits below the measurement floor. In every one of those cases the file as downloaded is the best version of that language that exists, and the operator's order is that it is then treated like a correction:
+**The rule.** `no proven gain` is not a failure — it is the deploy rule DECLINING to move the file. Nothing had to move, or the measured gain did not prove itself, or the needed shift sits below the measurement floor. In every one of those cases the file as downloaded is the best version of that language that exists, and the operator's order is that it is kept as what it is:
 
-- it takes the **corrected range** (`<base>.<lang>.01.srt`, then `02` … F-M316/F-M317), not the reserved block;
+- it is written as a **good file at `01` upward** (`<base>.<lang>.01.srt`, then `02` … F-M316) — the same range a genuinely corrected file uses, because this file needs no correction;
 - it advances the **corrected counter**, so `01` is used by the good file and the reserved block stays free for files that are actually wrong;
-- a copy is written into the **reserved block as well** (`99` downward), holding the **same bytes** — the operator asked for both tracks, and they are identical by construction because the reserved write REUSES the array that went to the corrected slot rather than re-encoding the text;
+- the **original is written as well**, into the reserved block (`99` downward) — the operator's words are "beide original": nothing was corrected, so BOTH files carry the original subtitle, and they are identical by construction because the reserved write REUSES the array that went to `01` rather than re-encoding the text;
 - the walk **ENDS** there. The hunt of F-M318 exists to find a candidate whose correction proves itself; against a file the fit found nothing wrong with, no candidate can beat it, so continuing would spend the daily quota and write up to ten unprocessed files for one episode.
 
 **What still keeps the old behaviour.** Only the deploy rule's OWN refusal counts. A refusal that says the file is **wrong** — a shift beyond the limit, too few cues, a first cue that would go negative — keeps the reserved range and keeps the F-M318 hunt alive, because another candidate may well fit. The two are told apart by `SubtitleSync.RefusalMeansAlreadyGood`, matched on the exact `no proven gain` prefix the class composes itself, so the prefix is the contract rather than a guess at wording. A tooling verdict (`ffmpeg not available`, `audio decode failed`, `no audio samples`) is likewise not "already good", and `null` never is.
 
 **Both tracks carry the rule.** The HI branch answers the same question with its own counter (F-M317), which matters most here: the HI pool is where the drift lives, so it is the pool most likely to produce a file that is already fine.
 
-**Why the reserved copy is byte-identical rather than a second artifact.** For a real correction the reserved copy is the ORIGINAL text and therefore differs from the corrected file — that case is untouched. For an already-good file there is nothing to correct, so "the original" and "the best version" are the same bytes; re-encoding the text a second time would let the two files differ by encoding alone, which would break the identity the operator asked for. Reusing the written array makes them identical by construction. The registry row is content-keyed (F-M186/F-M199), so one row describes both files — and since a downloaded row is what locks a file against upload (F-M315), both copies are locked by it.
+**Why the 99 copy is byte-identical rather than a second artifact.** For a real correction the 99 copy is the ORIGINAL text and therefore differs from the corrected file at 01 — that case is untouched. For an already-good file there is nothing to correct, so "the original" and "the best version" are the same bytes; re-encoding the text a second time would let the two files differ by encoding alone, which would break the identity the operator asked for. Reusing the written array makes them identical by construction. The registry row is content-keyed (F-M186/F-M199), so one row describes both files — and since a downloaded row is what locks a file against upload (F-M315), both copies are locked by it.
 
 **Test: T133.**
+
+**F-M322 [D] (operator order 08.10.2026):** **The auto-sync has its own status row, the same words as every worker; and the statistics count only the alignments that really happened.**
+
+**The rule.** The alignment's status is its own readout, in two places:
+
+- a **row of its own** in the Workers list, next to Download — `Autosync`, kept as `WorkerRunRegistry.AutoSyncWorkerKey`. It is separate because the Download row cannot answer the question the operator watches: a run can fetch forty files and align none, and one word cannot tell those two apart;
+- the **same light mirrored under the download switch**, which is where the switch it describes lives.
+
+**ONE source for both readouts.** The mirrored light reads the row the Workers renderer has just built; it does NOT fetch again. A second request could return a different run than the list directly above it, and the two would then disagree on the same screen.
+
+**The words and colours are the existing ones** (F-M268), with nothing invented for this row: `ok` green when the run aligned something or found it already in sync, `skipped` grey when the alignment is switched off or nothing was measured, `failed` red when the run failed and aligned nothing. A DRY RUN reports `skipped` with its own note: it writes no file, so it cannot have aligned anything.
+
+**The statistics count successful auto-syncs only.** The row is `Downloads: Sub Autosync, aligned to the spoken track` and reads `FittedToAudio`, which advances ONLY where a correction was really applied. An already-good file (F-M321) therefore does NOT reach it: nothing moved, and counting it would make the row claim an alignment that never happened. Those files have their own counter (`AlreadyGoodAsDownloaded`), which is also what turns the light green.
+
+**The switch says what it does.** The setting's label reads *"Automatically synchronize subtitle to spoken track"* — the operator's own wording (08.10.2026). It replaced *"Correct subtitle timing"*, which described the effect rather than the action.
+
+**The postprocessing row is named for its direction:** `Upl. Postproc.` — it is the upload direction's work, and the bare `Postproc.` left that unsaid.
+
+**Test: T134.**
 
 **F-M307 [D] (development, 07.10.2026):** **The offset is a piecewise-constant function of time, fitted by exact dynamic programming. Supersedes the recursive Bayes-factor gate (F-M295) and the staircase applied from gate boundaries (F-M300).**
 
@@ -1795,6 +1815,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T132:** The QA retry limit bounds the fit and nothing else. Asserted as an ABSENCE, because removing a give-up is invisible in a passing run: the pipeline contains no `IsExhausted` call, the `QaFailTracker` has no `IsExhausted`/`RecordFailure`/`CounterKey`, the seeder's queue gate and the refresh task's actionable filter no longer filter by a QA verdict, and the two counters that used to report it (`SkippedQaGiveUp`, `QaGiveUpLanguages`) are gone from the run summary. The three surviving consumers are asserted too, so the removal did not take the wrong thing with it: `GetSkippedCandidates` still feeds the walk's memory filter, `RecordSkippedCandidates` still burns this run's discards, and the fit still reads `DownloadQaRetryLimit` as its refusal budget (F-M318). Negative control: plant `IsExhausted` back into the pipeline source and require the case to go RED. (F-M320)
 
 **T133:** A file the fit finds nothing wrong with is written as the best version: it takes the corrected range, advances the corrected counter, is copied into the reserved block with the SAME bytes, and ends the walk. Asserted on the REAL predicate, driven with the real refusal strings — the genuine `no proven gain` text answers true, while a shift beyond the limit, too few cues, a first cue that would go negative, a tooling verdict (`ffmpeg not available`) and `null` all answer false, because the predicate must not let a file that is actually WRONG end the walk. The pipeline side is asserted on its wiring: `alignedForNaming` includes the already-good case, the hunt is turned off for it, the HI branch carries the same rule, and both reserved copies reuse the written array (which is what makes the two files identical rather than merely similar). A NEGATIVE CONTROL plants the old routing back — an already-good file sent to the reserved block — and requires the check to go RED. (F-M321)
+
+**T134:** The auto-sync has its own worker row and its own light, and the statistics count only alignments that happened. Asserted on the SOURCE of all three carriers, because every failure here is silent: a light wired to an unknown worker reads "never" forever, a mirror that fetches on its own can show a different run than the list above it, and a switch whose sentence was left on the old wording still renders. The check proves the worker is registered in `WorkerRunRegistry` with its own key and name, that the mirrored light is present in the markup and reads `workers.forEach` rather than issuing its own `ApiClient.ajax`, that it reuses `subdlWorkerOutcome` instead of inventing words, that the statistics row is named for the auto-sync, and that the setting's label carries the new wording while the old one is gone. The counter rule is asserted as a positive/negative PAIR on the pipeline: the already-good branch must bump `AlreadyGoodAsDownloaded` and must NOT contain `FittedToAudio++`, so a file that needed no correction cannot be reported as an alignment. `Upl. Postproc.` is asserted to have replaced the bare `Postproc.` (F-M322)
 
 **T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M294, F-M288)
 

@@ -116,8 +116,23 @@ public class DownloadRunSummary
     /// <summary>
     /// F-M308: subtitles this run FITTED to their audio track. Counts the correction when it is
     /// APPLIED — a fit that was measured and then refused by its own deploy rule is not a fit.
+    /// <para>
+    /// F-M322 (operator order 08.10.2026): the operator's wording is that the statistics measure
+    /// SUCCESSFUL auto-syncs only, so this counter covers the files that were really MOVED. A file
+    /// the fit found nothing wrong with is NOT added here — it was not aligned, and counting it would
+    /// make the row claim an alignment that never happened. Such files have their own counter
+    /// (<see cref="AlreadyGoodAsDownloaded"/>).
+    /// </para>
     /// </summary>
     public int FittedToAudio { get; set; }
+
+    /// <summary>
+    /// F-M321/F-M322: files the fit found NOTHING WRONG WITH ("no proven gain"). They ARE the good
+    /// version of their language, so they are not successful alignments — nothing was moved — and
+    /// they are reported separately. The auto-sync light turns green for them because the work was
+    /// done, while the statistics' alignment counter stays honest about what it counts.
+    /// </summary>
+    public int AlreadyGoodAsDownloaded { get; set; }
 
     /// <summary>
     /// F-M310: total milliseconds the run spent aligning subtitles to their audio. The counter
@@ -1931,15 +1946,18 @@ public sealed class DownloadPipeline : IDisposable
 
                         // F-M321 (operator order 08.10.2026): "no proven gain" is the deploy rule
                         // DECLINING to move the file — nothing had to move, so the file as downloaded
-                        // IS the best version of this language. It is therefore treated like a
-                        // correction: it takes the corrected range (01, 02 …) instead of the reserved
-                        // block, it advances the corrected counter, and like a correction it ENDS the
-                        // walk. Hunting on would spend the daily quota looking for a candidate that
-                        // cannot beat a file the fit found nothing wrong with.
+                        // IS the good version of this language. The operator's order: no proven gain
+                        // writes 01 AND 99, both the original. So it goes into the upper range (01,
+                        // 02 …), advances the corrected counter, gets a byte-identical copy at 99, and
+                        // ENDS the walk. Hunting on would spend the daily quota looking for a candidate
+                        // that cannot beat a file the fit found nothing wrong with.
                         goodAsDownloaded = Qa.SubtitleSync.RefusalMeansAlreadyGood(syncResult.Reason);
                         if (goodAsDownloaded)
                         {
+                            // F-M321: no hunt, and the file is counted as ALREADY GOOD rather than as
+                            // an alignment — the statistics measure successful auto-syncs only (F-M322).
                             huntForCorrection = false;
+                            summary.AlreadyGoodAsDownloaded++;
                         }
 
                         // F-M309: ONE branch, not two. The "ffmpeg not available" case had its own
@@ -1987,8 +2005,9 @@ public sealed class DownloadPipeline : IDisposable
                     // gets the ".sdh" marker the reader demands — without it the file never counted
                     // as HI again and the F-M254 reader reported the variant as absent forever.
                     // F-M321 (operator order 08.10.2026): a "no proven gain" refusal is NOT
-                    // "unprocessed" in that sense — the file needs no correction, so it is the best
-                    // version of the language and takes the CORRECTED range like a corrected file.
+                    // "unprocessed" in that sense — the file needs no correction, so it is the good
+                    // version of the language and takes the upper range (01, 02 …) like a corrected
+                    // file. Its original is written at 99 as well (both are the same bytes).
                     // Only a refusal that says the file is WRONG (too few cues, a shift beyond the
                     // limit) keeps the reserved range, where it is a fallback the next run may beat.
                     bool alignedForNaming = unsyncPayload != null || goodAsDownloaded;
@@ -2070,12 +2089,11 @@ public sealed class DownloadPipeline : IDisposable
                     // today, and the original is a downloaded subtitle. Guarded by the dry-run flag
                     // like every other write (F-M287).
                     // F-M321 (operator order 08.10.2026): for a "no proven gain" file there is nothing
-                    // to correct, so the copy in the reserved block IS the file itself — the SAME array
-                    // that went to the corrected slot. The fetched bytes are REUSED rather than
-                    // re-encoded from the text on purpose: only reusing them makes the two files
-                    // identical, and identity is what the operator asked for. (For a real correction
-                    // the reserved copy is the ORIGINAL text, which differs from the corrected file —
-                    // that case is unchanged.)
+                    // to correct, so BOTH files are the original — the 01 file and the 99 file carry the
+                    // same subtitle, and the 99 write REUSES the array that went to 01 rather than
+                    // re-encoding the text. Only that makes them identical, and identity is what the
+                    // operator asked for ("beide original"). (For a real correction the 99 copy is the
+                    // ORIGINAL text and therefore differs from the corrected 01 file — unchanged.)
                     byte[]? reservedBytes = unsyncPayload != null
                         ? ContentHashRegistry.EncodeCanonical(unsyncPayload)
                         : (goodAsDownloaded ? writeBytes : null);
@@ -2286,9 +2304,9 @@ public sealed class DownloadPipeline : IDisposable
                                     else
                                     {
                                         // F-M321: the HI track follows the main track's rule — a
-                                        // "no proven gain" file needs no correction, so it is the best
-                                        // version and takes the corrected range instead of the reserved
-                                        // block. The HI pool is where the drift lives, so this is the
+                                        // "no proven gain" file needs no correction, so it is the good
+                                        // version and takes the upper range (01, 02 …), with its original
+                                        // at 99. The HI pool is where the drift lives, so this is the
                                         // branch that fires most often.
                                         hiGoodAsDownloaded = Qa.SubtitleSync.RefusalMeansAlreadyGood(hiSync.Reason);
 
@@ -2359,9 +2377,9 @@ public sealed class DownloadPipeline : IDisposable
                                         //
                                         // It is NOT marked forced: an unsynchronized original is not a
                                         // forced subtitle (F-M315).
-                                        // F-M321: for a "no proven gain" HI file the reserved copy IS
-                                        // the file itself — the same array that went to the corrected
-                                        // slot, so the two are identical. Symmetric to the main track.
+                                        // F-M321: for a "no proven gain" HI file both files are the
+                                        // original — the 99 write reuses the array that went to 01, so the
+                                        // two are byte-identical. Symmetric to the main track.
                                         if (hiUnsync != null || hiGoodAsDownloaded)
                                         {
                                             System.Collections.Generic.HashSet<string>? hiNames = SidecarNamesInDirectory(targetDir);
