@@ -1106,11 +1106,23 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// </para>
     /// </summary>
     /// <param name="config">Live configuration.</param>
-    /// <param name="downSummary">The download run's summary, never null at the call site.</param>
-    private void RecordAutoSyncRow(PluginConfiguration config, Pipeline.DownloadRunSummary downSummary)
+    /// <param name="downSummary">The download run's summary, or null when this direction is the UPLOAD:
+    /// the auto-sync belongs to the download run, and an upload run holds no alignment result.</param>
+    private void RecordAutoSyncRow(PluginConfiguration config, Pipeline.DownloadRunSummary? downSummary)
     {
         var runs = Plugin.Instance?.WorkerRuns;
         if (runs == null)
+        {
+            return;
+        }
+
+        // The row belongs to the DOWNLOAD run. ExecutePipelineAsync returns (upSummary, null) for the
+        // upload direction, so an upload run arrives here with no summary at all — guarded rather than
+        // documented, because the earlier "never null at the call site" was written from the download
+        // path alone and the NRE it hid repainted BOTH lamps red for a cycle whose download and upload
+        // had just finished green (live 08.10.2026 18:21, prod and test alike). Keeping the download's
+        // own verdict is the honest reading: this cycle did no alignment work to report.
+        if (downSummary == null)
         {
             return;
         }

@@ -618,6 +618,40 @@ def main():
     else:
         check("the download pipeline is reachable for the counter check", False, pipeline_src)
 
+    # ---- 6b2. F-M322/T134: the auto-sync row survives the UPLOAD direction ----
+    # The row is written from RunDirectionAsync, which runs for BOTH directions; the download's summary
+    # is the upload run's `null`. The first version dereferenced it straight away, and the NRE it threw
+    # landed AFTER a green run — the upload's catch painted that direction red and MarkCycleFailure
+    # repainted the download with it, so a cycle with 3 uploads "failed" on both lamps (live 08.10.2026
+    # 18:21, prod .201 and test .202 alike). Asserted on the SOURCE because the throw is invisible in
+    # the page: both lamps render either way, the wrong one just says "Object reference not set".
+    # A guard that is only documented is exactly what a later refactor removes again.
+    disp = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "SubdlEventDispatcher.cs"))
+    if os.path.exists(disp):
+        dsrc = open(disp, encoding="utf-8").read()
+        check("the auto-sync row takes a nullable download summary",
+              re.search(r"private void RecordAutoSyncRow\(PluginConfiguration config,\s*Pipeline\.DownloadRunSummary\?\s+downSummary\)", dsrc) is not None,
+              "the parameter is not nullable — an upload run hands over null")
+        # The guard must sit BEFORE the first use. Asserted as an ORDER, not as presence: a null check
+        # placed after the first dereference compiles, reads correctly and changes nothing.
+        m_body = re.search(r"private void RecordAutoSyncRow\([^)]*\)\s*\{(.*?)\n    \}", dsrc, re.S)
+        body = m_body.group(1) if m_body else ""
+        pos_guard = body.find("if (downSummary == null)")
+        pos_use = body.find("downSummary.IsDryRun")
+        check("the null guard precedes every use of the download summary",
+              pos_guard != -1 and pos_use != -1 and pos_guard < pos_use,
+              "guard at %d, first use at %d" % (pos_guard, pos_use))
+        # And the false CLAIM must stay gone. Scoped to the parameter's own doc line, not to the whole
+        # file: the explanation of why the guard exists names the old wording on purpose, and a
+        # check that forbids the phrase outright would forbid documenting the defect.
+        m_doc = re.search(r'<param name="downSummary">([^<]*)</param>', dsrc)
+        doc = m_doc.group(1) if m_doc else ""
+        check("the auto-sync row's doc no longer claims a non-null summary",
+              doc != "" and "never null" not in doc,
+              "the false non-null claim is back in the param doc")
+    else:
+        check("the dispatcher is reachable for the auto-sync null check", False, disp)
+
     # ---- 6c. F-M309/T124: the fit's logging split ----
     # Normal must show WHETHER the fit ran and HOW MUCH it did; Verbose must show WHICH audio track
     # and WHICH subtitle. Asserted on the source because the levels are what make the feature
