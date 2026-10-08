@@ -917,6 +917,15 @@ public sealed class SubdlEventDispatcher : IDisposable
             {
                 parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} rejected", upSummary.RejectedCandidates));
             }
+
+            // Operator finding 08.10.2026, live on prod: a run that EXAMINED five items and refused
+            // every one of them ("no-imdb/no-season-ep") read as "nothing to do", because the three
+            // counters above were all zero. A row that hides the work it did is worse than a short
+            // one — the operator reads the row to know whether the worker looked at anything.
+            if (upSummary.SkippedItems > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} skipped", upSummary.SkippedItems));
+            }
         }
         else
         {
@@ -939,9 +948,21 @@ public sealed class SubdlEventDispatcher : IDisposable
             {
                 parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} unavailable", downSummary.NotAvailable));
             }
+
+            if (downSummary.RejectedCandidates > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} rejected", downSummary.RejectedCandidates));
+            }
+
+            // Same finding as the upload side: a run that looked at items and refused them all must
+            // not read as "nothing to do". DownloadRunSummary counts its refusals under SkippedItems.
+            if (downSummary.SkippedItems > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} skipped", downSummary.SkippedItems));
+            }
         }
 
-        return parts.Count == 0 ? "nothing to do" : string.Join(", ", parts);
+        return parts.Count == 0 ? "ran — nothing reported" : string.Join(", ", parts);
     }
 
     /// <summary>

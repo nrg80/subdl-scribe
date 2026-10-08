@@ -846,6 +846,16 @@ def main():
               and disp_src.find("SetDirectionDetail(upload,") < disp_src.rfind("CleanupDirectionQueue(upload,"))
         check("the seeder row sums the cycle's legs instead of re-writing per leg",
               "_seedQueuedUp +=" in disp_src and "_seedLegsScanned++" in disp_src)
+        # A row that examines items and refuses them all must not read as "nothing to do": measured
+        # live on prod, five files rejected for a missing id produced that exact claim.
+        check("the direction row names the skipped count",
+              "upSummary.SkippedItems > 0" in disp_src and "downSummary.SkippedItems > 0" in disp_src)
+        # Anchored on the RETURN, not on the phrase: the words survive in the comments that quote
+        # the old behaviour, so a substring check fails on a correct change. What must be gone is
+        # the fallback that produced the claim.
+        check("and no longer claims 'nothing to do' for an examined-but-empty run",
+              'return parts.Count == 0 ? "nothing to do"' not in disp_src,
+              "the empty-run fallback must not claim nothing happened")
         check("a skipped leg does not overwrite a scan that ran this cycle",
               "_seedLegsScanned > 0" in disp_src)
 
