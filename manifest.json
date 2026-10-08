@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.197",
-        "changelog": "v12.1.12.197: Spelling: the statistics row reads \"Downloads: Auto-Sync\".",
+        "version": "12.1.12.198",
+        "changelog": "v12.1.12.198: The worker is named Auto-Sync too, like the statistics row, and the numbers\n    under Statistics are right-aligned in a column sized for six digits.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.197-dev/Jellyfin.Plugin.SubdlSync_12.1.12.197.zip",
-        "checksum": "ab485cfebf68ab51c1b3aaed123491e5",
-        "timestamp": "2026-10-08T13:34:08Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.198-dev/Jellyfin.Plugin.SubdlSync_12.1.12.198.zip",
+        "checksum": "25ca1c16b58e95f8ee755a85f76108b4",
+        "timestamp": "2026-10-08T13:40:36Z"
       }
     ]
   }
