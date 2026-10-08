@@ -18,8 +18,8 @@
     <RootNamespace>Jellyfin.Plugin.SubdlScribe</RootNamespace>
     <AssemblyName>Jellyfin.Plugin.SubdlSync</AssemblyName>
     <Version>12.1.12.203-dev</Version>
-    <AssemblyVersion>12.1.12.202</AssemblyVersion>
-    <FileVersion>12.1.12.202</FileVersion>
+    <AssemblyVersion>12.1.12.203</AssemblyVersion>
+    <FileVersion>12.1.12.203</FileVersion>
     <Authors>Hermes Agent</Authors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>

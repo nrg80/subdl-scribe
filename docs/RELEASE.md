@@ -94,3 +94,31 @@ API calls to still reach GitHub; a real test release must go to a different `REP
 Dashboard → plugins → all → SubDL Scribe → install → restart Jellyfin.
 
 Versions older than the current one are installable from their release page only.
+
+## Deploying to the test bench
+
+`scripts/deploy-jf-test.sh <version> <zip>` stops the test Jellyfin, removes every other
+`SubDL Scribe_*` folder (one GUID — two copies would both load), unpacks the ZIP, writes `meta.json`
+and starts the instance again. The order is mandatory: replacing the DLL while Jellyfin runs leaves the
+process holding a file that no longer matches the loaded assembly, and .NET compiles methods lazily, so
+a method first reached during SHUTDOWN is read off disk then and the runtime dies with
+`BadImageFormatException: Bad IL range`.
+
+**The package is verified before anything is removed**, and the extraction is verified after it: a
+deploy that cannot unpack must not leave an install holding nothing but the logo while reporting
+success. Both failure modes are real and were measured on 08.10.2026 — `unzip` is not on this host's
+PATH, so the extraction failed silently, the old version had already been deleted, and Jellyfin
+answered 503 on a deploy that printed no error. The script now falls back to Python's `zipfile` and
+aborts with `extract failed — no DLL in <path>` if the assembly is still missing. **A negative control
+is part of the change:** handing it a ZIP without the plugin assembly must abort before the running
+instance is touched.
+
+**`AssemblyVersion` is bumped by hand.** `release.sh` verifies only the `<Version>` element against
+`build.yaml`, so a manual version bump that misses `<AssemblyVersion>`/`<FileVersion>` ships a package
+whose `meta.json` says the new version while Jellyfin's log reports the old assembly version for the
+newly loaded plugin. Bump all three together.
+
+**The readiness line of the script can end on `HTTP 000` while the instance is fine.** The loop breaks
+on the first 200 and then re-probes once more; a slow start makes that second probe time out. Verify
+with your own call — measured 08.10.2026: the script printed `bereit nach ~3s` with `HTTP 000`, and the
+same endpoint answered 200 eight seconds later.

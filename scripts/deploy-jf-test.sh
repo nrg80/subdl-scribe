@@ -19,10 +19,26 @@ PATTERN='jellyfin.*--datadir /opt/data/jf-test/data'
 
 [ -f "$ZIP" ] || { echo "ABORT: zip not found: $ZIP"; exit 1; }
 
+# The package is verified BEFORE anything is removed. The target folder is wiped below, so a ZIP
+# without the plugin assembly used to leave an install holding nothing but the logo: the deploy
+# reported success and Jellyfin answered 503 (measured 08.10.2026 — `unzip` was missing from the
+# PATH, the extraction failed silently, and the old version had already been deleted).
+python3 -c 'import sys,zipfile; sys.exit(0 if "Jellyfin.Plugin.SubdlSync.dll" in zipfile.ZipFile(sys.argv[1]).namelist() else 1)' "$ZIP" \
+    || { echo "  ABORT: package carries no Jellyfin.Plugin.SubdlSync.dll — nothing was touched."; exit 1; }
+
 echo "=== 1. Zielordner vorbereiten ==="
 rm -rf "$TGT"
 mkdir -p "$TGT"
-unzip -q "$ZIP" -d "$TGT"
+# unzip is not on this host's PATH and the script must not abort halfway on that: the target folder
+# has already been wiped by then, so a missing extractor leaves an install holding nothing but the
+# logo — which is how a deploy "succeeds" and Jellyfin answers 503 (measured 08.10.2026). Python's
+# zipfile is always present; fall back to it, and abort if nothing could extract.
+if command -v unzip >/dev/null 2>&1; then
+    unzip -q "$ZIP" -d "$TGT"
+else
+    python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$ZIP" "$TGT"
+fi
+[ -f "$TGT/Jellyfin.Plugin.SubdlSync.dll" ] || { echo "  ABORT: extract failed — no DLL in $TGT"; exit 1; }
 [ -f "$ROOT/Jellyfin.Plugin.SubdlSync/logo.png" ] && cp "$ROOT/Jellyfin.Plugin.SubdlSync/logo.png" "$TGT/logo.png"
 echo "  entpackt: $(ls "$TGT" | tr '\n' ' ')"
 
