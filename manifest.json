@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.207",
-        "changelog": "v12.1.12.207: A worker row no longer reads \"nothing to do\" for a run that examined items and\n    refused them all. Live on prod: the upload looked at five files, rejected every one for a missing\n    id, and its row said nothing had happened. The row now names the skipped count too.",
+        "version": "12.1.12.208",
+        "changelog": "v12.1.12.208: One lit lamp, for the worker that is working. The cycle marked both directions as\n    running when it STARTED, so the Seeder scanned while Download and Upload were already blue from\n    the same cycle. Each direction now marks itself when its own run begins and closes its own row,\n    start to finish, so exactly one lamp is blue at a time. Also: the upload row counts the skips it\n    really keeps (FilesSkipped), so a run that examined files and refused them all says so instead\n    of reading as untouched.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.207-dev/Jellyfin.Plugin.SubdlSync_12.1.12.207.zip",
-        "checksum": "268ad133366b43c4e356a4efb2178fe8",
-        "timestamp": "2026-10-08T19:09:37Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.208-dev/Jellyfin.Plugin.SubdlSync_12.1.12.208.zip",
+        "checksum": "6998cb35f0035071335af93538bc089d",
+        "timestamp": "2026-10-08T19:23:17Z"
       }
     ]
   }
