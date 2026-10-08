@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.200",
-        "changelog": "v12.1.12.200: The auto-sync is a worker of its own now: it is handed the subtitle and\n    hands back a status and its output, instead of the download guessing its outcome.\n    Its row goes red for its own failures only, not for the download's.",
+        "version": "12.1.12.201",
+        "changelog": "v12.1.12.201: The configuration page carries its JavaScript once. The second page\n    script was never loaded (measured in a browser), so it, its ConfigJs route, its\n    page registration and its resource entry are gone — 65 KB less in the DLL.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.200-dev/Jellyfin.Plugin.SubdlSync_12.1.12.200.zip",
-        "checksum": "d08c011d29f83850779878c52314bfc6",
-        "timestamp": "2026-10-08T14:14:15Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.201-dev/Jellyfin.Plugin.SubdlSync_12.1.12.201.zip",
+        "checksum": "6219ae903e3fe4b58399e125b216a4a7",
+        "timestamp": "2026-10-08T14:47:40Z"
       }
     ]
   }
