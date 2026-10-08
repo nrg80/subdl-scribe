@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.191",
-        "changelog": "v12.1.12.191: Subtitles start sooner after a file lands. A new episode used to wait five\n    minutes before anything happened to it; the arrival window is now one minute by default,\n    so a dropped file is picked up while the import is still fresh. Files that arrive together\n    are still handled in one cycle, and the window stays adjustable (1-120 minutes) for a slow\n    NAS. Already-installed servers keep their existing setting.",
+        "version": "12.1.12.192",
+        "changelog": "v12.1.12.192: A subtitle the alignment finds nothing wrong with is no longer treated as a\n    failure. It is kept as the best version of its language, taking index 01 upward like a\n    corrected file, together with an identical copy from index 99 downward - and the download\n    stops there instead of hunting further candidates, which no longer spends quota on a file\n    that cannot be beaten. Only files that are actually wrong (beyond the shift limit, too few\n    cues) keep going into the reserved range and keep the hunt alive.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.191-dev/Jellyfin.Plugin.SubdlSync_12.1.12.191.zip",
-        "checksum": "6b2f3a0912723142c9452b96e0538eed",
-        "timestamp": "2026-10-08T11:08:38Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.192-dev/Jellyfin.Plugin.SubdlSync_12.1.12.192.zip",
+        "checksum": "95800329201d7c0ef41cd40f1511cf6f",
+        "timestamp": "2026-10-08T12:57:58Z"
       }
     ]
   }
