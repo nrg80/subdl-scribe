@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.204",
-        "changelog": "v12.1.12.204: A library scan is ~50x faster. The store committed once per ROW — and a commit is a\n    disk sync — so a pass over prod's library issued 9 644 writes at 45 ms each and ran eight minutes\n    while queueing nothing. Writes now accumulate and commit in batches, and observing an embedded\n    track no longer restamps its parent media row once per track. Same workload: 4 800 writes in\n    2 846 ms instead of 138 650 ms.",
+        "version": "12.1.12.205",
+        "changelog": "v12.1.12.205: Every worker row now reports only its own result - until now the green line handed\n    the seeder's sentence to the download AND upload row, so two rows read identically. The scan also\n    stopped printing the direction it never looked at, and the seeder row sums a both-direction cycle\n    instead of letting the second leg overwrite the first. Settings page: the download tab reads in\n    the order the cycle works - continue after daily limit, follow-up rounds, automatically\n    synchronize. No setting changed value.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.204-dev/Jellyfin.Plugin.SubdlSync_12.1.12.204.zip",
-        "checksum": "fbc3bf8b23338e689cc045ef642fe529",
-        "timestamp": "2026-10-08T18:31:31Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.205-dev/Jellyfin.Plugin.SubdlSync_12.1.12.205.zip",
+        "checksum": "fc60d8244509d4b8c4be25987a81432e",
+        "timestamp": "2026-10-08T18:59:52Z"
       }
     ]
   }
