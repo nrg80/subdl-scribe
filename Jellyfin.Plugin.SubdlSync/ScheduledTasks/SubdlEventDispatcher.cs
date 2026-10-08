@@ -1208,8 +1208,6 @@ public sealed class SubdlEventDispatcher : IDisposable
             Plugin.Instance!.AddStatusCounters(
                 delta.Uploaded,
                 delta.Downloaded,
-                delta.TypeCorrected,
-                delta.TmdbYearMisses,
                 delta.RejectedDownload,
                 delta.RejectedUpload,
                 delta.FittedToAudio,

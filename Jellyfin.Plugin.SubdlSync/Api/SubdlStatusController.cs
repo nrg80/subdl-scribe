@@ -89,8 +89,6 @@ public class SubdlStatusController : ControllerBase
         {
             Uploaded = row.Uploaded,
             Downloaded = row.Downloaded,
-            TypeCorrectedByFileName = row.TypeCorrectedByFileName,
-            TmdbYearFilterMisses = row.TmdbYearFilterMisses,
             RejectedDownload = row.RejectedDownload,
             RejectedUpload = row.RejectedUpload,
             FittedToAudio = row.FittedToAudio,
@@ -202,8 +200,6 @@ public class SubdlStatusController : ControllerBase
             ok = true,
             Uploaded = row.Uploaded,
             Downloaded = row.Downloaded,
-            TypeCorrectedByFileName = row.TypeCorrectedByFileName,
-            TmdbYearFilterMisses = row.TmdbYearFilterMisses,
             RejectedDownload = row.RejectedDownload,
             RejectedUpload = row.RejectedUpload,
             FittedToAudio = row.FittedToAudio,

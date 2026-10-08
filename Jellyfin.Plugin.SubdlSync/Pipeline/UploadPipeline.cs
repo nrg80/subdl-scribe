@@ -110,11 +110,6 @@ public class RunSummary
     /// <summary>Gets or sets the number of items skipped as file-missing after exhausting retries (F-M60).</summary>
     public int SkippedFileMissing { get; set; }
 
-    /// <summary>
-    /// F-M231: items whose ids the TMDb title+year test corrected (the counterpart of the
-    /// download side's counter of the same name).
-    /// </summary>
-    public int TypeCorrectedByFileName { get; set; }
 }
 
 /// <summary>
@@ -662,7 +657,6 @@ public sealed class UploadPipeline
                 imdbId = verified.Imdb;
                 tmdbIdRaw = verified.Tmdb;
                 isSeries = verified.IsSeries;
-                summary.TypeCorrectedByFileName++; // same counter as the other id corrections
             }
 
             string title = searchTitle;

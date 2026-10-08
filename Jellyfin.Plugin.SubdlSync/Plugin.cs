@@ -125,8 +125,6 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// </summary>
     /// <param name="uploaded">Subtitles uploaded in this run.</param>
     /// <param name="downloaded">Subtitles downloaded in this run.</param>
-    /// <param name="typeCorrected">F-M218: items typed by the file name instead of Jellyfin.</param>
-    /// <param name="tmdbYearMisses">F-M218: TMDb searches that needed the year filter dropped.</param>
     /// <param name="rejectedDownload">F-M286: download candidates fetched and thrown away.</param>
     /// <param name="rejectedUpload">F-M286: upload candidates discarded from the upload.</param>
     /// <param name="fittedToAudio">F-M308: downloaded subtitles fitted to their audio track.</param>
@@ -135,15 +133,13 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     public void AddStatusCounters(
         long uploaded,
         long downloaded,
-        long typeCorrected = 0,
-        long tmdbYearMisses = 0,
         long rejectedDownload = 0,
         long rejectedUpload = 0,
         long fittedToAudio = 0,
         long languageCodesAllocated = 0,
         long looseSubtitlesRenamed = 0)
     {
-        if (uploaded == 0 && downloaded == 0 && typeCorrected == 0 && tmdbYearMisses == 0
+        if (uploaded == 0 && downloaded == 0
             && rejectedDownload == 0 && rejectedUpload == 0 && fittedToAudio == 0
             && languageCodesAllocated == 0 && looseSubtitlesRenamed == 0)
         {
@@ -155,8 +151,6 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             ?? new Data.StatusStatsEntity { Id = "status", SinceUtc = DateTime.UtcNow };
         row.Uploaded += uploaded;
         row.Downloaded += downloaded;
-        row.TypeCorrectedByFileName += typeCorrected;
-        row.TmdbYearFilterMisses += tmdbYearMisses;
         row.RejectedDownload += rejectedDownload;
         row.RejectedUpload += rejectedUpload;
         row.FittedToAudio += fittedToAudio; // F-M308
@@ -176,8 +170,6 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         var row = db.StatusStats.FindById("status") ?? new Data.StatusStatsEntity { Id = "status" };
         row.Uploaded = 0;
         row.Downloaded = 0;
-        row.TypeCorrectedByFileName = 0; // F-M218
-        row.TmdbYearFilterMisses = 0;
         row.RejectedDownload = 0;
         row.RejectedUpload = 0;
         row.FittedToAudio = 0; // F-M308

@@ -334,22 +334,55 @@ def main():
     # Asserted because a regrouping that reverts is invisible — the table still renders, it just
     # reads the old way, and no number changes. The labels are matched as they appear in `rows`.
     order = re.findall(r"\['([^']+)'", renderer)
+    # F-M322 (operator order 08.10.2026): the type row and the year row were WITHDRAWN, with their
+    # counters — the operator asked for both to go ("Type movies series und searches run without the
+    # year kann entfallen. In statistik und der Zähler"). The table is SEVEN rows now and the volume
+    # pair leads directly; the both-directions row that used to sit between them no longer exists, so
+    # the prefix assertion covers the two volume rows only.
     expected_prefix = [
         "Subtitles downloaded",
         "Subtitles uploaded",
-        "Type (movie/series) adjusted, both dir",
     ]
-    check("the volume rows lead, download first, then the both-directions row",
-          order[:3] == expected_prefix,
-          "got: %s" % " | ".join(order[:3]))
+    check("the volume rows lead, download first",
+          order[:2] == expected_prefix,
+          "got: %s" % " | ".join(order[:2]))
     dl = [i for i, o in enumerate(order) if o.startswith("Downloads:")]
     up = [i for i, o in enumerate(order) if o.startswith("Uploads:")]
     check("the remaining rows are grouped by direction, downloads before uploads",
           bool(dl) and bool(up) and max(dl) < min(up),
           "downloads at %s, uploads at %s" % (dl, up))
     check("every quality row is present exactly once",
-          len(order) == 9 and len(set(order)) == 9,
+          len(order) == 7 and len(set(order)) == 7,
           "%d row(s): %s" % (len(order), order))
+    # The two withdrawn counters must not come back by halves: a row deleted from the page while the
+    # field stays in the API is the F-M218 file-pair trap in reverse, and it leaves a counter that
+    # still counts and is never read.
+    # Checked across EVERY carrier, not just the page: a withdrawal done by halves is the F-M218
+    # file-pair trap in reverse — the row disappears from the table while the field survives in the
+    # entity, the writer or the API, and the counter keeps counting with nobody reading it. Planted
+    # and confirmed RED for the page AND for the API field separately (a page-only check passed the
+    # planted API field, which is why this reads all four sources).
+    withdrawn = {
+        "type": ("movie/series", "TypeCorrectedByFileName", "TypeCorrected", "typeCorrected"),
+        "year": ("without the year", "TmdbYearFilterMisses", "TmdbYearMisses", "tmdbYearMisses"),
+    }
+    src_ent = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Data", "Entities.cs"))
+    src_plg = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Plugin.cs"))
+    src_api = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Api", "SubdlStatusController.cs"))
+    carriers = {"page": html}
+    if os.path.exists(src_ent):
+        carriers["entity"] = open(src_ent, encoding="utf-8").read()
+    if os.path.exists(src_plg):
+        carriers["writer"] = open(src_plg, encoding="utf-8").read()
+    if os.path.exists(src_api):
+        carriers["api"] = open(src_api, encoding="utf-8").read()
+    for label, needles in withdrawn.items():
+        rows_left = [o for o in order if any(n in o for n in needles[:1])]
+        live = sorted({(name, f) for name, src in carriers.items()
+                       for f in needles[1:] if f in src})
+        check("the withdrawn %s counter is gone from every carrier" % label,
+              not rows_left and not live,
+              "row(s) %s / still wired in %s" % (rows_left, live))
     # F-M311/F-M313: the last two rows are the only ones that are NOT a direction — they count FILES
     # the seeder edited on disk, and the seeder serves both directions. A direction prefix on either
     # would claim a scope the count does not have. Asserted because both sit among prefixed rows and
@@ -379,9 +412,6 @@ def main():
     # "dir" and the year row names the year, not the tag it is carried on. Asserted as a pair of
     # negatives, because the long forms are the ones a copy-paste re-introduces and the table
     # renders perfectly either way — the only thing that changes is that it no longer fits.
-    check("the both-directions row is abbreviated to dir",
-          not any("both directions" in o for o in order),
-          "a row still spells out 'directions': %s" % [o for o in order if "direction" in o])
     check("the year row says year, not year tag",
           not any("year tag" in o for o in order),
           "a row still says 'year tag': %s" % [o for o in order if "year" in o])
@@ -440,9 +470,8 @@ def main():
             # And the writer's early-out must know about every PARAMETER: a run that only fitted
             # subtitles would otherwise be dropped as "nothing happened" and its count lost.
             # Match on the PARAMETERS, not the entity field names — the two differ on purpose
-            # (`typeCorrected` writes `TypeCorrectedByFileName`, `tmdbYearMisses` writes
-            # `TmdbYearFilterMisses`), and comparing field names to parameter names reports a
-            # complete guard as broken.
+            # (there is no field whose name equals its parameter), and comparing field names to
+            # parameter names reports a complete guard as broken.
             add = plugin[plugin.index("public void AddStatusCounters("):]
             add = add[:add.index("db.StatusStats.Upsert(row);")]
             sig = add[:add.index(")")]

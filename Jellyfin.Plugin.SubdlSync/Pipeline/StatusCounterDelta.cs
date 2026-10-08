@@ -36,8 +36,6 @@ public readonly struct StatusCounterDelta
     public StatusCounterDelta(
         long uploaded,
         long downloaded,
-        long typeCorrected,
-        long tmdbYearMisses,
         long rejectedDownload,
         long rejectedUpload,
         long fittedToAudio,
@@ -46,8 +44,6 @@ public readonly struct StatusCounterDelta
     {
         Uploaded = uploaded;
         Downloaded = downloaded;
-        TypeCorrected = typeCorrected;
-        TmdbYearMisses = tmdbYearMisses;
         RejectedDownload = rejectedDownload;
         RejectedUpload = rejectedUpload;
         FittedToAudio = fittedToAudio;
@@ -60,12 +56,6 @@ public readonly struct StatusCounterDelta
 
     /// <summary>Gets subtitles downloaded by this run.</summary>
     public long Downloaded { get; }
-
-    /// <summary>Gets the F-M218 items typed by the file name instead of Jellyfin.</summary>
-    public long TypeCorrected { get; }
-
-    /// <summary>Gets the F-M218 TMDb searches that needed the year filter dropped.</summary>
-    public long TmdbYearMisses { get; }
 
     /// <summary>Gets the F-M286 download candidates fetched and then thrown away.</summary>
     public long RejectedDownload { get; }
@@ -84,7 +74,7 @@ public readonly struct StatusCounterDelta
 
     /// <summary>Gets a value indicating whether this delta leaves the statistics row untouched.</summary>
     public bool IsEmpty
-        => Uploaded == 0 && Downloaded == 0 && TypeCorrected == 0 && TmdbYearMisses == 0
+        => Uploaded == 0 && Downloaded == 0
            && RejectedDownload == 0 && RejectedUpload == 0 && FittedToAudio == 0
            && LanguageCodesAllocated == 0 && LooseSubtitlesRenamed == 0;
 
@@ -92,9 +82,7 @@ public readonly struct StatusCounterDelta
     /// F-M247: builds the delta for one direction run, discarding everything a dry run produced.
     /// <para>
     /// At most one of the two summaries is non-null for a given run, so each is judged on its own
-    /// flag: a dry upload must not zero a real download's numbers, and the other way round. The
-    /// <c>TypeCorrected</c> counter is the one that both directions write, so it is guarded
-    /// per direction rather than once.
+    /// flag: a dry upload must not zero a real download's numbers, and the other way round.
     /// </para>
     /// </summary>
     /// <param name="upload">The upload summary, or null when this run was a download.</param>
@@ -112,9 +100,6 @@ public readonly struct StatusCounterDelta
         return new StatusCounterDelta(
             uploaded: uploadDry ? 0 : upload?.Uploaded ?? 0,
             downloaded: downloadDry ? 0 : download?.Downloaded ?? 0,
-            typeCorrected: (downloadDry ? 0 : download?.TypeCorrectedByFileName ?? 0)
-                + (uploadDry ? 0 : upload?.TypeCorrectedByFileName ?? 0),
-            tmdbYearMisses: downloadDry ? 0 : download?.TmdbYearFilterMisses ?? 0,
             rejectedDownload: downloadDry ? 0 : download?.RejectedCandidates ?? 0,
             rejectedUpload: uploadDry ? 0 : upload?.RejectedCandidates ?? 0,
             fittedToAudio: downloadDry ? 0 : download?.FittedToAudio ?? 0,

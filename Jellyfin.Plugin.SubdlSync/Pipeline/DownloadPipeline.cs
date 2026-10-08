@@ -107,12 +107,6 @@ public class DownloadRunSummary
     /// </summary>
     public int RejectedCandidates { get; set; }
 
-    /// <summary>F-M218: items whose type/season/episode came from the file name, not Jellyfin.</summary>
-    public int TypeCorrectedByFileName { get; set; }
-
-    /// <summary>F-M218: TMDb title searches that only matched once the year filter was dropped.</summary>
-    public int TmdbYearFilterMisses { get; set; }
-
     /// <summary>
     /// F-M308: subtitles this run FITTED to their audio track. Counts the correction when it is
     /// APPLIED — a fit that was measured and then refused by its own deploy rule is not a fit.
@@ -465,7 +459,6 @@ public sealed class DownloadPipeline : IDisposable
         // F-M24a (user decision 09.09.2026): TMDB calls trace at VERBOSE (SubDL API calls are Debug).
         _tmdb.Trace += OnTmdbTrace;
         _runSummaryForEvents = summary; // F-M218: event handlers need the running summary
-        _tmdb.YearFilterMiss += OnTmdbYearFilterMiss;
 
         // F-M54: wrong TMDB key reported ONCE at Normal/Error level.
         _tmdb.AuthError += msg => _logger.LogError("[SubDL-D] {Msg}", msg);
@@ -560,7 +553,6 @@ public sealed class DownloadPipeline : IDisposable
         _api.DebugTrace -= OnApiTrace;
         _api.Log -= OnApiLog; // F-M232: detach the client's LogInfo channel per run
         _tmdb.Trace -= OnTmdbTrace;
-        _tmdb.YearFilterMiss -= OnTmdbYearFilterMiss; // F-M218
         _runSummaryForEvents = null;
         Registry.Flush();
         _searchTracker.Flush(); // F-M47: persist search timestamps after the run
@@ -651,20 +643,6 @@ public sealed class DownloadPipeline : IDisposable
     private void OnTmdbTrace(string msg)
     {
         LogUtil.Trace(_config.LogMode, _logger, "{Tag} {Msg}", "[SubDL-D]", msg);
-    }
-
-    /// <summary>
-    /// F-M218: counts a TMDb title search that only matched after the year filter was
-    /// dropped. Runs on the resolver's YearFilterMiss event during this run.
-    /// </summary>
-    /// <param name="title">The title that was searched.</param>
-    private void OnTmdbYearFilterMiss(string title)
-    {
-        var s = _runSummaryForEvents;
-        if (s != null)
-        {
-            s.TmdbYearFilterMisses++;
-        }
     }
 
     /// <summary>F-M24a: per-API-call trace → LogLevel.Debug (never Normal/Verbose).</summary>
@@ -994,7 +972,6 @@ public sealed class DownloadPipeline : IDisposable
             if (!isSeries)
             {
                 isSeries = true;
-                summary.TypeCorrectedByFileName++; // F-M218
                 LogUtil.PerItem(_config.LogMode, _logger,
                     "[SubDL-D] type from file name (not Jellyfin) {File} — series, name states S{Season}E{Episode}",
                     Path.GetFileName(mediaPath), parsedName.Season ?? 0, parsedName.Episode ?? 0);
@@ -1045,7 +1022,6 @@ public sealed class DownloadPipeline : IDisposable
                 imdbId = verified.Imdb;
                 tmdbId = verified.Tmdb;
                 isSeries = verified.IsSeries;
-                summary.TypeCorrectedByFileName++;
                 LogUtil.PerItem(_config.LogMode, _logger,
                     "[SubDL-D] TMDb id test corrected the item — tmdb={Tmdb} imdb={Imdb} {File}.",
                     tmdbId ?? "-", imdbId ?? "-", Path.GetFileName(mediaPath));
@@ -1120,7 +1096,6 @@ public sealed class DownloadPipeline : IDisposable
                     if (multi.IsSeries != isSeries)
                     {
                         isSeries = multi.IsSeries; // TMDB decides, not Jellyfin
-                        summary.TypeCorrectedByFileName++; // F-M218
                         LogUtil.PerItem(_config.LogMode, _logger,
                             "[SubDL-D] TMDb resolved this as a {Kind} — type corrected {File}.",
                             multi.IsSeries ? "series" : "movie", Path.GetFileName(mediaPath));

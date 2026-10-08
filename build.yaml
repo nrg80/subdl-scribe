@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.198"
+version: "12.1.12.199"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,9 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.199: Two statistics rows are gone, and with them their counters: the type row and
+    the year-filter row. The behaviour they measured is unchanged - the file name still
+    decides type and episode, a year-filtered search still retries without the year.
   v12.1.12.198: The worker is named Auto-Sync too, like the statistics row, and the numbers
     under Statistics are right-aligned in a column sized for six digits.
   v12.1.12.197: Spelling: the statistics row reads "Downloads: Auto-Sync".

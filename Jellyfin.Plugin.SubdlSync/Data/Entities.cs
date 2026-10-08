@@ -518,16 +518,6 @@ public class StatusStatsEntity
     /// <summary>Total subtitles downloaded since <see cref="SinceUtc"/>.</summary>
     public long Downloaded { get; set; }
 
-    // F-M218 (27.09.2026, user decision): cumulative quality counters next to the two
-    // volume counters. A field per counter rather than a generic key/value row — the set
-    // is deliberately small, fixed and read by the GUI, so fields keep it typed,
-    // greppable and impossible to misspell at runtime.
-
-    /// <summary>Items whose type/season/episode came from the FILE NAME instead of Jellyfin (F-M217).</summary>
-    public long TypeCorrectedByFileName { get; set; }
-
-    /// <summary>TMDb title searches that only matched after the year filter was dropped (F-M217).</summary>
-    public long TmdbYearFilterMisses { get; set; }
 
     /// <summary>
     /// F-M286: candidates FETCHED and then thrown away, per direction — every reject path, not the QA
