@@ -222,19 +222,36 @@ def main():
     else:
         check("PluginConfiguration.cs found next to the page", False, cfg_cs)
 
-    # ---- 5c. The second page script must not write the stamp either ----
-    # configPage.js carries its own copy of the status loader. It is shipped (embedded
-    # resource + ConfigJs route) and it used to write the stamp with a SERVER timestamp
-    # labelled "Last checked", which contradicts the one-writer rule and would show a
-    # time the click did not cause. Two files, one rule.
+    # ---- 5c. F-M324: there is NO second page script ----
+    # The page carried TWO copies of the same JavaScript: the inline block in this file and a
+    # separate Configuration/configPage.js, embedded as a resource and served over the ConfigJs
+    # route. The route was never called. Checked live in a real browser on 08.10.2026, by two
+    # independent methods (a MutationObserver on script injection and performance.getEntries),
+    # across direct URL, reload, tab switches and the plugin menu: ZERO loads. The inline block
+    # was the only code that ran — every inline function existed (subdlSetLight, subdlLoadStatus,
+    # subdlRenderStats) while the two defined only in that file (subdlBootstrapOnce,
+    # subdlRefreshBackupSelect) were undefined in the page. And the second copy was not merely
+    # redundant: four functions shared a name with a DIFFERENT body (subdlLoadQuota 8,077 vs
+    # 3,578 bytes; subdlFindTaskId 286 vs 1,627; subdlLoadStatus 3,226 vs 2,740;
+    # subdlStartQuotaPoll 239 vs 135), and it predated the login light — had JF ever loaded it,
+    # it would have overwritten the live functions with older ones.
+    #
+    # So the file, its resource registration, its PluginPageInfo entry and its controller are
+    # GONE, and their absence is asserted: a page that grows a second script again is the state
+    # this check exists to prevent. A reintroduced copy would restore the file-pair drift with
+    # nothing in any log looking abnormal.
+    # The project root is two levels up from Configuration/.
+    root = os.path.dirname(os.path.dirname(path))
     js_path = os.path.join(os.path.dirname(path), "configPage.js")
-    if os.path.isfile(js_path):
-        page_js = open(js_path, encoding="utf-8").read()
-        check("configPage.js does NOT write the status stamp",
-              "SubdlStatusTimestamp" not in page_js
-              or ".textContent = 'Last checked" not in page_js)
-    else:
-        check("configPage.js found next to the page", False, js_path)
+    check("no second page script sits next to the page", not os.path.isfile(js_path), js_path)
+    ctrl = os.path.join(root, "Api", "SubdlConfigController.cs")
+    check("the ConfigJs route controller is gone", not os.path.isfile(ctrl), ctrl)
+    plugin_cs = os.path.join(root, "Plugin.cs")
+    check("the .js page is no longer registered as a plugin page",
+          "configPage.js" not in open(plugin_cs, encoding="utf-8").read(), plugin_cs)
+    csproj = os.path.join(root, "Jellyfin.Plugin.SubdlSync.csproj")
+    check("the .js page is no longer an EmbeddedResource",
+          "configPage.js" not in open(csproj, encoding="utf-8").read(), csproj)
 
     # ---- 8. Intro text stays OPERATIONAL: no measured values, and a length budget ----
     # F-M299: the block under an h4 heading says what the section DOES. Measurements, episode
@@ -517,22 +534,14 @@ def main():
     else:
         check("the status controller is reachable for the field cross-check", False, api_src)
 
-    # The file-pair trap: the renderer is duplicated in configPage.js. A row added to one copy
-    # only would render in one embedding and not the other.
-    js = os.path.join(os.path.dirname(path), "configPage.js")
-    if os.path.exists(js):
-        jstext = open(js, encoding="utf-8").read()
-        # Match the FIELD ACCESS, not the bare name: "XXFittedToAudio" contains "FittedToAudio"
-        # and would pass a substring test while rendering a field that does not exist.
-        check("both copies of the page carry the table renderer",
-              "StatsTable" in jstext and "s.FittedToAudio" in jstext)
-        # Both copies must carry the SAME renderer — a row in one only is the file-pair trap.
-        def renderer_of(text):
-            i = text.index("var subdlRenderStats = function (s) {")
-            j = text.index("window.subdlRenderStats =", i)
-            return text[i:j]
-        check("the two copies of the renderer are identical",
-              renderer_of(jstext) == renderer_of(html))
+    # F-M324: the renderer exists ONCE. It used to be duplicated in configPage.js, and the two
+    # copies had to be asserted IDENTICAL because a row added to one only would render in one
+    # embedding and not the other. There is no second copy any more, so the check that remains is
+    # that the surviving one carries the renderer at all — and that no second file reappears.
+    check("the page carries the statistics table renderer",
+          "StatsTable" in html and "s.FittedToAudio" in html)
+    check("no second copy of the page script exists",
+          not os.path.isfile(os.path.join(os.path.dirname(path), "configPage.js")))
 
     # ---- 6h. F-M322: the auto-sync's own light and the switch wording ----
     # The operator asked for the alignment's status as its own readout, both in the Workers list and

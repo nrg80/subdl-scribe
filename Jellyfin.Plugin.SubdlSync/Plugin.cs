@@ -514,11 +514,6 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             {
                 Name = Name,
                 EmbeddedResourcePath = "Jellyfin.Plugin.SubdlScribe.Configuration.configPage.html"
-            },
-            new PluginPageInfo
-            {
-                Name = Name + ".js",
-                EmbeddedResourcePath = "Jellyfin.Plugin.SubdlScribe.Configuration.configPage.js"
             }
         ];
     }
