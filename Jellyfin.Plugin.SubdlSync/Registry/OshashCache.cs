@@ -15,14 +15,13 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Jellyfin.Plugin.SubdlScribe.Data;
-using LiteDB;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
 
 namespace Jellyfin.Plugin.SubdlScribe.Registry;
 
 /// <summary>
-/// Central OSHash cache backed by LiteDB (F-M88c, F-M119).
+/// Central OSHash cache backed by the plugin's data store (F-M88c, F-M119).
 /// </summary>
 /// F-M61b: keyed by file path; a lookup validates size AND mtime and treats a mismatch as a miss,
 /// so a replaced file is re-hashed automatically.
@@ -143,7 +142,7 @@ public sealed class OshashCache
 
     public void Flush()
     {
-        // LiteDB writes immediately.
+        // The store writes at the point of the write — nothing to do.
     }
 }
 

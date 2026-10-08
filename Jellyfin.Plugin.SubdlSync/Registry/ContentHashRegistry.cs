@@ -16,7 +16,6 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using Jellyfin.Plugin.SubdlScribe.Data;
-using LiteDB;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
 
@@ -37,7 +36,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// F-M194b: every area is keyed by a computed business key stored in the record's own id, never
 /// by a database-assigned auto id.
 /// <b>1. A row is written under a computed business key, never the database's auto id.</b>
-/// The previous implementation upserted <c>new SubtitleEntity { Id = 0 }</c>; LiteDB resolves an
+/// The previous implementation upserted <c>new SubtitleEntity { Id = 0 }</c>; the store resolved an
 /// upsert by <c>_id</c>, so zero never matched and every write inserted. That produced 1277 rows
 /// for 782 facts (F-M194) and is structurally impossible now.
 /// </para>
@@ -973,7 +972,7 @@ public sealed class ContentHashRegistry : IDisposable
 
         // F-M278: a row must state a language — it is what the coverage check reads. An observation
         // without one is not "no information", it is a claim of coverage that does not exist, and it
-        // is not even idempotent: LiteDB stores the null as an empty string, so the comparison below
+        // is not even idempotent: the store writes the null as an empty string, so the comparison below
         // never matches it and every pass rewrites the row forever. A caller that cannot name the
         // language must not call this; the absence of a row is what keeps the item searchable.
         if (string.IsNullOrEmpty(language))
@@ -1648,7 +1647,7 @@ public sealed class ContentHashRegistry : IDisposable
 
     // --------------------------------------------------------------- plumbing
 
-    /// <summary>No-op flush: LiteDB persists at the point of the write.</summary>
+    /// <summary>No-op flush: the store persists at the point of the write.</summary>
     public void Flush()
     {
     }

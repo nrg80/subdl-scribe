@@ -36,6 +36,14 @@
     <PackageReference Include="Jellyfin.Model" Version="12.1.0">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
+    <!-- F-M325: the store is SQLite through Entity Framework Core. ExcludeAssets=runtime keeps the
+         assemblies OUT of the ZIP: Jellyfin ships EF Core 10.0.11 and Microsoft.Data.Sqlite itself,
+         and PluginLoadContext resolves what the plugin does not carry from the host. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <!-- Kept ONLY for the one-time import of the previous document store (F-M327). It is the only
+         remaining use, and it is why this version still ships the engine. -->
     <PackageReference Include="LiteDB" Version="5.0.21" />
     <PackageReference Include="LanguageDetection" Version="1.2.0" />
       <None Remove="logo.png" />

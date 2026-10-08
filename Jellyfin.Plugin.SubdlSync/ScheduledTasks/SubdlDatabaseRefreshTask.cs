@@ -268,7 +268,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 progress.Report(85);
 
                 // ---- Phase 5: compact the file ----
-                // Deleting rows in LiteDB frees pages inside the file but never releases them, and
+                // Deleting rows frees pages inside the file but never releases them, and
                 // the journal keeps every delete separately. Compact in the SAME run so the refresh
                 // actually leaves a smaller store behind; housekeeping later would be forgotten.
                 try

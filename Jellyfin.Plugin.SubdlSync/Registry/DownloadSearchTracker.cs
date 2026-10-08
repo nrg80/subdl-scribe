@@ -13,7 +13,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Jellyfin.Plugin.SubdlScribe.Data;
-using LiteDB;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
 
@@ -178,7 +177,7 @@ public sealed class DownloadSearchTracker
         return dead.Count;
     }
 
-    /// <summary>No-op flush: LiteDB writes at the point of the update.</summary>
+    /// <summary>No-op flush: the store writes at the point of the update.</summary>
     public void Flush()
     {
     }

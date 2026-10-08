@@ -451,7 +451,7 @@ public class OshashEntity
 /// </summary>
 public class CounterEntity
 {
-    /// <summary>LiteDB auto-id.</summary>
+    /// <summary>Database-assigned auto-id. No longer the identity — see the Key above.</summary>
     public int Id { get; set; }
 
     /// <summary>Counter key, namespaced, e.g. "not-found:tt1234567".</summary>

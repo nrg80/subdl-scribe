@@ -21,7 +21,7 @@ using Jellyfin.Plugin.SubdlScribe.Pipeline;
 namespace Jellyfin.Plugin.SubdlScribe.Api;
 
 /// <summary>
-/// F-M90: registry reset endpoint — clears the plugin's LiteDB state.
+/// F-M90: registry reset endpoint — clears the plugin's stored state.
 /// After confirmation, the database file is renamed with a timestamped backup
 /// and the shared context is recreated. The next run starts fresh: hashes
 /// recompute, streams re-screen, uploads re-check against SubDL.
@@ -63,12 +63,28 @@ public class SubdlReset : ControllerBase
         {
             if (scope.Equals("all", StringComparison.OrdinalIgnoreCase))
             {
+                // Fold the WAL in BEFORE the copy. Without it the backup is the main file alone and
+                // every write since the last checkpoint is missing from it (see SubdlDbContext.
+                // Checkpoint). The old single-file engine had no such side file, so this is a step
+                // the format change introduced.
+                try { db.Checkpoint(); }
+                catch (Exception ex) { _logger.LogWarning(ex, "[SubDL] checkpoint before the reset backup failed; the backup may miss recent writes."); }
+
                 db.Dispose();
+
+                // Drop pooled handles before touching the file: a pooled connection would keep the
+                // old file open and the new one would not be seen.
+                Data.SubdlDbContext.ClearPoolFor(dbPath);
+
                 if (System.IO.File.Exists(dbPath))
                 {
                     System.IO.File.Copy(dbPath, backupPath, overwrite: true);
                     System.IO.File.Delete(dbPath);
                 }
+
+                // A -wal/-shm left beside a deleted database would be applied to whatever file comes
+                // next, so they go with it.
+                DeleteSideFiles(dbPath);
 
                 // F-M181: keep only the most recent backup; delete older .bak-* files.
                 foreach (var old in System.IO.Directory.GetFiles(dataDir, Data.DbFiles.BackupPrefix + "*"))
@@ -220,14 +236,31 @@ public class SubdlReset : ControllerBase
         try
         {
             var db = Plugin.Instance.SharedDbContext;
-            db.Dispose();
 
             string restoreStamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
+            if (System.IO.File.Exists(dbPath))
+            {
+                // BEFORE Dispose: a checkpoint needs the open connection. Folding the WAL first is
+                // what makes the pre-restore copy a complete snapshot rather than the main file
+                // alone.
+                try { db.Checkpoint(); }
+                catch (Exception ex) { _logger.LogWarning(ex, "[SubDL] checkpoint before the pre-restore copy failed."); }
+            }
+
+            db.Dispose();
+
+            // Drop pooled handles BEFORE the copy. Without this the copied file is not what the next
+            // open reads — measured in a probe: the restore silently kept the old rows and values.
+            Data.SubdlDbContext.ClearPoolFor(dbPath);
+
             if (System.IO.File.Exists(dbPath))
             {
                 System.IO.File.Copy(dbPath, dbPath + ".pre-restore-" + restoreStamp, overwrite: true);
             }
 
+            // The restored file must not find a write-ahead log belonging to the OLD file: SQLite
+            // would try to replay it over the restored pages. Clear the side files first, then copy.
+            DeleteSideFiles(dbPath);
             System.IO.File.Copy(backupPath, dbPath, overwrite: true);
             Plugin.Instance.RecreateDbContext();
         }
@@ -240,6 +273,30 @@ public class SubdlReset : ControllerBase
         ScheduledTasks.SubdlEventDispatcher.Instance?.ReloadQueues();
         _logger.LogWarning("[SubDL] Restored database from backup {Stamp}.", stamp);
         return Ok(new { ok = true, stamp });
+    }
+
+    /// <summary>
+    /// Removes the side files SQLite keeps beside a database. They belong to one file generation and
+    /// must never outlive it — see <see cref="Data.SubdlDbContext.Checkpoint"/>.
+    /// </summary>
+    /// <param name="dbPath">Path of the database file.</param>
+    private static void DeleteSideFiles(string dbPath)
+    {
+        foreach (var suffix in Data.DbFiles.SideSuffixes)
+        {
+            try
+            {
+                var side = Data.DbFiles.SidePath(dbPath, suffix);
+                if (System.IO.File.Exists(side))
+                {
+                    System.IO.File.Delete(side);
+                }
+            }
+            catch (Exception)
+            {
+                // A leftover side file is not worth failing the reset for; the next open recreates it.
+            }
+        }
     }
 
     private static IReadOnlyList<string> GetLegacyStateFiles() => new[]

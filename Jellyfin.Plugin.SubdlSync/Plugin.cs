@@ -345,7 +345,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     }
 
     /// <summary>
-    /// Recreate the shared LiteDB context after a reset/restore.
+    /// Recreate the shared data context after a reset/restore.
     /// </summary>
     public void RecreateDbContext()
     {
@@ -387,19 +387,24 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// <para>
     /// Without this, two scheduled tasks starting in the same tick both see
     /// <c>_sharedDbContext == null</c> and each construct a SubdlDbContext over the same data
-    /// file. LiteDB's BsonMapper is not thread-safe, so the concurrent EnsureIndexes() calls
-    /// raced and one task died with
+    /// file. The engine then in use had a non-thread-safe object mapper, so the concurrent
+    /// schema setup raced and one task died with
     /// <c>System.NotSupportedException: Member Id not found on BsonMapper for type
     /// EmbedTrackEntity</c> (measured 26.09.2026 at 08:21:09.081/.082, prune and OSHash firing
     /// in the same scheduler tick — the first occurrence in any log). The task itself is fine:
     /// started alone it completes normally.
+    /// </para>
+    /// <para>
+    /// The lock is kept although the engine changed: two contexts over one SQLite file is still a
+    /// race this design does not want — the second one sees a half-initialised schema, and the
+    /// shared instance is what every registry was handed at construction.
     /// </para>
     // F-M211: the shared database context is created under a lock; two contexts over one data file
     // race the object mapper and one task is lost.
     private static readonly object SharedDbContextLock = new();
 
     /// <summary>
-    /// Shared LiteDB context. Lazy-created on first use; all registries
+    /// Shared data context. Lazy-created on first use; all registries
     /// and scheduled tasks share this one instance.
     /// </summary>
     public SubdlDbContext SharedDbContext

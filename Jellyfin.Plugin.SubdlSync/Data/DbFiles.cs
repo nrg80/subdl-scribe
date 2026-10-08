@@ -17,29 +17,37 @@ namespace Jellyfin.Plugin.SubdlScribe.Data;
 /// The one place that knows how the plugin's data files are spelled.
 /// <para>
 /// The file is a path, not a label — every read and write resolves it here, so a rename is one edit
-/// instead of a hunt for string literals. It was renamed from <c>subdl-sync.db</c> to
-/// <c>subdl-scribe.db</c> (28.09.2026, the name kept the plugin's working title).
+/// instead of a hunt for string literals.
 /// </para>
 /// <para>
-/// No migration code is kept for the old name: the rename shipped in 12.1.12.116 and every known
-/// installation carried its files across on the first start after it, so nothing is left to
-/// migrate. An installation that somehow still only has the old file starts with an empty registry
-/// — the accepted trade for not carrying dead code forever.
+/// Renamed twice, and both times for a reason worth keeping. It was <c>subdl-sync.db</c> until
+/// 28.09.2026 (the name kept the plugin's working title), and <c>subdl-scribe.db</c> until
+/// 08.10.2026, when the store became SQLite and the extension stopped being decorative: the file is
+/// now a real SQLite database, so it says so — <c>subdl-scribe.sqlite</c>. The old name is not
+/// reused as a second live file: it is the IMPORT source, read once and renamed aside (F-M327).
 /// </para>
 /// </summary>
 public static class DbFiles
 {
     /// <summary>The data file's name.</summary>
-    public const string Name = "subdl-scribe.db";
+    public const string Name = "subdl-scribe.sqlite";
 
     /// <summary>Prefix of a timestamped backup, as the reset and restore routes expect it.</summary>
     public const string BackupPrefix = Name + ".bak-";
 
     /// <summary>
-    /// Suffixes LiteDB gives the files sitting NEXT TO a data file. They are built from the data
-    /// file's stem, not its full name: <c>subdl-scribe.db</c> → <c>subdl-scribe-log.db</c>.
+    /// The name the data file carried before it became SQLite. Kept ONLY as the import source
+    /// (F-M327) — nothing reads or writes it as a live store any more.
     /// </summary>
-    public static readonly string[] SideSuffixes = { "-log.db", "-temp.db", "-temp-log.db" };
+    public const string LegacyName = "subdl-scribe.db";
+
+    /// <summary>
+    /// Suffixes SQLite gives the files sitting NEXT TO a database. Built from the FULL file name,
+    /// not its stem: <c>subdl-scribe.sqlite</c> → <c>subdl-scribe.sqlite-wal</c>. This is the
+    /// opposite of the convention the previous engine used, which is why <see cref="SidePath"/>
+    /// still exists as a separate helper rather than a shared string.
+    /// </summary>
+    public static readonly string[] SideSuffixes = { "-wal", "-shm", "-journal" };
 
     /// <summary>Full path of the data file inside a plugin data directory.</summary>
     /// <param name="dataDir">Plugin data directory.</param>
@@ -47,17 +55,28 @@ public static class DbFiles
     public static string PathIn(string dataDir) => Path.Combine(dataDir, Name);
 
     /// <summary>
-    /// Path of a side file (rollback journal, rebuild temporary) belonging to a data file. LiteDB
-    /// appends the suffix to the file's STEM: <c>subdl-scribe.db</c> → <c>subdl-scribe-log.db</c>.
-    /// Appending to the full name (<c>subdl-scribe.db-log.db</c>) matches nothing that exists.
+    /// Full path of the PREVIOUS data file, the one-time import source. Never the live store.
+    /// </summary>
+    /// <param name="dataDir">Plugin data directory.</param>
+    /// <returns>Absolute path of the old document store.</returns>
+    public static string LegacyPathIn(string dataDir) => Path.Combine(dataDir, LegacyName);
+
+    /// <summary>
+    /// Path of a side file belonging to a data file. SQLite appends the suffix to the FULL name:
+    /// <c>subdl-scribe.sqlite</c> → <c>subdl-scribe.sqlite-wal</c>. Appending to the stem
+    /// (<c>subdl-scribe-wal</c>) matches nothing SQLite ever writes.
+    /// <para>
+    /// The previous engine did the opposite — it built side names from the stem — so this helper
+    /// carries a comment on each side rather than an assumption on either.
+    /// </para>
     /// </summary>
     /// <param name="dbPath">Path of the data file.</param>
-    /// <param name="suffix">Suffix including the leading dash, e.g. "-log.db".</param>
+    /// <param name="suffix">Suffix including the leading dash, e.g. "-wal".</param>
     /// <returns>Absolute path of the side file.</returns>
     public static string SidePath(string dbPath, string suffix)
     {
         return Path.Combine(
             Path.GetDirectoryName(dbPath) ?? ".",
-            Path.GetFileNameWithoutExtension(dbPath) + suffix);
+            Path.GetFileName(dbPath) + suffix);
     }
 }

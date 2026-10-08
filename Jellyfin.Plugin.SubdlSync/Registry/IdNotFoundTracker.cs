@@ -13,14 +13,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Jellyfin.Plugin.SubdlScribe.Data;
-using LiteDB;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
 
 namespace Jellyfin.Plugin.SubdlScribe.Registry;
 
 /// <summary>
-/// Per-item id-resolution failure tracker backed by LiteDB (F-M66).
+/// Per-item id-resolution failure tracker backed by the plugin's data store (F-M66).
 /// </summary>
 public sealed class IdNotFoundTracker
 {
@@ -36,7 +35,7 @@ public sealed class IdNotFoundTracker
     private static string Key(string itemId) => "id-not-found:" + itemId;
 
     private CounterEntity Get(string itemId)
-        => _db.Counters.FindOne(Query.EQ("Key", Key(itemId))) ?? new CounterEntity { Key = Key(itemId) };
+        => _db.Counters.FindOne(c => c.Key == Key(itemId)) ?? new CounterEntity { Key = Key(itemId) };
 
     public bool IsExhausted(string itemId, int limit)
     {
@@ -64,7 +63,7 @@ public sealed class IdNotFoundTracker
 
     public void RecordSuccess(string itemId)
     {
-        _db.Counters.DeleteMany(Query.EQ("Key", Key(itemId)));
+        _db.Counters.DeleteMany(c => c.Key == Key(itemId));
         LogUtil.Detail(_logger, "[SubDL-DB] id-not-found reset {Item}", itemId);
     }
 
@@ -72,10 +71,10 @@ public sealed class IdNotFoundTracker
     {
         var dead = _db.Counters.FindAll()
             .Where(c => c.Key.StartsWith("id-not-found:", StringComparison.Ordinal) && !itemExists(c.Key["id-not-found:".Length..]))
-            .Select(c => c.Id)
+            .Select(c => c.Key)
             .ToList();
 
-        var removed = _db.Counters.DeleteMany(Query.In("_id", dead.Select(id => new BsonValue(id)).ToArray()));
+        var removed = _db.Counters.DeleteMany(c => dead.Contains(c.Key));
         if (removed > 0)
         {
             LogUtil.Detail(_logger, "[SubDL-DB] id-not-found prune {Removed}", removed);
@@ -85,6 +84,6 @@ public sealed class IdNotFoundTracker
 
     public void Flush()
     {
-        // LiteDB writes immediately.
+        // The store writes at the point of the write — nothing to do.
     }
 }

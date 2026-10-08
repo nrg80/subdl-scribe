@@ -13,7 +13,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Jellyfin.Plugin.SubdlScribe.Data;
-using LiteDB;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
 
@@ -53,8 +52,8 @@ public sealed class QaFailTracker
     /// <returns>Discarded release ids.</returns>
     public List<string> GetSkippedCandidates(string itemId, string language)
     {
-        // The language comparison runs in LINQ-to-objects, NOT inside the LiteDB query.
-        // LiteDB cannot translate string.Equals(..., StringComparison.OrdinalIgnoreCase) and
+        // The language comparison runs in LINQ-to-objects, NOT pushed down as SQL.
+        // No provider can translate string.Equals(..., StringComparison.OrdinalIgnoreCase) and
         // emitted `(($.ItemId = @p0) AND (( = $.Language) = true))`, which failed the entire
         // F-M193a: no construct the database cannot translate may cross into a query.
         // download cycle with "Invalid BsonExpression when converted from Linq expression".
@@ -110,9 +109,11 @@ public sealed class QaFailTracker
     /// <param name="language">Language code.</param>
     public void RecordSuccess(string itemId, string language)
     {
-        _db.RejectedCandidates.DeleteMany(Query.And(
-            Query.EQ("ItemId", itemId),
-            Query.EQ("Language", language.ToUpperInvariant())));
+        // The stored language is the UPPER-CASE form the key builder wrote, so the comparison is
+        // ordinal and exact. It must not become a case-insensitive one: OrdinalIgnoreCase would also
+        // match a row stored in another case, which the previous engine's exact EQ never did.
+        var upper = language.ToUpperInvariant();
+        _db.RejectedCandidates.DeleteMany(c => c.ItemId == itemId && c.Language == upper);
         LogUtil.Detail(_logger, "[SubDL-DB] burned candidates reset {Item}|{Lang}", itemId, language);
     }
 
@@ -130,7 +131,7 @@ public sealed class QaFailTracker
         int removed = 0;
         foreach (var itemId in deadItemIds)
         {
-            removed += _db.RejectedCandidates.DeleteMany(Query.EQ("ItemId", itemId));
+            removed += _db.RejectedCandidates.DeleteMany(c => c.ItemId == itemId);
         }
 
         if (removed > 0)
@@ -141,7 +142,7 @@ public sealed class QaFailTracker
         return removed;
     }
 
-    /// <summary>No-op flush: LiteDB writes at the point of the write.</summary>
+    /// <summary>No-op flush: the store writes at the point of the write.</summary>
     public void Flush()
     {
     }

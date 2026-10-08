@@ -9,12 +9,23 @@
   SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
   warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   See the GNU General Public License for more details.
+
+  References the BUILT plugin assembly, like the other harnesses here, so the
+  import path under test is the compiled one and not a copy that can drift.
 -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>disable</Nullable>
-    <AssemblyName>logrun</AssemblyName><RootNamespace>DupRunNs</RootNamespace>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>storerun</AssemblyName>
+    <RootNamespace>StoreRun</RootNamespace>
+    <!-- Real globalization, NOT invariant: the source store records a `de` collation, and opening
+         it under invariant globalization throws CultureNotFoundException before a row is read.
+         That is also why the harness must pass no DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CA1305;CA1862;CA1307;CA1725</NoWarn>
     <JellyfinDir>/opt/data/jf-test/jellyfin</JellyfinDir>
     <PluginDir>/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/bin/Release/net10.0</PluginDir>
   </PropertyGroup>
@@ -23,6 +34,7 @@
     <Reference Include="MediaBrowser.Common"><HintPath>$(JellyfinDir)/MediaBrowser.Common.dll</HintPath></Reference>
     <Reference Include="MediaBrowser.Controller"><HintPath>$(JellyfinDir)/MediaBrowser.Controller.dll</HintPath></Reference>
     <Reference Include="MediaBrowser.Model"><HintPath>$(JellyfinDir)/MediaBrowser.Model.dll</HintPath></Reference>
+    <Reference Include="LiteDB"><HintPath>$(PluginDir)/LiteDB.dll</HintPath></Reference>
     <Reference Include="Microsoft.EntityFrameworkCore"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.dll</HintPath></Reference>
     <Reference Include="Microsoft.EntityFrameworkCore.Abstractions"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.Abstractions.dll</HintPath></Reference>
     <Reference Include="Microsoft.EntityFrameworkCore.Relational"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.Relational.dll</HintPath></Reference>
@@ -31,7 +43,6 @@
     <Reference Include="SQLitePCLRaw.core"><HintPath>$(JellyfinDir)/SQLitePCLRaw.core.dll</HintPath></Reference>
     <Reference Include="SQLitePCLRaw.provider.e_sqlite3"><HintPath>$(JellyfinDir)/SQLitePCLRaw.provider.e_sqlite3.dll</HintPath></Reference>
     <Reference Include="SQLitePCLRaw.batteries_v2"><HintPath>$(JellyfinDir)/SQLitePCLRaw.batteries_v2.dll</HintPath></Reference>
-    <Reference Include="LiteDB"><HintPath>$(PluginDir)/LiteDB.dll</HintPath></Reference>
     <Reference Include="Microsoft.Extensions.Logging.Abstractions"><HintPath>$(JellyfinDir)/Microsoft.Extensions.Logging.Abstractions.dll</HintPath></Reference>
   </ItemGroup>
 </Project>

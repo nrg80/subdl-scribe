@@ -14,14 +14,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.SubdlScribe.Data;
-using LiteDB;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
 
 namespace Jellyfin.Plugin.SubdlScribe.Registry;
 
 /// <summary>
-/// Per-item file-access/extraction retry tracker backed by LiteDB (F-M60).
+/// Per-item file-access/extraction retry tracker backed by the plugin's data store (F-M60).
 /// </summary>
 public sealed class FileRetryTracker
 {
@@ -37,7 +36,7 @@ public sealed class FileRetryTracker
     private static string Key(string itemId) => "file-retry:" + itemId;
 
     private CounterEntity Get(string itemId)
-        => _db.Counters.FindOne(Query.EQ("Key", Key(itemId))) ?? new CounterEntity { Key = Key(itemId) };
+        => _db.Counters.FindOne(c => c.Key == Key(itemId)) ?? new CounterEntity { Key = Key(itemId) };
 
     public bool IsExhausted(string itemId, int limit)
     {
@@ -60,7 +59,7 @@ public sealed class FileRetryTracker
 
     public void RecordSuccess(string itemId)
     {
-        _db.Counters.DeleteMany(Query.EQ("Key", Key(itemId)));
+        _db.Counters.DeleteMany(c => c.Key == Key(itemId));
         LogUtil.Detail(_logger, "[SubDL-DB] file-retry reset {Item}", itemId);
     }
 
@@ -68,10 +67,10 @@ public sealed class FileRetryTracker
     {
         var dead = _db.Counters.FindAll()
             .Where(c => c.Key.StartsWith("file-retry:", StringComparison.Ordinal) && !itemExists(c.Key["file-retry:".Length..]))
-            .Select(c => c.Id)
+            .Select(c => c.Key)
             .ToList();
 
-        var removed = _db.Counters.DeleteMany(Query.In("_id", dead.Select(id => new BsonValue(id)).ToArray()));
+        var removed = _db.Counters.DeleteMany(c => dead.Contains(c.Key));
         if (removed > 0)
         {
             LogUtil.Detail(_logger, "[SubDL-DB] file-retry prune {Removed}", removed);
@@ -79,10 +78,10 @@ public sealed class FileRetryTracker
         return removed;
     }
 
-    public int Count => _db.Counters.Count(Query.StartsWith("Key", "file-retry:"));
+    public int Count => _db.Counters.FindAll().Count(c => c.Key.StartsWith("file-retry:", StringComparison.Ordinal));
 
     public void Flush()
     {
-        // LiteDB writes immediately — nothing to do.
+        // The store writes at the point of the write — nothing to do.
     }
 }

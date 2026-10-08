@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.201"
+version: "12.1.12.202"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,13 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.202: The data store is SQLite now, through the Entity Framework Core that Jellyfin already
+    ships, and the plugin writes its own file (subdl-scribe.sqlite) — never Jellyfin's database, which
+    offers plugins no interface and is rebuilt by its own migrations. A new version that meets an old
+    data file IMPORTS it once: measured against a real file, 117 of 117 rows over ten areas, including
+    the retry budgets and the burned-candidate verdicts, which are work rather than data — losing them
+    re-fetches candidates that were already screened. The old file is kept. 35 KB smaller package
+    (1,337,266 -> 1,301,728 B): not the full engine weight, because the import still needs it to read.
   Older entries (before v12.1.12.192) were removed on 08.10.2026 to keep this file
   and the shipped ZIP small. They remain in the git history: git log -- build.yaml .
   v12.1.12.201: The configuration page carries its JavaScript once. The second page
