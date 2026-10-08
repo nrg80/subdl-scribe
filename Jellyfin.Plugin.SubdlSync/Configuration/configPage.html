@@ -616,7 +616,17 @@
         }
         #StatsTable .subdl-stat-row { display: contents; }
         #StatsTable > .subdl-stat-row > * { min-width: 0; white-space: nowrap; }
-        #StatsTable .subdl-stat-value { text-align: right; font-variant-numeric: tabular-nums; }
+        /* The value column is sized for SIX digits and right-aligned, so every number starts at
+           the same edge whatever its length: with max-content alone the column took the width of
+           the widest number PRESENT, and the decimal edge wandered between renders as the
+           counters grew (operator order 08.10.2026). 6ch = the widest value the counters can
+           reach in practice (999 999), plus the tabular figures make the column align digit to
+           digit. min-width on the CELL, not the table: the label column stays max-content. */
+        #StatsTable .subdl-stat-value {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            min-width: 6ch;
+        }
         #StatsTable .subdl-stat-total { font-weight: 600; }
 
         #WorkerRunList {

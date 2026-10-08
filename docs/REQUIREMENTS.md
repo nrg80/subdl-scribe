@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.197.
+**Status:** Implementation — v12.1.12.198.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -681,7 +681,7 @@ Both are existing code paths that every downloaded subtitle already travels. The
 
 **The rule.** The alignment's status is its own readout, in two places:
 
-- a **row of its own** in the Workers list, next to Download — `Autosync`, kept as `WorkerRunRegistry.AutoSyncWorkerKey`. It is separate because the Download row cannot answer the question the operator watches: a run can fetch forty files and align none, and one word cannot tell those two apart.
+- a **row of its own** in the Workers list, next to Download — `Auto-Sync`, kept as `WorkerRunRegistry.AutoSyncWorkerKey`. It is separate because the Download row cannot answer the question the operator watches: a run can fetch forty files and align none, and one word cannot tell those two apart.
 
 **ONE place, and it is the Workers list.** The light was first also mirrored under the download switch; the operator struck that on the same day. The switch is an input, not a second readout of the same run, and one number deserves one place. The Workers list is where every other worker reports, so the alignment reports there too. Asserted as an ABSENCE (T134) — a duplicated readout is exactly what gets helpfully re-added later, and the page renders either way.
 
@@ -1505,8 +1505,9 @@ The wording states what happened, not the code's vocabulary. Four counters, plus
   among others that follow the same `Downloads:` pattern. Two long forms were written here first and
   both were struck by the operator: "...aligned to the spoken track", which echoed the switch's
   sentence, and the spelling `Auto-Synch`, which he corrected to `Auto-Sync` so that one word is
-  spelled one way across the table — `Autosync` (the worker row) and `Auto-Sync` (this row) are the
-  only two spellings in the product, and each stands for its own thing. A row in a table of counts
+  spelled one way: the worker row and the statistics row both read `Auto-Sync`, because one worker
+  spelled two ways reads as two things. (`Autosync` was the worker's spelling for one release; it
+  went the same day the row was corrected.) A row in a table of counts
   names its counter; it does not restate the switch's description.
 
 **Test: T123.** See F-M218, F-M286.

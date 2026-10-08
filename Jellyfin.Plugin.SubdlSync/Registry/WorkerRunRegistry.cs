@@ -301,7 +301,7 @@ public sealed class WorkerRunRegistry
     [
         (SeederKey, "Seeder"),
         (DownloadWorkerKey, "Download"),
-        (AutoSyncWorkerKey, "Autosync"),
+        (AutoSyncWorkerKey, "Auto-Sync"),
         (UploadWorkerKey, "Upload"),
         ("SubDLPostprocessTask", "Upl. Postproc."),
         ("SubdlSyncDatabaseRefreshTask", "Database"),

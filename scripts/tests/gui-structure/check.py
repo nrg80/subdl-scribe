@@ -386,6 +386,15 @@ def main():
           not any("year tag" in o for o in order),
           "a row still says 'year tag': %s" % [o for o in order if "year" in o])
 
+    # F-M322 (operator order 08.10.2026): the value column is sized for SIX digits and right-aligned,
+    # so every number shares one edge. Asserted, because the failure is invisible in a screenshot:
+    # with max-content alone the column takes the width of the widest number PRESENT, so the row of
+    # numbers looks aligned on the day it is looked at and shifts as the counters grow.
+    check("the statistics value column fits six digits and aligns right",
+          "min-width: 6ch" in html and "text-align: right" in html
+          and "#StatsTable .subdl-stat-value" in html,
+          "the value column is not sized for six digits")
+
     check("the two language-code rows read the fields the API sends",
           "LanguageCodesAllocated" in html and "LooseSubtitlesRenamed" in html,
           "a row reads a field name the API does not publish")
@@ -524,9 +533,16 @@ def main():
           "Correct subtitle timing" not in html,
           "old wording left behind")
 
+    # F-M322 (operator correction 08.10.2026): the worker row and the statistics row spell the same
+    # thing the same way — "Auto-Sync". Asserted POSITIVELY and as a negative pair, because the two
+    # spellings drifted apart once already ("Autosync" here, "Auto-Synch" there) and neither breaks
+    # the page: one word for one worker is the point.
     check("the auto-sync's row is registered as a worker of its own",
-          "AutoSyncWorkerKey" in worker_src and '"Autosync"' in worker_src,
-          "no Autosync worker registered")
+          "AutoSyncWorkerKey" in worker_src and '"Auto-Sync"' in worker_src,
+          "no Auto-Sync worker registered")
+    check("the worker row is not spelled Autosync",
+          '"Autosync"' not in worker_src,
+          "the worker row still carries the old spelling")
     check("the postprocessing row is named for the upload direction",
           '"Upl. Postproc."' in worker_src and '"Postproc."' not in worker_src,
           "postprocessing row not renamed")

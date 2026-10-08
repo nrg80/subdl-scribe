@@ -1119,7 +1119,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             runs.Finish(
                 Registry.WorkerRunRegistry.AutoSyncWorkerKey,
-                "Autosync",
+                "Auto-Sync",
                 Registry.WorkerRunRegistry.Outcome.Skipped,
                 "dry run — nothing aligned",
                 dryRun: true);
@@ -1133,7 +1133,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             runs.Finish(
                 Registry.WorkerRunRegistry.AutoSyncWorkerKey,
-                "Autosync",
+                "Auto-Sync",
                 Registry.WorkerRunRegistry.Outcome.Skipped,
                 "alignment switched off");
             return;
@@ -1144,7 +1144,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             string detail = aligned > 0
                 ? $"{aligned} aligned, {alreadyGood} already in sync ({downSummary.FitMsTotal / 1000.0:0.#}s)"
                 : $"{alreadyGood} already in sync — nothing to correct";
-            runs.Finish(Registry.WorkerRunRegistry.AutoSyncWorkerKey, "Autosync", Registry.WorkerRunRegistry.Outcome.Ok, detail);
+            runs.Finish(Registry.WorkerRunRegistry.AutoSyncWorkerKey, "Auto-Sync", Registry.WorkerRunRegistry.Outcome.Ok, detail);
             return;
         }
 
@@ -1153,7 +1153,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             runs.Finish(
                 Registry.WorkerRunRegistry.AutoSyncWorkerKey,
-                "Autosync",
+                "Auto-Sync",
                 Registry.WorkerRunRegistry.Outcome.Failed,
                 $"{downSummary.Failed} file(s) failed, nothing aligned");
             return;
@@ -1161,7 +1161,7 @@ public sealed class SubdlEventDispatcher : IDisposable
 
         runs.Finish(
             Registry.WorkerRunRegistry.AutoSyncWorkerKey,
-            "Autosync",
+            "Auto-Sync",
             Registry.WorkerRunRegistry.Outcome.Skipped,
             "nothing to align this run");
     }
