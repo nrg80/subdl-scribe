@@ -262,10 +262,10 @@ using (var db = new SubdlDbContext(workdir, null))
 
 using (var db = new SubdlDbContext(workdir, null))
 {
-    // "download": downloaded sidecars, burned candidates, QA/id counters, search stamps.
+    // "download": downloaded sidecars, burned candidates, QA/id/file-retry counters, search stamps.
     var removedSidecars = db.Sidecars.DeleteMany(x => x.Status == "downloaded");
     db.RejectedCandidates.DeleteAll();
-    db.Counters.DeleteMany(x => x.Key.StartsWith("qa-fail:") || x.Key.StartsWith("id-not-found:"));
+    db.Counters.DeleteMany(x => x.Key.StartsWith("qa-fail:") || x.Key.StartsWith("id-not-found:") || x.Key.StartsWith("file-retry:"));
     foreach (var media in db.Media.Find(x => x.LastSearchUtc != null))
     {
         media.LastSearchUtc = null;
@@ -277,7 +277,10 @@ using (var db = new SubdlDbContext(workdir, null))
     Check(removedSidecars == 2, "download scope removed the downloaded sidecars", removedSidecars.ToString());
     Check(db.RejectedCandidates.Count() == 0, "burned candidates cleared");
     Check(db.Media.FindAll().All(m => m.LastSearchUtc == null), "search stamps cleared");
-    Check(db.Counters.FindAll().Any(c => c.Key.StartsWith("file-retry:", StringComparison.Ordinal)), "file-retry counters survive the download scope");
+    // REVERSED with the F-M60 removal (08.10.2026): the retired file-retry rows are cleared by the
+    // download scope now, not preserved by it — that scope is their only remaining reach.
+    Check(!db.Counters.FindAll().Any(c => c.Key.StartsWith("file-retry:", StringComparison.Ordinal)),
+        "the RETIRED file-retry rows are cleared by the download scope");
 }
 
 // ---------------------------------------------------------------------------------------------

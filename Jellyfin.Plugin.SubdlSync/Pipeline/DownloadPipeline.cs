@@ -89,9 +89,6 @@ public class DownloadRunSummary
     /// <summary>Gets or sets the count of items skipped by the skip filters (dir/file patterns).</summary>
     public int SkippedByFilter { get; set; }
 
-    /// <summary>Gets or sets the number of items skipped as file-missing after exhausting retries (F-M60).</summary>
-    public int SkippedFileMissing { get; set; }
-
     /// <summary>Gets or sets the count of items not due for refetch (F-M47 gap).</summary>
     public int SkippedNotDue { get; set; }
 
@@ -229,7 +226,6 @@ public sealed class DownloadPipeline : IDisposable
             return false;
         }
     }
-    private readonly Registry.FileRetryTracker _fileRetries;
     private readonly Registry.QaFailTracker _qaFails;
 
     /// <summary>In-run watchdog (NF-4); non-null only while a run is active.</summary>
@@ -335,7 +331,6 @@ public sealed class DownloadPipeline : IDisposable
         PluginConfiguration config,
         GlobalRateLimiter limiter,
         DownloadSearchTracker searchTracker,
-        Registry.FileRetryTracker fileRetries,
         Registry.QaFailTracker qaFails)
     {
         _logger = logger;
@@ -346,7 +341,6 @@ public sealed class DownloadPipeline : IDisposable
         _config = config;
         _limiter = limiter;
         _searchTracker = searchTracker;
-        _fileRetries = fileRetries;
         _qaFails = qaFails;
     }
 
@@ -763,28 +757,13 @@ public sealed class DownloadPipeline : IDisposable
             return;
         }
 
-        // F-M60 (user decision 09.09.2026): file gone from disk but item still in the
-        // catalog — after FileRetryLimit consecutive failures skip as file-missing
-        // (aggregate, no per-run errors). Success resets the shared counter.
-        if (_fileRetries.IsExhausted(item.Id.ToString(), _config.FileRetryLimit))
-        {
-            summary.SkippedFileMissing++;
-            // Remove the media and subtitle state for the missing file.
-            //
-            // F-M22 (defect fixed 02.10.2026): NOT in a dry run. This method returns from the
-            // file-missing branch above every dry-run exit in the file (the exits sit per language,
-            // far below), so a dry run could DELETE rows for an item it merely reported on. F-M22
-            // names both directions of the rule: "No stored verdict is written **or cleared** by a
-            // dry run." Clearing is the destructive half — the item's whole registry state went,
-            // and unlike a wrong stamp there is nothing to re-derive it from but a full re-scan.
-            var missingHash = Registry.GetMediaHash(mediaPath);
-            if (!string.IsNullOrEmpty(missingHash) && !_config.DownloadDryRun)
-            {
-                Registry.MarkAndFlush(() => Registry.DeleteMediaAndSubtitles(missingHash));
-            }
-
-            return;
-        }
+        // F-M60 REMOVED (operator order 08.10.2026): the file-missing give-up and its counter are
+        // gone from both pipelines — "Alleinige Aufgabe database refresh". The seeder already refuses
+        // an item whose file is gone before it can enter a queue, so this branch could only fire for
+        // a file that vanished mid-run, and that case is reported as a failure below rather than
+        // counted towards a give-up. The registry cleanup it performed now belongs to the refresh's
+        // phase 3b, which does it by PATH on every run and behind the same fail-safe as its
+        // neighbours.
 
         // (10.09.2026, user decision): one probe write per directory PER RUN,
         // lazily on first contact — runs BEFORE any API search/download work for this
@@ -810,32 +789,17 @@ public sealed class DownloadPipeline : IDisposable
             return;
         }
 
+        // The bare existence read stays: it is the loop's precondition, not a give-up. A file that
+        // vanished between seeding and this run is reported as a failure instead of crashing the run
+        // halfway through its per-language work.
         if (!File.Exists(mediaPath))
         {
-            // F-M22 (defect fixed 02.10.2026): a dry run does not burn a retry. The counter is
-            // stored state that decides when this item is given up on — and the give-up branch
-            // DELETES its registry rows. Letting a report-only run advance that count means a dry
-            // run can be the reason an item loses its state. F-M22 states the rule for the counter
-            // by name ("a dry run neither burns a retry nor leaves the retry state stale"); the
-            // normal path honours it by recording a success, this exit path recorded a failure.
-            if (!_config.DownloadDryRun)
-            {
-                _fileRetries.RecordFailure(item.Id.ToString());
-            }
-            else
-            {
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] DRY-RUN {File} is missing — retry counter left untouched (F-M22)", Path.GetFileName(mediaPath));
-            }
-
             summary.Failed++;
             ReportOutcome(item, ItemOutcome.RealFailure);
-            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] FILE MISSING {File} — skip after {Limit} consecutive attempts", Path.GetFileName(mediaPath), _config.FileRetryLimit);
+            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] FILE MISSING {File} — vanished between seeding and this run", Path.GetFileName(mediaPath));
 
             return;
         }
-
-        // F-M60: file readable — reset the consecutive-failure counter.
-        _fileRetries.RecordSuccess(item.Id.ToString());
 
         // F-M263 (user decision 30.09.2026): the language gate is NOT called here any more.
         // It was redundant: the seeder resolves untagged tracks before the queue decision, and there

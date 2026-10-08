@@ -837,25 +837,24 @@ public static class AutoSyncRun
 
         string src = System.IO.File.ReadAllText(pipeline);
 
-        // 1. The QA give-up is gone from the pipeline. Scoped to `_qaFails` on purpose: `_fileRetries`
-        // is a different budget (F-M60 file-missing) that the operator did not touch, and a blanket
-        // search for "IsExhausted" would demand its removal too — the assertion would then be about
+        // 1. BOTH give-ups are gone from the pipeline: the QA one and the file-missing one.
+        // `_idNotFound` went first (operator order 08.10.2026, "Id resolution retrys bitte auch löschen"),
+        // then `_fileRetries` (same day, "Dann bitte file-retry weg in code und gui. Alleinige Aufgabe
+        // database refresh."). Scoped to named trackers on purpose — a blanket search for "IsExhausted"
+        // would also match the surviving tracker's legitimate call and the assertion would then be about
         // the wrong mechanism.
-        //
-        // `_idNotFound` USED to be asserted as untouched here. It is gone as well now (operator order
-        // 08.10.2026, "Id resolution retrys bitte auch löschen"): that budget gave an id-less item up
-        // permanently, and the operator chose that the ladder re-runs instead. So the pair became one.
         bool noGiveUpCall = !src.Contains("_qaFails.IsExhausted", StringComparison.Ordinal);
         Check("the pipeline applies no QA give-up to a work list any more", noGiveUpCall,
             noGiveUpCall ? "no _qaFails.IsExhausted call" : "a QA give-up is still applied to a work list");
         f += noGiveUpCall ? 0 : 1;
 
-        // ...and the one budget that is NOT the QA one is asserted to still be there, so this scoping
-        // is a decision rather than an oversight.
-        bool otherBudgetsKept = src.Contains("_fileRetries.IsExhausted(", StringComparison.Ordinal);
-        Check("the file-missing (F-M60) budget is untouched", otherBudgetsKept,
-            otherBudgetsKept ? "the file-missing budget is still applied" : "an unrelated budget was removed too");
-        f += otherBudgetsKept ? 0 : 1;
+        // ...and the file-missing budget is asserted GONE too, so the removal is covered from the
+        // pipeline side rather than only from the GUI side. Both halves matter: a re-added give-up with
+        // no field to configure it would silently use the default.
+        bool noFileRetryCall = !src.Contains("_fileRetries", StringComparison.Ordinal);
+        Check("the file-missing (F-M60) give-up is gone from the pipeline", noFileRetryCall,
+            noFileRetryCall ? "no _fileRetries call remains" : "a file-missing give-up is still applied");
+        f += noFileRetryCall ? 0 : 1;
 
         // 2. The counter itself is gone from the tracker — the method, its key and its writes.
         string trackerSrc = System.IO.File.ReadAllText(tracker);

@@ -371,10 +371,13 @@ Section("database refresh — prune, driven with a predicate (F-M234)");
         SubtitlesUploadedAt = DateTime.UtcNow,
     });
 
+    // BOTH retired prefixes are planted on purpose (operator order 08.10.2026: "Dann bitte file-retry
+    // weg in code und gui. Alleinige Aufgabe database refresh."). No tracker prunes them any more —
+    // their types are deleted — so the reset scope is the ONLY place those rows can be cleared, and
+    // the fixture has to carry them for that assertion to mean anything. Deleting these plants would
+    // remove the only evidence that the retired keys are still reachable.
     db.Counters.Upsert(new CounterEntity { Key = "file-retry:" + aliveItem, Value = 2 });
     db.Counters.Upsert(new CounterEntity { Key = "file-retry:" + deadItem, Value = 5 });
-    // The retired id-not-found counter is planted on purpose: the reset scope still clears it,
-    // so the fixture has to carry one for that assertion to mean anything (F-M66 removal).
     db.Counters.Upsert(new CounterEntity { Key = "id-not-found:" + deadItem, Value = 3 });
 
     db.RejectedCandidates.Upsert(new RejectedCandidateEntity
@@ -434,17 +437,18 @@ Section("database refresh — prune, driven with a predicate (F-M234)");
     Check(!deadKeepsStamp, "the DEAD item lost its search stamp");
     Check(aliveKeepsStamp, "the LIVE item KEPT its search stamp");
 
-    // --- 9b. Counters keyed by a prefixed item id, on the retry budget. ---
-    // The id-not-found counter is NOT pruned by a tracker any more: the give-up went with
-    // IdRetryLimit (08.10.2026), the tracker type is gone, and the retired key is cleared by the
-    // reset scope instead (asserted in 10b below). Pruning it here would mean a live consumer.
-    var fileRetryPruned = new FileRetryTracker(db).PruneDeadItems(ItemExists);
+    // --- 9b. The retired file-retry budget is NOT pruned by anything, and that is the point. ---
+    // The give-up went with F-M60 (operator order 08.10.2026), its tracker type is deleted, and no
+    // live consumer remains. So this section asserts the ABSENCE of a pruner and the PRESENCE of the
+    // rows: they survive the refresh untouched, and only the reset scope clears them (10b below).
+    // A refresh that "helpfully" swept them would mean a live consumer had been reintroduced.
     var aliveRetry = db.Counters.FindById("file-retry:" + aliveItem);
     var deadRetry = db.Counters.FindById("file-retry:" + deadItem);
-    Console.WriteLine("   counters pruned: file-retry " + fileRetryPruned);
-    Check(deadRetry == null, "the DEAD item's retry budget was pruned");
-    Check(aliveRetry != null && aliveRetry.Value == 2, "the LIVE item's retry budget SURVIVED with its value",
+    Console.WriteLine("   retired file-retry rows after the refresh: alive=" + (aliveRetry?.Value.ToString() ?? "(missing)")
+        + " dead=" + (deadRetry?.Value.ToString() ?? "(missing)"));
+    Check(aliveRetry != null && aliveRetry.Value == 2, "the retired file-retry row SURVIVED the refresh (no pruner is live)",
         aliveRetry?.Value.ToString() ?? "(missing)");
+    Check(deadRetry != null, "even the DEAD item's retired file-retry row SURVIVED — the refresh does not sweep it");
 
     // --- 9c. Burned candidates, keyed by item id. ---
     var candidatesPruned = new QaFailTracker(db).PruneDeadItems(ItemExists);
@@ -589,14 +593,15 @@ Section("reset scopes");
     var downloadedBefore = db.Sidecars.Count(x => x.Status == SubtitleStatus.Downloaded);
     var observedBefore = db.Sidecars.Count(x => x.Status == SubtitleStatus.Observed);
     var candidatesBefore = db.RejectedCandidates.Count();
-    var qaCountersBefore = db.Counters.Count(x => x.Key.StartsWith("qa-fail:") || x.Key.StartsWith("id-not-found:"));
-    var fileRetryBefore = db.Counters.Count(x => x.Key.StartsWith("file-retry:"));
+    var qaCountersBefore = db.Counters.Count(x => x.Key.StartsWith("qa-fail:") || x.Key.StartsWith("id-not-found:") || x.Key.StartsWith("file-retry:"));
+    var fileRetryBefore = db.Counters.Count(x => x.Key.StartsWith("file-retry:"));  // retired key, cleared HERE (F-M60 removal)
     var stampsBefore = db.Media.Count(m => m.LastSearchUtc != null);
 
     // The same statements SubdlReset runs for this scope.
     var removedSidecars = db.Sidecars.DeleteMany(x => x.Status == SubtitleStatus.Downloaded);
     db.RejectedCandidates.DeleteAll();
-    db.Counters.DeleteMany(x => x.Key.StartsWith("qa-fail:") || x.Key.StartsWith("id-not-found:"));
+    // The SAME three-way statement SubdlReset now runs: file-retry joins the retired keys.
+    db.Counters.DeleteMany(x => x.Key.StartsWith("qa-fail:") || x.Key.StartsWith("id-not-found:") || x.Key.StartsWith("file-retry:"));
     foreach (var media in db.Media.Find(x => x.LastSearchUtc != null))
     {
         media.LastSearchUtc = null;
@@ -607,7 +612,7 @@ Section("reset scopes");
     var fileRetryAfter = db.Counters.Count(x => x.Key.StartsWith("file-retry:"));
     Console.WriteLine("   download scope: sidecars " + downloadedBefore + " -> " + db.Sidecars.Count(x => x.Status == SubtitleStatus.Downloaded)
         + ", candidates " + candidatesBefore + " -> " + db.RejectedCandidates.Count()
-        + ", qa/id counters " + qaCountersBefore + " -> " + db.Counters.Count(x => x.Key.StartsWith("qa-fail:") || x.Key.StartsWith("id-not-found:"))
+        + ", qa/id/file-retry counters " + qaCountersBefore + " -> " + db.Counters.Count(x => x.Key.StartsWith("qa-fail:") || x.Key.StartsWith("id-not-found:") || x.Key.StartsWith("file-retry:"))
         + ", search stamps " + stampsBefore + " -> " + db.Media.Count(m => m.LastSearchUtc != null));
 
     Check(downloadedBefore >= 1, "the fixture holds a downloaded sidecar to remove", downloadedBefore.ToString());
@@ -617,9 +622,14 @@ Section("reset scopes");
     Check(db.RejectedCandidates.Count() == 0, "burned candidates cleared");
     Check(stampsBefore >= 1, "the fixture carries a search stamp to clear", stampsBefore.ToString());
     Check(db.Media.FindAll().All(m => m.LastSearchUtc == null), "EVERY search stamp cleared");
-    Check(fileRetryBefore >= 1, "the fixture holds a file-retry budget", fileRetryBefore.ToString());
-    Check(fileRetryAfter == fileRetryBefore, "file-retry counters SURVIVE the download scope (not that scope's state)",
-        fileRetryAfter + " of " + fileRetryBefore);
+    // REVERSED on purpose (operator order 08.10.2026, F-M60 removal): the file-retry budget used to be
+    // "not that scope's state" and survived. Now that its mechanism is gone and its tracker type is
+    // deleted, the download scope is the ONLY thing that clears the rows a pre-removal database still
+    // holds — so the assertion flips from survival to removal. A check that kept demanding survival
+    // would make a correct build RED, and, worse, would document the retired key as live state.
+    Check(fileRetryBefore >= 1, "the fixture holds a retired file-retry budget to clear", fileRetryBefore.ToString());
+    Check(fileRetryAfter == 0, "the RETIRED file-retry rows are cleared by the download scope",
+        fileRetryAfter + " of " + fileRetryBefore + " left");
 }
 
 // --- 10c. "all": the file-replacing sequence, then an empty but usable store, plus a complete backup. ---

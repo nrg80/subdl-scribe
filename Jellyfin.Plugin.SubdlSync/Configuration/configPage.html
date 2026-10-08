@@ -219,7 +219,7 @@
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="UploadsPerHour">Transfer rate per hour (100&ndash;500)</label>
                             <input id="UploadsPerHour" name="UploadsPerHour" type="number" is="emby-input" min="100" max="500" />
-                            <div class="fieldDescription">Paces the gap between two real transfers (uploads or downloads). Default: 400. It is a rate, not a limit &mdash; only SubDL stops a run.</div>
+                            <div class="fieldDescription">Paces the gap between two real transfers (uploads or downloads). Default: 400.</div>
                         </div>
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="MinCallPauseSec">Min. pause between API calls, seconds (0.1&#8211;10)</label>
@@ -227,14 +227,13 @@
                             <div class="fieldDescription">Delay between requests in seconds. Default: 0.5.</div>
                         </div>
 
-<h3>Retries</h3>
-                        
-
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="FileRetryLimit">File-missing retries before skip (upload + download)</label>
-                            <input id="FileRetryLimit" name="FileRetryLimit" type="number" is="emby-input" min="0" max="20" />
-                            <div class="fieldDescription">Skip after this many missing-file failures. 0 = never. Default: 3.</div>
-                        </div>
+<!-- Operator order 08.10.2026 ("Dann bitte file-retry weg in code und gui. Alleinige Aufgabe
+                         database refresh."): the "File-missing retries before skip" field is GONE. Both the
+                         give-up counter and the field are removed; a file that is gone from disk is now the
+                         Database Refresh's job, and the Seeder already refuses such an item before it can
+                         enter a queue. What stays in this section is the Auto-Sync/download budget, which
+                         is a different mechanism the operator did not touch. -->
+                        <h3>Retries</h3>
 
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="DownloadQaRetryLimit">Auto-Sync attempts and max. download/search limit</label>
@@ -345,7 +344,7 @@
 
                         <h3>Database</h3>
                         <div class="fieldDescription" style="max-width:60em;">
-                            <b>Reset plugin database.</b> Deletes all persistent state files. Rebuild costs API quota. No double uploads (local registry guard), backups are kept.
+                            <b>Reset plugin database.</b> Deletes all persistent state files. Rebuild costs API quota. <b>The upload dedup state goes with them (F-M4)</b> — which pairs are already up has to be re-derived by re-scanning, backups are kept.
                         </div>
                         <div style="margin-top:0.5em; margin-bottom:1em;">
                             <button is="emby-button" type="button" class="raised" id="ResetRegistry" style="color:#f00;">Reset plugin database…</button>
@@ -891,7 +890,6 @@
         document.querySelector('#MinCallPauseSec').value = (config.MinCallPauseSec != null ? config.MinCallPauseSec : 0.5);
                         document.querySelector('#FollowUpRoundsDownload').checked = (config.FollowUpRoundsDownload !== false);
                         document.querySelector('#FollowUpRoundsUpload').checked = (config.FollowUpRoundsUpload !== false);
-                        document.querySelector('#FileRetryLimit').value = (function () { var v = parseInt(config.FileRetryLimit); return isNaN(v) ? 3 : v; })();
                         document.querySelector('#DownloadQaRetryLimit').value = (function () { var v = parseInt(config.DownloadQaRetryLimit); return isNaN(v) ? 3 : v; })();
                         document.querySelector('#ArrivalDebounceMinutes').value = (function () { var v = parseInt(config.ArrivalDebounceMinutes); return isNaN(v) ? 1 : v; })();                                                document.querySelector('#RefetchInterval').value = config.RefetchInterval;
                         document.querySelector('#JobSpacingMinutes').value = (function () { var v = parseInt(config.JobSpacingMinutes); return isNaN(v) ? 15 : v; })();
@@ -1513,7 +1511,6 @@ workers.forEach(function (w) {
                         config.ApiKey = document.querySelector('#ApiKey').value;
                         config.TmdbApiKey = tmdbKey;
                         var uph = parseInt(document.querySelector('#UploadsPerHour').value) || 400;
-                        config.FileRetryLimit = (function () { var v = parseInt(document.querySelector('#FileRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
                         config.DownloadQaRetryLimit = (function () { var v = parseInt(document.querySelector('#DownloadQaRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
                         config.ArrivalDebounceMinutes = (function () { var v = parseInt(document.querySelector('#ArrivalDebounceMinutes').value, 10); return isNaN(v) ? 1 : Math.min(120, Math.max(1, v)); })();                                                config.RefetchInterval = document.querySelector('#RefetchInterval').value;
                         config.JobSpacingMinutes = (function () { var v = parseInt(document.querySelector('#JobSpacingMinutes').value, 10); return isNaN(v) ? 15 : Math.min(120, Math.max(5, v)); })();

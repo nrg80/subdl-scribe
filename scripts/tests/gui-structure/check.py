@@ -1066,6 +1066,59 @@ def main():
               '<option value="Never">Manual</option>' in blk,
               "the label is the bare word; the button sits right below and needs no pointing at")
 
+    # F-M60 REMOVED (operator order 08.10.2026: "Dann bitte file-retry weg in code und gui. Alleinige
+    # Aufgabe database refresh."). A removal is invisible in a passing run, so it needs its own absence
+    # assertions — and they must cover BOTH ends the order names: the page AND the code. Each one is
+    # proven red by a planted negative control (see the suite's own report).
+    check("the page no longer offers a file-missing retry field",
+          "FileRetryLimit" not in html,
+          "the field is gone; the Database Refresh owns the gone-file case now")
+    check("no config load/save binding is left for the removed field",
+          ".value = (function () { var v = parseInt(config.FileRetryLimit)" not in html
+          and "config.FileRetryLimit =" not in html,
+          "a binding for a removed element throws at load and takes other bindings with it")
+    # Resolved UNCONDITIONALLY and asserted non-None first: a guard shaped like
+    # `if src:` around the whole block turns every check below it into a no-op the day a file moves,
+    # and a block that cannot run reads exactly like a block that passed. This suite already carries
+    # that lesson from a page-wide search that went RED on a correct file.
+    _up = read_source("Pipeline", "UploadPipeline.cs")
+    _dl = read_source("Pipeline", "DownloadPipeline.cs")
+    _cfg = read_source("Configuration", "PluginConfiguration.cs")
+    _ref = read_source("ScheduledTasks", "SubdlDatabaseRefreshTask.cs")
+    check("the F-M60 removal checks can reach their sources",
+          None not in (_up, _dl, _cfg, _ref),
+          "an unreadable source would silently skip every assertion below it")
+    if True:
+        check("the setting itself is gone from the configuration",
+              "FileRetryLimit" not in _cfg,
+              "a property no code reads would keep the field alive through any later re-add")
+        check("neither pipeline carries the file-missing give-up any more",
+              "_fileRetries" not in _up and "_fileRetries" not in _dl,
+              "the give-up and its counter are what the order removes")
+        # The tracker FILE was deleted, and that is asserted on the file, not on the pipelines: the
+        # first version of this check searched the pipeline sources for the type name, which stays
+        # present in the explanatory comments and would have gone RED on a correct tree. Read the
+        # registry directory and require the file's absence.
+        _reg_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..",
+                                "Jellyfin.Plugin.SubdlSync", "Registry")
+        _reg_files = sorted(f for f in os.listdir(_reg_dir) if f.endswith(".cs")) if os.path.isdir(_reg_dir) else []
+        check("the tracker type is gone from the tree",
+              "FileRetryTracker.cs" not in _reg_files,
+              "a tracker kept 'just in case' becomes the next session's dead code")
+        check("the neighbouring trackers are still there",
+              "DownloadSearchTracker.cs" in _reg_files and "QaFailTracker.cs" in _reg_files,
+              "a deletion that took its neighbours would pass the check above for the wrong reason")
+        # The OWNERSHIP half: the removal is only correct if the refresh actually took the job over,
+        # and took the fail-safe with it. Without this pair, deleting the mechanism would pass every
+        # assertion above while leaving the gone-file case unowned — the exact failure the operator's
+        # rule is about.
+        check("the database refresh owns the gone-file sweep",
+              "PruneMissingPathMediaAndSubtitles()" in _ref,
+              "removing the pipeline give-up without an owner would leave vanished files uncleaned")
+        check("the refresh's gone-file sweep sits behind the same fail-safe as its neighbours",
+              "mediaRoots" in _ref and "RootsUsable(mediaRoots)" in _ref,
+              "without the root gate an unmounted volume would delete live media state")
+
     check("the postprocessing section carries a manual run button",
           'id="RunPostprocessNow"' in html)
     # F-M295 (08.10.2026): the button starts the TASK, not the endpoint. The endpoint ran the work but

@@ -85,10 +85,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // F-M20/F-M26: ONE pacing rhythm shared by upload + download (same SubDL account).
         // It spaces calls and jitters transfers — it holds no budget and refuses nothing.
         var limiter = new GlobalRateLimiter(config.UploadsPerHour, config.MinCallPauseSec);
-        var fileRetries = new FileRetryTracker(db, loggerFactory.CreateLogger<FileRetryTracker>());
         var logger = loggerFactory.CreateLogger<UploadPipeline>();
-        var pipeline = new UploadPipeline(logger, libraryManager, mediaSourceManager, api, tmdb, config, limiter, fileRetries);
-        return new PipelineBundle(pipeline, registry, http, fileRetries);
+        var pipeline = new UploadPipeline(logger, libraryManager, mediaSourceManager, api, tmdb, config, limiter);
+        return new PipelineBundle(pipeline, registry, http);
     }
 
     /// <summary>
@@ -97,7 +96,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <param name="bundle">Bundle to dispose.</param>
     public static void DisposePipeline(PipelineBundle bundle)
     {
-        bundle.FileRetries.Flush(); // F-M60: persist retry counters after the run
         bundle.Registry.Dispose();
         bundle.Http.Dispose();
     }
@@ -125,11 +123,10 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // there is none left to share (F-M20, 03.10.2026).
         var limiter = new GlobalRateLimiter(config.UploadsPerHour, config.MinCallPauseSec);
         var searchTracker = new DownloadSearchTracker(db, loggerFactory.CreateLogger<DownloadSearchTracker>());
-        var fileRetries = new FileRetryTracker(db, loggerFactory.CreateLogger<FileRetryTracker>());
         var qaFails = new QaFailTracker(db, loggerFactory.CreateLogger<QaFailTracker>());
         var logger = loggerFactory.CreateLogger<DownloadPipeline>();
-        var pipeline = new DownloadPipeline(logger, libraryManager, mediaSourceManager, api, tmdb, config, limiter, searchTracker, fileRetries, qaFails);
-        return new DownloadPipelineBundle(pipeline, registry, http, searchTracker, fileRetries, qaFails);
+        var pipeline = new DownloadPipeline(logger, libraryManager, mediaSourceManager, api, tmdb, config, limiter, searchTracker, qaFails);
+        return new DownloadPipelineBundle(pipeline, registry, http, searchTracker, qaFails);
     }
 
     /// <summary>
@@ -138,7 +135,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <param name="bundle">Bundle to dispose.</param>
     public static void DisposeDownloadPipeline(DownloadPipelineBundle bundle)
     {
-        bundle.FileRetries.Flush(); // F-M60: persist retry counters after the run
         bundle.SearchTracker.Flush();
         bundle.Registry.Dispose();
         bundle.Http.Dispose();
@@ -184,13 +180,12 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         /// <summary>
         /// Initializes a new instance of the <see cref="DownloadPipelineBundle"/> class.
         /// </summary>
-        public DownloadPipelineBundle(DownloadPipeline pipeline, ContentHashRegistry registry, HttpClient http, DownloadSearchTracker searchTracker, FileRetryTracker fileRetries, QaFailTracker qaFails)
+        public DownloadPipelineBundle(DownloadPipeline pipeline, ContentHashRegistry registry, HttpClient http, DownloadSearchTracker searchTracker, QaFailTracker qaFails)
         {
             Pipeline = pipeline;
             Registry = registry;
             Http = http;
             SearchTracker = searchTracker;
-            FileRetries = fileRetries;
             QaFails = qaFails;
         }
 
@@ -206,16 +201,12 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         /// <summary>Gets the per-item search tracker (F-M47).</summary>
         public DownloadSearchTracker SearchTracker { get; }
 
-        /// <summary>Gets the per-item file-failure retry tracker (F-M60).</summary>
-        public FileRetryTracker FileRetries { get; }
-
         /// <summary>Gets the per-(item, language) QA-failure tracker.</summary>
         public QaFailTracker QaFails { get; }
 
         /// <inheritdoc />
         public void Dispose()
         {
-            FileRetries.Flush();
             SearchTracker.Flush();
             QaFails.Flush(); // Persist qa-failure counters after the run
             Registry.Dispose();
@@ -231,12 +222,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         /// <summary>
         /// Initializes a new instance of the <see cref="PipelineBundle"/> class.
         /// </summary>
-        public PipelineBundle(UploadPipeline pipeline, ContentHashRegistry registry, HttpClient http, FileRetryTracker fileRetries)
+        public PipelineBundle(UploadPipeline pipeline, ContentHashRegistry registry, HttpClient http)
         {
             Pipeline = pipeline;
             Registry = registry;
             Http = http;
-            FileRetries = fileRetries;
         }
 
         /// <summary>Gets the upload pipeline.</summary>
@@ -248,13 +238,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         /// <summary>Gets the HTTP client.</summary>
         public HttpClient Http { get; }
 
-        /// <summary>Gets the per-item file-failure retry tracker (F-M60).</summary>
-        public FileRetryTracker FileRetries { get; }
-
         /// <inheritdoc />
         public void Dispose()
         {
-            FileRetries.Flush();
             Registry.Dispose();
             Http.Dispose();
         }

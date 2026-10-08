@@ -104,9 +104,6 @@ public class RunSummary
     /// </summary>
     public bool StopRequested { get; set; }
 
-    /// <summary>Gets or sets the number of items skipped as file-missing after exhausting retries (F-M60).</summary>
-    public int SkippedFileMissing { get; set; }
-
 }
 
 /// <summary>
@@ -165,7 +162,6 @@ public sealed class UploadPipeline
     private readonly TmdbImdbResolver _tmdb;
     private readonly PluginConfiguration _config;
     private readonly GlobalRateLimiter _limiter;
-    private readonly Registry.FileRetryTracker _fileRetries;
 
     /// <summary>F-M88c/d: central OSHash cache (oshash-cache.json in the plugin data dir).</summary>
     /// Always use the current Plugin.Instance cache so a DB reset is respected.<
@@ -260,8 +256,7 @@ public sealed class UploadPipeline
         SubdlApiClient api,
         TmdbImdbResolver tmdb,
         PluginConfiguration config,
-        GlobalRateLimiter limiter,
-        Registry.FileRetryTracker fileRetries)
+        GlobalRateLimiter limiter)
     {
         _logger = logger;
         _libraryManager = libraryManager;
@@ -270,7 +265,6 @@ public sealed class UploadPipeline
         _tmdb = tmdb;
         _config = config;
         _limiter = limiter;
-        _fileRetries = fileRetries;
         // F-M88c/d (user decision): OSHash cache lives in the plugin data dir via
         // the OshashCache property. Read-only shares keep their cache,
         // library folders stay clean.
@@ -485,52 +479,24 @@ public sealed class UploadPipeline
                 continue;
             }
 
-            // F-M60 (user decision 09.09.2026): items whose file is gone (deleted from
-            // disk but still in the JF catalog) fail extraction on EVERY run. After
-            // FileRetryLimit consecutive failures they are skipped as "file-missing"
-            // (aggregate counter, no per-run error spam). A success resets the counter.
-            if (_fileRetries.IsExhausted(item.Id.ToString(), _config.FileRetryLimit))
-            {
-                summary.SkippedFileMissing++;
-                // F-M88c: the file is permanently gone — drop its OSHash cache entry too.
-                // Same FileRetryLimit knob governs both (user decision): after the last
-                // failed attempt the dead cache entry would otherwise linger forever.
-                OshashCache.Remove(mediaPath);
-                OshashCache.Flush(); // kill-safe: the prune survives a cancelled run
-
-                // Remove the media and subtitle state for the missing file.
-                // F-M22 (defect fixed 02.10.2026): NOT in a dry run — this branch returns before the
-                // upload dry-run exit (the per-item DRY-RUN block below), so a dry run cleared the
-                // item's whole registry state. "No stored verdict is written or cleared by a dry run."
-                var missingHash = Registry.GetMediaHash(mediaPath);
-                if (!string.IsNullOrEmpty(missingHash) && !_config.DryRun)
-                {
-                    Registry.MarkAndFlush(() => Registry.DeleteMediaAndSubtitles(missingHash));
-                }
-
-                // F-M255: name the file that is gone and gave up after FileRetryLimit attempts.
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] SKIP {File} — file missing, retries exhausted", Path.GetFileName(mediaPath));
-                continue;
-            }
-
-            // F-M60: explicit existence check BEFORE any ffmpeg work — a missing file
-            // fails fast here (no stream scan, no API calls) and bumps the retry counter.
+            // F-M60 REMOVED (operator order 08.10.2026: "Dann bitte file-retry weg in code und gui.
+            // Alleinige Aufgabe database refresh."). The file-missing give-up is no longer the
+            // pipeline's job: the SEEDER already refuses an item whose file is gone
+            // (SubdlSeeder.Scan: `!File.Exists(mediaPath)` -> continue), so a dead catalog entry
+            // never reaches this loop, and what the counter used to clean up — the registry rows and
+            // the OSHash entry of a vanished file — is now the DATABASE REFRESH's phase 3b
+            // (PruneMissingPathMediaAndSubtitles, behind the same RootsUsable fail-safe as its
+            // neighbours). Keeping a second, slower owner here is what the order removes.
+            //
+            // The ONE check that stays is the bare existence read below: it is not a give-up, it is
+            // the loop's precondition — the path is used for hashing and probing, and a file that
+            // vanishes BETWEEN seeding and this run must be reported as a failure rather than
+            // crashing the run in the middle of it.
             if (!File.Exists(mediaPath))
             {
-                // F-M22 (defect fixed 02.10.2026): see the download side — a dry run does not burn a
-                // retry, because the give-up branch deletes the item's registry state.
-                if (!_config.DryRun)
-                {
-                    _fileRetries.RecordFailure(item.Id.ToString());
-                }
-                else
-                {
-                    LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] DRY-RUN {File} is missing — retry counter left untouched (F-M22)", Path.GetFileName(mediaPath));
-                }
-
                 summary.Failed++;
                 ReportOutcome(item, ItemOutcome.RealFailure);
-                LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] FILE MISSING {File} — attempt {N} (skip after {Limit})", Path.GetFileName(mediaPath), _fileRetries.Count, _config.FileRetryLimit);
+                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] FILE MISSING {File} — vanished between seeding and this run", Path.GetFileName(mediaPath));
 
                 continue;
             }
@@ -1178,7 +1144,6 @@ public sealed class UploadPipeline
                 // had streams, none survived QA, and nothing will ever be uploaded
                 // from it this run. Previously the early continue bypassed the
                 // per-file verdict and the card showed 0 files skipped forever.
-                _fileRetries.RecordSuccess(item.Id.ToString());
                 summary.FilesSkipped++;
                 LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] SKIP {File} — no stream survived local screening (F-M69)", Path.GetFileName(mediaPath));
                 progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
@@ -1243,8 +1208,7 @@ public sealed class UploadPipeline
 
             if (qaSurvivors.Count == 0)
             {
-                _fileRetries.RecordSuccess(item.Id.ToString());
-                progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
+                    progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
                 continue;
             }
 
@@ -1264,8 +1228,7 @@ public sealed class UploadPipeline
                 LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] DRY-RUN would upload {Name}", neutralName);
             }
 
-            _fileRetries.RecordSuccess(item.Id.ToString());
-                progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
+            progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
                 continue;
             }
 
@@ -1478,10 +1441,6 @@ public sealed class UploadPipeline
                 await Task.Delay(_limiter.TransferPauseMs(), runCt).ConfigureAwait(false);
             }
 
-            // F-M60: the file was readable this run (existence check passed) — reset
-            // the consecutive-failure counter (move/rename/NAS-comeback case).
-            _fileRetries.RecordSuccess(item.Id.ToString());
-
             // F-M88c: when every candidate of this media file has been settled and none
             // failed, mark the whole file complete so future runs skip it entirely.
             if (itemHadCandidates && !itemHadFailures && mediaHash != null)
@@ -1511,7 +1470,6 @@ public sealed class UploadPipeline
         _tmdb.IdMismatch -= OnIdMismatch; // F-M190: detach per-run handler
         Registry.Flush();
         OshashCache.Flush(); // F-M88c: kill-safe flush of the central OSHash cache
-        _fileRetries.Flush();
         // (user decision 14.09.2026, REVISED 02.10.2026 — F-M286): the rule used to be "no stats
         // line, no skip aggregates" for the upload, with per-item UPLOADED lines as the only run
         // output. That decision was made when the upload's reject number was a single gate; with the

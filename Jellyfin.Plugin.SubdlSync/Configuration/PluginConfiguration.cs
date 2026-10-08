@@ -336,18 +336,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public UpdateInterval RefetchInterval { get; set; } = UpdateInterval.Weekly;
 
     /// <summary>
-    /// F-M60 (user decision 09.09.2026): max consecutive file-access/extraction
-    /// failures per item (file not found, ffmpeg extraction failed) before the
-    /// item is skipped as "file-missing" in both pipelines — instead of failing
-    /// EVERY run with an error for a file that is gone from disk but not from
-    /// the Jellyfin catalog. Applies to BOTH directions (upload + download),
-    /// one counter per item shared across directions. A success resets the
-    /// counter (move/rename/NAS-comeback case). 0 = never give up (old behaviour).
-    /// Default: 3.
-    /// </summary>
-    public int FileRetryLimit { get; set; } = 3;
-
-    /// <summary>
     /// F-M320 (operator order 08.10.2026): how many candidates may be FETCHED hoping for a correction
     /// the alignment can prove against the audio — the correction hunt's budget (F-M318).
     /// <para>
