@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.193.
+**Status:** Implementation — v12.1.12.194.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -688,7 +688,7 @@ Both are existing code paths that every downloaded subtitle already travels. The
 
 **The words and colours are the existing ones** (F-M268), with nothing invented for this row: `ok` green when the run aligned something or found it already in sync, `skipped` grey when the alignment is switched off or nothing was measured, `failed` red when the run failed and aligned nothing. A DRY RUN reports `skipped` with its own note: it writes no file, so it cannot have aligned anything.
 
-**The statistics count successful auto-syncs only.** The row is `Downloads: Sub Autosync, aligned to the spoken track` and reads `FittedToAudio`, which advances ONLY where a correction was really applied. An already-good file (F-M321) therefore does NOT reach it: nothing moved, and counting it would make the row claim an alignment that never happened. Those files have their own counter (`AlreadyGoodAsDownloaded`), which is also what turns the light green.
+**The statistics count successful auto-syncs only.** The row is `Downloads: Auto-Synch` and reads `FittedToAudio`, which advances ONLY where a correction was really applied. An already-good file (F-M321) therefore does NOT reach it: nothing moved, and counting it would make the row claim an alignment that never happened. Those files have their own counter (`AlreadyGoodAsDownloaded`), which is also what turns the light green.
 
 **The switch says what it does.** The setting's label reads *"Automatically synchronize subtitle to spoken track"* — the operator's own wording (08.10.2026). It replaced *"Correct subtitle timing"*, which described the effect rather than the action.
 
@@ -1499,11 +1499,13 @@ The wording states what happened, not the code's vocabulary. Four counters, plus
   now name what each direction actually spent.
   downloads rejected after being fetched — download candidates fetched and then thrown away.
   searches run without the year tag — TMDb searches that only matched once the year filter was dropped.
-  timing aligned on a spoken track — downloaded subtitles the run MOVED onto their audio track
-  (F-M307), counted when the correction is APPLIED; the upload direction has no such row, because
-  it has no audio to align against. The label is worded like the switch above it ("Correct subtitle
-  timing", "...on a spoken track") and follows the `Downloads:` pattern of the rows around it, so
-  the table speaks one language instead of mixing "fitted" (the code's word) into the user's view.
+  auto-synch — downloaded subtitles whose timing the run MOVED onto their audio track (F-M307),
+  counted when the correction is APPLIED; the upload direction has no such row, because it has no
+  audio to align against. The operator's wording for the row is `Downloads: Auto-Synch`
+  (08.10.2026): it is short on purpose, because the statistics column is narrow and the row sits
+  among others that follow the same `Downloads:` pattern. The long form first written here
+  ("...aligned to the spoken track", echoing the switch's sentence) was the operator's correction —
+  a row in a table of counts names its counter, it does not restate the switch's description.
 
 **Test: T123.** See F-M218, F-M286.
 
