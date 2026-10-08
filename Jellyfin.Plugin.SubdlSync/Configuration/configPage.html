@@ -975,7 +975,7 @@
                             // source, because a regrouping that silently reverts is invisible: the
                             // table still renders, it just reads the old way.
                             // The wording states what happened, not the code's vocabulary: type is
-                            // movie/series, a search without the year tag, a fetch that was thrown away,
+                            // movie/series, a search without the year, a fetch that was thrown away,
                             // a subtitle whose timing the run aligned on a spoken track, and a media
                             // file whose language codes the seeder wrote, and a LOOSE subtitle file
                             // the seeder renamed so its name carries the language. The last two rows are
@@ -984,9 +984,9 @@
                             var rows = [
                                 ['Subtitles downloaded', s.Downloaded || 0, true],
                                 ['Subtitles uploaded', s.Uploaded || 0, true],
-                                ['Type (movie/series) adjusted, both directions', s.TypeCorrectedByFileName || 0],
+                                ['Type (movie/series) adjusted, both dir', s.TypeCorrectedByFileName || 0],
                                 ['Downloads: rejected after being fetched', s.RejectedDownload || 0],
-                                ['Downloads: searches run without the year tag', s.TmdbYearFilterMisses || 0],
+                                ['Downloads: searches run without the year', s.TmdbYearFilterMisses || 0],
                                 ['Downloads: Auto-Synch', s.FittedToAudio || 0],
                                 ['Uploads: discarded before transfer', s.RejectedUpload || 0],
                                 ['Media files: language codes added', s.LanguageCodesAllocated || 0],

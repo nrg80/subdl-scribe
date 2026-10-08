@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.195.
+**Status:** Implementation — v12.1.12.196.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -1489,7 +1489,7 @@ invisible: the table still renders, no number changes, it just reads the old way
 
 The wording states what happened, not the code's vocabulary. Four counters, plus the fit:
 
-  type (movie/series) adjusted — the item's type came from the FILE NAME and was corrected, both directions.
+  type (movie/series) adjusted — the item's type came from the FILE NAME and was corrected, both dir.
   uploads DISCARDED BEFORE TRANSFER — upload candidates dropped before anything was sent, on the
   QA gates, the und/language checks and the self-echo guard (user decision 07.10.2026). It reads
   "after being fetched" no longer: the upload direction fetches NOTHING. Every increment site sits
@@ -1497,7 +1497,7 @@ The wording states what happened, not the code's vocabulary. Four counters, plus
   transferred — so the download word "fetched" was a copy that stated something false. The two rows
   now name what each direction actually spent.
   downloads rejected after being fetched — download candidates fetched and then thrown away.
-  searches run without the year tag — TMDb searches that only matched once the year filter was dropped.
+  searches run without the year — TMDb searches that only matched once the year filter was dropped.
   auto-synch — downloaded subtitles whose timing the run MOVED onto their audio track (F-M307),
   counted when the correction is APPLIED; the upload direction has no such row, because it has no
   audio to align against. The operator's wording for the row is `Downloads: Auto-Synch`

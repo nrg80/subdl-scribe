@@ -337,7 +337,7 @@ def main():
     expected_prefix = [
         "Subtitles downloaded",
         "Subtitles uploaded",
-        "Type (movie/series) adjusted, both directions",
+        "Type (movie/series) adjusted, both dir",
     ]
     check("the volume rows lead, download first, then the both-directions row",
           order[:3] == expected_prefix,
@@ -374,6 +374,17 @@ def main():
     check("the download row keeps its own wording, fetched is true there",
           "Downloads: rejected after being fetched" in order,
           "download row missing or renamed: %s" % [o for o in order if o.startswith("Downloads:")])
+
+    # F-M322 (operator correction 08.10.2026): the row labels are SHORT. "direction" is written
+    # "dir" and the year row names the year, not the tag it is carried on. Asserted as a pair of
+    # negatives, because the long forms are the ones a copy-paste re-introduces and the table
+    # renders perfectly either way — the only thing that changes is that it no longer fits.
+    check("the both-directions row is abbreviated to dir",
+          not any("both directions" in o for o in order),
+          "a row still spells out 'directions': %s" % [o for o in order if "direction" in o])
+    check("the year row says year, not year tag",
+          not any("year tag" in o for o in order),
+          "a row still says 'year tag': %s" % [o for o in order if "year" in o])
 
     check("the two language-code rows read the fields the API sends",
           "LanguageCodesAllocated" in html and "LooseSubtitlesRenamed" in html,
