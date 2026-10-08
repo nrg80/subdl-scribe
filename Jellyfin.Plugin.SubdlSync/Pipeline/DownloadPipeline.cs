@@ -1629,7 +1629,7 @@ public sealed class DownloadPipeline : IDisposable
 
                     // F-M242: show the slots the run WOULD fill, not just the first candidate.
                     // KeepBestPerLanguage decides how many numbered files a language gets
-                    // ("name.en.srt", "name.en.2.srt", …); while the loop was cut short by an
+                    // ("name.en.01.srt", "name.en.02.srt", …); while the loop was cut short by an
                     // unconditional break the setting had no effect at all, and a dry run that
                     // reported one candidate per language could not reveal that.
                     if (_config.LogMode >= LogLevelMode.Verbose && keepBest > 1)
@@ -1932,8 +1932,8 @@ public sealed class DownloadPipeline : IDisposable
 
                 try
                 {
-                    // Slot 1 = "<base>.<lang>.srt" (as before), further slots
-                    // "<base>.<lang>.2.srt", "<base>.<lang>.3.srt", ... — Jellyfin
+                    // Slot 1 = "<base>.<lang>.01.srt", further slots
+                    // "<base>.<lang>.02.srt", "<base>.<lang>.03.srt", ... (F-M316, two digits) — Jellyfin
                     // listet jede externe Datei als eigene wählbare Spur.
                     // F-M260: the name comes from the shared builder, so a name composed here is
                     // one SidecarNaming.Parse recognizes by construction. A hearing-impaired file

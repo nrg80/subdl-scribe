@@ -361,7 +361,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// language instead of only the best one. X = 1 (default) keeps today's
     /// behaviour (one .srt per language, JF shows one track). X &gt; 1 saves the
     /// top X QA-passed candidates per language as numbered sidecar files
-    /// ("name.en.2.srt", "name.en.3.srt", ...) — Jellyfin then offers X
+    /// ("name.en.02.srt", "name.en.03.srt", ...) — Jellyfin then offers X
     /// selectable tracks for that language. Each saved subtitle still consumes
     /// download quota, so keep X small.
     /// </summary>

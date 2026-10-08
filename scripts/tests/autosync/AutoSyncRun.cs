@@ -628,22 +628,98 @@ public static class AutoSyncRun
         var allCorrected = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int s = 1; s <= SidecarNaming.CorrectedSlotMax; s++)
         {
-            allCorrected.Add($"{baseName}.en{(s > 1 ? "." + s : string.Empty)}.srt");
+            allCorrected.Add($"{baseName}.en.{s:D2}.srt");
         }
 
         highestCorrected = SidecarNaming.PlanTarget(media, "EN", false, allCorrected);
         // The fallback name must never come out of the reserved block: that is the collision this
-        // whole reservation exists to prevent. Slot 1 (the plain name) is the expected answer, and
+        // whole reservation exists to prevent. Slot 1 is the expected answer, and
         // its number is below the block by construction.
         string fallbackName = System.IO.Path.GetFileName(highestCorrected ?? "(null)");
-        bool below = fallbackName == $"{baseName}.en.srt";
-        Check("every corrected slot taken → plain name, never a reserved one", below, fallbackName);
+        bool below = fallbackName == $"{baseName}.en.01.srt";
+        Check("every corrected slot taken → slot 1, never a reserved one", below, fallbackName);
         f += below ? 0 : 1;
 
         bool block = SidecarNaming.IsOriginalSlot(90) && SidecarNaming.IsOriginalSlot(99)
                      && !SidecarNaming.IsOriginalSlot(89) && !SidecarNaming.IsOriginalSlot(1);
         Check("the reserved block is exactly 90–99", block, "90..99");
         f += block ? 0 : 1;
+
+        // ── [5b] the slot is two digits, and the slot IS the track order (F-M316) ────────────
+        Console.WriteLine();
+        Console.WriteLine("[5b] the slot is two digits and it orders the track list (F-M316)");
+
+        // The writer: every slot, always a number, always two digits — slot 1 included.
+        bool w1 = System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 1))
+                  == $"{baseName}.en.01.srt";
+        bool w2 = System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 2))
+                  == $"{baseName}.en.02.srt";
+        bool w10 = System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 10))
+                   == $"{baseName}.en.10.srt";
+        bool w99 = System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 99))
+                   == $"{baseName}.en.99.srt";
+        Check("slot 1 is written as .01, not as the bare name", w1,
+            System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 1)));
+        Check("slots 2 / 10 / 99 are two digits", w2 && w10 && w99,
+            System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 10)));
+        f += w1 ? 0 : 1;
+        f += (w2 && w10 && w99) ? 0 : 1;
+
+        // The marker sits BEFORE the number — the reader steps over the slot first and then reads
+        // the markers, so the opposite order would make a variant unrecognizable.
+        bool markerFirst = System.IO.Path.GetFileName(SidecarNaming.Build(media, "DE", true, 1, true))
+                           == $"{baseName}.de.sdh.forced.01.srt";
+        Check("the markers come before the number (.de.sdh.forced.01.srt)", markerFirst,
+            System.IO.Path.GetFileName(SidecarNaming.Build(media, "DE", true, 1, true)));
+        f += markerFirst ? 0 : 1;
+
+        // The OLD form must still parse — the switch needs no migration shim.
+        var oldBare = SidecarNaming.Parse($"{baseName}.en", baseName);
+        var oldOneDigit = SidecarNaming.Parse($"{baseName}.en.2", baseName);
+        Check("a pre-F-M316 name without a number still parses",
+            oldBare != null && oldBare.Value.Lang == "EN" && !oldBare.Value.HearingImpaired,
+            oldBare?.ToString() ?? "null");
+        Check("a pre-F-M316 one-digit slot still parses",
+            oldOneDigit != null && oldOneDigit.Value.Lang == "EN",
+            oldOneDigit?.ToString() ?? "null");
+        f += (oldBare != null && oldBare.Value.Lang == "EN") ? 0 : 1;
+        f += (oldOneDigit != null && oldOneDigit.Value.Lang == "EN") ? 0 : 1;
+
+        // THE POINT of the number: the order Jellyfin lists is the ORDER OF THE NAMES. Asserted on
+        // the names, not on the files, because that is what the player sorts. Corrected slots must
+        // come before reserved originals — the ordering F-M315 reserves the block for.
+        var newForm = new List<string>();
+        for (int s = 1; s <= SidecarNaming.CorrectedSlotMax; s++)
+        {
+            newForm.Add(System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, s)));
+        }
+
+        for (int s = SidecarNaming.OriginalSlotMin; s <= SidecarNaming.OriginalSlotMax; s++)
+        {
+            newForm.Add(System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, s)));
+        }
+
+        var ordered = newForm.OrderBy(n => n, StringComparer.Ordinal).ToList();
+        int lastCorrected = ordered.FindLastIndex(n => n.Contains(".89.srt"));
+        int firstOriginal = ordered.FindIndex(n => n.Contains(".90.srt"));
+        bool correctFirst = lastCorrected >= 0 && firstOriginal > lastCorrected;
+        Check("every corrected slot lists BEFORE every reserved original", correctFirst,
+            $"last corrected at {lastCorrected}, first original at {firstOriginal}");
+        f += correctFirst ? 0 : 1;
+
+        // And the negative control: the PRE-F-M316 forms must FAIL that same sort, or the case above
+        // proves nothing. A bare name sorts last ('s' of ".srt" > '9'), an unpadded slot sorts after
+        // ".10" — both are the defect this rule removes.
+        var oldForm = new List<string> { $"{baseName}.en.srt", $"{baseName}.en.99.srt", $"{baseName}.en.10.srt", $"{baseName}.en.2.srt" };
+        var oldOrdered = oldForm.OrderBy(n => n, StringComparer.Ordinal).ToList();
+        bool oldBareLast = oldOrdered[oldOrdered.Count - 1] == $"{baseName}.en.srt";
+        bool oldTenBeforeTwo = oldOrdered.IndexOf($"{baseName}.en.10.srt") < oldOrdered.IndexOf($"{baseName}.en.2.srt");
+        Check("NEGATIVE CONTROL: the old bare name sorts LAST (that was the defect)", oldBareLast,
+            string.Join(" | ", oldOrdered.Select(n => n.Replace(baseName + ".", "…"))));
+        Check("NEGATIVE CONTROL: the old form puts .10 before .2", oldTenBeforeTwo,
+            string.Join(" | ", oldOrdered.Select(n => n.Replace(baseName + ".", "…"))));
+        f += oldBareLast ? 0 : 1;
+        f += oldTenBeforeTwo ? 0 : 1;
 
         Console.WriteLine();
         return f;

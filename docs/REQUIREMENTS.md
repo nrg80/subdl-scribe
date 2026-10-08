@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.189.
+**Status:** Implementation — v12.1.12.190.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -20,10 +20,10 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 32 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 33 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 6 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
-  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 9 requirements
+  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 10 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -106,7 +106,7 @@ The name is the only thing Jellyfin, MediaElch and every reader here can see. An
 
 **A file that already carries a language token is never renamed.** Its name is already the shape this rule produces, and rewriting it would churn files that are correct.
 
-**A taken combination takes the next free slot, never an overwrite.** The target is slot 1 (`<container>.<lang>.srt`); where that name is already on disk the next slot is used (`<container>.<lang>.2.srt`, `.3.srt`, …), because two unlabelled files that both detect as the same language are two subtitles and tidying a name must not destroy one. The slot is per combination: a `DE` file present does not push an `EN` file to a slot.
+**A taken combination takes the next free slot, never an overwrite.** The target is slot 1 (`<container>.<lang>.01.srt`, F-M316); where that name is already on disk the next slot is used (`.02.srt`, `.03.srt`, …), because two unlabelled files that both detect as the same language are two subtitles and tidying a name must not destroy one. The slot is per combination: a `DE` file present does not push an `EN` file to a slot.
 
 **A rename moves the stored row's location with it.** The content hash — the row key — does not change, so the row keeps its verdict and only its path and name are updated. Without that the refresh task would find a path that no longer exists and forget the row (F-M234) for a file that is right there under a new name.
 
@@ -202,7 +202,7 @@ Before the extraction pass, read the container's ACTUAL per-subtitle tags (a sin
 
 The switch the missing-language switch sits on the **General** tab under `Media files`, directly above the statistics section. **Test: T82.**
 
-**F-M239 [B1/D2]:** **One reader for sidecar file names.** The name→(language, hearing-impaired) rule exists ONCE (the sidecar reader); the uploader, the pipeline's missing-language check and the database refresh all call it. Marker is `sdh` only — never `hi` (F-M48). Recognized shapes: `<base>.srt` (no language — it is detected before upload, F-M48), `<base>.<lang>.srt`, `<base>.<lang>.sdh.srt`, and the numbered slots `<base>.<lang>.<n>.srt` the downloader writes. `.part` is never a subtitle.
+**F-M239 [B1/D2]:** **One reader for sidecar file names.** The name→(language, hearing-impaired) rule exists ONCE (the sidecar reader); the uploader, the pipeline's missing-language check and the database refresh all call it. Marker is `sdh` only — never `hi` (F-M48). Recognized shapes: `<base>.srt` (no language — it is detected before upload, F-M48), `<base>.<lang>.srt`, `<base>.<lang>.sdh.srt`, and the numbered slots `<base>.<lang>.<n>.srt` the downloader writes (F-M316). `.part` is never a subtitle.
 
 A marker is consumed as a marker and the language token is read from the position BEFORE it; a marker must never reach the language mapper. A name whose marker has no resolvable language token yields nothing.
 
@@ -275,13 +275,13 @@ There is no download-side completion mark any more. The pipeline asks `SubtitleC
 
 The HI block of the download loop is guarded by the *effective* flag, not the candidate's: when the file just saved already was the HI variant, no second download follows.
 
-**F-M242 [D]:** **"Best subtitles to keep per language" saves exactly that many numbered files.** With `KeepBestPerLanguage = X` the pipeline saves the top X QA-passed candidates per (item, language): slot 1 is `<basename>.<lang>.srt`, slots 2..X are `<basename>.<lang>.2.srt`, `.<lang>.3.srt`, … Fewer usable candidates than X saves fewer files, never an error.
+**F-M242 [D]:** **"Best subtitles to keep per language" saves exactly that many numbered files.** With `KeepBestPerLanguage = X` the pipeline saves the top X QA-passed candidates per (item, language): the slots are `<basename>.<lang>.01.srt` … `<basename>.<lang>.NN.srt` (F-M316). Fewer usable candidates than X saves fewer files, never an error.
 
 The candidate loop has two exits: `savedCount >= keepBest` and the download budget (F-M50), whichever comes first. Because the budget is raised to `keepBest`, the keep-best exit is reachable and the setting is never silently cut short — before 02.10.2026 the budget broke the loop first. `KeepBestPerLanguage = 1` (the default) is unchanged. **Test: T99.**
 
 The GUI caps the saved-slot count at 10.
 
-While `KeepBestPerLanguage > 1` the dry run names the slots it would fill (`DRY-RUN slot 2/3 … → <name>.en.2.srt`), so the setting is verifiable without spending quota. With the default of 1 there is one slot and the line is not written. The slot preview carries the slot number, not the hearing-impaired marker: it runs before any file is fetched (F-M277).
+While `KeepBestPerLanguage > 1` the dry run names the slots it would fill (`DRY-RUN slot 2/3 … → <name>.en.02.srt`), so the setting is verifiable without spending quota. With the default of 1 there is one slot and the line is not written. The slot preview carries the slot number, not the hearing-impaired marker: it runs before any file is fetched (F-M277).
 
 **F-M95:** **The search's early stop is the download cap, derived — never a literal.** The page walk stops once every requested language has at least N candidates, where N is the effective download budget (F-M50); `0` disables the early stop. Until 02.10.2026 the threshold was hard-coded to 3, so raising "Max candidates per language" widened the download budget but never the search: the walk still stopped after three candidates per language and the loop never saw a fourth.
 
@@ -592,11 +592,21 @@ Both are existing code paths that every downloaded subtitle already travels. The
 
 **F-M315 [D] (user decision 07.10.2026):** **The slots 90–99 are reserved for kept originals; corrected files stop at 89.**
 
-**Rule.** `SidecarNaming` carries the reservation as a pure property of the number: `IsOriginalSlot(slot)` is true for 90–99 and for nothing else. `PlanTarget` — the name a *corrected* sidecar is moved to, and the name the downloader composes — never returns a reserved slot: it walks 1…89 and, when every one is taken, returns the plain name so the caller's own existence check refuses the move. `PlanOriginalTarget` walks **99…90** and returns **null** when all ten are taken. Slot assignment for originals is downward on purpose: corrected names grow up from 1, originals come down from 99, and a viewer sees the reserved number in the track list.
+**Rule.** `SidecarNaming` carries the reservation as a pure property of the number: `IsOriginalSlot(slot)` is true for 90–99 and for nothing else. `PlanTarget` — the name a *corrected* sidecar is moved to, and the name the downloader composes — never returns a reserved slot: it walks 1…89 and, when every one is taken, returns slot 1 so the caller's own existence check refuses the move. `PlanOriginalTarget` walks **99…90** and returns **null** when all ten are taken. Slot assignment for originals is downward on purpose: corrected names grow up from 1, originals come down from 99, and a viewer sees the reserved number in the track list (F-M316).
 
-**Why the cap is not cosmetic.** Without it, the next corrected file of a language whose slots 1–89 are taken would be handed a name an original already occupies — the correction would overwrite the very file it exists to keep. Measured 07.10.2026 against the loop bound of 999: with 1–89 taken the corrected writer returns `<base>.<lang>.srt`, never a reserved number.
+**Why the cap is not cosmetic.** Without it, the next corrected file of a language whose slots 1–89 are taken would be handed a name an original already occupies — the correction would overwrite the very file it exists to keep. Measured 07.10.2026 against the loop bound of 999: with 1–89 taken the corrected writer returns slot 1 (`<base>.<lang>.01.srt`, F-M316), never a reserved number.
 
 **Test: T128.**
+
+**F-M316 [D] (operator order 08.10.2026):** **The slot is always written, always two digits; it is the track order.**
+
+**Rule.** `SidecarNaming.Build` composes every sidecar name as `<base>.<lang>[.sdh][.forced].<NN>.srt` with `NN` = the slot as `D2` (`01`…`99`). Slot 1 is no longer the bare `<base>.<lang>.srt`. The number stays the LAST name token, so `Parse` and `ReadFlags` read it exactly as before — they accept one and two digits, so names written before F-M316 keep parsing and no migration shim exists.
+
+**Why the number is load-bearing.** Jellyfin indexes a sidecar as an external track and orders the track list by the FILE NAME, not by any property of the file. A name is therefore the only ordering signal the player has. Two forms broke that order: a bare `en.srt` sorts AFTER `en.99.srt` (the `s` of `.srt` is greater than `9`), and an unpadded `en.2.srt` sorts after `en.10.srt`. Measured on prod 08.10.2026 (BCS S01E05, six sidecars): the menu offered `99 – German` ABOVE `German` — the kept originals listed before the corrected files, the exact inverse of what F-M315 reserves them for. With two digits the list runs languages alphabetically and, within a language, `01`…`89` (corrected) before `90`…`99` (originals).
+
+**Cost, stated because it is real.** Names written before this rule keep their old form until they are renamed; the pipeline only writes new names. Renaming an existing library is a separate, explicit operation — nothing renames on disk by itself.
+
+**Test: T129.**
 
 **F-M307 [D] (development, 07.10.2026):** **The offset is a piecewise-constant function of time, fitted by exact dynamic programming. Supersedes the recursive Bayes-factor gate (F-M295) and the staircase applied from gate boundaries (F-M300).**
 
@@ -1704,7 +1714,9 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T118:** The kept original, driven through the real planner and read back through the real name parser: the first original takes slot **99** beside the corrected file; the name **matches** the sidecar listing (that match is the point — it is how the file becomes a selectable track) and parses as the corrected file's own language with `hi=false` and `forced=false`; with 99 taken the next original takes **98**, and the numbering never leaves 90–99; when all ten reserved slots are taken **no name is returned**, so nothing can overwrite an original already kept; and **every corrected slot taken returns the plain name**, never a reserved one — the collision F-M315 exists to prevent. On the pipeline source: **no archive is written any more** (`AtomicWriteAsync(unsyncZip…)` absent), the original **is** written for both tracks through `AtomicWriteAsync(originalPath…)`, it is registered with **`MarkDownloaded` on the original's own hash** for both tracks, and **no invented reject reason** is introduced — counted on `MarkDownloaded(originalHash…)` rather than on `MarkDownloaded` overall, because the corrected files carry the same call and a total would rise when *they* change. The bytes written are **canonical** (F-M296) so the row and the file describe the same sequence, and the **dry run still guards the write** (F-M287). That the lock holds at all rests on `IsContentKnown` counting every row except `observed`, which is asserted as well — a change that made downloads non-terminal would fail here (F-M306, F-M315)
 
-**T128:** The reserved block is exactly **90–99**: `IsOriginalSlot` is true at 90 and 99 and false at 89 and 1. `PlanOriginalTarget` walks **downward** — 99 first, then 98 — and returns **null** when all ten are taken, never a name that would overwrite. `PlanTarget` for corrected files never returns a reserved slot: with slots 1–89 taken it returns the plain `<base>.<lang>.srt` so the caller's own existence check refuses the move. Measured 07.10.2026 against the former loop bound of 999, which would have handed a corrected file slot 90 (F-M315)
+**T128:** The reserved block is exactly **90–99**: `IsOriginalSlot` is true at 90 and 99 and false at 89 and 1. `PlanOriginalTarget` walks **downward** — 99 first, then 98 — and returns **null** when all ten are taken, never a name that would overwrite. `PlanTarget` for corrected files never returns a reserved slot: with slots 1–89 taken it returns slot 1 (`<base>.<lang>.01.srt`, F-M316) so the caller's own existence check refuses the move. Measured 07.10.2026 against the former loop bound of 999, which would have handed a corrected file slot 90 (F-M315)
+
+**T129:** The sidecar name carries its slot as a two-digit number, always, and the number is what orders the track list. Driven through the real builder and read back through the real parser: `Build` writes `.en.01.srt`, `.en.02.srt`, `.en.99.srt` — never a bare `.en.srt` — and a file written by the OLD form still parses, so the switch needs no migration. The order is asserted as a property of the names, not of the files: sorting a language's names lexicographically must place every corrected slot (1…89) before every reserved original (90…99), which is the ordering F-M315 reserves the block for — with the pre-F-M316 forms the same sort puts `en.srt` last and `en.2.srt` after `en.10.srt`, so this case FAILS against them. The marker shapes are covered too: the slot follows the markers (`.de.sdh.01.srt`), never precedes them, because the reader steps over the slot first and then reads the markers. (F-M316)
 
 **T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M294, F-M288)
 

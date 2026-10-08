@@ -430,10 +430,10 @@ internal static class Program
 
         foreach (var (path, wantLang, wantHi, label) in shapes)
         {
-            string want = label == "sdh + slot 2" ? ".en.sdh.2.srt"
-                        : label == "slot 3" ? ".en.3.srt"
-                        : label == "sdh" ? ".en.sdh.srt"
-                        : ".en.srt";
+            string want = label == "sdh + slot 2" ? ".en.sdh.02.srt"
+                        : label == "slot 3" ? ".en.03.srt"
+                        : label == "sdh" ? ".en.sdh.01.srt"
+                        : ".en.01.srt";
             Check("Build: " + label + " -> " + want, path.EndsWith(want, StringComparison.Ordinal),
                   "-> " + Path.GetFileName(path));
 
@@ -453,29 +453,29 @@ internal static class Program
 
         var noneTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string freeTarget = SidecarNaming.PlanTarget(media, "EN", false, noneTaken);
-        Check("free slot 1 -> <base>.en.srt",
-              Path.GetFileName(freeTarget) == baseName + ".en.srt",
+        Check("free slot 1 -> <base>.en.01.srt",
+              Path.GetFileName(freeTarget) == baseName + ".en.01.srt",
               "-> " + Path.GetFileName(freeTarget));
 
-        var plainTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { baseName + ".en.srt" };
+        var plainTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { baseName + ".en.01.srt" };
         string slot2 = SidecarNaming.PlanTarget(media, "EN", false, plainTaken);
         Check("taken slot 1 -> slot 2",
-              Path.GetFileName(slot2) == baseName + ".en.2.srt",
+              Path.GetFileName(slot2) == baseName + ".en.02.srt",
               "-> " + Path.GetFileName(slot2));
 
         var twoTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            baseName + ".en.srt", baseName + ".en.2.srt",
+            baseName + ".en.01.srt", baseName + ".en.02.srt",
         };
         string slot3 = SidecarNaming.PlanTarget(media, "EN", false, twoTaken);
         Check("taken slots 1+2 -> slot 3",
-              Path.GetFileName(slot3) == baseName + ".en.3.srt",
+              Path.GetFileName(slot3) == baseName + ".en.03.srt",
               "-> " + Path.GetFileName(slot3));
 
         // The slot is per COMBINATION: a DE file present does not push the EN file to a slot.
-        var otherLangTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { baseName + ".de.srt" };
+        var otherLangTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { baseName + ".de.01.srt" };
         Check("another language's file does not occupy the slot",
-              Path.GetFileName(SidecarNaming.PlanTarget(media, "EN", false, otherLangTaken)) == baseName + ".en.srt");
+              Path.GetFileName(SidecarNaming.PlanTarget(media, "EN", false, otherLangTaken)) == baseName + ".en.01.srt");
 
         // And the target must be a name the plugin's own reader reads back — a rename that writes a
         // name Parse cannot resolve would make the file invisible while "tidying" it.
@@ -578,14 +578,15 @@ internal static class Program
                                   Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.de.forced.srt")));
 
         // The name writer must carry the marker, or a rename of an unlabelled forced file would
-        // turn it into the film's dialogue.
+        // turn it into the film's dialogue. F-M316: the slot then follows the markers as a
+        // two-digit number — the marker block sits before the number, the number stays last.
         Check("Build carries the forced marker",
               Path.GetFileName(SidecarNaming.Build(media, "DE", false, 1, true)) ==
-              Path.GetFileNameWithoutExtension(media) + ".de.forced.srt",
+              Path.GetFileNameWithoutExtension(media) + ".de.forced.01.srt",
               "-> " + Path.GetFileName(SidecarNaming.Build(media, "DE", false, 1, true)));
         Check("Build carries both markers",
               Path.GetFileName(SidecarNaming.Build(media, "DE", true, 1, true)) ==
-              Path.GetFileNameWithoutExtension(media) + ".de.sdh.forced.srt",
+              Path.GetFileNameWithoutExtension(media) + ".de.sdh.forced.01.srt",
               "-> " + Path.GetFileName(SidecarNaming.Build(media, "DE", true, 1, true)));
         var forcedRoundTrip = SidecarNaming.Parse(
             Path.GetFileNameWithoutExtension(SidecarNaming.Build(media, "DE", true, 1, true)),
