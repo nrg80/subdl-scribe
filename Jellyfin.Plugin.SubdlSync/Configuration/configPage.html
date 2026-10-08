@@ -527,15 +527,6 @@
                                 <span>Automatically synchronize subtitle to spoken track</span>
                             </label>
                             <div class="fieldDescription">Aligns a fetched subtitle segment-wise on a spoken track. A file the alignment finds nothing wrong with is kept as the best version: it takes index 01 upward, together with a copy of it from index 99 downward. A file that could not be aligned — or that is out of sync beyond repair — is kept from index 99 downward as well. Default: on.</div>
-                            <!-- F-M322 (operator order 08.10.2026): the auto-sync's own light, right here
-                                 under the switch it belongs to. Same markup and same status words as the
-                                 Workers list (F-M268), so the two readouts cannot drift apart. -->
-                            <div class="subdl-status-row" id="SubdlAutosyncStatus">
-                                <span class="subdl-light" id="SubdlAutosyncLight"></span>
-                                <span class="subdl-label">Sub Autosync</span>
-                                <span class="subdl-when" id="SubdlAutosyncWhen">&mdash;</span>
-                                <span class="subdl-outcome" id="SubdlAutosyncOutcome">&mdash;</span>
-                            </div>
                         </div>
 
                         
@@ -1110,30 +1101,6 @@ workers.forEach(function (w) {
                                     (w.DryRun ? '<span class="subdl-dryrun">dry run</span>' : '') + '</span>';
                                 list.appendChild(row);
                             });
-
-                            // F-M322 (operator order 08.10.2026): the SAME auto-sync status, mirrored
-                            // under the download switch. It reads the Autosync row out of the list that
-                            // was just rendered, so there is exactly ONE source and the two readouts
-                            // cannot disagree — a second fetch could return a different run.
-                            var ac = document.querySelector('#SubdlAutosyncLight');
-                            if (ac) {
-                                var auto = null;
-                                workers.forEach(function (w) {
-                                    if ((w.Name || '') === 'Autosync') { auto = w; }
-                                });
-                                var aoc = auto ? subdlWorkerOutcome(auto.Outcome) : subdlWorkerOutcome('never');
-                                if (auto && auto.Deferred && aoc.text !== 'fail' && aoc.text !== 'run') {
-                                    aoc = subdlWorkerOutcome('deferred');
-                                }
-                                ac.style.background = aoc.color;
-                                var aw = document.querySelector('#SubdlAutosyncWhen');
-                                if (aw) { aw.textContent = auto && auto.Started ? subdlFmtDateTime(auto.Started) : '\u2014'; }
-                                var ao = document.querySelector('#SubdlAutosyncOutcome');
-                                if (ao) {
-                                    ao.textContent = aoc.text + ((auto && auto.DryRun) ? ' dry run' : '');
-                                    ao.style.color = aoc.color;
-                                }
-                            }
                         };
                         var subdlLoadWorkers = function () {
                             // _t cache-buster, same reason as the stats loader above.

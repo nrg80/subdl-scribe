@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.194"
+version: "12.1.12.195"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,8 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.195: The auto-sync's light lives in the Workers list and nowhere else - the copy
+    under the download switch is gone. One readout, one place.
   v12.1.12.194: The statistics row is shorter now: "Downloads: Auto-Synch" instead of the long
     sentence that restated the switch. A row in a table of counts names its counter.
   v12.1.12.193: The audio alignment has its own status light now - in the Workers list and

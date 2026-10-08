@@ -520,22 +520,18 @@ def main():
           '"Upl. Postproc."' in worker_src and '"Postproc."' not in worker_src,
           "postprocessing row not renamed")
 
-    check("the light under the switch exists in the markup",
-          'id="SubdlAutosyncLight"' in html and 'id="SubdlAutosyncOutcome"' in html,
-          "no mirrored light in the markup")
-
-    # F-M322: the worker registry is the source of the light's words, and the pipeline is the source
-    # of its numbers — both are read just below, because a page that agrees with a stale copy of
-    # either is exactly the silent failure this section exists to catch.
-    # ONE source: the mirrored light must read the row the workers renderer just built, not fetch again.
-    mirror = html[html.index("var ac = document.querySelector('#SubdlAutosyncLight');"):]
-    mirror = mirror[:mirror.index("var subdlLoadWorkers")]
-    check("the mirrored light reads the workers list, it does not fetch again",
-          "workers.forEach" in mirror and "ApiClient.ajax" not in mirror,
-          "the mirror performs its own request")
-    check("the mirrored light uses the same status words as the list",
-          "subdlWorkerOutcome(" in mirror,
-          "the mirror invents its own colours or words")
+    # F-M322 (operator order 08.10.2026, corrected the same day): the auto-sync's light lives in the
+    # WORKERS LIST and nowhere else. The first version also mirrored it under the download switch;
+    # the operator struck that — one readout, one place. Asserted as an ABSENCE, because a mirror is
+    # exactly the kind of thing that gets helpfully re-added and the page still renders either way:
+    # no mirrored markup (id/class), and no second reader for it in the script.
+    check("the auto-sync's light is NOT duplicated under the download switch",
+          "SubdlAutosyncLight" not in html and "SubdlAutosyncOutcome" not in html
+          and "SubdlAutosyncStatus" not in html,
+          "a second auto-sync readout is still wired into the page")
+    check("no second reader for the auto-sync light remains in the script",
+          "SubdlAutosyncWhen" not in html,
+          "the mirrored light's script survived the markup")
 
     # The statistics row says what it counts, and it counts the FILES THE RUN MOVED — the operator's
     # order is that only successful auto-syncs are measured, so a "no proven gain" file (F-M321) must
