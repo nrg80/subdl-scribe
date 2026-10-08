@@ -505,8 +505,10 @@ public class PluginConfiguration : BasePluginConfiguration
     /// the cycle (download first, then upload), so that files arriving together
     /// (season import, NAS sync) are processed in ONE cycle.
     /// (user decision 11.09.2026): default back to 5 (10 was too sluggish).
+    /// (user decision 08.10.2026): default 1 — a full import is complete well inside
+    /// this window, so the cycle starts sooner without splitting one season drop.
     /// </summary>
-    public int ArrivalDebounceMinutes { get; set; } = 5;
+    public int ArrivalDebounceMinutes { get; set; } = 1;
 
     /// <summary>
     /// (user decision 14.09.2026): when a due job (anchor fire, recovery

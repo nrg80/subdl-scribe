@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.190"
+version: "12.1.12.191"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,11 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.191: Subtitles start sooner after a file lands. A new episode used to wait five
+    minutes before anything happened to it; the arrival window is now one minute by default,
+    so a dropped file is picked up while the import is still fresh. Files that arrive together
+    are still handled in one cycle, and the window stays adjustable (1-120 minutes) for a slow
+    NAS. Already-installed servers keep their existing setting.
   v12.1.12.190: Subtitle files now always carry their slot number, two digits, right after the
     language: <name>.en.01.srt instead of <name>.en.srt. The number is what orders the track list
     in the player, because Jellyfin sorts external subtitles by file name. A bare <name>.en.srt
