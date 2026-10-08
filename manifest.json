@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.196",
-        "changelog": "v12.1.12.196: Shorter statistics rows: \"Downloads: searches run without the year\"\n    and \"Type (movie/series) adjusted, both dir\".",
+        "version": "12.1.12.197",
+        "changelog": "v12.1.12.197: Spelling: the statistics row reads \"Downloads: Auto-Sync\".",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.196-dev/Jellyfin.Plugin.SubdlSync_12.1.12.196.zip",
-        "checksum": "802ed1f13677251797e23f13b05c8f36",
-        "timestamp": "2026-10-08T13:30:10Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.197-dev/Jellyfin.Plugin.SubdlSync_12.1.12.197.zip",
+        "checksum": "ab485cfebf68ab51c1b3aaed123491e5",
+        "timestamp": "2026-10-08T13:34:08Z"
       }
     ]
   }
