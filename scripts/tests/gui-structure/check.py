@@ -848,16 +848,54 @@ def main():
               "_seedQueuedUp +=" in disp_src and "_seedLegsScanned++" in disp_src)
         # A row that examines items and refuses them all must not read as "nothing to do": measured
         # live on prod, five files rejected for a missing id produced that exact claim.
+        # The upload's refusal paths increment FilesSkipped, NOT SkippedItems (measured on the
+        # source: SkippedItems is written on two paths only). Asserting the wrong field is how the
+        # first attempt at this fix passed its check while the live row still said nothing.
         check("the direction row names the skipped count",
-              "upSummary.SkippedItems > 0" in disp_src and "downSummary.SkippedItems > 0" in disp_src)
+              "upSummary.FilesSkipped > 0" in disp_src and "downSummary.SkippedItems > 0" in disp_src)
         # Anchored on the RETURN, not on the phrase: the words survive in the comments that quote
         # the old behaviour, so a substring check fails on a correct change. What must be gone is
         # the fallback that produced the claim.
-        check("and no longer claims 'nothing to do' for an examined-but-empty run",
-              'return parts.Count == 0 ? "nothing to do"' not in disp_src,
-              "the empty-run fallback must not claim nothing happened")
+        # The fallback IS "nothing to do" again, and correctly so: it is reachable only when EVERY
+        # counter is zero, which now includes the skipped count. The earlier assertion banned the
+        # phrase outright; that was wrong once the skipped counter was actually wired.
+        check("the empty-run fallback exists for a run with no counters at all",
+              'return parts.Count == 0 ?' in disp_src)
         check("a skipped leg does not overwrite a scan that ran this cycle",
               "_seedLegsScanned > 0" in disp_src)
+
+        # ---- F-M330 (operator order 08.10.2026): one lit lamp, for the worker that is working ----
+        # "seeder gets blue only, download only download, upload only upload — as it is successive."
+        # Measured live on prod before the fix: the Seeder scanned while Download AND Upload were
+        # already blue, both started 19:12:52 by the same cycle. The cycle marked both directions up
+        # front, so a lamp claimed work that had not begun.
+        check("the cycle no longer lights both directions up front",
+              "RecordArrivalDirectionStart(dir)" not in disp_src,
+              "the up-front start is what lit two lamps for one worker")
+        check("and cannot do so through the old helper either",
+              "private void RecordArrivalDirectionStart" not in disp_src)
+        check("a direction marks ITSELF running when its own run begins",
+              "MarkDirectionRunning(upload)" in disp_src)
+        check("that mark sits in the direction's own run, not in the cycle",
+              disp_src.find("MarkDirectionRunning(upload)") > disp_src.find("private async Task RunDirectionAsync"))
+        check("the direction closes its own row start-to-finish",
+              "FinishDirectionRow(upload)" in disp_src
+              and "DirectionRowWritten(bool upload)" in disp_src)
+        check("and closes it in a finally, so a failure leaves no lamp hanging",
+              disp_src.find("FinishDirectionRow(upload)") > disp_src.find("finally"))
+
+    task_src = read_source("ScheduledTasks", "SubdlUploadTask.cs")
+    task_dl = read_source("ScheduledTasks", "SubdlDownloadTask.cs")
+    if task_src and task_dl:
+        # The wait-only tasks start a cycle and WAIT for it: marking their direction running there
+        # lit a lamp for the seeder's work. They still own the rows of directions that never ran.
+        check("the upload task no longer marks its row running at cycle start",
+              "RecordWorkerStart(plugin);" not in task_src)
+        check("the download task no longer marks its row running at cycle start",
+              "RecordWorkerStart(plugin);" not in task_dl)
+        check("and both leave a row the direction wrote itself alone",
+              "DirectionRowWritten(upload: true)" in task_src
+              and "DirectionRowWritten(upload: false)" in task_dl)
 
     seed_src = read_source("ScheduledTasks", "SubdlSeeder.cs")
     if seed_src:

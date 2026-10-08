@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.207.
+**Status:** Implementation — v12.1.12.208.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -35,7 +35,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 15 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 30 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 31 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -1676,6 +1676,18 @@ No selection means there is nothing this seeder could look at, so the answer is 
 
 The row is `skipped` with "no libraries selected" — GREY, because a scan that was never allowed to run must not read like one that ran and found nothing. The wording matches the line `Scan()` logs for the same condition, so the two cannot be told apart. **Test: T103.**
 
+**F-M330 [D] (operator order 08.10.2026):** **One lit lamp, for the worker that is working.**
+
+**The rule is the operator's own sentence:** *"seeder gets blue only, download only download, upload only upload. Not seeder and downloader etc. as it is successive."* The cycle is a sequence — seed, then download, then upload — so at most ONE direction may be blue, and blue claims its own work, never a sibling's.
+
+**Measured on prod, before the fix.** `Download Started 19:07:17.544` and `Seeder Started 19:07:17.591` — 47 ms apart, from one and the same cycle. The Seeder then scanned for half a minute while Download AND Upload were both lit, because the cycle marked both directions running when it STARTED rather than when their runs began.
+
+**What changed.** `RecordArrivalDirectionStart` — called at the cycle's start, lighting both directions — is gone, with the helper itself. Each direction calls `MarkDirectionRunning(upload)` at the moment its own queue is prepared inside `RunDirectionAsync`, and closes its own row from its own fate in a `finally` (`FinishDirectionRow`), so a failure or a stop still leaves no lamp hanging. The wait-only scheduled tasks no longer call `Start` at all: they start a cycle and wait, so their mark lit a lamp for the seeder's work.
+
+**A direction that never ran keeps its row for the waiting task** — that is what `DirectionRowWritten(upload)` gates. A direction whose run never began (switched off, empty queue, lock busy) has nothing of its own to report, and its row would otherwise keep a stale outcome.
+
+**Test: T141.**
+
 **F-M268:** **One colour rule for every worker: green = the work ran and ended without an exception, yellow = the work did not happen but nothing is broken, red = something is broken, grey = not run.**
 
 The palette: the page accent is `#00a4dc`. `run` → accent; `ok` → `#107c10`; `failed` → `#a4262c`; `cancelled` and `deferred` → `#ffc107` (quota, run-lock deferral, user stop); `skipped` and `never` → `#767676`; a dry-run note → `#9a9a9a`.
@@ -1983,3 +1995,6 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 
 **T140:** One worker row, one worker's own result, and the download tab in the cycle's order. The row-level half is asserted as a **negative pair** on `Registry/WorkerRunRegistry.cs` — the green branch reads `directionDetail`, and the seeder-detail fallback is required **absent** — because both spellings render perfectly and only the pair catches a future drift; measured on the live endpoint, `Seeder` and `Upload` had carried the identical sentence. The dispatcher is asserted for the direction's own summary reaching its row (`DescribeDirectionRun`), for that write sitting **before** the cleanup that may record a quota stop (asserted as an ORDER, because a detail set afterwards is simply overwritten), for the leg-skipped guard, and for the seeder row summing its legs. The scan's own log line is anchored on the **decision** line (`string covered = coversUp && coversDown`), not on the words: planting `false && coversUp && coversDown` keeps the substring and restores the old behaviour, so a word-level check reads a broken line as green. The tab order is asserted on the download tab's slice as four ORDER comparisons plus a count of one. **Mutation-verified:** the three pre-existing controls moved back, the green branch reverted to the seeder's detail, the log line forced to both counts, and the leg guard removed — each confirmed RED, baseline green on restore.
+
+**T141:** One lit lamp, for the worker that is working. Asserted as a **negative pair** on the dispatcher, because both orderings render perfectly and only the pair catches the regression: `RecordArrivalDirectionStart(dir)` in the cycle is required **absent** and the helper's own declaration too, while each direction must call `MarkDirectionRunning(upload)` from inside its own run (`asserted as an ORDER — the call site must sit after RunDirectionAsync begins, because marking a direction from the cycle is exactly the defect), and the row must be closed from a `finally` (`FinishDirectionRow` above `finally`). The wait-only tasks are asserted for the ABSENCE of `RecordWorkerStart(plugin);` and for gating their own write on `DirectionRowWritten`. **Mutation-verified, three plants:** the up-front start restored, the waiting task's mark restored, and `FinishDirectionRow` removed from the `finally` — each confirmed RED, baseline green on restore. Also covered here: the upload row's skip counter is `FilesSkipped`, not `SkippedItems` — asserting the wrong field is how an earlier attempt at this fix passed its check while the live row still printed nothing.
+

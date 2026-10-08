@@ -639,11 +639,12 @@ public sealed class SubdlEventDispatcher : IDisposable
         // scheduled run — only the Seeder row moved. The dispatcher therefore records those two rows
         // itself, but ONLY for the arrival triggers: on a scheduled or manual run the waiting task
         // owns them, and two writers on one row would fight.
-        if (IsArrivalTrigger(trigger))
-        {
-            RecordArrivalDirectionStart(dir);
-        }
-
+        //
+        // Operator order 08.10.2026 ("seeder gets blue only, download only download, upload only
+        // upload — as it is successive"): the rows are NOT marked running here any more. This call
+        // sat at the CYCLE's start, so both directions lit blue while the seeder was still scanning —
+        // measured on prod, Seeder 19:12:52 and Upload 19:12:52 from one and the same cycle, two lit
+        // lamps for one worker. Each direction now marks itself when its own run begins.
         try
         {
             await RunCycleBodyAsync(trigger, dir, onlyLibs, onlyItems).ConfigureAwait(false);
@@ -725,6 +726,8 @@ public sealed class SubdlEventDispatcher : IDisposable
         _seedCoveredDown = false;
         _seedQueuedUp = 0;
         _seedQueuedDown = 0;
+        _dirRowWrittenUp = false;
+        _dirRowWrittenDown = false;
         lock (_lock) { _userStopActive = false; }
         try { _stopCts.Dispose(); } catch { }
         _stopCts = new CancellationTokenSource();
@@ -919,12 +922,19 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
 
             // Operator finding 08.10.2026, live on prod: a run that EXAMINED five items and refused
-            // every one of them ("no-imdb/no-season-ep") read as "nothing to do", because the three
-            // counters above were all zero. A row that hides the work it did is worse than a short
-            // one — the operator reads the row to know whether the worker looked at anything.
-            if (upSummary.SkippedItems > 0)
+            // every one of them ("no-imdb/no-season-ep") read as "nothing to do". A row that hides the
+            // work it did is worse than a short one — the operator reads the row to know whether the
+            // worker looked at anything.
+            //
+            // The counter is FilesSkipped, NOT SkippedItems. Measured on the source: the upload
+            // increments SkippedItems on exactly two paths (file-complete, dir/file filter) while
+            // every refusal path increments FilesSkipped — the no-imdb ladder, the exhausted id
+            // budget, no-surviving-stream, and the item that had candidates but uploaded none. A row
+            // reading SkippedItems therefore printed nothing for the very run that exposed this,
+            // which is how the first attempt at this fix taught nothing.
+            if (upSummary.FilesSkipped > 0)
             {
-                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} skipped", upSummary.SkippedItems));
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} skipped", upSummary.FilesSkipped));
             }
         }
         else
@@ -955,14 +965,15 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
 
             // Same finding as the upload side: a run that looked at items and refused them all must
-            // not read as "nothing to do". DownloadRunSummary counts its refusals under SkippedItems.
+            // not read as "nothing to do". Here SkippedItems IS the counter for it — the download
+            // increments it on ten refusal paths, including the no-id and filter paths.
             if (downSummary.SkippedItems > 0)
             {
                 parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} skipped", downSummary.SkippedItems));
             }
         }
 
-        return parts.Count == 0 ? "ran — nothing reported" : string.Join(", ", parts);
+        return parts.Count == 0 ? "nothing to do" : string.Join(", ", parts);
     }
 
     /// <summary>
@@ -1000,6 +1011,11 @@ public sealed class SubdlEventDispatcher : IDisposable
             {
                 return;
             }
+
+            // This direction's run really starts HERE — mark its own row running only now. See
+            // RunCycleAsync for why the cycle no longer lights both directions up front. The row is
+            // started with no name so a row that has never run keeps its stored display name.
+            MarkDirectionRunning(upload);
 
             var progress = new Progress<double>();
             var (upSummary, downSummary) = await ExecutePipelineAsync(upload, config, filter, progress).ConfigureAwait(false);
@@ -1050,6 +1066,10 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
         finally
         {
+            // The direction's OWN row, written from its own fate — start and finish, one worker.
+            // In the finally so a failure or a stop still closes the row it opened; a direction that
+            // never began leaves the row untouched (see FinishDirectionRow).
+            FinishDirectionRow(upload);
             lock (_lock)
             {
                 _runActive = false;
@@ -1520,6 +1540,11 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// <returns>Outcome word and detail, both possibly null.</returns>
     public (string? Outcome, string? Detail) GetSeederOutcome() => (_seederOutcome, _seederDetail);
 
+    // True when THIS cycle already wrote a direction's own row (start AND finish). The waiting
+    // task and the arrival path then leave that row alone — see FinishDirectionRow.
+    private bool _dirRowWrittenUp;
+    private bool _dirRowWrittenDown;
+
     // The current cycle's seeder accounting, one entry per leg. See PrepareCycleState for why.
     private int _seedLegsScanned;
     private bool _seedCoveredUp;
@@ -1551,6 +1576,90 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
 
         return parts.Count == 0 ? "scan finished" : string.Join(", ", parts) + " queued";
+    }
+
+    /// <summary>
+    /// Whether THIS cycle already wrote the given direction's row itself (start and finish).
+    /// <para>
+    /// The waiting scheduled tasks and the arrival path both used to write these rows after the
+    /// whole cycle, which is why a direction stayed blue while its SIBLING ran: the download leg
+    /// ended, nobody finished its row, and the upload leg then lit a second lamp. A row written by
+    /// the direction itself is complete and must not be overwritten with a cycle-level summary.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction to ask about.</param>
+    /// <returns>True when this cycle already wrote that row.</returns>
+    public bool DirectionRowWritten(bool upload) => upload ? _dirRowWrittenUp : _dirRowWrittenDown;
+
+    /// <summary>
+    /// Writes a direction's row from ITS OWN result, start to finish — the row states what this
+    /// direction did and nothing else.
+    /// <para>
+    /// Operator order 08.10.2026 ("jeder worker meldet nur sich selbst"; "seeder gets blue only,
+    /// download only download, upload only upload — as it is successive"). Called from
+    /// <see cref="RunDirectionAsync"/>'s finally, so it runs on the success path, on a failure and
+    /// on a cancellation; a direction that had nothing to say (its queue was empty, so no run ever
+    /// began) leaves the row to the waiting task exactly as before.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction whose run just ended.</param>
+    private void FinishDirectionRow(bool upload)
+    {
+        var plugin = Plugin.Instance;
+        if (plugin == null)
+        {
+            return;
+        }
+
+        var (outcome, detail) = GetDirectionOutcome(upload);
+        if (outcome == null && detail == null)
+        {
+            return; // nothing happened in this direction — not this writer's row to claim
+        }
+
+        // A run that finished with nothing special to report is GREEN with its own one-line result;
+        // a quota stop, a user stop or a failure keeps its own stronger word.
+        var word = outcome ?? Registry.WorkerRunRegistry.Outcome.Ok;
+        var text = detail ?? "cycle finished";
+        var dryRun = upload ? plugin.Configuration.DryRun : plugin.Configuration.DownloadDryRun;
+        if (upload)
+        {
+            plugin.WorkerRuns.Finish(Registry.WorkerRunRegistry.UploadWorkerKey, "Upload", word, text, dryRun);
+            _dirRowWrittenUp = true;
+        }
+        else
+        {
+            plugin.WorkerRuns.Finish(Registry.WorkerRunRegistry.DownloadWorkerKey, "Download", word, text, dryRun);
+            _dirRowWrittenDown = true;
+        }
+    }
+
+    /// <summary>
+    /// Marks ONE direction's row as running, because that direction's own run is starting.
+    /// <para>
+    /// Operator order 08.10.2026: "seeder gets blue only, download only download, upload only
+    /// upload — as it is successive." A direction must therefore never light up for work the seeder
+    /// or its sibling is doing. Called from <see cref="RunDirectionAsync"/> at the moment the
+    /// direction's own queue is prepared, not when the enclosing cycle starts.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction whose run is starting.</param>
+    private static void MarkDirectionRunning(bool upload)
+    {
+        var runs = Plugin.Instance?.WorkerRuns;
+        if (runs == null)
+        {
+            return;
+        }
+
+        if (upload)
+        {
+            runs.Start(Registry.WorkerRunRegistry.UploadWorkerKey, "Upload");
+        }
+        else
+        {
+            runs.Start(Registry.WorkerRunRegistry.DownloadWorkerKey, "Download");
+        }
     }
 
     /// <summary>
@@ -1602,30 +1711,6 @@ public sealed class SubdlEventDispatcher : IDisposable
     }
 
     /// <summary>
-    /// Marks the arrival cycle's directions as RUNNING, so a cycle that dies mid-scan shows the
-    /// attempt instead of the previous cycle's green.
-    /// </summary>
-    /// <param name="dir">Direction this cycle works.</param>
-    private void RecordArrivalDirectionStart(CycleDirection dir)
-    {
-        var runs = Plugin.Instance?.WorkerRuns;
-        if (runs == null)
-        {
-            return;
-        }
-
-        if (dir != CycleDirection.UploadOnly)
-        {
-            runs.Start(Registry.WorkerRunRegistry.DownloadWorkerKey, "Download");
-        }
-
-        if (dir != CycleDirection.DownloadOnly)
-        {
-            runs.Start(Registry.WorkerRunRegistry.UploadWorkerKey, "Upload");
-        }
-    }
-
-    /// <summary>
     /// Writes the arrival cycle's direction rows, ranked by the same rule the waiting tasks use
     /// (<see cref="Registry.WorkerRunRegistry.DescribeCycle"/>), so a row reads identically whether
     /// an arrival or a schedule produced the cycle. Without it a quota stop or a failed arrival
@@ -1647,7 +1732,11 @@ public sealed class SubdlEventDispatcher : IDisposable
         // untouched — it has nothing to report — so DescribeCycle would fall through to `ok` and paint
         // "nothing happened here" as "this ran fine". The scheduled task records `skipped`/"disabled"
         // for exactly that case; the arrival path has to say the same thing.
-        if (dir != CycleDirection.UploadOnly)
+        // Operator order 08.10.2026: a direction that RAN writes its own row, start to finish, and
+        // this cycle-level write must leave it alone. What is left here is the case the direction
+        // cannot report itself: its run never began (switched off, or nothing queued), where the row
+        // would otherwise keep a stale outcome from a previous cycle.
+        if (dir != CycleDirection.UploadOnly && !_dirRowWrittenDown)
         {
             if (!config.DownloadEnabled)
             {
@@ -1665,7 +1754,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
         }
 
-        if (dir != CycleDirection.DownloadOnly)
+        if (dir != CycleDirection.DownloadOnly && !_dirRowWrittenUp)
         {
             if (!config.UploadEnabled)
             {

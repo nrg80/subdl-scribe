@@ -82,8 +82,11 @@ public class SubdlUploadTask : IScheduledTask
             return;
         }
 
-        RecordWorkerStart(plugin);
-
+        // Operator order 08.10.2026: this task WAITS for a cycle whose seed may run for minutes, so
+        // marking its direction running here lit a lamp for work that had not started — measured on
+        // prod, the Seeder scanned while Download and Upload were both already blue. The direction
+        // marks itself when its own run begins (SubdlEventDispatcher.MarkDirectionRunning); this
+        // task only records the outcome it waited for.
         var config = plugin.Configuration;
         if (!config.UploadEnabled)
         {
@@ -124,6 +127,16 @@ public class SubdlUploadTask : IScheduledTask
             // 429 after 2 of 1144 items, and a failed upload cycle, both shown as ok before).
             var (seedOutcome, seedDetail) = dispatcher.GetSeederOutcome();
             var (dirOutcome, dirDetail) = dispatcher.GetDirectionOutcome(upload: true);
+            // Operator order 08.10.2026: the direction writes its OWN row (start to finish) when its
+            // run begins, so this task must not repaint it with a cycle-level summary — that summary
+            // is what made every direction row carry the seeder's sentence. It writes only for a
+            // direction whose run never began (empty queue, lock busy), where the row would otherwise
+            // keep a stale outcome.
+            if (dispatcher.DirectionRowWritten(upload: true))
+            {
+                return;
+            }
+
             var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
                 cycleFinished, seedOutcome, seedDetail, dirOutcome, dirDetail);
             RecordWorker(plugin, outcome, detail);
