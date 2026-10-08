@@ -526,7 +526,7 @@
                                 <input id="QaDownloadAutoSync" name="QaDownloadAutoSync" type="checkbox" is="emby-checkbox" />
                                 <span>Correct subtitle timing</span>
                             </label>
-                            <div class="fieldDescription">Aligns a fetched subtitle segment-wise on a spoken track. Corrected files are numbered from index 01 upward; a copy of the original — and any file the alignment could not process — is kept from index 99 downward. Inconclusive alignment outcomes are dropped. Default: on.</div>
+                            <div class="fieldDescription">Aligns a fetched subtitle segment-wise on a spoken track. A file the alignment finds nothing wrong with is kept as the best version: it takes index 01 upward, together with a copy of it from index 99 downward. A file that could not be aligned — or that is out of sync beyond repair — is kept from index 99 downward as well. Default: on.</div>
                         </div>
 
                         

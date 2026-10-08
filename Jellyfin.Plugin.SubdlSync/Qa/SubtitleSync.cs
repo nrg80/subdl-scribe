@@ -166,6 +166,29 @@ public static class SubtitleSync
     }
 
     /// <summary>
+    /// F-M321 (operator order 08.10.2026): whether a refusal means the file needs NO correction.
+    /// <para>
+    /// "no proven gain" is the deploy rule DECLINING to move the file: nothing had to move, or the
+    /// measured gain did not prove itself, or the needed shift sits below the measurement floor. In
+    /// every one of those cases the file AS DOWNLOADED is the best version of that language there is,
+    /// and the operator's rule is that it is then treated like a correction — the walk ENDS (no quota
+    /// spent hunting a candidate that cannot beat a file the fit found nothing wrong with) and the
+    /// file takes the corrected range.
+    /// </para>
+    /// <para>
+    /// Every OTHER refusal says the file is WRONG — a shift beyond the limit, too few cues, a first
+    /// cue that would go negative — and another candidate may well fit, so those keep the F-M318 hunt
+    /// alive exactly as before. Matched by exact prefix, like <see cref="RefusalIsCandidateSpecific"/>:
+    /// this class composes the reason itself, so the prefix is the contract rather than a guess at
+    /// wording.
+    /// </para>
+    /// </summary>
+    /// <param name="reason">The refusal reason from <see cref="SyncAsync"/>.</param>
+    /// <returns>True when the refusal means the file is already the best available version.</returns>
+    public static bool RefusalMeansAlreadyGood(string? reason)
+        => reason != null && reason.StartsWith("no proven gain", StringComparison.Ordinal);
+
+    /// <summary>
     /// Measures and applies the shift for one downloaded subtitle.
     /// </summary>
     /// <param name="mediaPath">Media file the subtitle belongs to.</param>

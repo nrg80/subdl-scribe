@@ -1902,6 +1902,8 @@ public sealed class DownloadPipeline : IDisposable
                 // repeated identically for every candidate, so the walk stops after the save.
                 bool huntForCorrection = false;
                 string huntReason = "not measured";
+                // F-M321: the refusal was "no proven gain" — the file is already the best version.
+                bool goodAsDownloaded = false;
                 if (_config.QaDownloadAutoSync)
                 {
                     Qa.SubtitleSync.Result syncResult = await SyncMeasuredAsync(
@@ -1926,6 +1928,19 @@ public sealed class DownloadPipeline : IDisposable
                         // or the tooling does not — see RefusalIsCandidateSpecific.
                         huntForCorrection = Qa.SubtitleSync.RefusalIsCandidateSpecific(syncResult.Reason);
                         huntReason = syncResult.Reason;
+
+                        // F-M321 (operator order 08.10.2026): "no proven gain" is the deploy rule
+                        // DECLINING to move the file — nothing had to move, so the file as downloaded
+                        // IS the best version of this language. It is therefore treated like a
+                        // correction: it takes the corrected range (01, 02 …) instead of the reserved
+                        // block, it advances the corrected counter, and like a correction it ENDS the
+                        // walk. Hunting on would spend the daily quota looking for a candidate that
+                        // cannot beat a file the fit found nothing wrong with.
+                        goodAsDownloaded = Qa.SubtitleSync.RefusalMeansAlreadyGood(syncResult.Reason);
+                        if (goodAsDownloaded)
+                        {
+                            huntForCorrection = false;
+                        }
 
                         // F-M309: ONE branch, not two. The "ffmpeg not available" case had its own
                         // branch, but it called the same PerItem helper as the general one and was
@@ -1971,7 +1986,12 @@ public sealed class DownloadPipeline : IDisposable
                     // one SidecarNaming.Parse recognizes by construction. A hearing-impaired file
                     // gets the ".sdh" marker the reader demands — without it the file never counted
                     // as HI again and the F-M254 reader reported the variant as absent forever.
-                    bool alignedForNaming = unsyncPayload != null;
+                    // F-M321 (operator order 08.10.2026): a "no proven gain" refusal is NOT
+                    // "unprocessed" in that sense — the file needs no correction, so it is the best
+                    // version of the language and takes the CORRECTED range like a corrected file.
+                    // Only a refusal that says the file is WRONG (too few cues, a shift beyond the
+                    // limit) keeps the reserved range, where it is a fallback the next run may beat.
+                    bool alignedForNaming = unsyncPayload != null || goodAsDownloaded;
                     string? targetPath;
                     if (alignedForNaming)
                     {
@@ -2049,7 +2069,17 @@ public sealed class DownloadPipeline : IDisposable
                     // had to be invented for this; every downloaded subtitle is treated this way
                     // today, and the original is a downloaded subtitle. Guarded by the dry-run flag
                     // like every other write (F-M287).
-                    if (unsyncPayload != null && !_config.DownloadDryRun)
+                    // F-M321 (operator order 08.10.2026): for a "no proven gain" file there is nothing
+                    // to correct, so the copy in the reserved block IS the file itself — the SAME array
+                    // that went to the corrected slot. The fetched bytes are REUSED rather than
+                    // re-encoded from the text on purpose: only reusing them makes the two files
+                    // identical, and identity is what the operator asked for. (For a real correction
+                    // the reserved copy is the ORIGINAL text, which differs from the corrected file —
+                    // that case is unchanged.)
+                    byte[]? reservedBytes = unsyncPayload != null
+                        ? ContentHashRegistry.EncodeCanonical(unsyncPayload)
+                        : (goodAsDownloaded ? writeBytes : null);
+                    if (reservedBytes != null && !_config.DownloadDryRun)
                     {
                         try
                         {
@@ -2072,10 +2102,19 @@ public sealed class DownloadPipeline : IDisposable
                             }
                             else
                             {
-                                string originalHash = ContentHashRegistry.ComputeHash(unsyncPayload);
+                                // F-M321: for a "no proven gain" file the reserved copy holds the SAME
+                                // bytes as the corrected slot, so it hashes to the SAME content hash —
+                                // which is the key of the registry row. One row therefore describes both
+                                // files, and the later write below (the .01 one) names the path. That is
+                                // the existing design rather than a new special case: identity is
+                                // content-keyed, and a downloaded row is what locks a file against
+                                // upload — so both files are locked by the one row.
+                                string originalHash = goodAsDownloaded
+                                    ? contentHash
+                                    : ContentHashRegistry.ComputeHash(unsyncPayload!);
                                 await AtomicWriteAsync(
                                     originalPath,
-                                    ContentHashRegistry.EncodeCanonical(unsyncPayload),
+                                    reservedBytes!,
                                     ct).ConfigureAwait(false);
 
                                 // The lock is the SAME row the corrected file gets: MarkDownloaded.
@@ -2221,6 +2260,8 @@ public sealed class DownloadPipeline : IDisposable
                                 byte[] hiWriteBytes = hiBytes!;
                                 string hiContent = DecodeSrt(hiBytes!);
                                 string? hiUnsync = null;
+                                // F-M321: the HI refusal was "no proven gain" — best version already.
+                                bool hiGoodAsDownloaded = false;
                                 if (_config.QaDownloadAutoSync)
                                 {
                                     // F-M307: the HI variant goes through the SAME correction as
@@ -2242,11 +2283,21 @@ public sealed class DownloadPipeline : IDisposable
                                             "[SubDL-D] HI auto-sync {Reason} for {File} [{Lang}] ({Release})",
                                             hiSync.Reason, Path.GetFileName(mediaPath), lang, hi.ReleaseName);
                                     }
-                                    else if (_config.LogMode >= LogLevelMode.Verbose)
+                                    else
                                     {
-                                        LogUtil.PerItem(_config.LogMode, _logger,
-                                            "[SubDL-D] HI auto-sync not applied for {File} [{Lang}]: {Reason} ({Release})",
-                                            Path.GetFileName(mediaPath), lang, hiSync.Reason, hi.ReleaseName);
+                                        // F-M321: the HI track follows the main track's rule — a
+                                        // "no proven gain" file needs no correction, so it is the best
+                                        // version and takes the corrected range instead of the reserved
+                                        // block. The HI pool is where the drift lives, so this is the
+                                        // branch that fires most often.
+                                        hiGoodAsDownloaded = Qa.SubtitleSync.RefusalMeansAlreadyGood(hiSync.Reason);
+
+                                        if (_config.LogMode >= LogLevelMode.Verbose)
+                                        {
+                                            LogUtil.PerItem(_config.LogMode, _logger,
+                                                "[SubDL-D] HI auto-sync not applied for {File} [{Lang}]: {Reason} ({Release})",
+                                                Path.GetFileName(mediaPath), lang, hiSync.Reason, hi.ReleaseName);
+                                        }
                                     }
                                 }
 
@@ -2263,7 +2314,7 @@ public sealed class DownloadPipeline : IDisposable
                                         // HI file at 01 beside an unaligned one at 01 as well.
                                         // F-M260: the shared builder, not a hand-written
                                         // concatenation — the same rule the reader parses.
-                                        bool hiAligned = hiUnsync != null;
+                                        bool hiAligned = hiUnsync != null || hiGoodAsDownloaded;
                                         string? hiPath;
                                         if (hiAligned)
                                         {
@@ -2308,7 +2359,10 @@ public sealed class DownloadPipeline : IDisposable
                                         //
                                         // It is NOT marked forced: an unsynchronized original is not a
                                         // forced subtitle (F-M315).
-                                        if (hiUnsync != null)
+                                        // F-M321: for a "no proven gain" HI file the reserved copy IS
+                                        // the file itself — the same array that went to the corrected
+                                        // slot, so the two are identical. Symmetric to the main track.
+                                        if (hiUnsync != null || hiGoodAsDownloaded)
                                         {
                                             System.Collections.Generic.HashSet<string>? hiNames = SidecarNamesInDirectory(targetDir);
                                             string? hiOriginalPath = hiNames == null
@@ -2325,10 +2379,12 @@ public sealed class DownloadPipeline : IDisposable
                                             {
                                                 try
                                                 {
-                                                    string hiOriginalHash = ContentHashRegistry.ComputeHash(hiUnsync);
+                                                    string hiOriginalHash = hiGoodAsDownloaded
+                                                        ? hiHash
+                                                        : ContentHashRegistry.ComputeHash(hiUnsync!);
                                                     await AtomicWriteAsync(
                                                         hiOriginalPath,
-                                                        ContentHashRegistry.EncodeCanonical(hiUnsync),
+                                                        hiGoodAsDownloaded ? hiWriteBytes : ContentHashRegistry.EncodeCanonical(hiUnsync!),
                                                         ct).ConfigureAwait(false);
 
                                                     // Same row as the HI corrected file (see the main path).

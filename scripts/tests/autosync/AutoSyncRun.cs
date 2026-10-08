@@ -1133,6 +1133,97 @@ public static class AutoSyncRun
         f += controlRed ? 0 : 1;
 
         Console.WriteLine();
+        Console.WriteLine("[5d] a \"no proven gain\" file IS the best version (F-M321)");
+        f += AlreadyGoodAsCorrected(src);
+
+        Console.WriteLine();
+        return f;
+    }
+
+    /// <summary>
+    /// F-M321 (operator order 08.10.2026): "no proven gain" is the deploy rule DECLINING to move the
+    /// file, so the file as downloaded is the best version of its language. It is treated like a
+    /// correction — corrected range, own counter, walk ends — while every OTHER refusal keeps the
+    /// reserved range and the F-M318 hunt.
+    /// <para>
+    /// Asserted on the REAL predicate (not a copy of it) plus the pipeline's use of it: the split
+    /// between "the file is fine" and "the file is wrong" is the whole rule, and a substring test on
+    /// the pipeline alone could pass while the predicate answered the opposite way.
+    /// </para>
+    /// </summary>
+    /// <param name="src">The pipeline source.</param>
+    /// <returns>Number of failures.</returns>
+    private static int AlreadyGoodAsCorrected(string src)
+    {
+        int f = 0;
+
+        // ---- The predicate itself, driven with the REAL refusal strings.
+        bool goodOnNoGain = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(
+            "no proven gain (0 cue(s) moved, t = +0.00) — left as downloaded");
+        Check("a \"no proven gain\" refusal means the file is already good", goodOnNoGain,
+            goodOnNoGain ? "predicate answers true" : "predicate does not recognise the refusal");
+        f += goodOnNoGain ? 0 : 1;
+
+        // Every refusal that says the file is WRONG must NOT count as already good — otherwise the
+        // walk would stop on a file that another candidate could have fixed.
+        bool wrongStaysWrong = !Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(
+                "shift 25.0s beyond the 20s limit — not applied")
+            && !Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood("not measured: only 12 cues")
+            && !Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood("not applied: first cue 5,07s would go negative under -8,50s");
+        Check("a refusal that says the file is WRONG is not treated as already good", wrongStaysWrong,
+            wrongStaysWrong ? "wrong-file refusals keep the reserved range" : "a wrong file would take 01");
+        f += wrongStaysWrong ? 0 : 1;
+
+        bool toolingStaysOut = !Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood("ffmpeg not available")
+                               && !Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(null);
+        Check("a tooling verdict, and no verdict at all, are not \"already good\"", toolingStaysOut,
+            toolingStaysOut ? "only the deploy rule's own refusal counts" : "too broad");
+        f += toolingStaysOut ? 0 : 1;
+
+        // ---- The pipeline ties the range, the counter and the walk to that predicate.
+        bool rangeWired = src.Contains("bool alignedForNaming = unsyncPayload != null || goodAsDownloaded",
+                                       StringComparison.Ordinal);
+        Check("the corrected range is used when the file is already good", rangeWired,
+            rangeWired ? "alignedForNaming includes goodAsDownloaded" : "still routed to the reserved block");
+        f += rangeWired ? 0 : 1;
+
+        bool huntStops = src.Contains("goodAsDownloaded)\n                        {\n                            huntForCorrection = false;",
+                                      StringComparison.Ordinal);
+        Check("the walk ends for an already-good file (no quota spent hunting)", huntStops,
+            huntStops ? "hunt turned off for this refusal" : "the hunt would continue");
+        f += huntStops ? 0 : 1;
+
+        bool hiSymmetric = src.Contains("bool hiAligned = hiUnsync != null || hiGoodAsDownloaded",
+                                        StringComparison.Ordinal);
+        Check("the HI branch carries the same rule", hiSymmetric,
+            hiSymmetric ? "hiAligned includes hiGoodAsDownloaded" : "HI left on the old rule");
+        f += hiSymmetric ? 0 : 1;
+
+        // The reserved copy must hold the SAME bytes as the corrected slot, or the two files differ
+        // and the operator's "identisch" is not met. Reusing the written array is what guarantees it.
+        bool identicalBytes = src.Contains(": (goodAsDownloaded ? writeBytes : null);", StringComparison.Ordinal)
+                              && src.Contains("hiGoodAsDownloaded ? hiWriteBytes : ContentHashRegistry.EncodeCanonical(hiUnsync!)",
+                                              StringComparison.Ordinal);
+        Check("the reserved copy reuses the written bytes, so both files are identical", identicalBytes,
+            identicalBytes ? "both tracks reuse the written array" : "the copy is re-encoded and may differ");
+        f += identicalBytes ? 0 : 1;
+
+        // NEGATIVE CONTROL: plant the old routing back and require RED.
+        string planted = src.Replace(
+            "bool alignedForNaming = unsyncPayload != null || goodAsDownloaded",
+            "bool alignedForNaming = unsyncPayload != null",
+            StringComparison.Ordinal);
+        bool plantLanded = planted != src;
+        bool controlRed = plantLanded
+                          && !planted.Contains("bool alignedForNaming = unsyncPayload != null || goodAsDownloaded",
+                                               StringComparison.Ordinal);
+        Check("NEGATIVE CONTROL: routing an already-good file back to the reserved block turns this RED",
+            controlRed,
+            !plantLanded ? "(the plant did not land — the wiring moved; fix this test)"
+                         : "planted → check goes red as required");
+        f += controlRed ? 0 : 1;
+
+        Console.WriteLine();
         return f;
     }
 
@@ -1200,9 +1291,13 @@ public static class AutoSyncRun
                 $"EncodeCanonical(unsync…) {canonicalOriginal}/2");
             f += canonicalOriginal == 2 ? 0 : 1;
 
-            // The dry run must still guard the new write (F-M287).
+            // The dry run must still guard the new write (F-M287). Asserted on the SHAPE, not on one
+            // variable name: the guard moved from `unsyncPayload != null` to `reservedBytes != null`
+            // when F-M321 added the already-good case, and a test that pins the name would go red for
+            // a rewrite that keeps the protection intact. What must hold is that the reserved write is
+            // guarded by the dry-run flag at all.
             int dryRunGuards = System.Text.RegularExpressions.Regex.Matches(
-                src, @"unsyncPayload\s*!=\s*null\s*&&\s*!_config\.DownloadDryRun").Count;
+                src, @"if\s*\(\s*\w+\s*!=\s*null\s*&&\s*!_config\.DownloadDryRun\s*\)").Count;
             Check("the dry run still guards the original's write", dryRunGuards == 1,
                 $"{dryRunGuards} site(s)");
             f += dryRunGuards == 1 ? 0 : 1;

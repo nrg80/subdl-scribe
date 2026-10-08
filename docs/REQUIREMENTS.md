@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.191.
+**Status:** Implementation — v12.1.12.192.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -20,10 +20,10 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 36 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 37 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 6 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
-  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 13 requirements
+  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 14 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -627,7 +627,7 @@ Both are existing code paths that every downloaded subtitle already travels. The
 
 **What this changes about F-M315.** F-M315's reservation (90–99, corrected stops at 89) stands; its *scope* widens. The block no longer holds only the original kept beside a correction — it now also holds every file that could not be aligned. `CorrectedSlotMax = 89` remains correct and unreachable in practice: the aligned writer counts from 01 with its own counter, so it does not walk up into the block.
 
-**GUI text (operator wording, 08.10.2026).** The switch description reads: *"Aligns a fetched subtitle segment-wise on a spoken track. Corrected files are numbered from index 01 upward; a copy of the original — and any file the alignment could not process — is kept from index 99 downward. Inconclusive alignment outcomes are dropped."* "Dropped" means **the ALIGNMENT RESULT is dropped**, not the file: nothing is moved and the file lies on disk as downloaded, in the reserved block. The operator's follow-up intent: such a file may be re-fetched once and put through alignment again.
+**GUI text (operator wording, 08.10.2026, updated the same day for F-M321).** The switch description reads: *"Aligns a fetched subtitle segment-wise on a spoken track. A file the alignment finds nothing wrong with is kept as the best version: it takes index 01 upward, together with a copy of it from index 99 downward. A file that could not be aligned — or that is out of sync beyond repair — is kept from index 99 downward as well. Default: on."* The sentence had to change with F-M321: it used to say that *any* file the alignment could not process is kept from 99 downward, which is now true only for the files that are actually WRONG — a file the alignment found nothing wrong with takes 01. Leaving the old sentence would have shipped a page contradicting the code, which is what F-M302 forbids.
 
 **Test: T130.**
 
@@ -658,6 +658,23 @@ Both are existing code paths that every downloaded subtitle already travels. The
 **What `QaFailTracker` still is:** the burned-candidate record and nothing else. Its fail counter, `IsExhausted`, `RecordFailure` and the `qa-fail:` keys are gone; a reset after a real save now clears only the burned candidates.
 
 **Test: T132.**
+
+**F-M321 [D] (operator order 08.10.2026):** **A file the fit finds nothing wrong with IS the best version of its language: it takes the corrected range and ends the walk.**
+
+**The rule.** `no proven gain` is not a failure — it is the deploy rule DECLINING to move the file. Nothing had to move, or the measured gain did not prove itself, or the needed shift sits below the measurement floor. In every one of those cases the file as downloaded is the best version of that language that exists, and the operator's order is that it is then treated like a correction:
+
+- it takes the **corrected range** (`<base>.<lang>.01.srt`, then `02` … F-M316/F-M317), not the reserved block;
+- it advances the **corrected counter**, so `01` is used by the good file and the reserved block stays free for files that are actually wrong;
+- a copy is written into the **reserved block as well** (`99` downward), holding the **same bytes** — the operator asked for both tracks, and they are identical by construction because the reserved write REUSES the array that went to the corrected slot rather than re-encoding the text;
+- the walk **ENDS** there. The hunt of F-M318 exists to find a candidate whose correction proves itself; against a file the fit found nothing wrong with, no candidate can beat it, so continuing would spend the daily quota and write up to ten unprocessed files for one episode.
+
+**What still keeps the old behaviour.** Only the deploy rule's OWN refusal counts. A refusal that says the file is **wrong** — a shift beyond the limit, too few cues, a first cue that would go negative — keeps the reserved range and keeps the F-M318 hunt alive, because another candidate may well fit. The two are told apart by `SubtitleSync.RefusalMeansAlreadyGood`, matched on the exact `no proven gain` prefix the class composes itself, so the prefix is the contract rather than a guess at wording. A tooling verdict (`ffmpeg not available`, `audio decode failed`, `no audio samples`) is likewise not "already good", and `null` never is.
+
+**Both tracks carry the rule.** The HI branch answers the same question with its own counter (F-M317), which matters most here: the HI pool is where the drift lives, so it is the pool most likely to produce a file that is already fine.
+
+**Why the reserved copy is byte-identical rather than a second artifact.** For a real correction the reserved copy is the ORIGINAL text and therefore differs from the corrected file — that case is untouched. For an already-good file there is nothing to correct, so "the original" and "the best version" are the same bytes; re-encoding the text a second time would let the two files differ by encoding alone, which would break the identity the operator asked for. Reusing the written array makes them identical by construction. The registry row is content-keyed (F-M186/F-M199), so one row describes both files — and since a downloaded row is what locks a file against upload (F-M315), both copies are locked by it.
+
+**Test: T133.**
 
 **F-M307 [D] (development, 07.10.2026):** **The offset is a piecewise-constant function of time, fitted by exact dynamic programming. Supersedes the recursive Bayes-factor gate (F-M295) and the staircase applied from gate boundaries (F-M300).**
 
@@ -1776,6 +1793,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T131:** The download repeats until a correction proves itself, capped at the QA retry limit. Asserted on the REAL refusal strings through the REAL predicate — each case's fragment is first required to still exist in the source, so the case cannot keep passing after the wording drifts: `no proven gain`, a shift beyond the limit, `not measured: only N cues`, `not applied: …` and `fit error` are **candidate-specific** (hunt continues); `ffmpeg not available`, `audio decode failed` and `not measured: no audio samples` are **not** (hunt stops, and the stop is logged with its reason). The cap is asserted to BE `DownloadQaRetryLimit` (default 3) rather than a second knob invented beside it; the stop is asserted to sit against `refusalsThisRun`, and `keep-best` against `correctedSaved` — counting an unprocessed file as a "best" is exactly the bug that made the repeat impossible under the default `KeepBest=1`. **The ORDER is asserted as a property**: all six other download gates (FPS pre-check, no-bytes, language verification, structure, min-cues, runtime) must sit textually BEFORE the fit in the MAIN path, so a repeat never spends a download on a file a gate is about to discard. Negative controls (two): plant `if (savedCount >= keepBest)` back, and move the fit above the gates — each must turn the case RED. (F-M318)
 
 **T132:** The QA retry limit bounds the fit and nothing else. Asserted as an ABSENCE, because removing a give-up is invisible in a passing run: the pipeline contains no `IsExhausted` call, the `QaFailTracker` has no `IsExhausted`/`RecordFailure`/`CounterKey`, the seeder's queue gate and the refresh task's actionable filter no longer filter by a QA verdict, and the two counters that used to report it (`SkippedQaGiveUp`, `QaGiveUpLanguages`) are gone from the run summary. The three surviving consumers are asserted too, so the removal did not take the wrong thing with it: `GetSkippedCandidates` still feeds the walk's memory filter, `RecordSkippedCandidates` still burns this run's discards, and the fit still reads `DownloadQaRetryLimit` as its refusal budget (F-M318). Negative control: plant `IsExhausted` back into the pipeline source and require the case to go RED. (F-M320)
+
+**T133:** A file the fit finds nothing wrong with is written as the best version: it takes the corrected range, advances the corrected counter, is copied into the reserved block with the SAME bytes, and ends the walk. Asserted on the REAL predicate, driven with the real refusal strings — the genuine `no proven gain` text answers true, while a shift beyond the limit, too few cues, a first cue that would go negative, a tooling verdict (`ffmpeg not available`) and `null` all answer false, because the predicate must not let a file that is actually WRONG end the walk. The pipeline side is asserted on its wiring: `alignedForNaming` includes the already-good case, the hunt is turned off for it, the HI branch carries the same rule, and both reserved copies reuse the written array (which is what makes the two files identical rather than merely similar). A NEGATIVE CONTROL plants the old routing back — an already-good file sent to the reserved block — and requires the check to go RED. (F-M321)
 
 **T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M294, F-M288)
 
