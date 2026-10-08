@@ -1029,8 +1029,12 @@ def main():
     # The LABEL follows the button (F-M210a, operator order 08.10.2026: "Never -> manual in beiden
     # Auswahlmenüs"). The VALUE must stay `Never` — the enum and every stored configuration key on it,
     # so a renamed label that also renamed the value would silently reset what a user had chosen.
-    for cfg_id, expected in [("PruneMode", "Manual — no scheduled refresh, use the button below"),
-                             ("OshashRefresh", "Manual — trust cached fingerprint, use the button below")]:
+    # Operator order 08.10.2026: the menu entry itself reads just "Manual" — no see-below sentence
+    # tacked onto it. The button sits directly under its own description, so naming it in the option
+    # text was noise the operator removed twice ("Never -> manual in beiden Auswahlmenüs", then
+    # "Und nur manual im Auswahlmenü der 3 worker bitte, kein see below bla bla blah").
+    for cfg_id, expected in [("PruneMode", "Manual"),
+                             ("OshashRefresh", "Manual")]:
         check(f"{cfg_id} offers a Manual option (F-M210a)",
               f'<option value="Never">{expected}</option>' in html,
               "a service with a manual button must offer Manual, not Never")
@@ -1049,8 +1053,19 @@ def main():
     # dann vergessen. Auch manual dann statt never") - so all three carry a button AND the Manual label,
     # and no service on this page offers Manual without a way to trigger it.
     check("postprocessing offers Manual (F-M210a)",
-          '<option value="Never">Manual — no scheduled run, use the button below</option>' in html,
+          '<option value="Never">Manual</option>' in html,
           "every service with a manual button must label its disabling option Manual")
+    # Operator order 08.10.2026: the option reads EXACTLY "Manual" — no see-below sentence after it.
+    # Asserted on all three menus by reading each select's own block, because the entry is the label the
+    # operator keeps shortening and a suffix would otherwise only be caught by the VALUE check above,
+    # which would report the wrong reason ("renaming the value") for a purely cosmetic change.
+    for cfg_id in ("PruneMode", "OshashRefresh", "UploadPostprocessInterval"):
+        _i = html.find(f'id="{cfg_id}"')
+        blk = html[_i:html.find('</select>', _i)] if _i != -1 else ''
+        check(f"{cfg_id} menu entry reads just 'Manual'",
+              '<option value="Never">Manual</option>' in blk,
+              "the label is the bare word; the button sits right below and needs no pointing at")
+
     check("the postprocessing section carries a manual run button",
           'id="RunPostprocessNow"' in html)
     # F-M295 (08.10.2026): the button starts the TASK, not the endpoint. The endpoint ran the work but

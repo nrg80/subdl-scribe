@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.215"
+version: "12.1.12.216"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,8 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.216: All three maintenance menus now read just "Manual" - the appended "no scheduled run,
+    use the button below" is gone. The button sits directly under its description; nothing else changed.
   v12.1.12.215: The postprocessing button now starts the scheduled task instead of calling the job's
     API endpoint. Both run the work, but only the task writes the status row - measured on prod, the endpoint
     finished correctly while the list stayed empty, so the run looked like it never happened.
