@@ -33,6 +33,9 @@ CHECKS = [
      r"config\.QaDownloadAutoSync = document\.querySelector\('#QaDownloadAutoSync'\)\.checked"),
 ]
 
+# Which of them must ALSO be gone from the C# configuration. Only the one this order removed.
+C_SHARP_REMOVED = ['DownloadRequireImdb']
+
 # Gone: folded into the one switch. Each must be absent from markup AND from the JS, and its
 # C# property must no longer be bound by the page.
 REMOVED = [
@@ -40,6 +43,12 @@ REMOVED = [
     'QaDownloadDriftReject',
     'QaDownloadAudioTrackByLanguage',
     'QaDownloadAnchorSync',
+    # Operator order 08.10.2026: "Toggle no download without imdb tmdb id kann auch weg." The
+    # match is a hard criterion now, so there is nothing to switch — F-M45 lost its switch.
+    # Asserted across markup AND the C# property list in the same pass: a leftover
+    # `config.DownloadRequireImdb` in the page throws at load and takes the other bindings with
+    # it, and a field left in the configuration reads like the setting still exists.
+    'DownloadRequireImdb',
 ]
 
 fails = 0
@@ -51,11 +60,32 @@ for name, pat in CHECKS:
     print(f"  [{'ok' if ok else 'FAIL'}] {name}")
     fails += 0 if ok else 1
 
+CONFIG_CS = '/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs'
 for prop in REMOVED:
     n = len(re.findall(rf'{prop}', src))
     ok = n == 0
     print(f"  [{'ok' if ok else 'FAIL'}] {prop} fully removed from the page (found {n})")
     fails += 0 if ok else 1
+
+    # A removed switch must be gone from the CONFIGURATION too, not just from the page — a C#
+    # property nobody binds is the same defect the other way round: the setting looks present in a
+    # config dump, saves as its default forever, and can be read by code that was supposed to lose
+    # it. ONLY the property this order removed is asserted here (see C_SHARP_REMOVED below): the
+    # older fold-ins are reported, not enforced, so this check cannot fail on history it did not
+    # change — one of them still IS read (QaDownloadAudioTrackByLanguage, DownloadPipeline.cs) and
+    # deciding about it is a separate finding, not this check's business.
+    if prop in C_SHARP_REMOVED:
+        cfg_src = open(CONFIG_CS, encoding='utf-8').read()
+        n = len(re.findall(rf'\b{prop}\b', cfg_src))
+        ok = n == 0
+        print(f"  [{'ok' if ok else 'FAIL'}] {prop} gone from PluginConfiguration.cs too (found {n})")
+        fails += 0 if ok else 1
+    else:
+        cfg_src = open(CONFIG_CS, encoding='utf-8').read()
+        n = len(re.findall(rf'\b{prop}\b', cfg_src))
+        if n:
+            print(f"  [note] {prop} still declared in PluginConfiguration.cs (found {n}) — older "
+                  f"fold-in, not asserted here")
 
 # The correction block itself must hold exactly ONE checkbox — the whole point of the change.
 # Counted on a slice so an unrelated checkbox elsewhere cannot mask it.

@@ -498,14 +498,6 @@
                             <div class="fieldDescription">Also save the SDH variant as separate file. Default: off.</div>
                         </div>
 
-                        <div class="checkboxContainer checkboxContainer-withDescription">
-                            <label class="emby-checkbox-label">
-                                <input id="DownloadRequireImdb" name="DownloadRequireImdb" type="checkbox" is="emby-checkbox" />
-                                <span>Require IMDb/TMDb match</span>
-                            </label>
-                            <div class="fieldDescription">No download without an IMDb/TMDb ID.</div>
-                        </div>
-
                     <h3 style="margin-top:1.2em;">Quality gates (before download save)</h3>
                         <div class="fieldDescription" style="margin-bottom:.6em;">Structure, runtime and known-content checks always run. Extra gates reject before saving.</div>
 
@@ -948,7 +940,6 @@
                         document.querySelector('#DownloadOnlyMissing').checked = config.DownloadOnlyMissing;
                         document.querySelector('#DownloadHearingImpaired').checked = config.DownloadHearingImpaired;
                         document.querySelector('#DownloadRuntimeToleranceSec').value = config.DownloadRuntimeToleranceSec;
-                        document.querySelector('#DownloadRequireImdb').checked = config.DownloadRequireImdb;
                         document.querySelector('#AllocateMissingLanguageCodes').checked = config.AllocateMissingLanguageCodes;
                         document.querySelector('#QaDownloadMinCues').checked = config.QaDownloadMinCues;
                         document.querySelector('#QaDownloadVerifyLanguage').checked = config.QaDownloadVerifyLanguage;
@@ -1544,7 +1535,6 @@ workers.forEach(function (w) {
                         config.DownloadOnlyMissing = document.querySelector('#DownloadOnlyMissing').checked;
                         config.DownloadHearingImpaired = document.querySelector('#DownloadHearingImpaired').checked;
                         config.DownloadRuntimeToleranceSec = (function () { var v = parseInt(document.querySelector('#DownloadRuntimeToleranceSec').value, 10); return isNaN(v) ? 600 : v; })();
-                        config.DownloadRequireImdb = document.querySelector('#DownloadRequireImdb').checked;
                         config.AllocateMissingLanguageCodes = document.querySelector('#AllocateMissingLanguageCodes').checked;
                         config.QaDownloadMinCues = document.querySelector('#QaDownloadMinCues').checked;
                         config.QaDownloadVerifyLanguage = document.querySelector('#QaDownloadVerifyLanguage').checked;

@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.208"
+version: "12.1.12.209"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,15 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.209: The IMDb/TMDb match loses its switch, and a spent allowance no longer starts the
+    downloader. A filename-parsed title search could fetch a wrong-year release with the same name;
+    the hard gate is the only position that stays correct, so the option went and not the gate. And
+    the seeder now asks the SubDL counters once per scan, BEFORE it fills the download queue: with
+    the 50/day download limit or the search allowance spent, the queue is not filled AND the run is
+    refused, so a cycle stops costing its search allowance for saves that cannot happen. Measured on
+    prod the day of the order: the download limit was spent from 05:59, and four further cycles each
+    walked ~1000 queued items, spent the day's search allowance (59 -> 194) and saved nothing.
+    An unreadable counter is NOT treated as spent - a network hiccup must not cost a day.
   v12.1.12.208: One lit lamp, for the worker that is working. The cycle marked both directions as
     running when it STARTED, so the Seeder scanned while Download and Upload were already blue from
     the same cycle. Each direction now marks itself when its own run begins and closes its own row,

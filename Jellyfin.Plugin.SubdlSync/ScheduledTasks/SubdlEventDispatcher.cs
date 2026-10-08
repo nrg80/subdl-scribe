@@ -800,6 +800,17 @@ public sealed class SubdlEventDispatcher : IDisposable
         if (upload && _upQuotaStopped) return true;
         if (!upload && _downQuotaStopped) return true;
 
+        // Operator order 08.10.2026: "Api limit oder download limit voll, downloader startet erst
+        // garnicht." The seeder gate above holds back NEW queue entries, but the LIVE case had 1 144
+        // items already queued from earlier cycles — gating the fill alone would still have walked
+        // all of them into the same wall. So the RUN is refused too, and the leftovers stay Queued
+        // for the run after the reset. The direction's row carries the reason (set in SeedAsync).
+        if (!upload && _seeder.DownloadGateReason is { } held)
+        {
+            LogUtil.Normal(_logger, "[SubDL-Dispatch] no download run — {Reason}. Leftover queued items stay due for the next run.", held);
+            return true;
+        }
+
         var fresh = upload ? _lastSeedNewIdsUp : _lastSeedNewIdsDown;
 
         // F-M233: an arrival cycle runs ONLY when its own arrivals produced new work.
@@ -1943,7 +1954,17 @@ public sealed class SubdlEventDispatcher : IDisposable
             SeedSnapshot snapshot;
             try
             {
-                snapshot = _seeder.Scan(config, onlyLibraries, dir, onlyItemIds);
+                snapshot = await _seeder.ScanAsync(config, onlyLibraries, dir, onlyItemIds).ConfigureAwait(false);
+                // Operator order 08.10.2026: a spent download/search allowance held the download
+                // QUEUE back, so this direction has no run to report — its row states the reason
+                // instead of a stale outcome from a previous cycle. YELLOW/deferred: the work did not
+                // happen and nothing is broken; the pipeline's own recovery fire is already armed.
+                if (_seeder.DownloadGateReason is { } gateReason
+                    && dir != CycleDirection.UploadOnly)
+                {
+                    SetDirectionOutcome(upload: false, Registry.WorkerRunRegistry.Outcome.Deferred, gateReason);
+                }
+
                 // F-M311: hand the scan's writes to the statistics row. ADDED, not overwritten.
                 // A scan does NOT always get a run: the direction ends before it when no arrivals
                 // were queued ("no arrivals queued — no run") or when its queue holds nothing to do,

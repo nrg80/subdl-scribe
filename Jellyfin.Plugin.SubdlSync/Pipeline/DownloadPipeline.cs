@@ -259,11 +259,6 @@ public sealed class DownloadPipeline : IDisposable
     // the queue). Null = classic full-scan behaviour (legacy manual runs).
     public HashSet<string>? QueueFilter { get; set; }
 
-    // (16.09.2026): v1 soft-mode film_name search restored — the parsed
-    // Filename title rides into the v1 search as the last rung for
-    // Id-less items (HEAD 8a17aed behavior, removed by, user wants it back).
-    private string? _searchFnTitle;
-    private int? _searchFnYear;
 
     /// <summary>Per-item outcome report for the queue bookkeeping (fired by ProcessItemAsync).</summary>
     public event Action<string, ItemOutcome>? ItemResult;
@@ -767,8 +762,6 @@ public sealed class DownloadPipeline : IDisposable
     private async Task ProcessItemAsync(BaseItem item, List<string> targets, DownloadRunSummary summary, SkipFilter skipFilter, TimeSpan refetchGap, CancellationToken ct)
     {
         string? mediaPath = item.Path;
-        _searchFnTitle = null;
-        _searchFnYear = null;
         if (string.IsNullOrWhiteSpace(mediaPath))
         {
             summary.SkippedItems++;
@@ -1143,65 +1136,35 @@ public sealed class DownloadPipeline : IDisposable
                 }
             }
 
-            // (user decision 12.09.2026): the filename TITLE search is the LAST
-            // rung of the ladder — but ONLY when "IMDb/TMDB required" is OFF. When the
-            // checkbox is on (hard mode), no id = no search (fail-closed, unchanged).
-            // Soft mode: one film_name search with the parsed filename before the
-            // no-id skip — if it finds candidates, process them like any other item;
-            // only a miss lands the item in the no-id requeue.
+            // F-M45 (operator order 08.10.2026): the IMDb/TMDb match is a HARD criterion — the
+            // switch that could soften it is gone. An item with no resolvable id does not search
+            // SubDL at all. The removed soft mode ran a film_name search on a PARSED FILENAME, and a
+            // title-only hit on a wrong-year release is exactly the mis-download this gate prevents —
+            // the switch that could let it through is gone (no replacement; see F-M45).
             if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId))
             {
-                if (_config.DownloadRequireImdb)
+                // F-M22 (defect fixed 02.10.2026): a dry run does not spend the item's
+                // id-resolution budget. This counter's limit (IdRetryLimit) is what gives an
+                // item up, and the give-up is a STORED verdict a later run reads — so three dry
+                // runs could retire an item that a real run never touched. The success side is
+                // deliberately NOT guarded: recording a success clears stale state instead of
+                // creating it, which is the direction F-M22 sanctions ("neither burns a retry
+                // nor leaves the retry state stale").
+                if (!_config.DownloadDryRun)
                 {
-                    // F-M22 (defect fixed 02.10.2026): a dry run does not spend the item's
-                    // id-resolution budget. This counter's limit (IdRetryLimit) is what gives an
-                    // item up, and the give-up is a STORED verdict a later run reads — so three dry
-                    // runs could retire an item that a real run never touched. The success side is
-                    // deliberately NOT guarded: recording a success clears stale state instead of
-                    // creating it, which is the direction F-M22 sanctions ("neither burns a retry
-                    // nor leaves the retry state stale").
-                    if (!_config.DownloadDryRun)
-                    {
-                        _idNotFound.RecordFailure(item.Id.ToString());
-                    }
-
-                    summary.SkippedItems++;
-                    summary.SkippedNoId++;
-                    if (_config.LogMode >= LogLevelMode.Verbose)
-                    {
-                        LogUtil.PerItem(_config.LogMode, _logger, 
-                            "[SubDL-D] SKIP {File} — no id resolvable (wait {Wait}; TMDB ladder failed) — requeued, not-found #{Count}",
-                            Path.GetFileName(mediaPath), "none", _idNotFound.IsExhausted(item.Id.ToString(), _config.IdRetryLimit) ? "limit" : "+1");
-                    }
-
-                    return;
+                    _idNotFound.RecordFailure(item.Id.ToString());
                 }
 
-                // (16.09.2026, user decision): v1 soft mode restored — parse
-                // the filename title and let the v1 search run with film_name
-                // (HEAD 8a17aed behavior). had disabled this.
-                var (fnTitle, fnYear, fnIsSeries2) = ParseFileNameForIds(Path.GetFileName(mediaPath));
-                if (fnTitle != null)
+                summary.SkippedItems++;
+                summary.SkippedNoId++;
+                if (_config.LogMode >= LogLevelMode.Verbose)
                 {
-                    isSeries = fnIsSeries2;
-                    imdbId = string.Empty;
-                    tmdbId = string.Empty;
-                    if (_config.LogMode >= LogLevelMode.Verbose)
-                    {
-                        if (_config.LogMode >= LogLevelMode.Verbose)
-                        {
-                            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] filename title search (F-M143, soft mode) {File} — \"{Title}\" ({Kind} {Year})",
-                            Path.GetFileName(mediaPath), fnTitle, isSeries ? "series" : "movie", fnYear);
-                        }
-                    }
-                    _searchFnTitle = fnTitle;
-                    _searchFnYear = fnYear;
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] SKIP {File} — no id resolvable (TMDb ladder failed) — requeued, not-found #{Count}",
+                        Path.GetFileName(mediaPath), _idNotFound.IsExhausted(item.Id.ToString(), _config.IdRetryLimit) ? "limit" : "+1");
                 }
-                else
-                {
-                    LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] id-less item (soft mode) {File} — no parsable title, search skipped",
-                        Path.GetFileName(mediaPath));
-                }
+
+                return;
             }
 
             _idNotFound.RecordSuccess(item.Id.ToString()); // resolved via wait or TMDB
@@ -1215,10 +1178,11 @@ public sealed class DownloadPipeline : IDisposable
             imdbId = await _tmdb.ResolveImdbAsync(tmdbId, isSeries, ct).ConfigureAwait(false);
         }
 
-        // F-M45: hard mode → an id-less item (no IMDB, no TMDB at all) does not
-        // search SubDL. Soft mode (DownloadRequireImdb=false) continues with the
-        // TMDB id alone — SubDL search accepts TMDB ids as fallback (F-M45).
-        if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId) && _config.DownloadRequireImdb)
+        // F-M45 (operator order 08.10.2026): an id-less item (no IMDB, no TMDB at all) does not
+        // search SubDL, full stop — the switch that once let it continue with the TMDB id alone is
+        // gone. This second gate stays because an item can still arrive here id-less: the TMDB
+        // fetch above needs a tmdb id to begin with, and directed fires never ran the ladder.
+        if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId))
         {
             summary.SkippedItems++;
             summary.SkippedNoId++;
@@ -1298,13 +1262,12 @@ public sealed class DownloadPipeline : IDisposable
         // F-M58 (09.09.2026): a transient service_busy 429 (retryAfterSeconds) is
         // NOT the daily limit — wait the short window and retry the SAME search up
         // to 3 times before giving up. Only a real daily-limit 429 aborts the run.
-        _watchdog?.Heartbeat();        // (16.09.2026, user decision): v2 filename batch (BACKUP)
-        // REMOVED — the v1 MAIN search already carries the title anchor as its
-        // Last rung (soft mode: parsed filename title → plain JF name),
-        // so a filename-similarity second pass adds nothing but extra requests.
-        // Main path is the episode-exact v1 id search (GET /api/v1/subtitles by
-        // imdb/tmdb/film_name + season/episode, unpack=1); No v2 search remains
-        // in the download path.
+        _watchdog?.Heartbeat();
+        // (16.09.2026, user decision): v2 filename batch (BACKUP) REMOVED — it added a
+        // filename-similarity second pass on top of the v1 search for nothing. With F-M45 hardened
+        // (operator order 08.10.2026) the v1 MAIN search is an ID search, period: no title anchor,
+        // no soft-mode rung. Main path is the episode-exact v1 search (GET /api/v1/subtitles by
+        // imdb/tmdb + season/episode, unpack=1); no v2 search remains in the download path.
         var (candidates, usedBackup, thresholdPassCount, hiCandidates) = await RunV2SearchAsync(
             item, mediaPath, imdbId, tmdbId, season, isSeries ? episode : 0, missing, variantMissing, summary, ct);
 
@@ -2797,16 +2760,14 @@ public sealed class DownloadPipeline : IDisposable
         // DownloadBudget.SearchEarlyStopThreshold (F-M95): it used to be a hard-coded 3, so
         // DownloadMaxCandidatesPerLanguage widened the download budget but never the search —
         // the page walk still stopped at three candidates per language.
-        // (16.09.2026): id-less soft mode runs v1 with film_name
-        // (_searchFnTitle ?? item.Name) — HEAD 8a17aed behavior restored.
-        if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId) && _searchFnTitle == null && !_config.DownloadRequireImdb)
-        {
-            _searchFnTitle = item.Name; // last rung: plain JF title
-        }
-        if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId) && _searchFnTitle == null)
+        // F-M45 (operator order 08.10.2026): the title rung is gone with the switch, so this is an
+        // id search or nothing. An item that lost its ids after the ladder (the TMDB fetch above
+        // needs one to begin with; directed fires skip the ladder) must not be searched by name —
+        // the wording names the fact instead of a fallback that no longer exists.
+        if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId))
         {
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL-D] MAIN (v1 id) skipped {File} — no TMDB/IMDb ID resolvable → filename fallback",
+                "[SubDL-D] MAIN (v1 id) skipped {File} — no TMDB/IMDb ID resolvable, no title search (F-M45)",
                 filename);
         }
         else
@@ -2830,7 +2791,7 @@ public sealed class DownloadPipeline : IDisposable
                 : await _api.SearchSubtitlesAsync(
                     string.IsNullOrWhiteSpace(imdbId) ? null : imdbId,
                     string.IsNullOrWhiteSpace(tmdbId) ? null : tmdbId,
-                    _searchFnTitle, season, episode, langs, 20, ct, earlyStop, hearingImpaired: false).ConfigureAwait(false);
+                    season, episode, langs, 20, ct, earlyStop, hearingImpaired: false).ConfigureAwait(false);
             if (main == null)
             {
                 return (null, false, 0, noHi); // 429/5xx/403 → stop the run
@@ -2849,7 +2810,7 @@ public sealed class DownloadPipeline : IDisposable
                 var hi = await _api.SearchSubtitlesAsync(
                     string.IsNullOrWhiteSpace(imdbId) ? null : imdbId,
                     string.IsNullOrWhiteSpace(tmdbId) ? null : tmdbId,
-                    _searchFnTitle, season, episode, hiLangs, 20, ct, earlyStop, hearingImpaired: true).ConfigureAwait(false);
+                    season, episode, hiLangs, 20, ct, earlyStop, hearingImpaired: true).ConfigureAwait(false);
                 if (hi != null && hi.Count > 0)
                 {
                     noHi = hi.Where(c => c.Language != null && variantMissing.Contains(c.Language, StringComparer.OrdinalIgnoreCase)).ToList();

@@ -897,6 +897,71 @@ def main():
               "DirectionRowWritten(upload: true)" in task_src
               and "DirectionRowWritten(upload: false)" in task_dl)
 
+    # ---- F-M331 (operator order 08.10.2026): a spent allowance never starts the downloader ----
+    # "Api limit oder download limit voll, downloader startet erst garnicht." Measured on prod the
+    # same day: the 50/day download limit had been spent since 05:59, yet four more cycles each
+    # walked ~1 000 queued items, spent the day's SEARCH allowance (59 -> 194) and saved nothing.
+    seed_src = read_source("ScheduledTasks", "SubdlSeeder.cs")
+    disp_src2 = disp_src
+    if seed_src:
+        # Asserts the EXACT call site, not the presence of the method name: a `if (false)
+        # _downloadGateReason = await ReadDownloadGateAsync(...)` guard (plant 1) contains every
+        # one of those words and disables the probe completely. Measured: the word-level version
+        # stayed GREEN under exactly that mutation.
+        GATE_CALL = ('_downloadGateReason = await ReadDownloadGateAsync('
+                     'Plugin.Instance.Configuration, System.Threading.CancellationToken.None)'
+                     '.ConfigureAwait(false);')
+        check("the seeder asks the counters before it fills the download queue",
+              GATE_CALL in seed_src,
+              "without the probe the queue fills and the run walks into the same wall")
+        check("the probe's verdict is ASSIGNED unconditionally, not behind a guard",
+              GATE_CALL in seed_src and "if (false)" not in seed_src)
+        # Assert the READS, not the comparisons: plant 3 replaced the search read with a constant
+        # while leaving `if (search == QuotaRead.Spent)` intact, and a comparison-level check stayed
+        # GREEN. Both counters must actually come back from the server.
+        check("the probe reads BOTH allowances from the server, download and search",
+              "api.ReadQuotaAsync(forDownload: true" in seed_src
+              and "api.ReadQuotaAsync(forDownload: false" in seed_src,
+              "each allowance stops a download run on its own path")
+        check("and both spent verdicts block the queue",
+              "down == QuotaRead.Spent" in seed_src and "search == QuotaRead.Spent" in seed_src)
+        check("a spent allowance keeps the item out of the download queue",
+              "_downloadGateReason == null" in seed_src)
+        check("and the verdict is asked only for a scan that covers the download direction",
+              "dir != SubdlEventDispatcher.CycleDirection.UploadOnly" in seed_src)
+        check("the probe reuses the pipeline's own quota reader, not a second source",
+              "api.ReadQuotaAsync" in seed_src and "BuildApiClient" in seed_src,
+              "two sources for one statement can drift")
+
+        # An UNREADABLE counter must NOT read as spent: assert the catch block's OWN returns, not a
+        # phrase elsewhere in the file. Plant 2 put `return "unreadable";` into that catch and the
+        # phrase-level version stayed GREEN — the check has to read the block it is about.
+        # Bound the block by its `catch (Exception ex)` and the `finally` that closes it. Anchoring
+        # on the LOG line missed plant 2, which inserted its `return "…spent"` BEFORE that line and
+        # therefore fell outside the window — measured GREEN on a fail-closed change.
+        gate_start = seed_src.find("private async Task<string?> ReadDownloadGateAsync")
+        catch_at = seed_src.find("catch (Exception ex)", gate_start)
+        finally_at = seed_src.find("finally", catch_at)
+        catch_block = seed_src[catch_at:finally_at] if -1 < gate_start < catch_at < finally_at else ''
+        returns = [ln.strip() for ln in catch_block.splitlines()
+                   if ln.strip().startswith('return ')]
+        check("an UNREADABLE counter is not treated as spent (nothing fails closed in the catch)",
+              returns == ['return null;'],
+              f"the catch must only return null, found {returns}")
+        check("the quota probe failure is logged, not silent",
+              "quota probe failed" in seed_src)
+    if disp_src2 and seed_src:
+        # The fill gate alone is not enough: prod had 1 144 items ALREADY queued, and those would
+        # still have been walked into the wall. The run itself must be refused as well.
+        check("the RUN is refused too, not only the queue fill",
+              "_seeder.DownloadGateReason" in disp_src2
+              and "no download run" in disp_src2,
+              "gating only the fill still walks the items queued by earlier cycles")
+        check("the held-back direction still reports why",
+              "DownloadGateReason is { } gateReason" in disp_src2)
+        check("and the leftovers stay queued for the next run",
+              "stay due for the next run" in disp_src2)
+
     seed_src = read_source("ScheduledTasks", "SubdlSeeder.cs")
     if seed_src:
         # Anchored on the DECISION line, not on the words alone: planting `false && coversUp &&

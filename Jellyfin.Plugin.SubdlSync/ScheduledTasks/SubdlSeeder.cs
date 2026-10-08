@@ -115,6 +115,23 @@ public sealed class SubdlSeeder
     private readonly ILogger _logger;
     private readonly TmdbImdbResolver _tmdb;
 
+    /// <summary>
+    /// The download gate's verdict for the CURRENT scan, or null when it was not asked.
+    /// <para>
+    /// Set by <see cref="ReadDownloadGateAsync"/>, read by the queue decision, and exposed so the
+    /// dispatcher can report the reason on the download row. Kept as one field rather than a second
+    /// quota source: the numbers come from <c>SubdlApiClient.ReadQuotaAsync</c>, the same reader the
+    /// pipeline's own 429 decision uses (F-M238).
+    /// </para>
+    /// </summary>
+    private string? _downloadGateReason;
+
+    /// <summary>
+    /// Why the download direction may not be queued this scan, or null when it may.
+    /// Read by the dispatcher after <see cref="Scan"/> to write the download row.
+    /// </summary>
+    public string? DownloadGateReason => _downloadGateReason;
+
     /// <summary>Initializes the seeder.</summary>
     public SubdlSeeder(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ILoggerFactory loggerFactory, TmdbImdbResolver tmdb)
     {
@@ -218,7 +235,78 @@ public sealed class SubdlSeeder
     public static bool SkipForArrivalScope(string itemId, System.Collections.Generic.ISet<string>? onlyItemIds)
         => onlyItemIds != null && !onlyItemIds.Contains(itemId);
 
-    public SeedSnapshot Scan(Configuration.PluginConfiguration config, System.Collections.Generic.ISet<string>? onlyLibraries = null, SubdlEventDispatcher.CycleDirection dir = SubdlEventDispatcher.CycleDirection.Both, System.Collections.Generic.ISet<string>? onlyItemIds = null)
+    /// <summary>
+    /// Asks the SubDL counters whether a download run could do anything at all right now.
+    /// <para>
+    /// Operator order 08.10.2026: "Api limit oder download limit voll, downloader startet erst
+    /// garnicht." Measured on prod the same day: the download limit had been spent since 05:59, yet
+    /// four further cycles (20:45, 21:09, 21:32, …) each walked ~1 000 queued items, spent the run's
+    /// SEARCH allowance (59 → 194 across the day) and saved nothing — every one of them ran into the
+    /// same wall at the first real file fetch. The gate belongs here, in the seeder, because the
+    /// seeder is what fills the queue: an item that is never queued is never walked.
+    /// </para>
+    /// <para>
+    /// Both allowances are checked, because both stop a download run: the file-download counter (50
+    /// a day) and the search allowance, which the search phase needs before any candidate exists.
+    /// </para>
+    /// <para>
+    /// A failure to READ the counters is NOT a verdict — it returns null and the scan proceeds
+    /// exactly as before. Fail-closed here would turn a network hiccup into a silent day without
+    /// downloads, which is worse than one wasted run: the pipeline still guards itself.
+    /// </para>
+    /// </summary>
+    /// <param name="config">Plugin configuration (credentials).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The reason to block, or null when the direction may be queued.</returns>
+    private async Task<string?> ReadDownloadGateAsync(Configuration.PluginConfiguration config, System.Threading.CancellationToken ct)
+    {
+        if (config.MissingCredentials().Count > 0)
+        {
+            return null; // the pipeline refuses on its own; not this gate's verdict to make
+        }
+
+        var (api, http) = PluginServiceRegistrator.BuildApiClient(config);
+        try
+        {
+            // The download counter first: it is the one that stops the FILE fetch, and it is the
+            // counter that was spent in the measured case.
+            var down = await api.ReadQuotaAsync(forDownload: true, ct).ConfigureAwait(false);
+            var quota = api.Quota;
+            if (down == QuotaRead.Spent && quota != null)
+            {
+                return string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "download limit spent ({0}/{1}) — not queued",
+                    quota.DownloadsUsed,
+                    quota.DownloadsLimit);
+            }
+
+            // The search allowance: without it the run cannot even look for candidates.
+            var search = await api.ReadQuotaAsync(forDownload: false, ct).ConfigureAwait(false);
+            if (search == QuotaRead.Spent && api.Quota != null)
+            {
+                return string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "search allowance spent ({0}/{1}) — not queued",
+                    api.Quota.SearchUsed,
+                    api.Quota.SearchLimit);
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            // Unreadable is not spent — see the summary above.
+            LogUtil.Detail(config.LogMode, _logger, "[SubDL-Seed] quota probe failed ({Msg}) — queueing as before.", ex.Message);
+            return null;
+        }
+        finally
+        {
+            http.Dispose();
+        }
+    }
+
+    public async Task<SeedSnapshot> ScanAsync(Configuration.PluginConfiguration config, System.Collections.Generic.ISet<string>? onlyLibraries = null, SubdlEventDispatcher.CycleDirection dir = SubdlEventDispatcher.CycleDirection.Both, System.Collections.Generic.ISet<string>? onlyItemIds = null)
     {
         var snapshot = new SeedSnapshot();
         string dirLabel = dir switch
@@ -228,6 +316,22 @@ public sealed class SubdlSeeder
             _ => "both"
         };
         LogUtil.Normal(_logger, "[SubDL-Seed] scan started ({Direction})", dirLabel);
+
+        // Operator order 08.10.2026: "Api limit oder download limit voll, downloader startet erst
+        // garnicht." Asked ONCE per scan, before the walk, and only when this scan covers the
+        // download direction — a directed upload fire must not spend a quota probe on a question it
+        // never asks. The verdict gates the download QUEUE below: no entry, no run, no queue walk.
+        _downloadGateReason = null;
+        if (dir != SubdlEventDispatcher.CycleDirection.UploadOnly
+            && config.DownloadEnabled
+            && Plugin.Instance?.Configuration is not null)
+        {
+            _downloadGateReason = await ReadDownloadGateAsync(Plugin.Instance.Configuration, System.Threading.CancellationToken.None).ConfigureAwait(false);
+            if (_downloadGateReason != null)
+            {
+                LogUtil.Normal(_logger, "[SubDL-Seed] download queue held back — {Reason} (F-M45/F-M238).", _downloadGateReason);
+            }
+        }
 
         // F-M4a: requirement marker added for traceability.
         // F-M189: selected libraries resolve to their media PATHS, so a
@@ -352,8 +456,13 @@ public sealed class SubdlSeeder
                 // 13.09.2026 (user decision): a directed cycle seeds ONLY its
                 // direction — an upload-button fire must not fill the download
                 // queue (and vice versa).
+                // Operator order 08.10.2026: a spent allowance keeps the item OUT of the queue
+                // entirely — the gate above decided once for the whole scan, so this is a flag read
+                // and not a second probe per item.
                 if (dir != SubdlEventDispatcher.CycleDirection.UploadOnly
-                    && config.DownloadEnabled && IsDownloadTodo(item, mediaPath, config))
+                    && config.DownloadEnabled
+                    && _downloadGateReason == null
+                    && IsDownloadTodo(item, mediaPath, config))
                 {
                     snapshot.Download.Add(Clone(qi));
                 }

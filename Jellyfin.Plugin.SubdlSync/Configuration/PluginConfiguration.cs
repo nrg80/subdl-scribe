@@ -312,12 +312,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets the FPS tolerance in percent for the pre-download FPS check (F-M43 Stufe 1). 0 = disabled.</summary>
     public int DownloadFpsTolerancePercent { get; set; } = 1;
 
-    /// <summary>
-    /// Gets or sets a value indicating whether the IMDB/TMDB match is a hard requirement (F-M45).
-    /// Default true: no provider id → no download. False: risky title-based search fallback.
-    /// </summary>
-    public bool DownloadRequireImdb { get; set; } = true;
-
     /// <summary>Gets or sets the score weight for a release-group match (F-M44 expert mode). Default 1000.</summary>
     public int DownloadScoreWeightGroup { get; set; } = 1000;
 

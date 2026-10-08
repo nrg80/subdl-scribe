@@ -33,6 +33,37 @@ namespace Jellyfin.Plugin.SubdlScribe;
 public class PluginServiceRegistrator : IPluginServiceRegistrator
 {
     /// <summary>
+    /// Builds a bare SubDL API client outside a pipeline run — for a read-only probe.
+    /// <para>
+    /// ONE construction site for all three users (upload pipeline, download pipeline, and the
+    /// dispatcher's pre-run quota probe). The probe reads the SAME counters the pipeline's own 429
+    /// decision reads (F-M238) instead of inventing a second quota source: two sources for one
+    /// statement can drift, and the second is invisible to check.
+    /// </para>
+    /// </summary>
+    /// <param name="config">Plugin configuration (carries the credentials).</param>
+    /// <returns>The client and the HttpClient it owns; the caller disposes the client.</returns>
+    public static (SubdlApiClient Api, HttpClient Http) BuildApiClient(PluginConfiguration config)
+    {
+        // F-M235: the timeout lives in the handler now, per attempt, so a slow server is retried
+        // (3 attempts) instead of surfacing as a cancellation. HttpClient.Timeout is disabled
+        // (InfiniteTimeSpan) because it would otherwise cap the WHOLE request including retries
+        // and cancel them mid-sequence.
+        var retry = new TransientRetryHandler(new SocketsHttpHandler());
+        var http = new HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+        var api = new SubdlApiClient(http)
+        {
+            Username = config.Username,
+            Password = config.Password,
+            ApiKey = config.ApiKey
+        };
+        // The handler is built before the client, but the client owns the log channel: route the
+        // retry lines back into it so a hidden retry still shows up.
+        retry.Log = msg => api.RaiseLog(msg);
+        return (api, http);
+    }
+
+    /// <summary>
     /// Builds a ready-to-use pipeline outside JF DI (for the scheduled task entry).
     /// </summary>
     /// <param name="loggerFactory">Logger factory.</param>
@@ -49,17 +80,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // (3 attempts) instead of surfacing as a cancellation. HttpClient.Timeout is disabled
         // (InfiniteTimeSpan) because it would otherwise cap the WHOLE request including retries
         // and cancel them mid-sequence.
-        var retry = new TransientRetryHandler(new SocketsHttpHandler());
-        var http = new HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
-        var api = new SubdlApiClient(http)
-        {
-            Username = config.Username,
-            Password = config.Password,
-            ApiKey = config.ApiKey
-        };
-        // The handler is built before the client, but the client owns the run's log channel: route
-        // the retry lines back into it so a hidden retry still shows up in the run log.
-        retry.Log = msg => api.RaiseLog(msg);
+        var (api, http) = BuildApiClient(config);
         var tmdb = new TmdbImdbResolver(http, config.TmdbApiKey);
         // F-M20/F-M26: ONE pacing rhythm shared by upload + download (same SubDL account).
         // It spaces calls and jitters transfers — it holds no budget and refuses nothing.
@@ -99,17 +120,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // (3 attempts) instead of surfacing as a cancellation. HttpClient.Timeout is disabled
         // (InfiniteTimeSpan) because it would otherwise cap the WHOLE request including retries
         // and cancel them mid-sequence.
-        var retry = new TransientRetryHandler(new SocketsHttpHandler());
-        var http = new HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
-        var api = new SubdlApiClient(http)
-        {
-            Username = config.Username,
-            Password = config.Password,
-            ApiKey = config.ApiKey
-        };
-        // The handler is built before the client, but the client owns the run's log channel: route
-        // the retry lines back into it so a hidden retry still shows up in the run log.
-        retry.Log = msg => api.RaiseLog(msg);
+        var (api, http) = BuildApiClient(config);
         var tmdb = new TmdbImdbResolver(http, config.TmdbApiKey);
         // F-M20/F-M26: same pacing semantics as the upload bundle — no shared budget, because
         // there is none left to share (F-M20, 03.10.2026).
