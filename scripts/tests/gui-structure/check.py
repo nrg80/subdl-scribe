@@ -956,6 +956,49 @@ def main():
         check("the flag is handed to the seeder, so the queue stays empty too",
               "downloadAllowed: _downloadAllowanceHeld == null" in disp_src)
 
+    # ---- F-M50 (operator order 08.10.2026): ONE setting, TWO effects ----
+    # "Die correction attempts bestimmen wieviele Kandidaten pro Sprache gesucht werden und wie oft die
+    # autosync Schleife maximal Kandidaten zieht bis das Ergebnis passt. Aus 2 variables mach eine."
+    #
+    # The pair had drifted: the walk's cap was checked BEFORE the correction budget and counted the
+    # same attempts, so at equal defaults the cap always fired first and the budget could never
+    # trigger (replayed against the loop). Asserted as a PAIR again — a removed knob whose number
+    # still sits in the loop is a hidden second variable, and a merged read without the removal
+    # leaves the setting able to contradict it.
+    pipe_src = read_source("Pipeline", "DownloadPipeline.cs")
+    budget_src = read_source("Pipeline", "DownloadBudget.cs")
+    if pipe_src and budget_src:
+        check("the second candidate setting is gone from the pipeline",
+              "DownloadMaxCandidatesPerLanguage" not in pipe_src,
+              "a leftover read would be the second variable again")
+        check("the search width is derived from the ONE correction-attempts setting",
+              "SearchEarlyStopThreshold(\n                _config.DownloadQaRetryLimit)" in pipe_src,
+              "the search must read the same value as the walk")
+        check("the walk's limit reads that same value",
+              "int walkLimit = Math.Max(0, _config.DownloadQaRetryLimit);" in pipe_src)
+        check("the removed second cap is gone from the loop",
+              "attempts >= downloadCap" not in pipe_src,
+              "that cap fired first at equal values and hid the limit")
+        check("the limit counts FITS only, never gate rejections",
+              "if (walkLimit > 0 && refusalsThisRun >= walkLimit)" in pipe_src,
+              "a gate rejection must not spend the Auto-Sync's budget (F-M320)")
+        # Assert the SIGNATURE, not the word: `keepBest` still appears in the comment that explains
+        # why the parameter was removed, and a word-level ban would forbid documenting history.
+        # Measured: the word-level version went RED on a correct file.
+        check("the helper takes one value and no second parameter",
+              "SearchEarlyStopThreshold(int correctionAttempts)" in budget_src
+              and "SearchEarlyStopThreshold(int correctionAttempts," not in budget_src
+              and "EffectiveDownloadCap" not in budget_src,
+              "a second parameter would be the dead keepBest knob again")
+        check("0 stays 0 (no limit), never a threshold of zero",
+              "correctionAttempts <= 0 ? 0 : correctionAttempts" in budget_src)
+
+        # The Auto-Sync-OFF path: without a fit there is no verdict, so the abandon must not fire —
+        # it used to end the walk on the FIRST candidate of every language.
+        check("the abandon break requires the Auto-Sync to be ON",
+              "if (_config.QaDownloadAutoSync && !huntForCorrection)" in pipe_src,
+              "without the gate a run with the Auto-Sync off pulled ONE candidate per language")
+
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)

@@ -1523,57 +1523,53 @@ public sealed class DownloadPipeline : IDisposable
             // file to 02 — the operator's rule is that a corrected file starts at 01.
             int correctedSlotCount = 0;
             int hiCorrectedSlotCount = 0;
-            int downloadCap = DownloadBudget.EffectiveDownloadCap(
-                _config.DownloadMaxCandidatesPerLanguage);
-
-            // F-M318 (operator order 08.10.2026): the fit's refusal does NOT end the walk — the
-            // operator asked for the download to REPEAT until a candidate's correction proves itself
-            // against the audio, capped at the QA retry limit:
+            // F-M318/F-M331 (operator order 08.10.2026): ONE number bounds this walk — the configured
+            // "Auto-Sync attempts and max. download/search limit". It is the same setting that decides
+            // how many candidates per language the SEARCH fetches (DownloadBudget), because the two
+            // were always the same intent: how many candidates the Auto-Sync may pull before it gives
+            // up on this language.
             //
-            //   refusalsThisRun  — candidates fetched and refused by the fit this run. Each one is
-            //                      KEPT, so it is also the number of unprocessed files written.
-            //   refusalBudget    — how many of those are spent before the walk stops hunting.
-            //   correctedSaved   — candidates whose correction WAS applied. Only these end the walk
-            //                      (F-M319): an unprocessed file is a fallback, never a "best", and
-            //                      letting it end the walk is what made the repeat impossible.
+            // The former second cap is GONE. It counted every attempt — gate rejections included — and
+            // was checked FIRST, so at equal values it always fired before the limit below: measured by
+            // replaying the loop, at 3/3 the cap stopped the walk in EVERY ordering and the limit could
+            // never trigger. It won only when raised above it, which was the keep-best raise that went
+            // with F-M319.
+            int walkLimit = Math.Max(0, _config.DownloadQaRetryLimit);
+
+            // F-M318 (operator order 08.10.2026): the Auto-Sync's refusal does NOT end the walk — the
+            // operator asked for the download to REPEAT until a candidate's correction proves itself
+            // against the audio, bounded by the ONE correction-attempts setting (walkLimit above):
+            //
+            //   refusalsThisRun — candidates pulled and handed to the Auto-Sync, which could not prove
+            //                     a correction. Each one is KEPT, so this is also the number of
+            //                     unprocessed files written. Only FITS are counted: a gate rejection
+            //                     (language, structure, min-cues, runtime, FPS) is a verdict on the
+            //                     candidate, not a pull the Auto-Sync worked on — the walk moves on
+            //                     (F-M320).
+            //   correctedSaved  — candidates whose correction WAS applied. Only these end the walk
+            //                     (F-M319): an unprocessed file is a fallback, never a "best".
             int refusalsThisRun = 0;
-            int refusalBudget = Math.Max(0, _config.DownloadQaRetryLimit);
             int correctedSaved = 0;
             bool correctionHuntAbandoned = false;
             foreach (var (cand, _) in ranked)
             {
-                // F-M50: download budget per (item, language) — each candidate download
-                // costs daily quota even when rejected afterwards (runtime check), so
-                // stop walking after the configured number of failed attempts.
-                // F-M242: the cap is raised to the keep-best count when that is higher — a budget
-                // below it makes "keep X saves X files" unreachable, and the break below would fire
-                // before the Xth slot could ever be filled.
-                if (downloadCap > 0 && attempts >= downloadCap)
-                {
-                    if (savedCount == 0)
-                    {
-                        summary.NotAvailable++;
-                        ReportOutcome(item, ItemOutcome.NotAvailable);
-                    }
-
-                    if (_config.LogMode >= LogLevelMode.Verbose)
-                    {
-                        LogUtil.PerItem(_config.LogMode, _logger, 
-                            "[SubDL-D] {File} [{Lang}] — download budget exhausted ({Max} candidates tried), counting as not available; {N} rejected download(s) memorized (F-M93g/F-M93m), next run takes fresh candidates; retried at the next refetch interval",
-                            Path.GetFileName(mediaPath), lang, downloadCap, qaRejectedReleases.Count);
-                    }
-                    break;
-                }
-
-                // F-M318: enough candidates were fetched and refused by the fit — stop hunting for a
-                // provable correction. This sits BEFORE the fetch on purpose: breaking after the
-                // refusal would burn one more download from the daily quota and keep a file the
-                // budget says not to keep.
-                if (refusalBudget > 0 && refusalsThisRun >= refusalBudget)
+                // THE walk's limit (F-M318/F-M331): the configured correction attempts are spent —
+                // give up on this language for this run. Sits BEFORE the fetch on purpose: breaking
+                // after the refusal would burn one more download from the daily quota and keep a file
+                // the limit says not to keep.
+                //
+                // It bounds BOTH modes, which is the point of one setting with two effects:
+                //   Auto-Sync ON  — candidates it pulled and could not fit (only FITS are counted; a
+                //                   gate rejection is a verdict on the candidate, not a pull the
+                //                   Auto-Sync worked on, F-M320).
+                //   Auto-Sync OFF — candidates pulled through the active quality gates and kept as
+                //                   99, 98, 97 … here every pull counts, because there is no fit to
+                //                   ask whether the result "passes".
+                if (walkLimit > 0 && refusalsThisRun >= walkLimit)
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL-D] {File} [{Lang}] — correction hunt stopped: {N} candidate(s) fetched and refused by the fit (limit {Limit}); {Kept} unprocessed file(s) kept, {M} lower-ranked candidate(s) not tried",
-                        Path.GetFileName(mediaPath), lang, refusalsThisRun, refusalBudget,
+                        "[SubDL-D] {File} [{Lang}] — candidate limit reached: {N} candidate(s) pulled (limit {Limit}); {Kept} file(s) kept, {M} lower-ranked candidate(s) not tried",
+                        Path.GetFileName(mediaPath), lang, refusalsThisRun, walkLimit,
                         refusalsThisRun, Math.Max(0, ranked.Count - attempts));
                     break;
                 }
@@ -2161,7 +2157,18 @@ public sealed class DownloadPipeline : IDisposable
                         // about the audio or the tooling ("ffmpeg not available") would be repeated
                         // word for word for every candidate, so the walk ends after this save instead
                         // of spending the daily quota to reach an identical answer.
-                        if (!huntForCorrection)
+                        //
+                        // GATED ON THE AUTO-SYNC BEING ON (operator order 08.10.2026): with the
+                        // Auto-Sync OFF there is no fit and therefore no verdict at all — nothing was
+                        // measured, so nothing can be "a reason no other candidate can change".
+                        // Without this gate the abandon fired on the FIRST candidate of every
+                        // language (huntForCorrection starts false and only a fit ever sets it), so a
+                        // run with the Auto-Sync off pulled exactly ONE candidate per language and
+                        // stopped. The operator's rule for that mode: the walk pulls n candidates
+                        // (the configured correction attempts) through the active quality gates and
+                        // keeps them as 99, 98, 97 … — n comes from the text field, and the walk's
+                        // own limit below is what ends it.
+                        if (_config.QaDownloadAutoSync && !huntForCorrection)
                         {
                             correctionHuntAbandoned = true;
                             LogUtil.PerItem(_config.LogMode, _logger,
@@ -2757,9 +2764,9 @@ public sealed class DownloadPipeline : IDisposable
         // (15.09.2026): v2 id-search ignores season/episode server-side
         // (live: BCS S02E01 query returned 30 candidates incl. S06 packs and
         // The Simpsons); v1 filters episode-exact. Early-stop is fed by
-        // DownloadBudget.SearchEarlyStopThreshold (F-M95): it used to be a hard-coded 3, so
-        // DownloadMaxCandidatesPerLanguage widened the download budget but never the search —
-        // the page walk still stopped at three candidates per language.
+        // DownloadBudget.SearchEarlyStopThreshold (F-M95), derived from the ONE correction-attempts
+        // setting (operator order 08.10.2026): the search must never fetch fewer candidates than the
+        // Auto-Sync may pull, nor more than it will discard.
         // F-M45 (operator order 08.10.2026): the title rung is gone with the switch, so this is an
         // id search or nothing. An item that lost its ids after the ladder (the TMDB fetch above
         // needs one to begin with; directed fires skip the ladder) must not be searched by name —
@@ -2780,9 +2787,11 @@ public sealed class DownloadPipeline : IDisposable
             // HI releases the response happened to contain. The HI search only runs when the HI
             // switch asks for it, so a user who does not want HI variants pays exactly one search,
             // as before.
-            // F-M95: the threshold is derived from the two candidate settings, never a literal.
+            // F-M95/F-M331: the search's width IS the single correction-attempts setting — the same
+            // number that bounds the walk. One setting, two effects: how many candidates per language
+            // are searched, and how many the Auto-Sync may pull before it gives up.
             int earlyStop = DownloadBudget.SearchEarlyStopThreshold(
-                _config.DownloadMaxCandidatesPerLanguage);
+                _config.DownloadQaRetryLimit);
             // F-M282: the regular search runs only when a REGULAR file is open. When the variant is
             // the only thing missing, `langs` is empty and this call would be a search for nothing —
             // worse, it used to be the call that re-fetched a subtitle already on disk.

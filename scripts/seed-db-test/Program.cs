@@ -990,66 +990,68 @@ internal static class Program
             }
         }
 
-        // ── M  the search width, the download cap and keep-best agree (F-M95/F-M50/F-M242) ──
-        // One setting, two derived numbers. The search used to receive a HARD-CODED 3 while its own
-        // comment named DownloadMaxCandidatesPerLanguage, so raising the setting widened the download
-        // budget but never the search — the page walk stopped after three candidates per language and
-        // the loop could not see a fourth.
+        // ── M  ONE setting, TWO effects: search width and the Auto-Sync walk's limit ──
+        // (F-M95/F-M50/F-M331, operator order 08.10.2026: "Die correction attempts bestimmen wieviele
+        // Kandidaten pro Sprache gesucht werden und wie oft die autosync Schleife maximal Kandidaten
+        // zieht bis das Ergebnis passt. Aus 2 variables mach eine.")
         //
-        // F-M319 (operator order 08.10.2026): "best subtitles to keep per language" (F-M242) is GONE,
-        // and with it the SECOND parameter these checks used to pass. The contradictions they covered
-        // (a budget below keep-best making F-M242 unreachable, 0 raised to keep-best) cannot exist
-        // without that setting, so what is asserted now is the single decision that remains.
+        // What was two knobs that described the same intent is now one setting. The old pair drifted
+        // silently: the walk's cap was checked BEFORE the correction budget and counted the same
+        // attempts, so at the equal defaults the cap always fired first and the budget could never
+        // trigger. Replayed against the loop, the cap stopped the walk in every ordering.
         {
-            // The configured budget is passed through unchanged, so no existing installation's quota
-            // use moves.
-            Check("M1 the configured budget is passed through unchanged",
-                  DownloadBudget.EffectiveDownloadCap(3) == 3);
-            Check("M2 the search threshold equals the unchanged budget",
-                  DownloadBudget.SearchEarlyStopThreshold(3) == 3,
-                  "-> today's behaviour, so the fix is not a hidden quota increase");
-
-            // 0 means unlimited in F-M50 and must stay unlimited.
+            // The number the search receives is the ONE configured value, unchanged — so removing the
+            // second knob is not a hidden quota change for an existing install (default 3).
+            Check("M1 the search width IS the configured setting",
+                  DownloadBudget.SearchEarlyStopThreshold(3) == 3);
+            Check("M7 a deliberate value is passed through, never lowered",
+                  DownloadBudget.SearchEarlyStopThreshold(10) == 10);
             Check("M5 unlimited stays unlimited (F-M50)",
-                  DownloadBudget.EffectiveDownloadCap(0) == 0);
-            Check("M6 an unlimited budget disables the early stop (F-M95/F-M50)",
                   DownloadBudget.SearchEarlyStopThreshold(0) == 0,
-                  "-> 0 is the documented 'no early stop', not a threshold of zero");
+                  "-> 0 is the documented 'no cap', not a threshold of zero");
+            Check("M6 negative values are treated as 0, never as a threshold",
+                  DownloadBudget.SearchEarlyStopThreshold(-1) == 0);
 
-            // A deliberate budget is never lowered by a second setting — there is no second setting.
-            Check("M7 a budget of 10 stays 10",
-                  DownloadBudget.EffectiveDownloadCap(10) == 10);
-
-            // The formula is only half the fix: a correct helper that nobody calls leaves the
-            // behaviour unchanged. These are STRUCTURAL — they read the pipeline source and assert the
-            // numbers are wired in, so the literal cannot come back unnoticed.
+            // Both effects read the SAME setting. Asserted on the pipeline SOURCE, because a correct
+            // helper that nobody calls leaves the behaviour unchanged — and this is the drift that
+            // caused the original bug: the search was fed a literal while the walk read the setting.
             {
                 string srcPath = Path.Combine(AppContext.BaseDirectory, "DownloadPipeline.source.cs");
                 string src = File.Exists(srcPath) ? File.ReadAllText(srcPath) : "";
                 Check("M10 the pipeline source is available for the structural check", src.Length > 0,
                       "-> " + srcPath);
-                // The bug in one line: a bare ", 3," as the search threshold.
+
+                // Effect 1: the search. No literal, and both calls take the derived value.
                 Check("M11 no hard-coded search threshold remains in the pipeline",
                       !Regex.IsMatch(src, @"ct,\s*3,\s*hearingImpaired"),
-                      "-> the literal that ignored DownloadMaxCandidatesPerLanguage");
+                      "-> the literal that ignored the setting");
                 Check("M12 both search calls take the derived threshold",
                       Regex.Matches(src, @"ct,\s*earlyStop,\s*hearingImpaired").Count == 2,
                       "-> regular search and HI search");
-                Check("M13 the download loop compares against the derived cap",
-                      src.Contains("attempts >= downloadCap", StringComparison.Ordinal),
-                      "-> not against the raw setting");
-                // F-M319: the removed setting must not survive in the pipeline as a dead call.
-                Check("M14 the budget helper is called with ONE argument",
-                      !Regex.IsMatch(src, @"EffectiveDownloadCap\(\s*[^)]*,"),
-                      "-> a second argument would be the dead keepBest parameter again");
-            }
+                Check("M12b and it is derived from the ONE correction-attempts setting",
+                      src.Contains("SearchEarlyStopThreshold(\n                _config.DownloadQaRetryLimit)",
+                                   StringComparison.Ordinal),
+                      "-> a second setting would be the second knob again");
 
-            // The two numbers are one decision, not two: this is the drift that caused the bug.
-            foreach (int budget in new[] { 3, 2, 10, 0, 1 })
-            {
-                Check($"M9.{budget} search and download agree",
-                      DownloadBudget.SearchEarlyStopThreshold(budget)
-                          == DownloadBudget.EffectiveDownloadCap(budget));
+                // Effect 2: the walk. Its limit is that same setting, and the removed cap is gone.
+                Check("M13 the walk's limit is the correction-attempts setting",
+                      src.Contains("int walkLimit = Math.Max(0, _config.DownloadQaRetryLimit);",
+                                   StringComparison.Ordinal),
+                      "-> not a second cap");
+                Check("M13b the removed second cap is gone from the loop",
+                      !src.Contains("attempts >= downloadCap", StringComparison.Ordinal),
+                      "-> that cap fired first at equal values and hid the limit");
+                // Only FITS are counted (operator order): a gate rejection is a verdict on the
+                // candidate, not a pull the Auto-Sync worked on, and must not consume the limit.
+                Check("M13c the limit counts fits only, never gate rejections",
+                      src.Contains("if (walkLimit > 0 && refusalsThisRun >= walkLimit)",
+                                   StringComparison.Ordinal),
+                      "-> gate rejections must not spend the Auto-Sync's budget");
+
+                // The helper's signature: the removed keepBest parameter must not reappear.
+                Check("M14 the budget helper takes no second parameter",
+                      !Regex.IsMatch(src, @"SearchEarlyStopThreshold\(\s*[^)]*,"),
+                      "-> a second argument would be the dead keepBest parameter again");
             }
         }
 

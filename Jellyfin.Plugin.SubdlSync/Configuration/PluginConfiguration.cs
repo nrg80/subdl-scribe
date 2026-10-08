@@ -336,21 +336,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public UpdateInterval RefetchInterval { get; set; } = UpdateInterval.Weekly;
 
     /// <summary>
-    /// Gets or sets the max candidate downloads per (item, language) (F-M50).
-    /// Every downloaded candidate costs daily quota even when rejected afterwards
-    /// (runtime check) — this cap stops quota-burning candidate walks. 0 = unlimited.
-    /// Default: 3.
-    /// <para>
-    /// Two derived numbers come from this setting, both via <see cref="Pipeline.DownloadBudget"/>:
-    /// the loop's cap is raised to the keep-best count (F-M242) when that is higher — a budget
-    /// below it would make "keep X saves X files" unreachable — and the search's early-stop
-    /// threshold (F-M95) is this same effective value, so the search never fetches fewer
-    /// candidates than the loop may try, nor more than it keeps.
-    /// </para>
-    /// </summary>
-    public int DownloadMaxCandidatesPerLanguage { get; set; } = 3;
-
-    /// <summary>
     /// F-M60 (user decision 09.09.2026): max consecutive file-access/extraction
     /// failures per item (file not found, ffmpeg extraction failed) before the
     /// item is skipped as "file-missing" in both pipelines — instead of failing

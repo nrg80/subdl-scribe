@@ -16,12 +16,6 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 /// F-M95 / F-M50: the ONE place that turns the candidate setting into the number the search and the
 /// download loop use.
 /// <para>
-/// The search used to receive a hard-coded 3 while its own comment named
-/// <c>DownloadMaxCandidatesPerLanguage</c>, so raising the setting widened the download budget but not
-/// the search: the page walk still stopped after three candidates per language and the loop never saw a
-/// fourth.
-/// </para>
-/// <para>
 /// There was a SECOND parameter here, <c>keepBest</c> (F-M242), which raised both numbers to the
 /// "best subtitles to keep per language" count. Both the setting and that raise are GONE (operator
 /// order 08.10.2026): a language now receives exactly one corrected file, and the walk's stop is no
@@ -33,35 +27,30 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 public static class DownloadBudget
 {
     /// <summary>
-    /// F-M50: how many candidates may be downloaded per (item, language) before the language counts as
-    /// "not available".
+    /// F-M95 / F-M50 (operator order 08.10.2026): the ONE number the search width and the Auto-Sync
+    /// walk both use, derived from the single setting
+    /// "Auto-Sync attempts and max. download/search limit".
     /// <para>
-    /// <c>0</c> means unlimited.
+    /// <b>Two settings became one.</b> The search's per-language width and the walk's stop were two
+    /// knobs describing the same intent, and at their equal defaults the walk's cap was checked FIRST
+    /// and counted the same attempts — so <em>the cap always fired first and the correction budget
+    /// could never trigger</em>. Measured by replaying the loop: at 3/3 the cap stopped the walk in
+    /// every ordering, and the budget only ever won when the cap was raised above it, which was the
+    /// keep-best raise that went with F-M319.
+    /// </para>
+    /// <para>
+    /// The operator's rule is one setting with two effects: it decides <b>how many candidates per
+    /// language are searched</b> and <b>how many candidates the Auto-Sync may pull before it gives
+    /// up</b>.
+    /// </para>
+    /// <para>
+    /// There was a SECOND parameter here, <c>keepBest</c> (F-M242), which raised both numbers to the
+    /// "best subtitles to keep per language" count. Both the setting and that raise are GONE
+    /// (F-M319): a language now receives exactly one corrected file.
     /// </para>
     /// </summary>
-    /// <param name="configuredBudget">The configured download budget.</param>
-    /// <returns>The effective cap; 0 = unlimited.</returns>
-    public static int EffectiveDownloadCap(int configuredBudget)
-    {
-        if (configuredBudget <= 0)
-        {
-            return 0; // F-M50: 0 = unlimited
-        }
-
-        return configuredBudget;
-    }
-
-    /// <summary>
-    /// F-M95: the per-language early-stop threshold for the search page walk. <c>0</c> disables the
-    /// early stop entirely (F-M50's "unlimited").
-    /// <para>
-    /// Deliberately the same number as <see cref="EffectiveDownloadCap(int)"/>: fetching fewer
-    /// candidates than the loop is allowed to try would make the download cap unreachable, and fetching
-    /// more is quota spent on candidates the loop discards.
-    /// </para>
-    /// </summary>
-    /// <param name="configuredBudget">The configured download budget.</param>
-    /// <returns>The early-stop threshold; 0 = no early stop.</returns>
-    public static int SearchEarlyStopThreshold(int configuredBudget)
-        => EffectiveDownloadCap(configuredBudget);
+    /// <param name="correctionAttempts">The configured correction attempts.</param>
+    /// <returns>The search's per-language width; 0 = no early stop.</returns>
+    public static int SearchEarlyStopThreshold(int correctionAttempts)
+        => correctionAttempts <= 0 ? 0 : correctionAttempts; // F-M50: 0 = unlimited, stays 0
 }

@@ -1026,15 +1026,27 @@ public static class AutoSyncRun
             $"pipeline={settingGone} configType={fieldGone} gui={guiGone}");
         f += settingGone && fieldGone && guiGone ? 0 : 1;
 
-        // The budget helper lost its keepBest parameter with the setting: a parameter nothing can set
-        // is the same dead knob F-M242 was created to fix.
-        bool helperSimplified = src.Contains("DownloadBudget.EffectiveDownloadCap(\n                _config.DownloadMaxCandidatesPerLanguage);",
-                                             StringComparison.Ordinal)
-                                || src.Contains("DownloadBudget.EffectiveDownloadCap(_config.DownloadMaxCandidatesPerLanguage)",
-                                                StringComparison.Ordinal);
-        Check("the download budget is derived from ONE setting, not two", helperSimplified,
-            helperSimplified ? "EffectiveDownloadCap takes the budget alone" : "a dead keepBest parameter remains");
-        f += helperSimplified ? 0 : 1;
+        // Operator order 08.10.2026: "Aus 2 variables mach eine." The search width and the Auto-Sync
+        // walk's limit are the SAME setting now, and the second knob ("Max candidates per language")
+        // is gone from config, pipeline and page. Asserted as the PAIR, because either half alone
+        // leaves the drift: a removed knob whose number still sits in the loop is a hidden second
+        // variable, and a merged read without the removal leaves the setting able to contradict it.
+        bool capSettingGone = !src.Contains("DownloadMaxCandidatesPerLanguage", StringComparison.Ordinal);
+        bool capFieldGone = cfgProbe.GetType().GetProperty("DownloadMaxCandidatesPerLanguage") == null;
+        bool capGuiGone = !System.IO.File.Exists(guiPage)
+                          || !System.IO.File.ReadAllText(guiPage).Contains("DownloadMaxCandidatesPerLanguage", StringComparison.Ordinal);
+        Check("the second candidate setting is gone from config, pipeline AND the page",
+            capSettingGone && capFieldGone && capGuiGone,
+            $"pipeline={capSettingGone} configType={capFieldGone} gui={capGuiGone}");
+        f += capSettingGone && capFieldGone && capGuiGone ? 0 : 1;
+
+        bool oneSettingTwoEffects =
+            src.Contains("SearchEarlyStopThreshold(\n                _config.DownloadQaRetryLimit)", StringComparison.Ordinal)
+            && src.Contains("int walkLimit = Math.Max(0, _config.DownloadQaRetryLimit);", StringComparison.Ordinal);
+        Check("ONE setting drives BOTH the search width and the walk's limit",
+            oneSettingTwoEffects,
+            oneSettingTwoEffects ? "search and walk read the same value" : "the two effects drifted apart again");
+        f += oneSettingTwoEffects ? 0 : 1;
 
         // NEGATIVE CONTROL: put the old, configured stop back and require the check to go RED.
         string stopPlanted = src.Replace("if (correctedSaved >= 1)", "if (savedCount >= keepBest)",

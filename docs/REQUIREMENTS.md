@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.210.
+**Status:** Implementation — v12.1.12.211.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -283,7 +283,7 @@ The HI block of the download loop is guarded by the *effective* flag, not the ca
 
 **A removed setting must be removed at every layer** (config type, page, pipeline): a field left on the config type is a knob the next reader wires back up. Asserted in T131.
 
-**F-M95:** **The search's early stop is the download cap, derived — never a literal.** The page walk stops once every requested language has at least N candidates, where N is the configured download budget (F-M50); `0` disables the early stop. Until 02.10.2026 the threshold was hard-coded to 3, so raising "Max candidates per language" widened the download budget but never the search: the walk still stopped after three candidates per language and the loop never saw a fourth. **One setting, one number:** the helper that derives the threshold takes the budget alone (F-M319).
+**F-M95:** **The search's early stop is the one correction-attempts setting, derived — never a literal.** The page walk stops once every requested language has at least N candidates, where N is that setting (F-M50); `0` disables the early stop. Until 02.10.2026 the threshold was hard-coded to 3, so raising the setting widened the download side but never the search: the walk still stopped after three candidates per language and the loop never saw a fourth. Until 08.10.2026 there were two settings feeding it; **one setting, one number** (operator order: "Aus 2 variables mach eine") — the helper takes that value alone.
 
 **F-M241 [D]:** **Two searches, one per side of the hearing-impaired split.** The regular slot is filled from a `&hi=0` search and the HI slot from a `&hi=1` search; the HI search runs only while the switch is on, so a user who does not want HI pays one search exactly as before.
 
@@ -325,7 +325,7 @@ The download chain runs against each candidate in score order, before the file i
 
 **Two gates carry this, and both must stay.** The ladder's id-less branch returns before any search, and `ProcessItemAsync`'s own gate does the same for an item that arrives id-less *after* the ladder — the TMDb fetch needs a tmdb id to begin with, and a directed fire never runs the ladder. **Test: T142.**
 
-**F-M50 [D]:** **Download budget per (item, language):** max N candidate downloads before the language counts as "not available" (default 3, 0 = unlimited). It is the ONLY budget on the download side — the raise to a keep-best count went with that setting (F-M319) and the QA retry limit is the fit's own budget, not a second download budget (F-M318/F-M320). **Test: T98.**
+**F-M50 [D] (operator order 08.10.2026):** **ONE setting, TWO effects: how many candidates per language are searched, and how many the downloader may pull before it gives up** (page label: *Auto-Sync attempts and max. download/search limit*). The second setting ("Max candidates per language") is gone — the two knobs described one intent and drifted: the walk's cap was checked before the correction budget and counted the same attempts, so at equal defaults the cap always fired first and the budget could never trigger. With the Auto-Sync **on** the limit counts only **fits** the walk could not resolve, never gate rejections (F-M320). With the Auto-Sync **off** there is no fit and no verdict, so the walk pulls N candidates through the active quality gates and keeps them at 99, 98, 97 … `0` = no limit, in both modes. Fixed with it: the "correction hunt abandoned" break fired on the **first** candidate of every language whenever the Auto-Sync was off. **Test: T98.**
 
 **The same language verification runs here verbatim** (F-M15), on the downloaded bytes, with its own per-direction switch.
 
@@ -660,7 +660,7 @@ Both are existing code paths that every downloaded subtitle already travels. The
 
 **The order is a precondition, not a detail.** The repeat sits AFTER every other download gate (FPS, no-bytes, language verification, structure, min-cues, runtime). A candidate whose CONTENT fails a gate never reaches the fit, so a download spent on one would be spent on a file the plugin is about to discard — the walk is worth continuing only because everything admitted to the fit has already passed those gates. The order is asserted as a property (T131), so a later edit that moves the fit above the gates goes red instead of silently costing quota.
 
-**The interaction with `DownloadMaxCandidatesPerLanguage`.** That budget still caps the total fetches; the refusal budget is a second, independent stop. Whichever is reached first ends the walk, and each has its own log line naming how many candidates were left untried.
+**The interaction with the walk's candidate limit.** That limit still caps the total fetches, and the refusal budget is the fits' own budget; the limit counts only fits the worker could not resolve, never gate rejections (F-M50). Each has its own log line naming how many candidates were left untried.
 
 **Test: T131.**
 
@@ -1902,7 +1902,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T97:** A dry run leaves no stored verdict in either direction - the refetch stamp, the file-retry counter, the id-resolution budget, the registry upserts, the file-missing deletion and the cycle-queue removal are all held back, while the worker-run record is still written (F-M22, F-M287)
 
-**T98:** The download cap and the search's early-stop threshold are the SAME number, derived from the single setting: with `MaxCandidatesPerLanguage = 3` both are 3, with `2` both are 2, with `0` both stay unlimited. The helper that derives them takes the budget ALONE — asserted structurally as well, so the removed keep-best parameter cannot reappear as a second argument (F-M95/F-M50/F-M319).
+**T98:** The walk's candidate limit and the search's early-stop threshold are the SAME number, derived from the ONE correction-attempts setting (F-M50): with that setting at 3 both are 3, at 2 both are 2, at `0` both stay unlimited. The helper that derives the search's width takes that value ALONE — asserted structurally as well, so a removed second parameter cannot reappear as a second argument (F-M95/F-M50/F-M319).
 
 **T99:** The candidate walk's exits are reachable and each is the one that applies: it stops at the first CORRECTED file, and it stops when the download budget is spent. A budget that no setting can raise is asserted to be passed through unchanged, so a deliberate value is never silently widened (F-M319/F-M50).
 **T100:** A deferred direction shows its own stored cause under the Workers list (never a generic "rate limit"), that line sits below the quota box rather than inside it, the bars keep their 75 %/95 % colours at every fill level, and the line disappears once the scheduler holds no fire for that direction (F-M288)

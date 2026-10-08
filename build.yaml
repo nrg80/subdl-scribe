@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.210"
+version: "12.1.12.211"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,13 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.211: Two settings became one. "Auto-Sync attempts and max. download/search limit" now
+    decides how many candidates per language are SEARCHED and how many the downloader may pull
+    before giving up; "Max candidates per language" is gone. At the old default of 3 the cap always
+    stopped the walk first, so the correction attempts never took effect - the two numbers could
+    contradict each other silently. With Auto-Sync on, only candidates the fit could not resolve
+    count against the limit, not ones a quality gate refused. With Auto-Sync off the walk stopped
+    after the first candidate of each language; it now pulls the configured number.
   v12.1.12.210: The allowance gate now works like the download switch, at the switch's own two
     places, and the check moved out of the seeder. The seeder fills queues and does not decide
     policy: it takes a plain flag beside DownloadEnabled and asks the API nothing. The dispatcher

@@ -955,9 +955,9 @@ public sealed class SubdlApiClient
             result.AddRange(batch);
 
             // Early-stop once every requested language has enough candidates —
-            // the pipeline only keeps MaxCandidatesPerLanguage per language anyway, so
-            // further pages are pure API-quota waste (verified 11.09.2026: ~half of the
-            // 2015 daily requests were pagination over pages we discard).
+            // the Auto-Sync walk only pulls a fixed number per language anyway, so further
+            // pages are pure API-quota waste (verified 11.09.2026: ~half of the 2015 daily
+            // requests were pagination over pages we discard).
             if (maxCandidatesPerLanguage > 0 && !string.IsNullOrWhiteSpace(languages))
             {
                 var wanted = languages.Split(',').Select(l => l.Trim()).Where(l => l.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);

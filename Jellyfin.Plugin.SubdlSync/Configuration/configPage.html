@@ -243,9 +243,9 @@
                         </div>
 
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="DownloadQaRetryLimit">Correction attempts before the fit is given up (download)</label>
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadQaRetryLimit">Auto-Sync attempts and max. download/search limit</label>
                             <input id="DownloadQaRetryLimit" name="DownloadQaRetryLimit" type="number" is="emby-input" min="0" max="20" />
-                            <div class="fieldDescription">How many candidates may be downloaded while hunting for a correction the alignment can prove against the audio. Every refused candidate is kept untouched at index 99 downward. 0 = no cap. Default: 3.</div>
+                            <div class="fieldDescription">How many candidates per language are searched, and how many the downloader may pull for a file before it gives up. With Auto-Sync on, each candidate is fitted and the walk repeats until a correction proves itself. With Auto-Sync off, the candidates are pulled through the active quality gates and kept untouched at index 99 downward. 0 = no limit. Default: 3.</div>
                         </div>
 
 <h3>Skip filters (upload + download)</h3>
@@ -290,13 +290,7 @@
                             <div class="fieldDescription">Search only — no file is downloaded and nothing is saved. Reports, per language, the release it would pick with its score and its hearing-impaired flag; with more than one slot per language it also names the slots it would fill, and while the hearing-impaired switch is on the candidate from that pool. Costs one search per language set. Default: off.</div>
                         </div>
 
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="DownloadMaxCandidatesPerLanguage">Max candidates per language</label>
-                            <input id="DownloadMaxCandidatesPerLanguage" type="number" is="emby-input" min="0" max="20" />
-                            <div class="fieldDescription">Download attempts per file+language, and the search's early stop. 0 = unlimited. Default: 3.</div>
-                        </div>
-
-                        <h3>Download — Ranking</h3>
+<h3>Download — Ranking</h3>
 <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused">Score weights</label>
                             <div style="display:flex; gap:10px;">
@@ -948,8 +942,6 @@
                         document.querySelector('#DownloadScoreWeightToken').value = config.DownloadScoreWeightToken;
                         document.querySelector('#DownloadScoreWeightDownload').value = config.DownloadScoreWeightDownload;
                                                 document.querySelector('#DownloadOnArrival').checked = config.DownloadOnArrival;
-                        var dmcl = parseInt(config.DownloadMaxCandidatesPerLanguage);
-                        document.querySelector('#DownloadMaxCandidatesPerLanguage').value = isNaN(dmcl) ? 3 : dmcl;
                         document.querySelector('#UploadContinueAfterLimit').checked = config.UploadContinueAfterLimit;
                         document.querySelector('#DownloadContinueAfterLimit').checked = config.DownloadContinueAfterLimit;
                         document.querySelector('#DownloadDryRun').checked = config.DownloadDryRun;
@@ -1543,7 +1535,6 @@ workers.forEach(function (w) {
                         config.DownloadScoreWeightToken = parseInt(document.querySelector('#DownloadScoreWeightToken').value) || 10;
                         config.DownloadScoreWeightDownload = parseInt(document.querySelector('#DownloadScoreWeightDownload').value, 10); if (isNaN(config.DownloadScoreWeightDownload)) { config.DownloadScoreWeightDownload = 1; }
                                                 config.DownloadOnArrival = document.querySelector('#DownloadOnArrival').checked;
-                        config.DownloadMaxCandidatesPerLanguage = (function () { var v = parseInt(document.querySelector('#DownloadMaxCandidatesPerLanguage').value, 10); return isNaN(v) ? 3 : v; })();
                         config.DownloadContinueAfterLimit = document.querySelector('#DownloadContinueAfterLimit').checked;
                         config.DownloadDryRun = document.querySelector('#DownloadDryRun').checked;
                         // Union of both library views — a tick in either the
