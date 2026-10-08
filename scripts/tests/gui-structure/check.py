@@ -1053,11 +1053,22 @@ def main():
           "every service with a manual button must label its disabling option Manual")
     check("the postprocessing section carries a manual run button",
           'id="RunPostprocessNow"' in html)
-    # This one calls its own endpoint rather than the generic task starter: the endpoint is the job's
-    # dedicated manual route and it answers in words instead of a bare start confirmation.
-    check("RunPostprocessNow calls the postprocessing endpoint",
-          "ApiClient.getUrl('Plugins/SubdlSync/PostprocessUploads')" in html,
-          "postprocessing has its own manual route; use it")
+    # F-M295 (08.10.2026): the button starts the TASK, not the endpoint. The endpoint ran the work but
+    # wrote no status row, so the operator saw an empty list and reported the run as not having happened
+    # (prod log 23:20:22→25: the work WAS done). Only SubdlPostprocessTask writes the "Upl. Postproc."
+    # row, so the task route is the one that leaves evidence.
+    check("RunPostprocessNow starts the task, not the endpoint",
+          "subdlStartTask('SubDL Postprocessing')" in html
+          and "Plugins/SubdlSync/PostprocessUploads" not in html,
+          "the endpoint writes no status row; the button must reach the task that does")
+    # The string above is matched against the task's Name at RUNTIME (subdlStartTask looks the task up by
+    # name). A rename on either side would answer "Task not found" in the browser while every build and
+    # every other check stayed green — so the literals are tied together here.
+    post_task_src = read_source("ScheduledTasks", "SubdlPostprocessTask.cs")
+    if post_task_src:
+        check("the button's task name matches SubdlPostprocessTask.Name",
+              'Name => "SubDL Postprocessing"' in post_task_src,
+              "a name mismatch fails only in the browser, as 'Task not found'")
 
     # F-M291 (operator order 08.10.2026, "Nur die automatischen runs vom Postprocessing an den upload
     # binden, manuell darf immer"): the upload binding belongs to the AUTOMATIC path ONLY. This is a

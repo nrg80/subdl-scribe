@@ -332,10 +332,15 @@
                             <div class="fieldDescription">How often rejected uploads are resolved against /user/mySubtitles. Scheduled run is inhibited if upload is disabled; the button below always runs. Default: Daily.</div>
                             <!-- Operator order 08.10.2026: the third refresh job gets its manual button too
                                  ("Knopf für upload Postprocessing habe ich dann vergessen. Auch manual dann statt never").
-                                 It calls this job's OWN endpoint rather than the generic task starter, because
-                                 only that endpoint reports "upload switched off" in words (F-M291/T104) — the
-                                 scheduled-task route would answer with a start confirmation and then do nothing,
-                                 which is exactly the silence the endpoint exists to avoid. -->
+                                 It starts the TASK, like the two refresh buttons above — NOT the job's own
+                                 endpoint. Measured 08.10.2026: the endpoint ran the work correctly (prod log
+                                 23:20:22→25, two rejected uploads cleaned) but the status list stayed EMPTY,
+                                 because the "Upl. Postproc." row is written by SubdlPostprocessTask alone
+                                 (WorkerRuns.Start/Finish, lines 61/77) and the endpoint never wrote one. The
+                                 operator pressed the button, saw no entry, and concluded nothing had run. The
+                                 task route also reports honestly: it writes the row from the pipeline's own
+                                 last result, and it runs in the background instead of holding the click open.
+                                 The endpoint stays as an API-level trigger; nothing on this page uses it. -->
                             <button is="emby-button" type="button" class="raised button-submit" id="RunPostprocessNow" style="margin-top:0.6em;">▶ Run upload postprocessing now</button>
                         </div>
 
@@ -1382,22 +1387,9 @@ workers.forEach(function (w) {
                 // difference — these two are "SubDL Scribe — …", not "SubDL/TMDB — …".
                 document.querySelector('#RunDatabaseRefreshNow').addEventListener('click', function () { subdlStartTask('SubDL Scribe — Database Refresh'); });
                 document.querySelector('#RunOshashRefreshNow').addEventListener('click', function () { subdlStartTask('SubDL Scribe — OSHash Cache Refresh'); });
-                document.querySelector('#RunPostprocessNow').addEventListener('click', function () {
-                    Dashboard.showLoadingMsg();
-                    ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Plugins/SubdlSync/PostprocessUploads') }).then(function (r) {
-                        return r.json();
-                    }).then(function (res) {
-                        Dashboard.hideLoadingMsg();
-                        if (res && res.status === 'skipped') {
-                            Dashboard.alert('Postprocessing not run: ' + res.reason);
-                        } else {
-                            Dashboard.alert('Upload postprocessing finished.');
-                        }
-                    }, function () {
-                        Dashboard.hideLoadingMsg();
-                        Dashboard.alert('Could not run upload postprocessing.');
-                    });
-                });
+                // F-M295 (08.10.2026): the TASK, not the endpoint — only the task writes the status row.
+                // Name must match SubdlPostprocessTask.Name exactly; a mismatch answers "Task not found".
+                document.querySelector('#RunPostprocessNow').addEventListener('click', function () { subdlStartTask('SubDL Postprocessing'); });
                 document.querySelector('#StopAllNow').addEventListener('click', function () {
                     // NF-8: stop BOTH directions — one click, two marker files.
                     subdlStopTask('SubDL/TMDB — Subtitle Upload');
