@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.206",
-        "changelog": "v12.1.12.206: Same fixes as 12.1.12.205, with the assembly version corrected. 205 shipped a\n    DLL that still identified itself as 12.1.12.204, so Jellyfin installed the package while its\n    loader reported the old assembly and the version never took effect. The release script now\n    refuses a build whose AssemblyVersion and FileVersion disagree with the version.",
+        "version": "12.1.12.207",
+        "changelog": "v12.1.12.207: A worker row no longer reads \"nothing to do\" for a run that examined items and\n    refused them all. Live on prod: the upload looked at five files, rejected every one for a missing\n    id, and its row said nothing had happened. The row now names the skipped count too.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.206-dev/Jellyfin.Plugin.SubdlSync_12.1.12.206.zip",
-        "checksum": "b1c8c620c4db2098fb96968ab888aee3",
-        "timestamp": "2026-10-08T19:02:14Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.207-dev/Jellyfin.Plugin.SubdlSync_12.1.12.207.zip",
+        "checksum": "268ad133366b43c4e356a4efb2178fe8",
+        "timestamp": "2026-10-08T19:09:37Z"
       }
     ]
   }
