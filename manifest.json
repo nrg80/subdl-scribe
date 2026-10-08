@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.194",
-        "changelog": "v12.1.12.194: The statistics row is shorter now: \"Downloads: Auto-Synch\" instead of the long\n    sentence that restated the switch. A row in a table of counts names its counter.",
+        "version": "12.1.12.195",
+        "changelog": "v12.1.12.195: The auto-sync's light lives in the Workers list and nowhere else - the copy\n    under the download switch is gone. One readout, one place.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.194-dev/Jellyfin.Plugin.SubdlSync_12.1.12.194.zip",
-        "checksum": "81a084dc2fd9c6675aa404f1d9519cad",
-        "timestamp": "2026-10-08T13:14:47Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.195-dev/Jellyfin.Plugin.SubdlSync_12.1.12.195.zip",
+        "checksum": "b2649bf09eda1d4d7077440925764e0b",
+        "timestamp": "2026-10-08T13:17:16Z"
       }
     ]
   }
