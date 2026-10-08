@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.210",
-        "changelog": "v12.1.12.210: The allowance gate now works like the download switch, at the switch's own two\n    places, and the check moved out of the seeder. The seeder fills queues and does not decide\n    policy: it takes a plain flag beside DownloadEnabled and asks the API nothing. The dispatcher\n    probes once per cycle before the download seed - only when the cycle covers the download\n    direction - and a spent download OR search allowance then holds the queue back AND stops the\n    run, exactly as switching the direction off does. A read that fails is not a verdict.",
+        "version": "12.1.12.211",
+        "changelog": "v12.1.12.211: Two settings became one. \"Auto-Sync attempts and max. download/search limit\" now\n    decides how many candidates per language are SEARCHED and how many the downloader may pull\n    before giving up; \"Max candidates per language\" is gone. At the old default of 3 the cap always\n    stopped the walk first, so the correction attempts never took effect - the two numbers could\n    contradict each other silently. With Auto-Sync on, only candidates the fit could not resolve\n    count against the limit, not ones a quality gate refused. With Auto-Sync off the walk stopped\n    after the first candidate of each language; it now pulls the configured number.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.210-dev/Jellyfin.Plugin.SubdlSync_12.1.12.210.zip",
-        "checksum": "50c3f7478a8476c27f395c65e8269720",
-        "timestamp": "2026-10-08T20:02:16Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.211-dev/Jellyfin.Plugin.SubdlSync_12.1.12.211.zip",
+        "checksum": "034f76993563c2a9a296face6892c98b",
+        "timestamp": "2026-10-08T20:43:35Z"
       }
     ]
   }
