@@ -199,6 +199,13 @@ public sealed class WorkerRunRegistry
     public const string AutoSyncWorkerKey = "SubdlAutoSyncTask";
 
     /// <summary>
+    /// F-M323 (operator order 08.10.2026): the auto-sync's display name, in one place. The worker
+    /// type carries it too (<see cref="Qa.AutoSyncWorker.Name"/>); this constant is the registry's
+    /// copy so the row and the worker cannot be renamed apart.
+    /// </summary>
+    public const string Name = Qa.AutoSyncWorker.Name;
+
+    /// <summary>
     /// The status a worker reports for the cycle it took part in.
     /// <para>
     /// Colour criteria (user-approved 30.09.2026), one principle for every worker:

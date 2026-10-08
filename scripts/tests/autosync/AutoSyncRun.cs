@@ -272,25 +272,104 @@ public static class AutoSyncRun
                 measured, $"{src.Split("SyncMeasuredAsync(").Length - 1} occurrence(s), expected 3");
             f += measured ? 0 : 1;
 
-            // Exactly ONE raw call is correct: the measurement helper itself must call it. Zero
-            // would mean the helper is gone and nothing is measured; two or more would mean a
-            // second alignment path bypasses the stopwatch.
+            // F-M323 (operator order 08.10.2026): the RAW call lives in the WORKER now, not in the
+            // pipeline. The assertion follows it — and gets stronger on the way: the pipeline must
+            // contain NO raw call at all (a second fit path there would bypass the worker), and the
+            // worker must contain exactly one.
+            string worker = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Qa/AutoSyncWorker.cs";
             int raw = src.Split("SubtitleSync.SyncAsync(").Length - 1;
-            Check("exactly one raw call, inside the measuring helper",
-                raw == 1, $"{raw} raw call(s), expected 1 (the helper's own)");
-            f += raw == 1 ? 0 : 1;
+            Check("no raw fit call is left in the pipeline", raw == 0,
+                $"{raw} raw call(s) in the pipeline, expected 0 (they belong to the worker)");
+            f += raw == 0 ? 0 : 1;
+
+            if (System.IO.File.Exists(worker))
+            {
+                string wsrc = System.IO.File.ReadAllText(worker);
+                int rawWorker = wsrc.Split("SubtitleSync.SyncAsync(").Length - 1;
+                Check("the worker makes exactly one raw fit call, measured", rawWorker == 1,
+                    $"{rawWorker} raw call(s) in the worker, expected 1");
+                f += rawWorker == 1 ? 0 : 1;
+
+                // The stopwatch must WRAP the call: started before it and stopped after it, in a
+                // finally block so a cancelled fit still spends its time. Asserted as an ORDER, not
+                // as the presence of a stopwatch — a stopwatch started after the fit, or stopped
+                // before it, reports a number that means nothing. `Stopwatch.StartNew()` starts the
+                // watch itself, so that is the anchor, not a `sw.Start()` call.
+                int swStart = wsrc.IndexOf("Stopwatch.StartNew();", StringComparison.Ordinal);
+                int callAt = wsrc.IndexOf("SubtitleSync.SyncAsync(", StringComparison.Ordinal);
+                int swStop = wsrc.IndexOf("sw.Stop();", StringComparison.Ordinal);
+                bool wraps = swStart >= 0 && callAt > swStart && swStop > callAt;
+                Check("the worker measures around the fit, not around a write", wraps,
+                    wraps ? "stopwatch wraps the call" : "the stopwatch does not wrap the fit");
+                f += wraps ? 0 : 1;
+            }
+            else
+            {
+                Check("the worker source is reachable for the measurement check", false,
+                    "the worker file was not found — the measurement checks cannot run");
+                f += 1;
+            }
+
+            // F-M323 (operator order 08.10.2026): the CONTRACT. The worker is handed the subtitle
+            // and hands back a status and its output — the operator's own words. Asserted on the
+            // worker's public surface, because the contract is what the download may rely on: a
+            // worker that returns only a bool, or that writes files itself, breaks the cut between
+            // "owns the outcome" and "owns the files and the counters".
+            if (System.IO.File.Exists(worker))
+            {
+                string wsrc = System.IO.File.ReadAllText(worker);
+                bool takesSub = wsrc.Contains("string srtText,") && wsrc.Contains("string audioMap,");
+                Check("the worker is handed the subtitle and the audio map", takesSub,
+                    takesSub ? "inputs are the subtitle text and the audio map" : "the input surface moved");
+                f += takesSub ? 0 : 1;
+
+                bool returnsOutcome = wsrc.Contains("Task<Outcome> RunAsync(")
+                                      && wsrc.Contains("readonly record struct Outcome(");
+                Check("the worker returns a status and its output", returnsOutcome,
+                    returnsOutcome ? "Outcome(Status, Applied, Corrected, Reason, ElapsedMs …)"
+                                   : "the return type is not the outcome record");
+                f += returnsOutcome ? 0 : 1;
+
+                // Its own status vocabulary, with the two cases that decide the caller's next move.
+                bool ownStatus = wsrc.Contains("AlreadyGood") && wsrc.Contains("CandidateSpecific")
+                                 && wsrc.Contains("ElapsedMs");
+                Check("the outcome carries already-good, candidate-specific and the measured time", ownStatus,
+                    ownStatus ? "the caller does not re-derive any of the three" : "a decision is missing");
+                f += ownStatus ? 0 : 1;
+
+                // The OPERATOR'S CUT: the worker must not write files or count statistics. Checked as
+                // an absence, because "helpfully" filing the artifact here is exactly the drift this
+                // boundary exists to prevent — two writers for one directory.
+                bool doesNotWrite = !wsrc.Contains("File.WriteAllBytes")
+                                    && !wsrc.Contains("FittedToAudio")
+                                    && !wsrc.Contains("AlreadyGoodAsDownloaded++");
+                Check("the worker writes no file and keeps no counter", doesNotWrite,
+                    doesNotWrite ? "files and counters stay with the download run"
+                                 : "the worker took over writing or counting");
+                f += doesNotWrite ? 0 : 1;
+            }
+
+            // The download must no longer re-derive the two decisions from the reason string: that
+            // derivation is what the worker replaced. Asserted as an absence in the pipeline.
+            bool noDerivation = !src.Contains("Qa.SubtitleSync.RefusalIsCandidateSpecific(")
+                                && !src.Contains("Qa.SubtitleSync.RefusalMeansAlreadyGood(");
+            Check("the pipeline no longer re-derives the refusal itself", noDerivation,
+                noDerivation ? "the two decisions come from the worker's status"
+                             : "the pipeline still reads the reason string");
+            f += noDerivation ? 0 : 1;
 
             // The helper must BOOK the measured time, and book it with the limiter (not with a
-            // local variable that nothing reads). A helper that stops the stopwatch but never
-            // credits leaves the feature with no effect at all — the shape this check exists for,
-            // because every other assertion here still passes in that state.
-            bool books = src.Contains("_limiter.AddFitMs(ms);");
+            // local variable that nothing reads). A helper that receives the time but never credits
+            // it leaves the feature with no effect at all — the shape this check exists for,
+            // because every other assertion here still passes in that state. F-M323: the value now
+            // arrives on the outcome, so the booking reads `outcome.ElapsedMs`.
+            bool books = src.Contains("_limiter.AddFitMs(outcome.ElapsedMs);");
             Check("the helper credits the measured time to the limiter",
-                books, books ? "AddFitMs is called with the measured value" : "the measurement is never credited");
+                books, books ? "AddFitMs is called with the worker's measurement" : "the measurement is never credited");
             f += books ? 0 : 1;
 
             // And the run total must be kept, or the DONE line would print a permanent 0s.
-            bool total = src.Contains("summary.FitMsTotal += ms;");
+            bool total = src.Contains("summary.FitMsTotal += outcome.ElapsedMs;");
             Check("the helper keeps the run total for the log",
                 total, total ? "FitMsTotal is accumulated" : "FitMsTotal is never written");
             f += total ? 0 : 1;
@@ -989,7 +1068,7 @@ public static class AutoSyncRun
             "F-M43 Stufe 2 (structure, fixed part)",
             "Gate 1: minimum cue count",
             "F-M43 Stufe 2 (runtime)",
-            "Qa.SubtitleSync.Result syncResult = await SyncMeasuredAsync(",
+            "Qa.AutoSyncWorker.Outcome syncResult = await SyncMeasuredAsync(",
         };
 
         int fitAt = src.IndexOf(gates[^1], StringComparison.Ordinal);

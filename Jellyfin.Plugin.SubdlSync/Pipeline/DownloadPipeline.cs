@@ -129,6 +129,17 @@ public class DownloadRunSummary
     public int AlreadyGoodAsDownloaded { get; set; }
 
     /// <summary>
+    /// F-M323: auto-sync measurements that FAILED — no ffmpeg, undecodable audio, a fit that threw.
+    /// <para>
+    /// Its own counter because the worker's row needs its own evidence: the row used to go red on
+    /// <see cref="Failed"/>, which counts the DOWNLOAD's failures, so a network error on an
+    /// unrelated subtitle painted the alignment red. A refusal is NOT counted here — declining a
+    /// correction is an outcome, not a breakdown.
+    /// </para>
+    /// </summary>
+    public int AutoSyncFailed { get; set; }
+
+    /// <summary>
     /// F-M310: total milliseconds the run spent aligning subtitles to their audio. The counter
     /// above says HOW MANY were aligned; this says what the alignment COST, which is the number
     /// that tells whether the correction is a footnote or the bulk of a run's wall time.
@@ -281,29 +292,32 @@ public sealed class DownloadPipeline : IDisposable
     private int _dailyLimitWaits;
 
     /// <summary>
-    /// F-M310: runs the audio alignment and books the time it took. Measured around the CALL,
-    /// not around the write: a fit that ran and concluded "no measurable gain" cost just as much
-    /// as one that corrected the file, and the rhythm should not charge the run for either.
-    /// The measurement is in a finally block because a cancelled or failed fit also spent the
-    /// time; swallowing the cost would credit the run for work it did not do.
+    /// F-M310/F-M323: hands one subtitle to the auto-sync worker and books what it cost.
+    /// <para>
+    /// The MEASUREMENT moved into the worker (F-M323): it reports the time it spent, so a second
+    /// fit path cannot bypass the stopwatch by forgetting to wrap it. The ACCOUNTING stays here —
+    /// the limiter's credit and the run total are the run's books, not the worker's.
+    /// </para>
     /// </summary>
-    private async Task<Qa.SubtitleSync.Result> SyncMeasuredAsync(
+    /// <param name="mediaPath">Media file the subtitle belongs to.</param>
+    /// <param name="content">Decoded subtitle text.</param>
+    /// <param name="audioMap">ffmpeg map argument for the audio track.</param>
+    /// <param name="ffmpegForDrift">Resolved ffmpeg path, or null when the fit is off.</param>
+    /// <param name="summary">The run summary the credit is booked on.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The worker's outcome: a status and its output.</returns>
+    private async Task<Qa.AutoSyncWorker.Outcome> SyncMeasuredAsync(
         string mediaPath, string content, string audioMap, string? ffmpegForDrift,
         DownloadRunSummary summary, CancellationToken ct)
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        try
-        {
-            return await Qa.SubtitleSync.SyncAsync(mediaPath, content, audioMap, ffmpegForDrift, _logger, ct)
-                .ConfigureAwait(false);
-        }
-        finally
-        {
-            sw.Stop();
-            long ms = (long)sw.Elapsed.TotalMilliseconds;
-            _limiter.AddFitMs(ms);
-            summary.FitMsTotal += ms;
-        }
+        var outcome = await Qa.AutoSyncWorker.RunAsync(
+            mediaPath, content, audioMap, ffmpegForDrift, switchedOn: true, _logger, ct).ConfigureAwait(false);
+
+        // F-M310: the fit's time comes off the next transfer pause. Booked here because the limiter
+        // and the run total belong to the run — the worker only reports what it spent.
+        _limiter.AddFitMs(outcome.ElapsedMs);
+        summary.FitMsTotal += outcome.ElapsedMs;
+        return outcome;
     }
 
 
@@ -1896,7 +1910,10 @@ public sealed class DownloadPipeline : IDisposable
                 bool goodAsDownloaded = false;
                 if (_config.QaDownloadAutoSync)
                 {
-                    Qa.SubtitleSync.Result syncResult = await SyncMeasuredAsync(
+                    // F-M323 (operator order 08.10.2026): the auto-sync is a worker with a contract —
+                    // it is handed the subtitle and hands back a status and its output. The run keeps
+                    // the FILES (01/99) and the counters; the worker owns the outcome.
+                    Qa.AutoSyncWorker.Outcome syncResult = await SyncMeasuredAsync(
                         mediaPath, content, audioMap, ffmpegForDrift, summary, ct).ConfigureAwait(false);
 
                     if (syncResult.Applied)
@@ -1914,9 +1931,13 @@ public sealed class DownloadPipeline : IDisposable
                     }
                     else
                     {
+                        // F-M323: the WORKER states what its refusal was. Deriving it here from the
+                        // reason string is what the worker exists to end — the download reads a
+                        // status, and the rules live in one place.
+                        //
                         // F-M318: a verdict on the FILE keeps the hunt alive; a verdict on the audio
-                        // or the tooling does not — see RefusalIsCandidateSpecific.
-                        huntForCorrection = Qa.SubtitleSync.RefusalIsCandidateSpecific(syncResult.Reason);
+                        // or the tooling does not (the worker's CandidateSpecific).
+                        huntForCorrection = syncResult.CandidateSpecific;
                         huntReason = syncResult.Reason;
 
                         // F-M321 (operator order 08.10.2026): "no proven gain" is the deploy rule
@@ -1926,13 +1947,22 @@ public sealed class DownloadPipeline : IDisposable
                         // 02 …), advances the corrected counter, gets a byte-identical copy at 99, and
                         // ENDS the walk. Hunting on would spend the daily quota looking for a candidate
                         // that cannot beat a file the fit found nothing wrong with.
-                        goodAsDownloaded = Qa.SubtitleSync.RefusalMeansAlreadyGood(syncResult.Reason);
+                        goodAsDownloaded = syncResult.AlreadyGood;
                         if (goodAsDownloaded)
                         {
                             // F-M321: no hunt, and the file is counted as ALREADY GOOD rather than as
                             // an alignment — the statistics measure successful auto-syncs only (F-M322).
                             huntForCorrection = false;
                             summary.AlreadyGoodAsDownloaded++;
+                        }
+
+                        // F-M323: the worker's own failures are counted on the run so its ROW can go
+                        // red for a broken fit. Without this the row could only ever report the
+                        // DOWNLOAD's failures — a network error on an unrelated file painted the
+                        // alignment red, which is a claim the alignment never made.
+                        if (syncResult.IsBroken)
+                        {
+                            summary.AutoSyncFailed++;
                         }
 
                         // F-M309: ONE branch, not two. The "ffmpeg not available" case had its own
@@ -2261,7 +2291,7 @@ public sealed class DownloadPipeline : IDisposable
                                     // the main track — one implementation, both tracks, so the two
                                     // cannot drift apart. The HI pool is where the drift lives,
                                     // and the fit's own deploy rule decides per file.
-                                    Qa.SubtitleSync.Result hiSync = await SyncMeasuredAsync(
+                                    Qa.AutoSyncWorker.Outcome hiSync = await SyncMeasuredAsync(
                                         mediaPath, hiContent, audioMap, ffmpegForDrift, summary, ct).ConfigureAwait(false);
                                     if (hiSync.Applied)
                                     {
@@ -2283,7 +2313,11 @@ public sealed class DownloadPipeline : IDisposable
                                         // version and takes the upper range (01, 02 …), with its original
                                         // at 99. The HI pool is where the drift lives, so this is the
                                         // branch that fires most often.
-                                        hiGoodAsDownloaded = Qa.SubtitleSync.RefusalMeansAlreadyGood(hiSync.Reason);
+                                        hiGoodAsDownloaded = hiSync.AlreadyGood;
+                                        if (hiSync.IsBroken)
+                                        {
+                                            summary.AutoSyncFailed++;
+                                        }
 
                                         if (_config.LogMode >= LogLevelMode.Verbose)
                                         {

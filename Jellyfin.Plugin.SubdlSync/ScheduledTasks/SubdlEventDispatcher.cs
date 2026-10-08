@@ -1119,7 +1119,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             runs.Finish(
                 Registry.WorkerRunRegistry.AutoSyncWorkerKey,
-                "Auto-Sync",
+                Registry.WorkerRunRegistry.Name,
                 Registry.WorkerRunRegistry.Outcome.Skipped,
                 "dry run — nothing aligned",
                 dryRun: true);
@@ -1133,7 +1133,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             runs.Finish(
                 Registry.WorkerRunRegistry.AutoSyncWorkerKey,
-                "Auto-Sync",
+                Registry.WorkerRunRegistry.Name,
                 Registry.WorkerRunRegistry.Outcome.Skipped,
                 "alignment switched off");
             return;
@@ -1144,24 +1144,27 @@ public sealed class SubdlEventDispatcher : IDisposable
             string detail = aligned > 0
                 ? $"{aligned} aligned, {alreadyGood} already in sync ({downSummary.FitMsTotal / 1000.0:0.#}s)"
                 : $"{alreadyGood} already in sync — nothing to correct";
-            runs.Finish(Registry.WorkerRunRegistry.AutoSyncWorkerKey, "Auto-Sync", Registry.WorkerRunRegistry.Outcome.Ok, detail);
+            runs.Finish(Registry.WorkerRunRegistry.AutoSyncWorkerKey, Registry.WorkerRunRegistry.Name, Registry.WorkerRunRegistry.Outcome.Ok, detail);
             return;
         }
 
-        // Nothing measured, and the run FAILED on top of it: that is broken, not idle.
-        if (downSummary.Failed > 0)
+        // F-M323: the row goes red for ITS OWN breakdown only. It used to read downSummary.Failed —
+        // the DOWNLOAD's failure count — so an unrelated network error painted the alignment red,
+        // a claim the alignment never made. Refusals and already-good files are outcomes, not
+        // breakdowns, so neither reaches this branch.
+        if (downSummary.AutoSyncFailed > 0)
         {
             runs.Finish(
                 Registry.WorkerRunRegistry.AutoSyncWorkerKey,
-                "Auto-Sync",
+                Registry.WorkerRunRegistry.Name,
                 Registry.WorkerRunRegistry.Outcome.Failed,
-                $"{downSummary.Failed} file(s) failed, nothing aligned");
+                $"{downSummary.AutoSyncFailed} measurement(s) failed, nothing aligned");
             return;
         }
 
         runs.Finish(
             Registry.WorkerRunRegistry.AutoSyncWorkerKey,
-            "Auto-Sync",
+            Registry.WorkerRunRegistry.Name,
             Registry.WorkerRunRegistry.Outcome.Skipped,
             "nothing to align this run");
     }

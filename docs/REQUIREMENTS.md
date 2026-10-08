@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.199.
+**Status:** Implementation — v12.1.12.200.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -20,10 +20,10 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 38 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 39 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 6 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
-  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 15 requirements
+  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 16 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 13 requirements
 - [6. Database Refresh](#6-database-refresh) — 7 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -694,6 +694,24 @@ Both are existing code paths that every downloaded subtitle already travels. The
 **The postprocessing row is named for its direction:** `Upl. Postproc.` — it is the upload direction's work, and the bare `Postproc.` left that unsaid.
 
 **Test: T134.**
+
+**F-M323 [D] (operator order 08.10.2026):** **The auto-sync is a WORKER of its own — it is handed the subtitle and hands back a status and its output.**
+
+**The contract, in the operator's words:** *"Bekommt dann das sub übergeben und gibt status und output zurück"*, and the cut was confirmed explicitly: the worker returns the corrected text and a status, while the **download run keeps writing the files and counting**. The operator's reason for promoting it: *"Ich denke der autosync ist groß genug das der als eigener worker gelten kann."*
+
+**What it is.** `Qa/AutoSyncWorker.cs`, one entry point for both tracks (main and hearing-impaired — F-M307's symmetry kept). It owns the per-FILE outcome, and the caller reads a status instead of re-deriving the rules from a reason string. Before this the outcome was derived from a run summary three files away: the download counted a file as already good, and the dispatcher later guessed the worker's colour from that count.
+
+**The input.** The subtitle arrives as **decoded TEXT**, not as a file reference, because the fit needs the cues as numbers and the correction leaves as text the download writes. The audio arrives as a **file reference plus a stream map** (`mediaPath` + `audioMap`, e.g. `0:a:2`): ffmpeg decodes the track straight out of the media file, so no audio is extracted or cached.
+
+**The output.** `Outcome(Status, Applied, Corrected, Reason, ElapsedMs, AlreadyGood, CandidateSpecific)`. `Corrected` is text — the worker writes NO file, files no slot and keeps NO counter, and that is asserted as an absence: filing itself into 01/99 would be two writers for one directory, and the count of what was really MOVED (F-M322) is the run's number.
+
+**Six per-file statuses**, distinct from the per-RUN vocabulary of F-M268: `ok` (moved), `already-good` (declined, the file as downloaded is best — F-M321), `disabled` (switch off), `refused-audio` (nothing about the file — F-M318), `refused-file` (about this file, so another candidate may align), `failed` (could not measure at all).
+
+**The measurement came along (F-M310).** The stopwatch wraps the fit inside the worker and `ElapsedMs` is reported, so a second fit path cannot bypass the measurement by forgetting to wrap it. The ACCOUNTING stays with the run — the limiter's credit and the run total are the run's books.
+
+**The row goes red for its OWN breakdown only.** `DownloadRunSummary.AutoSyncFailed` counts fit measurements that failed; the row used to read the download's `Failed`, so a network error on an unrelated subtitle painted the alignment red — a claim the alignment never made. A refusal is an outcome, not a breakdown, and is never counted here.
+
+**Test: T135.** See F-M307, F-M310, F-M318, F-M321, F-M322.
 
 **F-M307 [D] (development, 07.10.2026):** **The offset is a piecewise-constant function of time, fitted by exact dynamic programming. Supersedes the recursive Bayes-factor gate (F-M295) and the staircase applied from gate boundaries (F-M300).**
 
@@ -1822,6 +1840,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T133:** A file the fit finds nothing wrong with is written as the best version: it takes the corrected range, advances the corrected counter, is copied into the reserved block with the SAME bytes, and ends the walk. Asserted on the REAL predicate, driven with the real refusal strings — the genuine `no proven gain` text answers true, while a shift beyond the limit, too few cues, a first cue that would go negative, a tooling verdict (`ffmpeg not available`) and `null` all answer false, because the predicate must not let a file that is actually WRONG end the walk. The pipeline side is asserted on its wiring: `alignedForNaming` includes the already-good case, the hunt is turned off for it, the HI branch carries the same rule, and both reserved copies reuse the written array (which is what makes the two files identical rather than merely similar). A NEGATIVE CONTROL plants the old routing back — an already-good file sent to the reserved block — and requires the check to go RED. (F-M321)
 
 **T134:** The auto-sync has its own worker row and its own light, and the statistics count only alignments that happened. Asserted on the SOURCE of all three carriers, because every failure here is silent: a light wired to an unknown worker reads "never" forever, a second readout re-appears without breaking the render, and a switch whose sentence was left on the old wording still renders. The check proves the worker is registered in `WorkerRunRegistry` with its own key and name, that NO auto-sync markup and NO second reader remain under the download switch, that the statistics row is named for the auto-sync, and that the setting's label carries the new wording while the old one is gone. The counter rule is asserted as a positive/negative PAIR on the pipeline: the already-good branch must bump `AlreadyGoodAsDownloaded` and must NOT contain `FittedToAudio++`, so a file that needed no correction cannot be reported as an alignment. `Upl. Postproc.` is asserted to have replaced the bare `Postproc.` (F-M322)
+
+**T135:** The auto-sync is a worker with a contract — subtitle in, status and output back — and the download run keeps the files and the counters. Asserted on the worker's public surface and on the pipeline, because every failure here is silent: a worker reduced to a bool still returns, a second fit path in the pipeline still works, and a worker that files its own artifact still aligns. The check proves the inputs are the subtitle text and the audio map, that the return type is the outcome record carrying already-good, candidate-specific and the measured time, that the RAW fit call sits in the worker exactly once and in the pipeline not at all, that the stopwatch WRAPS the fit (asserted as an order — started before the call, stopped after it), and that the worker writes no file and keeps no counter. The pipeline must no longer re-derive the two refusal decisions from the reason string; that derivation is what the worker replaced. The run-side booking is asserted too: the limiter credit and the run total read the worker's `ElapsedMs`, so the measurement cannot be dropped between the two. Four failure modes planted (a raw call left in the pipeline, the re-derivation restored, the stopwatch unwrapped, the worker counting), each confirmed RED (F-M323)
 
 **T105:** With a deferred fire pending, the direction's worker row is painted yellow (`defer`) even when its last run ended `ok`, and it returns to green once the fire is consumed; a red, grey or running row is left untouched, and the stored outcome underneath is unchanged. The deferral line under the Workers list follows the opposite gate — it appears only while the direction is stopped — so a direction that has started running again shows a yellow lamp and no line (F-M294, F-M288)
 
