@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.203",
-        "changelog": "v12.1.12.203: A run that uploaded subtitles is no longer marked failed afterwards. The status row\n    for the audio alignment was written on the upload path too, where there is no download to report,\n    so every upload run threw and both the Download and Upload lights turned red although both had\n    finished green. The row is skipped when there is no download. Also: a failed unpack during a\n    deploy no longer leaves a half-installed plugin.",
+        "version": "12.1.12.204",
+        "changelog": "v12.1.12.204: A library scan is ~50x faster. The store committed once per ROW — and a commit is a\n    disk sync — so a pass over prod's library issued 9 644 writes at 45 ms each and ran eight minutes\n    while queueing nothing. Writes now accumulate and commit in batches, and observing an embedded\n    track no longer restamps its parent media row once per track. Same workload: 4 800 writes in\n    2 846 ms instead of 138 650 ms.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.203-dev/Jellyfin.Plugin.SubdlSync_12.1.12.203.zip",
-        "checksum": "4f046a62114d6d9bce425ee12b6038b6",
-        "timestamp": "2026-10-08T17:31:49Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.204-dev/Jellyfin.Plugin.SubdlSync_12.1.12.204.zip",
+        "checksum": "fbc3bf8b23338e689cc045ef642fe529",
+        "timestamp": "2026-10-08T18:31:31Z"
       }
     ]
   }
