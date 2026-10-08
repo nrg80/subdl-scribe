@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.213",
-        "changelog": "v12.1.12.213: Upload postprocessing joins the other two jobs with a manual start button under its\n    description, and its disabling option is now labelled \"Manual\" instead of \"Never\" - the stored\n    value is unchanged, so an existing setting keeps meaning what it meant. Its button calls the job's\n    own endpoint rather than the generic task starter, so a press with the upload direction switched\n    off says so instead of looking like a finished run.",
+        "version": "12.1.12.214",
+        "changelog": "v12.1.12.214: The upload binding on postprocessing now applies to the scheduled run only - a manual\n    run always works, with the upload direction on or off. The two gates that refused a manual trigger\n    are gone; the schedule itself is still held back while upload is disabled, and the page says so.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.213-dev/Jellyfin.Plugin.SubdlSync_12.1.12.213.zip",
-        "checksum": "ce58dd214063a6347bc09b53fac1f78f",
-        "timestamp": "2026-10-08T21:07:28Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.214-dev/Jellyfin.Plugin.SubdlSync_12.1.12.214.zip",
+        "checksum": "cf251c3a70ce38490647b2da7ea399f6",
+        "timestamp": "2026-10-08T21:13:46Z"
       }
     ]
   }
