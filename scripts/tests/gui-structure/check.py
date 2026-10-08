@@ -1045,10 +1045,22 @@ def main():
         check(f"{cfg_id} keeps the stored VALUE Never",
               f'<option value="Never">{expected}</option>' in blk and '<option value="Manual"' not in blk,
               "renaming the value would reset an existing configuration")
-    # ...and the service WITHOUT a button keeps Never, which is the other half of the rule.
-    check("postprocessing keeps Never (no manual button exists for it)",
-          '<option value="Never">Never</option>' in html,
-          "offering Manual there would promise a button that does not exist")
+    # The third job joined them (operator order 08.10.2026: "Knopf für upload Postprocessing habe ich
+    # dann vergessen. Auch manual dann statt never") - so all three carry a button AND the Manual label,
+    # and no service on this page offers Manual without a way to trigger it.
+    check("postprocessing offers Manual (F-M210a)",
+          '<option value="Never">Manual — no scheduled run, use the button below</option>' in html,
+          "every service with a manual button must label its disabling option Manual")
+    check("the postprocessing section carries a manual run button",
+          'id="RunPostprocessNow"' in html)
+    # This one calls its own endpoint, NOT the task starter — the endpoint is what reports "upload
+    # switched off" (F-M291/T104), while the task route would confirm a start and do nothing.
+    check("RunPostprocessNow calls the postprocessing endpoint",
+          "ApiClient.getUrl('Plugins/SubdlSync/PostprocessUploads')" in html,
+          "the generic task starter would answer a start and then silently do nothing")
+    check("RunPostprocessNow surfaces the 'skipped' answer instead of claiming success",
+          "res.status === 'skipped'" in html and "res.reason" in html,
+          "a refusal must be spoken, not reported as a finished run")
 
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:

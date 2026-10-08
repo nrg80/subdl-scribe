@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.212"
+version: "12.1.12.213"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,11 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.213: Upload postprocessing joins the other two jobs with a manual start button under its
+    description, and its disabling option is now labelled "Manual" instead of "Never" - the stored
+    value is unchanged, so an existing setting keeps meaning what it meant. Its button calls the job's
+    own endpoint rather than the generic task starter, so a press with the upload direction switched
+    off says so instead of looking like a finished run.
   v12.1.12.212: The id-resolution give-up is gone. An item whose id could not be resolved used to be
     retired after three failed attempts, which meant the ladder never ran again for it; now the next
     run tries again, and the setting with its field is gone. The database refresh and the OSHash
