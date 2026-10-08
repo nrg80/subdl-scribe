@@ -1119,6 +1119,52 @@ def main():
               "mediaRoots" in _ref and "RootsUsable(mediaRoots)" in _ref,
               "without the root gate an unmounted volume would delete live media state")
 
+    # F-M333 (operator order 08.10.2026): "Only missing languages" gets a real second mode. ON is
+    # unchanged (sidecar counts, embedded counts); OFF means ONLY our own recorded download closes a
+    # pair, so every target language is fetched once even when the file already carries it — and the
+    # fetched file must not overwrite the one already there.
+    #
+    # The label lost its parenthetical: the switch no longer describes "embedded count as present",
+    # because with it OFF the embedded track is exactly what stops counting.
+    check("the switch label drops the embedded parenthetical",
+          "<span>Only missing languages</span>" in html
+          and "embedded count as present" not in html,
+          "the old suffix named the ON behaviour and contradicted the OFF one")
+    _cov = read_source("Registry", "SubtitleCoverage.cs")
+    if _cov:
+        check("coverage has a mode that reads ONLY our own downloads",
+              "onlyOwnDownloads" in _cov and "Data.SubtitleStatus.Downloaded" in _cov,
+              "with the switch off, sidecars and embedded tracks must not close a pair")
+        # `str.index` RAISES where the substring is missing, so the first version of this check
+        # traced back instead of reporting — measured: renaming the mode made the suite die with a
+        # ValueError and NO named failure, which reads like a broken harness rather than a defect.
+        # Find once, assert non-negative, compare only then.
+        _mode_at = _cov.find("if (onlyOwnDownloads)")
+        _file_evidence_at = _cov.find("SidecarNaming.List(mediaPath)")
+        check("the own-download mode RETURNS before the other evidence is collected",
+              _mode_at >= 0 and _file_evidence_at >= 0 and _mode_at < _file_evidence_at,
+              "collecting the file's own evidence first would let it close a pair again"
+              if _mode_at >= 0 and _file_evidence_at >= 0
+              else "the mode block or the file-evidence reader was not found at all")
+    _pipe = read_source("Pipeline", "DownloadPipeline.cs")
+    _seed = read_source("ScheduledTasks", "SubdlSeeder.cs")
+    _ref2 = read_source("ScheduledTasks", "SubdlDatabaseRefreshTask.cs")
+    if _pipe and _seed and _ref2:
+        check("the pipeline passes the switch's mode to the shared reader",
+              _pipe.count("onlyOwnDownloads: !_config.DownloadOnlyMissing") == 2,
+              "a caller that ignores the switch would keep deciding by the old rule")
+        check("the seeder passes the switch's mode to the shared reader",
+              "onlyOwnDownloads: !onlyMissing" in _seed,
+              "the queue gate and the pipeline must answer alike")
+        check("the refresh passes the switch's mode too",
+              "onlyOwnDownloads: Plugin.Instance?.Configuration.DownloadOnlyMissing != true" in _ref2,
+              "a third answer would make the readout contradict the queue")
+        # The overwrite guard: with the switch off the same language IS fetched over a file that is
+        # already there, and the writer moves with overwrite:true.
+        check("the download slot is planned against the files on disk",
+              "PlanTarget(mediaPath, lang, effectiveHi, namesHere)" in _pipe,
+              "a per-run counter would hand out .01 again and overwrite the existing subtitle")
+
     check("the postprocessing section carries a manual run button",
           'id="RunPostprocessNow"' in html)
     # F-M295 (08.10.2026): the button starts the TASK, not the endpoint. The endpoint ran the work but

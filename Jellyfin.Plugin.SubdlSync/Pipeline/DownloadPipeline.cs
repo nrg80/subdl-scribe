@@ -849,7 +849,9 @@ public sealed class DownloadPipeline : IDisposable
         // were always the same question, and with the mark deleted there is only one of them left.
         var required = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef
             .Required(TargetLanguages, _config.DownloadHearingImpaired);
-        var openPairs = Registry.OpenPairs(mediaPath, required, EmbeddedPresentLanguagesOf(item));
+        var openPairs = Registry.OpenPairs(
+            mediaPath, required, EmbeddedPresentLanguagesOf(item),
+            onlyOwnDownloads: !_config.DownloadOnlyMissing);
 
         // F-M320 (operator order 08.10.2026): a gate rejection no longer closes a pair. The QA retry
         // limit is the FIT's budget (F-M318) — it says how often another candidate may be fetched
@@ -1132,7 +1134,9 @@ public sealed class DownloadPipeline : IDisposable
         // SubDL serves the two sides from separate, non-overlapping pools (F-M241), so they must be
         // fed separately here: `regularMissing` drives `&hi=0`, `variantMissing` drives `&hi=1`.
         var requiredPairs = RequiredPairs(targets);
-        var openPairsNow = Registry.OpenPairs(mediaPath, requiredPairs, EmbeddedPresentLanguagesOf(item));
+        var openPairsNow = Registry.OpenPairs(
+            mediaPath, requiredPairs, EmbeddedPresentLanguagesOf(item),
+            onlyOwnDownloads: !_config.DownloadOnlyMissing);
 
         var regularMissing = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleCoverage
             .RegularLanguages(openPairsNow);
@@ -1910,7 +1914,20 @@ public sealed class DownloadPipeline : IDisposable
                     string? targetPath;
                     if (alignedForNaming)
                     {
-                        targetPath = SidecarNaming.Build(mediaPath, lang, effectiveHi, correctedSlotCount + 1);
+                        // F-M333 (operator order 08.10.2026: "Doppeldatei vernünftig nummerieren"): the
+                        // slot is planned against the files ACTUALLY in the directory, not counted from
+                        // zero per run. The counter alone was correct while only MISSING languages were
+                        // fetched — nothing could collide. With "Only missing languages" off the same
+                        // language IS fetched over a file that is already there, and a per-run counter
+                        // would hand out `.01` again: `AtomicWriteAsync` moves with `overwrite: true`,
+                        // so the fetch the operator asked for would silently DESTROY the subtitle it
+                        // was meant to sit beside. `PlanTarget` is the shared planner (F-M315) and
+                        // returns the first free corrected slot; it never returns one above
+                        // `CorrectedSlotMax`, so the reserved originals (90–99) stay untouched.
+                        var namesHere = SidecarNamesInDirectory(Path.GetDirectoryName(mediaPath) ?? ".");
+                        targetPath = namesHere == null
+                            ? SidecarNaming.Build(mediaPath, lang, effectiveHi, correctedSlotCount + 1)
+                            : SidecarNaming.PlanTarget(mediaPath, lang, effectiveHi, namesHere);
                     }
                     else
                     {
@@ -2556,78 +2573,7 @@ public sealed class DownloadPipeline : IDisposable
         }
     }
 
-    private List<string> MissingLanguages(BaseItem item, string mediaPath, List<string> targets)
-    {
-        // F-M239: the shared reader (Registry.SidecarNaming) — one directory listing, one set of
-        // name rules. See SidecarNaming for why three copies of this parse had to go: the copies
-        // disagreed about the "sdh" marker and the disagreement silently invalidated download marks.
-        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (_, lang, _, forced) in Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.List(mediaPath))
-        {
-            if (lang == null)
-            {
-                // A sidecar whose NAME carries no language and whose text has not been
-                // detected yet proves nothing about coverage. It is not added, so the
-                // language still counts as missing and is fetched if it is configured.
-                continue;
-            }
 
-            // F-M284: a forced subtitle is not the film's dialogue (F-M246), so it never proves
-            // its language. This is the ONE place the rule lives now; it used to be re-derived in
-            // five call sites from Jellyfin's stream flag.
-            if (forced)
-            {
-                continue;
-            }
-
-            present.Add(lang);
-        }
-
-        // Embedded streams (when DownloadOnlyMissing is on, embedded languages count as present).
-        // F-M246: a FORCED track does not make its language present — it carries only the lines of
-        // foreign-language scenes, so counting it left the language without a real subtitle. The
-        // rule lives in SidecarNaming.EmbeddedPresentLanguages and is shared with the seeder.
-        if (_config.DownloadOnlyMissing)
-        {
-            // F-M263: what the SEEDER resolved counts as present too, and it is read from the
-            // REGISTRY. It used to come from this pipeline's own gate call, which held the result in
-            // memory — correct in effect, but it made the pipeline rewrite media files with no hash
-            // pair and outside any dry run. The seeder has written the same facts under this file's
-            // hash, so the record is the authority now, and it is the CURRENT one: Jellyfin caches
-            // its stream list, so a container corrected earlier in this cycle still reports its OLD
-            // tag through the call below.
-            foreach (var lang in Registry.EmbeddedLanguages(mediaPath))
-            {
-                present.Add(lang);
-            }
-
-            foreach (var lang in Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
-                         .EmbeddedPresentLanguages(_mediaSourceManager.GetMediaStreams(item.Id)))
-            {
-                present.Add(lang);
-            }
-        }
-
-        return targets.Where(t => !present.Contains(t)).ToList();
-    }
-
-    /// <summary>
-    /// F-M282: the language-level embedded evidence this run may count as coverage.
-    /// <para>
-    /// Deliberately language-level and deliberately optional: it is Jellyfin's stream list, which
-    /// says a LANGUAGE has a track but says nothing about which variant, so it can prove the regular
-    /// pair and never the variant pair. The registry's own embedded ROWS are consulted separately by
-    /// the coverage reader and they DO carry the flag — that is the difference between the cached
-    /// stream snapshot and a stored fact (F-M263).
-    /// </para>
-    /// <para>
-    /// Empty while <c>DownloadOnlyMissing</c> is off, which is the configuration saying embedded
-    /// tracks are not coverage for this install. F-M246: a FORCED track does not make its language
-    /// present — it carries only the lines of foreign-language scenes.
-    /// </para>
-    /// </summary>
-    /// <param name="item">Jellyfin item.</param>
-    /// <returns>Languages with a usable embedded track, or empty.</returns>
     private IEnumerable<string> EmbeddedPresentLanguagesOf(BaseItem item)
     {
         if (!_config.DownloadOnlyMissing)

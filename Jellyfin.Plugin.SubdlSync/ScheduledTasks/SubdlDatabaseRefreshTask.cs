@@ -651,7 +651,12 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             // embedded rows the registry holds are part of the evidence, which is what makes a
             // subtitle inside the container count — and a VARIANT inside the container count as the
             // variant, which the old language-keyed check could not express (F-M234, F-M282).
-            var openPairs = registry.OpenPairs(media.Path!, required);
+            // F-M333: same mode as the seeder and the pipeline, or the refresh would report a file as
+            // open while the queue considers it done — the two must answer alike (the reason
+            // SubtitleCoverage exists as the ONE reader).
+            var openPairs = registry.OpenPairs(
+                media.Path!, required,
+                onlyOwnDownloads: Plugin.Instance?.Configuration.DownloadOnlyMissing != true);
             if (openPairs.Count == 0)
             {
                 continue;

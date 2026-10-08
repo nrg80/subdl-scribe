@@ -80,13 +80,45 @@ public sealed class SubtitleCoverage
     /// <param name="registry">Content registry (may be null in host-free tests).</param>
     /// <param name="mediaPath">Path to the media file.</param>
     /// <param name="embeddedLanguages">Language-level embedded evidence the caller holds, or null.</param>
+    /// <param name="onlyOwnDownloads">
+    /// F-M333 (operator order 08.10.2026): the "Only missing languages" switch OFF. When true, the
+    /// ONLY evidence that closes a pair is OUR OWN recorded download for it — a sidecar that came
+    /// with the library, an embedded track, and Jellyfin's stream list all stop counting. The pair
+    /// therefore stays open until this plugin has fetched the language once, even when the file
+    /// already carries it.
+    /// </param>
     /// <returns>The coverage.</returns>
     public static SubtitleCoverage Read(
         ContentHashRegistry? registry,
         string? mediaPath,
-        IEnumerable<string>? embeddedLanguages = null)
+        IEnumerable<string>? embeddedLanguages = null,
+        bool onlyOwnDownloads = false)
     {
         var covered = new HashSet<SubtitleRef>();
+
+        // 0. The switch-off mode, and it RETURN here on purpose: every source below counts evidence
+        //    the file happens to have, and with the switch off that evidence is exactly what must not
+        //    close a pair. "Once per language" is measured against OUR OWN record, so the rule has to
+        //    read that record and nothing else. A `downloaded` row is the record of a fetch this
+        //    plugin performed; the refresh forgets it when the file it names is gone (F-M234), which
+        //    is what keeps a deleted subtitle coming back on the next run instead of staying closed
+        //    forever.
+        if (onlyOwnDownloads)
+        {
+            string? ownHash = registry?.GetMediaHash(mediaPath);
+            if (registry != null && !string.IsNullOrEmpty(ownHash))
+            {
+                foreach (var row in registry.GetSidecars(ownHash))
+                {
+                    if (row.Status == Data.SubtitleStatus.Downloaded)
+                    {
+                        Add(covered, row.Language, row.HearingImpaired, row.Forced);
+                    }
+                }
+            }
+
+            return new SubtitleCoverage(covered);
+        }
 
         // 1. The files beside the media file. Each name states its own data — including forced,
         //    which is why the listing carries all three parts (F-M284).

@@ -1367,9 +1367,10 @@ public sealed class ContentHashRegistry : IDisposable
     public List<SubtitleRef> OpenPairs(
         string? mediaPath,
         IEnumerable<SubtitleRef> required,
-        IEnumerable<string>? embeddedLanguages = null)
+        IEnumerable<string>? embeddedLanguages = null,
+        bool onlyOwnDownloads = false)
         => SubtitleCoverage
-            .Read(this, mediaPath, embeddedLanguages)
+            .Read(this, mediaPath, embeddedLanguages, onlyOwnDownloads)
             .Open(required);
 
 

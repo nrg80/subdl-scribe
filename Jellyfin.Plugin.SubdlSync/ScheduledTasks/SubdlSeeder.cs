@@ -822,6 +822,9 @@ public sealed class SubdlSeeder
         // The language-level stream evidence only counts when the configuration says embedded
         // tracks are coverage (DownloadOnlyMissing); the embedded ROWS the registry holds are
         // always consulted by the reader itself, because a stored row is a fact.
+        // F-M333: with "Only missing languages" OFF, embedded/foreign evidence must not close a pair
+        // and Jellyfin's stream list must not be fed in at all — the reader's own mode handles this,
+        // so the list is left null rather than being collected and then discarded.
         IEnumerable<string>? streamLangs = onlyMissing
             ? Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
                 .EmbeddedPresentLanguages(_mediaSourceManager.GetMediaStreams(item.Id))
@@ -832,7 +835,7 @@ public sealed class SubdlSeeder
 
         return (Plugin.Instance?.Registry
                 ?? throw new InvalidOperationException("registry unavailable"))
-            .OpenPairs(mediaPath, required, streamLangs);
+            .OpenPairs(mediaPath, required, streamLangs, onlyOwnDownloads: !onlyMissing);
     }
 
 
