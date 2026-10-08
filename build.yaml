@@ -34,6 +34,13 @@ changelog: >
     alphabetically by language and numerically by slot, corrected files first (01-89), the
     reserved originals last (90-99). Files written by an earlier version keep their names and
     still work; nothing is renamed by itself.
+    Also in this version: the slot says WHICH KIND a file is — a corrected file counts up from 01,
+    and one the alignment could not process is kept from 99 downward, whether or not a corrected
+    version exists beside it. When the alignment cannot prove its correction against the audio, the
+    download repeats with the next candidate instead of giving up, bounded by the QA retry limit, and
+    every refused candidate is kept untouched. "Best subtitles to keep per language" is removed: one
+    corrected file per language. The QA retry limit now bounds the alignment alone — a candidate the
+    quality gates reject no longer counts against a limit and no longer closes a file.
   v12.1.12.189: The unsynchronized original is no longer an archive but a sidecar you can select
     in the player, and it is locked against upload. After a correction the untouched file lands
     beside the corrected one as <base>.<lang>.99.srt — numbered from 99 downward — so Jellyfin
