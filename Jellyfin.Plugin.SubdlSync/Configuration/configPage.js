@@ -353,7 +353,7 @@
                                 ['Type (movie/series) adjusted, both dir', s.TypeCorrectedByFileName || 0],
                                 ['Downloads: rejected after being fetched', s.RejectedDownload || 0],
                                 ['Downloads: searches run without the year', s.TmdbYearFilterMisses || 0],
-                                ['Downloads: Auto-Synch', s.FittedToAudio || 0],
+                                ['Downloads: Auto-Sync', s.FittedToAudio || 0],
                                 ['Uploads: discarded before transfer', s.RejectedUpload || 0],
                                 ['Media files: language codes added', s.LanguageCodesAllocated || 0],
                                 ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0]

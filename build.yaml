@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.196"
+version: "12.1.12.197"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.197: Spelling: the statistics row reads "Downloads: Auto-Sync".
   v12.1.12.196: Shorter statistics rows: "Downloads: searches run without the year"
     and "Type (movie/series) adjusted, both dir".
   v12.1.12.195: The auto-sync's light lives in the Workers list and nowhere else - the copy

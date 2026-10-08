@@ -17,9 +17,9 @@
     <!-- F-M223: namespace says SubDL Scribe; the ASSEMBLY name stays Jellyfin.Plugin.SubdlSync. -->
     <RootNamespace>Jellyfin.Plugin.SubdlScribe</RootNamespace>
     <AssemblyName>Jellyfin.Plugin.SubdlSync</AssemblyName>
-    <Version>12.1.12.196-dev</Version>
-    <AssemblyVersion>12.1.12.196</AssemblyVersion>
-    <FileVersion>12.1.12.196</FileVersion>
+    <Version>12.1.12.197-dev</Version>
+    <AssemblyVersion>12.1.12.197</AssemblyVersion>
+    <FileVersion>12.1.12.197</FileVersion>
     <Authors>Hermes Agent</Authors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>

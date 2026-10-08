@@ -548,7 +548,7 @@ def main():
     # order is that only successful auto-syncs are measured, so a "no proven gain" file (F-M321) must
     # not reach this counter. Asserted as a positive/negative pair on the pipeline source.
     check("the statistics row is named for the auto-sync",
-          "Downloads: Auto-Synch" in order,
+          "Downloads: Auto-Sync" in order,
           "row missing or renamed: %s" % order)
     if os.path.exists(pipeline_src):
         pipe = open(pipeline_src, encoding="utf-8").read()
