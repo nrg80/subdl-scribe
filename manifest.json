@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.216",
-        "changelog": "v12.1.12.216: All three maintenance menus now read just \"Manual\" - the appended \"no scheduled run,\n    use the button below\" is gone. The button sits directly under its description; nothing else changed.",
+        "version": "12.1.12.217",
+        "changelog": "v12.1.12.217: file-retry is removed from code and GUI - the file-missing give-up, its setting and\n    its tracker type are gone. The gone-file case is the Database Refresh's job now (new phase 1b,\n    path-keyed and behind the same root fail-safe as its neighbours), which is what the operator's\n    \"alleinige Aufgabe database refresh\" asks for. Two page texts corrected with it: the reset warning\n    no longer claims the dedup state survives (it is exactly what a reset deletes), and the pacing\n    field drops its \"rate, not a limit\" aside.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.216-dev/Jellyfin.Plugin.SubdlSync_12.1.12.216.zip",
-        "checksum": "07e0c5e7bf9c1116eb39d4f9399bc857",
-        "timestamp": "2026-10-08T21:32:17Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.217-dev/Jellyfin.Plugin.SubdlSync_12.1.12.217.zip",
+        "checksum": "b66313d400a7d1810f998d975d3fb5ea",
+        "timestamp": "2026-10-08T21:48:07Z"
       }
     ]
   }
