@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.209"
+version: "12.1.12.210"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,12 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.210: The allowance gate now works like the download switch, at the switch's own two
+    places, and the check moved out of the seeder. The seeder fills queues and does not decide
+    policy: it takes a plain flag beside DownloadEnabled and asks the API nothing. The dispatcher
+    probes once per cycle before the download seed - only when the cycle covers the download
+    direction - and a spent download OR search allowance then holds the queue back AND stops the
+    run, exactly as switching the direction off does. A read that fails is not a verdict.
   v12.1.12.209: The IMDb/TMDb match loses its switch, and a spent allowance no longer starts the
     downloader. A filename-parsed title search could fetch a wrong-year release with the same name;
     the hard gate is the only position that stays correct, so the option went and not the gate. And

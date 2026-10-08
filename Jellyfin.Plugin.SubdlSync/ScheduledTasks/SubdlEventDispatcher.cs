@@ -689,6 +689,22 @@ public sealed class SubdlEventDispatcher : IDisposable
         // F-M233: an arrival cycle is scoped (onlyItems) and must NOT start a run
         // when the seed found nothing new for that direction ("kein treffer, kein lauf").
         bool arrivalScoped = onlyItems != null;
+
+        // F-M331 (operator order 08.10.2026): "Api limit oder download limit voll, downloader
+        // startet erst garnicht." Asked ONCE per cycle, before the download seed, and only when the
+        // cycle actually covers the download direction — a directed upload fire must not spend a
+        // probe on a question it never asks. The answer is then consulted exactly where
+        // `config.DownloadEnabled` is consulted, so a spent allowance behaves like the download
+        // switch being off: no queue entries AND no run.
+        _downloadAllowanceHeld = null;
+        if (dir != CycleDirection.UploadOnly && configForCycle.DownloadEnabled)
+        {
+            _downloadAllowanceHeld = await ReadDownloadAllowanceAsync(configForCycle).ConfigureAwait(false);
+            if (_downloadAllowanceHeld != null)
+            {
+                LogUtil.Normal(_logger, "[SubDL-Dispatch] download held back this cycle — {Reason} (F-M331).", _downloadAllowanceHeld);
+            }
+        }
         if (dir != CycleDirection.UploadOnly
             && !await SeedAndMaybeRunAsync(trigger, onlyLibs, configForCycle, upload: false, scopedOnly: arrivalScoped, onlyItems: onlyItems).ConfigureAwait(false))
         {
@@ -779,6 +795,77 @@ public sealed class SubdlEventDispatcher : IDisposable
     }
 
     /// <summary>
+    /// Asks SubDL whether the download direction has any allowance left, ONCE per cycle.
+    /// <para>
+    /// Operator order 08.10.2026: "Api limit oder download limit voll, downloader startet erst
+    /// garnicht." Measured on prod the same day: the 50/day download limit had been spent since
+    /// 05:59, yet four further cycles (20:45, 21:09, 21:32, 21:33) each walked ~1 000 of 1 144
+    /// queued items, spent the day's SEARCH allowance (59 → 194) and saved nothing — 104 s per
+    /// cycle into the same wall.
+    /// </para>
+    /// <para>
+    /// The check lives HERE, not in the seeder: the seeder fills queues and does not decide policy,
+    /// so it takes the answer as a plain flag exactly like <c>config.DownloadEnabled</c>. One
+    /// read-only call to <c>/me</c> per cycle, which consumes no allowance (verified: the settings
+    /// page queries it freely).
+    /// </para>
+    /// <para>
+    /// A failure to READ the counters is NOT a verdict — it returns null and the cycle proceeds as
+    /// before. Fail-closed here would turn a network hiccup into a silent day without downloads,
+    /// which is worse than one wasted run; the pipeline still guards itself.
+    /// </para>
+    /// </summary>
+    /// <param name="config">Plugin configuration (credentials).</param>
+    /// <returns>The reason to hold back, or null when the direction may proceed.</returns>
+    private async Task<string?> ReadDownloadAllowanceAsync(PluginConfiguration config)
+    {
+        if (config.MissingCredentials().Count > 0)
+        {
+            return null; // the pipeline refuses on its own; not this check's verdict to make
+        }
+
+        var (api, http) = PluginServiceRegistrator.BuildApiClient(config);
+        try
+        {
+            // The download counter first: it is the one that stops the FILE fetch, and the one that
+            // was spent in the measured case.
+            var down = await api.ReadQuotaAsync(forDownload: true, System.Threading.CancellationToken.None).ConfigureAwait(false);
+            if (down == QuotaRead.Spent && api.Quota != null)
+            {
+                return string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "download limit spent ({0}/{1})",
+                    api.Quota.DownloadsUsed,
+                    api.Quota.DownloadsLimit);
+            }
+
+            // The search allowance: the search phase needs it before any candidate exists, so a run
+            // without it cannot do anything either.
+            var search = await api.ReadQuotaAsync(forDownload: false, System.Threading.CancellationToken.None).ConfigureAwait(false);
+            if (search == QuotaRead.Spent && api.Quota != null)
+            {
+                return string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "search allowance spent ({0}/{1})",
+                    api.Quota.SearchUsed,
+                    api.Quota.SearchLimit);
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            // Unreadable is not spent — see the summary above.
+            LogUtil.Detail(config.LogMode, _logger, "[SubDL-Dispatch] quota probe failed ({Msg}) — proceeding as before.", ex.Message);
+            return null;
+        }
+        finally
+        {
+            http.Dispose();
+        }
+    }
+
+    /// <summary>
     /// Seed + run helper used by round 1 and follow-up rounds.
     /// </summary>
     private async Task<bool> SeedAndMaybeRunAsync(string trigger, System.Collections.Generic.ISet<string>? onlyLibs, PluginConfiguration config, bool upload, bool scopedOnly, bool precheck = false, System.Collections.Generic.ISet<string>? onlyItems = null)
@@ -787,11 +874,21 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             return true; // F-M131: user stop — no further seeding/running
         }
-        if (upload ? !config.UploadEnabled : !config.DownloadEnabled)
+        // F-M331 (operator order 08.10.2026): the download switch and a spent allowance are the
+        // SAME kind of gate here — both mean "this direction does no work this cycle": no queue
+        // fill, no run, items stay due, and the direction still writes its own row.
+        bool heldByAllowance = !upload && _downloadAllowanceHeld != null;
+        if (upload ? !config.UploadEnabled : (!config.DownloadEnabled || heldByAllowance))
         {
-            return true; // toggle off = direction permanently "done" for this cycle
+            if (heldByAllowance)
+            {
+                SetDirectionOutcome(upload: false, Registry.WorkerRunRegistry.Outcome.Deferred, _downloadAllowanceHeld!);
+                LogUtil.Normal(_logger, "[SubDL-Dispatch] download held back — {Reason}. Queued items stay due (F-M331).", _downloadAllowanceHeld);
+            }
+
+            return true; // toggle off (or no allowance) = direction permanently "done" for this cycle
         }
-        bool seeded = await SeedAsync(trigger, onlyLibs, upload ? CycleDirection.UploadOnly : CycleDirection.DownloadOnly, precheck, onlyItems).ConfigureAwait(false);
+        bool seeded = await SeedAsync(trigger, onlyLibs, upload ? CycleDirection.UploadOnly : CycleDirection.DownloadOnly, precheck, onlyItems, downloadAllowed: _downloadAllowanceHeld == null).ConfigureAwait(false);
         if (!seeded)
         {
             return false; // seed lock busy (run active) — next event/anchor retries
@@ -799,17 +896,6 @@ public sealed class SubdlEventDispatcher : IDisposable
 
         if (upload && _upQuotaStopped) return true;
         if (!upload && _downQuotaStopped) return true;
-
-        // Operator order 08.10.2026: "Api limit oder download limit voll, downloader startet erst
-        // garnicht." The seeder gate above holds back NEW queue entries, but the LIVE case had 1 144
-        // items already queued from earlier cycles — gating the fill alone would still have walked
-        // all of them into the same wall. So the RUN is refused too, and the leftovers stay Queued
-        // for the run after the reset. The direction's row carries the reason (set in SeedAsync).
-        if (!upload && _seeder.DownloadGateReason is { } held)
-        {
-            LogUtil.Normal(_logger, "[SubDL-Dispatch] no download run — {Reason}. Leftover queued items stay due for the next run.", held);
-            return true;
-        }
 
         var fresh = upload ? _lastSeedNewIdsUp : _lastSeedNewIdsDown;
 
@@ -1551,6 +1637,13 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// <returns>Outcome word and detail, both possibly null.</returns>
     public (string? Outcome, string? Detail) GetSeederOutcome() => (_seederOutcome, _seederDetail);
 
+    // F-M331 (operator order 08.10.2026): "Api limit oder download limit voll, downloader startet
+    // erst garnicht." The reason the download direction may not be filled/run this cycle, or null
+    // when it may. Read once per cycle before the download seed and consulted exactly where
+    // `config.DownloadEnabled` is consulted, so a spent allowance acts like the download switch
+    // being off rather than like a decision the seeder makes.
+    private string? _downloadAllowanceHeld;
+
     // True when THIS cycle already wrote a direction's own row (start AND finish). The waiting
     // task and the arrival path then leave that row alone — see FinishDirectionRow.
     private bool _dirRowWrittenUp;
@@ -1824,7 +1917,12 @@ public sealed class SubdlEventDispatcher : IDisposable
     //  SEEDER CALL + QUEUE MERGE
     // ────────────────────────────────────────────────────────────────────────
 
-    private async Task<bool> SeedAsync(string reason, System.Collections.Generic.ISet<string>? onlyLibraries = null, CycleDirection dir = CycleDirection.Both, bool precheck = false, System.Collections.Generic.ISet<string>? onlyItemIds = null)
+    /// <param name="downloadAllowed">
+    /// Whether the download queue may be filled this scan — the plain flag the seeder takes, exactly
+    /// like its own <c>config.DownloadEnabled</c>. Lowered when SubDL reports no download allowance
+    /// left (F-M331); the seeder never asks the API itself.
+    /// </param>
+    private async Task<bool> SeedAsync(string reason, System.Collections.Generic.ISet<string>? onlyLibraries = null, CycleDirection dir = CycleDirection.Both, bool precheck = false, System.Collections.Generic.ISet<string>? onlyItemIds = null, bool downloadAllowed = true)
     {
         // F-M188/F-M290: no library selected = there is nothing this seeder could look at, so it does
         // not even start. The same condition is checked again inside Scan(), but by then the run lock
@@ -1954,16 +2052,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             SeedSnapshot snapshot;
             try
             {
-                snapshot = await _seeder.ScanAsync(config, onlyLibraries, dir, onlyItemIds).ConfigureAwait(false);
-                // Operator order 08.10.2026: a spent download/search allowance held the download
-                // QUEUE back, so this direction has no run to report — its row states the reason
-                // instead of a stale outcome from a previous cycle. YELLOW/deferred: the work did not
-                // happen and nothing is broken; the pipeline's own recovery fire is already armed.
-                if (_seeder.DownloadGateReason is { } gateReason
-                    && dir != CycleDirection.UploadOnly)
-                {
-                    SetDirectionOutcome(upload: false, Registry.WorkerRunRegistry.Outcome.Deferred, gateReason);
-                }
+                snapshot = _seeder.Scan(config, onlyLibraries, dir, onlyItemIds, downloadAllowed);
 
                 // F-M311: hand the scan's writes to the statistics row. ADDED, not overwritten.
                 // A scan does NOT always get a run: the direction ends before it when no arrivals
