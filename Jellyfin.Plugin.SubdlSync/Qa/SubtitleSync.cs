@@ -266,7 +266,8 @@ public static class SubtitleSync
                 0,
                 srtText,
                 null,
-                $"no proven gain ({fit.MovedCues} cue(s) moved, t = {fit.TMoved:+0.00;-0.00}) — left as downloaded");
+                "no proven gain (" + fit.MovedCues.ToString(CultureInfo.InvariantCulture) + " cue(s) moved, t = "
+                + fit.TMoved.ToString("+0.00;-0.00", CultureInfo.InvariantCulture) + ") — left as downloaded");
         }
 
         double largestShift = 0;
@@ -282,7 +283,8 @@ public static class SubtitleSync
                 0,
                 srtText,
                 null,
-                $"shift {largestShift:0.0}s beyond the {MaxShiftSec:0}s limit — not applied");
+                "shift " + largestShift.ToString("0.0", CultureInfo.InvariantCulture)
+                + "s beyond the " + MaxShiftSec.ToString("0", CultureInfo.InvariantCulture) + "s limit — not applied");
         }
 
         (bool aok, string ashifted, string awhy) = ShiftByStaircasePerCue(srtText, fit.AppliedShiftsSec);
@@ -291,16 +293,27 @@ public static class SubtitleSync
             return new Result(false, 0, srtText, null, "not applied: " + awhy);
         }
 
+        // F-M341 (operator order 09.10.2026): every NUMBER in this message is formatted with
+        // InvariantCulture. The interpolated forms were not, so they followed the HOST culture
+        // and the same line came out as "t = +8,62" on one day and "t = +8.62" on another —
+        // measured in prod, log_20261008 (comma) against log_20261009 (dot), from unchanged
+        // code. The operator parses these lines and the mixed form cost him a parser error, so
+        // the decimals are an interface now, not decoration. Only the formatting changes; the
+        // procedure that produces the numbers is untouched.
         string how = fit.Segments == 1
-            ? $"constant {fit.AppliedShiftsSec[0]:+0.00;-0.00}s"
-            : $"{fit.Segments} segments ({string.Join(" / ", fit.SegmentOffsetsSec.ConvertAll(v => (-v).ToString("+0.00;-0.00", CultureInfo.InvariantCulture)))})";
+            ? "constant " + fit.AppliedShiftsSec[0].ToString("+0.00;-0.00", CultureInfo.InvariantCulture) + "s"
+            : fit.Segments.ToString(CultureInfo.InvariantCulture) + " segments ("
+              + string.Join(" / ", fit.SegmentOffsetsSec.ConvertAll(v => (-v).ToString("+0.00;-0.00", CultureInfo.InvariantCulture))) + ")";
         return new Result(
             true,
             largestShift,
             ashifted,
             null,
-            $"corrected {how}, {fit.MovedCues} cue(s) moved, t = {fit.TMoved:+0.00;-0.00}, "
-            + $"score {fit.ScoreBefore:0.0000} -> {fit.ScoreAfter:0.0000}, {fit.GuardedCues} order-guarded");
+            "corrected " + how + ", " + fit.MovedCues.ToString(CultureInfo.InvariantCulture) + " cue(s) moved, t = "
+            + fit.TMoved.ToString("+0.00;-0.00", CultureInfo.InvariantCulture) + ", "
+            + "score " + fit.ScoreBefore.ToString("0.0000", CultureInfo.InvariantCulture) + " -> "
+            + fit.ScoreAfter.ToString("0.0000", CultureInfo.InvariantCulture) + ", "
+            + fit.GuardedCues.ToString(CultureInfo.InvariantCulture) + " order-guarded");
     }
 
     /// <summary>
@@ -500,7 +513,8 @@ public static class SubtitleSync
         }
 
         return (true, sb.ToString(),
-            $"staircase over {segmentOffsetsSec.Count} segments, largest shift {maxShift:0.00}s ({guarded} cue(s) order-guarded)",
+            string.Create(CultureInfo.InvariantCulture,
+                $"staircase over {segmentOffsetsSec.Count} segments, largest shift {maxShift:0.00}s ({guarded} cue(s) order-guarded)"),
             guarded);
     }
 
@@ -556,8 +570,10 @@ public static class SubtitleSync
         }
 
         return (true, outText, clampedFlat > 0
-            ? $"shifted {touched} timestamps by {shiftSec:+0.00;-0.00}s, {clampedFlat} clamped to 0"
-            : $"shifted {touched} timestamps by {shiftSec:+0.00;-0.00}s");
+            ? string.Create(CultureInfo.InvariantCulture,
+                $"shifted {touched} timestamps by {shiftSec:+0.00;-0.00}s, {clampedFlat} clamped to 0")
+            : string.Create(CultureInfo.InvariantCulture,
+                $"shifted {touched} timestamps by {shiftSec:+0.00;-0.00}s"));
     }
 
     /// <summary>
