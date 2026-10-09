@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.219"
+version: "12.1.12.220"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,11 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.220: A DOWNLOAD dry run escapes the DOWNLOAD brake, not the search one. With the account
+    at 50/50 the probe from F-M331 held back the very run meant to report what WOULD happen, so the
+    dry-run test could not be started at all. A dry run fetches no file, so the download counter no
+    longer stops it; the search allowance keeps holding it in both modes, because a dry run does
+    search every item and prints only what those answers carry.
   v12.1.12.219: "Only missing languages" gets a real second mode. Off now means once per language,
     whatever the file already carries: only our own recorded download closes a pair, so library
     sidecars, embedded tracks and the stream list stop counting. The fetched file is numbered against

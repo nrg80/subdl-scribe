@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.219.
+**Status:** Implementation — v12.1.12.220.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -20,7 +20,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
   - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
   - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 44 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 45 requirements
   - [4.1 Quality Gates — Download](#41-quality-gates-download) — 7 requirements
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
   - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 19 requirements
@@ -272,6 +272,8 @@ There is no download-side completion mark any more. The pipeline asks `SubtitleC
 **F-M42b [D]:** **Hearing-impaired version additionally** (checkbox, default off): when on, the best hearing-impaired candidate per (item, language) is downloaded in addition to the regular version and stored as `<basename>.<lang>.sdh.srt`. It comes from the second search (F-M241), and the branch must sit before the best-per-language cut break, or with the default one per language it is unreachable.
 
 **F-M333 [D] (operator order 08.10.2026):** **"Only missing languages" has TWO real modes. OFF means: once per language, whatever the file already carries.** *"Wenn on: embedded gilt als present, sidecar gilt als present. Wenn off: einmaliger download der Sprache egal ob sidecar oder embedded da."* **ON (unchanged):** sidecar and embedded track both count as present. **OFF:** only **our own recorded download** closes a pair — library sidecars, embedded tracks and the stream list stop counting, so every configured language is fetched once even when the file carries it. Reason: *"Ein embedded Titel verschwindet mit seinem Container"* — a language never fetched has no copy this plugin can re-derive. **"Once" is our own row, not the disk:** the reader RETURNS after the `downloaded` rows and never reads the file's own evidence, which would close the pair again. Intended: the second download lands beside the existing file (numbered cleanly) and a deleted subtitle heals, because the refresh forgets the row whose file is gone (F-M234). **No overwrite:** the slot is planned against the directory (F-M315). **One reader, three callers** — pipeline, seeder and refresh pass the mode in. **Test: T104.**
+
+**F-M334 [D] (operator order 09.10.2026):** **A DOWNLOAD dry run escapes the download brake, but not the search one.** *"Naja, das klingt als müsste diese bremse vom dryrun test ausgenommen werden"*, and *"Also weiter wenn download dry run test ein"*. **The defect it fixes:** with the account at 50/50 downloads, F-M331 held back the very run whose whole purpose is to report what WOULD happen — the dry-run test could not be started at all (measured on the test server: `download held back this cycle — "download limit spent (50/50)"`, then `cycle end`, not one dry-run line). **The exception is HALF, and that is the point:** only the DOWNLOAD brake is skipped, because a dry run fetches no file. The SEARCH allowance keeps holding it in both modes — a dry run does search every item, spends search quota and draws every line it prints from those answers, so lifting that brake too would let it walk a library with the allowance spent and print nothing, which is the same wall F-M331 was written against. A real run reads both counters exactly as before. **Test: T105.**
 
 **F-M260 [D]:** **The downloader reads the hearing-impaired flag of the file it actually fetched.** When a candidate resolves to one file inside a season or range pack (the pack member), that file's own `hi` flag governs naming and registration; for a plain single-file release the candidate's flag does, since the candidate is the file.
 
@@ -1977,6 +1979,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 
 **T104:** The upload binding binds the SCHEDULED run only: with upload switched off no anchor is armed, while BOTH manual routes still work — the dashboard button (through `SubdlPostprocessTask`) and the job's own endpoint — neither of which carries an upload gate any more. Asserted from both sides, because a half-removal fails as a manual run that silently declines rather than as a crash: the gates are absent from the endpoint and the task, AND the anchor gate is still present, or removing the rule entirely would let the schedule run with upload off. The page names the bound half only and leaves the manual route to the visible button; the button reaches the task rather than the endpoint, so a manual run leaves a status row and leaves evidence (F-M332). Separately, "Only missing languages" is asserted in BOTH modes (F-M333): the own-download reader returns before collecting the file's own evidence, and all three callers pass the switch's mode in, so queue, search and report answer alike — a caller left on the old rule would keep deciding by evidence the mode forbids. (F-M291)
+
+**T105:** The dry run is exempt from the DOWNLOAD brake and NOT from the search one, and the two halves are asserted by INDENTATION inside the probe: the guard sits one level above the download read and exactly level with the search read, which is precisely the claim. Asserted that way because a brace-counting version stayed red on correct code, and because a plain word-level check cannot tell the halves apart — a dry run that skipped the search brake would walk a library with the allowance spent and print nothing. A second check forbids the self-closing decoy `if (!config.DownloadDryRun) { }`, which compiles, keeps the guard\u2019s indentation and leaves the download read in a block that always runs: measured, that decoy stayed GREEN against the position check alone. The switch named is the DOWNLOAD one; the upload dry run is a separate setting and must not exempt this path. (F-M334)
 
 
 **T89:** An untagged track is resolved and the found language written back (F-M261)

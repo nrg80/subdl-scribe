@@ -956,6 +956,55 @@ def main():
         check("the flag is handed to the seeder, so the queue stays empty too",
               "downloadAllowed: _downloadAllowanceHeld == null" in disp_src)
 
+    # ---- F-M334 (operator order 09.10.2026): the dry run escapes the DOWNLOAD brake, not the search one ----
+    # "Also weiter wenn download dry run test ein" — the test could not be started: the probe read
+    # 50/50 and held back the one run whose entire purpose is to report what WOULD happen.
+    #
+    # Only the FILE brake may be skipped. A dry run DOES search every item, spends search quota and
+    # draws every line it prints from those answers, so the search allowance must keep holding it —
+    # an exception that lifted both would let a dry run walk a library with the search quota spent
+    # and print nothing, which is the same wall F-M331 was written against.
+    #
+    # Asserted by POSITION inside the probe, and the closing brace is the point: it proves the
+    # download read sits INSIDE the guard while the search read sits OUTSIDE it. Two separate
+    # word-level checks would stay green against `if (!config.DownloadDryRun) { }` around both reads.
+    if disp_src:
+        _probe = disp_src[probe_at:finally_at] if probe_at >= 0 and finally_at > probe_at else ''
+        _guard = _probe.find("if (!config.DownloadDryRun)")
+        _down = _probe.find("api.ReadQuotaAsync(forDownload: true")
+        _search = _probe.find("api.ReadQuotaAsync(forDownload: false")
+        # INDENTATION carries the answer here, not brace counting: a brace-level test counts the
+        # braces of the `return string.Format(...)` blocks too and stayed red on correct code
+        # (measured). The guard sits one level ABOVE the download read and exactly level WITH the
+        # search read, which is precisely the claim: the one read is inside it, the other is not.
+        def _indent_of(marker: str) -> int:
+            for ln in _probe.splitlines():
+                if marker in ln and ln.strip() and not ln.strip().startswith("//"):
+                    return len(ln) - len(ln.lstrip())
+            return -1
+        _guard_ind = _indent_of("if (!config.DownloadDryRun)")
+        _down_ind = _indent_of("api.ReadQuotaAsync(forDownload: true")
+        _search_ind = _indent_of("api.ReadQuotaAsync(forDownload: false")
+        check("the dry run skips the DOWNLOAD brake",
+              _guard_ind >= 0 and _down_ind > _guard_ind and _guard < _down < _search,
+              "without the guard the dry run cannot start when the limit is spent (measured: 50/50) "
+              f"(indents guard={_guard_ind} download={_down_ind})")
+        check("but the SEARCH brake still holds a dry run",
+              _search_ind >= 0 and _search_ind == _guard_ind and _search_ind < _down_ind,
+              "a dry run searches, spends search quota, and prints only what those answers carry "
+              f"(indent search={_search_ind}, guard={_guard_ind})")
+        # A decoy the position check could NOT see (measured): `if (!config.DownloadDryRun) { }`
+        # followed by its own block compiles, keeps the guard's indentation AND leaves the download
+        # read inside a block that always runs — the brake stays on and plant 5 stayed GREEN. The
+        # guard must therefore be a BLOCK, not a statement that closes itself.
+        check("the guard is a real block, not an empty decoy",
+              not any("if (!config.DownloadDryRun) { }" in ln or "if (!config.DownloadDryRun){}" in ln
+                      for ln in _probe.splitlines()),
+              "a self-closing guard would exempt nothing and still satisfy a position check")
+        check("the exception names the DOWNLOAD dry run, not the upload one",
+              "!config.DownloadDryRun" in _probe and "!config.DryRun" not in _probe,
+              "the two switches are separate settings; the wrong one would exempt the wrong mode")
+
     # ---- F-M50 (operator order 08.10.2026): ONE setting, TWO effects ----
     # "Die correction attempts bestimmen wieviele Kandidaten pro Sprache gesucht werden und wie oft die
     # autosync Schleife maximal Kandidaten zieht bis das Ergebnis passt. Aus 2 variables mach eine."

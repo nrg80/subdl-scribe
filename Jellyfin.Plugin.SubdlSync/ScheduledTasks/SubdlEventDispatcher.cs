@@ -827,20 +827,30 @@ public sealed class SubdlEventDispatcher : IDisposable
         var (api, http) = PluginServiceRegistrator.BuildApiClient(config);
         try
         {
-            // The download counter first: it is the one that stops the FILE fetch, and the one that
-            // was spent in the measured case.
-            var down = await api.ReadQuotaAsync(forDownload: true, System.Threading.CancellationToken.None).ConfigureAwait(false);
-            if (down == QuotaRead.Spent && api.Quota != null)
+            // F-M334 (operator order 09.10.2026): a DRY RUN fetches no FILE, so the download counter
+            // cannot stop it. Measured on the test server: the limit stood at 50/50 and the probe held
+            // back the one run whose whole purpose is to report what WOULD happen — the operator's
+            // dry-run test could not be started at all. The counter is still read and reported below
+            // when the run is real, which is when a file fetch is actually at stake.
+            if (!config.DownloadDryRun)
             {
-                return string.Format(
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    "download limit spent ({0}/{1})",
-                    api.Quota.DownloadsUsed,
-                    api.Quota.DownloadsLimit);
+                // The download counter: it is the one that stops the FILE fetch, and the one that
+                // was spent in the case F-M331 was written for.
+                var down = await api.ReadQuotaAsync(forDownload: true, System.Threading.CancellationToken.None).ConfigureAwait(false);
+                if (down == QuotaRead.Spent && api.Quota != null)
+                {
+                    return string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "download limit spent ({0}/{1})",
+                        api.Quota.DownloadsUsed,
+                        api.Quota.DownloadsLimit);
+                }
             }
 
-            // The search allowance: the search phase needs it before any candidate exists, so a run
-            // without it cannot do anything either.
+            // The search allowance applies to a dry run too, and this is not an oversight: a dry run
+            // DOES search every item — it spends search quota, and it draws every line it prints from
+            // those answers. Without the allowance it could not produce one line, so the hold is right
+            // in both modes. Only the FILE fetch is what a dry run never reaches.
             var search = await api.ReadQuotaAsync(forDownload: false, System.Threading.CancellationToken.None).ConfigureAwait(false);
             if (search == QuotaRead.Spent && api.Quota != null)
             {
