@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.225",
-        "changelog": "v12.1.12.225: The upload switch reads \"Continue after daily limit\" like the download one - the\n    extra \"API\" made two controls that do the same thing look like they behave differently.",
+        "version": "12.1.12.226",
+        "changelog": "v12.1.12.226: Every gate in \"Quality gates (before upload)\" names its default. Three of the five\n    (minimum cue count, validate SRT, check sync) had none - the two written later did, which is how\n    the gap arose. A default is what makes a switch readable without flipping it.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.225-dev/Jellyfin.Plugin.SubdlSync_12.1.12.225.zip",
-        "checksum": "59ef32c57e63096a1ef3d1de63186c2f",
-        "timestamp": "2026-10-09T05:18:52Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.226-dev/Jellyfin.Plugin.SubdlSync_12.1.12.226.zip",
+        "checksum": "29a3516d041f89edd85e37c49f89447d",
+        "timestamp": "2026-10-09T05:22:22Z"
       }
     ]
   }
