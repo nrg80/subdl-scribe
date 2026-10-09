@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.222",
-        "changelog": "v12.1.12.222: A worker row may not claim work the run did not do. The Download row stored\n    \"20 downloaded, 22 unavailable, 1 skipped\" while carrying DryRun=1, and the run's own log\n    line said \"20 would have saved\" - DescribeDirectionRun took the summaries but never the\n    mode. The label now follows the log's words (\"would have saved\" / \"would have uploaded\");\n    the counters are untouched, because a dry run's numbers are honest about what it FOUND.",
+        "version": "12.1.12.223",
+        "changelog": "v12.1.12.223: Target languages (download, required) moves to the General tab, directly under\n    the library selection, so the first page carries what a run needs. Moved, not copied - a\n    second control would render on both tabs and the last one read would win at save.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.222-dev/Jellyfin.Plugin.SubdlSync_12.1.12.222.zip",
-        "checksum": "9e5d96e2347a97938a160766caff6e0b",
-        "timestamp": "2026-10-09T04:03:38Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.223-dev/Jellyfin.Plugin.SubdlSync_12.1.12.223.zip",
+        "checksum": "6a6f2fa865767b528d44216bffb8f436",
+        "timestamp": "2026-10-09T05:10:35Z"
       }
     ]
   }
