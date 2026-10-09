@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.228.
+**Status:** Implementation — v12.1.12.229.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -35,7 +35,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 15 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 31 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 32 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -1745,6 +1745,8 @@ The line under the Workers list names, per worker and in list order, its stored 
 
 **This is a NOTE, not a red light:** the outcome stays `ok`. **Test: T86.**
 
+**F-M339 [D] (operator finding 09.10.2026):** **Every number in an Auto-Sync log line is written with `InvariantCulture`.** An interpolated number follows the host's locale, so the same code printed `t = +8,62` on one day and `t = +8.62` on the next, and the operator parses these lines. **The SRT timestamp formatter keeps its comma** — that is the file format, not a display choice. **Test: T149.**
+
 ## 16. Non-Goals
 
 - N-1: Standalone downloader app or separate downloader plugin — integrated in SubDL Scribe.
@@ -2044,5 +2046,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T145:** The General tab carries everything a run needs: Target languages sits on the General tab, directly below the library selection and above the refetch interval, and is **absent** from the Download tab. Asserted as an ORDER plus a COUNT plus the machinery, because every failure here is silent — the control renders perfectly on the wrong tab, a second copy renders too, and a moved block orphans the picker without changing a pixel. The tab boundaries are read from the DOM markers rather than counted, because the download tab is the last one and its section runs to the end of the page. **Mutation-verified, five plants:** block returned to the Download tab, a copy in both tabs, placed below the refetch interval, placed above the library list, and the picker modal dropped — each confirmed RED by name, baseline green on restore. (F-M337) The heading is asserted as an **element** and by its **name**: a bare "Target languages" fails, and so does a `<span>` styled to look like a heading, because a text check passes on both. The field-container form is required **absent** around it — an `inputContainer` is what made it read as a caption — and the old label form must be gone, since leaving it behind renders a second, stale caption. **Mutation-verified, four further plants:** the heading without the direction, the block back as a styled label, the heading as a `<span>`, and the old label left in place — each confirmed RED by name, baseline green on restore. (F-M337, follow-up)
 
 **T146:** The two daily-limit switches read the SAME sentence, and the upload one carries no "API". Asserted as a PARITY plus an ABSENCE, because each alone is passed by a wrong page: an absence check alone is satisfied by deleting the word from the wrong label, and the paragraph in the spec is only the statement of intent. The download label is pinned to its literal, so a change on the wrong side fails too. **Mutation-verified, three plants:** "API" back in the upload label, the download label altered instead, and the upload label rewritten wholesale — each confirmed RED by name, baseline green on restore. (F-M338)
+
+**T149:** Every number in an Auto-Sync log line is separated by a POINT, whatever the host's culture wants. Asserted against a culture that wants a comma, because a check run under the machine's own culture passes on any English host and proves nothing: the number is formatted through `InvariantCulture`, the resulting line carries no comma **between digits**, and the SRT timestamp formatter is required to KEEP its comma — that one is the file format and a "fix" there would corrupt every written subtitle. The two directions are asserted together for that reason: a check that only greps for `,` would be satisfied by breaking the timestamps. **Mutation-verified:** reverting one interpolation to its plain form turns it RED, and replacing the timestamp comma with a point turns it RED by name. (F-M339)
 
 
