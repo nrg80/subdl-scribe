@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.226",
-        "changelog": "v12.1.12.226: Every gate in \"Quality gates (before upload)\" names its default. Three of the five\n    (minimum cue count, validate SRT, check sync) had none - the two written later did, which is how\n    the gap arose. A default is what makes a switch readable without flipping it.",
+        "version": "12.1.12.227",
+        "changelog": "v12.1.12.227: The Auto-Sync row is reachable while it runs. Start and finish sat in one\n    synchronous block, so the light was never blue and its duration read as ~0. It now opens\n    with the download run and is closed by whoever opened it - including a cancelled run.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.226-dev/Jellyfin.Plugin.SubdlSync_12.1.12.226.zip",
-        "checksum": "29a3516d041f89edd85e37c49f89447d",
-        "timestamp": "2026-10-09T05:22:22Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.227-dev/Jellyfin.Plugin.SubdlSync_12.1.12.227.zip",
+        "checksum": "e14b521c4e340d0f6b413124fbd933ea",
+        "timestamp": "2026-10-09T05:42:30Z"
       }
     ]
   }
