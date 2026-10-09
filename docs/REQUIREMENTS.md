@@ -98,19 +98,7 @@ The scan records every loose subtitle file beside the media whose NAME carries a
 
 Content is the key, not the path, and the hash is the uploader's own function. Two sidecars with the same language but different text stay two rows.
 
-**F-M278 [D]:** **An unlabelled sidecar is detected and then RENAMED to the shape this plugin writes — `<container>.<lang>[.sdh].srt`. Only a file whose name carries no language token is touched.**
-
-The name is the only thing Jellyfin, MediaElch and every reader here can see. An unlabelled `<container>.srt` is read as "no language" (F-M239), so it proves no coverage, gets no observation row (F-M259) and the item is searched for a language its own disk already holds — the item never settles. Detecting the language and writing it into the name is what ends that.
-
-**The run order is detect, then rename, then record.** Detection reads the file's own text — an `.srt` is plain text, so no ffmpeg pass is involved. The gates apply unchanged and in this order: switch **`Allocate missing language codes` off** (F-M314 — the same switch as the container write, NOT `UploadResolveUnd`), text below the 2 KB floor (F-M16), or no language found all mean **the file is left exactly as it is** — no rename, no row. Only a detection that names a language renames.
-
-**A file that already carries a language token is never renamed.** Its name is already the shape this rule produces, and rewriting it would churn files that are correct.
-
-**A taken combination takes the next free slot, never an overwrite.** The target is slot 1 (`<container>.<lang>.01.srt`, F-M316); where that name is already on disk the next slot is used (`.02.srt`, `.03.srt`, …), because two unlabelled files that both detect as the same language are two subtitles and tidying a name must not destroy one. The slot is per combination: a `DE` file present does not push an `EN` file to a slot.
-
-**A rename moves the stored row's location with it.** The content hash — the row key — does not change, so the row keeps its verdict and only its path and name are updated. Without that the refresh task would find a path that no longer exists and forget the row (F-M234) for a file that is right there under a new name.
-
-**A refused rename is not a failed observation.** If the target cannot be built, the directory cannot be listed or the filesystem rejects the move, the file stays where it is and is recorded under its current name. The rename is a tidying step, never a precondition for recording.
+**F-M278 [D]:** **An unlabelled sidecar is detected and then RENAMED to the shape this plugin writes — `<container>.<lang>[.sdh].srt`. Only a file whose name carries no language token is touched.** The run order is detect, then rename, then record. Detection reads the file's own text (no ffmpeg pass). The gates apply unchanged and in this order: switch **`Allocate missing language codes` off** (F-M314 — the same switch as the container write, NOT `UploadResolveUnd`), text below the 2 KB floor (F-M16), or no language found all mean **the file is left exactly as it is** — no rename, no row; only a detection that names a language renames. A file that already carries a language token is never renamed. A taken combination takes the next free slot (`<container>.<lang>.01.srt`, F-M316; then `.02.srt`, `.03.srt`, …), never an overwrite, and the slot is per combination. A rename moves the stored row's location with it: the content hash — the row key — is unchanged, so the row keeps its verdict. A refused rename is not a failed observation: a file that cannot be renamed is recorded under its current name.
 
 **F-M55:** **Download-on-arrival as its own switch** + UI restructure: "Download subtitles on arrival" checkbox (Download tab), independent of the upload arrival setting. Both directions share the same diced anchors/jitter.
 
@@ -142,17 +130,7 @@ The name is the only thing Jellyfin, MediaElch and every reader here can see. An
 
 **F-M21 [B1]:** Update interval: **manual / daily / twice daily / twice weekly / weekly / monthly**. A scheduled interval fires at the per-installation diced random anchor (F-M51); **manual** leaves no scheduled fire at all and keeps the dashboard and config-page triggers; "on new file" = F-M1a. **Default: Weekly**, shared by both directions (F-M111).
 
-**F-M26b [D]:** **A deferred direction waits the job spacing — one knob, no hidden clock.** Whenever a stop defers a direction, the one-shot recovery fire lands **JobSpacingMinutes after the stop** (both directions), clamped 5–120, default 15. **Test: T22.**
-
-**The fire used to be anchored to a roll-over (removed 03.10.2026, user decision).** A per-run hourly bucket anchored it, and that bucket started at the **first API call of the run** — so its "roll-over" was a moving point nobody could predict from the settings page: a run that began at 04:50 and stopped at 04:55 fired at 06:05, and the only explanation lived in the code. Both the anchor and the bucket that produced it are gone (F-M20). What replaced them is the plain deferral every other stop already uses (run-lock retry, overload, postprocessing), so one knob now means one thing everywhere.
-
-**The stop reason is never invented.** A deferral is recorded with the direction's own stored wording, so a run-lock push is not reported as a quota problem (F-M288).
-
-One knob for all spacing — the user configures it through the existing **Job spacing (minutes)** field, with no separate control to discover.
-
-Anti-herd spreading is not needed here: the offset is per installation. The daily-limit reset keeps its randomised 30–300 min offset (F-M152, F-M182).
-
-The coordinator must not add a second offset on top: this path uses the recovery-fire scheduler, whose `alreadyJittered: true` leaves the caller's offset alone. The offset must not affect the daily-limit reset.
+**F-M26b [D]:** **A deferred direction waits the job spacing — one knob, no hidden clock.** Whenever a stop defers a direction, the one-shot recovery fire lands **JobSpacingMinutes after the stop** (both directions), clamped 5–120, default 15. **Test: T22.** The user configures it through the existing **Job spacing (minutes)** field — one knob for all spacing, no separate control to discover; the anchored hourly bucket that once produced the fire is gone (F-M20). A deferral is recorded with the direction's own stored wording, so a run-lock push is not reported as a quota problem (F-M288). Anti-herd spreading is not needed here: the offset is per installation; the daily-limit reset keeps its randomised 30–300 min offset (F-M152, F-M182). The coordinator must not add a second offset on top — this path uses the recovery-fire scheduler, whose `alreadyJittered: true` leaves the caller's offset alone — and the offset must not affect the daily-limit reset.
 
 **F-M249:** **The file-name parser recognises a bare episode marker without a season, and a broadcast date in the middle of the name with the title after it.** Every other shape keeps its result.
 
@@ -346,23 +324,15 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 
 **What it decides — and what it refuses to:** a direction plus a span. A drifting file has NO valid single offset, so a correction value printed here would be read as an instruction and would be wrong. The gate therefore never emits a shift.
 
-**Measured, on the reference set:** a clean control file yields **0 findings**; steps planted at a known time and size come back **6/6**; genuinely drifting files give **77 % recall at 36 % precision**, positions scattering **±1–2 min**. The scatter is set by the material (an SDH cue leads the speech by a per-cue varying amount, ~1.5 s MAD), not by the search.
+**Failure posture:** no ffmpeg, unreadable audio, no speech, or too few cues → the gate reports "did not run" and the file passes, like every other gate. **Tests: T108 (synthetic: clean / planted steps / ramp, plus the factored-marginal equality), T109 (end-to-end on a real episode).**
 
-**Rejected approaches, with their numbers** — recorded so they are not retried: nearest-island single cue (21 % precision — in dense dialogue the nearest start is always ~0 s away, so the likelihood flattens and the offset lands anywhere: measured +10.70 s against a truth of +4.65 s); binary-mask cross-correlation (found ±25 s jumps in the KNOWN-CLEAN file, scatter 12.7 s); full-surface correlation vs. the anchored method (2.37 s vs. 2.49 s mean error — equally poor, because a file drifting from −2 s to +10 s has no valid single offset, so every number is an average over the drift); joint optimisation over k windows (synthetic 2/6 vs. 6/6, recall 22 % vs. 77 % — with a free offset per segment each extra boundary pays for itself, so k pins to its upper limit).
+**F-M331 [D] (operator order 08.10.2026):** **A spent allowance acts like the download switch.** *"Api limit oder download limit voll, downloader startet erst garnicht."*
 
-**Cost and failure posture:** one full audio decode per candidate file (~14 s per 44 min episode, measured). No ffmpeg, unreadable audio, no speech, too few cues → the gate reports "did not run" and the file passes, like every other gate. **Tests: T108 (synthetic: clean / planted steps / ramp, plus the factored-marginal equality), T109 (end-to-end on a real episode: the plain subtitle steady, the SDH variant drifting).**
+**Rule.** A direction whose allowance is spent is switched off for that cycle exactly as `DownloadEnabled` off does it: the queue is **not filled** and the **run does not start**. No queue entry, no run, items stay due, and the direction still writes its own row. Both allowances are checked: the file-download counter (50/day) and the search allowance the search phase needs before any candidate exists.
 
-**F-M331 [D] (operator order 08.10.2026):** **A spent allowance acts like the download switch.** *"Api limit oder download limit voll, downloader startet erst garnicht."* And, on the shape: *"Es gibt den download toggle im seeder, api limit oder Download limit voll soll genauso wirken."*
+**The verdict is the dispatcher's.** The seeder fills queues, reads a flag and owns no quota logic; the dispatcher probes **once per cycle, before the download seed**, and only when the cycle covers the download direction. The read is `GET /api/v2/me` via `SubdlApiClient.ReadQuotaAsync`, which consumes no allowance.
 
-**The rule is the download switch's, at the switch's own two places.** The direction is switched off — for that cycle — exactly the way `DownloadEnabled` off does it: the **queue is not filled** (`SubdlSeeder.Scan`, which takes the verdict as a plain `downloadAllowed` flag standing beside `config.DownloadEnabled`) and the **run does not start** (`SeedAndMaybeRunAsync`, where the switch's own condition holds). No queue entry, no run, items stay due, and the direction still writes its own row.
-
-**The verdict is the dispatcher's, not the seeder's.** The seeder fills queues and does not decide policy: it reads a flag, asks the API nothing, and owns no quota logic. The dispatcher probes **once per cycle, before the download seed**, and only when the cycle covers the download direction — a directed upload fire must not spend a probe on a question it never asks. The read is `GET /api/v2/me` through `SubdlApiClient.ReadQuotaAsync` (the same reader the 429 decision and the settings page use), which consumes no allowance.
-
-**Both allowances are checked**, because each stops a download run on its own path: the file-download counter (50/day) and the search allowance, which the search phase needs before any candidate exists.
-
-**Measured on prod, the day of the order.** The download limit was spent from 05:59. Four further cycles (20:45, 21:09, 21:32, 21:33) each walked ~1 000 of 1 144 queued items, spent the day's SEARCH allowance (59 → 194) and saved **0** subtitles — 104 s per cycle into the same wall. The queue was already full from earlier cycles, so gating the fill alone would not have been enough; the run is refused too.
-
-**An unreadable counter is NOT a verdict.** A quota read that fails returns null and the cycle proceeds exactly as before — fail-closed here would turn a network hiccup into a silent day without downloads, worse than one wasted run, and the pipeline still guards itself. This is the one place where the plugin's usual fail-closed posture is deliberately not taken, and the reason is written at the site. **Test: T143.**
+**An unreadable counter is NOT a verdict.** A failed quota read returns null and the cycle proceeds as before — the usual fail-closed posture is deliberately not taken here. **Test: T143.**
 
 **F-M46 [D]:** **Overall selection:** one best candidate per (item, language) by combined score from F-M43–F-M45 — the best CORRECTED one where a correction can be proven (F-M318/F-M319). No candidate passing → the language counts as "not available".
 
@@ -374,13 +344,9 @@ It runs: the id quality gate (F-M151b), the searches (F-M241), the release scori
 
 It does not run: the file fetch, the quality gates of 4.1 (language verify, minimum cue count, runtime match), the file write, the download mark and the registry write.
 
-The report names, per language, the chosen release with its score and its hearing-impaired flag. While the hearing-impaired switch is on, the candidate from the hearing-impaired pool is named as well (F-M241).
+The report names, per language, the chosen release with its score and its hearing-impaired flag; while the hearing-impaired switch is on, the candidate from the hearing-impaired pool is also named (F-M241). It stops at the candidate, not the file: a dry run fetches nothing, so it cannot know the byte size and never builds the F-M260 name's hearing-impaired marker.
 
-**The report stops at the candidate, not at the file.** A dry run fetches nothing, so it cannot know the byte size, and it never reaches the point where the name is built from the fetched file — the hearing-impaired marker of the F-M260 name is therefore NOT part of a dry run. What a dry run answers is *which release* per language, not *which file*.
-
-**It stops before the download call,** so no file is transferred — but the searches DO cost API quota, one per language set (two while the HI switch is on, F-M241). The GUI text must name both: "without saving files" and "without API calls" are not the same claim.
-
-The run's stored statistics stay untouched (F-M247).
+The searches DO cost API quota, one per language set (two while the HI switch is on, F-M241); the GUI text must name both "without saving files" and "without API calls". Statistics stay untouched (F-M247).
 
 ### 4.3 Auto-Sync — Download
 
@@ -540,20 +506,16 @@ it right.
 
 **F-M305 [D] (development):** **A real-material score is taken against the AUDIO, never against a
 subtitle.** The synthetic episode T114 runs on puts the boundaries where the test put them, so it cannot
-fail on boundary placement — the one thing that decides the result on real audio. A real-material score
-is therefore required, and its yardstick must be independent of every subtitle: **the audio envelope
-itself**, the same input the correction reads. The detector runs on it and the result is read as the
-**per-segment offset curve** — a file that is in sync yields offsets near zero and a small span, a file
-that still drifts yields several segments far apart.
-**A subtitle must not be the yardstick, because that makes the measurement circular.** The residual of a
-correction is computed RELATIVE to the reference, so a reference that itself drifts makes the result look
-better than it is, and the error is counted twice — once in the reference and once in what is measured
-against it. A reference may be used to **find** a defect, never as the number a requirement is accepted on.
-**The control run comes first, and it decides whether a file may be scored at all.** The untouched
-material goes through the same measurement before anything is corrected: an untouched file that already
-looks wrong means the yardstick is misaligned to that material. The **order-guard count is read together
-with the result**, because a guard firing on hundreds of cues flattens the staircase into one constant
-shift while the step heights still look right. **Test: T117.**
+fail on boundary placement — the decider on real audio. A real-material score is therefore required, and
+its yardstick must be independent of every subtitle: **the audio envelope itself**, the same input the
+correction reads. The detector runs on it and the result is read as the **per-segment offset curve** — in
+sync yields offsets near zero and a small span, drifting yields several segments far apart. **A subtitle
+must not be the yardstick, because that makes the measurement circular:** a reference that itself drifts
+makes the result look better than it is; it may be used to **find** a defect, never as the number a
+requirement is accepted on. **The control run comes first:** the untouched material is measured before
+anything is corrected, and the **order-guard count is read with the result** (a guard firing on hundreds
+of cues flattens the staircase into one constant shift while the step heights still look right).
+**Test: T117.**
 **F-M300 [D] (superseded by F-M307, 07.10.2026):** **A subtitle whose offset MOVES is repaired segment by segment — one
 offset per segment, the boundaries the drift gate already found — instead of being left as downloaded.**
 
@@ -604,19 +566,9 @@ not undo the corrected file; it is logged as a warning.
 
 **F-M306 [D] (development):** **The untouched original is kept as a selectable sidecar in the reserved slot block, and is locked against upload.** *(Superseded the one-entry archive on 07.10.2026 by operator order.)*
 
-**Rule.** After a correction the pipeline writes the original beside the corrected file as a **loose sidecar** `<base>.<lang>.99.srt`, **numbered from 99 downward** and taking the first free number down to 90. It carries the corrected file's own language token and its `.sdh` marker when the corrected file is the variant; it carries **no marker of its own** — an unsynchronized original is not a forced subtitle, and saying so would make the file read as something it is not. The reserved block is **90–99**; the writer of *corrected* files therefore stops at slot **89** (F-M315), so a corrected file can never be handed the name of an original. When all ten reserved slots are taken, **no original is written** — the pipeline logs that and refuses, rather than inventing a name that would overwrite one.
+**Rule.** After a correction the pipeline writes the original beside the corrected file as a **loose sidecar** `<base>.<lang>.99.srt`, **numbered from 99 downward** to the first free number down to **90**. It carries the corrected file's language token and `.sdh` marker, and **no marker of its own**. The reserved block is **90–99**; the writer of *corrected* files stops at slot **89** (F-M315). With all ten reserved, **no original is written** and the pipeline refuses.
 
-**Why a loose file and not an archive.** The archive could only be reached by unpacking it by hand. As a sidecar it is **a track the operator selects in the player** — Jellyfin indexes a `.srt` beside the media file by its name, and a numbered slot becomes the track's title. Measured on the test instance 07.10.2026: `For All Mankind S02E01.en.99.srt` came back as `idx=0 lang=eng title='99' ext=True`, next to `title=None` for the unnumbered file. The archive is **no longer written**; archives already on disk are left untouched.
-
-**The lock, and why nothing new was needed.** The original is registered exactly like **every other downloaded subtitle** — `MarkDownloaded`, a `downloaded` row keyed on the content hash of the bytes on disk. Nothing else was invented, and there is no new status and no new reject reason. It locks because the seeder's `IsContentKnown` counts every row **except `observed`** as known content and the uploader applies the same test, so:
-- the seeder drops the file from the queue instead of queueing it, and
-- the uploader returns `duplicate-content` without spending a search request.
-
-Both are existing code paths that every downloaded subtitle already travels. The bytes are written **canonical** (F-M296) and the row hashes **those** bytes, so the row and the file describe the same sequence — writing the fetched byte style instead would leave the row pointing at a sequence that exists nowhere and the file would read as unknown and be uploaded.
-
-**Both tracks, one helper** — the HI variant goes through the same one, so the two cannot drift apart. **Failure posture:** a failed write is logged as a warning and never undoes the corrected file, and a directory that cannot be listed refuses the write rather than guessing at a free slot. Governed by `QaDownloadAutoSync` (F-M304) — no second switch.
-
-**Test: T118.**
+**The lock.** The original is registered like every other downloaded subtitle — a `downloaded` row `MarkDownloaded` keyed on the content hash of the bytes on disk. `IsContentKnown` counts every row **except `observed`** as known content and the uploader does too, so the seeder drops the file and the uploader returns `duplicate-content`. **Canonical** bytes (F-M296); both tracks share one helper under `QaDownloadAutoSync` (F-M304). **Test: T118.**
 
 **F-M315 [D] (user decision 07.10.2026):** **The slots 90–99 are reserved for kept originals; corrected files stop at 89.**
 
@@ -628,51 +580,29 @@ Both are existing code paths that every downloaded subtitle already travels. The
 
 **F-M316 [D] (operator order 08.10.2026):** **The slot is always written, always two digits; it is the track order.**
 
-**Rule.** `SidecarNaming.Build` composes every sidecar name as `<base>.<lang>[.sdh][.forced].<NN>.srt` with `NN` = the slot as `D2` (`01`…`99`). Slot 1 is no longer the bare `<base>.<lang>.srt`. The number stays the LAST name token, so `Parse` and `ReadFlags` read it exactly as before — they accept one and two digits, so names written before F-M316 keep parsing and no migration shim exists.
+**Rule.** `SidecarNaming.Build` composes every sidecar name as `<base>.<lang>[.sdh][.forced].<NN>.srt` with `NN` = the slot as `D2` (`01`…`99`). Slot 1 is no longer the bare `<base>.<lang>.srt`. The number stays the LAST name token, so `Parse` and `ReadFlags` read it exactly as before — they accept one and two digits, so names written before F-M316 keep parsing and no migration shim exists. The track list therefore runs languages alphabetically and, within a language, `01`…`89` (corrected) before `90`…`99` (originals) — the order F-M315 reserves them for.
 
-**Why the number is load-bearing.** Jellyfin indexes a sidecar as an external track and orders the track list by the FILE NAME, not by any property of the file. A name is therefore the only ordering signal the player has. Two forms broke that order: a bare `en.srt` sorts AFTER `en.99.srt` (the `s` of `.srt` is greater than `9`), and an unpadded `en.2.srt` sorts after `en.10.srt`. Measured on prod 08.10.2026 (BCS S01E05, six sidecars): the menu offered `99 – German` ABOVE `German` — the kept originals listed before the corrected files, the exact inverse of what F-M315 reserves them for. With two digits the list runs languages alphabetically and, within a language, `01`…`89` (corrected) before `90`…`99` (originals).
-
-**Cost, stated because it is real.** Names written before this rule keep their old form until they are renamed; the pipeline only writes new names. Renaming an existing library is a separate, explicit operation — nothing renames on disk by itself.
-
-**Test: T129.**
+**Cost.** Names written before this rule keep their old form until they are renamed; the pipeline only writes new names, and nothing renames on disk by itself. **Test: T129.**
 
 **F-M317 [D] (operator order 08.10.2026):** **The slot encodes WHICH KIND the file is: aligned takes 01 upward, unprocessed takes 99 downward.**
 
-**Rule.** A downloaded subtitle is written into one of two ranges, and the range is decided by one question: was it ALIGNED?
+**Rule.** A downloaded subtitle goes into one of two ranges: was it ALIGNED?
 
-- **Aligned** (the fit applied a correction, or the fit switch is off and nothing was moved but the file is the corrected artifact) → `<base>.<lang>.<NN>.srt` with `NN` = `01`, `02`, `03` … **upward**, counted by its own counter.
-- **Unprocessed** (the fit found the file **WRONG** — a shift beyond the limit, a first cue that would go negative, too few cues — or the fit is off and the file is left as downloaded) → the **reserved block**, `99`, `98`, `97` … **downward**, exactly as an original was numbered before.
-- **`no proven gain` is NEITHER of the two** — see F-M321. The fit found nothing wrong with the file, so the file IS the best version: it takes `01` upward **and** a byte-identical copy at `99` downward. It is not "unprocessed", because nothing about it needs processing.
+- **Aligned** (the fit applied a correction, or the fit is off and the file is the corrected artifact) → `<base>.<lang>.<NN>.srt`, `NN` = `01`, `02`, `03` … **upward**, its own counter.
+- **Unprocessed** (the fit found the file **WRONG** — shift beyond the limit, first cue negative, too few cues — or the fit is off) → the **reserved block**, `99`, `98`, `97` … **downward**.
+- **`no proven gain` is NEITHER** (F-M321): `01` **and** a byte-identical copy at `99`.
 
-**"Regardless of whether a corrected version exists"** is the operator's own wording and it is the load-bearing part: an unprocessed file takes a reserved slot **even when there is no corrected sibling beside it**. The reserved block therefore stops being only the home of *the original of a correction* and becomes the home of **everything that is not the corrected file** — including the byte-identical copy of an already-good file (F-M321).
+**"Regardless of whether a corrected version exists"**: an unprocessed file takes a reserved slot **even with no corrected sibling beside it** (F-M321).
 
-**The counter must be separate from the corrected slot number.** With one shared counter an unprocessed file consumes slot `01` and pushes the next aligned file to `02`, while the rule the operator stated is that alignment starts at `01`. `correctedSlotCount` and `hiCorrectedSlotCount` are therefore incremented on the aligned path only — and the already-good case of F-M321 counts as aligned, because `01` is where its best version belongs.
-
-**A file that is not aligned IS the original, so it is written ONCE — unless it is an already-good file.** On the unprocessed path the subtitle lands in the reserved slot, `unsyncPayload` stays null, and the second write is skipped by its `unsyncPayload != null` guard: writing it again would put the same subtitle on disk twice. An already-good file (F-M321) is the deliberate exception: it takes `01` AND `99`, and the reserved write REUSES the array written to `01`, so the two are byte-identical rather than two separately encoded copies.
-
-**When all ten reserved slots are taken** the write is **refused** and counted (`summary.Failed++` on the main path, `summary.RejectedCandidates++` on the HI path) with a distinct log line — this is the one path where a fetched subtitle is not written at all, so it must not be silent. Inventing a name would overwrite an unprocessed file already kept.
-
-**Both tracks carry the rule.** The HI branch follows the same two ranges with its own counter, for the reason the HI pool is where the drift lives: it is the pool most likely to land in the reserved block, and one rule on one branch only would put an aligned file at `01` beside an unprocessed one at `01`.
-
-**What this changes about F-M315.** F-M315's reservation (90–99, corrected stops at 89) stands; its *scope* widens. The block no longer holds only the original kept beside a correction — it now also holds every file that could not be aligned. `CorrectedSlotMax = 89` remains correct and unreachable in practice: the aligned writer counts from 01 with its own counter, so it does not walk up into the block.
-
-**GUI text (operator wording, 08.10.2026, updated the same day for F-M321).** The switch description reads: *"Aligns a fetched subtitle segment-wise on a spoken track. A file the alignment finds nothing wrong with is kept as the best version: it takes index 01 upward, together with a copy of it from index 99 downward. A file that could not be aligned — or that is out of sync beyond repair — is kept from index 99 downward as well. Default: on."* The sentence had to change with F-M321: it used to say that *any* file the alignment could not process is kept from 99 downward, which is now true only for the files that are actually WRONG — a file the alignment found nothing wrong with takes 01. Leaving the old sentence would have shipped a page contradicting the code, which is what F-M302 forbids.
-
-**Test: T130.**
+`correctedSlotCount` / `hiCorrectedSlotCount` increment on the aligned path only; the unprocessed path writes once. Ten taken reserved slots → the write is **refused** and counted. F-M315's reservation (90–99, corrected stops at 89) stands; GUI text must match the code (F-M302). **Test: T130.**
 
 **F-M318 [D] (operator order 08.10.2026):** **The download REPEATS until a candidate's correction proves itself, capped at the QA retry limit.**
 
 **The rule.** A fetched subtitle whose correction the fit REFUSES does not end the walk. The pipeline keeps fetching lower-ranked candidates — up to **`DownloadQaRetryLimit`** candidates refused by the fit (default 3, the same knob the QA-reject give-up already uses; `0` = no cap) — and stops at the first candidate whose correction proves itself against the audio.
 
-**Why the walk used to end at the first refusal.** The save counter drove the walk's stop, and an unprocessed file is memorized as a download (F-M317 keeps it) and incremented it — so the loop broke right after the first refusal and the "repeat" could never happen, leaving the item with one unprocessed file. The counter that decides the walk is **`correctedSaved`**, and with the count setting removed the stop is simply the first corrected file (F-M319): an unprocessed file is a FALLBACK, never a "best".
+Only a verdict on the FILE justifies another download; a verdict on the AUDIO or the tooling ends the hunt (T131). Each refused candidate is still kept, landing in the reserved block as an unprocessed file (`99`, `98`, `97` … F-M317).
 
-**"Refused" is not one thing.** Only a verdict on the FILE justifies another download. A verdict on the AUDIO or the tooling (`ffmpeg not available`, `audio decode failed`, `not measured: no audio samples`) would come back word for word for every candidate, while each attempt still costs daily quota and writes another unprocessed file — up to ten for one episode. Such a refusal therefore ends the hunt, and says so: `correction hunt abandoned after N candidate(s): the fit refused for a reason no other candidate can change (<reason>)`. The distinction lives in `SubtitleSync.RefusalIsCandidateSpecific` — one predicate, exact prefixes, so "not measured: only 12 cues" (about the FILE, hunt continues) and "not measured: no audio samples" (about the AUDIO, hunt stops) cannot be confused.
-
-**Every refusal is still kept.** Each refused candidate lands in the reserved block as an unprocessed file (`99`, `98`, `97` … F-M317), so the repeat never costs content — and the hunt therefore also has a physical ceiling: when the ten reserved slots are taken, the write is refused and counted (F-M317).
-
-**The order is a precondition, not a detail.** The repeat sits AFTER every other download gate (FPS, no-bytes, language verification, structure, min-cues, runtime). A candidate whose CONTENT fails a gate never reaches the fit, so a download spent on one would be spent on a file the plugin is about to discard — the walk is worth continuing only because everything admitted to the fit has already passed those gates. The order is asserted as a property (T131), so a later edit that moves the fit above the gates goes red instead of silently costing quota.
-
-**The interaction with the walk's candidate limit.** That limit still caps the total fetches, and the refusal budget is the fits' own budget; the limit counts only fits the worker could not resolve, never gate rejections (F-M50). Each has its own log line naming how many candidates were left untried.
+The repeat sits AFTER every other download gate (FPS, no-bytes, language verification, structure, min-cues, runtime). The walk's candidate limit still caps the total fetches, counting only fits the worker could not resolve, never gate rejections (F-M50); each budget has its own log line.
 
 **Test: T131.**
 
@@ -680,104 +610,55 @@ Both are existing code paths that every downloaded subtitle already travels. The
 
 **The rule.** `DownloadQaRetryLimit` (default 3) is the fit's budget — how many candidates may be fetched hoping for a provable correction (F-M318). It no longer counts anything else. A gate rejection (language, structure, min-cues, runtime, FPS, no-bytes) is **not** a budget: the candidate is discarded, counted in `RejectedCandidates`, memorized by release id (F-M200, so it is never fetched twice), and the walk moves on.
 
-**What was removed, at all four places it lived.** The failed-run counter (`QaFailTracker.RecordFailure`/`IsExhausted`) incremented once per saveless run of a (item, language) pair and, at the limit, the pair was CLOSED — by the pipeline's own work list, by the seeder's queue gate, by the refresh task's "actionable" filter, and by the run-end "language marked not-available" verdict. All four are gone with the counter, and so are the two status counters that reported them (`SkippedQaGiveUp`, `QaGiveUpLanguages`).
-
-**Why it had to go.** It was the second give-up in a system that now has a designed one. A file whose candidates are all badly ripped used to be declared "settled as unavailable" after N rejections and was then never searched again — indistinguishable, in the record, from a language SubDL genuinely does not carry. With the counter removed the file is searched again every cycle, and what bounds the work is the download budget per run (F-M50) plus the burned-release memory (F-M200), neither of which hides a live file.
-
-**What `QaFailTracker` still is:** the burned-candidate record and nothing else. Its fail counter, `IsExhausted`, `RecordFailure` and the `qa-fail:` keys are gone; a reset after a real save now clears only the burned candidates.
+The failed-run counter (`QaFailTracker.RecordFailure`/`IsExhausted`) is gone, and with it the two status counters that reported it (`SkippedQaGiveUp`, `QaGiveUpLanguages`); nothing closes a (item, language) pair. `QaFailTracker` is now the burned-candidate record and nothing else. What bounds the work is the download budget per run (F-M50) plus the burned-release memory (F-M200).
 
 **Test: T132.**
 
 **F-M321 [D] (operator order 08.10.2026):** **A file the fit finds nothing wrong with is a GOOD file: it is written at 01 upward, its original at 99 downward, and the walk ends.**
 
-**The rule.** `no proven gain` is not a failure — it is the deploy rule DECLINING to move the file. Nothing had to move, or the measured gain did not prove itself, or the needed shift sits below the measurement floor. In every one of those cases the file as downloaded is the best version of that language that exists, and the operator's order is that it is kept as what it is:
+**The rule.** `no proven gain` is not a failure — the deploy rule DECLINES to move the file, so the file as downloaded is the best version of that language. It is written as a **good file at `01` upward** (`<base>.<lang>.01.srt`, then `02` … F-M316), advances the **corrected counter** (the reserved block stays free for wrong files), and its **original is written too**, into the reserved block (`99` downward) — "beide original": BOTH carry the original subtitle, identical by construction because the reserved write REUSES the array sent to `01`. The walk **ENDS** there: no candidate can beat a file the fit found nothing wrong with (F-M318).
 
-- it is written as a **good file at `01` upward** (`<base>.<lang>.01.srt`, then `02` … F-M316) — the same range a genuinely corrected file uses, because this file needs no correction;
-- it advances the **corrected counter**, so `01` is used by the good file and the reserved block stays free for files that are actually wrong;
-- the **original is written as well**, into the reserved block (`99` downward) — the operator's words are "beide original": nothing was corrected, so BOTH files carry the original subtitle, and they are identical by construction because the reserved write REUSES the array that went to `01` rather than re-encoding the text;
-- the walk **ENDS** there. The hunt of F-M318 exists to find a candidate whose correction proves itself; against a file the fit found nothing wrong with, no candidate can beat it, so continuing would spend the daily quota and write up to ten unprocessed files for one episode.
-
-**What still keeps the old behaviour.** Only the deploy rule's OWN refusal counts. A refusal that says the file is **wrong** — a shift beyond the limit, too few cues, a first cue that would go negative — keeps the reserved range and keeps the F-M318 hunt alive, because another candidate may well fit. The two are told apart by `SubtitleSync.RefusalMeansAlreadyGood`, matched on the exact `no proven gain` prefix the class composes itself, so the prefix is the contract rather than a guess at wording. A tooling verdict (`ffmpeg not available`, `audio decode failed`, `no audio samples`) is likewise not "already good", and `null` never is.
-
-**Both tracks carry the rule.** The HI branch answers the same question with its own counter (F-M317), which matters most here: the HI pool is where the drift lives, so it is the pool most likely to produce a file that is already fine.
-
-**Why the 99 copy is byte-identical rather than a second artifact.** For a real correction the 99 copy is the ORIGINAL text and therefore differs from the corrected file at 01 — that case is untouched. For an already-good file there is nothing to correct, so "the original" and "the best version" are the same bytes; re-encoding the text a second time would let the two files differ by encoding alone, which would break the identity the operator asked for. Reusing the written array makes them identical by construction. The registry row is content-keyed (F-M186/F-M199), so one row describes both files — and since a downloaded row is what locks a file against upload (F-M315), both copies are locked by it.
+Only the deploy rule's OWN refusal counts: a refusal that says the file is **wrong** keeps the reserved range and the F-M318 hunt alive. `SubtitleSync.RefusalMeansAlreadyGood` tells the two apart on the exact `no proven gain` prefix. Both tracks carry the rule (F-M317).
 
 **Test: T133.**
 
 **F-M322 [D] (operator order 08.10.2026):** **The auto-sync has its own status row, the same words as every worker; and the statistics count only the alignments that really happened.**
 
-**The rule.** The alignment's status is its own readout, in two places:
+The alignment's status is its own readout, in ONE place: a **row of its own** in the Workers list — `Auto-Sync`, kept as `WorkerRunRegistry.AutoSyncWorkerKey` — separate from Download, which cannot say whether anything was aligned. A second readout (a light under the download switch) is asserted ABSENT (T134). **The words and colours are the existing ones** (F-M268): `ok` green when it aligned something or was already in sync, `skipped` grey when switched off or nothing measured, `failed` red when the run failed and aligned nothing; a DRY RUN reports `skipped`.
 
-- a **row of its own** in the Workers list, next to Download — `Auto-Sync`, kept as `WorkerRunRegistry.AutoSyncWorkerKey`. It is separate because the Download row cannot answer the question the operator watches: a run can fetch forty files and align none, and one word cannot tell those two apart.
-
-**ONE place, and it is the Workers list.** The light was first also mirrored under the download switch; the operator struck that on the same day. The switch is an input, not a second readout of the same run, and one number deserves one place. The Workers list is where every other worker reports, so the alignment reports there too. Asserted as an ABSENCE (T134) — a duplicated readout is exactly what gets helpfully re-added later, and the page renders either way.
-
-**The words and colours are the existing ones** (F-M268), with nothing invented for this row: `ok` green when the run aligned something or found it already in sync, `skipped` grey when the alignment is switched off or nothing was measured, `failed` red when the run failed and aligned nothing. A DRY RUN reports `skipped` with its own note: it writes no file, so it cannot have aligned anything.
-
-**The statistics count successful auto-syncs only.** The row is `Downloads: Auto-Sync` and reads `FittedToAudio`, which advances ONLY where a correction was really applied. An already-good file (F-M321) therefore does NOT reach it: nothing moved, and counting it would make the row claim an alignment that never happened. Those files have their own counter (`AlreadyGoodAsDownloaded`), which is also what turns the light green.
-
-**The switch says what it does.** The setting's label reads *"Automatically synchronize subtitle to spoken track"* — the operator's own wording (08.10.2026). It replaced *"Correct subtitle timing"*, which described the effect rather than the action.
-
-**The postprocessing row is named for its direction:** `Upl. Postproc.` — it is the upload direction's work, and the bare `Postproc.` left that unsaid.
+**The statistics count successful auto-syncs only.** The row is `Downloads: Auto-Sync`, reading `FittedToAudio`, advanced ONLY where a correction was really applied; an already-good file (F-M321) does NOT reach it and keeps `AlreadyGoodAsDownloaded`. The setting's label reads *"Automatically synchronize subtitle to spoken track"*; the postprocessing row is `Upl. Postproc.`.
 
 **Test: T134.**
 
-**T134 was prose only, and that is why this slipped through.** The rule named a test, the paragraph described what it asserts, and no suite carried it — `grep -rn 'T134' scripts/tests/` returned nothing. A documented test that does not exist protects nothing: the defect below (`v12.1.12.203`) is exactly the kind the paragraph promised to catch. The check now lives in `scripts/tests/gui-structure/check.py`, section 6b2, and the three assertions were verified RED against the broken source before the fix was kept.
-
-**The defect this paragraph failed to catch (08.10.2026 18:21, prod and test alike): the auto-sync row killed the cycle it belonged to.** `RecordAutoSyncRow` is called from `RunDirectionAsync`, which serves BOTH directions; `ExecutePipelineAsync` returns `(upSummary, null)` for the upload, so an upload run arrives with no download summary. The method dereferenced `downSummary.IsDryRun` immediately, and its own parameter doc claimed "never null at the call site" — true of the download path alone, which is where the sentence was written.
-
-**The failure lands AFTER the work, which is what makes it read so wrongly.** Measured on prod: the cycle logged `UPLOADED ... ["EN"]`, `["EN"]`, `["DE"]`, then `upload: finished — lock released. 3 uploaded | 0 rejected, 0 stream(s) skipped`, and only THEN `Cycle failed: "Object reference not set to an instance of an object."` The upload's `catch (Exception ex)` painted its own direction red, and `MarkCycleFailure` — which fills every direction still on null — repainted the DOWNLOAD with the same message. Both lamps therefore said `failed` for a cycle whose download had finished `0 saved | 0 fitted` and whose upload had uploaded three files. The word on both rows named a crash in the auto-sync's bookkeeping, not anything either direction did.
-
-**The fix is the guard the doc claimed was unnecessary:** the parameter is nullable, `downSummary == null` returns before the first use, and the download's own verdict stands — a cycle that ran no download had no alignment to report. The counter is untouched by this: `StatusCounterDelta.From` already read `download?.FittedToAudio ?? 0` and was never part of the throw.
-
-**What was NOT the cause.** The SQLite rebuild (`.202`) touched the same version line and was cleared: `b30a4a7` ("the auto-sync gets its own light", 15:08) is an ancestor of BOTH `.201` (prod) and `.202` (test), so one defect on two channels explained both reports, and the store migration never entered the path.
-
 **F-M323 [D] (operator order 08.10.2026):** **The auto-sync is a WORKER of its own — it is handed the subtitle and hands back a status and its output.**
 
-**The contract, in the operator's words:** *"Bekommt dann das sub übergeben und gibt status und output zurück"*, and the cut was confirmed explicitly: the worker returns the corrected text and a status, while the **download run keeps writing the files and counting**. The operator's reason for promoting it: *"Ich denke der autosync ist groß genug das der als eigener worker gelten kann."*
+`Qa/AutoSyncWorker.cs`, one entry point for both tracks (F-M307 kept). It returns the corrected text and a status; the **download run keeps writing the files and counting**. **Input:** subtitle as **decoded TEXT**; audio as a **file reference plus a stream map** (`mediaPath` + `audioMap`, e.g. `0:a:2`). **Output:** `Outcome(Status, Applied, Corrected, Reason, ElapsedMs, AlreadyGood, CandidateSpecific)`; `Corrected` is text — the worker writes NO file, files no slot, keeps NO counter.
 
-**What it is.** `Qa/AutoSyncWorker.cs`, one entry point for both tracks (main and hearing-impaired — F-M307's symmetry kept). It owns the per-FILE outcome, and the caller reads a status instead of re-deriving the rules from a reason string. Before this the outcome was derived from a run summary three files away: the download counted a file as already good, and the dispatcher later guessed the worker's colour from that count.
+**Six per-file statuses** (vs F-M268's per-RUN vocabulary): `ok` (moved), `already-good` (declined — F-M321), `disabled` (switch off), `refused-audio` (nothing about the file — F-M318), `refused-file` (about this file), `failed` (could not measure).
 
-**The input.** The subtitle arrives as **decoded TEXT**, not as a file reference, because the fit needs the cues as numbers and the correction leaves as text the download writes. The audio arrives as a **file reference plus a stream map** (`mediaPath` + `audioMap`, e.g. `0:a:2`): ffmpeg decodes the track straight out of the media file, so no audio is extracted or cached.
-
-**The output.** `Outcome(Status, Applied, Corrected, Reason, ElapsedMs, AlreadyGood, CandidateSpecific)`. `Corrected` is text — the worker writes NO file, files no slot and keeps NO counter, and that is asserted as an absence: filing itself into 01/99 would be two writers for one directory, and the count of what was really MOVED (F-M322) is the run's number.
-
-**Six per-file statuses**, distinct from the per-RUN vocabulary of F-M268: `ok` (moved), `already-good` (declined, the file as downloaded is best — F-M321), `disabled` (switch off), `refused-audio` (nothing about the file — F-M318), `refused-file` (about this file, so another candidate may align), `failed` (could not measure at all).
-
-**The measurement came along (F-M310).** The stopwatch wraps the fit inside the worker and `ElapsedMs` is reported, so a second fit path cannot bypass the measurement by forgetting to wrap it. The ACCOUNTING stays with the run — the limiter's credit and the run total are the run's books.
-
-**The row goes red for its OWN breakdown only.** `DownloadRunSummary.AutoSyncFailed` counts fit measurements that failed; the row used to read the download's `Failed`, so a network error on an unrelated subtitle painted the alignment red — a claim the alignment never made. A refusal is an outcome, not a breakdown, and is never counted here.
+**Measurement (F-M310):** the stopwatch wraps the fit; `ElapsedMs` is reported. **The row goes red for its OWN breakdown only** (`DownloadRunSummary.AutoSyncFailed`), never a refusal.
 
 **Test: T135.** See F-M307, F-M310, F-M318, F-M321, F-M322.
 
 **F-M324 [D] (operator order 08.10.2026):** **The configuration page carries its JavaScript ONCE. There is no second page script, no `ConfigJs` route, and no page-script file.**
 
-**What was there.** The page carried two copies of the same JavaScript: an inline block in `configPage.html` (78 KB) and a separate `Configuration/configPage.js` (65 KB), embedded as a resource, registered as a second `PluginPageInfo`, and served over an API route `Plugins/SubdlSync/ConfigJs` built because JF 12.1 strips `<script src>` from plugin configuration pages. Seven test assertions enforced the second copy's existence and its byte-identity with the first.
+**The rule.** The page carries its JavaScript exactly once, inline in `configPage.html`. There is no second copy: `Configuration/configPage.js`, the second `PluginPageInfo` entry, the `EmbeddedResource` registration and the API route `Plugins/SubdlSync/ConfigJs` are all removed. Five assertions of ABSENCE hold the state — no file beside the page, no controller, no registration, no resource, and the renderer present exactly once.
 
-**The measurement that settled it (browser session on TEST, 08.10.2026).** The second copy was never loaded. Two independent methods — a `MutationObserver` on script injection plus `performance.getEntriesByType('resource')` — across four navigation paths (direct URL, full reload, tab switches, plugin menu) and both routes (`?name=SubDL Scribe.js`, `/Plugins/SubdlSync/ConfigJs`, each answering HTTP 200 with 64,824 B): **zero loads.** The differential proof: every function defined in the inline block existed at runtime (`subdlSetLight`, `subdlLoadStatus`, `subdlRenderStats`, `subdlInitConfigPage`), while both functions defined ONLY in the file were `undefined` (`subdlBootstrapOnce`, `subdlRefreshBackupSelect`). The page was fully functional from the inline block alone — the worker list rendered six lights and the Restore button opened its real confirmation dialog naming a real backup.
-
-**Why it was not a harmless duplicate.** Four functions shared a name with a DIFFERENT body: `subdlLoadQuota` (inline 8,077 B vs file 3,578 B), `subdlFindTaskId` (286 vs 1,627), `subdlLoadStatus` (3,226 vs 2,740), `subdlStartQuotaPoll` (239 vs 135). The file's variant predated the login light — it knew no `SubdlLoginStatus`. Had JF ever loaded it, it would have overwritten the live functions with **older** ones, with nothing in any log looking abnormal.
-
-**What was removed:** `Configuration/configPage.js`, `Api/SubdlConfigController.cs`, the second `PluginPageInfo` entry, the `EmbeddedResource` registration, and the seven assertions that required the copy. **What replaced them:** five assertions of ABSENCE — no file beside the page, no controller, no registration, no resource, and the renderer present exactly once. A page that grows a second script again is the state this rule exists to prevent.
-
-**What stands unchanged:** the renderer's FIELD must still be `s.FittedToAudio`, and the statistics endpoints must still carry `dataType: "json"` (F-M216) — that rule was never about the copy.
+**What stands unchanged:** the renderer's FIELD must still be `s.FittedToAudio`, and the statistics endpoints must still carry `dataType: "json"` (F-M216).
 
 **F-M328 [D] (operator order 08.10.2026):** **Every worker row reports only ITS OWN result; no row borrows a neighbour's sentence.**
 
 **The rule.** A worker's light and its detail text are both derived from that worker's own evidence, and from nothing else:
 
-- The cycle's **green** fallback states the DIRECTION's own detail. It used to hand the SEEDER's string to every direction row, so `Seeder` and `Upload` carried the identical sentence while the upload row never said what the upload did. **Measured on the live prod endpoint** (`/Plugins/SubdlSync/WorkerRuns`): two rows, one string — `5 upload, 0 download queued` on both. The seeder's numbers belong on the seeder's row.
-- This holds at the level the rows are WRITTEN, so the check reads the live endpoint and requires that no two rows carry the same detail — not merely that each row's field is non-empty.
-- A direction that never reached the pipeline reports that, instead of borrowing a neighbour's sentence.
-- The direction's own detail is set **before** the cleanup may record a quota stop: a quota stop is that direction's own stronger fate and outranks a green one-line result.
-- A **skipped leg does not overwrite a scan that ran this cycle.** A Both cycle scans the download leg and then finds the upload leg unchanged, whose pre-check reports grey *"no changes — scan skipped"*; that write used to replace the scan's numbers, so a row claiming to summarise the cycle dropped the leg that actually ran and read as if the cycle had found nothing.
+- The cycle's **green** fallback states the DIRECTION's own detail, never the seeder's string.
+- This holds at the level the rows are WRITTEN: the check reads the live endpoint and requires that no two rows carry the same detail, not merely that each field is non-empty.
+- A direction that never reached the pipeline reports that.
+- The direction's own detail is set **before** the cleanup may record a quota stop; a quota stop outranks a green one-line result.
+- A **skipped leg does not overwrite a scan that ran this cycle.**
 
-**A gated scan names only the directions it covered.** The scan is handed one direction and leaves the foreign queue structurally empty, so a shared line formatting both counts printed a hard `0` for the direction it was never asked about — read as *"nothing to do"* when the truth is *"not asked"*. Both the log line and the worker row format only the covered counts.
+**A gated scan names only the directions it covered** — a hard `0` is never printed for a direction that was not asked. **The seeder row SUMS the cycle's legs**, so the download leg's numbers do not vanish.
 
-**The seeder row SUMS the cycle's legs.** A Both cycle seeds the download leg and then the upload leg; the second write overwrote the first, so the download leg's numbers vanished from a row that claims to summarise the cycle.
-
-**Test: T140.** The order of the download tab's switch blocks is asserted, and the row-level rule above is asserted against the source plus the live endpoint.
+**Test: T140.** The download tab's switch-block order and the row-level rule are asserted against source and the live endpoint.
 
 **F-M329 [D] (operator order 08.10.2026):** **The download tab reads in the order the cycle works: "Continue after daily limit", then "Follow-up rounds for downloads", then "Automatically synchronize" — all three above the quality gates.**
 
@@ -789,57 +670,15 @@ Both are existing code paths that every downloaded subtitle already travels. The
 
 **F-M307 [D] (development, 07.10.2026):** **The offset is a piecewise-constant function of time, fitted by exact dynamic programming. Supersedes the recursive Bayes-factor gate (F-M295) and the staircase applied from gate boundaries (F-M300).**
 
-**How the speech is recognised.** One audio track is decoded (chosen by language, §4.3.1), mono, 16 kHz, band-passed **300–3400 Hz** — the band that carries voice. The signal is cut into **20 ms frames** and each frame's RMS is taken as its level in dB. The levels are normalised against the file's own distribution: the **10th percentile** of frame level becomes 0 and the **90th percentile** becomes 1, clipped. The result is `p(t)`, a **speech probability between 0 and 1 per frame**. The method is **threshold-free** — no absolute level is assumed, so any recording level works, and it adapts to the file rather than to a calibration. `p(t)` is then dilated by a **0.30 s max-filter** (`SLACK`), which absorbs the fact that a subtitle boundary is not frame-exact and sharpens the peak.
+**Speech** (§4.3.1): mono 16 kHz, band-pass **300–3400 Hz**, **20 ms** RMS frames; levels clipped at the file's **10th** and **90th percentiles** → `p(t)` in **0–1**; dilate **0.30 s** (`SLACK`).
 
-**What is compared, and how.** Nothing is cross-correlated and no matrix of coefficients is formed. The comparison is a **single scalar per candidate shift**, and it is an **average, not a correlation coefficient**: nothing is centred, nothing is normalised against a second curve, and no Pearson or cross-correlation figure is computed anywhere in the method.
+**Score:** a cue at shift `d` scores the mean `p(t)` over its shifted window; off-audio → **0**, excluded (T121a). **161** shifts (**−20…+20 s**, step **0.25 s**) per cue.
 
-The comparison is built in two steps:
+**Fit:** maximise `sum(score) − Z·sigma·sqrt(cues)` exactly by DP over **`BLOCK_CUES = 40`** blocks; `Z = 1.0`; `MIN_SEG_FRAC = 0.12` of the file's cues, floor **40 cues**; a shift-**0** segment competes.
 
-1. **Per cue.** For a candidate shift `d`, cue `c` covers the frames of the window `[start_c + d, end_c + d]`. The mean of `p(t)` over exactly those frames is that cue's score. It is read from a **cumulative sum of `p(t)`**, so the mean over a window costs one subtraction regardless of its length. If the shifted window would fall outside the audio at either end it scores **0 and is excluded**, never truncated to the edge — a truncated window is short and its mean is therefore too high (see the regression case T121a).
-2. **Per candidate shift.** The score of `d` is the **arithmetic mean of the per-cue scores**, taken over the cues that are being scored for that `d`. A higher value means the cues sit on more speech. Chance level is the file's own mean of `p(t)`: if cues and speech were unrelated, the score would land there.
+**Deploy (all must hold):** moved cues gain over `DeployZ = 2.0` standard errors (paired, moved cues only); file not worse; largest shift ≥ `MinShiftSec` (§4.3.2).
 
-**The result is a table, and the table is what the fit reads.** Evaluating all 161 candidate shifts (`−20 s … +20 s`, step `0.25 s`) for every cue yields `S[cue, shift]` — the per-cue score at every shift — plus a flag per entry saying whether that window fitted inside the audio. The fit never touches the audio again; it works on this table alone. That is what makes an exhaustive optimum affordable.
-
-**Why not a correlation coefficient.** A coefficient divides by the spread of both curves, which is only meaningful when both are free to vary. Here the audio curve `p(t)` is fixed and every candidate shift is one number measuring *how much speech the cues land on*; the quantity to maximise is therefore a mean, and the fitted charge is calibrated to the **spread of that mean**, not to a coefficient. Cross-correlation and a product form of the two curves were both tried on this material and both failed; the records are in `METHODIK.md`, section 4, so they are not retried.
-
-**The fit.** The offset is not one number but a function of time, and the function is chosen by maximising
-
-    sum over cues of (score at that cue's shift)   −   Z · sigma · sqrt(cues in the segment)
-
-over **all** placements of change points, where `sigma` is the median absolute change of a cue's score per grid step, read from the data. The optimum is found **exactly** by dynamic programming over (block, state) pairs: blocks of **`BLOCK_CUES = 40`** cues, candidate shifts on a **0.25 s** grid from **−20 s to +20 s**, then the accepted boundaries are refined off the block grid. **A constant offset, a slow drift and a single hard cut are the same fit** — one segment, many segments, or two.
-
-**Why the charge is sqrt-shaped.** A segment of `L` cues may pick the best of all candidate shifts, so it gains by luck alone an amount that grows as the square root of `L`. Charging `Z · sigma · sqrt(L)` means a step must earn more than its own luck to be kept, and the charge grows faster than the luck available. Splitting is never free. This is the rule that keeps the fit from inventing steps; a fixed shift-size threshold cannot do the job, because a threshold cannot distinguish a real small step from noise.
-
-**The do-nothing fit competes.** One segment with shift exactly **0** is always an alternative inside the same objective, evaluated with the shift **fixed at zero** — not free to take the best value. A file with no drift therefore scores better left alone, and is left alone.
-
-**Deploy rule — a correction must prove itself.** A shift is written only if all of the following hold: the cues the fit actually moves show a mean score gain above `DeployZ` standard errors of that mean (**paired test over the moved cues only**); the file as a whole does not get worse; and the largest shift is at least `MinShiftSec`. Consequences, both intended: a file already in sync is returned **byte-identical**, and a repeat run changes nothing.
-
-**`DeployZ` is separate from `Z`, and the two must not be merged.** `Z` is the charge inside the DP and decides where segments are placed; `DeployZ` only decides whether a result is written. Tightening the deploy rule by raising `Z` would move the segmentation underneath it — the measured separation below was taken at `Z = 1.0`. Measured on **34 real fits of one series** (one morning, all language variants) against the operator's listening verdicts: every file he reported as audibly **wrong** sat at `t = 1.06 / 1.15 / 1.38 / 1.51`, every file he confirmed as **good** at `t = 2.66` and `8.45` — nothing in between, so the gap separates the groups completely, while `Z = 1.0` let all four bad files through because they cleared it by a hair. At `DeployZ = 2.0` the four are refused and no good file is lost. Refusal is the intended outcome there: those fits had landed on the wrong piece of sound (adjacent-segment jumps of **10.25–34.00 s**, against at most **5.50 s** for every good one), so leaving the file as downloaded is correct. Caveat to carry: this is a threshold fitted on the run it judges, so watch for a run of refusals and re-derive the bound as verdicts accumulate.
-
-**Constants.** `Z = 1.0` (DP charge). `DeployZ = 2.0` (deploy rule). `MIN_SEG_FRAC = 0.12` — the shortest segment is a **fraction of the file's cues**, not a cue count, so the resolution is the same for a 45-minute episode and a feature film; floor 40 cues. `BLOCK_CUES = 40`. State grid `0.25 s`, range `±20 s`. `SLACK = 0.30 s`. `MinShiftSec` as in the refusal list of §4.3.2.
-
-**Language-neutral.** The rule reads cue times and the audio only. Script, case and SDH notation change nothing, so there is no per-language calibration and no language-specific parameter.
-
-**What it does not claim.** `p(t)` measures energy in the voice band; it does not classify speech against music, and it does not read words. It therefore measures *where the speech is*, which is what synchronisation needs, and nothing about what is said.
-
-**Streaming — the decoder returns the FRAME LEVELS, never the samples.** **Rule.** The audio is read in
-chunks and reduced to one level per **20 ms frame** as it arrives; the samples are never materialised as
-an array. The decoder's return value is the level curve, because the levels are the only thing any
-consumer reads — `SpeechProbability` and `SpeechIslands` both walk the frames and compute nothing but
-`20·log10(sqrt(mean(v²)))`, and no code reads an individual sample outside that loop. **Consequence: the
-levels are never persisted** — no database column, no cache, no file. They live for one fit and are
-dropped. **Why.** The whole track in memory costs **~1 GB peak** at 140 minutes (a 514 MB `byte[]` and a
-514 MB `float[]` alive at once) against **3.2 MB** streamed; the fits are **bit-identical**, and the
-140-minute files could not be fitted at all under the old path (the OOM killer took them). **Test: T122.**
-
-**Cost and failure posture.** One audio decode per candidate file, streamed. No ffmpeg, unreadable
-audio, no speech, too few cues ⇒ "did not run" and the file passes, as with every other gate, and
-**nothing is written**. The correction is applied to **times only**: text is carried through
-byte-for-byte, cue count and cue order are unchanged. Order guard last: no cue overtakes its
-predecessor's end, and a cue that would land below zero is **clamped to 0** — the fitted shift is
-applied as measured (as in the list of §4.3.2).
-
-**Tests: T119, T120, T121.** Reference implementation: `/opt/data/drift-lab/RC/sy-1.0.0-rc1` (`core4.py` the fit, `drift_algo5.py` the runner); `CURRENT-RC.txt` names the active candidate. Reasons, measurements and the records of rejected approaches: `METHODIK.md`, section 4.
+**Scope:** language-neutral, times only, text byte-for-byte; below-zero clamped to **0**; no audio or speech ⇒ "did not run". **Tests: T119, T120, T121, T122.**
 ## 5. Upload Postprocessing
 
 **F-M287 [B1] (user decision 02.10.2026):** **Everything a run writes that is reachable from a dry run sits behind the dry-run flag — the guard belongs at the WRITE, not at the mode's exit.**
@@ -886,51 +725,25 @@ The counter is cleared by the reschedule reset on a real fire and by the per-day
 
 **F-M274:** **The refresh runs its steps in one fixed order, in a single run, under the global run lock, and reports what it changed.**
 
-**Step 0 — library probe:** the full item id set is resolved (movies, series, episodes). A library that is not queryable, or that answers with zero items, skips the whole run; nothing is judged.
+**0 — probe:** resolve the full item id set; an unqueryable or empty library skips the run. **1 — dead rows:** rows whose Jellyfin item is gone are removed and counted. **1b — gone files (F-M60 removal, 08.10.2026):** media rows whose FILE is gone while the item survives are removed with their subtitles, by PATH. **2 — guid-keyed trackers:** the search and QA-fail trackers lose gone-item rows. **3 — OSHash cache paths:** cached paths under a non-listable root are dropped. **4 — vanished subtitle files:** the sidecar verdicts of F-M234 and the open required FILES of F-M283 (reported, never repaired). **4b — embedded rows:** F-M258. **5 — compaction:** the fold and rebuild of F-M214.
 
-**Step 1 — dead rows:** media and subtitle rows whose Jellyfin item is gone are removed, and the count is reported.
-
-**Step 1b — gone files (F-M60 removal, 08.10.2026):** media rows whose FILE is gone from disk while the Jellyfin item is still there are removed with their subtitles, by PATH. This is the case the pipelines' file-missing give-up used to clean up; it is the refresh's job now. Behind the same fail-safe as steps 3 and 4 — every stored media root must exist AND list cleanly, because an unmounted volume reports every path as missing and "unknown" is never "deleted".
-
-**Step 2 — guid-keyed trackers:** the search tracker and the QA-fail tracker are pruned of rows whose item is gone. The file-retry tracker is gone from this step with its type (F-M60 removal); the rows a pre-removal database still holds are left untouched by the refresh and cleared by the RESET scope, which is their only remaining reach.
-
-**Step 3 — OSHash cache paths:** cached paths whose root is no longer listable are dropped.
-
-**Step 4 — vanished subtitle files:** the sidecar verdicts of F-M234, and the open required FILES of F-M283 (reported, never repaired — there is no stored mark).
-
-**Step 4b — embedded rows:** the check of F-M258.
-
-**Step 5 — compaction:** the fold and the rebuild of F-M214.
-
-A step that cannot read its evidence is skipped, never judged ("unknown ≠ deleted").
-
-**The run's own line** reports the removed rows per area, the forgotten subtitle verdicts, the dropped download marks and the forgotten embedded rows; a run that changed nothing reports that the database matches reality. A run that cannot take the global run lock is recorded as `deferred` and re-fires later, never as failed.
+Steps 1b, 3, 4 share one fail-safe: every stored media root must exist and list cleanly, else the step is skipped, never judged ("unknown ≠ deleted"). The run's line reports removed rows per area and forgotten state; a no-change run reports the database matches reality; a lock-less run is `deferred`, never failed.
 
 **F-M234:** **The state prune is a database refresh: it verifies the FILE side of a stored verdict, not only whether the item still exists.**
 
-A removed item is only the crudest case. A subtitle file deleted while its item stays keeps a verdict saying "uploaded"/"rejected"/"downloaded" and a download mark saying the language is settled — both permanently wrong, and the item is reported complete forever while the seeder keeps queueing it.
+A subtitle file deleted while its item stays leaves a verdict ("uploaded"/"rejected"/"downloaded") and a download mark both permanently wrong, the item reported complete forever. A mark is stale only when the language has lost its evidence EVERYWHERE the configuration counts it: no sidecar file AND no embedded track, or a track settled as unavailable. The refresh reads "settled as unavailable" from the whole stored set, through the same reader the download pipeline uses.
 
-Fail-safe, same two-tier rule as the oshash cache: every root the stored paths live under must exist and list cleanly, else the file side is skipped entirely. Rows without a stored path are never judged. "Unknown ≠ deleted" — a missed refresh costs nothing, a false one destroys valid verdicts.
+Fail-safe: every stored-path root must exist and list cleanly, else the file side is skipped; rows without a stored path are never judged ("unknown ≠ deleted": a missed refresh costs nothing, a false one destroys valid verdicts). A missing probe is not a deletion: when the embedded half cannot be read, the check falls back to the files alone.
 
 Subset rule: a stored language set that COVERS the configured one counts as complete, so removing a language does not invalidate every mark; adding one still does.
-
-**What "the file side" is.** A mark is only stale when the language has lost its evidence EVERYWHERE the configuration counts it: no sidecar file AND no embedded track, or a track settled as unavailable. The refresh asks the same question the download pipeline asks, through the same reader.
-
-**"Settled as unavailable" is read from the whole stored set**, not from the languages that failed the disk test. A language SubDL does not have has neither a file nor a track, so deriving the settled set from the missing list left it empty in exactly the case it exists for.
-
-**A missing probe is not a deletion.** When the embedded half cannot be read (item unresolvable, unreadable stream list), the check falls back to the files alone rather than judging.
 
 **F-M258 [D]:** **The database refresh checks the embedded side too, not only the sidecar side.**
 
 For every media row whose Jellyfin item still exists and which has stored embedded rows, the refresh reads the item's current streams and forgets every stored row that disagrees — on the key (position) and on the recorded facts (language, hearing-impaired). A row whose position is gone, or whose language/HI no longer matches the stream at that position, is dropped.
 
-The check is structural for observations only. A row carrying a verdict (`uploaded`/`rejected`) or a detection attempt is kept unconditionally; only a plain observation is dropped when position, language or HI disagree.
+The check is structural for observations only: a row carrying a verdict (`uploaded`/`rejected`) or a detection attempt is kept unconditionally; only a plain observation is dropped on a disagreement. The comparison is against positions, not the tracks whose language resolved: a position that exists but answered nothing keeps its row; only a position that exists and answers differently is a disagreement.
 
-**The comparison is made against positions, not against the tracks whose language resolved.** A row is dropped when its POSITION no longer exists among the item's non-external subtitle streams; a position that exists but answered nothing keeps its row, and only a position that exists and answers differently is a disagreement.
-
-Fail-safe, as the rest of the refresh ("unknown ≠ deleted"). An item Jellyfin no longer resolves, an unreadable stream list, and an EMPTY stream list are all skipped rather than judged. Only a NON-empty list that disagrees with a stored row is evidence.
-
-The check runs only for files that HAVE stored rows, so it costs one stream lookup per file with state.
+Fail-safe, as the rest of the refresh ("unknown ≠ deleted"): an unresolvable item, an unreadable stream list and an EMPTY stream list are skipped, not judged; only a NON-empty list that disagrees is evidence. The check runs only for files that HAVE stored rows.
 
 **F-M214:** **A database refresh compacts the database in the same run.** The prune is followed, in the same run and while it holds the global run lock, by the compaction: fold the journal in (the journal fold), then rebuild the file (the rebuild) to release the free pages.
 
@@ -969,12 +782,12 @@ A recomputed hash is stored together with size and modification time. A file tha
 The cache is flushed at the end of the run. The run's line reports the entry count and the changed, missing and skipped counts. The run ends `ok`, `cancelled` or `failed`; a failed run keeps the entries already flushed and leaves the remainder untouched. A run that cannot take the global run lock is recorded as `deferred` and re-fires after the job spacing (default 15 minutes, clamped to 5–120).
 
 **F-M279 [D]:** **The OSHash VALUE is verified against an independent oracle, not merely against itself. Switchable: not applicable — this is a test obligation, not runtime behaviour.**
-A hash that is computed wrongly is still 16 hex characters and still stable, so the identity layer works perfectly on a value nobody else shares: dedup compares our hashes with our hashes, the cache matches, and no log line looks abnormal. Correctness here is only observable against a reference computed OUTSIDE this codebase.
-**The reference:** `scripts/oshash-oracle/oshash_oracle.py` implements the published OpenSubtitles algorithm (size + first and last 64 KiB summed as little-endian 64-bit words, trailing partial word dropped, 16 lowercase hex, unsigned 64-bit wraparound) and was written from the specification, NOT from `ComputeMediaHash`. `scripts/seed-db-test` section J asserts the shipped code against literals produced by that oracle.
-**The contract the code actually implements:** `chunk = min(64 KiB, size)`, both windows read at that width. Above 128 KiB this equals the published canonical hash; between 64 KiB and 128 KiB the two windows overlap; below 64 KiB they coincide and the same bytes are summed twice. Every non-empty file therefore has a defined value; an empty file yields `null`, never a made-up hash.
-**What must be pinned:** the values at 8 B, 64 KiB, 128 KiB and 200 KB, the window edges at 64 KiB ±1 and 128 KiB ±1, that a change in the tail or the last window changes the value, and that a missing path yields `null` rather than throwing.
-**The obligation is negative-controlled:** reverting the algorithm in a COPY of the source must turn the assertion red. Measured 01.10.2026: chunk 65 536 → 32 768 in a copy produced 7 failures and exit 1; the same suite against the shipped build reports 0 failures.
-**Where it does not reach:** the cache on a host the agent cannot read (the production instance's data file lives inside its container) can only be audited through `scripts/oshash-oracle/oshash_cache_forensics.py` when that file is reachable. Its verdicts separate `MATCH`, `MISSING FILE` (F-M119 keeps these by design), `SIZE DRIFT` (F-M61b treats this as a miss by design) and `MISMATCH` — the only one that means a stored value is wrong.
+
+**The reference:** `scripts/oshash-oracle/oshash_oracle.py` implements the published OpenSubtitles algorithm (size + first/last 64 KiB summed as little-endian 64-bit words, 16 lowercase hex, unsigned 64-bit wraparound), NOT from `ComputeMediaHash`; `scripts/seed-db-test` section J asserts the shipped code against its literals. The contract is `chunk = min(64 KiB, size)`.
+
+**Pinned:** the values at 8 B, 64 KiB, 128 KiB and 200 KB, the window edges at 64 KiB ±1 and 128 KiB ±1, that a change in the tail or the last window changes the value, and a missing path yields `null` (empty file too), never a throw.
+
+**Negative-controlled:** reverting the algorithm in a COPY of the source must turn the assertion red. The cache on an unreadable host is audited via `scripts/oshash-oracle/oshash_cache_forensics.py`; its verdicts separate `MATCH`, `MISSING FILE` (F-M119), `SIZE DRIFT` (F-M61b) and `MISMATCH` (wrong value).
 
 ## 8. Rules Shared by Both Directions
 
@@ -984,15 +797,12 @@ A hash that is computed wrongly is still 16 hex characters and still stable, so 
 **The fallback rule:** ffmpeg's exit code decides what an empty result means. Exit 0 → the stream carries no text; that is a verdict and must NOT be retried. Non-zero → the pass failed as a whole, and each empty stream is retried once with the per-stream call.
 
 **F-M261 [D]:** **An untagged or `und` subtitle track is resolved, and the found language is written back into the container. Switchable, default off — it governs both the resolution and the write.**
-A text subtitle track whose tag is absent, empty, `und` or `undefined` is not a fact about its language. The gate extracts those tracks, detects the language offline, records it as an observation and — when enabled — writes it into the container as a real tag.
-**It belongs to the SEEDER, before the queue decision:** a resolution that has not happened yet cannot change the missing-language answer.
-**The sequence:** find the untagged text tracks from the stream list (no ffmpeg call when there are none) → one ffmpeg pass for all of them (F-M5) → detect offline with the 2 KB floor (F-M74) → write the codes into the container → move the file's registry state to the new hash → record the tracks. The queue decision then reads the corrected language.
-**The registry move:** the rewrite changes the file's IDENTITY (the OSHash covers size plus the first and last 64 KB, and a Matroska segment header carries its own size). `ReplaceMediaIdentity(oldHash, newHash)` is a rename, not a re-decision: marks, ids, language aggregates, embed rows (rebuilt under `"<hash>|<pos>"`) and the parents of the sidecars travel. Where both sides hold a row the OLD one wins; an equal pair is a no-op and an empty hash is refused.
-**The position rule:** a track's position is `0:s:N` over TEXT-eligible subtitle streams only (subtitle streams, not external, not forced, not bitmap), in container order. Video and audio never enter the count; bitmap and forced tracks DO occupy a position and stay in it; the tag goes back to the position it came from. External streams are skipped, not counted.
-**No row** for a track the detector cannot decide (below the 2 KB floor, no text, no confident verdict).
-**The resolution counts as PRESENT for the coverage check in the same run**, because Jellyfin's cached list still reports the old tag for a container that was just corrected.
-**The write is a stream copy (`-c copy`)**, and the original is replaced only after the result was read back and found to carry the wanted tag.
-The result is read back out of the file across the stream shapes that exist (audio in front, interleaved, bitmap tracks between, forced tracks between): every corrected track carries the wanted language and none is misassigned. Only files carrying an untagged track are touched, and each once. **Test: T79.**
+
+A text track whose tag is absent, empty, `und` or `undefined` is not a fact about its language: the gate extracts it, detects offline, records an observation and — when enabled — writes the tag into the container. It belongs to the SEEDER, before the queue decision.
+
+**Sequence:** untagged text tracks from the stream list → one ffmpeg pass for all (F-M5) → offline detect with the 2 KB floor (F-M74) → write the codes → move the registry state to the new hash → record the tracks.
+
+**Registry move:** the rewrite changes the file's IDENTITY, so `ReplaceMediaIdentity(oldHash, newHash)` renames the state. **Position rule:** position is `0:s:N` over TEXT-eligible subtitle streams only (not external, not forced, not bitmap); bitmap and forced tracks occupy and keep a position, external streams are skipped. **The write is a stream copy (`-c copy`)**, read back and verified, and counts as PRESENT for the same run's coverage check. **Test: T79.**
 
 **F-M66 [D] (operator order 08.10.2026):** **Id resolution has NO give-up — an item without a resolvable id is retried by the next run.** *"Id resolution retrys bitte auch löschen."* The per-item failure counter and its limit are gone from config, page, both pipelines and the refresh; `0`-means-never-give-up was the only surviving meaning, so the rule is now unconditional. An id-less item is skipped for the run and re-enters the ladder next time, which costs one TMDb attempt per run at worst. **Test: L4–L6.**
 
@@ -1070,17 +880,13 @@ The give-up line names the server as not answering in time, never as a caller ca
 
 **F-M28 [B1]:** **IMDB ID mandatory — correct per media type.** For series strictly the series IMDB (tvshow, not episode) plus season and episode; for movies the movie IMDB. Resolution order: (1) Jellyfin metadata as-is; (2) TMDB id → IMDB via the TMDB REST API (key required, F-M203); (3) TMDB title search; (4) skip "no-imdb". Episode IMDB is never used.
 
-**F-M190 [B1]:** **ID resolution is type-free and TMDB-authoritative, and it is the standard path for every upload** — not an optional gate.
+**F-M190 [B1]:** **ID resolution is type-free and TMDB-authoritative, and it is the standard path for every upload.**
 
-**Type detection comes from the FILE NAME and from TMDB, never from the Jellyfin library type.** The file-name parser reads the name (`S01E05`, `Season 1 Episode 5`, TV stamps `Title_<YYYYMMDD>_<HHMMSS>`); when it reports a series while Jellyfin reports none, the item IS resolved as a series. A later `search/multi` answer overrides the assumed type: **TMDB decides** film or series. The library type is never the source — an episode in a library typed "movies" is imported as a film, so class-based detection would search TMDB for a FILM named after the episode.
+**Type detection comes from the FILE NAME and from TMDB, never from the Jellyfin library type.** The parser reads the name (`S01E05`, `Season 1 Episode 5`, TV stamps); when it reports a series while Jellyfin reports none, the item IS resolved as a series; a later `search/multi` answer overrides the type — **TMDB decides** film or series.
 
-**ID arbitration (JF vs TMDB) with a report:** both IDs present → cross-validate; on disagreement a **Normal-level** line is emitted (`ID conflict for "<title>": Jellyfin says <tt…>, TMDB says <tt…> — using the TMDB id`) and **TMDB wins**. Visible without raising the log level.
+**ID arbitration (JF vs TMDB) with a report:** both IDs present → cross-validate; on disagreement a **Normal-level** ID-conflict line is emitted and **TMDB wins**.
 
-**Fallback chain:** TMDB returns no IMDb → the Jellyfin ids are kept; Jellyfin carries only a TMDB id → the IMDb id is fetched from TMDB; **no IMDb resolvable at all → NO upload** (fail-closed).
-
-**Upload payload preference:** IMDb + TMDB when both are known, IMDb alone when TMDB is missing. Neither → no upload.
-
-**Series IMDb needs `/external_ids`:** the detail endpoint reports `imdb_id: null` for series, while `<kind>/<id>/external_ids` returns the real `tt…`. the IMDb fallback falls back to it whenever the detail response leaves the id empty — without it every series was skipped as "no-imdb".
+**Fallback chain:** TMDB returns no IMDb → the Jellyfin ids are kept; Jellyfin carries only a TMDB id → the IMDb id is fetched from TMDB; **no IMDb resolvable at all → NO upload** (fail-closed). **Upload payload:** IMDb + TMDB when both are known, IMDb alone when TMDB is missing, neither → no upload. **Series IMDb needs `/external_ids`:** the detail endpoint reports `imdb_id: null` for series, while `<kind>/<id>/external_ids` returns the real `tt…`; the fallback uses it when the detail response leaves the id empty.
 
 **F-M28a:** Before every SubDL search/upload the plugin calls the id validation to cross-check and correct Jellyfin's IDs via TMDB when a key is configured. Mismatches are corrected, missing IDs backfilled. Automatic whenever a TMDB key is present; no separate UI switch.
 
@@ -1120,21 +926,15 @@ Status: a missing key reports **red**; the settings page refuses to save it and 
 
 ## 10. Scheduler, Quota and Timing
 
-**F-M20 [B1]:** Configurable pacing — a transfer rate (**default 400/h**) and a pause between API calls (**0.1–10 s, default 0.5 s**) — **and no local call limit of any kind**. A configured pause replaces the rate-derived one; the two are not compared. The range is the server's own fastest allowed rate at the floor (SubDL allows 600 req/min = 0.1 s) and a slow, polite pace at the top; it never permits an unpaused burst. The GUI range and the limiter clamp are identical (0.1–10), so a value entered in the page is the value the limiter uses. The rate is clamped to **1–2000**.
-
-**The plugin enforces no quota of its own (03.10.2026, user decision).** No code path counts API calls, no counter can run out, and no run is stopped for making "too many" calls. **Only SubDL stops a run**: on a real HTTP 429 the server's own counters are read and the `QuotaStopDecision` decides between a short respacing and a day-long stop (F-M238). A per-run hourly bucket lived in `GlobalRateLimiter` until this date and DID stop runs; it was the plugin's own invention — SubDL publishes **daily** counters only — and it stopped runs the server would have allowed (measured live: 735 of 2000 searches and 16 of 50 downloads still free when the bucket fired). The class now only spaces calls; it cannot refuse one.
+**F-M20 [B1]:** Configurable pacing — a transfer rate (**default 400/h**) and a pause between API calls (**0.1–10 s, default 0.5 s**) — **and no local call limit of any kind**. A configured pause replaces the rate-derived one; the two are not compared. The range is the server's own fastest allowed rate at the floor (SubDL allows 600 req/min = 0.1 s) and a slow, polite pace at the top; it never permits an unpaused burst. The GUI range and the limiter clamp are identical (0.1–10), so a value entered in the page is the value the limiter uses. The rate is clamped to **1–2000**. **The plugin enforces no quota of its own (03.10.2026, user decision).** No code path counts API calls and no run is stopped for making "too many" calls. **Only SubDL stops a run**: on a real HTTP 429 the server's own counters are read and the `QuotaStopDecision` decides between a short respacing and a day-long stop (F-M238). The limiter now only spaces calls; it cannot refuse one.
 
 **F-M288:** **A LOCAL deferral is reported under the Workers list, in plain text — the quota bars stay a pure server reading.**
 
-The server counters alone cannot show why a direction is idle. They can read `3 / 1000` (bar blue, everything looking fine) while the direction is deferred, so the deferral needs its own line.
+The line sits under the Workers list, in the page's normal text colour, and is not part of the quota box; the bars keep the 75 %/95 % rule unchanged, and the two facts stand side by side instead of over each other.
 
-That line sits **under the Workers list**, in the page's normal text colour, and is not part of the quota box. It carried yellow and recoloured the bar in a first version (03.10.2026, reverted the same day on the user's report): a bar painted yellow at 66 % reads as "the allowance is nearly spent" when the fill says nothing of the kind, and the box's job is to report the SERVER's allowance. The two facts are stated side by side instead of over each other — the bars keep the 75 %/95 % rule unchanged, the line states our own wait.
+**The cause is passed through, never guessed.** `deferred` covers three unrelated situations: the run lock being busy, our own quota/rate cap, and a user stop. The line carries the direction's own stored wording ("download quota/rate limit — rescheduled", "cycle already active", "run lock busy — rescheduled") instead of a label invented in the page.
 
-**The cause is passed through, never guessed.** `deferred` covers three unrelated situations: the run lock being busy, our own quota/rate cap, and a user stop. The line carries the direction's own stored wording ("download quota/rate limit — rescheduled", "cycle already active", "run lock busy — rescheduled") instead of a label invented in the page. A lock deferral painted as a rate limit sends the reader after a quota problem that does not exist.
-
-**The line answers "why is this direction idle", so it is gated on the direction being STOPPED — a pending fire alone is not enough.** (Reworked 03.10.2026 on the user's report; the first version rendered whenever a fire existed.) Measured the same day on prod: the download hit its daily limit at 06:08 and left 384 of 412 queued items due, armed its recovery fire for 04:37 the next day, then ran normally at 10:30 and 13:50 — its last row read `ok`, yet the line kept claiming "Download: deferred — next attempt 4:37:00 AM" for the rest of the day, naming ordinary backlog pickup as if the direction were stuck. A direction that is running needs no explanation; only a stopped one does.
-
-**A deferral whose fire is gone is not shown either** — when the scheduler holds no fire the task has already moved on, and the server clears the stopped flag for that case before the page ever sees it. The time the line names is that fire, in the viewer's zone.
+**The line answers "why is this direction idle", so it is gated on the direction being STOPPED — a pending fire alone is not enough** (reworked 03.10.2026). **A deferral whose fire is gone is not shown either**, because when the scheduler holds no fire the task has already moved on. The time the line names is that fire, in the viewer's zone.
 
 **F-M272:** **The page has THREE refresh cadences, and none of them is "10 s for everything".**
 
@@ -1144,21 +944,13 @@ That line sits **under the Workers list**, in the page's normal text colour, and
 
 **F-M238:** **A 429 is not a verdict — the COUNTERS decide whether the allowance is spent.**
 
-Every 429 is classified into three variants: rate headers present → the daily allowance, exact reset from the header; body `service_busy` → transient overload, wait the server window; body `rate_limit` with the server's retry hint → a short-term trip, waited out like the overload. Only when the counters say the allowance is spent does the run stop for the day.
+Every 429 is classified: rate headers → the daily allowance, exact reset from the header; body `service_busy` → transient overload; body `rate_limit` with a retry hint → a short-term trip, waited out like the overload. Only when the counters say the allowance is spent does the run stop for the day.
 
-The status code alone cannot decide: SubDL answers 429 for both cases. "Spent" turns a short pause into a lost day; "harmless" turns a spent account into a retry storm.
+Counters come from the settings page's source (`GET /api/v2/me`, `usage.search`/`usage.downloads`), read only after a 429; each direction names its own. An unreadable quota is not free: a failed or limit-less read leaves the 429 a stop.
 
-The counters come from the same source the settings page shows (`GET /api/v2/me`, `usage.search`/`usage.downloads`), read only after a 429, so GUI and pipeline cannot disagree. Search and download are separate allowances, so every decision names its direction.
+A next-day fire anchors on the server's own `reset_at`, never a local midnight guess; `Continue after daily limit` gates that path per direction. The respacing offset is the job spacing (5–120 min, default 15; clamped 5–120). Every day-long stop ends in a fire at the reset plus the 30–300 min jitter; only the toggle off, or an arrival run holding the slot, stops without a fire.
 
-An unreadable quota is not a free quota: when the read fails or carries no limits, the 429 remains a stop.
-
-A next-day fire anchors on the server's own `reset_at`, never a local midnight guess, with the jitter on top. `Continue after daily limit` still gates that path per direction.
-
-The respacing offset is the job spacing (5–120 min, default 15) (clamped 5–120); no fixed interval is introduced for this case.
-
-Every day-long stop schedules: a spent and an unreadable allowance both end in a fire after the reset plus the 30–300 min jitter. Only the direction's toggle off, or an arrival run holding the slot, stops without a fire.
-
-A dry run reports the hearing-impaired choice — the HI variant is selected beyond the point a dry run stops, so the run repeats the selection and reports it (`DRY-RUN HI … (n/m candidates are HI)`). **See T52, T53, T55.**
+A dry run reports the hearing-impaired choice (`DRY-RUN HI … (n/m candidates are HI)`). **See T52, T53, T55.**
 
 **F-M26 [B2]:** **Random jitter in the rate limit — on the transfer rhythm, not on bare calls.**
 
@@ -1202,11 +994,9 @@ The marker counts the CLAIM, not the outcome: a run that fails after being queue
 
 **F-M298 [D] (development):** **A `duplicate-content` skip never overwrites an `uploaded` row — the state follows the CONTENT, not the reason.**
 
-The content-known check deliberately counts a **rejected** row as known just as much as an uploaded one: it answers "has this text been dealt with", which is the question its callers ask. A skip raised on that answer therefore fires routinely over content that is **demonstrably up** — most visibly after a container tag write, where the language-tag gate gives the file a NEW media hash and the identity move carries the accepted rows across (F-M61), while the same text is then seen again as "known" and skipped on the next run.
+The content-known check deliberately counts a **rejected** row as known just as much as an uploaded one, so a skip raised on that answer fires routinely over content that is **demonstrably up** — most visibly after a container tag write, where the language-tag gate gives the file a NEW media hash and the identity move carries the accepted rows across (F-M61).
 
-Recording `rejected` in that situation contradicts the evidence: the position looks unsettled, the file is re-extracted on every later run and rejected again, and the rejected counter grows without a single new verdict. Measured on prod 06.10.2026 — Lanterns S01E08: 39 streams, **0 uploaded against 39 rejected**, while the identical text sat as `uploaded` under the pre-rewrite identity (39 skips, one per stream, `duplicate-content`, with a `rejected` row written each time).
-
-The rule: when a skip carries the reason `duplicate-content` **and** the same content hash already holds an `uploaded` row anywhere — embedded or sidecar, under this media hash or under another — the row is written as `uploaded` (reason cleared) and the stream is **not** counted as rejected. In every other case the reject is recorded exactly as before: a skip over content that is genuinely NOT up must keep saying so, or the fix would claim an upload that never happened.
+The rule: when a skip carries the reason `duplicate-content` **and** the same content hash already holds an `uploaded` row anywhere — embedded or sidecar, under this media hash or under another — the row is written as `uploaded` (reason cleared) and the stream is **not** counted as rejected. In every other case the reject is recorded exactly as before, so a skip over content that is genuinely NOT up still says so.
 
 The decision lives in ONE registry method (`RecordSkippedContent`) that every skip path calls — the embedded reject-replay, the sidecar reject-replay, the phase-1 QA gate and the phase-3 upload skip. **Test: T112.**
 
@@ -1447,43 +1237,11 @@ There is **no "settled"/"done" state.** "Is this position finished?" is answered
 #### 14.8 Migration policy
 **F-M195b:** structural changes are **not migrated**. The schema marker in area 0 makes the change visible and the database reset (F-M90) is the intended path; records from an unrecognised schema version are ignored rather than rewritten.
 
-**F-M325 [D] (operator order 08.10.2026):** **The data store is SQLite through the host's Entity Framework Core. The engine rides along in no ZIP.**
+**F-M325 [D] (operator order 08.10.2026):** **The data store is SQLite through the host's Entity Framework Core. The engine rides along in no ZIP.** The plugin keeps a file of its OWN, `subdl-scribe.sqlite`, in its data directory — nothing is ever written into Jellyfin's database, which its own migrations rebuild. The schema is declared with `EnsureCreated`, and the business keys are the primary keys — never an auto-assigned id (F-M194). The engine is a host dependency (`ExcludeAssets=runtime`), so no SQLite file rides in the ZIP. Because the one-time import (F-M327) must still READ the old document store, the previous engine remains a dependency in this version; it disappears only when no installation can still carry an old file. **Test: T137.** See F-M194, F-M236, F-M326, F-M327.
 
-**What was there.** A document store (`LiteDB`) carried as a full dependency: 510,464 B in the package, 202,303 B of it COMPRESSED — 15.3 % of everything that shipped. It was used from exactly ONE file: `Data/SubdlDbContext.cs`. The other 22 call sites only touched the collection properties the context exposes, so the engine was never spread through the code, only the abstraction.
+**F-M326 [D] (operator order 08.10.2026):** **The store runs in WAL mode with a busy timeout, and every file-level copy of it is checkpointed first.** WAL is set explicitly — it is not the default — so a reader never blocks the writer and never sees a half-written state. `busy_timeout=5000` covers a second context or a second process over the same file. The reset and restore routes checkpoint first and clear the side files before they copy. Connection pooling is OFF as a correctness setting: the file-level routes dispose the context, copy a file over the database and open a fresh context, and a pooled connection would keep the old handle; `ClearPoolFor` is called as well for the operation that cannot tolerate a stale handle. **Test: T138.** See F-M325, F-M327.
 
-**Why it was avoidable.** Jellyfin 12.1 already ships `Microsoft.EntityFrameworkCore.Sqlite` 10.0.11 together with `Microsoft.Data.Sqlite` and the native `libe_sqlite3.so`, and its `PluginLoadContext` (verified in the host's own source: `AssemblyDependencyResolver`, falling through to the host when the plugin carries nothing) resolves what a plugin does not bring. With `ExcludeAssets=runtime` on the package nothing rides along: the built output holds the plugin assembly and `LanguageDetection.dll` only, and the ZIP names no SQLite file.
-
-**Nothing is written into Jellyfin's database.** The plugin keeps a file of its OWN, `subdl-scribe.sqlite`, in its data directory. Jellyfin offers plugins no database interface at all — checked against `MediaBrowser.Controller.dll`, which carries no such abstraction — and its own `jellyfin.db` is rebuilt by its migrations, so a plugin writing there would lose data on a server update.
-
-**What the plugin pays for and what it gets.** The provider's service set comes from the host: connection handling, the LINQ surface, `VACUUM`, `PRAGMA`. The plugin declares the schema with `EnsureCreated` (it owns the schema outright, so no migration assembly is involved) and keeps the business keys as primary keys — never an auto-assigned id (F-M194).
-
-**What this rule does NOT claim.** The saving is not the engine's full weight. The one-time import (F-M327) still needs the old engine to READ the previous file, so `LiteDB` remains a dependency in this version and 202,303 B stay in the ZIP. Measured, v200 → v201: 1,337,266 → 1,301,728 B, a 35 KB reduction, NOT the 202 KB the format change alone would give. The remainder disappears only when no installation can still carry an old file.
-
-**Test: T137.** See F-M194, F-M236, F-M326, F-M327.
-
-**F-M326 [D] (operator order 08.10.2026):** **The store runs in WAL mode with a busy timeout, and every file-level copy of it is checkpointed first.**
-
-**Why WAL is set EXPLICITLY.** It is not the default. SQLite and Entity Framework both start in the rollback-journal mode (`delete`) — verified by reading `PRAGMA journal_mode` back on a fresh EF-created file, which answered `delete`. The store wants WAL because the plugin has one writer (a scheduled task, serialised by the global run lock) and several readers (the configuration page polls `Plugins/SubdlSync/Stats` every 10 seconds, the diagnostics endpoint walks four areas at once), and in WAL a reader never blocks the writer and never sees a half-written state. `busy_timeout=5000` covers the one case the in-process gate cannot: a second context or a second process over the same file, where SQLite otherwise answers "database is locked" immediately.
-
-**Why the copy paths changed with the format.** The previous engine was ONE file, so "copy it aside and put it back" was obviously correct. A WAL database is up to three files, and the two mistakes are silent: a backup taken without folding the journal first carries the main file alone and is missing every write since the last checkpoint, and a restore that leaves the OLD file's `-wal` beside the restored one lets SQLite replay foreign pages over it. So the reset and restore routes checkpoint first and clear the side files before they copy.
-
-**Connection pooling is OFF, and that is a correctness setting.** The reset and restore routes are file-level operations: they dispose the context, copy a file over the database and open a fresh context. With pooling ON the physical connection is not closed on dispose — it returns to the pool holding the file handle and its journal index — so the copy does not take effect and the reopened context reads the OLD file. Measured in a probe mirroring both paths: pooling ON restored **2 of 3** rows and a mutated value still read **999**; pooling OFF restored **3 of 3** and the backed-up value. `ClearPoolFor` is called as well, for the one operation that cannot tolerate a stale handle.
-
-**Test: T138.** See F-M325, F-M327.
-
-**F-M327 [D] (operator order 08.10.2026):** **A new version that meets an old data file IMPORTS it once, and keeps the old file.**
-
-**Why an import rather than a reset.** The document store's own convention is a marker plus a reset (F-M195b), and that was the first candidate. The measurement decided against it: a live file held **117 rows over ten areas**, and while most are rebuildable — media and track rows come back from a rescan, OSHashes are pure cache, worker rows are cosmetic — two areas are not. Losing the retry counters and the burned-candidate verdicts does not lose data, it loses WORK: a title that keeps failing is retried from scratch, and a candidate that was already screened is fetched and screened again. That is the exact failure the old engine's own comments record — 41 downloads in one run against a 50/day quota because a mark was never written.
-
-**How it runs.** Before the SQLite store is opened, and only when there is nothing to import INTO: a non-empty `subdl-scribe.sqlite` short-circuits everything, so the path is walked once in the life of an installation. The source is read with the old engine, written area by area, and then renamed to `subdl-scribe.db.imported` — never deleted. A failed import leaves the SQLite file absent so the next start retries, and leaves the source untouched either way; the plugin starts on an empty store rather than refusing to load.
-
-**The three-valued flags survive the import.** F-M285's rule is that `true`/`false` are statements and an absent field is a GAP. The import reads the old document directly and writes null for an absent field, so a gap never becomes a false claim about a subtitle. Verified against a real file: `Forced` null counts preserved 8 → 8.
-
-**Measured, against a copy of a live file.** 117 of 117 rows across all ten areas; every counter key intact including the `id-not-found:` and `qa-fail:` budgets the import exists for; burned-candidate keys keeping the `item|language|subdl_id` shape; the status row carried with its values (`Uploaded=71 Downloaded=16 RejectedDownload=44 RejectedUpload=17 FittedToAudio=3`); a second start changes no row count.
-
-**The import is not the end of the path, and the harness follows it through the housekeeping.** An import lands the operator in a store whose next three actions are REFRESH, RESET and RESTORE, and those ran only against a seeded store — which is not what an import leaves behind. The retry budgets, the burned verdicts and the per-area shape are the difference, so they are the fixture: the refresh is driven through the same entry points the task calls and is asserted in BOTH directions (a dead item loses its stamp, budget and candidate; a live item keeps all three with its value), with the fail-safe rule asserted from both sides because a missed prune costs nothing and a false one on an unmounted volume erases valid state; the reset drives all three scopes and requires the `all` scope to leave an empty but usable store and a backup that opens on its own with every row the store held; the restore mutates first and asserts VALUES, because a restore that silently keeps the old rows is the failure the pool actually caused. The order of the two file-level operations is additionally read out of `Api/SubdlReset.cs`, so the suite cannot stay green while the plugin's own order drifts. Planted and confirmed RED: liveness ignored in the prune, the oshash fail-safe removed, the side files cleared after the copy and not at all, the pooled-handle drop withheld, the checkpoint before the backup withheld, and the import's short-circuit removed. One measured lesson is recorded in the suite itself: the check that locates the plugin's source must FAIL when it cannot find it, because a fixed relative path once pointed nowhere and the section reported a skip that read like a pass.
-
-**Test: T139.** See F-M195b, F-M285, F-M325, F-M326.
+**F-M327 [D] (operator order 08.10.2026):** **A new version that meets an old data file IMPORTS it once, and keeps the old file.** The import runs before the SQLite store is opened, and only when there is nothing to import INTO: a non-empty `subdl-scribe.sqlite` short-circuits it, so the path is walked once in the life of an installation. The source is read with the old engine, written area by area, and then renamed to `subdl-scribe.db.imported` — never deleted. A failed import leaves the SQLite file absent so the next start retries, and leaves the source untouched either way; the plugin starts on an empty store rather than refusing to load. The retry counters and burned-candidate verdicts are what the import exists to preserve — that work cannot be rebuilt from a rescan. The three-valued flags survive (F-M285): an absent field is written as null, so a gap never becomes a false claim about a subtitle. **Test: T139.** See F-M195b, F-M285, F-M325, F-M326.
 
 ## 15. Logging, Status and Transparency
 
@@ -1515,70 +1273,21 @@ The log line reads `DRY RUN, would have uploaded {N}` / `{Saved} would have save
 
 **F-M245:** **A message reaches the log through exactly ONE gate.** A call site picks the lowest level that must carry its message and calls the one matching gate; it never calls two gates for the same message. `Normal < Verbose < Debug` is cumulative, so two gates for one message put it in the log twice. Scope: the TMDb call trace in both pipelines. **Test: T62.**
 
-**F-M218:** **The reject counters are persisted too, per direction, next to the volume counters.** Two 64-bit fields on the same single status row as F-M207, one field per counter.
+**F-M218:** **The reject counters are persisted too, per direction, next to the volume counters.** Two 64-bit fields on the same single status row as F-M207, one field per counter — rejected downloads / rejected uploads: candidates **fetched and then thrown away**, one field per direction. The scope is every reject path, and it is F-M286 that defines it. **Test: K1–K8.**
 
-Rejected downloads / rejected uploads — candidates **fetched and then thrown away**, one field per direction; the scope is every reject path, and it is F-M286 that defines it. **Test: K1–K8.**
+**Two counters were WITHDRAWN from this requirement (operator order 08.10.2026):** *type-corrected-from-file-name* and *TMDb year-filter misses* — the row AND the counter. They are removed from every carrier: the two statistics rows, both entity fields, the writer and its early-out, the reset, both API responses, the pipeline increments and the resolver event. The BEHAVIOUR they measured is unchanged and still required (F-M217). Withdrawing a counter means withdrawing it everywhere: the check asserts the absence across page, entity, writer and API.
 
-**Two counters were WITHDRAWN from this requirement (operator order 08.10.2026):** *type-corrected-from-file-name* and *TMDb year-filter misses*. The operator's words are that both "kann entfallen. In statistik und der Zähler" — the row AND the counter. They were removed from every carrier, not just hidden: the two rows in the statistics table, both entity fields, the writer and its early-out, the reset, both API responses, the pipeline increments and the resolver event that fed one of them. The BEHAVIOUR they measured is untouched and still required — the file name still decides type, title, season and episode (F-M217), the year-filtered search still retries once without the year (F-M217), and the log still names both. What is gone is the number. Withdrawing a counter means withdrawing it everywhere: a field left in the entity while its row disappears counts on with nobody reading it, which is why the check asserts the absence across page, entity, writer and API.
+Every timestamp uses one format — US order (M/D/YYYY) with local AM/PM time — through the timestamp formatter and the time formatter, so stamps cannot drift apart per call site.
 
-Every timestamp uses one format — US order (M/D/YYYY) with local AM/PM time — through the timestamp formatter and the time formatter, so stamps cannot drift apart per call site. an unqualified locale call without an explicit locale follows the BROWSER's locale.
+**F-M310 [B1] (user decision 07.10.2026):** **The time an audio alignment spends is taken off the next download's pacing wait, never below zero.** The alignment runs after a subtitle download and before the next real download, inside a transfer pause sized for a download only.
 
-**F-M310 [B1] (user decision 07.10.2026):** **The time an audio alignment spends is taken off the next download's pacing wait, never below zero.**
+Measured and credited in `GlobalRateLimiter`: `AddFitMs` books, `TransferPauseMsLessFit` spends. Both alignments are measured — main track and hearing-impaired — in one helper. The measurement wraps the CALL, not the write, in a `finally` block, so a cancelled or failed alignment also counts. The credit is CONSUMED at the pause, once, and never banked: it can only bring the next pause down, never a later one. Floor 0 — the plugin never waits a negative time. Zero and negative bookings are discarded, not booked. With the alignment switched off nothing is measured, so the pauses are exactly as configured. Uploads are NOT affected (own limiter, own rhythm).
 
-The alignment runs AFTER a subtitle is downloaded and BEFORE the next real download, so its duration sits inside a transfer pause that was sized for a download only — the rhythm was charging the run for time it spent correcting instead of transferring (user request: "die Zeit messen, die der Fit gebraucht hat, und sie von der transfer rate per hour für Downloads abziehen, minimum 0").
+The run's DONE line reports what the alignment cost: `N fitted to audio (Xs)`. **Test: T125.** See F-M26, F-M308, F-M309.
 
-Measured and credited in `GlobalRateLimiter`, not in the pipeline: the arithmetic has to be testable, and a bound that only exists as a private field of a Jellyfin-hosted pipeline cannot be exercised. `AddFitMs` books, `TransferPauseMsLessFit` spends.
+**F-M309 [B1] (user decision 07.10.2026):** **The audio fit is logged on two levels: WHETHER at Normal, WHAT AGAINST at Verbose.** At Normal, in the lines F-M24d prescribes: the run START line names the switch — `audio fit=on|off` — the run DONE line carries the counter — `N fitted to audio` (F-M286). At Verbose, the per-file detail to REPRODUCE a fit: `fit reads audio track {Pos} of {N} ({Reason}); subtitle {Release}` — the track actually READ, gated on the fit switch. Verdict lines: `auto-sync corrected …` / `not applied: …` at Verbose (F-M24a), one branch each; the `ffmpeg not available` branch is GONE, a missing ffmpeg reported once per run by `FfmpegTools` at Warning. **Test: T124.** See F-M24a, F-M286, F-M307.
 
-  both alignments are measured — the main track and the hearing-impaired one, in one helper, so a
-  second alignment path cannot bypass the stopwatch;
-  the measurement wraps the CALL, not the write: an alignment that ran and concluded "no measurable
-  gain" cost the same as one that corrected the file, and the rhythm charges for neither;
-  measured in a `finally` block, because a cancelled or failed alignment also spent the time;
-  the credit is CONSUMED at the pause (`Interlocked.Exchange`, not read-then-clear, so two readers
-  cannot spend it twice) and never banked: it can only bring the next pause down, never pay for a
-  later one, and two pauses are never shortened for one alignment;
-  floor 0 — the plugin never waits a negative time, and an alignment longer than the pause simply
-  means no further wait. Both transfer gaps carry it, because both gaps contain an alignment (this
-  one the main track's, the next one the HI track's);
-  zero and negative bookings are discarded, not booked: a negative value would ADD to the pause.
-  With the alignment switched off nothing is measured, so the credit stays 0 and the pauses are
-  exactly as configured — no special case needed;
-  uploads are NOT affected: they have their own limiter instance and their own rhythm, and the
-  request was for the download direction.
-
-The run's DONE line reports what the alignment cost: `N fitted to audio (Xs)` — the counter says how many, the seconds say whether the correction is a footnote or the bulk of the wall time. **Test: T125.** See F-M26, F-M308, F-M309.
-
-**F-M309 [B1] (user decision 07.10.2026):** **The audio fit is logged on two levels: WHETHER at Normal, WHAT AGAINST at Verbose.**
-
-Normal carries the fit as a run-level fact, in the two lines F-M24d already prescribes:
-
-  the run START line names the switch — `audio fit=on|off` — so a run with the correction off is
-  distinguishable from a run where every fit simply found nothing to do;
-  the run DONE line carries the counter — `N fitted to audio` — so the one number that says how much
-  of the correction work landed is visible without raising the log level. F-M286 already required
-  every counter to be printed somewhere; this is where the fit's counter is printed.
-
-Verbose carries the per-file detail a reader needs to REPRODUCE a fit: `fit reads audio track {Pos}
-of {N} ({Reason}); subtitle {Release}`. It names the track that was READ — not a substitution — and
-the subtitle it was fitted against, and it is gated on the fit switch, because with the correction off
-nothing reads the audio and the line would be false. It is emitted for track 0 of N as well: the
-exceptions are not the interesting set, the track actually read is.
-
-The verdict lines stay where F-M24a puts per-item work — `auto-sync corrected …` / `not applied: …`
-at Verbose, one branch each. The former separate `ffmpeg not available` branch is GONE: it called the
-same helper under the same threshold as the general branch, so it changed nothing while suggesting a
-policy that did not exist. A missing ffmpeg is reported once per run by `FfmpegTools` at Warning
-level, which is visible at Normal. **Test: T124.** See F-M24a, F-M286, F-M307.
-
->**F-M314 [D] (user decision 07.10.2026):** **The sidecar rename is gated by the SAME switch as the container write — `Allocate missing language codes` — and no longer by `UploadResolveUnd`.**
-
-A rename allocates a missing language code exactly as the container write does; it writes that code into the NAME instead of into the container. Two different switches for one act would let an operator ask for allocation and still be left with a library that reads as unlabelled — the two halves of one feature disagreeing about whether it is on.
-
-**`UploadResolveUnd` was the wrong owner.** It is the UPLOADER's und-resolution switch (Upload tab): it decides whether the upload direction looks at an untagged stream. The seeder pass serves BOTH directions and never belonged to that switch. The container path never consulted it either — so the container was written under `Allocate missing language codes` while the file beside it was renamed under a different switch. The two now agree.
-
-**The default therefore changes from ON to OFF**, because `Allocate missing language codes` is off by default (F-M261) while `UploadResolveUnd` is on. On a default installation the seeder no longer renames unlabelled sidecars unless the operator asks for allocation. Stated here because it is a behaviour change on existing installs, not a refactor.
-
-**The gate is a gate, not a deletion:** the file is left exactly as it is, and the uploader still owns it. The 2 KB floor and the "no confident verdict" exit are unchanged and still independent of this switch.
+>**F-M314 [D] (user decision 07.10.2026):** **The sidecar rename is gated by the SAME switch as the container write — `Allocate missing language codes` — and no longer by `UploadResolveUnd`.** Default changes ON→OFF, because `Allocate missing language codes` is off by default (F-M261). The gate only gates: the file is left as it is, the 2 KB floor and the "no confident verdict" exit unchanged.
 
 **F-M313 [B1] (user decision 07.10.2026):** **The statistics row counts the LOOSE subtitle files the seeder renamed so their name carries the language, in its own row.**
 
@@ -1596,48 +1305,21 @@ The container rewrite was already suppressed by F-M263, but this rename had **no
 
 **F-M311 [B1] (user decision 07.10.2026):** **The statistics row counts the media FILES whose language codes the seeder wrote, and that row carries no direction.**
 
-The seeder's allocation pass (F-M261) rewrites media containers, and until now that was visible only in the log. It is work the run did to the LIBRARY, not work that entered or left it, and the row reported only the latter — a run that edited 40 files read exactly like one that edited none.
+The seeder's allocation pass (F-M261) rewrites media containers; it is work the run did to the LIBRARY, so it gets its own statistics row. The count is one per FILE, not per code: a file that got three tags counts once. The gate keeps reporting the per-track number on its own Normal line.
 
-The count is one per FILE, not per code (user decision): a file that got three tags counts once, because the question the line answers is "how many media files did the run edit". The gate keeps reporting the per-track number on its own Normal line, where the languages themselves are named.
+**No direction prefix** — the seeder serves both directions, and the allocation pass sits BEFORE the direction checks, so a `Downloads:` prefix would claim a scope the count does not have. The label reads `Media files: language codes added`.
 
-**No direction prefix.** Every other quality row is prefixed because its counter is produced inside a direction; this one is not — the seeder serves both, and the allocation pass sits BEFORE the direction checks, so it runs on every scan whichever direction was asked for. A `Downloads:` prefix would claim a scope the count does not have. The label therefore reads `Media files: language codes added`.
-
-Counted only when the write actually happened: a dry run `stand`s the write down (F-M263), the switch `Allocate missing language codes` is off by default, and a detector that cannot decide writes nothing on purpose (F-M261). All three leave the counter at 0 — no dry-run filter is needed at the statistics boundary, because the count cannot exist in a run that wrote nothing. **Test: T126.** See F-M261, F-M308.
+Counted only when the write actually happened: a dry run `stand`s the write down (F-M263), the switch `Allocate missing language codes` is off by default, and an undecidable detector writes nothing (F-M261) — all three leave the counter at 0. **Test: T126.** See F-M261, F-M308.
 
 **F-M308 [B1] (user decision 07.10.2026):** **The statistics counters are a TABLE, one row per counter, and the table names the direction each count belongs to.**
 
-Form: label left, number right, both columns bounded so the numbers form **one vertical line** — the
-counters are compared at a glance, and a run-on sentence makes that impossible (the user could not read
-the previous single line).
+Form: label left, number right, both columns bounded so the numbers form **one vertical line**. Order: the two volume counters with **download first**, then the counter covering **both** directions, then the remaining rows **grouped by direction — all downloads, then uploads**. A row whose data is per-direction names it (`Uploads:` / `Downloads:`); one covering both says so. Order asserted (T123).
 
-**The order is the user's (07.10.2026):** the two volume counters lead with **download first** (it is the
-direction every install runs, and it sat second before), then the counter that covers **both** directions,
-then the remaining rows **grouped by direction — all downloads, then uploads**. A reader meets one
-direction's numbers together instead of hopping between the two. Every quality row names its direction
-where the data is per-direction (`Uploads:` / `Downloads:`), and where one counter covers both directions
-the row says so instead of picking one. The order is asserted (T123) because a regrouping that reverts is
-invisible: the table still renders, no number changes, it just reads the old way.
+The wording states what happened, not the code's vocabulary:
 
-The wording states what happened, not the code's vocabulary. Four counters, plus the fit:
-
-  uploads DISCARDED BEFORE TRANSFER — upload candidates dropped before anything was sent, on the
-  QA gates, the und/language checks and the self-echo guard (user decision 07.10.2026). It reads
-  "after being fetched" no longer: the upload direction fetches NOTHING. Every increment site sits
-  on a skip path ahead of the API call — the bytes are extracted, detected on and screened, never
-  transferred — so the download word "fetched" was a copy that stated something false. The two rows
-  now name what each direction actually spent.
+  uploads DISCARDED BEFORE TRANSFER — upload candidates dropped before anything was sent, on the QA gates, the und/language checks and the self-echo guard; the upload direction fetches NOTHING.
   downloads rejected after being fetched — download candidates fetched and then thrown away.
-  auto-synch — downloaded subtitles whose timing the run MOVED onto their audio track (F-M307),
-  counted when the correction is APPLIED; the upload direction has no such row, because it has no
-  audio to align against. The operator's wording for the row is `Downloads: Auto-Sync`
-  (08.10.2026): it is short on purpose, because the statistics column is narrow and the row sits
-  among others that follow the same `Downloads:` pattern. Two long forms were written here first and
-  both were struck by the operator: "...aligned to the spoken track", which echoed the switch's
-  sentence, and the spelling `Auto-Synch`, which he corrected to `Auto-Sync` so that one word is
-  spelled one way: the worker row and the statistics row both read `Auto-Sync`, because one worker
-  spelled two ways reads as two things. (`Autosync` was the worker's spelling for one release; it
-  went the same day the row was corrected.) A row in a table of counts
-  names its counter; it does not restate the switch's description.
+  auto-synch — downloaded subtitles whose timing the run MOVED onto their audio track (F-M307), counted when APPLIED; no upload row. Operator's wording: `Downloads: Auto-Sync` (08.10.2026).
 
 **Test: T123.** See F-M218, F-M286.
 
@@ -1691,11 +1373,9 @@ Reporting the task's own "ok" is wrong twice over: it claims success when the wa
 
 **F-M289:** **The direction rows are written by whoever OWNS the cycle — on an arrival cycle that is the dispatcher, not the waiting task.**
 
-An arrival cycle starts in the dispatcher and never passes through `SubdlDownloadTask`/`SubdlUploadTask`; those two only record their row while they wait. Before this rule an arrival cycle therefore did its work, logged it and left the Download and Upload rows untouched: they kept showing the last SCHEDULED run, and only the Seeder row moved. The rows were truthful about the wrong run — the failure mode is a reader concluding nothing had happened.
+An arrival cycle starts in the dispatcher and never passes through `SubdlDownloadTask`/`SubdlUploadTask`. The dispatcher records both direction rows for the arrival triggers (`event`, `arrival-followup`) and only for those: on a scheduled or manual run the waiting task owns its row, and a second writer would fight it. The ranking is `DescribeCycle` (F-M267), so a row reads identically whichever path produced the cycle. The dispatcher marks both rows `running` at cycle start, so a cycle that dies mid-scan shows the attempt rather than the previous green.
 
-The dispatcher records both direction rows for the arrival triggers (`event`, `arrival-followup`) and only for those: on a scheduled or manual run the waiting task owns its row, and a second writer would fight it. The ranking is `DescribeCycle` (F-M267), so a row reads identically whichever path produced the cycle. The dispatcher marks both rows `running` at cycle start, so a cycle that dies mid-scan shows the attempt rather than the previous green.
-
-A direction that is switched OFF is recorded `skipped`/`disabled`, not `ok`: the arrival path leaves it untouched, so a plain `DescribeCycle` call would fall through to green and paint "nothing happened here" as "this ran fine". **Test: T102.**
+A direction that is switched OFF is recorded `skipped`/`disabled`, not `ok`. **Test: T102.**
 
 **F-M290:** **With no library selected the seeder does not start at all — it does not scan, pre-check, or take the run lock to conclude that there is nothing to do.**
 
@@ -1705,15 +1385,9 @@ The row is `skipped` with "no libraries selected" — GREY, because a scan that 
 
 **F-M330 [D] (operator order 08.10.2026):** **One lit lamp, for the worker that is working.**
 
-**The rule is the operator's own sentence:** *"seeder gets blue only, download only download, upload only upload. Not seeder and downloader etc. as it is successive."* The cycle is a sequence — seed, then download, then upload — so at most ONE direction may be blue, and blue claims its own work, never a sibling's.
+The rule is the operator's own sentence: *"seeder gets blue only, download only download, upload only upload. Not seeder and downloader etc. as it is successive."* The cycle is a sequence — seed, then download, then upload — so at most ONE direction may be blue, and blue claims its own work, never a sibling's.
 
-**Measured on prod, before the fix.** `Download Started 19:07:17.544` and `Seeder Started 19:07:17.591` — 47 ms apart, from one and the same cycle. The Seeder then scanned for half a minute while Download AND Upload were both lit, because the cycle marked both directions running when it STARTED rather than when their runs began.
-
-**What changed.** `RecordArrivalDirectionStart` — called at the cycle's start, lighting both directions — is gone, with the helper itself. Each direction calls `MarkDirectionRunning(upload)` at the moment its own queue is prepared inside `RunDirectionAsync`, and closes its own row from its own fate in a `finally` (`FinishDirectionRow`), so a failure or a stop still leaves no lamp hanging. The wait-only scheduled tasks no longer call `Start` at all: they start a cycle and wait, so their mark lit a lamp for the seeder's work.
-
-**A direction that never ran keeps its row for the waiting task** — that is what `DirectionRowWritten(upload)` gates. A direction whose run never began (switched off, empty queue, lock busy) has nothing of its own to report, and its row would otherwise keep a stale outcome.
-
-**Test: T141.**
+Each direction calls `MarkDirectionRunning(upload)` at the moment its own queue is prepared inside `RunDirectionAsync`, and closes its own row from its own fate in a `finally` (`FinishDirectionRow`), so a failure or a stop still leaves no lamp hanging. The wait-only scheduled tasks never call `Start`: they start a cycle and wait. A direction whose run never began (switched off, empty queue, lock busy) keeps its row for the waiting task — what `DirectionRowWritten(upload)` gates. **Test: T141.**
 
 **F-M268:** **One colour rule for every worker: green = the work ran and ended without an exception, yellow = the work did not happen but nothing is broken, red = something is broken, grey = not run.**
 
