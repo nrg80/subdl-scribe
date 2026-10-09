@@ -191,6 +191,21 @@ public sealed class WorkerRunRegistry
     public const string UploadWorkerKey = "SubdlSyncUploadTask";
 
     /// <summary>
+    /// F-M322 (operator order 08.10.2026): the auto-sync's own worker key. It gets its own row rather
+    /// than being folded into the Download row, because the alignment is the part of a download run
+    /// the operator watches: a run can fetch 40 files and align none, and the Download row's single
+    /// word cannot tell those two appart.
+    /// </summary>
+    public const string AutoSyncWorkerKey = "SubdlAutoSyncTask";
+
+    /// <summary>
+    /// F-M323 (operator order 08.10.2026): the auto-sync's display name, in one place. The worker
+    /// type carries it too (<see cref="Qa.AutoSyncWorker.Name"/>); this constant is the registry's
+    /// copy so the row and the worker cannot be renamed apart.
+    /// </summary>
+    public const string Name = Qa.AutoSyncWorker.Name;
+
+    /// <summary>
     /// The status a worker reports for the cycle it took part in.
     /// <para>
     /// Colour criteria (user-approved 30.09.2026), one principle for every worker:
@@ -210,7 +225,7 @@ public sealed class WorkerRunRegistry
     /// </summary>
     /// <param name="cycleFinished">False when the wait hit its cap and the cycle is still working.</param>
     /// <param name="seederOutcome">The seeder's fate in THIS cycle, or null when it reported none.</param>
-    /// <param name="seederDetail">The matching seeder detail.</param>
+    /// <param name="seederDetail">The matching seeder detail; ranked in the red/yellow/grey branches only.</param>
     /// <param name="directionOutcome">
     /// This direction's fate (download/upload) in the cycle, or empty/null when it ran without a
     /// special fate.
@@ -266,8 +281,12 @@ public sealed class WorkerRunRegistry
             return (Outcome.Skipped, Fallback(seederDetail));
         }
 
-        // GREEN: the work ran. The seeder's numbers are the most informative thing to show.
-        return (Outcome.Ok, string.IsNullOrWhiteSpace(seederDetail) ? "cycle finished" : seederDetail!);
+        // GREEN: the work ran, and the row states ITS OWN result. Operator order 08.10.2026:
+        // "jeder worker meldet nur sich selbst". The green fallback used to hand the SEEDER's string
+        // to EVERY direction row, so `Seeder` and `Upload` carried the identical sentence on the live
+        // endpoint while the upload row never said what the upload did — measured on prod, two rows,
+        // one string. The seeder's numbers belong on the seeder's row and nowhere else.
+        return (Outcome.Ok, string.IsNullOrWhiteSpace(directionDetail) ? "cycle finished" : directionDetail!);
     }
 
     /// <summary>Detail text that is never empty, so a row cannot show a bare outcome word.</summary>
@@ -293,8 +312,9 @@ public sealed class WorkerRunRegistry
     [
         (SeederKey, "Seeder"),
         (DownloadWorkerKey, "Download"),
+        (AutoSyncWorkerKey, "Auto-Sync"),
         (UploadWorkerKey, "Upload"),
-        ("SubDLPostprocessTask", "Postproc."),
+        ("SubDLPostprocessTask", "Upl. Postproc."),
         ("SubdlSyncDatabaseRefreshTask", "Database"),
         ("SubdlSyncOshashRefreshTask", "OSHash"),
     ];

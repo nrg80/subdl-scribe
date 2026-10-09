@@ -108,6 +108,7 @@ public static class RejectReason
     /// <summary>This (file, language, HI) pair was already uploaded in this run.</summary>
     public const string SelfEcho = "duplicate-self-echo";
 
+
     // --- download side: a candidate was fetched, screened and discarded ---
     /// <summary>A download candidate was fetched and failed a gate. The gate is the reason suffix.</summary>
     public const string CandidateRejected = "candidate-rejected";
@@ -450,7 +451,7 @@ public class OshashEntity
 /// </summary>
 public class CounterEntity
 {
-    /// <summary>LiteDB auto-id.</summary>
+    /// <summary>Database-assigned auto-id. No longer the identity — see the Key above.</summary>
     public int Id { get; set; }
 
     /// <summary>Counter key, namespaced, e.g. "not-found:tt1234567".</summary>
@@ -517,16 +518,6 @@ public class StatusStatsEntity
     /// <summary>Total subtitles downloaded since <see cref="SinceUtc"/>.</summary>
     public long Downloaded { get; set; }
 
-    // F-M218 (27.09.2026, user decision): cumulative quality counters next to the two
-    // volume counters. A field per counter rather than a generic key/value row — the set
-    // is deliberately small, fixed and read by the GUI, so fields keep it typed,
-    // greppable and impossible to misspell at runtime.
-
-    /// <summary>Items whose type/season/episode came from the FILE NAME instead of Jellyfin (F-M217).</summary>
-    public long TypeCorrectedByFileName { get; set; }
-
-    /// <summary>TMDb title searches that only matched after the year filter was dropped (F-M217).</summary>
-    public long TmdbYearFilterMisses { get; set; }
 
     /// <summary>
     /// F-M286: candidates FETCHED and then thrown away, per direction — every reject path, not the QA
@@ -543,6 +534,34 @@ public class StatusStatsEntity
     /// one field, every reject path.
     /// </summary>
     public long RejectedUpload { get; set; }
+
+    /// <summary>
+    /// F-M308: downloaded subtitles that were FITTED to their audio track — the correction applied,
+    /// not merely offered. The volume counter counts subtitles that arrived; this one counts the ones
+    /// the run had to move, which is why it is reported next to the corrections and not next to the
+    /// volume. Download only: the upload direction has no audio fit.
+    /// </summary>
+    public long FittedToAudio { get; set; }
+
+    /// <summary>
+    /// F-M311: media FILES whose language codes were written by the seeder's allocation pass — not a
+    /// download and not an upload. One count is one file that got at least one real tag where it had
+    /// none (or had <c>und</c>), counted only when the write actually happened: a dry run, a disabled
+    /// switch or a detector that could not decide all leave it at 0. Collapsed to one per file on
+    /// purpose — a file with three tags is one file edited, and that is the question the line
+    /// answers. It belongs on the status row because the row otherwise reports only what entered the
+    /// library, never that the library itself was rewritten.
+    /// </summary>
+    public long LanguageCodesAllocated { get; set; }
+
+    /// <summary>
+    /// F-M313: LOOSE subtitle files renamed so their NAME carries the detected language (F-M278). A
+    /// separate counter from the one above because it is a different act on a different kind of file:
+    /// a container gets a language tag INSIDE, a loose .srt gets a new name. Counted only on a real
+    /// move — a refusal (target taken, unlistable directory, filesystem error) and a dry run leave
+    /// both the file and the counter untouched.
+    /// </summary>
+    public long LooseSubtitlesRenamed { get; set; }
 
     /// <summary>Start of the counting period; set by "Reset statistics", null before first use.</summary>
     public DateTime? SinceUtc { get; set; }

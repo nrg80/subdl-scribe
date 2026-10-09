@@ -21,7 +21,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.SubdlScribe.Api;
 
 /// <summary>
-/// (20.09.2026): diagnostics endpoint that exposes LiteDB counters,
+/// (20.09.2026): diagnostics endpoint that exposes store counters,
 /// subtitle state and recent run records without requiring shell/SSH access.
 /// </summary>
 [ApiController]

@@ -794,14 +794,13 @@ public sealed class SubdlApiClient
 
     /// <summary>
     /// Searches SubDL for subtitle candidates (F-M41/F-M45, F-M17a).
-    /// GET /api/v1/subtitles with api_key + imdb_id/tmdb_id (hard mode) or film_name (soft mode)
+    /// GET /api/v1/subtitles with api_key + imdb_id/tmdb_id
     /// AND the verified server-side filters season_number, episode_number, languages.
     /// All filters are STRICT (user decision 08.09.2026 — no fallbacks): what the API
     /// returns is authoritative. Search errors still fail-open (F-M17d).
     /// </summary>
     /// <param name="imdbId">IMDb ID (series IMDB for TV) — preferred.</param>
     /// <param name="tmdbId">TMDB fallback id.</param>
-    /// <param name="filmName">Title for the risky soft-mode search (F-M45, only used when ids are absent).</param>
     /// <param name="season">Season (TV) or 0.</param>
     /// <param name="episode">Episode number (TV) or 0 — sent as episode_number.</param>
     /// <param name="languages">Comma-separated SubDL language codes (EN, DE...) or null/empty for all.</param>
@@ -810,7 +809,7 @@ public sealed class SubdlApiClient
     /// <param name="maxCandidatesPerLanguage">Early-stop threshold per language; 0 disables it.</param>
     /// <param name="hearingImpaired">F-M241: when set, the server returns ONLY that side of the HI split (`&amp;hi=1` / `&amp;hi=0`); null leaves it unfiltered.</param>
     /// <returns>List of candidates; empty when nothing found or the search failed (fail-open).</returns>
-    public async Task<List<SubtitleCandidate>?> SearchSubtitlesAsync(string? imdbId, string? tmdbId, string? filmName, int season, int episode, string? languages, int maxPages, CancellationToken ct, int maxCandidatesPerLanguage = 0, bool? hearingImpaired = null)
+    public async Task<List<SubtitleCandidate>?> SearchSubtitlesAsync(string? imdbId, string? tmdbId, int season, int episode, string? languages, int maxPages, CancellationToken ct, int maxCandidatesPerLanguage = 0, bool? hearingImpaired = null)
     {
         var result = new List<SubtitleCandidate>();
         string apiKey = ApiKey ?? throw new InvalidOperationException("Search requires the SubDL API key");
@@ -827,14 +826,9 @@ public sealed class SubdlApiClient
             {
                 url += $"&tmdb_id={Uri.EscapeDataString(tmdbId)}";
             }
-            else if (!string.IsNullOrWhiteSpace(filmName))
-            {
-                // F-M45 soft mode: risky title-based search (only when hard match disabled)
-                url += $"&film_name={Uri.EscapeDataString(filmName)}";
-            }
             else
             {
-                return result; // nothing to search by
+                return result; // nothing to search by — F-M45: an id search or nothing
             }
 
             // (19.09.2026): SubDL requires "type=tv|movie" for TMDB-id
@@ -961,9 +955,9 @@ public sealed class SubdlApiClient
             result.AddRange(batch);
 
             // Early-stop once every requested language has enough candidates —
-            // the pipeline only keeps MaxCandidatesPerLanguage per language anyway, so
-            // further pages are pure API-quota waste (verified 11.09.2026: ~half of the
-            // 2015 daily requests were pagination over pages we discard).
+            // the Auto-Sync walk only pulls a fixed number per language anyway, so further
+            // pages are pure API-quota waste (verified 11.09.2026: ~half of the 2015 daily
+            // requests were pagination over pages we discard).
             if (maxCandidatesPerLanguage > 0 && !string.IsNullOrWhiteSpace(languages))
             {
                 var wanted = languages.Split(',').Select(l => l.Trim()).Where(l => l.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);

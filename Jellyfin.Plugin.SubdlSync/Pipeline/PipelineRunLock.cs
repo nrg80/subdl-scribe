@@ -21,7 +21,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 /// <summary>
 /// (user decision 25.09.2026): ONE lock for every state-mutating component —
 /// seeder, download, upload, postprocessing, database refresh, oshash-refresh. All six touch
-/// the same LiteDB databases, so a single mutual exclusion is what the design needs.
+/// the same data store, so a single mutual exclusion is what the design needs.
 ///
 /// Overlap is NOT waited out. A caller that cannot acquire gets <c>false</c>
 /// immediately and reschedules itself by JobSpacingMinutes (the scheduler coordinators

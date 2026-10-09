@@ -125,20 +125,23 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// </summary>
     /// <param name="uploaded">Subtitles uploaded in this run.</param>
     /// <param name="downloaded">Subtitles downloaded in this run.</param>
-    /// <param name="typeCorrected">F-M218: items typed by the file name instead of Jellyfin.</param>
-    /// <param name="tmdbYearMisses">F-M218: TMDb searches that needed the year filter dropped.</param>
     /// <param name="rejectedDownload">F-M286: download candidates fetched and thrown away.</param>
     /// <param name="rejectedUpload">F-M286: upload candidates discarded from the upload.</param>
+    /// <param name="fittedToAudio">F-M308: downloaded subtitles fitted to their audio track.</param>
+    /// <param name="languageCodesAllocated">F-M311: media files whose language codes were written into their container.</param>
+    /// <param name="looseSubtitlesRenamed">F-M313: loose subtitle files renamed so their name carries the language.</param>
     public void AddStatusCounters(
         long uploaded,
         long downloaded,
-        long typeCorrected = 0,
-        long tmdbYearMisses = 0,
         long rejectedDownload = 0,
-        long rejectedUpload = 0)
+        long rejectedUpload = 0,
+        long fittedToAudio = 0,
+        long languageCodesAllocated = 0,
+        long looseSubtitlesRenamed = 0)
     {
-        if (uploaded == 0 && downloaded == 0 && typeCorrected == 0 && tmdbYearMisses == 0
-            && rejectedDownload == 0 && rejectedUpload == 0)
+        if (uploaded == 0 && downloaded == 0
+            && rejectedDownload == 0 && rejectedUpload == 0 && fittedToAudio == 0
+            && languageCodesAllocated == 0 && looseSubtitlesRenamed == 0)
         {
             return; // nothing happened — do not touch the row (keeps Updated meaningful)
         }
@@ -148,10 +151,11 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             ?? new Data.StatusStatsEntity { Id = "status", SinceUtc = DateTime.UtcNow };
         row.Uploaded += uploaded;
         row.Downloaded += downloaded;
-        row.TypeCorrectedByFileName += typeCorrected;
-        row.TmdbYearFilterMisses += tmdbYearMisses;
         row.RejectedDownload += rejectedDownload;
         row.RejectedUpload += rejectedUpload;
+        row.FittedToAudio += fittedToAudio; // F-M308
+        row.LanguageCodesAllocated += languageCodesAllocated; // F-M311
+        row.LooseSubtitlesRenamed += looseSubtitlesRenamed; // F-M313
         row.Updated = DateTime.UtcNow;
         db.StatusStats.Upsert(row);
     }
@@ -166,10 +170,11 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         var row = db.StatusStats.FindById("status") ?? new Data.StatusStatsEntity { Id = "status" };
         row.Uploaded = 0;
         row.Downloaded = 0;
-        row.TypeCorrectedByFileName = 0; // F-M218
-        row.TmdbYearFilterMisses = 0;
         row.RejectedDownload = 0;
         row.RejectedUpload = 0;
+        row.FittedToAudio = 0; // F-M308
+        row.LanguageCodesAllocated = 0; // F-M311
+        row.LooseSubtitlesRenamed = 0; // F-M313
         row.SinceUtc = DateTime.UtcNow;
         row.Updated = DateTime.UtcNow;
         db.StatusStats.Upsert(row);
@@ -340,7 +345,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     }
 
     /// <summary>
-    /// Recreate the shared LiteDB context after a reset/restore.
+    /// Recreate the shared data context after a reset/restore.
     /// </summary>
     public void RecreateDbContext()
     {
@@ -382,19 +387,24 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// <para>
     /// Without this, two scheduled tasks starting in the same tick both see
     /// <c>_sharedDbContext == null</c> and each construct a SubdlDbContext over the same data
-    /// file. LiteDB's BsonMapper is not thread-safe, so the concurrent EnsureIndexes() calls
-    /// raced and one task died with
+    /// file. The engine then in use had a non-thread-safe object mapper, so the concurrent
+    /// schema setup raced and one task died with
     /// <c>System.NotSupportedException: Member Id not found on BsonMapper for type
     /// EmbedTrackEntity</c> (measured 26.09.2026 at 08:21:09.081/.082, prune and OSHash firing
     /// in the same scheduler tick — the first occurrence in any log). The task itself is fine:
     /// started alone it completes normally.
+    /// </para>
+    /// <para>
+    /// The lock is kept although the engine changed: two contexts over one SQLite file is still a
+    /// race this design does not want — the second one sees a half-initialised schema, and the
+    /// shared instance is what every registry was handed at construction.
     /// </para>
     // F-M211: the shared database context is created under a lock; two contexts over one data file
     // race the object mapper and one task is lost.
     private static readonly object SharedDbContextLock = new();
 
     /// <summary>
-    /// Shared LiteDB context. Lazy-created on first use; all registries
+    /// Shared data context. Lazy-created on first use; all registries
     /// and scheduled tasks share this one instance.
     /// </summary>
     public SubdlDbContext SharedDbContext
@@ -509,11 +519,6 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             {
                 Name = Name,
                 EmbeddedResourcePath = "Jellyfin.Plugin.SubdlScribe.Configuration.configPage.html"
-            },
-            new PluginPageInfo
-            {
-                Name = Name + ".js",
-                EmbeddedResourcePath = "Jellyfin.Plugin.SubdlScribe.Configuration.configPage.js"
             }
         ];
     }

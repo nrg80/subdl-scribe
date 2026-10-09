@@ -43,54 +43,6 @@ public static class SubtitlePresence
     /// root means the caller must skip its deletions entirely. "Unknown" is never "deleted".
     /// </para>
     /// </summary>
-    /// <summary>
-    /// F-M234/F-M258: which of the requested languages have evidence SOMEWHERE — a sidecar file or
-    /// an embedded track.
-    /// <para>
-    /// The refresh used to ask the disk alone and the pipeline asked the disk plus the embedded
-    /// tracks, so the same file was judged differently by two parts of one plugin. On the live
-    /// library that difference was not academic: 349 of 442 files carried their only German and
-    /// English subtitles INSIDE the container, so the disk-only answer was "missing" and the
-    /// refresh dropped 450 valid download marks in fourteen seconds. The configuration already says
-    /// embedded tracks count (<c>DownloadOnlyMissing</c>); this is that rule, in one place, for the
-    /// callers that judge a mark.
-    /// </para>
-    /// <para>
-    /// No verdict is made here: the caller supplies what it could read. An unreadable directory
-    /// still yields an empty set, so the caller must apply its own root gate first — "unknown" must
-    /// not become "missing".
-    /// </para>
-    /// </summary>
-    /// <param name="mediaPath">Media file path.</param>
-    /// <param name="embeddedLanguages">Languages read from the container, when they may count.</param>
-    /// <returns>Languages with a sidecar or an embedded track.</returns>
-    public static HashSet<string> CoveredLanguages(string mediaPath, IEnumerable<string>? embeddedLanguages)
-    {
-        var covered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        if (!string.IsNullOrEmpty(mediaPath))
-        {
-            foreach (var (_, lang, _, forced) in SidecarNaming.List(mediaPath))
-            {
-                // F-M284: a forced sidecar is not the film's dialogue (F-M246), so it must not
-                // mark its language as covered — the regular subtitle stays open and is searched for.
-                if (lang != null && !forced)
-                {
-                    covered.Add(lang);
-                }
-            }
-        }
-
-        foreach (var lang in embeddedLanguages ?? Enumerable.Empty<string>())
-        {
-            if (!string.IsNullOrEmpty(lang))
-            {
-                covered.Add(lang);
-            }
-        }
-
-        return covered;
-    }
 
     /// <param name="roots">Candidate roots.</param>
     /// <returns>True when every root exists and can be listed.</returns>

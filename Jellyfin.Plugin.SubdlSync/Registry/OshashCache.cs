@@ -15,14 +15,13 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Jellyfin.Plugin.SubdlScribe.Data;
-using LiteDB;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
 
 namespace Jellyfin.Plugin.SubdlScribe.Registry;
 
 /// <summary>
-/// Central OSHash cache backed by LiteDB (F-M88c, F-M119).
+/// Central OSHash cache backed by the plugin's data store (F-M88c, F-M119).
 /// </summary>
 /// F-M61b: keyed by file path; a lookup validates size AND mtime and treats a mismatch as a miss,
 /// so a replaced file is re-hashed automatically.
@@ -136,6 +135,36 @@ public sealed class OshashCache
         return dead.Count;
     }
 
+    /// <summary>
+    /// Derive the distinct roots a set of stored paths lives under — "/data/movies2/..." -> "/data/movies2".
+    /// <para>
+    /// Shared by the refresh's two file-side sweeps (the OSHash cache and the media rows) so they cannot
+    /// disagree about whether a volume is present. A fail-safe that guards one and not the other would
+    /// let a dead mount be refused by the cache sweep and accepted by the media sweep in the SAME run.
+    /// </para>
+    /// </summary>
+    /// <param name="paths">Stored paths.</param>
+    /// <returns>Distinct roots.</returns>
+    public static List<string> RootsFromPaths(IEnumerable<string> paths)
+    {
+        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
+        {
+            // two levels below filesystem root: "/data/movies2/..." → "/data/movies2"
+            var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2)
+            {
+                roots.Add("/" + string.Join('/', parts[0], parts[1]));
+            }
+            else if (parts.Length == 1)
+            {
+                roots.Add("/" + parts[0]);
+            }
+        }
+
+        return roots.ToList();
+    }
+
     public IReadOnlyList<string> GetAllPaths()
     {
         return _db.Oshashes.FindAll().Select(e => e.Id).ToList();
@@ -143,7 +172,7 @@ public sealed class OshashCache
 
     public void Flush()
     {
-        // LiteDB writes immediately.
+        // The store writes at the point of the write — nothing to do.
     }
 }
 

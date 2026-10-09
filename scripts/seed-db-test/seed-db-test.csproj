@@ -48,6 +48,20 @@
     <Reference Include="Microsoft.Extensions.Logging.Abstractions">
       <HintPath>$(JellyfinDir)/Microsoft.Extensions.Logging.Abstractions.dll</HintPath>
     </Reference>
+    <!-- PRE-EXISTING GAP, fixed here: the store moved to SQLite and `migrate` grew these
+         references, but seed-db-test kept the LiteDB list alone. The suite therefore built
+         cleanly and died at its FIRST SubdlDbContext construction with
+         `Could not load file or assembly 'Microsoft.Data.Sqlite'` — a missing Reference in
+         this csproj, not a broken test. Without them no run reaches any check, so the suite
+         could not verify anything at all. -->
+    <Reference Include="Microsoft.EntityFrameworkCore"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.dll</HintPath></Reference>
+    <Reference Include="Microsoft.EntityFrameworkCore.Abstractions"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.Abstractions.dll</HintPath></Reference>
+    <Reference Include="Microsoft.EntityFrameworkCore.Relational"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.Relational.dll</HintPath></Reference>
+    <Reference Include="Microsoft.EntityFrameworkCore.Sqlite"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.Sqlite.dll</HintPath></Reference>
+    <Reference Include="Microsoft.Data.Sqlite"><HintPath>$(JellyfinDir)/Microsoft.Data.Sqlite.dll</HintPath></Reference>
+    <Reference Include="SQLitePCLRaw.core"><HintPath>$(JellyfinDir)/SQLitePCLRaw.core.dll</HintPath></Reference>
+    <Reference Include="SQLitePCLRaw.provider.e_sqlite3"><HintPath>$(JellyfinDir)/SQLitePCLRaw.provider.e_sqlite3.dll</HintPath></Reference>
+    <Reference Include="SQLitePCLRaw.batteries_v2"><HintPath>$(JellyfinDir)/SQLitePCLRaw.batteries_v2.dll</HintPath></Reference>
   </ItemGroup>
   <!-- The M11-M13 checks read the pipeline SOURCE, not the compiled DLL: a hard-coded literal
        is invisible in IL, so the source has to be next to the binary. Copied here rather than by
@@ -56,6 +70,9 @@
   <Target Name="CopyPipelineSourceForStructuralChecks" AfterTargets="Build">
     <Copy SourceFiles="$(MSBuildThisFileDirectory)../../Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"
           DestinationFiles="$(OutDir)DownloadPipeline.source.cs"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)../../Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"
+          DestinationFiles="$(OutDir)UploadPipeline.source.cs"
           SkipUnchangedFiles="true" />
   </Target>
 

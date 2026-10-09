@@ -139,6 +139,20 @@ public sealed class SubdlEventDispatcher : IDisposable
     private volatile string? _seederOutcome;
     private volatile string? _seederDetail;
     private volatile int _lastSeedNewItems;  // Items the last seed ADDED (new material)
+
+    // F-M311: media files whose language codes a scan WROTE and that no run has reported yet.
+    // Accumulated across scans and consumed ONCE by the statistics writer. Both halves matter: the
+    // allocation pass is direction-independent (it sits before the direction checks and edits each
+    // file once, and the second scan of a cycle finds the tags already on disk), so a cycle that
+    // seeds both directions produces the count only on its first scan — but a scan whose direction
+    // then ends WITHOUT a run (no arrivals, empty queue) would lose its number if this were
+    // assigned rather than added.
+    private int _pendingLanguageCodesAllocated;
+
+    // F-M313: loose subtitle files a scan RENAMED so their name carries the language (F-M278).
+    // Same channel and same rule as the counter above: accumulated across scans, consumed once by
+    // the statistics writer. Kept separate because it is a different act on a different file kind.
+    private int _pendingLooseSubtitlesRenamed;
     // Rev.3: the ITEM IDS the last seed added (per direction) — the
     // final sweep run processes ONLY these, never the retry-queued leftovers
     // of the earlier run in the same cycle.
@@ -222,9 +236,9 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
     }
 
-    /// <summary>Debounce window (minutes, config-driven, default 5).</summary>
+    /// <summary>Debounce window (minutes, config-driven, default 1).</summary>
     private static TimeSpan DebounceWindow => TimeSpan.FromMinutes(
-        Plugin.Instance?.Configuration.ArrivalDebounceMinutes is int m && m > 0 ? Math.Clamp(m, 1, 120) : 5);
+        Plugin.Instance?.Configuration.ArrivalDebounceMinutes is int m && m > 0 ? Math.Clamp(m, 1, 120) : 1);
 
     // ────────────────────────────────────────────────────────────────────────
     //  EVENT SOURCE 1: library changes
@@ -625,11 +639,12 @@ public sealed class SubdlEventDispatcher : IDisposable
         // scheduled run — only the Seeder row moved. The dispatcher therefore records those two rows
         // itself, but ONLY for the arrival triggers: on a scheduled or manual run the waiting task
         // owns them, and two writers on one row would fight.
-        if (IsArrivalTrigger(trigger))
-        {
-            RecordArrivalDirectionStart(dir);
-        }
-
+        //
+        // Operator order 08.10.2026 ("seeder gets blue only, download only download, upload only
+        // upload — as it is successive"): the rows are NOT marked running here any more. This call
+        // sat at the CYCLE's start, so both directions lit blue while the seeder was still scanning —
+        // measured on prod, Seeder 19:12:52 and Upload 19:12:52 from one and the same cycle, two lit
+        // lamps for one worker. Each direction now marks itself when its own run begins.
         try
         {
             await RunCycleBodyAsync(trigger, dir, onlyLibs, onlyItems).ConfigureAwait(false);
@@ -674,6 +689,22 @@ public sealed class SubdlEventDispatcher : IDisposable
         // F-M233: an arrival cycle is scoped (onlyItems) and must NOT start a run
         // when the seed found nothing new for that direction ("kein treffer, kein lauf").
         bool arrivalScoped = onlyItems != null;
+
+        // F-M331 (operator order 08.10.2026): "Api limit oder download limit voll, downloader
+        // startet erst garnicht." Asked ONCE per cycle, before the download seed, and only when the
+        // cycle actually covers the download direction — a directed upload fire must not spend a
+        // probe on a question it never asks. The answer is then consulted exactly where
+        // `config.DownloadEnabled` is consulted, so a spent allowance behaves like the download
+        // switch being off: no queue entries AND no run.
+        _downloadAllowanceHeld = null;
+        if (dir != CycleDirection.UploadOnly && configForCycle.DownloadEnabled)
+        {
+            _downloadAllowanceHeld = await ReadDownloadAllowanceAsync(configForCycle).ConfigureAwait(false);
+            if (_downloadAllowanceHeld != null)
+            {
+                LogUtil.Normal(_logger, "[SubDL-Dispatch] download held back this cycle — {Reason} (F-M331).", _downloadAllowanceHeld);
+            }
+        }
         if (dir != CycleDirection.UploadOnly
             && !await SeedAndMaybeRunAsync(trigger, onlyLibs, configForCycle, upload: false, scopedOnly: arrivalScoped, onlyItems: onlyItems).ConfigureAwait(false))
         {
@@ -702,6 +733,17 @@ public sealed class SubdlEventDispatcher : IDisposable
         _dirDetailDown = null;
         _seederOutcome = null;
         _seederDetail = null;
+        // Operator order 08.10.2026 ("jeder worker meldet nur sich selbst"): the seeder row
+        // SUMS the cycle's legs. A Both cycle seeds the download leg and then the upload leg, and
+        // the second write overwrote the first, so the download leg's numbers vanished from a row
+        // that claims to summarise the cycle. Fresh per cycle, accumulated per leg.
+        _seedLegsScanned = 0;
+        _seedCoveredUp = false;
+        _seedCoveredDown = false;
+        _seedQueuedUp = 0;
+        _seedQueuedDown = 0;
+        _dirRowWrittenUp = false;
+        _dirRowWrittenDown = false;
         lock (_lock) { _userStopActive = false; }
         try { _stopCts.Dispose(); } catch { }
         _stopCts = new CancellationTokenSource();
@@ -753,6 +795,87 @@ public sealed class SubdlEventDispatcher : IDisposable
     }
 
     /// <summary>
+    /// Asks SubDL whether the download direction has any allowance left, ONCE per cycle.
+    /// <para>
+    /// Operator order 08.10.2026: "Api limit oder download limit voll, downloader startet erst
+    /// garnicht." Measured on prod the same day: the 50/day download limit had been spent since
+    /// 05:59, yet four further cycles (20:45, 21:09, 21:32, 21:33) each walked ~1 000 of 1 144
+    /// queued items, spent the day's SEARCH allowance (59 → 194) and saved nothing — 104 s per
+    /// cycle into the same wall.
+    /// </para>
+    /// <para>
+    /// The check lives HERE, not in the seeder: the seeder fills queues and does not decide policy,
+    /// so it takes the answer as a plain flag exactly like <c>config.DownloadEnabled</c>. One
+    /// read-only call to <c>/me</c> per cycle, which consumes no allowance (verified: the settings
+    /// page queries it freely).
+    /// </para>
+    /// <para>
+    /// A failure to READ the counters is NOT a verdict — it returns null and the cycle proceeds as
+    /// before. Fail-closed here would turn a network hiccup into a silent day without downloads,
+    /// which is worse than one wasted run; the pipeline still guards itself.
+    /// </para>
+    /// </summary>
+    /// <param name="config">Plugin configuration (credentials).</param>
+    /// <returns>The reason to hold back, or null when the direction may proceed.</returns>
+    private async Task<string?> ReadDownloadAllowanceAsync(PluginConfiguration config)
+    {
+        if (config.MissingCredentials().Count > 0)
+        {
+            return null; // the pipeline refuses on its own; not this check's verdict to make
+        }
+
+        var (api, http) = PluginServiceRegistrator.BuildApiClient(config);
+        try
+        {
+            // F-M334 (operator order 09.10.2026): a DRY RUN fetches no FILE, so the download counter
+            // cannot stop it. Measured on the test server: the limit stood at 50/50 and the probe held
+            // back the one run whose whole purpose is to report what WOULD happen — the operator's
+            // dry-run test could not be started at all. The counter is still read and reported below
+            // when the run is real, which is when a file fetch is actually at stake.
+            if (!config.DownloadDryRun)
+            {
+                // The download counter: it is the one that stops the FILE fetch, and the one that
+                // was spent in the case F-M331 was written for.
+                var down = await api.ReadQuotaAsync(forDownload: true, System.Threading.CancellationToken.None).ConfigureAwait(false);
+                if (down == QuotaRead.Spent && api.Quota != null)
+                {
+                    return string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "download limit spent ({0}/{1})",
+                        api.Quota.DownloadsUsed,
+                        api.Quota.DownloadsLimit);
+                }
+            }
+
+            // The search allowance applies to a dry run too, and this is not an oversight: a dry run
+            // DOES search every item — it spends search quota, and it draws every line it prints from
+            // those answers. Without the allowance it could not produce one line, so the hold is right
+            // in both modes. Only the FILE fetch is what a dry run never reaches.
+            var search = await api.ReadQuotaAsync(forDownload: false, System.Threading.CancellationToken.None).ConfigureAwait(false);
+            if (search == QuotaRead.Spent && api.Quota != null)
+            {
+                return string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "search allowance spent ({0}/{1})",
+                    api.Quota.SearchUsed,
+                    api.Quota.SearchLimit);
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            // Unreadable is not spent — see the summary above.
+            LogUtil.Detail(config.LogMode, _logger, "[SubDL-Dispatch] quota probe failed ({Msg}) — proceeding as before.", ex.Message);
+            return null;
+        }
+        finally
+        {
+            http.Dispose();
+        }
+    }
+
+    /// <summary>
     /// Seed + run helper used by round 1 and follow-up rounds.
     /// </summary>
     private async Task<bool> SeedAndMaybeRunAsync(string trigger, System.Collections.Generic.ISet<string>? onlyLibs, PluginConfiguration config, bool upload, bool scopedOnly, bool precheck = false, System.Collections.Generic.ISet<string>? onlyItems = null)
@@ -761,11 +884,21 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             return true; // F-M131: user stop — no further seeding/running
         }
-        if (upload ? !config.UploadEnabled : !config.DownloadEnabled)
+        // F-M331 (operator order 08.10.2026): the download switch and a spent allowance are the
+        // SAME kind of gate here — both mean "this direction does no work this cycle": no queue
+        // fill, no run, items stay due, and the direction still writes its own row.
+        bool heldByAllowance = !upload && _downloadAllowanceHeld != null;
+        if (upload ? !config.UploadEnabled : (!config.DownloadEnabled || heldByAllowance))
         {
-            return true; // toggle off = direction permanently "done" for this cycle
+            if (heldByAllowance)
+            {
+                SetDirectionOutcome(upload: false, Registry.WorkerRunRegistry.Outcome.Deferred, _downloadAllowanceHeld!);
+                LogUtil.Normal(_logger, "[SubDL-Dispatch] download held back — {Reason}. Queued items stay due (F-M331).", _downloadAllowanceHeld);
+            }
+
+            return true; // toggle off (or no allowance) = direction permanently "done" for this cycle
         }
-        bool seeded = await SeedAsync(trigger, onlyLibs, upload ? CycleDirection.UploadOnly : CycleDirection.DownloadOnly, precheck, onlyItems).ConfigureAwait(false);
+        bool seeded = await SeedAsync(trigger, onlyLibs, upload ? CycleDirection.UploadOnly : CycleDirection.DownloadOnly, precheck, onlyItems, downloadAllowed: _downloadAllowanceHeld == null).ConfigureAwait(false);
         if (!seeded)
         {
             return false; // seed lock busy (run active) — next event/anchor retries
@@ -859,6 +992,115 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// QueueFilter and reports per-item outcomes via ItemResult → bookkeeping here.
     /// </summary>
     /// <summary>
+    /// This direction's own one-line result, for its worker row.
+    /// <para>
+    /// Only the parts that happened are named, so a quiet run reads as quiet instead of as a row of
+    /// zeroes. A run that never reached the pipeline reports that instead of borrowing a neighbour's
+    /// sentence.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction being described.</param>
+    /// <param name="upSummary">Upload run summary, when the upload leg produced one.</param>
+    /// <param name="downSummary">Download run summary, when the download leg produced one.</param>
+    /// <returns>Short detail text for the direction's row.</returns>
+    private static string DescribeDirectionRun(bool upload, Pipeline.RunSummary? upSummary, Pipeline.DownloadRunSummary? downSummary, bool dryRun)
+    {
+        // F-M336 (operator finding 09.10.2026, live on the test bench): this row claimed work the
+        // run had not done. Measured: a download DRY RUN stored "20 downloaded, 22 unavailable,
+        // 1 skipped" while carrying DryRun=1, and the run's own log line for the same run said
+        // "20 would have saved". The log had the label right since F-M247; the row did not, because
+        // this method takes the summaries but never the mode - so the dry run's hypothetical count
+        // was printed as a claim. The row is what the operator reads on the page, which makes it
+        // the worse half of the two.
+        //
+        // The label follows the run's own log line ("would have saved" / "would have uploaded") so
+        // the two can be compared word for word. A dry run's counters are honest numbers about what
+        // it FOUND; only the verb was wrong, which is why the fix is the label and not the counter.
+        var parts = new System.Collections.Generic.List<string>(3);
+        if (upload)
+        {
+            if (upSummary == null)
+            {
+                return "no run — nothing queued";
+            }
+
+            if (upSummary.Uploaded > 0)
+            {
+                parts.Add(string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    dryRun ? "{0} would have uploaded" : "{0} uploaded",
+                    upSummary.Uploaded));
+            }
+
+            if (upSummary.Failed > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} failed", upSummary.Failed));
+            }
+
+            if (upSummary.RejectedCandidates > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} rejected", upSummary.RejectedCandidates));
+            }
+
+            // Operator finding 08.10.2026, live on prod: a run that EXAMINED five items and refused
+            // every one of them ("no-imdb/no-season-ep") read as "nothing to do". A row that hides the
+            // work it did is worse than a short one — the operator reads the row to know whether the
+            // worker looked at anything.
+            //
+            // The counter is FilesSkipped, NOT SkippedItems. Measured on the source: the upload
+            // increments SkippedItems on exactly two paths (file-complete, dir/file filter) while
+            // every refusal path increments FilesSkipped — the no-imdb ladder, the exhausted id
+            // budget, no-surviving-stream, and the item that had candidates but uploaded none. A row
+            // reading SkippedItems therefore printed nothing for the very run that exposed this,
+            // which is how the first attempt at this fix taught nothing.
+            if (upSummary.FilesSkipped > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} skipped", upSummary.FilesSkipped));
+            }
+        }
+        else
+        {
+            if (downSummary == null)
+            {
+                return "no run — nothing queued";
+            }
+
+            if (downSummary.Downloaded > 0)
+            {
+                parts.Add(string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    dryRun ? "{0} would have saved" : "{0} downloaded",
+                    downSummary.Downloaded));
+            }
+
+            if (downSummary.Failed > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} failed", downSummary.Failed));
+            }
+
+            if (downSummary.NotAvailable > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} unavailable", downSummary.NotAvailable));
+            }
+
+            if (downSummary.RejectedCandidates > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} rejected", downSummary.RejectedCandidates));
+            }
+
+            // Same finding as the upload side: a run that looked at items and refused them all must
+            // not read as "nothing to do". Here SkippedItems IS the counter for it — the download
+            // increments it on ten refusal paths, including the no-id and filter paths.
+            if (downSummary.SkippedItems > 0)
+            {
+                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} skipped", downSummary.SkippedItems));
+            }
+        }
+
+        return parts.Count == 0 ? "nothing to do" : string.Join(", ", parts);
+    }
+
+    /// <summary>
     /// Runs one direction against its queue. Orchestrates setup, execution,
     /// result bookkeeping and cleanup.
     /// </summary>
@@ -894,6 +1136,18 @@ public sealed class SubdlEventDispatcher : IDisposable
                 return;
             }
 
+            // This direction's run really starts HERE — mark its own row running only now. See
+            // RunCycleAsync for why the cycle no longer lights both directions up front. The row is
+            // started with no name so a row that has never run keeps its stored display name.
+            MarkDirectionRunning(upload);
+            // F-M340 (operator finding 09.10.2026): "Ampel auto sync soll auf run springen". The
+            // alignment's row is opened HERE, at this run's edge, and NOT in RecordAutoSyncRow.
+            // Measured: Start() and all five Finish() calls sat in one SYNCHRONOUS block that runs
+            // only once the download summary exists, so the row was opened and closed in the same
+            // instant — the GUI polls every 10 s and could never see it blue. A worker that can never
+            // be seen running cannot be watched, which is the one thing the row exists for (F-M322).
+            MarkAutoSyncRunning(upload, config);
+
             var progress = new Progress<double>();
             var (upSummary, downSummary) = await ExecutePipelineAsync(upload, config, filter, progress).ConfigureAwait(false);
             // If this direction was stopped by marker, stop the whole cycle.
@@ -913,6 +1167,23 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
             // F-M207: single writer for the statistics row; the dry-run filter lives in StatusCounterDelta.
             ApplyStatusCounters(config, upSummary, downSummary);
+            // F-M322 (operator order 08.10.2026): the auto-sync's own worker row, written here because
+            // this is the only place that HOLDS the download run's summary — the waiting download task
+            // never sees it. Its light answers the question the Download row cannot: did the alignment
+            // work? Colour rule F-M268, and a dry run reports grey/`skipped` because a dry run aligns
+            // nothing (F-M247: a dry run contributes nothing to the statistics).
+            RecordAutoSyncRow(config, downSummary);
+            // Operator order 08.10.2026 ("jeder worker meldet nur sich selbst"): this direction's row
+            // states what THIS direction did, built from the run summary only this method holds —
+            // the waiting task never sees it and had to borrow the seeder's sentence instead.
+            // Deliberately BEFORE CleanupDirectionQueue: that call overwrites both fields when the run
+            // was quota-stopped, and a quota stop is this direction's own stronger fate.
+            // F-M336: the mode is read HERE, ahead of the row's own write, and passed in - the
+            // label cannot be derived inside DescribeDirectionRun (it takes no configuration) and a
+            // caller left on the old two-argument form would compile and print the old claim.
+            // The same expression CleanupDirectionQueue uses for its own dry-run guard.
+            bool directionWasDryRun = upload ? upSummary?.IsDryRun == true : downSummary?.IsDryRun == true;
+            SetDirectionDetail(upload, DescribeDirectionRun(upload, upSummary, downSummary, directionWasDryRun));
             CleanupDirectionQueue(upload, queue, filter, retriesAtStart, upSummary, downSummary);
         }
         catch (OperationCanceledException)
@@ -931,6 +1202,17 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
         finally
         {
+            // F-M340: the Auto-Sync row, too, must be closed by whoever opened it. This run opened it
+            // before ExecutePipelineAsync, and that call can fail or be cancelled BEFORE the summary
+            // path ever sees it — without this guard the light would stay blue after the run ended,
+            // which is a worse lie than never lighting up at all. Runs BEFORE the direction row so a
+            // failure still reads in the correct order.
+            FinishAutoSyncRowIfOpen(upload);
+
+            // The direction's OWN row, written from its own fate — start and finish, one worker.
+            // In the finally so a failure or a stop still closes the row it opened; a direction that
+            // never began leaves the row untouched (see FinishDirectionRow).
+            FinishDirectionRow(upload);
             lock (_lock)
             {
                 _runActive = false;
@@ -1065,19 +1347,141 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// uploaded rows in the database, 743 in the display). Writing them here keeps both in step.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// F-M322 (operator order 08.10.2026): writes the auto-sync's own worker row for the download run.
+    /// <para>
+    /// The light answers ONE question — did the alignment work — and the operator asked for it as its
+    /// own line, both in the Workers list and under the download switch. It uses the SAME status words
+    /// and colours as every other worker (F-M268), so nothing new had to be invented for it:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>GREEN (`ok`) — the run aligned at least one subtitle, or found every candidate it measured
+    /// already in sync (F-M321). Both are the work DONE; the statistics counter, by the operator's own
+    /// order, covers only the files that were really MOVED.</item>
+    /// <item>YELLOW/GREY (`skipped`) — the alignment is switched off, or the run measured nothing at
+    /// all. Nothing was asked of it and nothing is broken.</item>
+    /// <item>RED (`failed`) — the run reported failures and aligned nothing.</item>
+    /// </list>
+    /// <para>
+    /// A dry run reports skipped with its own note: a dry run writes no file, so it cannot have aligned
+    /// anything, and a green light would claim a correction that exists nowhere (F-M247).
+    /// </para>
+    /// </summary>
+    /// <param name="config">Live configuration.</param>
+    /// <param name="downSummary">The download run's summary, or null when this direction is the UPLOAD:
+    /// the auto-sync belongs to the download run, and an upload run holds no alignment result.</param>
+    private void RecordAutoSyncRow(PluginConfiguration config, Pipeline.DownloadRunSummary? downSummary)
+    {
+        var runs = Plugin.Instance?.WorkerRuns;
+        if (runs == null)
+        {
+            return;
+        }
+
+        // The row belongs to the DOWNLOAD run. ExecutePipelineAsync returns (upSummary, null) for the
+        // upload direction, so an upload run arrives here with no summary at all — guarded rather than
+        // documented, because the earlier "never null at the call site" was written from the download
+        // path alone and the NRE it hid repainted BOTH lamps red for a cycle whose download and upload
+        // had just finished green (live 08.10.2026 18:21, prod and test alike). Keeping the download's
+        // own verdict is the honest reading: this cycle did no alignment work to report.
+        if (downSummary == null)
+        {
+            return;
+        }
+
+        // F-M340: this method CLOSES the row; it no longer opens it. The start belongs to the run's
+        // edge (MarkAutoSyncRunning), where the light can be seen — F-M335 had put it here, in the
+        // same synchronous block as the five Finish() calls below, so `run` was unreachable. The flag
+        // is cleared first: from here on the finally guard must leave the row to this method, which
+        // holds the run's real verdict.
+        _autoSyncRowOpened = false;
+
+        if (downSummary.IsDryRun)
+        {
+            runs.Finish(
+                Registry.WorkerRunRegistry.AutoSyncWorkerKey,
+                Registry.WorkerRunRegistry.Name,
+                Registry.WorkerRunRegistry.Outcome.Skipped,
+                "dry run — nothing aligned",
+                dryRun: true);
+            return;
+        }
+
+        int aligned = downSummary.FittedToAudio;
+        int alreadyGood = downSummary.AlreadyGoodAsDownloaded;
+
+        if (!config.QaDownloadAutoSync)
+        {
+            runs.Finish(
+                Registry.WorkerRunRegistry.AutoSyncWorkerKey,
+                Registry.WorkerRunRegistry.Name,
+                Registry.WorkerRunRegistry.Outcome.Skipped,
+                "alignment switched off");
+            return;
+        }
+
+        if (aligned > 0 || alreadyGood > 0)
+        {
+            string detail = aligned > 0
+                ? $"{aligned} aligned, {alreadyGood} already in sync ({downSummary.FitMsTotal / 1000.0:0.#}s)"
+                : $"{alreadyGood} already in sync — nothing to correct";
+            runs.Finish(Registry.WorkerRunRegistry.AutoSyncWorkerKey, Registry.WorkerRunRegistry.Name, Registry.WorkerRunRegistry.Outcome.Ok, detail);
+            return;
+        }
+
+        // F-M323: the row goes red for ITS OWN breakdown only. It used to read downSummary.Failed —
+        // the DOWNLOAD's failure count — so an unrelated network error painted the alignment red,
+        // a claim the alignment never made. Refusals and already-good files are outcomes, not
+        // breakdowns, so neither reaches this branch.
+        if (downSummary.AutoSyncFailed > 0)
+        {
+            runs.Finish(
+                Registry.WorkerRunRegistry.AutoSyncWorkerKey,
+                Registry.WorkerRunRegistry.Name,
+                Registry.WorkerRunRegistry.Outcome.Failed,
+                $"{downSummary.AutoSyncFailed} measurement(s) failed, nothing aligned");
+            return;
+        }
+
+        runs.Finish(
+            Registry.WorkerRunRegistry.AutoSyncWorkerKey,
+            Registry.WorkerRunRegistry.Name,
+            Registry.WorkerRunRegistry.Outcome.Skipped,
+            "nothing to align this run");
+    }
+
+    /// <summary>
+    /// F-M23: updates the persisted cumulative status counters from pipeline summaries.
+    /// <para>
+    /// Stored in the database since 25.09.2026 (was: plugin configuration XML). The XML sits next to
+    /// user settings while the data being counted lives in the database, so a database reset used to
+    /// leave the counters behind and the display drifted from the data (measured 25.09.2026: 311
+    /// uploaded rows in the database, 743 in the display). Writing them here keeps both in step.
+    /// </para>
+    /// </summary>
     /// F-M207: the ONE writer of the cumulative counters; a database reset resets them with it.
+    /// <param name="config">Live configuration.</param>
+    /// <param name="upSummary">The upload run's summary, or null.</param>
+    /// <param name="downSummary">The download run's summary, or null.</param>
     private void ApplyStatusCounters(
         PluginConfiguration config,
         Pipeline.RunSummary? upSummary,
         Pipeline.DownloadRunSummary? downSummary)
     {
+        // F-M311: the seeder's language-code writes belong to this run. Consumed here so the second
+        // direction of the same cycle cannot report them a second time.
+        long langAllocated = _pendingLanguageCodesAllocated;
+        _pendingLanguageCodesAllocated = 0;
+        long looseRenamed = _pendingLooseSubtitlesRenamed;
+        _pendingLooseSubtitlesRenamed = 0;
+
         // F-M247 (user decision 28.09.2026: "Dryrun geht nie in die Statistik"): the dry-run
         // filter lives in StatusCounterDelta.From, not here — this method stays a plain
         // write, and the rule sits in one testable place. A dry run does real work (search,
         // ranking, id test, QA) and so fills its summary, but it writes nothing to SubDL or
         // to disk; counting it reported subtitles nobody ever wrote. Live 28.09.2026: 771 of
         // the 858 "downloaded" entries came from one afternoon of dry runs.
-        var delta = Pipeline.StatusCounterDelta.From(upSummary, downSummary);
+        var delta = Pipeline.StatusCounterDelta.From(upSummary, downSummary, langAllocated, looseRenamed);
         if (delta.IsEmpty)
         {
             return;
@@ -1088,10 +1492,11 @@ public sealed class SubdlEventDispatcher : IDisposable
             Plugin.Instance!.AddStatusCounters(
                 delta.Uploaded,
                 delta.Downloaded,
-                delta.TypeCorrected,
-                delta.TmdbYearMisses,
                 delta.RejectedDownload,
-                delta.RejectedUpload);
+                delta.RejectedUpload,
+                delta.FittedToAudio,
+                delta.LanguageCodesAllocated,
+                delta.LooseSubtitlesRenamed);
         }
         catch (Exception ex)
         {
@@ -1196,7 +1601,15 @@ public sealed class SubdlEventDispatcher : IDisposable
                 // and the next real run had nothing to work: the report-only mode consumed the work
                 // it was describing. F-M22: "what a dry run leaves behind must not change what a
                 // later run finds."
-                if (_upInFlightDryRun) { break; }
+                // F-M335 (operator order 09.10.2026): this line used to read `_upInFlightDryRun` —
+                // the UPLOAD dry-run flag. On a download run that flag is false, so the guard never
+                // fired and the DOWNLOAD dry run marked every item it had only DESCRIBED as `Done`.
+                // Measured on the test bench: a download dry run wrote 7 `Done` rows, exactly the 7
+                // items it had printed a DRY-RUN line for, and the next real run skipped them — the
+                // report-only mode consumed the work it was describing. That is the same F-M22 defect
+                // the sibling upload branch had already been fixed for, which is why only one half
+                // was repaired: an asymmetry that reads as correct on either side alone.
+                if (_downInFlightDryRun) { break; }
                 ApplyItem(queue, itemId, QueueItem.ItemState.Done);
                 break;
 
@@ -1285,6 +1698,229 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// <returns>Outcome word and detail, both possibly null.</returns>
     public (string? Outcome, string? Detail) GetSeederOutcome() => (_seederOutcome, _seederDetail);
 
+    // F-M331 (operator order 08.10.2026): "Api limit oder download limit voll, downloader startet
+    // erst garnicht." The reason the download direction may not be filled/run this cycle, or null
+    // when it may. Read once per cycle before the download seed and consulted exactly where
+    // `config.DownloadEnabled` is consulted, so a spent allowance acts like the download switch
+    // being off rather than like a decision the seeder makes.
+    private string? _downloadAllowanceHeld;
+
+    // True when THIS cycle already wrote a direction's own row (start AND finish). The waiting
+    // task and the arrival path then leave that row alone — see FinishDirectionRow.
+    private bool _dirRowWrittenUp;
+    private bool _dirRowWrittenDown;
+
+    // F-M340 (operator finding 09.10.2026): true while THIS download run has the Auto-Sync row open.
+    // The row is opened at the run's edge (MarkAutoSyncRunning) and closed either by the summary path
+    // (RecordAutoSyncRow) or by the finally guard, whichever comes first. Without the flag the guard
+    // could not tell a row this run opened from one a PREVIOUS run left behind.
+    private bool _autoSyncRowOpened;
+
+    // The current cycle's seeder accounting, one entry per leg. See PrepareCycleState for why.
+    private int _seedLegsScanned;
+    private bool _seedCoveredUp;
+    private bool _seedCoveredDown;
+    private int _seedQueuedUp;
+    private int _seedQueuedDown;
+
+    /// <summary>
+    /// The seeder row's detail for the cycle so far, naming ONLY the directions the cycle's scans
+    /// actually covered.
+    /// <para>
+    /// A gated scan is handed one direction and never fills the foreign queue, so formatting both
+    /// counts unconditionally printed a structural `0` for the direction it never looked at — read
+    /// as "nothing to do" when the truth is "not asked" (operator order 08.10.2026).
+    /// </para>
+    /// </summary>
+    /// <returns>Detail text such as "5 upload queued" or "5 upload, 3 download queued".</returns>
+    private string SeederQueuedDetail()
+    {
+        var parts = new System.Collections.Generic.List<string>(2);
+        if (_seedCoveredUp)
+        {
+            parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} upload", _seedQueuedUp));
+        }
+
+        if (_seedCoveredDown)
+        {
+            parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} download", _seedQueuedDown));
+        }
+
+        return parts.Count == 0 ? "scan finished" : string.Join(", ", parts) + " queued";
+    }
+
+    /// <summary>
+    /// Whether THIS cycle already wrote the given direction's row itself (start and finish).
+    /// <para>
+    /// The waiting scheduled tasks and the arrival path both used to write these rows after the
+    /// whole cycle, which is why a direction stayed blue while its SIBLING ran: the download leg
+    /// ended, nobody finished its row, and the upload leg then lit a second lamp. A row written by
+    /// the direction itself is complete and must not be overwritten with a cycle-level summary.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction to ask about.</param>
+    /// <returns>True when this cycle already wrote that row.</returns>
+    public bool DirectionRowWritten(bool upload) => upload ? _dirRowWrittenUp : _dirRowWrittenDown;
+
+    /// <summary>
+    /// Writes a direction's row from ITS OWN result, start to finish — the row states what this
+    /// direction did and nothing else.
+    /// <para>
+    /// Operator order 08.10.2026 ("jeder worker meldet nur sich selbst"; "seeder gets blue only,
+    /// download only download, upload only upload — as it is successive"). Called from
+    /// <see cref="RunDirectionAsync"/>'s finally, so it runs on the success path, on a failure and
+    /// on a cancellation; a direction that had nothing to say (its queue was empty, so no run ever
+    /// began) leaves the row to the waiting task exactly as before.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction whose run just ended.</param>
+    private void FinishDirectionRow(bool upload)
+    {
+        var plugin = Plugin.Instance;
+        if (plugin == null)
+        {
+            return;
+        }
+
+        var (outcome, detail) = GetDirectionOutcome(upload);
+        if (outcome == null && detail == null)
+        {
+            return; // nothing happened in this direction — not this writer's row to claim
+        }
+
+        // A run that finished with nothing special to report is GREEN with its own one-line result;
+        // a quota stop, a user stop or a failure keeps its own stronger word.
+        var word = outcome ?? Registry.WorkerRunRegistry.Outcome.Ok;
+        var text = detail ?? "cycle finished";
+        var dryRun = upload ? plugin.Configuration.DryRun : plugin.Configuration.DownloadDryRun;
+        if (upload)
+        {
+            plugin.WorkerRuns.Finish(Registry.WorkerRunRegistry.UploadWorkerKey, "Upload", word, text, dryRun);
+            _dirRowWrittenUp = true;
+        }
+        else
+        {
+            plugin.WorkerRuns.Finish(Registry.WorkerRunRegistry.DownloadWorkerKey, "Download", word, text, dryRun);
+            _dirRowWrittenDown = true;
+        }
+    }
+
+    /// <summary>
+    /// F-M340 (operator finding 09.10.2026): "Ampel auto sync soll auf run springen". Opens the
+    /// Auto-Sync row at the moment the DOWNLOAD run that will feed the alignment starts.
+    /// <para>
+    /// Only for the download, and only when the alignment can actually produce work: an upload run
+    /// holds no audio fit at all, and with the switch off the row reports `skipped` from the summary
+    /// path — opening it blue first would promise a run that never comes. Two conditions, because
+    /// the light means "work is in flight NOW" and nothing else.
+    /// </para>
+    /// <para>
+    /// The row is opened with no detail: a start time that is real and an outcome that is honest,
+    /// while the number of files this run will fit is unknown at this point. The detail arrives with
+    /// the summary. `Finish` keeps the start stamp it finds, so the duration shown on the page is
+    /// this run's real fit time in place of the fraction of a second the old placement produced.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction whose run is starting; only the download opens this row.</param>
+    /// <param name="config">Live configuration — the alignment's own switch decides.</param>
+    private void MarkAutoSyncRunning(bool upload, PluginConfiguration config)
+    {
+        if (upload || !config.QaDownloadAutoSync)
+        {
+            return;
+        }
+
+        var runs = Plugin.Instance?.WorkerRuns;
+        if (runs == null)
+        {
+            return;
+        }
+
+        runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey, Registry.WorkerRunRegistry.Name);
+        _autoSyncRowOpened = true;
+
+        // The wait between the two rows is the point of the exercise: the alignment runs DURING the
+        // download, so its row is open for exactly as long as the download works on it.
+        LogUtil.Detail(config.LogMode, _logger, "[SubDL] auto-sync row opened with the download run.");
+    }
+
+    /// <summary>
+    /// F-M340: closes the Auto-Sync row when the run ends without ever delivering a download summary
+    /// — a cancelled run, a lock-skip, or an exception out of the pipeline.
+    /// </summary>
+    /// <remarks>
+    /// A row left on `run` after the run is over is worse than one that never lit: the operator reads
+    /// a working alignment on a plugin that has stopped working on it. The summary path clears
+    /// <see cref="_autoSyncRowOpened"/> before it writes its own verdict, so this guard never
+    /// overwrites a real result — the flag, not the outcome word, decides who writes.
+    /// </remarks>
+    /// <param name="upload">Direction that is ending; only the download owns this row.</param>
+    private void FinishAutoSyncRowIfOpen(bool upload)
+    {
+        if (upload || !_autoSyncRowOpened)
+        {
+            return;
+        }
+
+        _autoSyncRowOpened = false;
+        Plugin.Instance?.WorkerRuns.Finish(
+            Registry.WorkerRunRegistry.AutoSyncWorkerKey,
+            Registry.WorkerRunRegistry.Name,
+            Registry.WorkerRunRegistry.Outcome.Skipped,
+            "run ended before any file was measured");
+    }
+
+    /// <summary>
+    /// Marks ONE direction's row as running, because that direction's own run is starting.
+    /// <para>
+    /// Operator order 08.10.2026: "seeder gets blue only, download only download, upload only
+    /// upload — as it is successive." A direction must therefore never light up for work the seeder
+    /// or its sibling is doing. Called from <see cref="RunDirectionAsync"/> at the moment the
+    /// direction's own queue is prepared, not when the enclosing cycle starts.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction whose run is starting.</param>
+    private static void MarkDirectionRunning(bool upload)
+    {
+        var runs = Plugin.Instance?.WorkerRuns;
+        if (runs == null)
+        {
+            return;
+        }
+
+        if (upload)
+        {
+            runs.Start(Registry.WorkerRunRegistry.UploadWorkerKey, "Upload");
+        }
+        else
+        {
+            runs.Start(Registry.WorkerRunRegistry.DownloadWorkerKey, "Download");
+        }
+    }
+
+    /// <summary>
+    /// Sets a direction's detail WITHOUT touching its outcome — for a run that ended green and has
+    /// no special fate of its own. A fate recorded deliberately (a quota stop, a user stop) is
+    /// never overwritten, because <see cref="SetDirectionOutcome"/> owns both fields together and
+    /// <see cref="CleanupDirectionQueue"/> runs after this.
+    /// </summary>
+    /// <param name="upload">Direction to record.</param>
+    /// <param name="detail">This direction's own one-line result.</param>
+    private void SetDirectionDetail(bool upload, string detail)
+    {
+        if (upload)
+        {
+            if (_dirOutcomeUp == null)
+            {
+                _dirDetailUp = detail;
+            }
+        }
+        else if (_dirOutcomeDown == null)
+        {
+            _dirDetailDown = detail;
+        }
+    }
+
     /// <summary>
     /// Records the seeder's fate both in memory (for the waiting task) and in the database row
     /// (for the configuration page). Every seeder path must call this, including the ones that
@@ -1294,33 +1930,20 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// <param name="detail">Short human-readable summary.</param>
     private void RecordSeeder(string outcome, string detail)
     {
-        _seederOutcome = outcome;
-        _seederDetail = detail;
-        Plugin.Instance?.WorkerRuns.Finish(Registry.WorkerRunRegistry.SeederKey, "Seeder", outcome, detail);
-    }
-
-    /// <summary>
-    /// Marks the arrival cycle's directions as RUNNING, so a cycle that dies mid-scan shows the
-    /// attempt instead of the previous cycle's green.
-    /// </summary>
-    /// <param name="dir">Direction this cycle works.</param>
-    private void RecordArrivalDirectionStart(CycleDirection dir)
-    {
-        var runs = Plugin.Instance?.WorkerRuns;
-        if (runs == null)
+        // A Both cycle scans the download leg and then finds the upload leg unchanged, whose pre-check
+        // reports grey "no changes — scan skipped". That write used to REPLACE the scan's own numbers,
+        // so a row claiming to summarise the cycle dropped the leg that actually ran and read as if the
+        // cycle had found nothing. Once a leg of THIS cycle has scanned, a later grey verdict is logged
+        // but does not take the row over; the numbers stay until the cycle ends.
+        if (outcome == Registry.WorkerRunRegistry.Outcome.Skipped && _seedLegsScanned > 0)
         {
+            LogUtil.Normal(_logger, "[SubDL-Seed] leg skipped after a scan this cycle — seeder row keeps the scan's result ({Detail}).", detail);
             return;
         }
 
-        if (dir != CycleDirection.UploadOnly)
-        {
-            runs.Start(Registry.WorkerRunRegistry.DownloadWorkerKey, "Download");
-        }
-
-        if (dir != CycleDirection.DownloadOnly)
-        {
-            runs.Start(Registry.WorkerRunRegistry.UploadWorkerKey, "Upload");
-        }
+        _seederOutcome = outcome;
+        _seederDetail = detail;
+        Plugin.Instance?.WorkerRuns.Finish(Registry.WorkerRunRegistry.SeederKey, "Seeder", outcome, detail);
     }
 
     /// <summary>
@@ -1345,7 +1968,11 @@ public sealed class SubdlEventDispatcher : IDisposable
         // untouched — it has nothing to report — so DescribeCycle would fall through to `ok` and paint
         // "nothing happened here" as "this ran fine". The scheduled task records `skipped`/"disabled"
         // for exactly that case; the arrival path has to say the same thing.
-        if (dir != CycleDirection.UploadOnly)
+        // Operator order 08.10.2026: a direction that RAN writes its own row, start to finish, and
+        // this cycle-level write must leave it alone. What is left here is the case the direction
+        // cannot report itself: its run never began (switched off, or nothing queued), where the row
+        // would otherwise keep a stale outcome from a previous cycle.
+        if (dir != CycleDirection.UploadOnly && !_dirRowWrittenDown)
         {
             if (!config.DownloadEnabled)
             {
@@ -1363,7 +1990,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
         }
 
-        if (dir != CycleDirection.DownloadOnly)
+        if (dir != CycleDirection.DownloadOnly && !_dirRowWrittenUp)
         {
             if (!config.UploadEnabled)
             {
@@ -1422,7 +2049,12 @@ public sealed class SubdlEventDispatcher : IDisposable
     //  SEEDER CALL + QUEUE MERGE
     // ────────────────────────────────────────────────────────────────────────
 
-    private async Task<bool> SeedAsync(string reason, System.Collections.Generic.ISet<string>? onlyLibraries = null, CycleDirection dir = CycleDirection.Both, bool precheck = false, System.Collections.Generic.ISet<string>? onlyItemIds = null)
+    /// <param name="downloadAllowed">
+    /// Whether the download queue may be filled this scan — the plain flag the seeder takes, exactly
+    /// like its own <c>config.DownloadEnabled</c>. Lowered when SubDL reports no download allowance
+    /// left (F-M331); the seeder never asks the API itself.
+    /// </param>
+    private async Task<bool> SeedAsync(string reason, System.Collections.Generic.ISet<string>? onlyLibraries = null, CycleDirection dir = CycleDirection.Both, bool precheck = false, System.Collections.Generic.ISet<string>? onlyItemIds = null, bool downloadAllowed = true)
     {
         // F-M188/F-M290: no library selected = there is nothing this seeder could look at, so it does
         // not even start. The same condition is checked again inside Scan(), but by then the run lock
@@ -1552,14 +2184,35 @@ public sealed class SubdlEventDispatcher : IDisposable
             SeedSnapshot snapshot;
             try
             {
-                snapshot = _seeder.Scan(config, onlyLibraries, dir, onlyItemIds);
-                RecordSeeder(
-                    Registry.WorkerRunRegistry.Outcome.Ok,
-                    string.Format(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        "{0} upload, {1} download queued",
-                        snapshot.Upload.Count,
-                        snapshot.Download.Count));
+                snapshot = _seeder.Scan(config, onlyLibraries, dir, onlyItemIds, downloadAllowed);
+
+                // F-M311: hand the scan's writes to the statistics row. ADDED, not overwritten.
+                // A scan does NOT always get a run: the direction ends before it when no arrivals
+                // were queued ("no arrivals queued — no run") or when its queue holds nothing to do,
+                // and the seeder has edited files either way. Assigning would let the NEXT scan's
+                // number wipe the first one's before any run could report it — the work would then
+                // be done on disk and absent from the statistics forever. Adding keeps it until a
+                // run consumes it. Double counting is impossible: the counter is cleared exactly
+                // once, by the writer, and only a scan adds to it.
+                _pendingLanguageCodesAllocated += snapshot.LanguageCodesAllocated;
+                _pendingLooseSubtitlesRenamed += snapshot.LooseSubtitlesRenamed;
+                // Accumulate the leg, then report the cycle's running total — see SeederQueuedDetail.
+                // The gate mirrors the scan's own: a leg only counts the direction it was asked for,
+                // because the foreign queue is left structurally empty by that gate.
+                if (dir != CycleDirection.DownloadOnly)
+                {
+                    _seedCoveredUp = true;
+                    _seedQueuedUp += snapshot.Upload.Count;
+                }
+
+                if (dir != CycleDirection.UploadOnly)
+                {
+                    _seedCoveredDown = true;
+                    _seedQueuedDown += snapshot.Download.Count;
+                }
+
+                _seedLegsScanned++;
+                RecordSeeder(Registry.WorkerRunRegistry.Outcome.Ok, SeederQueuedDetail());
             }
             catch (Exception ex)
             {

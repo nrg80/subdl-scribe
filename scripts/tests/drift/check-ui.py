@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+# This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# F-M304 UI wiring check. ONE toggle, and it must be wired in the file that is actually
+# delivered: a checkbox that exists in the markup but is bound nowhere is worse than a missing
+# one — the setting looks present, saves as undefined, and silently reverts on the next load.
+#
+# WHY THIS FILE NOW ALSO ASSERTS ABSENCE. Four switches were removed from the correction
+# section (drift report, drift reject, track-by-language, reference repair) because five
+# checkboxes described ONE mechanism. A wiring check that only looks for what should be there
+# cannot see a stale checkbox left behind, and a leftover `document.querySelector('#X')` for a
+# removed element throws at load and takes the whole page's bindings with it. So every removed
+# id is asserted ABSENT in the markup AND in the JS.
+#
+# Which file is delivered is not a guess: configPage.html is an EmbeddedResource in the
+# .csproj, so it ships inside the DLL — a GUI change needs a real build, release and deploy,
+# not a file copy. Asserted here so the next reader does not have to re-derive it.
+import re
+import subprocess
+import sys
+
+HTML = '/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Configuration/configPage.html'
+CSPROJ = '/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Jellyfin.Plugin.SubdlSync.csproj'
+LIVE_URL = 'http://localhost:8096/web/configurationpage?name=SubDL%20Scribe'
+
+# Present: the one switch the section is.
+CHECKS = [
+    ('markup #QaDownloadAutoSync', r'id="QaDownloadAutoSync"'),
+    ('load binds AutoSync (default-on aware)',
+     r"#QaDownloadAutoSync'\)\.checked = config\.QaDownloadAutoSync !== false"),
+    ('save reads AutoSync',
+     r"config\.QaDownloadAutoSync = document\.querySelector\('#QaDownloadAutoSync'\)\.checked"),
+]
+
+# Which of them must ALSO be gone from the C# configuration. Only the one this order removed.
+C_SHARP_REMOVED = ['DownloadRequireImdb']
+
+# Gone: folded into the one switch. Each must be absent from markup AND from the JS, and its
+# C# property must no longer be bound by the page.
+REMOVED = [
+    'QaDownloadDriftCheck',
+    'QaDownloadDriftReject',
+    'QaDownloadAudioTrackByLanguage',
+    'QaDownloadAnchorSync',
+    # Operator order 08.10.2026: "Toggle no download without imdb tmdb id kann auch weg." The
+    # match is a hard criterion now, so there is nothing to switch — F-M45 lost its switch.
+    # Asserted across markup AND the C# property list in the same pass: a leftover
+    # `config.DownloadRequireImdb` in the page throws at load and takes the other bindings with
+    # it, and a field left in the configuration reads like the setting still exists.
+    'DownloadRequireImdb',
+]
+
+fails = 0
+src = open(HTML, encoding='utf-8').read()
+
+print("=== F-M304 GUI wiring — one correction switch ===")
+for name, pat in CHECKS:
+    ok = re.search(pat, src) is not None
+    print(f"  [{'ok' if ok else 'FAIL'}] {name}")
+    fails += 0 if ok else 1
+
+CONFIG_CS = '/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs'
+for prop in REMOVED:
+    n = len(re.findall(rf'{prop}', src))
+    ok = n == 0
+    print(f"  [{'ok' if ok else 'FAIL'}] {prop} fully removed from the page (found {n})")
+    fails += 0 if ok else 1
+
+    # A removed switch must be gone from the CONFIGURATION too, not just from the page — a C#
+    # property nobody binds is the same defect the other way round: the setting looks present in a
+    # config dump, saves as its default forever, and can be read by code that was supposed to lose
+    # it. ONLY the property this order removed is asserted here (see C_SHARP_REMOVED below): the
+    # older fold-ins are reported, not enforced, so this check cannot fail on history it did not
+    # change — one of them still IS read (QaDownloadAudioTrackByLanguage, DownloadPipeline.cs) and
+    # deciding about it is a separate finding, not this check's business.
+    if prop in C_SHARP_REMOVED:
+        cfg_src = open(CONFIG_CS, encoding='utf-8').read()
+        n = len(re.findall(rf'\b{prop}\b', cfg_src))
+        ok = n == 0
+        print(f"  [{'ok' if ok else 'FAIL'}] {prop} gone from PluginConfiguration.cs too (found {n})")
+        fails += 0 if ok else 1
+    else:
+        cfg_src = open(CONFIG_CS, encoding='utf-8').read()
+        n = len(re.findall(rf'\b{prop}\b', cfg_src))
+        if n:
+            print(f"  [note] {prop} still declared in PluginConfiguration.cs (found {n}) — older "
+                  f"fold-in, not asserted here")
+
+# The correction block itself must hold exactly ONE checkbox — the whole point of the change.
+# Counted on a slice so an unrelated checkbox elsewhere cannot mask it.
+#
+# REBOUND (operator order 08.10.2026). The slice used to run from the runtime-tolerance control to
+# the language modal, because the switch lived below both quality gates. The download tab was then
+# re-ordered — "Continue after daily limit", then "Follow-up rounds", then the switch, all above the
+# quality gates — so that slice became EMPTY and the check reported 0 boxes on a correct page.
+# The block is now bounded by its NEIGHBOURS' containers: it starts where the follow-up checkbox's
+# container ends and stops where the next checkbox container begins. Bounding it on the switch id
+# alone would count forward from the switch and miss a stale checkbox sitting before it.
+
+
+def _container_end(text, pos):
+    """End offset of the <div> that encloses pos, by counting div tags."""
+    start = text.rfind('<div', 0, pos)
+    if start < 0:
+        return -1
+    depth = 0
+    for m in re.finditer(r'<div\b|</div>', text[start:]):
+        depth += 1 if m.group(0) == '<div' else -1
+        if depth == 0:
+            return start + m.end()
+    return -1
+
+
+fu_end = _container_end(src, src.find('id="FollowUpRoundsDownload"'))
+next_box = src.find('id="DownloadOnlyMissing"')
+sec_start = fu_end
+sec_end = src.rfind('<div', 0, next_box) if next_box > 0 else -1
+if sec_start < 0 or sec_end < 0 or sec_end <= sec_start:
+    print("  [FAIL] the correction section boundaries were not found")
+    fails += 1
+else:
+    section = src[sec_start:sec_end]
+    boxes = len(re.findall(r'<input[^>]*type="checkbox"', section))
+    ok = boxes == 1
+    print(f"  [{'ok' if ok else 'FAIL'}] the correction section holds exactly ONE checkbox "
+          f"(got {boxes})")
+    fails += 0 if ok else 1
+
+# The page ships inside the DLL, so the claim above must be true of the built artefact path.
+proj = open(CSPROJ, encoding='utf-8').read()
+ok = 'EmbeddedResource Include="Configuration\\configPage.html"' in proj
+print(f"  [{'ok' if ok else 'FAIL'}] configPage.html is an EmbeddedResource (ships in the DLL)")
+fails += 0 if ok else 1
+
+# Defaults of what REMAINS exposed. The removed props keep their C# defaults; only the one
+# visible switch is bound, and it must resolve an absent value (an older config) to TRUE —
+# `!!config.X` would silently switch a default-on correction off on every existing install.
+CFG = '/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs'
+cfg = open(CFG, encoding='utf-8').read()
+m = re.search(r'public bool QaDownloadAutoSync \{ get; set; \}(.*?)(?=\n\n|/// <summary>)', cfg, re.S)
+ok = bool(m) and '= true' in m.group(1)
+print(f"  [{'ok' if ok else 'FAIL'}] QaDownloadAutoSync defaults to true in C#")
+fails += 0 if ok else 1
+
+print()
+try:
+    live = subprocess.run(['curl', '-sk', '--max-time', '20', LIVE_URL],
+                          capture_output=True, timeout=40).stdout.decode('utf-8', 'replace')
+    if not live:
+        print("  [skip] live page unreachable — offline checks only")
+    else:
+        one = 'Correct subtitle timing' in live
+        stale = 'QaDownloadDriftCheck' in live
+        print(f"  [{'ok' if one and not stale else 'note'}] live page carries the ONE switch "
+              f"({'yes' if one else 'no'}), removed switches absent ({'yes' if not stale else 'no'})")
+except Exception as ex:
+    print(f"  [skip] live check: {str(ex)[:60]}")
+
+print()
+print("FAILED" if fails else "ALL WIRING CHECKS PASSED")
+sys.exit(1 if fails else 0)

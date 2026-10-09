@@ -80,9 +80,6 @@ public class RunSummary
     /// </summary>
     public int RejectedCandidates { get; set; }
 
-    /// <summary>Gets or sets the count of items skipped as id-unresolvable after exhausting the F-M66 retry budget.</summary>
-    public int SkippedIdGaveUp { get; set; }
-
     /// <summary>Gets or sets the number of rate-limit hits this run.</summary>
     public int RateLimitHits { get; set; }
 
@@ -107,14 +104,6 @@ public class RunSummary
     /// </summary>
     public bool StopRequested { get; set; }
 
-    /// <summary>Gets or sets the number of items skipped as file-missing after exhausting retries (F-M60).</summary>
-    public int SkippedFileMissing { get; set; }
-
-    /// <summary>
-    /// F-M231: items whose ids the TMDb title+year test corrected (the counterpart of the
-    /// download side's counter of the same name).
-    /// </summary>
-    public int TypeCorrectedByFileName { get; set; }
 }
 
 /// <summary>
@@ -173,8 +162,6 @@ public sealed class UploadPipeline
     private readonly TmdbImdbResolver _tmdb;
     private readonly PluginConfiguration _config;
     private readonly GlobalRateLimiter _limiter;
-    private readonly Registry.FileRetryTracker _fileRetries;
-    private readonly Registry.IdNotFoundTracker _idNotFound;
 
     /// <summary>F-M88c/d: central OSHash cache (oshash-cache.json in the plugin data dir).</summary>
     /// Always use the current Plugin.Instance cache so a DB reset is respected.<
@@ -269,9 +256,7 @@ public sealed class UploadPipeline
         SubdlApiClient api,
         TmdbImdbResolver tmdb,
         PluginConfiguration config,
-        GlobalRateLimiter limiter,
-        Registry.FileRetryTracker fileRetries,
-        Registry.IdNotFoundTracker idNotFound)
+        GlobalRateLimiter limiter)
     {
         _logger = logger;
         _libraryManager = libraryManager;
@@ -280,8 +265,6 @@ public sealed class UploadPipeline
         _tmdb = tmdb;
         _config = config;
         _limiter = limiter;
-        _fileRetries = fileRetries;
-        _idNotFound = idNotFound;
         // F-M88c/d (user decision): OSHash cache lives in the plugin data dir via
         // the OshashCache property. Read-only shares keep their cache,
         // library folders stay clean.
@@ -496,52 +479,24 @@ public sealed class UploadPipeline
                 continue;
             }
 
-            // F-M60 (user decision 09.09.2026): items whose file is gone (deleted from
-            // disk but still in the JF catalog) fail extraction on EVERY run. After
-            // FileRetryLimit consecutive failures they are skipped as "file-missing"
-            // (aggregate counter, no per-run error spam). A success resets the counter.
-            if (_fileRetries.IsExhausted(item.Id.ToString(), _config.FileRetryLimit))
-            {
-                summary.SkippedFileMissing++;
-                // F-M88c: the file is permanently gone — drop its OSHash cache entry too.
-                // Same FileRetryLimit knob governs both (user decision): after the last
-                // failed attempt the dead cache entry would otherwise linger forever.
-                OshashCache.Remove(mediaPath);
-                OshashCache.Flush(); // kill-safe: the prune survives a cancelled run
-
-                // Remove the media and subtitle state for the missing file.
-                // F-M22 (defect fixed 02.10.2026): NOT in a dry run — this branch returns before the
-                // upload dry-run exit (the per-item DRY-RUN block below), so a dry run cleared the
-                // item's whole registry state. "No stored verdict is written or cleared by a dry run."
-                var missingHash = Registry.GetMediaHash(mediaPath);
-                if (!string.IsNullOrEmpty(missingHash) && !_config.DryRun)
-                {
-                    Registry.MarkAndFlush(() => Registry.DeleteMediaAndSubtitles(missingHash));
-                }
-
-                // F-M255: name the file that is gone and gave up after FileRetryLimit attempts.
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] SKIP {File} — file missing, retries exhausted", Path.GetFileName(mediaPath));
-                continue;
-            }
-
-            // F-M60: explicit existence check BEFORE any ffmpeg work — a missing file
-            // fails fast here (no stream scan, no API calls) and bumps the retry counter.
+            // F-M60 REMOVED (operator order 08.10.2026: "Dann bitte file-retry weg in code und gui.
+            // Alleinige Aufgabe database refresh."). The file-missing give-up is no longer the
+            // pipeline's job: the SEEDER already refuses an item whose file is gone
+            // (SubdlSeeder.Scan: `!File.Exists(mediaPath)` -> continue), so a dead catalog entry
+            // never reaches this loop, and what the counter used to clean up — the registry rows and
+            // the OSHash entry of a vanished file — is now the DATABASE REFRESH's phase 3b
+            // (PruneMissingPathMediaAndSubtitles, behind the same RootsUsable fail-safe as its
+            // neighbours). Keeping a second, slower owner here is what the order removes.
+            //
+            // The ONE check that stays is the bare existence read below: it is not a give-up, it is
+            // the loop's precondition — the path is used for hashing and probing, and a file that
+            // vanishes BETWEEN seeding and this run must be reported as a failure rather than
+            // crashing the run in the middle of it.
             if (!File.Exists(mediaPath))
             {
-                // F-M22 (defect fixed 02.10.2026): see the download side — a dry run does not burn a
-                // retry, because the give-up branch deletes the item's registry state.
-                if (!_config.DryRun)
-                {
-                    _fileRetries.RecordFailure(item.Id.ToString());
-                }
-                else
-                {
-                    LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] DRY-RUN {File} is missing — retry counter left untouched (F-M22)", Path.GetFileName(mediaPath));
-                }
-
                 summary.Failed++;
                 ReportOutcome(item, ItemOutcome.RealFailure);
-                LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] FILE MISSING {File} — attempt {N} (skip after {Limit})", Path.GetFileName(mediaPath), _fileRetries.Count, _config.FileRetryLimit);
+                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] FILE MISSING {File} — vanished between seeding and this run", Path.GetFileName(mediaPath));
 
                 continue;
             }
@@ -582,8 +537,10 @@ public sealed class UploadPipeline
 
             // F-M66/F-M151: id resolution in ONE pass. Raw JF ids first, then the
             // optional upload ID quality gate (default ON) validates/corrects them
-            // against TMDB. Items that remain unresolvable are requeued with the
-            // id-not-found budget.
+            // against TMDB. An item that stays unresolvable is skipped for this run and
+            // retried by the next one: the give-up budget was REMOVED (operator order
+            // 08.10.2026, "Id resolution retrys bitte auch löschen"), so the ladder
+            // re-runs instead of retiring the item.
             var (imdbId, tmdbIdRaw, season, episode, isSeries) = ResolveIdsRaw(item);
 
 
@@ -662,7 +619,6 @@ public sealed class UploadPipeline
                 imdbId = verified.Imdb;
                 tmdbIdRaw = verified.Tmdb;
                 isSeries = verified.IsSeries;
-                summary.TypeCorrectedByFileName++; // same counter as the other id corrections
             }
 
             string title = searchTitle;
@@ -672,7 +628,6 @@ public sealed class UploadPipeline
             {
                 imdbId = correctedImdb ?? imdbId;
                 tmdbIdRaw = correctedTmdb ?? tmdbIdRaw;
-                _idNotFound.RecordSuccess(item.Id.ToString());
             }
             else
             {
@@ -682,19 +637,6 @@ public sealed class UploadPipeline
 
             if (string.IsNullOrWhiteSpace(imdbId))
             {
-                // The budget applies to ANY item that keeps failing the ladder.
-                if (_idNotFound.IsExhausted(item.Id.ToString(), _config.IdRetryLimit))
-                {
-                    summary.SkippedIdGaveUp++;
-                    if (_config.LogMode >= LogLevelMode.Verbose)
-                    {
-                        LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL] SKIP {File} — id-resolution exhausted ({Count}/{Limit} failed ladders) — no TMDB spend until ids change",
-                            Path.GetFileName(mediaPath), _idNotFound.Peek(item.Id.ToString()), _config.IdRetryLimit);
-                    }
-                    continue;
-                }
-
                 // No 60 s wait; go straight to the TMDB ladder when JF ids are empty.
                 if (string.IsNullOrWhiteSpace(imdbId) && !string.IsNullOrWhiteSpace(tmdbIdRaw) && _tmdb.IsConfigured)
                 {
@@ -730,19 +672,8 @@ public sealed class UploadPipeline
                     }
                 }
 
-                if (!string.IsNullOrWhiteSpace(imdbId))
+                if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbIdRaw))
                 {
-                    _idNotFound.RecordSuccess(item.Id.ToString());
-                }
-                else if (string.IsNullOrWhiteSpace(tmdbIdRaw))
-                {
-                    // F-M22 (defect fixed 02.10.2026): same as the download side — a dry run spends
-                    // no part of the id-resolution budget, because its limit retires the item.
-                    if (!_config.DryRun)
-                    {
-                        _idNotFound.RecordFailure(item.Id.ToString());
-                    }
-
                     summary.SkippedNoImdb++;
                     summary.FilesSkipped++;
                     if (_config.LogMode >= LogLevelMode.Verbose)
@@ -940,13 +871,27 @@ public sealed class UploadPipeline
                 string? rejectReason = Registry.EmbedRejectedReason(mediaHash, subPos);
                 if (rejectReason != null)
                 {
+                    // F-M298: `duplicate-content` is only a verdict while the content is NOT already up.
+                    // The registry decides that on the CONTENT (see RecordSkippedContent) — replaying a
+                    // stale reject over content that is demonstrably uploaded is what kept the position
+                    // due and made the file re-extract on every run.
+                    string? rejectedContentHash = Registry.GetEmbed(mediaHash, subPos)?.ContentHash;
+                    bool settledNow = Registry.RecordSkippedContent(
+                        mediaHash, false, subPos, lang, streamHi, false, rejectedContentHash, rejectReason);
+
+                    if (settledNow)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
+                            Path.GetFileName(mediaPath), lang);
+
+                        continue;
+                    }
+
                     summary.SkippedStreams++;
                     summary.RejectedCandidates++; // F-M286
                     // Known reject for THIS position — carry the original reason forward verbatim
                     // instead of replacing it with a generic note, so the cause stays readable.
-                    Registry.MarkAndFlush(() => Registry.MarkEmbed(
-                        mediaHash, subPos, lang, streamHi,
-                        SubtitleStatus.Rejected, reason: rejectReason));
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(mediaPath), lang, ExplainReject(rejectReason));
 
                     continue;
@@ -1051,6 +996,12 @@ public sealed class UploadPipeline
                     continue;
                 }
 
+                // F-M315 note: a kept unsynchronized original needs NO branch of its own here. The
+                // download wrote a Rejected row for its content with the reason `original-kept`, and the
+                // rejection check below already honours every terminal row by content — the same path
+                // that keeps a QA-rejected sidecar out of the queue. Adding a second check for this one
+                // reason would read the file twice and make the lock look like a special case.
+
                 if (Registry.IsUploaded(mediaHash, looseLang, looseHi))
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] Loose SRT already uploaded — skipping: {File} ({Lang}{Hi})", Path.GetFileName(loosePath), looseLang, looseHi ? ",HI" : "");
@@ -1074,6 +1025,22 @@ public sealed class UploadPipeline
                 string? looseReject = Registry.SidecarRejectedReason(looseHashProbe);
                 if (looseReject != null)
                 {
+                    // F-M298: `duplicate-content` is only a verdict while the content is NOT already up.
+                    // The registry decides that on the CONTENT (see RecordSkippedContent). A sidecar is
+                    // keyed by its content, so the question is asked about exactly the bytes rejected.
+                    bool looseSettled = Registry.RecordSkippedContent(
+                        mediaHash, true, -1, looseLang, looseHi, looseForced, looseHashProbe, looseReject,
+                        fileName: Path.GetFileName(loosePath), path: loosePath);
+
+                    if (looseSettled)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
+                            Path.GetFileName(loosePath), looseLang);
+
+                        continue;
+                    }
+
                     summary.SkippedStreams++;
                     summary.RejectedCandidates++; // F-M286
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(loosePath), looseLang, ExplainReject(looseReject));
@@ -1177,7 +1144,6 @@ public sealed class UploadPipeline
                 // had streams, none survived QA, and nothing will ever be uploaded
                 // from it this run. Previously the early continue bypassed the
                 // per-file verdict and the card showed 0 files skipped forever.
-                _fileRetries.RecordSuccess(item.Id.ToString());
                 summary.FilesSkipped++;
                 LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] SKIP {File} — no stream survived local screening (F-M69)", Path.GetFileName(mediaPath));
                 progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
@@ -1199,29 +1165,38 @@ public sealed class UploadPipeline
                 string? qaReject = ScreenContentQa(cand.Srt, cand.Lang, runtimeMs, out string contentHash);
                 if (qaReject != null)
                 {
+                    // F-M298: `duplicate-content` says "this text is already known" — and IsContentKnown
+                    // counts a REJECTED row as known just as much as an uploaded one. So this gate fires
+                    // for content that is genuinely UP, and recording "rejected" over an uploaded row made
+                    // a settled file look unsettled: it was re-extracted and re-rejected on every later
+                    // run (prod 06.10.2026: Lanterns S01E08, 39 streams, 0 uploaded / 39 rejected after a
+                    // container tag write moved the media hash). The registry settles this on the CONTENT
+                    // and reports whether it recorded an upload instead of a reject.
+                    bool qaSettledAsUploaded = Registry.RecordSkippedContent(
+                        mediaHash, cand.IsLoose, cand.SubPos, cand.Lang, cand.HearingImpaired, cand.Forced,
+                        contentHash, qaReject,
+                        fileName: cand.IsLoose ? Path.GetFileName(cand.LoosePath) : null,
+                        path: cand.IsLoose ? cand.LoosePath : null);
+
+                    if (qaSettledAsUploaded)
+                    {
+                        summary.SkippedStreams++;
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
+                            Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang);
+
+                        continue;
+                    }
+
                     // F-M286: count the rejection itself. SkippedStreams also carries
                     // non-QA reasons (duplicates, missing ids), so it cannot serve as the
                     // rejected number either.
                     summary.RejectedCandidates++;
                     summary.SkippedStreams++;
-                    // F-M68: persist the QA reject — next runs skip without re-extract/re-QA... 
-                    // Flush immediately — a hard JF kill between reject and run-end
-                    // otherwise loses the entry (live: the 12:03 MS-mismatch vanished on
-                    // the 12:05 deploy restart). Same NF-4 kill-safety the upload path has.
-                    if (cand.IsLoose)
-                    {
-                        // A sidecar is identified by content, not by a position — one verdict row.
-                        Registry.MarkAndFlush(() => Registry.MarkSidecar(
-                            contentHash, mediaHash, cand.Lang, cand.HearingImpaired, cand.Forced,
-                            SubtitleStatus.Rejected, reason: qaReject,
-                            fileName: Path.GetFileName(cand.LoosePath), path: cand.LoosePath));
-                    }
-                    else
-                    {
-                        Registry.MarkAndFlush(() => Registry.MarkEmbed(
-                            mediaHash, cand.SubPos, cand.Lang, cand.HearingImpaired,
-                            SubtitleStatus.Rejected, contentHash: contentHash, reason: qaReject));
-                    }
+                    // The reject row itself was already written by RecordSkippedContent above —
+                    // it flushes immediately (F-M68 kill-safety: a hard JF kill between reject and
+                    // run-end otherwise lost the entry; live, the 12:03 MS-mismatch vanished on the
+                    // 12:05 deploy restart).
 
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang, ExplainReject(qaReject));
 
@@ -1233,8 +1208,7 @@ public sealed class UploadPipeline
 
             if (qaSurvivors.Count == 0)
             {
-                _fileRetries.RecordSuccess(item.Id.ToString());
-                progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
+                    progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
                 continue;
             }
 
@@ -1254,8 +1228,7 @@ public sealed class UploadPipeline
                 LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] DRY-RUN would upload {Name}", neutralName);
             }
 
-            _fileRetries.RecordSuccess(item.Id.ToString());
-                progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
+            progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
                 continue;
             }
 
@@ -1375,28 +1348,39 @@ public sealed class UploadPipeline
 
                         break;
                     case { SkippedItem: true }:
+                        // F-M298: a duplicate-content skip means "SubDL already holds this text" — which
+                        // is what an earlier UPLOAD of the same bytes produces just as much as a remote
+                        // duplicate does. The registry settles this on the CONTENT: writing "rejected"
+                        // over content that is demonstrably up left the position due forever, and the next
+                        // run re-extracted the file to reject it again (prod 06.10.2026: Lanterns S01E08,
+                        // 39 streams rejected while the same text sat uploaded under the pre-rewrite
+                        // identity).
+                        string skippedContentHash = ContentHashRegistry.ComputeHash(cand.Srt);
+                        string skipReason = RejectReason.DuplicateRemote == result.Reason
+                            ? RejectReason.DuplicateRemote
+                            : result.Reason ?? RejectReason.CandidateRejected;
+                        bool skipSettled = Registry.RecordSkippedContent(
+                            mediaHash, cand.IsLoose, cand.SubPos, cand.Lang, cand.HearingImpaired, cand.Forced,
+                            skippedContentHash, skipReason,
+                            fileName: cand.IsLoose ? Path.GetFileName(cand.LoosePath) : null,
+                            path: cand.IsLoose ? cand.LoosePath : null);
+
+                        if (skipSettled)
+                        {
+                            summary.SkippedStreams++;
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
+                                Path.GetFileName(fileName), cand.Lang);
+
+                            break;
+                        }
+
                         summary.SkippedStreams++;
                         summary.RejectedCandidates++; // F-M286
                         // A definitive skip verdict settles the position — but
                         // transient reasons (rate caps inside UploadSrtContentAsync return
                         // as failures, not skips) keep the stream due.
-                        string skipReason = RejectReason.DuplicateRemote == result.Reason
-                            ? RejectReason.DuplicateRemote
-                            : result.Reason ?? RejectReason.CandidateRejected;
-                        if (cand.IsLoose)
-                        {
-                            Registry.MarkAndFlush(() => Registry.MarkSidecar(
-                                ContentHashRegistry.ComputeHash(cand.Srt), mediaHash, cand.Lang, cand.HearingImpaired, cand.Forced,
-                                SubtitleStatus.Rejected, reason: skipReason,
-                                fileName: Path.GetFileName(cand.LoosePath), path: cand.LoosePath));
-                        }
-                        else
-                        {
-                            Registry.MarkAndFlush(() => Registry.MarkEmbed(
-                                mediaHash, cand.SubPos, cand.Lang, cand.HearingImpaired,
-                                SubtitleStatus.Rejected, contentHash: ContentHashRegistry.ComputeHash(cand.Srt),
-                                reason: skipReason));
-                        }
+                        // The reject row itself was already written by RecordSkippedContent above.
 
                         LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(fileName), cand.Lang, ExplainReject(result.Reason));
 
@@ -1457,10 +1441,6 @@ public sealed class UploadPipeline
                 await Task.Delay(_limiter.TransferPauseMs(), runCt).ConfigureAwait(false);
             }
 
-            // F-M60: the file was readable this run (existence check passed) — reset
-            // the consecutive-failure counter (move/rename/NAS-comeback case).
-            _fileRetries.RecordSuccess(item.Id.ToString());
-
             // F-M88c: when every candidate of this media file has been settled and none
             // failed, mark the whole file complete so future runs skip it entirely.
             if (itemHadCandidates && !itemHadFailures && mediaHash != null)
@@ -1489,9 +1469,7 @@ public sealed class UploadPipeline
         _tmdb.Trace -= OnTmdbTrace;
         _tmdb.IdMismatch -= OnIdMismatch; // F-M190: detach per-run handler
         Registry.Flush();
-        _idNotFound.Flush(); // Persist id-resolution failure counters (F-M66) — without this every JF restart reset the counters and id-less items (Primer/Coherence test files) waited 60 s + spent TMDB searches in every run forever
         OshashCache.Flush(); // F-M88c: kill-safe flush of the central OSHash cache
-        _fileRetries.Flush();
         // (user decision 14.09.2026, REVISED 02.10.2026 — F-M286): the rule used to be "no stats
         // line, no skip aggregates" for the upload, with per-item UPLOADED lines as the only run
         // output. That decision was made when the upload's reject number was a single gate; with the

@@ -430,10 +430,10 @@ internal static class Program
 
         foreach (var (path, wantLang, wantHi, label) in shapes)
         {
-            string want = label == "sdh + slot 2" ? ".en.sdh.2.srt"
-                        : label == "slot 3" ? ".en.3.srt"
-                        : label == "sdh" ? ".en.sdh.srt"
-                        : ".en.srt";
+            string want = label == "sdh + slot 2" ? ".en.sdh.02.srt"
+                        : label == "slot 3" ? ".en.03.srt"
+                        : label == "sdh" ? ".en.sdh.01.srt"
+                        : ".en.01.srt";
             Check("Build: " + label + " -> " + want, path.EndsWith(want, StringComparison.Ordinal),
                   "-> " + Path.GetFileName(path));
 
@@ -453,29 +453,29 @@ internal static class Program
 
         var noneTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string freeTarget = SidecarNaming.PlanTarget(media, "EN", false, noneTaken);
-        Check("free slot 1 -> <base>.en.srt",
-              Path.GetFileName(freeTarget) == baseName + ".en.srt",
+        Check("free slot 1 -> <base>.en.01.srt",
+              Path.GetFileName(freeTarget) == baseName + ".en.01.srt",
               "-> " + Path.GetFileName(freeTarget));
 
-        var plainTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { baseName + ".en.srt" };
+        var plainTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { baseName + ".en.01.srt" };
         string slot2 = SidecarNaming.PlanTarget(media, "EN", false, plainTaken);
         Check("taken slot 1 -> slot 2",
-              Path.GetFileName(slot2) == baseName + ".en.2.srt",
+              Path.GetFileName(slot2) == baseName + ".en.02.srt",
               "-> " + Path.GetFileName(slot2));
 
         var twoTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            baseName + ".en.srt", baseName + ".en.2.srt",
+            baseName + ".en.01.srt", baseName + ".en.02.srt",
         };
         string slot3 = SidecarNaming.PlanTarget(media, "EN", false, twoTaken);
         Check("taken slots 1+2 -> slot 3",
-              Path.GetFileName(slot3) == baseName + ".en.3.srt",
+              Path.GetFileName(slot3) == baseName + ".en.03.srt",
               "-> " + Path.GetFileName(slot3));
 
         // The slot is per COMBINATION: a DE file present does not push the EN file to a slot.
-        var otherLangTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { baseName + ".de.srt" };
+        var otherLangTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { baseName + ".de.01.srt" };
         Check("another language's file does not occupy the slot",
-              Path.GetFileName(SidecarNaming.PlanTarget(media, "EN", false, otherLangTaken)) == baseName + ".en.srt");
+              Path.GetFileName(SidecarNaming.PlanTarget(media, "EN", false, otherLangTaken)) == baseName + ".en.01.srt");
 
         // And the target must be a name the plugin's own reader reads back — a rename that writes a
         // name Parse cannot resolve would make the file invisible while "tidying" it.
@@ -578,14 +578,15 @@ internal static class Program
                                   Path.Combine(mediaDir, "Film.2026.1080p.WEB-DL.de.forced.srt")));
 
         // The name writer must carry the marker, or a rename of an unlabelled forced file would
-        // turn it into the film's dialogue.
+        // turn it into the film's dialogue. F-M316: the slot then follows the markers as a
+        // two-digit number — the marker block sits before the number, the number stays last.
         Check("Build carries the forced marker",
               Path.GetFileName(SidecarNaming.Build(media, "DE", false, 1, true)) ==
-              Path.GetFileNameWithoutExtension(media) + ".de.forced.srt",
+              Path.GetFileNameWithoutExtension(media) + ".de.forced.01.srt",
               "-> " + Path.GetFileName(SidecarNaming.Build(media, "DE", false, 1, true)));
         Check("Build carries both markers",
               Path.GetFileName(SidecarNaming.Build(media, "DE", true, 1, true)) ==
-              Path.GetFileNameWithoutExtension(media) + ".de.sdh.forced.srt",
+              Path.GetFileNameWithoutExtension(media) + ".de.sdh.forced.01.srt",
               "-> " + Path.GetFileName(SidecarNaming.Build(media, "DE", true, 1, true)));
         var forcedRoundTrip = SidecarNaming.Parse(
             Path.GetFileNameWithoutExtension(SidecarNaming.Build(media, "DE", true, 1, true)),
@@ -926,9 +927,10 @@ internal static class Program
         // ── L  the dry run writes no stored verdict (F-M22) ────────────────────────────
         // The rule has two halves and both were violated in the same shape: a write sat BEFORE the
         // mode's own exit, so the report-only run left state behind that changed what the next real
-        // run found. These checks pin the two trackers the pipelines own, because those are the
-        // stored verdicts with the longest reach: the refetch stamp (hides work for a whole
-        // interval) and the id-resolution budget (retires an item after IdRetryLimit runs).
+        // run found. These checks pin the tracker the pipelines own whose reach is longest: the
+        // refetch stamp, which hides work for a whole interval. The id-resolution budget that used to
+        // be pinned here as well is GONE (operator order 08.10.2026, L4–L6 below assert the removal),
+        // so the stamp is the remaining stored verdict of this class.
         {
             string ldir = Path.Combine(Path.GetTempPath(), "subdl-fm22-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(ldir);
@@ -966,22 +968,23 @@ internal static class Program
                 Check("L3 clearing the stamp makes the item due again", stamp.IsDue(itemId, gap, new List<string> { "EN" }),
                       "-> no invalidation pass exists, so a wrong stamp does not self-heal");
 
-                // The id-resolution budget: the limit is what gives an item up, and giving up is a
-                // stored verdict. 3 failures at limit 3 must exhaust it; a success must clear it.
-                var idnf = new IdNotFoundTracker(ldb, null);
-                string item2 = Guid.NewGuid().ToString();
-                for (int i = 0; i < 3; i++)
-                {
-                    Check($"L4.{i + 1} id-not-found is not exhausted after {i} failure(s)",
-                          !idnf.IsExhausted(item2, 3));
-                    idnf.RecordFailure(item2);
-                }
-
-                Check("L5 the id-resolution budget is exhausted at its limit", idnf.IsExhausted(item2, 3),
-                      "-> and the give-up is read by later runs");
-                idnf.RecordSuccess(item2);
-                Check("L6 a success clears the budget (the direction a dry run MAY touch)",
-                      !idnf.IsExhausted(item2, 3));
+                // L4–L6: the id-resolution give-up is GONE, asserted as an ABSENCE on both sides —
+                // the tracker's type and the `id-not-found:` key. Removing a give-up is invisible in
+                // a passing run, so a positive check cannot carry this; only an absence can. Negative
+                // control (measured): restoring the tracker file and the counter write turns L4 RED.
+                var dlSrc = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "DownloadPipeline.source.cs"));
+                Check("L4 the pipeline reads no id-not-found budget and records no failure",
+                      !dlSrc.Contains("_idNotFound", StringComparison.Ordinal)
+                      && !dlSrc.Contains("IdRetryLimit", StringComparison.Ordinal),
+                      "-> an id-less item is retried by the next run, never retired");
+                var upSrc = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "UploadPipeline.source.cs"));
+                Check("L5 the upload side carries the same removal",
+                      !upSrc.Contains("_idNotFound", StringComparison.Ordinal)
+                      && !upSrc.Contains("IdRetryLimit", StringComparison.Ordinal));
+                Check("L6 no give-up counter is reported by either summary any more",
+                      !dlSrc.Contains("SkippedIdGaveUp", StringComparison.Ordinal)
+                      && !upSrc.Contains("SkippedIdGaveUp", StringComparison.Ordinal),
+                      "-> the count that gave items up cannot be reported either");
             }
             finally
             {
@@ -989,71 +992,68 @@ internal static class Program
             }
         }
 
-        // ── M  the search width, the download cap and keep-best agree (F-M95/F-M50/F-M242) ──
-        // Three settings met in one loop and none of them was checked against the others. The
-        // search received a HARD-CODED 3 while its own comment named
-        // DownloadMaxCandidatesPerLanguage, so raising the setting widened the download budget but
-        // never the search — the page walk stopped after three candidates per language and the
-        // loop could not see a fourth. Independently, a budget below the keep-best count made
-        // F-M242 unreachable: with KeepBest=4 and the default budget 3 the budget break fired
-        // before the fourth slot could be filled.
+        // ── M  ONE setting, TWO effects: search width and the Auto-Sync walk's limit ──
+        // (F-M95/F-M50/F-M331, operator order 08.10.2026: "Die correction attempts bestimmen wieviele
+        // Kandidaten pro Sprache gesucht werden und wie oft die autosync Schleife maximal Kandidaten
+        // zieht bis das Ergebnis passt. Aus 2 variables mach eine.")
+        //
+        // What was two knobs that described the same intent is now one setting. The old pair drifted
+        // silently: the walk's cap was checked BEFORE the correction budget and counted the same
+        // attempts, so at the equal defaults the cap always fired first and the budget could never
+        // trigger. Replayed against the loop, the cap stopped the walk in every ordering.
         {
-            // The configured default pair, unchanged: the effective numbers must stay 3 / 3, so
-            // the fix does not silently widen every existing installation's quota use.
-            Check("M1 the default budget is passed through unchanged",
-                  DownloadBudget.EffectiveDownloadCap(3, 1) == 3);
-            Check("M2 the search threshold equals the unchanged budget",
-                  DownloadBudget.SearchEarlyStopThreshold(3, 1) == 3,
-                  "-> today's behaviour, so the fix is not a hidden quota increase");
-
-            // The contradiction: the user asks for more files than the budget would let the loop try.
-            Check("M3 keep-best above the budget raises the cap (F-M242 reachable)",
-                  DownloadBudget.EffectiveDownloadCap(3, 4) == 4,
-                  "-> without this the budget break fires before slot 4 exists");
-            Check("M4 the search threshold follows the raised cap (F-M95)",
-                  DownloadBudget.SearchEarlyStopThreshold(3, 4) == 4,
-                  "-> else the loop may try 4 candidates the search never fetched");
-
-            // 0 means unlimited in F-M50 and must stay unlimited — it is NOT raised to keepBest.
+            // The number the search receives is the ONE configured value, unchanged — so removing the
+            // second knob is not a hidden quota change for an existing install (default 3).
+            Check("M1 the search width IS the configured setting",
+                  DownloadBudget.SearchEarlyStopThreshold(3) == 3);
+            Check("M7 a deliberate value is passed through, never lowered",
+                  DownloadBudget.SearchEarlyStopThreshold(10) == 10);
             Check("M5 unlimited stays unlimited (F-M50)",
-                  DownloadBudget.EffectiveDownloadCap(0, 4) == 0);
-            Check("M6 an unlimited budget disables the early stop (F-M95/F-M50)",
-                  DownloadBudget.SearchEarlyStopThreshold(0, 4) == 0,
-                  "-> 0 is the documented 'no early stop', not a threshold of zero");
+                  DownloadBudget.SearchEarlyStopThreshold(0) == 0,
+                  "-> 0 is the documented 'no cap', not a threshold of zero");
+            Check("M6 negative values are treated as 0, never as a threshold",
+                  DownloadBudget.SearchEarlyStopThreshold(-1) == 0);
 
-            // A budget ALREADY above keep-best is never lowered: the user set it deliberately.
-            Check("M7 a budget above keep-best is not lowered",
-                  DownloadBudget.EffectiveDownloadCap(10, 2) == 10);
-            Check("M8 a nonsensical keep-best cannot produce a zero threshold",
-                  DownloadBudget.SearchEarlyStopThreshold(3, 0) == 3,
-                  "-> keepBest is clamped to 1, so the search never stops after zero candidates");
-
-            // The formula is only half the fix: a correct helper that nobody calls leaves the
-            // behaviour unchanged. These two are STRUCTURAL — they read the pipeline source and
-            // assert the numbers are wired in, so the literal cannot come back unnoticed.
+            // Both effects read the SAME setting. Asserted on the pipeline SOURCE, because a correct
+            // helper that nobody calls leaves the behaviour unchanged — and this is the drift that
+            // caused the original bug: the search was fed a literal while the walk read the setting.
             {
                 string srcPath = Path.Combine(AppContext.BaseDirectory, "DownloadPipeline.source.cs");
                 string src = File.Exists(srcPath) ? File.ReadAllText(srcPath) : "";
                 Check("M10 the pipeline source is available for the structural check", src.Length > 0,
                       "-> " + srcPath);
-                // The bug in one line: a bare ", 3," as the search threshold.
+
+                // Effect 1: the search. No literal, and both calls take the derived value.
                 Check("M11 no hard-coded search threshold remains in the pipeline",
                       !Regex.IsMatch(src, @"ct,\s*3,\s*hearingImpaired"),
-                      "-> the literal that ignored DownloadMaxCandidatesPerLanguage");
+                      "-> the literal that ignored the setting");
                 Check("M12 both search calls take the derived threshold",
                       Regex.Matches(src, @"ct,\s*earlyStop,\s*hearingImpaired").Count == 2,
                       "-> regular search and HI search");
-                Check("M13 the download loop compares against the derived cap",
-                      src.Contains("attempts >= downloadCap", StringComparison.Ordinal),
-                      "-> not against the raw setting");
-            }
+                Check("M12b and it is derived from the ONE correction-attempts setting",
+                      src.Contains("SearchEarlyStopThreshold(\n                _config.DownloadQaRetryLimit)",
+                                   StringComparison.Ordinal),
+                      "-> a second setting would be the second knob again");
 
-            // The two numbers are one decision, not two: this is the drift that caused the bug.
-            foreach (var (budget, keep) in new[] { (3, 1), (3, 4), (2, 2), (10, 2), (0, 4) })
-            {
-                Check($"M9.{budget}/{keep} search and download agree",
-                      DownloadBudget.SearchEarlyStopThreshold(budget, keep)
-                          == DownloadBudget.EffectiveDownloadCap(budget, keep));
+                // Effect 2: the walk. Its limit is that same setting, and the removed cap is gone.
+                Check("M13 the walk's limit is the correction-attempts setting",
+                      src.Contains("int walkLimit = Math.Max(0, _config.DownloadQaRetryLimit);",
+                                   StringComparison.Ordinal),
+                      "-> not a second cap");
+                Check("M13b the removed second cap is gone from the loop",
+                      !src.Contains("attempts >= downloadCap", StringComparison.Ordinal),
+                      "-> that cap fired first at equal values and hid the limit");
+                // Only FITS are counted (operator order): a gate rejection is a verdict on the
+                // candidate, not a pull the Auto-Sync worked on, and must not consume the limit.
+                Check("M13c the limit counts fits only, never gate rejections",
+                      src.Contains("if (walkLimit > 0 && refusalsThisRun >= walkLimit)",
+                                   StringComparison.Ordinal),
+                      "-> gate rejections must not spend the Auto-Sync's budget");
+
+                // The helper's signature: the removed keepBest parameter must not reappear.
+                Check("M14 the budget helper takes no second parameter",
+                      !Regex.IsMatch(src, @"SearchEarlyStopThreshold\(\s*[^)]*,"),
+                      "-> a second argument would be the dead keepBest parameter again");
             }
         }
 

@@ -61,6 +61,23 @@ ok "csproj     : $VER_CSPROJ"
 [[ "$VER_CSPROJ" == "$VER" || "$VER_CSPROJ" == "$VER-dev" ]] \
     || die "csproj version $VER_CSPROJ does not match build.yaml $VER"
 
+# The ASSEMBLY version is a SECOND carrier of the same claim, and it drifts silently: on
+# 08.10.2026 the bump raised <Version> only, so 12.1.12.205 shipped a DLL that still identified
+# itself as 12.1.12.204. Everything downstream looked right — build.yaml, the tag, the ZIP field
+# and the manifest all said 205, and the manifest check passed — while Jellyfin's loader logged
+# `Loaded assembly "...Version=12.1.12.204"` and the installed version never took effect. The
+# catalogue installs the package but the plugin reports the old assembly, so the update is
+# invisible on the server. Checked here because a version that lies about itself cannot be
+# caught by any check that reads the packaging metadata.
+VER_ASM="$(grep -oP '(?<=<AssemblyVersion>)[^<]+' Jellyfin.Plugin.SubdlSync/Jellyfin.Plugin.SubdlSync.csproj | head -1)"
+VER_FILE="$(grep -oP '(?<=<FileVersion>)[^<]+' Jellyfin.Plugin.SubdlSync/Jellyfin.Plugin.SubdlSync.csproj | head -1)"
+ok "AssemblyVersion: $VER_ASM"
+ok "FileVersion: $VER_FILE"
+[[ "$VER_ASM" == "$VER" ]] \
+    || die "AssemblyVersion $VER_ASM != $VER — the DLL would identify itself as $VER_ASM (bump all THREE csproj version lines)"
+[[ "$VER_FILE" == "$VER" ]] \
+    || die "FileVersion $VER_FILE != $VER — same trap, bump all THREE csproj version lines"
+
 # The category check guards against the v12.1.12.80 class of bug: the release
 # must never go out with anything but the plural "Subtitles".
 CATEGORY="$(grep '^category:' build.yaml | sed 's/.*"\(.*\)".*/\1/')"
@@ -177,6 +194,14 @@ names = z.namelist()
 for req in ('Jellyfin.Plugin.SubdlSync.dll', 'LanguageDetection.dll', 'LiteDB.dll', 'build.yaml'):
     if req not in names:
         sys.exit(f"  FAIL: {req} missing from the ZIP")
+# The licence texts must travel with the published ZIP: LanguageDetection is
+# Apache-2.0, which requires the licence and notice alongside a redistribution.
+for req in ('licenses/THIRD-PARTY.txt',
+            'licenses/LanguageDetection-Apache-2.0.txt',
+            'licenses/LiteDB-MIT.txt',
+            'licenses/SubDL-Scribe-GPL-3.0.txt'):
+    if req not in names:
+        sys.exit(f"  FAIL: {req} missing from the ZIP — a required licence is not shipped")
 if any(n.endswith('meta.json') for n in names):
     sys.exit("  FAIL: this ZIP carries meta.json — that is the CI format, not ours")
 txt = z.read('build.yaml').decode()

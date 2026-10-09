@@ -168,9 +168,10 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
 
             progress.Report(20);
 
-            int removedSearch = 0, removedRetry = 0, removedIdNotFound = 0, removedQa = 0, removedOshash = 0;
+            int removedSearch = 0, removedQa = 0, removedOshash = 0;
             int forgottenSidecars = 0, openFiles = 0, forgottenEmbeds = 0, backfilledForced = 0;
             int removedPrunedSubtitles = 0, removedPrunedMedia = 0;
+            int removedGonePathSubtitles = 0, removedGonePathMedia = 0;
             Exception? refreshException = null;
             // Filled by the compaction step below; stays empty when it compacted cleanly. Names the
             // rebuild fallback in the worker row, which otherwise reads as a clean run.
@@ -191,15 +192,38 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                     (removedPrunedSubtitles, removedPrunedMedia) = registry.PruneDeadMediaAndSubtitles(allItems);
                 }
 
+                // ---- Phase 1b (operator order 08.10.2026: "Alleinige Aufgabe database refresh") ----
+                // Media rows whose FILE is gone while the Jellyfin item is still there. This is the
+                // case the pipelines' file-missing give-up (F-M60) used to clean up after three failed
+                // runs; that mechanism is gone, so the refresh owns it now — and owns it better: it is
+                // keyed on the PATH, not on an item id, so it also reaches rows whose item is fine.
+                //
+                // FAIL-SAFE FIRST, exactly like phases 3 and 4: every root the stored media paths live
+                // under must exist AND list cleanly. An unmounted volume reports every path as missing,
+                // and deleting live media state on that basis would be far worse than keeping a stale
+                // row. `collectRoots` is the same helper phase 3 already uses for the OSHash cache.
+                if (registry != null)
+                {
+                    var mediaRoots = Registry.OshashCache.RootsFromPaths(db.Media.FindAll()
+                        .Where(m => !string.IsNullOrEmpty(m.Path))
+                        .Select(m => m.Path!));
+                    if (mediaRoots.Count == 0)
+                    {
+                        LogUtil.Normal(_logger, "[SubDL-Refresh] no stored media paths to verify — gone-file side skipped.");
+                    }
+                    else if (!Registry.SubtitlePresence.RootsUsable(mediaRoots))
+                    {
+                        _logger.LogWarning("[SubDL-Refresh] {N} media root(s) not readable — gone-file side skipped (nothing removed).", mediaRoots.Count);
+                    }
+                    else
+                    {
+                        (removedGonePathSubtitles, removedGonePathMedia) = registry.PruneMissingPathMediaAndSubtitles();
+                    }
+                }
+
                 // ---- Phase 2: guid-keyed trackers ----
                 var searchTracker = new Registry.DownloadSearchTracker(db);
                 removedSearch = searchTracker.PruneDeadItems(ItemExists);
-
-                var fileRetries = new Registry.FileRetryTracker(db);
-                removedRetry = fileRetries.PruneDeadItems(ItemExists);
-
-                var idNotFound = new Registry.IdNotFoundTracker(db);
-                removedIdNotFound = idNotFound.PruneDeadItems(ItemExists);
 
                 var qaFails = new Registry.QaFailTracker(db);
                 removedQa = qaFails.PruneDeadItems(ItemExists);
@@ -268,7 +292,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 progress.Report(85);
 
                 // ---- Phase 5: compact the file ----
-                // Deleting rows in LiteDB frees pages inside the file but never releases them, and
+                // Deleting rows frees pages inside the file but never releases them, and
                 // the journal keeps every delete separately. Compact in the SAME run so the refresh
                 // actually leaves a smaller store behind; housekeeping later would be forgotten.
                 try
@@ -321,17 +345,19 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 _logger.LogError(ex, "[SubDL-Refresh] Refresh aborted mid-run — already-flushed parts stay, remainder untouched.");
             }
 
-            int removedTotal = removedSearch + removedRetry + removedIdNotFound + removedQa + removedOshash
-                               + removedPrunedSubtitles + removedPrunedMedia;
+            int removedTotal = removedSearch + removedQa + removedOshash
+                               + removedPrunedSubtitles + removedPrunedMedia
+                               + removedGonePathSubtitles + removedGonePathMedia;
             int changedTotal = removedTotal + forgottenSidecars + openFiles + forgottenEmbeds + backfilledForced;
 
             if (changedTotal > 0)
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL-Refresh] Removed dead state: {Search} search / {Retry} file-retry / {IdNotFound} id-not-found / {Qa} qa-fail / {Oshash} oshash / {PrunedSubs} subtitle / {PrunedMedia} media (dead items). Forgot {Sidecars} vanished subtitle verdict(s); {OpenFiles} item(s) with an open required file; forgot {Embeds} stale embedded row(s).",
-                    removedSearch, removedRetry, removedIdNotFound, removedQa, removedOshash,
+                    "[SubDL-Refresh] Removed dead state: {Search} search / {Qa} qa-fail / {Oshash} oshash / {PrunedSubs} subtitle / {PrunedMedia} media (dead items) / {GonePathSubs} subtitle + {GonePathMedia} media (file gone from disk). Forgot {Sidecars} vanished subtitle verdict(s); {OpenFiles} item(s) with an open required file; forgot {Embeds} stale embedded row(s).",
+                    removedSearch, removedQa, removedOshash,
                     removedPrunedSubtitles, removedPrunedMedia,
+                    removedGonePathSubtitles, removedGonePathMedia,
                     forgottenSidecars, openFiles, forgottenEmbeds);
             }
             else if (refreshException != null)
@@ -625,20 +651,23 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             // embedded rows the registry holds are part of the evidence, which is what makes a
             // subtitle inside the container count — and a VARIANT inside the container count as the
             // variant, which the old language-keyed check could not express (F-M234, F-M282).
-            var openPairs = registry.OpenPairs(media.Path!, required);
+            // F-M333: same mode as the seeder and the pipeline, or the refresh would report a file as
+            // open while the queue considers it done — the two must answer alike (the reason
+            // SubtitleCoverage exists as the ONE reader).
+            var openPairs = registry.OpenPairs(
+                media.Path!, required,
+                onlyOwnDownloads: Plugin.Instance?.Configuration.DownloadOnlyMissing != true);
             if (openPairs.Count == 0)
             {
                 continue;
             }
 
-            // A pair SubDL settled as unavailable is not missing work — the QA budget said so.
-            var qaFails = new Registry.QaFailTracker(db);
-            var actionable = openPairs
-                .Where(r => !qaFails.IsExhausted(
-                    media.JellyfinItemId!,
-                    r.Language,
-                    Plugin.Instance?.Configuration.DownloadQaRetryLimit ?? 3))
-                .ToList();
+            // F-M320 (operator order 08.10.2026): the QA retry limit is the FIT's budget and no longer
+            // makes a pair actionless. The filter that used to sit here called an item "not missing
+            // work" once its candidates had been gate-rejected enough times — a give-up the operator
+            // removed, and the reason a file with only badly ripped candidates was never searched
+            // again. Every open pair is actionable now.
+            var actionable = openPairs;
             if (actionable.Count == 0)
             {
                 continue;
@@ -719,9 +748,20 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
     /// mount would otherwise report every file as missing and nuke the cache).
     /// </summary>
     private static List<string> collectRoots(Registry.OshashCache oshash)
+        => Registry.OshashCache.RootsFromPaths(oshash.GetAllPaths());
+
+    /// <summary>
+    /// Derive the distinct roots for the gone-file sweep — same algorithm as
+    /// <see cref="collectRoots(Registry.OshashCache)"/>, applied to MEDIA paths. Both must agree:
+    /// the fail-safe that guards one must guard the other, or a dead mount would be refused by the
+    /// cache sweep and accepted by the media sweep in the same run.
+    /// </summary>
+    /// <param name="paths">Stored media paths.</param>
+    /// <returns>Distinct roots, e.g. "/data/movies2".</returns>
+    private static List<string> collectRoots(IEnumerable<string> paths)
     {
         var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in oshash.GetAllPaths())
+        foreach (var path in paths)
         {
             // two levels below filesystem root: "/data/movies2/..." → "/data/movies2"
             var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);

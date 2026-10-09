@@ -14,7 +14,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using LiteDB;
+using System.Linq.Expressions;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
 
@@ -45,7 +47,7 @@ public enum CompactOutcome
 }
 
 /// <summary>
-/// Central LiteDB context for SubDL Scribe. One data file, five clearly separated areas:
+/// Central data context for SubDL Scribe. One SQLite file, five clearly separated areas:
 /// <list type="number">
 /// <item><description>0 — file compatibility (schema/plugin/Jellyfin version)</description></item>
 /// <item><description>1 — OSHash cache (path → file hash, disposable)</description></item>
@@ -55,10 +57,23 @@ public enum CompactOutcome
 /// <item><description>5 — cumulative GUI counters (one row)</description></item>
 /// </list>
 /// <para>
-/// Every area is keyed by a business key carried in the document's own Id field, never by the
-/// database-assigned auto id. That is the correction of F-M194: with an auto id, an upsert of a
-/// "new" row can never find the row it means to update, which is what silently produced
-/// duplicates. It cannot happen now because the key is computed, not assigned.
+/// Every area is keyed by a business key carried in the document's own Id field, never by an
+/// auto-assigned id. That is the correction of F-M194: with an auto id, an upsert of a "new" row
+/// can never find the row it means to update, which is what silently produced duplicates. It cannot
+/// happen now because the key is computed, not assigned.
+/// </para>
+/// <para>
+/// Why SQLite through Entity Framework Core rather than the document store this replaced: Jellyfin
+/// already ships <c>Microsoft.EntityFrameworkCore.Sqlite</c> and its native <c>libe_sqlite3</c>, and
+/// its <c>PluginLoadContext</c> resolves an assembly the plugin does not carry from the host. With
+/// <c>ExcludeAssets=runtime</c> on that package NOTHING rides along in the ZIP, where the previous
+/// engine had to ship its whole 510 KB engine. The provider's own service set (connection pooling,
+/// change tracking, migrations surface, <c>VACUUM</c>) is part of what the host already pays for.
+/// </para>
+/// <para>
+/// The store is a file of this plugin's own, never Jellyfin's <c>jellyfin.db</c>. Jellyfin offers
+/// plugins no database interface at all, and its own schema is rebuilt by its migrations; a plugin
+/// writing there would lose data on a server update.
 /// </para>
 /// </summary>
 public sealed class SubdlDbContext : IDisposable
@@ -77,16 +92,18 @@ public sealed class SubdlDbContext : IDisposable
     // (`QaRejectedDownload`/`QaRejectedUpload` -> `RejectedDownload`/`RejectedUpload`) because they
     // now count every fetched-and-discarded candidate, not the QA gates alone. An older build reading
     // this file finds neither field and reports 0, which is why the marker moves with the rename.
-    public const int CurrentSchemaVersion = 3;
+    // F-M308 (07.10.2026): raised to 4. The status row gained `FittedToAudio` — the count of
+    // downloaded subtitles the run fitted to their audio track. An older build reading this file
+    // finds no such field and reports 0, which is why the marker moves with the addition.
+    // F-M325 (08.10.2026): raised to 5. The FILE CHANGED FORMAT — a SQLite database replacing the
+    // document store, named subdl-scribe.sqlite (F-M326). An older build opening this file finds no
+    // document header and reports a broken store; the marker is what makes that loud instead of
+    // silent. The old file is imported once on first start and kept as a .bak (F-M327).
+    public const int CurrentSchemaVersion = 5;
 
-    /// <summary>
-    /// The open LiteDB engine. Deliberately NOT readonly: LiteDB's <c>Rebuild()</c> closes the
-    /// engine and only reopens it on success, so a failed rebuild leaves it dead — see
-    /// <see cref="VerifyAndRepair"/>, which replaces this instance to bring the store back (F-M236).
-    /// </summary>
-    private LiteDatabase _db;
     private readonly string _dbPath;
     private readonly ILogger? _logger;
+    private readonly SubdlSqliteContext _db;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubdlDbContext"/> class.
@@ -97,89 +114,72 @@ public sealed class SubdlDbContext : IDisposable
     {
         _logger = logger;
         Directory.CreateDirectory(dataDir);
-        var path = DbFiles.PathIn(dataDir);
-        _dbPath = path;
-        _db = new LiteDatabase(path);
-        EnsureIndexes();
+        _dbPath = DbFiles.PathIn(dataDir);
+
+        // F-M327: the one-time import runs BEFORE the store is opened. It is the only path that ever
+        // reads the old format, it is skipped when there is nothing to import, and it never deletes
+        // the source file — see LiteDbImport.
+        LiteDbImport.RunOnce(dataDir, _dbPath, _logger);
+
+        _db = new SubdlSqliteContext(_dbPath);
+        _db.Database.EnsureCreated();
+        _db.ConfigurePragmas();
+
+        Meta = new SubdlSet<MetaEntity>(_db, e => e.Id);
+        Oshashes = new SubdlSet<OshashEntity>(_db, e => e.Id);
+        Media = new SubdlSet<MediaEntity>(_db, e => e.Id);
+        Embeds = new SubdlSet<EmbedTrackEntity>(_db, e => e.Id);
+        Sidecars = new SubdlSet<SidecarEntity>(_db, e => e.Id);
+        RejectedCandidates = new SubdlSet<RejectedCandidateEntity>(_db, e => e.Id);
+        Counters = new SubdlSet<CounterEntity>(_db, e => e.Key);
+        Runs = new SubdlSet<PipelineRunEntity>(_db, e => e.Id.ToString(CultureInfo.InvariantCulture));
+        StatusStats = new SubdlSet<StatusStatsEntity>(_db, e => e.Id);
+        WorkerRuns = new SubdlSet<WorkerRunEntity>(_db, e => e.Id);
+
         CheckSchemaVersion();
     }
 
     /// <summary>Area 0: the single compatibility record describing this data file.</summary>
-    public ILiteCollection<MetaEntity> Meta => _db.GetCollection<MetaEntity>("meta");
+    public SubdlSet<MetaEntity> Meta { get; }
 
     /// <summary>Area 1: OSHash cache, keyed by media path.</summary>
-    public ILiteCollection<OshashEntity> Oshashes => _db.GetCollection<OshashEntity>("oshashes");
+    public SubdlSet<OshashEntity> Oshashes { get; }
 
     /// <summary>Area 2: one record per video file, keyed by media hash.</summary>
-    public ILiteCollection<MediaEntity> Media => _db.GetCollection<MediaEntity>("media");
+    public SubdlSet<MediaEntity> Media { get; }
 
     /// <summary>Area 2, beneath the file: embedded subtitle tracks, keyed by "&lt;media hash&gt;|&lt;position&gt;".</summary>
-    public ILiteCollection<EmbedTrackEntity> Embeds => _db.GetCollection<EmbedTrackEntity>("embeds");
+    public SubdlSet<EmbedTrackEntity> Embeds { get; }
 
     /// <summary>Area 3: sidecar subtitle files, keyed by content hash.</summary>
-    public ILiteCollection<SidecarEntity> Sidecars => _db.GetCollection<SidecarEntity>("sidecars");
+    public SubdlSet<SidecarEntity> Sidecars { get; }
 
     /// <summary>Area 4: download candidates that were fetched and discarded.</summary>
-    public ILiteCollection<RejectedCandidateEntity> RejectedCandidates => _db.GetCollection<RejectedCandidateEntity>("rejected_candidates");
+    public SubdlSet<RejectedCandidateEntity> RejectedCandidates { get; }
 
-    /// <summary>Retry and fail-budget counters.</summary>
-    public ILiteCollection<CounterEntity> Counters => _db.GetCollection<CounterEntity>("counters");
+    /// <summary>Retry and fail-budget counters, keyed by the namespaced counter key.</summary>
+    public SubdlSet<CounterEntity> Counters { get; }
 
     /// <summary>Pipeline run bookkeeping.</summary>
-    public ILiteCollection<PipelineRunEntity> Runs => _db.GetCollection<PipelineRunEntity>("runs");
+    public SubdlSet<PipelineRunEntity> Runs { get; }
 
     /// <summary>
     /// Cumulative subtitle counters for the GUI (single row, key "status"). Stored here rather than
     /// in the configuration XML so a database reset resets them too — see <see cref="StatusStatsEntity"/>.
     /// </summary>
-    public ILiteCollection<StatusStatsEntity> StatusStats => _db.GetCollection<StatusStatsEntity>("status_stats");
+    public SubdlSet<StatusStatsEntity> StatusStats { get; }
 
     /// <summary>
     /// Area 6: the LAST run of each worker, keyed by the worker's task key (one row per worker, never
     /// a history). Read by the configuration page's "Workers" section — see <see cref="WorkerRunEntity"/>.
     /// </summary>
-    public ILiteCollection<WorkerRunEntity> WorkerRuns => _db.GetCollection<WorkerRunEntity>("worker_runs");
+    public SubdlSet<WorkerRunEntity> WorkerRuns { get; }
 
     /// <summary>
     /// True when the data file was written by a NEWER plugin build than this one. Callers must not
     /// write in that case: the newer build may store fields this one would silently drop.
     /// </summary>
     public bool IsWrittenByNewerVersion { get; private set; }
-
-    private void EnsureIndexes()
-    {
-        Meta.EnsureIndex(x => x.Id, true);
-
-        Oshashes.EnsureIndex(x => x.Id, true);
-
-        Media.EnsureIndex(x => x.Id, true);
-        Media.EnsureIndex(x => x.ImdbId);
-        Media.EnsureIndex(x => x.TmdbId);
-        Media.EnsureIndex(x => x.Path);
-        Media.EnsureIndex(x => x.JellyfinItemId);
-
-        Embeds.EnsureIndex(x => x.Id, true);
-        Embeds.EnsureIndex(x => x.MediaHash);
-        Embeds.EnsureIndex(x => x.ContentHash);
-        Embeds.EnsureIndex(x => x.Status);
-
-        Sidecars.EnsureIndex(x => x.Id, true);
-        Sidecars.EnsureIndex(x => x.ContentHash);
-        Sidecars.EnsureIndex(x => x.MediaHash);
-        Sidecars.EnsureIndex(x => x.Status);
-        Sidecars.EnsureIndex(x => x.Language);
-
-        RejectedCandidates.EnsureIndex(x => x.Id, true);
-        RejectedCandidates.EnsureIndex(x => x.ItemId);
-        RejectedCandidates.EnsureIndex(x => x.SubdlId);
-
-        Counters.EnsureIndex(x => x.Key, true);
-        Counters.EnsureIndex(x => x.Expires);
-
-        Runs.EnsureIndex(x => x.Started);
-        StatusStats.EnsureIndex(x => x.Id, true);
-        WorkerRuns.EnsureIndex(x => x.Id, true);
-    }
 
     /// <summary>
     /// Reads area 0 and decides whether this build may write to the file.
@@ -193,7 +193,7 @@ public sealed class SubdlDbContext : IDisposable
             {
                 meta = new MetaEntity { Id = "db", SchemaVersion = CurrentSchemaVersion };
                 Meta.Upsert(meta);
-                LogUtil.Normal(_logger, 
+                LogUtil.Normal(_logger,
                     "[SubDL] data file initialised, schema version {Version}.", CurrentSchemaVersion);
                 return;
             }
@@ -244,7 +244,7 @@ public sealed class SubdlDbContext : IDisposable
             meta.JellyfinVersion = jellyfinVersion;
             meta.Updated = DateTime.UtcNow;
             Meta.Upsert(meta);
-            LogUtil.Normal(_logger, 
+            LogUtil.Normal(_logger,
                 "[SubDL] data file last written by plugin {Plugin} on Jellyfin {Jellyfin}",
                 pluginVersion ?? "unknown", jellyfinVersion ?? "unknown");
         }
@@ -252,6 +252,57 @@ public sealed class SubdlDbContext : IDisposable
         {
             _logger?.LogWarning("[SubDL] recording versions failed (continuing): {Msg}", ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Reads the journal mode the data file is actually in, through the live context.
+    /// </summary>
+    /// <returns>The mode string, e.g. <c>wal</c> or <c>delete</c>.</returns>
+    public string ReadJournalMode()
+    {
+        FlushPending();
+        return _db.ReadJournalMode();
+    }
+
+    /// <summary>
+    /// Drops every idle pooled connection for this database, so a file-level REPLACEMENT of the
+    /// database is actually seen by the next open.
+    /// <para>
+    /// Called by the reset and restore paths immediately before they copy a file over the database.
+    /// Pooling is off in this context, but SQLite keeps a process-wide pool registry and the plugin
+    /// shares one path across several contexts over its lifetime — so the call is cheap insurance
+    /// for the one operation that cannot tolerate a stale handle.
+    /// </para>
+    /// </summary>
+    /// <param name="path">Path of the database file.</param>
+    public static void ClearPoolFor(string path)
+    {
+        using var cn = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = true,
+        }.ToString());
+        SqliteConnection.ClearPool(cn);
+        SqliteConnection.ClearAllPools();
+    }
+
+    /// <summary>
+    /// Folds the write-ahead log into the main file, so the file on disk is a complete,
+    /// self-contained snapshot.
+    /// <para>
+    /// Required before any file-level copy of the database. In WAL mode every committed write sits
+    /// in <c>&lt;name&gt;-wal</c> until a checkpoint; a copy taken without this one carries the main
+    /// file alone and silently loses everything written since the last checkpoint — and a RESTORE
+    /// from such a copy leaves a stale <c>-wal</c> beside the restored file, which SQLite then tries
+    /// to apply as if it belonged to it. The previous engine was a single file and needed none of
+    /// this, which is exactly why the copy sites are worth checking when the format changes.
+    /// </para>
+    /// </summary>
+    public void Checkpoint()
+    {
+        FlushPending();
+        _db.Database.ExecuteSqlRaw("PRAGMA wal_checkpoint(TRUNCATE);");
     }
 
     /// <summary>
@@ -263,334 +314,126 @@ public sealed class SubdlDbContext : IDisposable
         var cutoff = now ?? DateTime.UtcNow;
         var expiredCounters = Counters.DeleteMany(x => x.Expires != null && x.Expires < cutoff);
         var oldRuns = Runs.DeleteMany(x => x.Ended != null && x.Ended < cutoff.AddDays(-30));
-        LogUtil.Detail(_logger, "[SubDL] LiteDB pruned: {ExpiredCounters} expired counters, {OldRuns} old runs", expiredCounters, oldRuns);
+        LogUtil.Detail(_logger, "[SubDL] store pruned: {ExpiredCounters} expired counters, {OldRuns} old runs", expiredCounters, oldRuns);
     }
 
     /// <summary>
-    /// Physically compacts the data file: folds the rollback journal (<c>&lt;name&gt;-log.db</c>) into
-    /// the main file, then rebuilds it so free pages left behind by deletes are released.
+    /// Physically compacts the data file. SQLite's <c>VACUUM</c> does in one statement what the
+    /// previous engine needed a rebuild for: it rewrites the database into a dense file, which
+    /// releases the pages that deletes freed.
     /// <para>
-    /// Why this exists: deleting rows in LiteDB does not shrink anything by itself. The freed space
-    /// stays in the file, and every delete/update also sits in the side journal until a checkpoint.
-    /// A state prune therefore leaves the store physically as large as before the prune — measured on
-    /// a live file: 8 KB main + 496 KB journal before, 280 KB + 0 journal after.
+    /// Why this exists: deleting rows in SQLite does not shrink the file. The freed pages go on the
+    /// freelist and the file stays as large as before the prune, so a state prune would leave the
+    /// store physically untouched.
     /// </para>
     /// <para>
-    /// Runs on the open database rather than by copying the file aside and rebuilding a replacement,
-    /// because the database is open and other writers hold references to it — a file-level swap
-    /// would race with them.
-    /// </para>
-    /// <para>
-    /// F-M236: this is only half true, and the half that was wrong took the API down. LiteDB's
-    /// <c>Rebuild</c> DOES swap the file: <c>LiteEngine.Rebuild()</c> runs <c>Close()</c> →
-    /// <c>RebuildService.Rebuild()</c> (which moves the file aside and renames a temp copy in) →
-    /// <c>Open()</c>. When any step of that throws, the <c>Open()</c> never runs and the engine —
-    /// and with it every collection handle on this shared instance — stays closed. Measured on prod
-    /// (28.09.2026): after one manually triggered refresh, <c>/Plugins/SubdlSync/Stats</c> and
-    /// <c>/Diagnostics</c> answered HTTP 500 with <c>ObjectDisposedException</c> on LiteDB's
-    /// <c>ReaderWriterLockSlim</c> for the rest of the server's life, while <c>/Status</c> (no
-    /// database) kept working.
-    /// </para>
-    /// <para>
-    /// So the caller must be able to tell success from failure, and this method must repair the
-    /// engine when the rebuild died: the returned flag is true only when the database answers
-    /// afterwards, so a failed compaction costs the size reduction and nothing else.
+    /// <c>VACUUM</c> cannot run inside a transaction, and this runs on a database other writers hold
+    /// open — so the outcome is reported rather than assumed. The returned flag is true only when the
+    /// database answers afterwards, so a failed compaction costs the size reduction and nothing else.
     /// </para>
     /// </summary>
     /// <returns>Compaction result: sizes before/after, collections rebuilt, and what became of the
     /// rebuild.</returns>
-    /// F-M214: a database refresh compacts in the same run; measured over data file plus journal,
-    /// because reporting the main file alone understates the starting size.
+    /// F-M214: a database refresh compacts in the same run; measured over the database file plus its
+    /// write-ahead log, because reporting the main file alone understates the starting size.
     public (long Before, long After, long Rebuilt, CompactOutcome Outcome) Compact()
     {
-        long beforeTotal = 0;
+        // The measured footprint is what the FILE holds, so a batch still in the change tracker
+        // would be missing from it and the "before" number would understate the store.
+        FlushPending();
+        var (mainBefore, walBefore) = MeasureFootprint();
+        long beforeTotal = mainBefore + walBefore;
+
         try
         {
-            // Measure the whole footprint, not just the main file: before the checkpoint the freed
-            // bytes are held in the journal, so a main-file-only "before" understates it — measured
-            // live as 8192 -> 286720 with a negative "released", which read like growth.
-            var (mainBefore, journalBefore) = MeasureFootprint();
-            beforeTotal = mainBefore + journalBefore;
+            // Fold the WAL into the main file first. Without this, the bytes a prune just freed are
+            // still counted against the data directory in the side file, and VACUUM would report a
+            // "before" that no reader ever sees.
+            _db.Database.ExecuteSqlRaw("PRAGMA wal_checkpoint(TRUNCATE);");
 
-            // Fold the journal into the main file first. Without this the bytes a prune just freed
-            // are still counted against the data directory in the side file.
-            _db.Checkpoint();
+            _db.Database.ExecuteSqlRaw("VACUUM;");
 
-            // Then release the freed pages. LiteDB reports how many collections it rewrote; 0 means
-            // the file was already dense and nothing needed moving.
-            var rebuilt = _db.Rebuild(new LiteDB.Engine.RebuildOptions());
+            // A VACUUM rewrites every table; SQLite reports nothing, so the count that the previous
+            // engine got from its rebuild is taken from the collections that actually hold rows.
+            long rebuilt = _db.GetAreaRowCounts().Count(x => x.Rows > 0);
 
-            var (mainAfter, journalAfter) = MeasureFootprint();
-            long afterTotal = mainAfter + journalAfter;
+            var (mainAfter, walAfter) = MeasureFootprint();
+            long afterTotal = mainAfter + walAfter;
 
             LogUtil.Detail(_logger,
                 "[SubDL-DB] compacted: {BeforeTotal} -> {AfterTotal} bytes total "
-                + "(main {MainBefore} -> {MainAfter}, journal {JournalBefore} -> {JournalAfter}); "
-                + "{Rebuilt} collection(s) rebuilt, {Released} bytes released.",
-                beforeTotal, afterTotal, mainBefore, mainAfter, journalBefore, journalAfter,
+                + "(main {MainBefore} -> {MainAfter}, wal {WalBefore} -> {WalAfter}); "
+                + "{Rebuilt} area(s) rewritten, {Released} bytes released.",
+                beforeTotal, afterTotal, mainBefore, mainAfter, walBefore, walAfter,
                 rebuilt, beforeTotal - afterTotal);
             return (beforeTotal, afterTotal, rebuilt, CompactOutcome.Compacted);
         }
         catch (Exception ex)
         {
-            // Compaction is housekeeping. A failure must never abort the task that called it — but
-            // it must not leave a dead engine behind either (F-M236). Verify and repair. The outcome
-            // stays distinguishable: "recovered" means the store works but the FILE WAS NOT SHRUNK,
-            // which is not the same message as "compacted".
+            // Compaction is housekeeping. A failure must never abort the task that called it — but it
+            // must not leave a dead connection behind either. The outcome stays distinguishable:
+            // "recovered" means the store works but the FILE WAS NOT SHRUNK, which is not the same
+            // message as "compacted".
             _logger?.LogWarning("[SubDL-DB] compaction failed: {Msg}", ex.Message);
             var recovered = VerifyAndRepair(ex);
-            if (recovered && TryRebuildIntoFreshFile(out long repairedTo))
-            {
-                LogUtil.Normal(_logger, "[SubDL-DB] file rebuilt from its own rows: {Before} -> {After} bytes.", beforeTotal, repairedTo);
-                return (beforeTotal, repairedTo, 0, CompactOutcome.Repaired);
-            }
-
             return (beforeTotal, beforeTotal, 0,
                 recovered ? CompactOutcome.Recovered : CompactOutcome.Broken);
         }
     }
 
     /// <summary>
-    /// F-M237: rebuilds the data file from its own rows when <c>Rebuild()</c> cannot release the
-    /// pages. Reproduces and fixes prod's <c>Detected loop in FindAll({0})</c> — measured on a
-    /// harness with real data: <c>Rebuild()</c> throws from ~3000 rows upward in <c>subtitles</c>,
-    /// and export/import into a fresh file compacts normally afterwards (6578176 -> 6569984 bytes,
-    /// rows and schema intact).
-    /// <para>
-    /// Why this works where <c>Rebuild()</c> fails: the rebuild walks the linked list of every
-    /// index and throws when that walk exceeds a budget derived from the file size, so the failure
-    /// is about index-chain length, not damaged data. Reading the rows out never walks those chains.
-    /// </para>
-    /// <para>
-    /// Reads as <see cref="BsonDocument"/>, never as mapped entities: field types in the file
-    /// (int vs long) disagree with the entity classes, and a mapped read dies with
-    /// <c>InvalidCastException</c> on an unrelated field.
-    /// </para>
-    /// <para>
-    /// Safety order: back up, write the new file, verify its row counts, and only then swap it in.
-    /// Every failure path leaves the previous file in place — this runs on a live database, so a
-    /// half-finished rebuild must never become the file of record.
-    /// </para>
-    /// </summary>
-    /// <param name="afterBytes">Main-file size after a successful rebuild, in bytes.</param>
-    /// <returns>True when the file was rebuilt, verified and swapped in.</returns>
-    private bool TryRebuildIntoFreshFile(out long afterBytes)
-    {
-        afterBytes = 0;
-        string freshPath = _dbPath + ".rebuild-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
-        string backupPath = _dbPath + ".bak-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
-
-        try
-        {
-            // 1. Read every area out as raw documents. This is the step that bypasses the
-            //    damaged index chain — FindAll on a live engine works, only Rebuild's
-            //    full-index walk does not. Reading through _db rather than a second connection:
-            //    VerifyAndRepair has just proved this engine answers, and a second engine on the
-            //    same path would only add lock contention.
-            var data = new Dictionary<string, List<BsonDocument>>();
-            foreach (var name in _db.GetCollectionNames().OrderBy(n => n))
-            {
-                data[name] = _db.GetCollection(name).FindAll().ToList();
-            }
-
-            // 2. Write them into a fresh file. InsertBulk keeps this linear; per-row Insert on
-            //    thousands of rows spends the whole time rebalancing indexes.
-            using (var target = new LiteDatabase(freshPath))
-            {
-                foreach (var area in data)
-                {
-                    if (area.Value.Count > 0)
-                    {
-                        target.GetCollection(area.Key).InsertBulk(area.Value);
-                    }
-                }
-                target.Checkpoint();
-            }
-
-            // 3. VERIFY before touching the file of record: every area must come back with the
-            //    same row count. This is what makes the swap safe rather than hopeful.
-            using (var check = new LiteDatabase(freshPath))
-            {
-                foreach (var area in data)
-                {
-                    long actual = check.GetCollection(area.Key).Count();
-                    if (actual != area.Value.Count)
-                    {
-                        _logger?.LogError(
-                            "[SubDL-DB] rebuild verification failed for {Area}: {Expected} row(s) read, {Actual} written — keeping the original file.",
-                            area.Key, area.Value.Count, actual);
-                        TryDelete(freshPath);
-                        return false;
-                    }
-                }
-            }
-
-            // 4. One restorable backup, named exactly as SubdlReset's Restore expects
-            //    (subdl-scribe.db.bak-yyyyMMdd-HHmmss), so the pre-repair state is one click away.
-            //    Keep only this one: the point is a single safety copy, not a pile of them.
-            foreach (var old in Directory.GetFiles(Path.GetDirectoryName(_dbPath) ?? ".", DbFiles.BackupPrefix + "*"))
-            {
-                if (!string.Equals(old, backupPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    TryDelete(old);
-                }
-            }
-
-            // 5. Swap. The engine must be closed first — LiteDB holds the file handle. Disposing
-            //    also folds the journal into the main file, so the copy taken here is a
-            //    self-contained, checkpointed snapshot rather than a main file whose missing
-            //    journal would have to travel with it.
-            _db.Dispose();
-            try
-            {
-                File.Copy(_dbPath, backupPath, overwrite: true);
-
-                // The old journal belongs to the OLD file generation and must not survive next to
-                // the fresh one: a stale <name>-log.db beside a new main file is journal recovery
-                // waiting to apply foreign pages. The failed Rebuild also leaves its own temp pair
-                // behind — same treatment, they are leftovers, not state.
-                DeleteSibling(_dbPath, "-log.db");
-                DeleteSibling(_dbPath, "-temp.db");
-                DeleteSibling(_dbPath, "-temp-log.db");
-
-                // RENAME, not File.Copy. Measured on prod (v12.1.12.114, first live run): the copy
-                // was refused with "The process cannot access the file ... because it is being used
-                // by another process" — the plugin opens the same path from more than one place over
-                // its lifetime (ctor, VerifyAndRepair, RecreateDbContext, the reset endpoint) and a
-                // stale handle can outlive its owner. A rename replaces the directory entry and does
-                // not need write access to the file contents, so it succeeds where the copy does not
-                // (reproduced in a harness with a second holder open: Copy=FAIL, Move=OK). Both paths
-                // are in the same directory, so this never crosses a filesystem.
-                File.Move(freshPath, _dbPath, overwrite: true);
-            }
-            finally
-            {
-                _db = new LiteDatabase(_dbPath);
-                EnsureIndexes();
-
-                // Settle the size before reporting it: until this folds, the number is the main
-                // file alone and the next reader would see a different one.
-                _db.Checkpoint();
-            }
-
-            var (mainAfter, journalAfter) = MeasureFootprint();
-            afterBytes = mainAfter + journalAfter;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            // The original file is still in place on every failure path above, so report and move on.
-            _logger?.LogWarning("[SubDL-DB] rebuilding the data file from its own rows failed ({Msg}) — the previous file stays in use.", ex.Message);
-            TryDelete(freshPath);
-            return false;
-        }
-    }
-
-    /// <summary>Deletes a file, ignoring a failure — cleanup must never mask the real error.</summary>
-    /// <param name="path">File to delete.</param>
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch (Exception)
-        {
-            // Nothing to do: the file is a leftover, not state.
-        }
-    }
-
-    /// <summary>
-    /// Deletes LiteDB's side file for a data file: the rollback journal and the rebuild
-    /// temporaries. These are named from the data file's STEM (<c>subdl-scribe-log.db</c>), never by
-    /// appending to the full name — that variant (<c>subdl-scribe.db-log.db</c>) matches nothing on
-    /// disk, which the migration harness caught by leaving a stale journal in place.
-    /// </summary>
-    /// <param name="dbPath">Main data file path.</param>
-    /// <param name="suffix">Suffix including the leading dash, e.g. "-log.db".</param>
-    private static void DeleteSibling(string dbPath, string suffix)
-    {
-        TryDelete(DbFiles.SidePath(dbPath, suffix));
-    }
-
-    /// <summary>
-    /// F-M236: proves the database still answers after a failed rebuild and repairs it when it does
-    /// not.
-    /// <para>
-    /// LiteDB's <c>Rebuild()</c> closes the engine before it swaps the file and only reopens it on
-    /// the success path (<c>Close()</c> → <c>RebuildService.Rebuild()</c> → <c>Open()</c>), so a
-    /// throw anywhere in between leaves every collection handle on this instance dead. That is not
-    /// a hypothetical: it is what produced the persistent <c>ObjectDisposedException</c> on prod.
-    /// </para>
+    /// Proves the database still answers after a failed compaction.
     /// <para>
     /// The probe is a real query — reading one row — because a flag would only restate what we
-    /// already know about the exception. Only when it fails is the instance recreated; the new
-    /// instance re-runs the schema check and the index setup through the constructor.
+    /// already know about the exception. A SQLite connection that survives a failed VACUUM needs no
+    /// repair; the check exists so the caller can tell "usable but not shrunk" from "broken".
     /// </para>
     /// </summary>
-    /// <param name="cause">The exception the rebuild threw, for the log line.</param>
-    /// <returns>True when the database answers again (repaired or never broken).</returns>
+    /// <param name="cause">The exception the compaction threw, for the log line.</param>
+    /// <returns>True when the database answers again.</returns>
     private bool VerifyAndRepair(Exception cause)
     {
         try
         {
             _ = Meta.FindById("db");
-            return true; // still alive — the rebuild failed before it closed anything
+            _logger?.LogWarning("[SubDL-DB] data file still answers after the failed compaction ({Cause}).", cause.Message);
+            return true;
         }
         catch (Exception probeEx)
         {
-            _logger?.LogWarning(
-                "[SubDL-DB] the engine stayed closed after the failed rebuild ({Probe}) — reopening the data file.",
-                probeEx.Message);
-        }
-
-        // The engine cannot be reopened in place: LiteDB's LiteEngine leaves _state.Disposed set, so
-        // Open() on the same instance is not the path Rebuild() takes. A fresh LiteDatabase over the
-        // same path is, and the collections are property getters over _db — they resolve against the
-        // new instance on their next access, so no handle has to be re-created by hand.
-        try
-        {
-            var fresh = new LiteDatabase(_dbPath);
-            var previous = _db;
-            _db = fresh;
-            EnsureIndexes();
-            try
-            {
-                previous.Dispose();
-            }
-            catch (Exception disposeEx)
-            {
-                LogUtil.Detail(_logger, "[SubDL-DB] old engine dispose after repair: {Msg}", disposeEx.Message);
-            }
-
-            _logger?.LogWarning("[SubDL-DB] data file reopened after the failed compaction ({Cause}) — the store is usable again.", cause.Message);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "[SubDL-DB] reopening the data file failed — restart Jellyfin to recover the database.");
+            _logger?.LogError(probeEx, "[SubDL-DB] the data file stopped answering after the failed compaction — restart Jellyfin to recover the database.");
             return false;
         }
     }
 
     /// <summary>
-    /// Returns the byte sizes of the data file and its rollback journal. The journal is named
-    /// <c>&lt;name&gt;-log.db</c> beside the main file (LiteDB, not SQLite — there is no -wal/-shm pair),
-    /// and it holds every delete/update until a checkpoint folds it in.
+    /// Returns the byte sizes of the database file and its write-ahead log. SQLite in WAL mode keeps
+    /// every delete and update in the side <c>-wal</c> file until a checkpoint folds it in.
     /// </summary>
-    /// <returns>Main file size and journal size in bytes; 0 for a file that does not exist.</returns>
-    private (long Main, long Journal) MeasureFootprint()
+    /// <returns>Main file size and WAL size in bytes; 0 for a file that does not exist.</returns>
+    private (long Main, long Wal) MeasureFootprint()
     {
+        FlushPending();
         long main = File.Exists(_dbPath) ? new FileInfo(_dbPath).Length : 0;
-        var journalPath = Path.Combine(
-            Path.GetDirectoryName(_dbPath) ?? ".",
-            Path.GetFileNameWithoutExtension(_dbPath) + "-log.db");
-        long journal = File.Exists(journalPath) ? new FileInfo(journalPath).Length : 0;
-        return (main, journal);
+        var walPath = DbFiles.SidePath(_dbPath, "-wal");
+        long wal = File.Exists(walPath) ? new FileInfo(walPath).Length : 0;
+        return (main, wal);
     }
+
+    /// <summary>
+    /// Opens a batch on the underlying context — see <see cref="SubdlSqliteContext.BeginBatch"/>.
+    /// <para>
+    /// The wrapper exposes it because this is the type the callers hold; the batch state itself
+    /// lives beside <c>SaveChanges</c>, which only the context can call.
+    /// </para>
+    /// </summary>
+    public void BeginBatch() => _db.BeginBatch();
+
+    /// <summary>Closes a batch and commits what it accumulated.</summary>
+    public void EndBatch() => _db.EndBatch();
+
+    /// <summary>Commits accumulated writes now.</summary>
+    public void FlushPending() => _db.FlushPending();
 
     /// <summary>
     /// Replace aliases for a media record by hash. Creates the record if absent.
@@ -662,6 +505,648 @@ public sealed class SubdlDbContext : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
+        // A batch left open by an exception still owns writes the unbatched store would have
+        // committed, so the close drains them before the file handle goes away.
+        try
+        {
+            FlushPending();
+        }
+        catch (Exception ex)
+        {
+            LogUtil.Detail(_logger, "[SubDL-DB] pending writes could not be flushed on dispose: {Msg}", ex.Message);
+        }
+
         _db.Dispose();
     }
+}
+
+/// <summary>
+/// The Entity Framework Core model over the plugin's own SQLite file.
+/// <para>
+/// One <see cref="DbSet{TEntity}"/> per area, with the business key as the primary key — never an
+/// auto-assigned id (F-M194). The indexes are declared here so they exist in the schema rather than
+/// being created at runtime on every open.
+/// </para>
+/// </summary>
+public sealed class SubdlSqliteContext : DbContext
+{
+    private readonly string _path;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SubdlSqliteContext"/> class.
+    /// </summary>
+    /// <param name="path">Path of the SQLite file, this plugin's own.</param>
+    public SubdlSqliteContext(string path)
+    {
+        _path = path;
+    }
+
+    /// <summary>Path of the database file this context owns.</summary>
+    public string Path => _path;
+
+    /// <summary>
+    /// The one gate every read and write goes through.
+    /// <para>
+    /// NOT optional, and not a performance choice. A <see cref="DbContext"/> is single-threaded by
+    /// contract: a second operation started while another is in flight throws
+    /// <c>InvalidOperationException</c> ("A second operation was started on this context instance
+    /// before a previous operation completed"). The plugin shares ONE context across all registries,
+    /// the scheduled tasks and the API endpoints, and the configuration page polls
+    /// <c>/Plugins/SubdlSync/Stats</c> every 10 seconds while a worker writes — so without this gate
+    /// the failure is not hypothetical, it is a matter of timing.
+    /// </para>
+    /// <para>
+    /// The previous engine held thread-safe collection handles and needed no such gate. This is the
+    /// one behavioural difference the format change introduced that the callers cannot see, which is
+    /// why it lives here rather than at every call site.
+    /// </para>
+    /// </summary>
+    public object Gate { get; } = new();
+
+    /// <summary>
+    /// How many writes may accumulate before a batch commits on its own.
+    /// <para>
+    /// The floor exists so the change tracker never walks an unbounded set: Entity Framework runs
+    /// change detection over every tracked row on each <c>SaveChanges</c>, and the row cache holds
+    /// whole areas. On the largest install measured (11 153 embedded rows, 1 201 media rows) 500
+    /// keeps that walk cheap while collapsing a 14 000-write scan into roughly 28 commits.
+    /// </para>
+    /// </summary>
+    public const int BatchFloor = 500;
+
+    private int _batchDepth;
+    private int _pendingWrites;
+
+    /// <summary>
+    /// Opens a batch: writes made until <see cref="EndBatch"/> accumulate and commit together
+    /// instead of one transaction per row.
+    /// <para>
+    /// WHY this exists: a single row used to cost one commit, and a commit is a platter sync.
+    /// Measured live (08.10.2026): a library scan issued 9 644 writes at a flat 45 ms each — 496 s
+    /// of wall time for a pass that changed nothing. The upload and download pipelines write through
+    /// the same path, so the cost was never the seeder's alone.
+    /// </para>
+    /// <para>
+    /// READ-AFTER-WRITE IS PRESERVED WITHOUT THE COMMIT: readers go through the per-area row cache,
+    /// which the areas maintain in place, so a value written a moment ago is visible to this context
+    /// before it is durable. What changes is when the FILE receives it — an independent context (the
+    /// config page holds one) sees it at the next flush, up to <see cref="BatchFloor"/> rows later.
+    /// </para>
+    /// <para>
+    /// Callers pair this with <see cref="EndBatch"/> in a <c>finally</c>: an exception that skips the
+    /// close would drop the accumulated writes, where the unbatched store had already persisted each
+    /// one.
+    /// </para>
+    /// </summary>
+    public void BeginBatch() => _batchDepth++;
+
+    /// <summary>
+    /// Closes a batch and commits what it accumulated. Nested batches commit at the outermost close,
+    /// so a caller opening one inside another cannot flush a half-finished unit of work.
+    /// </summary>
+    public void EndBatch()
+    {
+        if (_batchDepth > 0)
+        {
+            _batchDepth--;
+        }
+
+        if (_batchDepth == 0)
+        {
+            FlushPending();
+        }
+    }
+
+    /// <summary>
+    /// Persists one write, or accumulates it while a batch is open. The areas call this instead of
+    /// <c>SaveChanges</c> directly, so the batching decision lives in one place.
+    /// </summary>
+    public void RequestSave()
+    {
+        _pendingWrites++;
+        if (_batchDepth == 0 || _pendingWrites >= BatchFloor)
+        {
+            FlushPending();
+        }
+    }
+
+    /// <summary>
+    /// Commits accumulated writes now. Called at the end of a batch and at every point whose answer
+    /// comes from the FILE rather than the row cache: area row counts, footprint, checkpoint,
+    /// compaction and disposal.
+    /// </summary>
+    public void FlushPending()
+    {
+        if (_pendingWrites == 0)
+        {
+            return;
+        }
+
+        _pendingWrites = 0;
+        SaveChanges();
+    }
+
+    /// <summary>Area 0: the single compatibility row.</summary>
+    public DbSet<MetaEntity> MetaRows => Set<MetaEntity>();
+
+    /// <summary>Area 1: OSHash cache.</summary>
+    public DbSet<OshashEntity> OshashRows => Set<OshashEntity>();
+
+    /// <summary>Area 2: video files.</summary>
+    public DbSet<MediaEntity> MediaRows => Set<MediaEntity>();
+
+    /// <summary>Area 2: embedded subtitle tracks.</summary>
+    public DbSet<EmbedTrackEntity> EmbedRows => Set<EmbedTrackEntity>();
+
+    /// <summary>Area 3: sidecar subtitle files.</summary>
+    public DbSet<SidecarEntity> SidecarRows => Set<SidecarEntity>();
+
+    /// <summary>Area 4: burned download candidates.</summary>
+    public DbSet<RejectedCandidateEntity> RejectedRows => Set<RejectedCandidateEntity>();
+
+    /// <summary>Retry and fail-budget counters.</summary>
+    public DbSet<CounterEntity> CounterRows => Set<CounterEntity>();
+
+    /// <summary>Pipeline run bookkeeping.</summary>
+    public DbSet<PipelineRunEntity> RunRows => Set<PipelineRunEntity>();
+
+    /// <summary>Area 5: cumulative GUI counters.</summary>
+    public DbSet<StatusStatsEntity> StatusRows => Set<StatusStatsEntity>();
+
+    /// <summary>Area 6: the last run of each worker.</summary>
+    public DbSet<WorkerRunEntity> WorkerRunRows => Set<WorkerRunEntity>();
+
+    /// <summary>
+    /// Sets the pragmas this store runs with. Called once per context, right after the schema exists.
+    /// <para>
+    /// <c>journal_mode=WAL</c> is set EXPLICITLY, because it is not the default: SQLite and Entity
+    /// Framework both start in the rollback-journal mode (<c>delete</c>) — verified by reading
+    /// <c>PRAGMA journal_mode</c> back on a fresh EF-created file, which answered <c>delete</c>. WAL
+    /// is what this store wants: the plugin has one writer (a scheduled task, serialised by the
+    /// global run lock) and several readers (the configuration page polls every 10 seconds, the
+    /// diagnostics endpoint walks four areas), and in WAL a reader never blocks the writer or sees a
+    /// half-written state.
+    /// </para>
+    /// <para>
+    /// The mode is stored IN the file, so this is a one-time change per database. It is also the
+    /// reason the reset and restore paths must checkpoint before they copy the file: in WAL the
+    /// committed writes sit in the side journal until a checkpoint, and a copy that ignores it is a
+    /// backup missing everything since the last one.
+    /// </para>
+    /// <para>
+    /// <c>busy_timeout</c> covers the one case the in-process gate cannot: two CONTEXTS, or a
+    /// second process, over the same file. SQLite then answers "database is locked" immediately;
+    /// the timeout makes it wait instead of failing a scheduled run.
+    /// </para>
+    /// </summary>
+    public void ConfigurePragmas()
+    {
+        Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+        Database.ExecuteSqlRaw("PRAGMA busy_timeout=5000;");
+        Database.ExecuteSqlRaw("PRAGMA synchronous=NORMAL;");
+    }
+
+    /// <summary>
+    /// Reads the journal mode the FILE is actually in.
+    /// </summary>
+    /// <returns>The mode string, e.g. <c>wal</c> or <c>delete</c>.</returns>
+    public string ReadJournalMode()
+    {
+        using var cn = (SqliteConnection)Database.GetDbConnection();
+        cn.Open();
+        using var cmd = cn.CreateCommand();
+        cmd.CommandText = "PRAGMA journal_mode;";
+        return Convert.ToString(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) ?? "unknown";
+    }
+
+    /// <summary>
+    /// Row counts per area, for the diagnostics endpoint and the compaction line.
+    /// </summary>
+    /// <returns>One entry per area with its row count.</returns>
+    public List<(string Area, long Rows)> GetAreaRowCounts()
+        => new()
+        {
+            ("meta", MetaRows.LongCount()),
+            ("oshashes", OshashRows.LongCount()),
+            ("media", MediaRows.LongCount()),
+            ("embeds", EmbedRows.LongCount()),
+            ("sidecars", SidecarRows.LongCount()),
+            ("rejected_candidates", RejectedRows.LongCount()),
+            ("counters", CounterRows.LongCount()),
+            ("runs", RunRows.LongCount()),
+            ("status_stats", StatusRows.LongCount()),
+            ("worker_runs", WorkerRunRows.LongCount()),
+        };
+
+    /// <inheritdoc />
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        // WAL so a reader never blocks a writer; the plugin has one writer and several readers
+        // (config page, diagnostics, scheduled tasks) on the same file.
+        // Pooling OFF, deliberately. The plugin's reset and restore routes are file-level
+        // operations: they dispose the context, copy a file over the database and open a fresh
+        // context. With pooling ON the physical connection is not closed on Dispose — it returns
+        // to the pool holding the file handle and its WAL index — so the copy does not take
+        // effect and the reopened context reads the OLD file. Measured, in a probe that mirrors
+        // both paths: pooling ON → 2 of 3 rows restored and a mutated value still reads 999;
+        // pooling OFF → 3 of 3 and the backed-up value. The cost is one connection open per
+        // context, and the plugin creates one context per process.
+        var cs = new SqliteConnectionStringBuilder
+        {
+            DataSource = _path,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false,
+        }.ToString();
+
+        optionsBuilder.UseSqlite(cs, sqlite =>
+        {
+            // The plugin schema is created by EnsureCreated and owned by the plugin alone, so no
+            // migration assembly is involved.
+            sqlite.CommandTimeout(30);
+        });
+        optionsBuilder.EnableSensitiveDataLogging(false);
+    }
+
+    /// <inheritdoc />
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<MetaEntity>(e =>
+        {
+            e.ToTable("meta");
+            e.HasKey(x => x.Id);
+        });
+
+        modelBuilder.Entity<OshashEntity>(e =>
+        {
+            e.ToTable("oshashes");
+            e.HasKey(x => x.Id);
+        });
+
+        modelBuilder.Entity<MediaEntity>(e =>
+        {
+            e.ToTable("media");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ImdbId);
+            e.HasIndex(x => x.TmdbId);
+            e.HasIndex(x => x.Path);
+            e.HasIndex(x => x.JellyfinItemId);
+        });
+
+        modelBuilder.Entity<EmbedTrackEntity>(e =>
+        {
+            e.ToTable("embeds");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.MediaHash);
+            e.HasIndex(x => x.ContentHash);
+            e.HasIndex(x => x.Status);
+        });
+
+        modelBuilder.Entity<SidecarEntity>(e =>
+        {
+            e.ToTable("sidecars");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ContentHash);
+            e.HasIndex(x => x.MediaHash);
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.Language);
+        });
+
+        modelBuilder.Entity<RejectedCandidateEntity>(e =>
+        {
+            e.ToTable("rejected_candidates");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ItemId);
+            e.HasIndex(x => x.SubdlId);
+        });
+
+        modelBuilder.Entity<CounterEntity>(e =>
+        {
+            e.ToTable("counters");
+            // Key, not the numeric Id: the previous engine's auto id is what made an upsert unable
+            // to find the row it meant to update (F-M194). The business key is the identity.
+            e.HasKey(x => x.Key);
+            e.HasIndex(x => x.Expires);
+        });
+
+        modelBuilder.Entity<PipelineRunEntity>(e =>
+        {
+            e.ToTable("runs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasIndex(x => x.Started);
+        });
+
+        modelBuilder.Entity<StatusStatsEntity>(e =>
+        {
+            e.ToTable("status_stats");
+            e.HasKey(x => x.Id);
+        });
+
+        modelBuilder.Entity<WorkerRunEntity>(e =>
+        {
+            e.ToTable("worker_runs");
+            e.HasKey(x => x.Id);
+        });
+    }
+}
+
+/// <summary>
+/// One area of the store, reached by the same verbs the previous engine offered —
+/// <c>FindById</c>, <c>FindAll</c>, <c>Find</c>, <c>Upsert</c>, <c>DeleteMany</c>, <c>Exists</c>,
+/// <c>Count</c>.
+/// <para>
+/// Why the predicates are evaluated in memory rather than handed to Entity Framework as SQL: the
+/// registries depend on that behaviour and say so. <c>QaFailTracker</c> compares languages with
+/// <c>String.Equals(..., StringComparison.OrdinalIgnoreCase)</c>, which no provider can translate,
+/// and the stored values are the plugin's own strings — a provider that translates the same
+/// comparison into SQL <c>LIKE</c> changes which rows match. A silent difference in matching is
+/// exactly the class of bug the registry code was written to avoid, so the comparison stays where it
+/// was: in LINQ-to-objects.
+/// </para>
+/// <para>
+/// That is affordable because these areas are small — measured on a live install: 117 rows across
+/// all ten areas, the largest being 86 embedded tracks. Rows are read once per area, kept for the
+/// lifetime of the context, and invalidated on write, so a read costs a memory walk and a write one
+/// round trip.
+/// </para>
+/// </summary>
+/// <typeparam name="TEntity">The area's row type.</typeparam>
+public sealed class SubdlSet<TEntity>
+    where TEntity : class
+{
+    private readonly SubdlSqliteContext _db;
+    private readonly Func<TEntity, string> _keyText;
+    private bool _dirty = true;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SubdlSet{TEntity}"/> class.
+    /// </summary>
+    /// <param name="db">The owning context.</param>
+    /// <param name="keyText">Reads the business key as text, for in-memory lookup.</param>
+    public SubdlSet(SubdlSqliteContext db, Func<TEntity, string> keyText)
+    {
+        _db = db;
+        _keyText = keyText;
+    }
+
+    /// <summary>Every row of the area.</summary>
+    /// <returns>The rows.</returns>
+    public IEnumerable<TEntity> FindAll()
+    {
+        lock (_db.Gate)
+        {
+            return Rows().ToList();
+        }
+    }
+
+    /// <summary>Rows matching a predicate, evaluated in memory.</summary>
+    /// <param name="predicate">The condition.</param>
+    /// <returns>The matching rows.</returns>
+    public IEnumerable<TEntity> Find(Expression<Func<TEntity, bool>> predicate)
+    {
+        var compiled = predicate.Compile();
+        lock (_db.Gate)
+        {
+            return Rows().Where(compiled).ToList();
+        }
+    }
+
+    /// <summary>One row by its business key, or null.</summary>
+    /// <param name="id">Business key.</param>
+    /// <returns>The row, or null.</returns>
+    public TEntity? FindById(string id)
+    {
+        lock (_db.Gate)
+        {
+            return Rows().FirstOrDefault(r => string.Equals(_keyText(r), id, StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>The first row matching a predicate, or null.</summary>
+    /// <param name="predicate">The condition.</param>
+    /// <returns>The row, or null.</returns>
+    public TEntity? FindOne(Expression<Func<TEntity, bool>> predicate)
+    {
+        var compiled = predicate.Compile();
+        lock (_db.Gate)
+        {
+            return Rows().FirstOrDefault(compiled);
+        }
+    }
+
+    /// <summary>Whether any row matches.</summary>
+    /// <param name="predicate">The condition.</param>
+    /// <returns>True when at least one row matches.</returns>
+    public bool Exists(Expression<Func<TEntity, bool>> predicate)
+    {
+        var compiled = predicate.Compile();
+        lock (_db.Gate)
+        {
+            return Rows().Any(compiled);
+        }
+    }
+
+    /// <summary>Number of rows in the area.</summary>
+    /// <returns>The row count.</returns>
+    public int Count()
+    {
+        lock (_db.Gate)
+        {
+            return Rows().Count;
+        }
+    }
+
+    /// <summary>Number of rows matching a predicate.</summary>
+    /// <param name="predicate">The condition.</param>
+    /// <returns>The matching row count.</returns>
+    public int Count(Expression<Func<TEntity, bool>> predicate)
+    {
+        var compiled = predicate.Compile();
+        lock (_db.Gate)
+        {
+            return Rows().Count(compiled);
+        }
+    }
+
+    /// <summary>Insert or update one row, matched by its business key.</summary>
+    /// <param name="entity">The row.</param>
+    public void Upsert(TEntity entity)
+    {
+        lock (_db.Gate)
+        {
+            UpsertCore(entity);
+        }
+    }
+
+    private void UpsertCore(TEntity entity)
+    {
+        var key = _keyText(entity);
+        var existing = Rows().FirstOrDefault(r => string.Equals(_keyText(r), key, StringComparison.Ordinal));
+        if (existing == null)
+        {
+            _rowCache.Add(entity);
+            _db.Add(entity);
+        }
+        else if (!ReferenceEquals(existing, entity))
+        {
+            _db.Entry(existing).CurrentValues.SetValues(entity);
+
+            // Keep the cache pointing at the instance that now holds the new values, so a read
+            // straight after the write sees them without a reload from disk.
+            var at = _rowCache.IndexOf(existing);
+            if (at >= 0 && !ReferenceEquals(entity, existing))
+            {
+                _rowCache[at] = existing;
+            }
+        }
+
+        _db.RequestSave();
+
+        // The cache is maintained IN PLACE rather than dropped. Marking it dirty here would make a
+        // write cost a full table read, which turns a run's writes into quadratic work: a refresh
+        // that writes 3000 embedded rows would re-read the whole area 3000 times. Measured on the
+        // 117-row live store the difference is invisible; on a large library it is the difference
+        // between one pass and thousands.
+    }
+
+    /// <summary>Update one row, matched by its business key. Alias of <see cref="Upsert"/>.</summary>
+    /// <param name="entity">The row.</param>
+    public void Update(TEntity entity) => Upsert(entity);
+
+    /// <summary>
+    /// Update many rows, each matched by its business key.
+    /// <para>
+    /// The previous engine accepted a list here and callers rely on it — the reset path collects the
+    /// rows it cleared and persists exactly those, and the refresh path does the same for sidecar
+    /// rows whose forced flag it just stated. Without this overload the batch would have to be
+    /// written row by row at each call site, which is how one of them silently stops persisting.
+    /// </para>
+    /// </summary>
+    /// <param name="entities">The rows.</param>
+    public void Update(IEnumerable<TEntity> entities)
+    {
+        lock (_db.Gate)
+        {
+            // ONE SaveChanges for the batch. UpsertCore saves per row, which turns a reset that
+            // clears 3000 markers into 3000 round trips; the batch is what the callers actually mean,
+            // and the reset path persists a list precisely so it is a single write.
+            var any = false;
+            foreach (var e in entities)
+            {
+                any = true;
+                var key = _keyText(e);
+                var existing = Rows().FirstOrDefault(r => string.Equals(_keyText(r), key, StringComparison.Ordinal));
+                if (existing == null)
+                {
+                    _rowCache.Add(e);
+                    _db.Add(e);
+                }
+                else if (!ReferenceEquals(existing, e))
+                {
+                    _db.Entry(existing).CurrentValues.SetValues(e);
+                }
+
+                // When the caller passed the SAME instance the cache handed out, it mutated that
+                // tracked instance in place and there is nothing to copy — the change is visible to
+                // Entity Framework's change tracker, and SaveChanges is what persists it. Skipping
+                // the save in that case is exactly the F-M192 defect: the reset reported success
+                // while the rows kept their markers, because the marked list was never written.
+            }
+
+            if (any)
+            {
+                _db.RequestSave();
+            }
+        }
+    }
+
+    /// <summary>Insert many rows in one transaction, for the import path.</summary>
+    /// <param name="entities">The rows.</param>
+    public void InsertBulk(IEnumerable<TEntity> entities)
+    {
+        lock (_db.Gate)
+        {
+            foreach (var e in entities)
+            {
+                _db.Add(e);
+                _rowCache.Add(e);
+            }
+
+            _db.RequestSave();
+        }
+    }
+
+    /// <summary>Delete the row with this business key.</summary>
+    /// <param name="id">Business key.</param>
+    /// <returns>True when a row was deleted.</returns>
+    public bool Delete(string id)
+    {
+        lock (_db.Gate)
+        {
+            var existing = Rows().FirstOrDefault(r => string.Equals(_keyText(r), id, StringComparison.Ordinal));
+            if (existing == null)
+            {
+                return false;
+            }
+
+            _db.Remove(existing);
+            _db.RequestSave();
+            _rowCache.Remove(existing);
+            return true;
+        }
+    }
+
+    /// <summary>Delete every row matching a predicate.</summary>
+    /// <param name="predicate">The condition.</param>
+    /// <returns>The number of rows deleted.</returns>
+    public int DeleteMany(Expression<Func<TEntity, bool>> predicate)
+    {
+        var compiled = predicate.Compile();
+        lock (_db.Gate)
+        {
+            var doomed = Rows().Where(compiled).ToList();
+            if (doomed.Count == 0)
+            {
+                return 0;
+            }
+
+            _db.RemoveRange(doomed);
+            _db.RequestSave();
+            foreach (var d in doomed)
+            {
+                _rowCache.Remove(d);
+            }
+
+            return doomed.Count;
+        }
+    }
+
+    /// <summary>Delete every row of the area.</summary>
+    public void DeleteAll()
+    {
+        lock (_db.Gate)
+        {
+            _db.RemoveRange(Rows().ToList());
+            _db.RequestSave();
+            _rowCache.Clear();
+        }
+    }
+
+    private List<TEntity> Rows()
+    {
+        if (_dirty)
+        {
+            // TRACKED, deliberately — the identity map IS the write path here. An entity handed out
+            // by FindById and then mutated by its caller is the instance SaveChanges will write, and
+            // a second read returns that same instance rather than a detached copy that would be
+            // re-attached and throw. These areas are small by construction (117 rows measured), so
+            // holding them for the context's lifetime is the cheap side of the trade.
+            _rowCache = _db.Set<TEntity>().ToList();
+            _dirty = false;
+        }
+
+        return _rowCache;
+    }
+
+    private List<TEntity> _rowCache = new();
 }

@@ -1,0 +1,37 @@
+Third-party components shipped in this plugin
+============================================
+
+SubDL Scribe itself is licensed under GPL-3.0-or-later (see SubDL-Scribe-GPL-3.0.txt).
+
+The release ZIP carries two third-party assemblies. Both are permissively
+licensed and compatible with GPL-3.0-or-later.
+
+  LanguageDetection 1.2.0
+    Copyright 2014 Pēteris Ņikiforovs
+    License: Apache License 2.0
+    Project: https://github.com/pdonald/language-detection
+    A .NET port of the Cybozu language-detection library (original author
+    Nakatani Shuyo, Apache License 2.0).
+    License text: LanguageDetection-Apache-2.0.txt
+
+  LiteDB 5.0.21
+    Copyright (c) 2014-2022 Mauricio David
+    License: MIT
+    Project: https://www.litedb.org/
+    License text: LiteDB-MIT.txt
+
+Not shipped, provided by the Jellyfin host at runtime
+-----------------------------------------------------
+Jellyfin.Controller and Jellyfin.Model (GPL-3.0-only) are referenced with
+ExcludeAssets=runtime, so they come from the installed Jellyfin server rather
+than from this package. Their transitive dependencies (Microsoft.Extensions.*
+and Entity Framework Core, MIT; Polly, BSD-3-Clause; ICU4N and J2N, Apache-2.0;
+Diacritics, Apache-2.0) likewise come from the host and are not redistributed
+here.
+
+External program
+----------------
+This plugin invokes ffmpeg as a separate process. ffmpeg is not bundled; it is
+resolved from the Jellyfin server's own installation or from PATH, and it
+carries its own license (LGPL-2.1-or-later by default, GPL when built with
+--enable-gpl).

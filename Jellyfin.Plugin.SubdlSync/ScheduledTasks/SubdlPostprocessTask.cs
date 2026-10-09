@@ -60,16 +60,14 @@ public class SubdlPostprocessTask : IScheduledTask
 
         plugin.WorkerRuns.Start("SubDLPostprocessTask", Name);
 
-        // F-M291: belt and braces for the scheduler's own gate — a fire armed BEFORE upload was switched
-        // off, or a manual trigger, must not do this work either. GREY, not green: nothing is broken and
-        // nothing ran. The wording matches the upload task's line for the same condition.
-        if (!plugin.Configuration.UploadEnabled)
-        {
-            LogUtil.Normal(_logger, "[SubDL] Postprocessing inactive (UploadEnabled=false) — run skipped.");
-            plugin.WorkerRuns.Finish("SubDLPostprocessTask", Name,
-                Registry.WorkerRunRegistry.Outcome.Skipped, "upload disabled");
-            return;
-        }
+        // F-M291 (operator order 08.10.2026: "Nur die automatischen runs vom Postprocessing an den
+        // upload binden, manuell darf immer"): there is deliberately NO UploadEnabled gate here any
+        // more. The dashboard's own run button reaches the work through THIS task, so a refusal here
+        // would inhibit a manual run — exactly what the order forbids. The binding lives in ONE place
+        // now, the scheduler's anchor, which is the automatic path.
+        //
+        // Consequence, stated plainly: a fire that was queued BEFORE upload was switched off still
+        // runs. That is accepted — the work is idempotent and only touches entries that exist.
 
         try
         {

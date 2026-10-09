@@ -110,13 +110,6 @@ public sealed class TmdbImdbResolver
     /// <summary>Raised when Jellyfin's id and TMDB's id disagree (user wants a report).</summary>
     public event Action<string>? IdMismatch;
 
-    /// <summary>
-    /// F-M218 (27.09.2026): fires when a title search matched ONLY after the year filter
-    /// was dropped. The argument is the title. Counted per run by the pipeline so the GUI
-    /// can show how often Jellyfin's year (often the import year, see the search note
-    /// above) would have cost a match.
-    /// </summary>
-    public event Action<string>? YearFilterMiss;
 
     /// <summary>
     /// F-M190 (24.09.2026): resolves a title WITHOUT assuming the media type —
@@ -609,8 +602,10 @@ public sealed class TmdbImdbResolver
                         hits = ReadTitleSearchHits(retryDoc);
                         if (hits.Count > 0)
                         {
-                            // The year was wrong; the title alone was enough.
-                            YearFilterMiss?.Invoke(title);
+                            // The year was wrong; the title alone was enough. The RETRY stays
+                            // (F-M217); the counter that used to report it here was withdrawn
+                            // (operator order 08.10.2026), so nothing is raised — the log line
+                            // below the search is what names the recovery now.
                         }
                     }
                 }

@@ -89,10 +89,11 @@ public class SubdlStatusController : ControllerBase
         {
             Uploaded = row.Uploaded,
             Downloaded = row.Downloaded,
-            TypeCorrectedByFileName = row.TypeCorrectedByFileName,
-            TmdbYearFilterMisses = row.TmdbYearFilterMisses,
             RejectedDownload = row.RejectedDownload,
             RejectedUpload = row.RejectedUpload,
+            FittedToAudio = row.FittedToAudio,
+            LanguageCodesAllocated = row.LanguageCodesAllocated,
+            LooseSubtitlesRenamed = row.LooseSubtitlesRenamed,
             SinceUtc = row.SinceUtc?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
             Updated = row.Updated.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
         });
@@ -199,10 +200,11 @@ public class SubdlStatusController : ControllerBase
             ok = true,
             Uploaded = row.Uploaded,
             Downloaded = row.Downloaded,
-            TypeCorrectedByFileName = row.TypeCorrectedByFileName,
-            TmdbYearFilterMisses = row.TmdbYearFilterMisses,
             RejectedDownload = row.RejectedDownload,
             RejectedUpload = row.RejectedUpload,
+            FittedToAudio = row.FittedToAudio,
+            LanguageCodesAllocated = row.LanguageCodesAllocated,
+            LooseSubtitlesRenamed = row.LooseSubtitlesRenamed,
             SinceUtc = row.SinceUtc?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
             Updated = row.Updated.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
         });

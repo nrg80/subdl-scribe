@@ -16,7 +16,6 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using Jellyfin.Plugin.SubdlScribe.Data;
-using LiteDB;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
 
@@ -37,7 +36,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// F-M194b: every area is keyed by a computed business key stored in the record's own id, never
 /// by a database-assigned auto id.
 /// <b>1. A row is written under a computed business key, never the database's auto id.</b>
-/// The previous implementation upserted <c>new SubtitleEntity { Id = 0 }</c>; LiteDB resolves an
+/// The previous implementation upserted <c>new SubtitleEntity { Id = 0 }</c>; the store resolved an
 /// upsert by <c>_id</c>, so zero never matched and every write inserted. That produced 1277 rows
 /// for 782 facts (F-M194) and is structurally impossible now.
 /// </para>
@@ -104,6 +103,26 @@ public sealed class ContentHashRegistry : IDisposable
         byte[] bytes = Encoding.UTF8.GetBytes(normalized);
         return Convert.ToHexString(MD5.HashData(bytes)).ToLowerInvariant();
     }
+
+    /// <summary>
+    /// Encodes SRT content in the canonical form: UTF-8, no BOM, LF line endings, trailing
+    /// whitespace trimmed — exactly the bytes the registry hash describes.
+    /// </summary>
+    /// <param name="srtContent">Raw content.</param>
+    /// <returns>The bytes to write to disk.</returns>
+    /// <remarks>
+    /// Operator order (07.10.2026): a file this plugin CHANGES is written normalized, so the form on
+    /// disk is the form that was hashed. Writing the corrected file in the fetched payload's own byte
+    /// style made the stored hash describe a byte sequence that existed nowhere on disk: same text,
+    /// but BOM and CRLF put back on the way out. The two are equal only because NormalizeSrt happens
+    /// to strip exactly what the style re-adds — an invariant nobody had asserted. Normalizing on the
+    /// way out makes written bytes and hashed bytes identical BY CONSTRUCTION, with nothing to
+    /// re-derive.
+    /// The fetched original is NOT touched by this: it stays byte-for-byte as received inside the
+    /// one-entry archive (F-M306), because that artefact exists precisely to be the uncorrected file.
+    /// </remarks>
+    public static byte[] EncodeCanonical(string srtContent)
+        => Encoding.UTF8.GetBytes(NormalizeSrt(srtContent));
 
     /// <summary>
     /// Computes the OSHash of a video file: size plus the first and last 64 KB, summed in 8-byte
@@ -455,7 +474,16 @@ public sealed class ContentHashRegistry : IDisposable
             return false;
         }
 
-        _db.EnsureMedia(mediaHash);
+        // The parent row is CREATED here if absent, but not touched when it already exists. The old
+        // form called EnsureMedia unconditionally, which stamps LastSeen and commits — once per
+        // embedded track, so a file with 44 tracks paid 44 commits to record a fact it had already
+        // recorded. Measured live (08.10.2026): 9 644 writes for 1 201 items and a store that ended
+        // the pass with exactly the rows it started with (media 1 201 -> 1 201).
+        if (_db.Media.FindById(mediaHash) == null)
+        {
+            _db.EnsureMedia(mediaHash);
+        }
+
         var id = SubdlDbContext.EmbedKey(mediaHash, subPos);
         var existing = _db.Embeds.FindById(id);
 
@@ -953,7 +981,7 @@ public sealed class ContentHashRegistry : IDisposable
 
         // F-M278: a row must state a language — it is what the coverage check reads. An observation
         // without one is not "no information", it is a claim of coverage that does not exist, and it
-        // is not even idempotent: LiteDB stores the null as an empty string, so the comparison below
+        // is not even idempotent: the store writes the null as an empty string, so the comparison below
         // never matches it and every pass rewrites the row forever. A caller that cannot name the
         // language must not call this; the absence of a row is what keeps the item searchable.
         if (string.IsNullOrEmpty(language))
@@ -1105,6 +1133,83 @@ public sealed class ContentHashRegistry : IDisposable
         // run would report a save that never happened.
         return _db.Embeds.Exists(x => x.ContentHash == contentHash && x.Status != SubtitleStatus.Observed)
             || _db.Sidecars.Exists(x => x.ContentHash == contentHash && x.Status != SubtitleStatus.Observed);
+    }
+
+    /// <summary>
+    /// F-M298: True when this exact content already carries an UPLOADED row somewhere — an embedded
+    /// position, a sidecar, under THIS media hash or under another one.
+    /// <para>
+    /// <see cref="IsContentKnown"/> answers "has this text been dealt with" and is deliberately blind
+    /// to WHICH outcome that was: a rejected row counts as known, which is what its callers want.
+    /// This question is the narrower one a duplicate skip has to ask before it writes anything — the
+    /// verdict "rejected" may only be recorded over a text that was not already accepted, or a file
+    /// whose subtitles are on SubDL ends up looking unsettled and is re-extracted and re-rejected on
+    /// every later run while the counter grows.
+    /// </para>
+    /// <para>
+    /// Global on purpose, like <see cref="IsContentKnown"/>: a file rewrite moves the media hash, the
+    /// accepted row stays behind under the previous identity, and the text is still the same text.
+    /// </para>
+    /// </summary>
+    /// <param name="contentHash">Content hash.</param>
+    /// <returns>True when an uploaded row for this content exists.</returns>
+    public bool IsContentUploaded(string? contentHash)
+    {
+        if (string.IsNullOrEmpty(contentHash))
+        {
+            return false;
+        }
+
+        return _db.Embeds.Exists(x => x.ContentHash == contentHash && x.Status == SubtitleStatus.Uploaded)
+            || _db.Sidecars.Exists(x => x.ContentHash == contentHash && x.Status == SubtitleStatus.Uploaded);
+    }
+
+    /// <summary>
+    /// F-M298: records the verdict for a SKIPPED candidate. The state is derived from the CONTENT and
+    /// not from the reason alone: <c>duplicate-content</c> means "SubDL already holds this text", and
+    /// <see cref="IsContentKnown"/> answers that for a REJECTED row exactly as it does for an uploaded
+    /// one — so a skip on that reason is routinely raised over content that is demonstrably up. Writing
+    /// <c>rejected</c> there contradicted the evidence, left the file looking unsettled, and made it be
+    /// re-extracted and re-rejected on every later run (prod 06.10.2026: Lanterns S01E08, 39 streams,
+    /// 0 uploaded against 39 rejected, after a container tag write moved the media hash and carried the
+    /// accepted rows onto the new identity).
+    /// <para>
+    /// Every skip path goes through here so the rule lives once instead of at each call site.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaHash">Parent media hash.</param>
+    /// <param name="isLoose">True for a sidecar file, false for an embedded position.</param>
+    /// <param name="subPos">Embedded stream position (ignored for a sidecar).</param>
+    /// <param name="lang">Language code.</param>
+    /// <param name="hearingImpaired">HI variant.</param>
+    /// <param name="forced">Forced flag.</param>
+    /// <param name="contentHash">Content hash of the skipped text.</param>
+    /// <param name="reason">Reject reason reported by the gate or by SubDL.</param>
+    /// <param name="fileName">Sidecar file name.</param>
+    /// <param name="path">Sidecar full path.</param>
+    /// <returns>True when the row was settled as UPLOADED — in that case nothing was rejected.</returns>
+    public bool RecordSkippedContent(string? mediaHash, bool isLoose, int subPos, string lang,
+        bool hearingImpaired, bool forced, string? contentHash, string? reason,
+        string? fileName = null, string? path = null)
+    {
+        bool settledAsUploaded = RejectReason.DuplicateContent == reason && IsContentUploaded(contentHash);
+
+        if (isLoose)
+        {
+            MarkSidecar(contentHash, mediaHash ?? string.Empty, lang, hearingImpaired, forced,
+                settledAsUploaded ? SubtitleStatus.Uploaded : SubtitleStatus.Rejected,
+                reason: settledAsUploaded ? null : reason,
+                fileName: fileName, path: path);
+        }
+        else
+        {
+            MarkEmbed(mediaHash, subPos, lang, hearingImpaired,
+                settledAsUploaded ? SubtitleStatus.Uploaded : SubtitleStatus.Rejected,
+                contentHash: contentHash,
+                reason: settledAsUploaded ? null : reason);
+        }
+
+        return settledAsUploaded;
     }
 
     /// <summary>True when this content was rejected by SubDL itself as already held remotely.</summary>
@@ -1262,9 +1367,10 @@ public sealed class ContentHashRegistry : IDisposable
     public List<SubtitleRef> OpenPairs(
         string? mediaPath,
         IEnumerable<SubtitleRef> required,
-        IEnumerable<string>? embeddedLanguages = null)
+        IEnumerable<string>? embeddedLanguages = null,
+        bool onlyOwnDownloads = false)
         => SubtitleCoverage
-            .Read(this, mediaPath, embeddedLanguages)
+            .Read(this, mediaPath, embeddedLanguages, onlyOwnDownloads)
             .Open(required);
 
 
@@ -1551,7 +1657,7 @@ public sealed class ContentHashRegistry : IDisposable
 
     // --------------------------------------------------------------- plumbing
 
-    /// <summary>No-op flush: LiteDB persists at the point of the write.</summary>
+    /// <summary>No-op flush: the store persists at the point of the write.</summary>
     public void Flush()
     {
     }

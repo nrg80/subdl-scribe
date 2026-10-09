@@ -312,12 +312,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets the FPS tolerance in percent for the pre-download FPS check (F-M43 Stufe 1). 0 = disabled.</summary>
     public int DownloadFpsTolerancePercent { get; set; } = 1;
 
-    /// <summary>
-    /// Gets or sets a value indicating whether the IMDB/TMDB match is a hard requirement (F-M45).
-    /// Default true: no provider id → no download. False: risky title-based search fallback.
-    /// </summary>
-    public bool DownloadRequireImdb { get; set; } = true;
-
     /// <summary>Gets or sets the score weight for a release-group match (F-M44 expert mode). Default 1000.</summary>
     public int DownloadScoreWeightGroup { get; set; } = 1000;
 
@@ -342,62 +336,19 @@ public class PluginConfiguration : BasePluginConfiguration
     public UpdateInterval RefetchInterval { get; set; } = UpdateInterval.Weekly;
 
     /// <summary>
-    /// Gets or sets the max candidate downloads per (item, language) (F-M50).
-    /// Every downloaded candidate costs daily quota even when rejected afterwards
-    /// (runtime check) — this cap stops quota-burning candidate walks. 0 = unlimited.
-    /// Default: 3.
+    /// F-M320 (operator order 08.10.2026): how many candidates may be FETCHED hoping for a correction
+    /// the alignment can prove against the audio — the correction hunt's budget (F-M318).
     /// <para>
-    /// Two derived numbers come from this setting, both via <see cref="Pipeline.DownloadBudget"/>:
-    /// the loop's cap is raised to the keep-best count (F-M242) when that is higher — a budget
-    /// below it would make "keep X saves X files" unreachable — and the search's early-stop
-    /// threshold (F-M95) is this same effective value, so the search never fetches fewer
-    /// candidates than the loop may try, nor more than it keeps.
+    /// It used to be a give-up counter: N saveless runs of a (item, language) pair closed the pair
+    /// without any SubDL search or fetch until a save succeeded. That is gone. The operator's rule is
+    /// that this limit bounds the FIT, not the other gates — a gate rejection (language, structure,
+    /// min-cues, runtime) is a verdict on the candidate, not a budget, and the walk simply moves on.
+    /// What still bounds a hopeless file is the download budget per run (F-M50) plus the
+    /// burned-release memory (F-M200), neither of which hides a live file.
     /// </para>
-    /// </summary>
-    public int DownloadMaxCandidatesPerLanguage { get; set; } = 3;
-
-    /// <summary>
-    /// (user decision 11.09.2026): download the best X subtitles per
-    /// language instead of only the best one. X = 1 (default) keeps today's
-    /// behaviour (one .srt per language, JF shows one track). X &gt; 1 saves the
-    /// top X QA-passed candidates per language as numbered sidecar files
-    /// ("name.en.2.srt", "name.en.3.srt", ...) — Jellyfin then offers X
-    /// selectable tracks for that language. Each saved subtitle still consumes
-    /// download quota, so keep X small.
-    /// </summary>
-    public int DownloadKeepBestPerLanguage { get; set; } = 1;
-
-    /// <summary>
-    /// F-M60 (user decision 09.09.2026): max consecutive file-access/extraction
-    /// failures per item (file not found, ffmpeg extraction failed) before the
-    /// item is skipped as "file-missing" in both pipelines — instead of failing
-    /// EVERY run with an error for a file that is gone from disk but not from
-    /// the Jellyfin catalog. Applies to BOTH directions (upload + download),
-    /// one counter per item shared across directions. A success resets the
-    /// counter (move/rename/NAS-comeback case). 0 = never give up (old behaviour).
-    /// Default: 3.
-    /// </summary>
-    public int FileRetryLimit { get; set; } = 3;
-
-    /// <summary>
-    /// F-M66 (user decision 09.09.2026): how many consecutive id-resolution
-    /// failures (60 s metadata wait + TMDB id→IMDB + TMDB title search all
-    /// failed) an item may accumulate before it is skipped without any TMDB
-    /// calls until its metadata improves. A resolved id resets the counter.
-    /// 0 = never give up (old behaviour: retry the full ladder every run).
-    /// Default: 3.
-    /// </summary>
-    public int IdRetryLimit { get; set; } = 3;
-
-    /// <summary>
-    /// (user decision 11.09.2026): how many consecutive QA failures
-    /// (structure reject / runtime reject on downloaded candidates) a (item,
-    /// language) pair may accumulate before it is skipped without any SubDL
-    /// search or fetch until a save succeeds. Rationale: a broken-JF-runtime
-    /// item (stub/bad ffprobe) burns up to MaxCandidatesPerLanguage fetches per
-    /// refetch cycle forever; the counter ends that loop (live evidence:
-    /// 21 fetches/day wasted on test stubs). A saved subtitle resets the
-    /// counter. 0 = never give up (old behaviour). Default: 3.
+    /// <para>
+    /// <c>0</c> means no cap on the correction hunt. Default: 3.
+    /// </para>
     /// </summary>
     public int DownloadQaRetryLimit { get; set; } = 3;
     /// <summary>
@@ -415,6 +366,62 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Default: true.
     /// </summary>
     public bool QaDownloadVerifyLanguage { get; set; } = true;
+
+    /// <summary>
+    /// F-M296 (development): download auto-sync — shift a fetched subtitle by the
+    /// single constant offset measured against the audio, before it is saved.
+    /// <para>
+    /// A downloaded subtitle is frequently whole seconds off: the release's own
+    /// timing does not match this rip. The offset is measurable to about 0.2 s
+    /// (planted shifts of −3 / +2 / +4 / +8 / +12 s came back as −3.20 / +1.80 /
+    /// +3.80 / +7.80 / +11.80 s), and a large constant shift is NOT mistaken for
+    /// drift, which is what makes a correction possible at all.
+    /// </para>
+    /// <para>
+    /// The corrected file is written as usual AND the untouched original is kept
+    /// beside it as the one-entry archive <c>&lt;name&gt;.&lt;lang&gt;.srt.unsynced.zip</c>
+    /// (F-M306). Registered is the
+    /// hash of the CORRECTED file, so the duplicate guard sees exactly what lies on
+    /// disk. A file whose offset MOVES is repaired by the staircase of F-M300, not by
+    /// a single offset — no average over a drift is ever applied.
+    /// </para>
+    /// <para>
+    /// F-M300 (development): a DRIFTING file is no longer refused. The segments the gate found are
+    /// the repair — each cue is shifted by the offset of its own segment, a staircase — which took
+    /// the worst-cue residual over 36 drifting episodes from a 10.74 s median to 4.51 s, 33 of 36
+    /// better. Two of the 36 come out worse and no reference-free signal separates them, so a
+    /// same-language reference (F-M297) is preferred when one exists and the untouched original is
+    /// kept either way.
+    /// </para>
+    /// <para>
+    /// On by default. The cost is one full audio decode per saved file — measured at
+    /// 11 s wall / 21 s CPU for a 49 min HEVC episode on the Pi 5 — and the run shares
+    /// one decode between the drift gate and this switch when both are on. A staircase adds no
+    /// second decode; it is the same verdict applied per segment.
+    /// </para>
+    /// Default: true.
+    /// </summary>
+    public bool QaDownloadAutoSync { get; set; } = true;
+
+    /// <summary>
+    /// F-M296 (development): the audio track an audio-reading gate decodes, chosen by
+    /// LANGUAGE rather than by stream order.
+    /// <para>
+    /// Priority: (1) a track in the subtitle's own language, (2) English, (3) the
+    /// first track without a language tag, else the first track. Measured on 304 files
+    /// with sidecar subtitles, this picks a different track than the first in 34 of
+    /// 387 (file, language) cases (~9 %) — typically an Italian release whose first
+    /// track is the Italian dub, with the English original on track 1. 76 files carry
+    /// no language tag on their first track at all.
+    /// </para>
+    /// <para>
+    /// The effect on the VERDICT is small (both tracks of the one multi-track file
+    /// measured closely agreed: span 17.4 vs. 18.1 s); what the switch removes is the
+    /// assumption that the first track is the right one, which is measurably false.
+    /// </para>
+    /// Default: true.
+    /// </summary>
+    public bool QaDownloadAudioTrackByLanguage { get; set; } = true;
 
     /// <summary>
     /// F-M261 (user decision 30.09.2026): allocate missing language codes to the media files
@@ -455,8 +462,10 @@ public class PluginConfiguration : BasePluginConfiguration
     /// the cycle (download first, then upload), so that files arriving together
     /// (season import, NAS sync) are processed in ONE cycle.
     /// (user decision 11.09.2026): default back to 5 (10 was too sluggish).
+    /// (user decision 08.10.2026): default 1 — a full import is complete well inside
+    /// this window, so the cycle starts sooner without splitting one season drop.
     /// </summary>
-    public int ArrivalDebounceMinutes { get; set; } = 5;
+    public int ArrivalDebounceMinutes { get; set; } = 1;
 
     /// <summary>
     /// (user decision 14.09.2026): when a due job (anchor fire, recovery

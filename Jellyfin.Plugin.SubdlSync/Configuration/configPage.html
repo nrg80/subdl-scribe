@@ -44,6 +44,13 @@
                         <!-- F-M230: field descriptions state function plus default value, nothing else. -->
                         <div class="fieldDescription">Only selected libraries are processed. None: no upload or download. Default: None.</div>
 
+                        <h3>Target languages (download, <span class="subdl-required">Required</span>)</h3>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <input id="DownloadLanguagesDisplay" type="text" is="emby-input" readonly style="flex:1;" />
+                            <button is="emby-button" type="button" class="raised" id="DownloadLangPickerBtn">Select&hellip;</button>
+                        </div>
+                        <div class="fieldDescription">Languages to download. Empty = download off.</div>
+
                         <h3>Refetch interval</h3>
                         <div class="selectContainer">
                             <label class="selectLabel" for="RefetchInterval">Refetch interval</label>
@@ -118,12 +125,16 @@
                                 <input id="AllocateMissingLanguageCodes" name="AllocateMissingLanguageCodes" type="checkbox" is="emby-checkbox" />
                                 <span>Allocate missing language codes to media files</span>
                             </label>
-                            <div class="fieldDescription">A track with no language tag reads as absent, so the file is searched for a language it already carries. With this on, that language is detected offline and written into the container as a real track tag. Default: off.</div>
+                            <div class="fieldDescription">A track with no language tag reads as absent, so the file is searched for a language it already carries. With this on, that language is detected offline and written into the container as a real track tag. A loose subtitle file beside the media whose NAME carries no language is renamed to carry it, instead of being written into anything. Default: off.</div>
                         </div>
 
                         <h3>Statistics</h3>
-                        <div class="fieldDescription" id="StatsLine" style="margin-bottom:0.25em;">&mdash;</div>
-                        <div class="fieldDescription" id="StatsQualityLine" style="margin-bottom:0.25em;">&mdash;</div>
+                        <!-- F-M308: the counters as a TABLE, filled by subdlRenderStats. The rows are
+                             built in JS (one per counter), so adding a counter means adding a row
+                             there and nothing here. Kept as a div-grid rather than a <table>: the
+                             Workers list beside it uses the same pattern, and an Emby theme that
+                             styles <table> would otherwise restyle one of the two lists. -->
+                        <div id="StatsTable"></div>
                         <div class="fieldDescription" id="StatsSinceLine" style="margin-bottom:0.5em;">&mdash;</div>
 
 <div style="margin-top:0.5em;">
@@ -215,7 +226,7 @@
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="UploadsPerHour">Transfer rate per hour (100&ndash;500)</label>
                             <input id="UploadsPerHour" name="UploadsPerHour" type="number" is="emby-input" min="100" max="500" />
-                            <div class="fieldDescription">Paces the gap between two real transfers (uploads or downloads). Default: 400. It is a rate, not a limit &mdash; only SubDL stops a run.</div>
+                            <div class="fieldDescription">Paces the gap between two real transfers (uploads or downloads). Default: 400.</div>
                         </div>
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="MinCallPauseSec">Min. pause between API calls, seconds (0.1&#8211;10)</label>
@@ -223,25 +234,18 @@
                             <div class="fieldDescription">Delay between requests in seconds. Default: 0.5.</div>
                         </div>
 
-<h3>Retries</h3>
-                        
+<!-- Operator order 08.10.2026 ("Dann bitte file-retry weg in code und gui. Alleinige Aufgabe
+                         database refresh."): the "File-missing retries before skip" field is GONE. Both the
+                         give-up counter and the field are removed; a file that is gone from disk is now the
+                         Database Refresh's job, and the Seeder already refuses such an item before it can
+                         enter a queue. What stays in this section is the Auto-Sync/download budget, which
+                         is a different mechanism the operator did not touch. -->
+                        <h3>Retries</h3>
 
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="FileRetryLimit">File-missing retries before skip (upload + download)</label>
-                            <input id="FileRetryLimit" name="FileRetryLimit" type="number" is="emby-input" min="0" max="20" />
-                            <div class="fieldDescription">Skip after this many missing-file failures. 0 = never. Default: 3.</div>
-                        </div>
-
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="IdRetryLimit">ID-resolution retries before give-up (upload + download)</label>
-                            <input id="IdRetryLimit" name="IdRetryLimit" type="number" is="emby-input" min="0" max="20" />
-                            <div class="fieldDescription">Skip item after this many ID failures. 0 = never. Default: 3.</div>
-                        </div>
-
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="DownloadQaRetryLimit">QA-reject retries before give-up (download)</label>
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadQaRetryLimit">Auto-Sync attempts and max. download/search limit</label>
                             <input id="DownloadQaRetryLimit" name="DownloadQaRetryLimit" type="number" is="emby-input" min="0" max="20" />
-                            <div class="fieldDescription">Skip after this many QA rejects. 0 = never. Default: 3.</div>
+                            <div class="fieldDescription">How many candidates per language are searched, and how many the downloader may pull for a file before it gives up. With Auto-Sync on, each candidate is fitted and the walk repeats until a correction proves itself. With Auto-Sync off, the candidates are pulled through the active quality gates and kept untouched at index 99 downward. 0 = no limit. Default: 3.</div>
                         </div>
 
 <h3>Skip filters (upload + download)</h3>
@@ -258,23 +262,29 @@
 <h3>Database refresh</h3>
                         <div class="selectContainer">
                             <select is="emby-select" id="PruneMode" name="PruneMode" class="emby-select-withcolor emby-select">
-                                <option value="Never">Never — no scheduled refresh</option>
+                                <option value="Never">Manual</option>
                                 <option value="Weekly">Weekly refresh</option>
                                 <option value="Monthly">Monthly refresh</option>
                                 <option value="Yearly">Yearly refresh</option>
                             </select>
                             <div class="fieldDescription">Checks stored state against reality: a deleted subtitle loses its verdict, a vanished file drops its download mark, removed media are cleaned up. Compacts the database. Default: Weekly.</div>
+                            <!-- Operator order 08.10.2026: a manual button under the description, so the
+                                 refresh can be run on the spot instead of waiting for the schedule. The
+                                 interval above stays what it is — this button does not change it. -->
+                            <button is="emby-button" type="button" class="raised button-submit" id="RunDatabaseRefreshNow" style="margin-top:0.6em;">▶ Run database refresh now</button>
                         </div>
 
 <h3>OSHash refresh</h3>
                         <div class="selectContainer">
                             <select is="emby-select" id="OshashRefresh" name="OshashRefresh" class="emby-select-withcolor emby-select">
-                                <option value="Never">Never — trust cached fingerprint</option>
+                                <option value="Never">Manual</option>
                                 <option value="Weekly">Weekly revalidation</option>
                                 <option value="Monthly">Monthly revalidation</option>
                                 <option value="Yearly">Yearly revalidation</option>
                             </select>
                             <div class="fieldDescription">Recheck interval for cached hashes. Default: Monthly.</div>
+                            <!-- Operator order 08.10.2026: same manual button beside its own description. -->
+                            <button is="emby-button" type="button" class="raised button-submit" id="RunOshashRefreshNow" style="margin-top:0.6em;">▶ Run OSHash refresh now</button>
                         </div>
 
                         <h3>Download</h3>
@@ -286,19 +296,7 @@
                             <div class="fieldDescription">Search only — no file is downloaded and nothing is saved. Reports, per language, the release it would pick with its score and its hearing-impaired flag; with more than one slot per language it also names the slots it would fill, and while the hearing-impaired switch is on the candidate from that pool. Costs one search per language set. Default: off.</div>
                         </div>
 
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="DownloadMaxCandidatesPerLanguage">Max candidates per language</label>
-                            <input id="DownloadMaxCandidatesPerLanguage" type="number" is="emby-input" min="0" max="20" />
-                            <div class="fieldDescription">Download attempts per file+language, and the search's early stop. 0 = unlimited. Default: 3. Raised to the keep-best count when that is higher.</div>
-                        </div>
-
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="DownloadKeepBestPerLanguage">Best subtitles to keep per language</label>
-                            <input id="DownloadKeepBestPerLanguage" type="number" is="emby-input" min="1" max="10" />
-                            <div class="fieldDescription">Best X subtitles per language, saved as X numbered files. Default: 1.</div>
-                        </div>
-
-                        <h3>Download — Ranking</h3>
+<h3>Download — Ranking</h3>
 <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused">Score weights</label>
                             <div style="display:flex; gap:10px;">
@@ -332,17 +330,28 @@
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="UploadPostprocessInterval">Upload postprocessing interval</label>
                             <select is="emby-select" id="UploadPostprocessInterval" name="UploadPostprocessInterval" class="emby-select-withcolor emby-select">
-                                <option value="Never">Never</option>
+                                <option value="Never">Manual</option>
                                 <option value="Daily">Daily</option>
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
                             </select>
-                            <div class="fieldDescription">How often rejected uploads are resolved against /user/mySubtitles. Default: Daily.</div>
+                            <div class="fieldDescription">How often rejected uploads are resolved against /user/mySubtitles. Scheduled run is inhibited if upload is disabled. Default: Daily.</div>
+                            <!-- Operator order 08.10.2026: the third refresh job gets its manual button too
+                                 ("Knopf für upload Postprocessing habe ich dann vergessen. Auch manual dann statt never").
+                                 It starts the TASK, like the two refresh buttons above — NOT the job's own
+                                 endpoint. Measured 08.10.2026: the endpoint ran the work correctly (prod log
+                                 23:20:22→25, two rejected uploads cleaned) but the status list stayed EMPTY,
+                                 because the "Upl. Postproc." row is written by SubdlPostprocessTask alone and
+                                 the endpoint never wrote one. The operator pressed the button, saw no entry,
+                                 and concluded nothing had run. The task route also runs in the background
+                                 instead of holding the click open. The endpoint stays as an API-level trigger;
+                                 nothing on this page uses it (F-M295). -->
+                            <button is="emby-button" type="button" class="raised button-submit" id="RunPostprocessNow" style="margin-top:0.6em;">▶ Run upload postprocessing now</button>
                         </div>
 
                         <h3>Database</h3>
                         <div class="fieldDescription" style="max-width:60em;">
-                            <b>Reset plugin database.</b> Deletes all persistent state files. Rebuild costs API quota. No double uploads (local registry guard), backups are kept.
+                            <b>Reset plugin database.</b> Deletes all persistent state. A backup is kept. Rebuild costs API quota.
                         </div>
                         <div style="margin-top:0.5em; margin-bottom:1em;">
                             <button is="emby-button" type="button" class="raised" id="ResetRegistry" style="color:#f00;">Reset plugin database…</button>
@@ -378,7 +387,7 @@
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="UploadContinueAfterLimit" name="UploadContinueAfterLimit" type="checkbox" is="emby-checkbox" />
-                                <span>Continue after daily API limit</span>
+                                <span>Continue after daily limit</span>
                             </label>
                             <div class="fieldDescription">On 429/overload, schedule one automatic retry. Default: on.</div>
                         </div>
@@ -405,21 +414,21 @@
                                 <input id="QaMinCues" name="QaMinCues" type="checkbox" is="emby-checkbox" />
                                 <span>Minimum cue count (30)</span>
                             </label>
-                            <div class="fieldDescription">Rejects subs with fewer than 30 cues.</div>
+                            <div class="fieldDescription">Rejects subs with fewer than 30 cues. Default: on.</div>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaValidateSrt" name="QaValidateSrt" type="checkbox" is="emby-checkbox" />
                                 <span>Validate SRT structure</span>
                             </label>
-                            <div class="fieldDescription">Rejects invalid timings and cue durations.</div>
+                            <div class="fieldDescription">Rejects invalid timings and cue durations. Default: on.</div>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaCheckSync" name="QaCheckSync" type="checkbox" is="emby-checkbox" />
                                 <span>Check sync plausibility</span>
                             </label>
-                            <div class="fieldDescription">Rejects cue span beyond media runtime.</div>
+                            <div class="fieldDescription">Rejects cue span beyond media runtime. Default: on.</div>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
@@ -439,15 +448,6 @@
                             <div class="fieldDescription">Enable all download functions. Default: on.</div>
                         </div>
 
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="DownloadLanguagesDisplay">Target languages (<span class="subdl-req-inline">Required</span>)</label>
-                            <div style="display:flex; gap:8px; align-items:center;">
-                                <input id="DownloadLanguagesDisplay" type="text" is="emby-input" readonly style="flex:1;" />
-                                <button is="emby-button" type="button" class="raised" id="DownloadLangPickerBtn">Select&hellip;</button>
-                            </div>
-                            <div class="fieldDescription">Languages to download. Empty = download off.</div>
-                        </div>
-
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="DownloadOnArrival" name="DownloadOnArrival" type="checkbox" is="emby-checkbox" />
@@ -465,6 +465,22 @@
                             <div class="fieldDescription">On 429/overload, schedule one automatic retry. Default: on.</div>
                         </div>
 
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                        <input id="FollowUpRoundsDownload" name="FollowUpRoundsDownload" type="checkbox" is="emby-checkbox" />
+                        <span>Follow-up rounds for downloads (2..n)</span>
+                        </label>
+                        <div class="fieldDescription">Further runs while new files keep arriving. Default: on.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="QaDownloadAutoSync" name="QaDownloadAutoSync" type="checkbox" is="emby-checkbox" />
+                                <span>Automatically synchronize subtitle to spoken track</span>
+                            </label>
+                            <div class="fieldDescription">Aligns a fetched subtitle segment-wise on a spoken track. A file the alignment finds nothing wrong with is kept as the best version: it takes index 01 upward, together with a copy of it from index 99 downward. A file that could not be aligned — or that is out of sync beyond repair — is kept from index 99 downward as well. Default: on.</div>
+                        </div>
+
                         
 
                         
@@ -472,8 +488,9 @@
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="DownloadOnlyMissing" name="DownloadOnlyMissing" type="checkbox" is="emby-checkbox" />
-                                <span>Only missing languages (embedded count as present)</span>
+                                <span>Only missing languages</span>
                             </label>
+                            <div class="fieldDescription">Skip files that already carry the language. Default: on.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -484,21 +501,6 @@
                             <div class="fieldDescription">Also save the SDH variant as separate file. Default: off.</div>
                         </div>
 
-                        <div class="checkboxContainer checkboxContainer-withDescription">
-                            <label class="emby-checkbox-label">
-                                <input id="DownloadRequireImdb" name="DownloadRequireImdb" type="checkbox" is="emby-checkbox" />
-                                <span>Require IMDb/TMDb match</span>
-                            </label>
-                            <div class="fieldDescription">No download without an IMDb/TMDb ID.</div>
-                        </div>
-
-                        <div class="checkboxContainer checkboxContainer-withDescription">
-                        <label class="emby-checkbox-label">
-                        <input id="FollowUpRoundsDownload" name="FollowUpRoundsDownload" type="checkbox" is="emby-checkbox" />
-                        <span>Follow-up rounds for downloads (2..n)</span>
-                        </label>
-                        <div class="fieldDescription">Further runs while new files keep arriving. Default: on.</div>
-                        </div>
                     <h3 style="margin-top:1.2em;">Quality gates (before download save)</h3>
                         <div class="fieldDescription" style="margin-bottom:.6em;">Structure, runtime and known-content checks always run. Extra gates reject before saving.</div>
 
@@ -522,6 +524,7 @@
                             <input id="DownloadRuntimeToleranceSec" name="DownloadRuntimeToleranceSec" type="number" is="emby-input" min="0" max="1800" />
                             <div class="fieldDescription">Max. cue span vs. runtime in seconds. 0 = off. Default: 600.</div>
                         </div>
+
 
                         
                         
@@ -589,6 +592,40 @@
            NEVER put a backtick in these comments: this whole block is a JS template
            literal, so a backtick ends the string early and the CSS silently never gets
            injected (the rows then fall back to plain flex and nothing lines up). */
+        /* F-M308: the statistics counters as a BOUNDED table — one row per counter, label and
+           number in two columns so the numbers line up under each other. The earlier form was a
+           run-on sentence in which every counter sat in prose, each label at a different offset,
+           and the user could not read it. A table makes them comparable at a glance and is the form the user asked for
+           ("gerne auch als tabelle bündig untereinander"). max-content on the label column lets
+           it size to the longest label, so the numbers form one vertical line; overflow-x:auto
+           keeps a narrow phone from cutting a row off.
+           NO backticks in this comment: it sits inside a JS template literal, and one backtick
+           ends the string early so the CSS silently never gets injected. */
+        #StatsTable {
+            display: grid;
+            grid-template-columns: max-content max-content;
+            align-items: baseline;
+            column-gap: 1.1em;
+            row-gap: 0.15em;
+            overflow-x: auto;
+            font-size: 1em;
+            margin-bottom: 0.25em;
+        }
+        #StatsTable .subdl-stat-row { display: contents; }
+        #StatsTable > .subdl-stat-row > * { min-width: 0; white-space: nowrap; }
+        /* The value column is sized for SIX digits and right-aligned, so every number starts at
+           the same edge whatever its length: with max-content alone the column took the width of
+           the widest number PRESENT, and the decimal edge wandered between renders as the
+           counters grew (operator order 08.10.2026). 6ch = the widest value the counters can
+           reach in practice (999 999), plus the tabular figures make the column align digit to
+           digit. min-width on the CELL, not the table: the label column stays max-content. */
+        #StatsTable .subdl-stat-value {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            min-width: 6ch;
+        }
+        #StatsTable .subdl-stat-total { font-weight: 600; }
+
         #WorkerRunList {
             display: grid;
             grid-template-columns: 1.4em max-content max-content 1fr;
@@ -852,10 +889,8 @@
         document.querySelector('#MinCallPauseSec').value = (config.MinCallPauseSec != null ? config.MinCallPauseSec : 0.5);
                         document.querySelector('#FollowUpRoundsDownload').checked = (config.FollowUpRoundsDownload !== false);
                         document.querySelector('#FollowUpRoundsUpload').checked = (config.FollowUpRoundsUpload !== false);
-                        document.querySelector('#FileRetryLimit').value = (function () { var v = parseInt(config.FileRetryLimit); return isNaN(v) ? 3 : v; })();
-                        document.querySelector('#IdRetryLimit').value = (function () { var v = parseInt(config.IdRetryLimit); return isNaN(v) ? 3 : v; })();
                         document.querySelector('#DownloadQaRetryLimit').value = (function () { var v = parseInt(config.DownloadQaRetryLimit); return isNaN(v) ? 3 : v; })();
-                        document.querySelector('#ArrivalDebounceMinutes').value = (function () { var v = parseInt(config.ArrivalDebounceMinutes); return isNaN(v) ? 5 : v; })();                                                document.querySelector('#RefetchInterval').value = config.RefetchInterval;
+                        document.querySelector('#ArrivalDebounceMinutes').value = (function () { var v = parseInt(config.ArrivalDebounceMinutes); return isNaN(v) ? 1 : v; })();                                                document.querySelector('#RefetchInterval').value = config.RefetchInterval;
                         document.querySelector('#JobSpacingMinutes').value = (function () { var v = parseInt(config.JobSpacingMinutes); return isNaN(v) ? 15 : v; })();
 
                         var rsi = document.querySelector('#RandomScheduleInfo');
@@ -906,18 +941,14 @@
                         document.querySelector('#DownloadOnlyMissing').checked = config.DownloadOnlyMissing;
                         document.querySelector('#DownloadHearingImpaired').checked = config.DownloadHearingImpaired;
                         document.querySelector('#DownloadRuntimeToleranceSec').value = config.DownloadRuntimeToleranceSec;
-                        document.querySelector('#DownloadRequireImdb').checked = config.DownloadRequireImdb;
                         document.querySelector('#AllocateMissingLanguageCodes').checked = config.AllocateMissingLanguageCodes;
                         document.querySelector('#QaDownloadMinCues').checked = config.QaDownloadMinCues;
                         document.querySelector('#QaDownloadVerifyLanguage').checked = config.QaDownloadVerifyLanguage;
+                        document.querySelector('#QaDownloadAutoSync').checked = config.QaDownloadAutoSync !== false;
                         document.querySelector('#DownloadScoreWeightGroup').value = config.DownloadScoreWeightGroup;
                         document.querySelector('#DownloadScoreWeightToken').value = config.DownloadScoreWeightToken;
                         document.querySelector('#DownloadScoreWeightDownload').value = config.DownloadScoreWeightDownload;
                                                 document.querySelector('#DownloadOnArrival').checked = config.DownloadOnArrival;
-                        var dmcl = parseInt(config.DownloadMaxCandidatesPerLanguage);
-                        document.querySelector('#DownloadMaxCandidatesPerLanguage').value = isNaN(dmcl) ? 3 : dmcl;
-                        var dkb = parseInt(config.DownloadKeepBestPerLanguage);
-                        document.querySelector('#DownloadKeepBestPerLanguage').value = isNaN(dkb) ? 1 : dkb;
                         document.querySelector('#UploadContinueAfterLimit').checked = config.UploadContinueAfterLimit;
                         document.querySelector('#DownloadContinueAfterLimit').checked = config.DownloadContinueAfterLimit;
                         document.querySelector('#DownloadDryRun').checked = config.DownloadDryRun;
@@ -929,27 +960,52 @@
                             return subdlFmtDateTime(iso);
                         };
                         var subdlRenderStats = function (s) {
-                            var el = document.querySelector('#StatsLine');
+                            var el = document.querySelector('#StatsTable');
                             if (!el) { return; }
-                            if (!s) { el.textContent = '—'; return; }
-                            el.textContent =
-                                s.Uploaded + ' subtitles uploaded, ' +
-                                s.Downloaded + ' subtitles downloaded since the last reset.';
-
-                            // F-M218 quality line: what the volume counters cannot show —
-                            // where the run had to work around Jellyfin's metadata, and how
-                            // much the QA gates filtered out.
-                            var q = document.querySelector('#StatsQualityLine');
-                            if (q) {
-                                q.textContent =
-                                    'Corrections and rejects: ' +
-                                    (s.TypeCorrectedByFileName || 0) + ' items the file name typed ' +
-                                    '(Jellyfin had the wrong type), ' +
-                                    (s.TmdbYearFilterMisses || 0) + ' titles found only after dropping ' +
-                                    'Jellyfin\u2019s year, ' +
-                                    (s.RejectedDownload || 0) + ' downloads / ' +
-                                    (s.RejectedUpload || 0) + ' uploads rejected after being fetched.';
-                            }
+                            if (!s) { el.innerHTML = ''; return; }
+                            // F-M308: one ROW per counter, label left / number right, so the numbers
+                            // form one vertical line and are comparable. Each label names the direction
+                            // it belongs to ("uploads" / "downloads") — the previous run-on sentence
+                            // packed both directions and both meanings into one line the user could not
+                            // read.
+                            // The ORDER is the user's (07.10.2026): the two volume counters lead with
+                            // the download direction FIRST — it is the direction every install runs,
+                            // and it was the one sitting second; then the counter that covers both
+                            // directions; then the remaining rows grouped BY DIRECTION, downloads
+                            // before uploads, so a reader meets one direction's numbers together
+                            // instead of hopping between the two. T123 asserts this order on the
+                            // source, because a regrouping that silently reverts is invisible: the
+                            // table still renders, it just reads the old way.
+                            // The wording states what happened, not the code's vocabulary: type is
+                            // movie/series, a search without the year, a fetch that was thrown away,
+                            // a subtitle whose timing the run aligned on a spoken track, and a media
+                            // file whose language codes the seeder wrote, and a LOOSE subtitle file
+                            // the seeder renamed so its name carries the language. The last two rows are
+                            // the only ones that are NOT a direction: they count FILES the run edited on
+                            // disk, and the seeder serves both directions, so neither carries a prefix.
+                            var rows = [
+                                ['Subtitles downloaded', s.Downloaded || 0, true],
+                                ['Subtitles uploaded', s.Uploaded || 0, true],
+                                ['Downloads: rejected after being fetched', s.RejectedDownload || 0],
+                                ['Downloads: Auto-Sync', s.FittedToAudio || 0],
+                                ['Uploads: discarded before transfer', s.RejectedUpload || 0],
+                                ['Media files: language codes added', s.LanguageCodesAllocated || 0],
+                                ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0]
+                            ];
+                            el.innerHTML = '';
+                            rows.forEach(function (r) {
+                                var row = document.createElement('div');
+                                row.className = 'subdl-stat-row';
+                                var lab = document.createElement('span');
+                                lab.className = 'subdl-stat-label' + (r[2] ? ' subdl-stat-total' : '');
+                                lab.textContent = r[0];
+                                var val = document.createElement('span');
+                                val.className = 'subdl-stat-value' + (r[2] ? ' subdl-stat-total' : '');
+                                val.textContent = String(r[1]);
+                                row.appendChild(lab);
+                                row.appendChild(val);
+                                el.appendChild(row);
+                            });
 
                             // The period stamp sits on its own line, last — it belongs to
                             // all of the counters above, not to a sentence in the middle.
@@ -1322,6 +1378,14 @@ workers.forEach(function (w) {
 
                 document.querySelector('#RunUploadNow').addEventListener('click', function () { subdlStartTask('SubDL/TMDB — Subtitle Upload'); });
                 document.querySelector('#RunDownloadNow').addEventListener('click', function () { subdlStartTask('SubDL/TMDB — Subtitle Download'); });
+                // Operator order 08.10.2026: the two refresh tasks get a manual button under their
+                // own description. Same helper the run buttons use, so the task NAME is the only
+                // difference — these two are "SubDL Scribe — …", not "SubDL/TMDB — …".
+                document.querySelector('#RunDatabaseRefreshNow').addEventListener('click', function () { subdlStartTask('SubDL Scribe — Database Refresh'); });
+                document.querySelector('#RunOshashRefreshNow').addEventListener('click', function () { subdlStartTask('SubDL Scribe — OSHash Cache Refresh'); });
+                // F-M295 (08.10.2026): the TASK, not the endpoint — only the task writes the status row.
+                // Name must match SubdlPostprocessTask.Name exactly; a mismatch answers "Task not found".
+                document.querySelector('#RunPostprocessNow').addEventListener('click', function () { subdlStartTask('SubDL Postprocessing'); });
                 document.querySelector('#StopAllNow').addEventListener('click', function () {
                     // NF-8: stop BOTH directions — one click, two marker files.
                     subdlStopTask('SubDL/TMDB — Subtitle Upload');
@@ -1446,10 +1510,8 @@ workers.forEach(function (w) {
                         config.ApiKey = document.querySelector('#ApiKey').value;
                         config.TmdbApiKey = tmdbKey;
                         var uph = parseInt(document.querySelector('#UploadsPerHour').value) || 400;
-                        config.FileRetryLimit = (function () { var v = parseInt(document.querySelector('#FileRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
-                        config.IdRetryLimit = (function () { var v = parseInt(document.querySelector('#IdRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
                         config.DownloadQaRetryLimit = (function () { var v = parseInt(document.querySelector('#DownloadQaRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
-                        config.ArrivalDebounceMinutes = (function () { var v = parseInt(document.querySelector('#ArrivalDebounceMinutes').value, 10); return isNaN(v) ? 5 : Math.min(120, Math.max(1, v)); })();                                                config.RefetchInterval = document.querySelector('#RefetchInterval').value;
+                        config.ArrivalDebounceMinutes = (function () { var v = parseInt(document.querySelector('#ArrivalDebounceMinutes').value, 10); return isNaN(v) ? 1 : Math.min(120, Math.max(1, v)); })();                                                config.RefetchInterval = document.querySelector('#RefetchInterval').value;
                         config.JobSpacingMinutes = (function () { var v = parseInt(document.querySelector('#JobSpacingMinutes').value, 10); return isNaN(v) ? 15 : Math.min(120, Math.max(5, v)); })();
 
                         config.UploadsPerHour = Math.min(500, Math.max(100, uph)); // Rate 100..500 (F-M20)
@@ -1478,16 +1540,14 @@ workers.forEach(function (w) {
                         config.DownloadOnlyMissing = document.querySelector('#DownloadOnlyMissing').checked;
                         config.DownloadHearingImpaired = document.querySelector('#DownloadHearingImpaired').checked;
                         config.DownloadRuntimeToleranceSec = (function () { var v = parseInt(document.querySelector('#DownloadRuntimeToleranceSec').value, 10); return isNaN(v) ? 600 : v; })();
-                        config.DownloadRequireImdb = document.querySelector('#DownloadRequireImdb').checked;
                         config.AllocateMissingLanguageCodes = document.querySelector('#AllocateMissingLanguageCodes').checked;
                         config.QaDownloadMinCues = document.querySelector('#QaDownloadMinCues').checked;
                         config.QaDownloadVerifyLanguage = document.querySelector('#QaDownloadVerifyLanguage').checked;
+                        config.QaDownloadAutoSync = document.querySelector('#QaDownloadAutoSync').checked;
                         config.DownloadScoreWeightGroup = parseInt(document.querySelector('#DownloadScoreWeightGroup').value) || 1000;
                         config.DownloadScoreWeightToken = parseInt(document.querySelector('#DownloadScoreWeightToken').value) || 10;
                         config.DownloadScoreWeightDownload = parseInt(document.querySelector('#DownloadScoreWeightDownload').value, 10); if (isNaN(config.DownloadScoreWeightDownload)) { config.DownloadScoreWeightDownload = 1; }
                                                 config.DownloadOnArrival = document.querySelector('#DownloadOnArrival').checked;
-                        config.DownloadMaxCandidatesPerLanguage = (function () { var v = parseInt(document.querySelector('#DownloadMaxCandidatesPerLanguage').value, 10); return isNaN(v) ? 3 : v; })();
-                        config.DownloadKeepBestPerLanguage = (function () { var v = parseInt(document.querySelector('#DownloadKeepBestPerLanguage').value, 10); return isNaN(v) ? 1 : Math.min(10, Math.max(1, v)); })();
                         config.DownloadContinueAfterLimit = document.querySelector('#DownloadContinueAfterLimit').checked;
                         config.DownloadDryRun = document.querySelector('#DownloadDryRun').checked;
                         // Union of both library views — a tick in either the

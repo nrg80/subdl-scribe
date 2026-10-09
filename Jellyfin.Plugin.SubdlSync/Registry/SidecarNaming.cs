@@ -38,6 +38,45 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 public static class SidecarNaming
 {
     /// <summary>
+    /// Highest slot a CORRECTED sidecar may take.
+    /// <para>
+    /// F-M315 (operator order 07.10.2026): the slots 90–99 are RESERVED for the unsynchronized
+    /// originals a correction keeps beside its result, so the writer of corrected files must stop
+    /// below them. Without the cap the next corrected file of a language whose slots 1–89 are taken
+    /// would be handed a name the original already uses, and the correction would overwrite the very
+    /// file it exists to preserve.
+    /// </para>
+    /// </summary>
+    public const int CorrectedSlotMax = 89;
+
+    /// <summary>
+    /// Lowest and highest slot of the reserved ORIGINAL block.
+    /// <para>
+    /// F-M315: an original is assigned from <see cref="OriginalSlotMax"/> DOWNWARD, which is what the
+    /// operator asked for ("90 bis 99 als Block von 99 abwärts"). Numbering the originals from the top
+    /// keeps them away from the corrected slots growing up from 1, and a viewer sees the reserved
+    /// number in the track list, so the two kinds of file are told apart without opening anything.
+    /// </para>
+    /// </summary>
+    public const int OriginalSlotMin = 90;
+
+    /// <summary>Highest slot of the reserved original block.</summary>
+    public const int OriginalSlotMax = 99;
+
+    /// <summary>
+    /// True when a slot belongs to the reserved ORIGINAL block (90–99).
+    /// <para>
+    /// F-M315: the reservation is a property of the number, not of a file's content, so it is a pure
+    /// function of the one datum the name carries. Nothing downstream has to hold state to tell an
+    /// original from a corrected file.
+    /// </para>
+    /// </summary>
+    /// <param name="slot">Slot number.</param>
+    /// <returns>True when the slot is reserved for an unsynchronized original.</returns>
+    public static bool IsOriginalSlot(int slot)
+        => slot >= OriginalSlotMin && slot <= OriginalSlotMax;
+
+    /// <summary>
     /// Builds the file name a sidecar gets next to the media file.
     /// <para>
     /// F-M260: the writer's counterpart to <see cref="Parse"/>, in the SAME class on purpose. The
@@ -52,7 +91,7 @@ public static class SidecarNaming
     /// <param name="mediaPath">Media file path (supplies directory and base name).</param>
     /// <param name="lang">Language code.</param>
     /// <param name="hearingImpaired">True for the <c>.sdh</c> variant (F-M260).</param>
-    /// <param name="slot">1-based slot; 1 is the plain name, higher numbers get a suffix.</param>
+    /// <param name="slot">1-based slot, always written two digits (F-M316).</param>
     /// <returns>Full path of the sidecar.</returns>
     public static string Build(string mediaPath, string lang, bool hearingImpaired = false, int slot = 1,
                                bool forced = false)
@@ -67,9 +106,17 @@ public static class SidecarNaming
             suffix += ".forced";
         }
 
-        string slotSuffix = slot > 1
-            ? "." + slot.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            : string.Empty;
+        // F-M316 (operator order 08.10.2026): the slot is ALWAYS written and always two digits.
+        // The number is not decoration — it is the ONLY ordering signal Jellyfin has. It lists the
+        // external tracks in the order the file names sort, so a one-digit slot puts "en.10.srt"
+        // before "en.2.srt" while a bare "en.srt" sorts AFTER "en.99.srt" ('s' from ".srt" > '9').
+        // Measured on prod 08.10.2026 (BCS S01E05, six sidecars): the menu offered "99 – German"
+        // ABOVE "German", i.e. exactly inverted — the kept originals were listed before the
+        // corrected files instead of after them. Two digits keep the alphabet and the numbers in
+        // the same run: "<base>.<lang>.01.srt" … ".99.srt", corrected slots first (1…89), the
+        // reserved originals last (90…99), exactly as F-M315 intends.
+        string slotSuffix = "."
+            + slot.ToString("D2", System.Globalization.CultureInfo.InvariantCulture);
         return Path.Combine(dir, $"{baseName}.{lang.ToLowerInvariant()}{suffix}{slotSuffix}.srt");
     }
 
@@ -84,10 +131,11 @@ public static class SidecarNaming
     /// language its own disk already holds.
     /// </para>
     /// <para>
-    /// Slot 1 is the plain name. A higher slot is chosen when that combination is already on disk —
-    /// two unlabelled files detected as the same language are two entries, and a rename that
-    /// overwrote one with the other would destroy a subtitle to tidy a file name. The rule is pure:
-    /// the caller hands in the names that exist, so it can be asserted with plain strings.
+    /// Slot 1 is the first name (F-M316: written as <c>.01</c>). A higher slot is chosen when that
+    /// combination is already on disk — two unlabelled files detected as the same language are two
+    /// entries, and a rename that overwrote one with the other would destroy a subtitle to tidy a
+    /// file name. The rule is pure: the caller hands in the names that exist, so it can be asserted
+    /// with plain strings.
     /// </para>
     /// </summary>
     /// <param name="mediaPath">Media file path.</param>
@@ -99,7 +147,10 @@ public static class SidecarNaming
                                     System.Collections.Generic.ISet<string> existingNames,
                                     bool forced = false)
     {
-        for (int slot = 1; slot <= 999; slot++)
+        // F-M315: the loop stops at CorrectedSlotMax, not at 999. The slots above it are reserved for
+        // the unsynchronized originals, and a corrected file handed one of those names would land on
+        // the file the correction exists to keep.
+        for (int slot = 1; slot <= CorrectedSlotMax; slot++)
         {
             string candidate = Build(mediaPath, lang, hearingImpaired, slot, forced);
             if (existingNames == null || !existingNames.Contains(Path.GetFileName(candidate)))
@@ -108,10 +159,51 @@ public static class SidecarNaming
             }
         }
 
-        // Every slot taken (999 files of one language beside one media file). Return the plain
-        // name so the caller's own existence check refuses the move — never a name that would
+        // Every corrected slot taken (89 files of one language beside one media file). Return slot 1
+        // so the caller's own existence check refuses the move — never a name that would
         // overwrite one of them.
         return Build(mediaPath, lang, hearingImpaired, 1);
+    }
+
+    /// <summary>
+    /// The name an unsynchronized ORIGINAL gets beside the corrected file it was kept from.
+    /// <para>
+    /// F-M315 (operator order 07.10.2026): the original is a normal sidecar — same language, same
+    /// hearing-impaired flag, no marker of its own — that differs only in the SLOT it occupies. It is
+    /// numbered from <see cref="OriginalSlotMax"/> DOWNWARD and takes the first free number, so up to
+    /// ten originals of one language can sit beside one media file. Jellyfin lists each as its own
+    /// selectable track titled with that number, which is what lets the operator pick the untouched
+    /// version in the player.
+    /// </para>
+    /// <para>
+    /// It is deliberately NOT marked forced: a forced subtitle is a different thing in this codebase
+    /// (it carries only foreign-language scenes and is never delivered) and the flag would make the
+    /// file read as something it is not.
+    /// </para>
+    /// <para>
+    /// There is no "already exists, overwrite anyway" fallback here. When all ten reserved slots are
+    /// taken the caller's own existence check refuses the write — ten uncorrected versions of one
+    /// language beside one media file is not a case to invent a name for.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaPath">Media file path.</param>
+    /// <param name="lang">The language of the corrected file the original belongs to.</param>
+    /// <param name="hearingImpaired">True when the corrected file is the variant.</param>
+    /// <param name="existingNames">File names already present in the directory.</param>
+    /// <returns>Full path for the original, or null when every reserved slot is taken.</returns>
+    public static string? PlanOriginalTarget(string mediaPath, string lang, bool hearingImpaired,
+                                             System.Collections.Generic.ISet<string>? existingNames)
+    {
+        for (int slot = OriginalSlotMax; slot >= OriginalSlotMin; slot--)
+        {
+            string candidate = Build(mediaPath, lang, hearingImpaired, slot);
+            if (existingNames == null || !existingNames.Contains(Path.GetFileName(candidate)))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -157,7 +249,7 @@ public static class SidecarNaming
     /// F-M284: extracted so the two callers that need only the flags — the sidecar backfill, which
     /// holds a stored file name rather than a directory to walk, and <see cref="Parse"/> — cannot
     /// disagree about what a marker is. The scan starts at the END and skips the numbered slot
-    /// first, because that is where the writer puts it (<c>&lt;base&gt;.&lt;lang&gt;.sdh.2.srt</c>).
+    /// first, because that is where the writer puts it (<c>&lt;base&gt;.&lt;lang&gt;.sdh.02.srt</c>).
     /// </para>
     /// </summary>
     /// <param name="fileNameWithoutExtension">Sidecar name without the .srt extension.</param>
@@ -206,8 +298,9 @@ public static class SidecarNaming
     /// <c>&lt;base&gt;.&lt;lang&gt;.sdh.srt</c> / <c>&lt;base&gt;.&lt;lang&gt;.hi.srt</c>,
     /// <c>&lt;base&gt;.&lt;lang&gt;.forced.srt</c>,
     /// the two markers combined (<c>&lt;base&gt;.&lt;lang&gt;.sdh.forced.srt</c>, either order),
-    /// and the numbered extra slots the downloader writes
-    /// (<c>&lt;base&gt;.&lt;lang&gt;.2.srt</c>, <c>.3</c>, …).
+    /// and the numbered slots, which F-M316 makes two digits and always present
+    /// (<c>&lt;base&gt;.&lt;lang&gt;.01.srt</c> … <c>.99.srt</c>; a one-digit or absent slot written
+    /// before F-M316 still reads back).
     /// </para>
     /// <para>
     /// The language token itself keeps the permissive resolution it always had (two letters direct,
@@ -247,8 +340,10 @@ public static class SidecarNaming
         int end = parts.Length - 1;
 
         // F-M260: the numbered slot sits LAST and the markers come BEFORE the language token. A
-        // slot is 1-2 digits ("<base>.<lang>.2.srt"), which is also how it is told apart from a
-        // 2-letter language or from a marker token.
+        // slot is 1-2 digits ("<base>.<lang>.02.srt"), which is also how it is told apart from a
+        // 2-letter language or from a marker token. F-M316: the writer always writes TWO digits
+        // ("01", not "1"), and this reader accepts both widths, so names written before the switch
+        // keep parsing and the migration does not need a compat shim.
         if (parts.Length >= 3 && end > 0 && parts[end].Length > 0 && parts[end].Length <= 2 && AllDigits(parts[end]))
         {
             end--;

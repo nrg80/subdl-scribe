@@ -33,6 +33,37 @@ namespace Jellyfin.Plugin.SubdlScribe;
 public class PluginServiceRegistrator : IPluginServiceRegistrator
 {
     /// <summary>
+    /// Builds a bare SubDL API client outside a pipeline run — for a read-only probe.
+    /// <para>
+    /// ONE construction site for all three users (upload pipeline, download pipeline, and the
+    /// dispatcher's pre-run quota probe). The probe reads the SAME counters the pipeline's own 429
+    /// decision reads (F-M238) instead of inventing a second quota source: two sources for one
+    /// statement can drift, and the second is invisible to check.
+    /// </para>
+    /// </summary>
+    /// <param name="config">Plugin configuration (carries the credentials).</param>
+    /// <returns>The client and the HttpClient it owns; the caller disposes the client.</returns>
+    public static (SubdlApiClient Api, HttpClient Http) BuildApiClient(PluginConfiguration config)
+    {
+        // F-M235: the timeout lives in the handler now, per attempt, so a slow server is retried
+        // (3 attempts) instead of surfacing as a cancellation. HttpClient.Timeout is disabled
+        // (InfiniteTimeSpan) because it would otherwise cap the WHOLE request including retries
+        // and cancel them mid-sequence.
+        var retry = new TransientRetryHandler(new SocketsHttpHandler());
+        var http = new HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+        var api = new SubdlApiClient(http)
+        {
+            Username = config.Username,
+            Password = config.Password,
+            ApiKey = config.ApiKey
+        };
+        // The handler is built before the client, but the client owns the log channel: route the
+        // retry lines back into it so a hidden retry still shows up.
+        retry.Log = msg => api.RaiseLog(msg);
+        return (api, http);
+    }
+
+    /// <summary>
     /// Builds a ready-to-use pipeline outside JF DI (for the scheduled task entry).
     /// </summary>
     /// <param name="loggerFactory">Logger factory.</param>
@@ -49,26 +80,14 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // (3 attempts) instead of surfacing as a cancellation. HttpClient.Timeout is disabled
         // (InfiniteTimeSpan) because it would otherwise cap the WHOLE request including retries
         // and cancel them mid-sequence.
-        var retry = new TransientRetryHandler(new SocketsHttpHandler());
-        var http = new HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
-        var api = new SubdlApiClient(http)
-        {
-            Username = config.Username,
-            Password = config.Password,
-            ApiKey = config.ApiKey
-        };
-        // The handler is built before the client, but the client owns the run's log channel: route
-        // the retry lines back into it so a hidden retry still shows up in the run log.
-        retry.Log = msg => api.RaiseLog(msg);
+        var (api, http) = BuildApiClient(config);
         var tmdb = new TmdbImdbResolver(http, config.TmdbApiKey);
         // F-M20/F-M26: ONE pacing rhythm shared by upload + download (same SubDL account).
         // It spaces calls and jitters transfers — it holds no budget and refuses nothing.
         var limiter = new GlobalRateLimiter(config.UploadsPerHour, config.MinCallPauseSec);
-        var fileRetries = new FileRetryTracker(db, loggerFactory.CreateLogger<FileRetryTracker>());
-        var idNotFound = new IdNotFoundTracker(db, loggerFactory.CreateLogger<IdNotFoundTracker>());
         var logger = loggerFactory.CreateLogger<UploadPipeline>();
-        var pipeline = new UploadPipeline(logger, libraryManager, mediaSourceManager, api, tmdb, config, limiter, fileRetries, idNotFound);
-        return new PipelineBundle(pipeline, registry, http, fileRetries, idNotFound);
+        var pipeline = new UploadPipeline(logger, libraryManager, mediaSourceManager, api, tmdb, config, limiter);
+        return new PipelineBundle(pipeline, registry, http);
     }
 
     /// <summary>
@@ -77,7 +96,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <param name="bundle">Bundle to dispose.</param>
     public static void DisposePipeline(PipelineBundle bundle)
     {
-        bundle.FileRetries.Flush(); // F-M60: persist retry counters after the run
         bundle.Registry.Dispose();
         bundle.Http.Dispose();
     }
@@ -99,28 +117,16 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // (3 attempts) instead of surfacing as a cancellation. HttpClient.Timeout is disabled
         // (InfiniteTimeSpan) because it would otherwise cap the WHOLE request including retries
         // and cancel them mid-sequence.
-        var retry = new TransientRetryHandler(new SocketsHttpHandler());
-        var http = new HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
-        var api = new SubdlApiClient(http)
-        {
-            Username = config.Username,
-            Password = config.Password,
-            ApiKey = config.ApiKey
-        };
-        // The handler is built before the client, but the client owns the run's log channel: route
-        // the retry lines back into it so a hidden retry still shows up in the run log.
-        retry.Log = msg => api.RaiseLog(msg);
+        var (api, http) = BuildApiClient(config);
         var tmdb = new TmdbImdbResolver(http, config.TmdbApiKey);
         // F-M20/F-M26: same pacing semantics as the upload bundle — no shared budget, because
         // there is none left to share (F-M20, 03.10.2026).
         var limiter = new GlobalRateLimiter(config.UploadsPerHour, config.MinCallPauseSec);
         var searchTracker = new DownloadSearchTracker(db, loggerFactory.CreateLogger<DownloadSearchTracker>());
-        var fileRetries = new FileRetryTracker(db, loggerFactory.CreateLogger<FileRetryTracker>());
-        var idNotFound = new IdNotFoundTracker(db, loggerFactory.CreateLogger<IdNotFoundTracker>());
         var qaFails = new QaFailTracker(db, loggerFactory.CreateLogger<QaFailTracker>());
         var logger = loggerFactory.CreateLogger<DownloadPipeline>();
-        var pipeline = new DownloadPipeline(logger, libraryManager, mediaSourceManager, api, tmdb, config, limiter, searchTracker, fileRetries, idNotFound, qaFails);
-        return new DownloadPipelineBundle(pipeline, registry, http, searchTracker, fileRetries, idNotFound, qaFails);
+        var pipeline = new DownloadPipeline(logger, libraryManager, mediaSourceManager, api, tmdb, config, limiter, searchTracker, qaFails);
+        return new DownloadPipelineBundle(pipeline, registry, http, searchTracker, qaFails);
     }
 
     /// <summary>
@@ -129,7 +135,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <param name="bundle">Bundle to dispose.</param>
     public static void DisposeDownloadPipeline(DownloadPipelineBundle bundle)
     {
-        bundle.FileRetries.Flush(); // F-M60: persist retry counters after the run
         bundle.SearchTracker.Flush();
         bundle.Registry.Dispose();
         bundle.Http.Dispose();
@@ -175,14 +180,12 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         /// <summary>
         /// Initializes a new instance of the <see cref="DownloadPipelineBundle"/> class.
         /// </summary>
-        public DownloadPipelineBundle(DownloadPipeline pipeline, ContentHashRegistry registry, HttpClient http, DownloadSearchTracker searchTracker, FileRetryTracker fileRetries, IdNotFoundTracker idNotFound, QaFailTracker qaFails)
+        public DownloadPipelineBundle(DownloadPipeline pipeline, ContentHashRegistry registry, HttpClient http, DownloadSearchTracker searchTracker, QaFailTracker qaFails)
         {
             Pipeline = pipeline;
             Registry = registry;
             Http = http;
             SearchTracker = searchTracker;
-            FileRetries = fileRetries;
-            IdNotFound = idNotFound;
             QaFails = qaFails;
         }
 
@@ -198,21 +201,13 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         /// <summary>Gets the per-item search tracker (F-M47).</summary>
         public DownloadSearchTracker SearchTracker { get; }
 
-        /// <summary>Gets the per-item file-failure retry tracker (F-M60).</summary>
-        public FileRetryTracker FileRetries { get; }
-
-        /// <summary>Gets the per-item id-resolution failure tracker (F-M66).</summary>
-        public IdNotFoundTracker IdNotFound { get; }
-
         /// <summary>Gets the per-(item, language) QA-failure tracker.</summary>
         public QaFailTracker QaFails { get; }
 
         /// <inheritdoc />
         public void Dispose()
         {
-            FileRetries.Flush();
             SearchTracker.Flush();
-            IdNotFound.Flush(); // F-M66: persist id-failure counters after the run
             QaFails.Flush(); // Persist qa-failure counters after the run
             Registry.Dispose();
             Http.Dispose();
@@ -227,13 +222,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         /// <summary>
         /// Initializes a new instance of the <see cref="PipelineBundle"/> class.
         /// </summary>
-        public PipelineBundle(UploadPipeline pipeline, ContentHashRegistry registry, HttpClient http, FileRetryTracker fileRetries, IdNotFoundTracker idNotFound)
+        public PipelineBundle(UploadPipeline pipeline, ContentHashRegistry registry, HttpClient http)
         {
             Pipeline = pipeline;
             Registry = registry;
             Http = http;
-            FileRetries = fileRetries;
-            IdNotFound = idNotFound;
         }
 
         /// <summary>Gets the upload pipeline.</summary>
@@ -245,17 +238,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         /// <summary>Gets the HTTP client.</summary>
         public HttpClient Http { get; }
 
-        /// <summary>Gets the per-item file-failure retry tracker (F-M60).</summary>
-        public FileRetryTracker FileRetries { get; }
-
-        /// <summary>Gets the per-item id-resolution failure tracker (F-M66).</summary>
-        public IdNotFoundTracker IdNotFound { get; }
-
         /// <inheritdoc />
         public void Dispose()
         {
-            FileRetries.Flush();
-            IdNotFound.Flush(); // F-M66: persist id-failure counters after the run
             Registry.Dispose();
             Http.Dispose();
         }

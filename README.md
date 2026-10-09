@@ -1,22 +1,12 @@
 # SubDL Scribe
 
 SubDL Scribe keeps your Jellyfin library subtitled and gives back to [SubDL](https://subdl.com). It
-**downloads** missing subtitles for the languages and libraries you select, and **uploads** the
-subtitle tracks already embedded in your own media files.
+**downloads** missing subtitles for the languages and libraries you select, **synchronizes them to the
+audio track**, and **uploads** the subtitle tracks already embedded in your own media files.
 
-The upload direction is **off by default** — see [Upload](#upload-off-by-default).
+Written by an **AI agent** under the maintainer's direction.
 
 Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
-
-## How this plugin is developed
-
-The code, the specification and this README are written by an **AI agent** under the maintainer's
-direction. The maintainer supplies the requirements, the design decisions and the tests — they come
-from his own library and the failures it produced — and reviews, measures and approves every change.
-
-The [Jellyfin project asks](https://jellyfin.org/docs/general/contributing/llm-policies/) that projects
-shared in its community disclose LLM involvement, so it is disclosed here. Anyone who would rather not
-run LLM-written software can decide on that basis.
 
 ## Requirements
 
@@ -40,14 +30,19 @@ run LLM-written software can decide on that basis.
 
 ### Manual
 
-1. Download `Jellyfin.Plugin.SubdlSync_12.1.12.175.zip` from the [releases page](../../releases).
+1. Download the ZIP of the latest release from the [releases page](../../releases).
 2. Create a folder for the plugin under your Jellyfin `plugins/` directory and extract the ZIP into it:
 
    ```
    /var/lib/jellyfin/plugins/SubDL Scribe/
    ├── Jellyfin.Plugin.SubdlSync.dll
    ├── LanguageDetection.dll
-   └── LiteDB.dll
+   ├── LiteDB.dll
+   └── licenses/
+       ├── THIRD-PARTY.txt
+       ├── LanguageDetection-Apache-2.0.txt
+       ├── LiteDB-MIT.txt
+       └── SubDL-Scribe-GPL-3.0.txt
    ```
 
 3. Restart Jellyfin.
