@@ -1353,6 +1353,17 @@ public sealed class SubdlEventDispatcher : IDisposable
             return;
         }
 
+        // F-M335 (operator order 09.10.2026): this row was only ever FINISHED, never STARTED. Every
+        // writer in this class called Finish() for the alignment while Start() was called for the
+        // seeder, both directions and all three refresh tasks — so the Auto-Sync row kept whatever
+        // start time it last had and reported a nine-hour run for 274 s of work (measured on prod:
+        // started 08.10. 18:05, ended 09.10. 03:23, "5 aligned, 5 already in sync (274.9s)").
+        // WorkerRunRegistry.Finish falls back to "now" ONLY when Started is null, so a stale stamp
+        // survived every later run. The alignment happens DURING the download run whose summary
+        // arrives here, so that run is this row's real beginning; opened before every branch below,
+        // so a skipped or failed alignment also carries an honest start.
+        runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey, Registry.WorkerRunRegistry.Name);
+
         if (downSummary.IsDryRun)
         {
             runs.Finish(
@@ -1558,7 +1569,15 @@ public sealed class SubdlEventDispatcher : IDisposable
                 // and the next real run had nothing to work: the report-only mode consumed the work
                 // it was describing. F-M22: "what a dry run leaves behind must not change what a
                 // later run finds."
-                if (_upInFlightDryRun) { break; }
+                // F-M335 (operator order 09.10.2026): this line used to read `_upInFlightDryRun` —
+                // the UPLOAD dry-run flag. On a download run that flag is false, so the guard never
+                // fired and the DOWNLOAD dry run marked every item it had only DESCRIBED as `Done`.
+                // Measured on the test bench: a download dry run wrote 7 `Done` rows, exactly the 7
+                // items it had printed a DRY-RUN line for, and the next real run skipped them — the
+                // report-only mode consumed the work it was describing. That is the same F-M22 defect
+                // the sibling upload branch had already been fixed for, which is why only one half
+                // was repaired: an asymmetry that reads as correct on either side alone.
+                if (_downInFlightDryRun) { break; }
                 ApplyItem(queue, itemId, QueueItem.ItemState.Done);
                 break;
 

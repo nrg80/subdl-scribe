@@ -1005,6 +1005,67 @@ def main():
               "!config.DownloadDryRun" in _probe and "!config.DryRun" not in _probe,
               "the two switches are separate settings; the wrong one would exempt the wrong mode")
 
+    # ---- F-M335 (operator order 09.10.2026): the dry run's queue guard, and the Auto-Sync row's start ----
+    # TWO defects the operator reported together, both live on prod.
+    #
+    # (1) "Wieso funktioniert der stop download button nicht mehr" led to the queue, and the queue
+    # exposed this: the DOWNLOAD outcome handler guarded on `_upInFlightDryRun` — the UPLOAD flag.
+    # On a download run that flag is false, so a download dry run marked every item it had only
+    # DESCRIBED as `Done`. Measured: a dry run wrote 7 `Done` rows, exactly the 7 items it printed a
+    # DRY-RUN line for; the next real run skipped them. Nothing caught it because `_downInFlightDryRun`
+    # was written and never READ, and no check looked at either flag.
+    #
+    # Asserted from BOTH sides: each handler must consult its OWN flag, and each flag must have a
+    # READER. The second half is the one that would have caught it — a set-and-never-read field is
+    # invisible to a check that only greps the guard.
+    if disp_src:
+        _dl = disp_src.find("private void OnItemResult(List<QueueItem> queue")
+        _ul = disp_src.find("private void ApplyOutcomeUpload(")
+
+        def _code_only(text: str) -> str:
+            # Comments MUST be dropped first: the fix's own comment names the wrong flag it replaced
+            # ("this line used to read `_upInFlightDryRun`"), so a raw substring test failed on
+            # CORRECT code — measured. The claim is about the executed guard, not about the prose.
+            return "\n".join(ln for ln in text.splitlines()
+                             if not ln.strip().startswith("//") and not ln.strip().startswith("///"))
+
+        _dl_body = _code_only(disp_src[_dl:_ul]) if 0 <= _dl < _ul else ''
+        _ul_body = _code_only(disp_src[_ul:_ul + 1800]) if _ul >= 0 else ''
+        check("the DOWNLOAD dry run consults the DOWNLOAD flag",
+              "_downInFlightDryRun) { break; }" in _dl_body
+              and "_upInFlightDryRun" not in _dl_body,
+              "reading the upload flag leaves a download dry run unguarded — measured 7 Done rows")
+        check("the UPLOAD dry run consults the UPLOAD flag",
+              "_upInFlightDryRun) { break; }" in _ul_body
+              and "_downInFlightDryRun" not in _ul_body,
+              "each direction owns its own mode flag; the two switches are separate settings")
+        for _flag, _setter in (("_downInFlightDryRun", "config.DownloadDryRun"),
+                               ("_upInFlightDryRun", "config.DryRun")):
+            _assigned = disp_src.count(f"{_flag} = {_setter}")
+            _read = disp_src.count(f"if ({_flag})")
+            check(f"{_flag} is both written and READ",
+                  _assigned >= 1 and _read >= 1,
+                  f"a flag written but never read is a mode that is not actually guarded "
+                  f"(writes={_assigned}, reads={_read})")
+
+    # (2) The Auto-Sync row was only ever FINISHED, never STARTED: every writer called Finish() for
+    # the alignment while Start() was called for the seeder, both directions and all three refresh
+    # tasks. `Finish` falls back to "now" only when Started is null, so the stale stamp survived —
+    # prod showed a nine-hour run for 274 s of alignment. Asserted as the PAIR write/read on the row
+    # key, in the one method that holds the download summary.
+    if disp_src:
+        _row_at = disp_src.find("private void RecordAutoSyncRow(")
+        _row_body = disp_src[_row_at:disp_src.find("private void ApplyStatusCounters", _row_at)] if _row_at >= 0 else ''
+        check("the Auto-Sync row is STARTED, not only finished",
+              "runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey" in _row_body,
+              "a row that is only closed keeps its previous start time (measured: 9 h for 274 s)")
+        check("its start is written before every outcome branch",
+              _row_body.find("runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey")
+              < _row_body.find("if (downSummary.IsDryRun)") if
+              _row_body.find("runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey") >= 0
+              and _row_body.find("if (downSummary.IsDryRun)") >= 0 else False,
+              "a branch that returns before the start leaves skipped/failed runs with a stale stamp")
+
     # ---- F-M50 (operator order 08.10.2026): ONE setting, TWO effects ----
     # "Die correction attempts bestimmen wieviele Kandidaten pro Sprache gesucht werden und wie oft die
     # autosync Schleife maximal Kandidaten zieht bis das Ergebnis passt. Aus 2 variables mach eine."

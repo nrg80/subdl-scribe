@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.220"
+version: "12.1.12.221"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,11 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.221: The dry run consumes no work. The download outcome handler read the UPLOAD
+    dry-run flag, so a download dry run marked every item it had only described as Done and the
+    next real run skipped them. Each direction now consults its own flag. And the Auto-Sync row
+    is STARTED as well as finished - it was only ever closed, so it reported a stale start time
+    (prod: nine hours for 274 s of alignment).
   v12.1.12.220: A DOWNLOAD dry run escapes the DOWNLOAD brake, not the search one. With the account
     at 50/50 the probe from F-M331 held back the very run meant to report what WOULD happen, so the
     dry-run test could not be started at all. A dry run fetches no file, so the download counter no
