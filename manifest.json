@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.220",
-        "changelog": "v12.1.12.220: A DOWNLOAD dry run escapes the DOWNLOAD brake, not the search one. With the account\n    at 50/50 the probe from F-M331 held back the very run meant to report what WOULD happen, so the\n    dry-run test could not be started at all. A dry run fetches no file, so the download counter no\n    longer stops it; the search allowance keeps holding it in both modes, because a dry run does\n    search every item and prints only what those answers carry.",
+        "version": "12.1.12.221",
+        "changelog": "v12.1.12.221: The dry run consumes no work. The download outcome handler read the UPLOAD\n    dry-run flag, so a download dry run marked every item it had only described as Done and the\n    next real run skipped them. Each direction now consults its own flag. And the Auto-Sync row\n    is STARTED as well as finished - it was only ever closed, so it reported a stale start time\n    (prod: nine hours for 274 s of alignment).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.220-dev/Jellyfin.Plugin.SubdlSync_12.1.12.220.zip",
-        "checksum": "009987806d28567b20cde007a4e60415",
-        "timestamp": "2026-10-09T03:05:32Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.221-dev/Jellyfin.Plugin.SubdlSync_12.1.12.221.zip",
+        "checksum": "77be26fcfd962c70870ae9348b21dee7",
+        "timestamp": "2026-10-09T03:44:04Z"
       }
     ]
   }
