@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.228",
-        "changelog": "v12.1.12.228: The Auto-Sync numbers in the log are written with a decimal point, not with\n    whatever separator the machine prefers. The same line read \"t = +8,62\" on one day and\n    \"t = +8.62\" on the next, from unchanged code, because interpolated numbers follow the\n    host culture. Nothing about the alignment itself changed.",
+        "version": "12.1.12.229",
+        "changelog": "v12.1.12.229: Removes an experimental subtitle-alignment method that shipped in 228 by\n    mistake. Nothing a run does changes - the alignment is the same one 227 used, unchanged.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.228-dev/Jellyfin.Plugin.SubdlSync_12.1.12.228.zip",
-        "checksum": "009102f8eb553efd180ec92b9294572e",
-        "timestamp": "2026-10-09T09:26:41Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.229-dev/Jellyfin.Plugin.SubdlSync_12.1.12.229.zip",
+        "checksum": "f5f64cd0c3878149614bc42963266d1e",
+        "timestamp": "2026-10-09T09:39:00Z"
       }
     ]
   }
