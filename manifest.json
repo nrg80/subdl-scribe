@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.175",
-        "changelog": "v12.1.12.175: A pending deferred fire now decides the worker's word and colour for every row\n    that does not claim something stronger, not only for a green one. The previous version\n    overrode green alone, so the download sat on a yellow \"cancel\" while its fire for 04:37 was\n    waiting - and \"cancel\" is the wrong word for a direction that is scheduled to resume. Both\n    \"ok\" and \"cancelled\" claim that nothing is owed, and a pending fire proves otherwise. Only\n    \"failed\" (something is broken) and \"run\" (in progress) are left alone.",
+        "version": "12.1.12.229",
+        "changelog": "v12.1.12.229: Removes an experimental subtitle-alignment method that shipped in 228 by\n    mistake. Nothing a run does changes - the alignment is the same one 227 used, unchanged.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.175/Jellyfin.Plugin.SubdlSync_12.1.12.175.zip",
-        "checksum": "efb463f2e5cb11b57b5dd3299acbfa13",
-        "timestamp": "2026-10-03T14:33:47Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.229/Jellyfin.Plugin.SubdlSync_12.1.12.229.zip",
+        "checksum": "93d496ac422f9eea34dcbdc9a7eeee18",
+        "timestamp": "2026-10-09T10:24:11Z"
       }
     ]
   }
