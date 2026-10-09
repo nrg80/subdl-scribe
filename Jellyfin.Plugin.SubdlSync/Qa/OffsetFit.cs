@@ -529,22 +529,6 @@ public static class OffsetFit
     /// <returns>Sigma, as the fit uses it.</returns>
     public static double DebugSigma(double[,] s) => MedianAbsStep(s);
 
-    /// <summary>
-    /// The candidate shifts, in the order the cue table's second index uses them. Exposed so a
-    /// SECOND fit — the polygonzug model, <see cref="StuetzstellenFit"/> — works on the same state grid
-    /// instead of carrying a copy that could drift away from this one.
-    /// </summary>
-    /// <returns>A copy of the state grid.</returns>
-    public static double[] DebugStates() => (double[])States.Clone();
-
-    /// <summary>
-    /// The block boundaries a DP may cut at. Exposed for the same reason as
-    /// <see cref="DebugStates"/>.
-    /// </summary>
-    /// <param name="nCues">Cues in the file.</param>
-    /// <returns>Ascending boundaries, first 0, last <paramref name="nCues"/>.</returns>
-    public static int[] DebugBounds(int nCues) => MakeBounds(nCues);
-
     private static double MedianAbsStep(double[,] s)
     {
         int nc = s.GetLength(0), ns = s.GetLength(1);
@@ -803,20 +787,7 @@ public static class OffsetFit
         return tot;
     }
 
-    private static double ZeroObjective(double[,] s, bool[,] w, double sigma) =>
-        ZeroObjectiveFor(s, w, sigma);
-
-    /// <summary>
-    /// The objective of doing nothing, exposed so a SECOND fit measures the do-nothing
-    /// hypothesis on the incumbent's own terms instead of re-deriving them. A second copy of
-    /// this formula would be a second thing to keep in step, and a disagreement between the two
-    /// fits would then be unattributable.
-    /// </summary>
-    /// <param name="s">Cue table.</param>
-    /// <param name="w">Fits-inside flags.</param>
-    /// <param name="sigma">Measured sigma.</param>
-    /// <returns>The objective of a flat, all-zero path.</returns>
-    public static double ZeroObjectiveFor(double[,] s, bool[,] w, double sigma)
+    private static double ZeroObjective(double[,] s, bool[,] w, double sigma)
     {
         int nc = s.GetLength(0);
         double sum = 0;
