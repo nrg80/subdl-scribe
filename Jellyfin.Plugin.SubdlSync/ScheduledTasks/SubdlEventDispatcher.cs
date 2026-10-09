@@ -1140,6 +1140,13 @@ public sealed class SubdlEventDispatcher : IDisposable
             // RunCycleAsync for why the cycle no longer lights both directions up front. The row is
             // started with no name so a row that has never run keeps its stored display name.
             MarkDirectionRunning(upload);
+            // F-M340 (operator finding 09.10.2026): "Ampel auto sync soll auf run springen". The
+            // alignment's row is opened HERE, at this run's edge, and NOT in RecordAutoSyncRow.
+            // Measured: Start() and all five Finish() calls sat in one SYNCHRONOUS block that runs
+            // only once the download summary exists, so the row was opened and closed in the same
+            // instant — the GUI polls every 10 s and could never see it blue. A worker that can never
+            // be seen running cannot be watched, which is the one thing the row exists for (F-M322).
+            MarkAutoSyncRunning(upload, config);
 
             var progress = new Progress<double>();
             var (upSummary, downSummary) = await ExecutePipelineAsync(upload, config, filter, progress).ConfigureAwait(false);
@@ -1195,6 +1202,13 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
         finally
         {
+            // F-M340: the Auto-Sync row, too, must be closed by whoever opened it. This run opened it
+            // before ExecutePipelineAsync, and that call can fail or be cancelled BEFORE the summary
+            // path ever sees it — without this guard the light would stay blue after the run ended,
+            // which is a worse lie than never lighting up at all. Runs BEFORE the direction row so a
+            // failure still reads in the correct order.
+            FinishAutoSyncRowIfOpen(upload);
+
             // The direction's OWN row, written from its own fate — start and finish, one worker.
             // In the finally so a failure or a stop still closes the row it opened; a direction that
             // never began leaves the row untouched (see FinishDirectionRow).
@@ -1375,16 +1389,12 @@ public sealed class SubdlEventDispatcher : IDisposable
             return;
         }
 
-        // F-M335 (operator order 09.10.2026): this row was only ever FINISHED, never STARTED. Every
-        // writer in this class called Finish() for the alignment while Start() was called for the
-        // seeder, both directions and all three refresh tasks — so the Auto-Sync row kept whatever
-        // start time it last had and reported a nine-hour run for 274 s of work (measured on prod:
-        // started 08.10. 18:05, ended 09.10. 03:23, "5 aligned, 5 already in sync (274.9s)").
-        // WorkerRunRegistry.Finish falls back to "now" ONLY when Started is null, so a stale stamp
-        // survived every later run. The alignment happens DURING the download run whose summary
-        // arrives here, so that run is this row's real beginning; opened before every branch below,
-        // so a skipped or failed alignment also carries an honest start.
-        runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey, Registry.WorkerRunRegistry.Name);
+        // F-M340: this method CLOSES the row; it no longer opens it. The start belongs to the run's
+        // edge (MarkAutoSyncRunning), where the light can be seen — F-M335 had put it here, in the
+        // same synchronous block as the five Finish() calls below, so `run` was unreachable. The flag
+        // is cleared first: from here on the finally guard must leave the row to this method, which
+        // holds the run's real verdict.
+        _autoSyncRowOpened = false;
 
         if (downSummary.IsDryRun)
         {
@@ -1700,6 +1710,12 @@ public sealed class SubdlEventDispatcher : IDisposable
     private bool _dirRowWrittenUp;
     private bool _dirRowWrittenDown;
 
+    // F-M340 (operator finding 09.10.2026): true while THIS download run has the Auto-Sync row open.
+    // The row is opened at the run's edge (MarkAutoSyncRunning) and closed either by the summary path
+    // (RecordAutoSyncRow) or by the finally guard, whichever comes first. Without the flag the guard
+    // could not tell a row this run opened from one a PREVIOUS run left behind.
+    private bool _autoSyncRowOpened;
+
     // The current cycle's seeder accounting, one entry per leg. See PrepareCycleState for why.
     private int _seedLegsScanned;
     private bool _seedCoveredUp;
@@ -1787,6 +1803,71 @@ public sealed class SubdlEventDispatcher : IDisposable
             plugin.WorkerRuns.Finish(Registry.WorkerRunRegistry.DownloadWorkerKey, "Download", word, text, dryRun);
             _dirRowWrittenDown = true;
         }
+    }
+
+    /// <summary>
+    /// F-M340 (operator finding 09.10.2026): "Ampel auto sync soll auf run springen". Opens the
+    /// Auto-Sync row at the moment the DOWNLOAD run that will feed the alignment starts.
+    /// <para>
+    /// Only for the download, and only when the alignment can actually produce work: an upload run
+    /// holds no audio fit at all, and with the switch off the row reports `skipped` from the summary
+    /// path — opening it blue first would promise a run that never comes. Two conditions, because
+    /// the light means "work is in flight NOW" and nothing else.
+    /// </para>
+    /// <para>
+    /// The row is opened with no detail: a start time that is real and an outcome that is honest,
+    /// while the number of files this run will fit is unknown at this point. The detail arrives with
+    /// the summary. `Finish` keeps the start stamp it finds, so the duration shown on the page is
+    /// this run's real fit time in place of the fraction of a second the old placement produced.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction whose run is starting; only the download opens this row.</param>
+    /// <param name="config">Live configuration — the alignment's own switch decides.</param>
+    private void MarkAutoSyncRunning(bool upload, PluginConfiguration config)
+    {
+        if (upload || !config.QaDownloadAutoSync)
+        {
+            return;
+        }
+
+        var runs = Plugin.Instance?.WorkerRuns;
+        if (runs == null)
+        {
+            return;
+        }
+
+        runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey, Registry.WorkerRunRegistry.Name);
+        _autoSyncRowOpened = true;
+
+        // The wait between the two rows is the point of the exercise: the alignment runs DURING the
+        // download, so its row is open for exactly as long as the download works on it.
+        LogUtil.Detail(config.LogMode, _logger, "[SubDL] auto-sync row opened with the download run.");
+    }
+
+    /// <summary>
+    /// F-M340: closes the Auto-Sync row when the run ends without ever delivering a download summary
+    /// — a cancelled run, a lock-skip, or an exception out of the pipeline.
+    /// </summary>
+    /// <remarks>
+    /// A row left on `run` after the run is over is worse than one that never lit: the operator reads
+    /// a working alignment on a plugin that has stopped working on it. The summary path clears
+    /// <see cref="_autoSyncRowOpened"/> before it writes its own verdict, so this guard never
+    /// overwrites a real result — the flag, not the outcome word, decides who writes.
+    /// </remarks>
+    /// <param name="upload">Direction that is ending; only the download owns this row.</param>
+    private void FinishAutoSyncRowIfOpen(bool upload)
+    {
+        if (upload || !_autoSyncRowOpened)
+        {
+            return;
+        }
+
+        _autoSyncRowOpened = false;
+        Plugin.Instance?.WorkerRuns.Finish(
+            Registry.WorkerRunRegistry.AutoSyncWorkerKey,
+            Registry.WorkerRunRegistry.Name,
+            Registry.WorkerRunRegistry.Outcome.Skipped,
+            "run ended before any file was measured");
     }
 
     /// <summary>

@@ -1163,23 +1163,63 @@ def main():
                   f"a flag written but never read is a mode that is not actually guarded "
                   f"(writes={_assigned}, reads={_read})")
 
-    # (2) The Auto-Sync row was only ever FINISHED, never STARTED: every writer called Finish() for
-    # the alignment while Start() was called for the seeder, both directions and all three refresh
-    # tasks. `Finish` falls back to "now" only when Started is null, so the stale stamp survived —
-    # prod showed a nine-hour run for 274 s of alignment. Asserted as the PAIR write/read on the row
-    # key, in the one method that holds the download summary.
+    # (2) F-M340 (operator finding 09.10.2026): "Ampel auto sync soll auf run springen". The row was
+    # STARTED but unreachably so: Start() and all five Finish() calls sat in ONE synchronous block
+    # that runs only once the download summary exists, so the row opened and closed in the same
+    # instant and the 10 s poll could never see it blue. F-M335's own check asserted the start was
+    # "before every outcome branch" - true, and useless: it named the start inside the very method
+    # whose end the finishes are. The rule is not "started early in the closing method" but "started
+    # where the RUN starts, and closed by whoever opened it".
+    #
+    # Asserted as a POSITION PAIR across two methods, because each half alone reads correct: a start
+    # left in RecordAutoSyncRow passes a "row is started" test while remaining invisible, and a start
+    # at the run edge WITHOUT the guard leaves the light blue forever after a cancelled run.
     if disp_src:
+        _open_at = disp_src.find("private void MarkAutoSyncRunning(")
+        _open_body = disp_src[_open_at:disp_src.find("private void FinishAutoSyncRowIfOpen(", _open_at)] if _open_at >= 0 else ''
         _row_at = disp_src.find("private void RecordAutoSyncRow(")
         _row_body = disp_src[_row_at:disp_src.find("private void ApplyStatusCounters", _row_at)] if _row_at >= 0 else ''
-        check("the Auto-Sync row is STARTED, not only finished",
-              "runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey" in _row_body,
-              "a row that is only closed keeps its previous start time (measured: 9 h for 274 s)")
-        check("its start is written before every outcome branch",
-              _row_body.find("runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey")
-              < _row_body.find("if (downSummary.IsDryRun)") if
-              _row_body.find("runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey") >= 0
-              and _row_body.find("if (downSummary.IsDryRun)") >= 0 else False,
-              "a branch that returns before the start leaves skipped/failed runs with a stale stamp")
+        check("F-M340: the Auto-Sync row is opened by its own method",
+              "runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey" in _open_body,
+              "the row needs a writer that runs when the RUN starts, not when its summary arrives")
+        check("F-M340: it is opened at the run's edge, before the pipeline await",
+              _open_body != '' and
+              disp_src.find("MarkAutoSyncRunning(upload, config)") >= 0 and
+              disp_src.find("MarkAutoSyncRunning(upload, config)")
+              < disp_src.find("await ExecutePipelineAsync(upload, config, filter, progress)"),
+              "opening it after the await is exactly the old defect: start and finish in one instant")
+        check("F-M340: the closing method no longer opens the row",
+              "runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey" not in _row_body,
+              "a start here is unreachable - the finishes are in the same synchronous block")
+        check("F-M340: a run that ends without a summary still closes the row",
+              "FinishAutoSyncRowIfOpen(upload)" in disp_src and
+              disp_src.find("FinishAutoSyncRowIfOpen(upload)")
+              < disp_src.find("FinishDirectionRow(upload);", disp_src.find("finally")),
+              "a cancelled run would otherwise leave the light blue after the run is over")
+        check("F-M340: the guard writes only what this run opened",
+              "_autoSyncRowOpened" in _open_body and
+              "_autoSyncRowOpened = false;" in _row_body,
+              "without the flag the guard cannot tell its own open row from a previous run's")
+        # The flag must be READ where it decides, not merely set: the F-M335(1) defect was a field
+        # written and never read, which no grep for the guard can see. Asserted on the guard's OWN
+        # body, bounded both ends.
+        _guard_at = disp_src.find("private void FinishAutoSyncRowIfOpen(")
+        _guard_end = disp_src.find("private ", _guard_at + 10)
+        _guard_body = disp_src[_guard_at:_guard_end if _guard_end > _guard_at else _guard_at + 900] if _guard_at >= 0 else ''
+        # The read must sit in the guard's CONDITION, not merely somewhere in its body: the body also
+        # CLEARS the flag, so a body-wide search is satisfied by a guard that never consults it. That
+        # distinction is the whole F-M335(1) lesson - a field written and never read.
+        _guard_cond = _guard_body.split("return;")[0]
+        check("F-M340: the closing guard READS the flag in its condition",
+              "_autoSyncRowOpened" in _guard_cond,
+              "a flag that is written but never read guards nothing - it would report a finished "
+              "alignment on every run, including those that never opened the row")
+        # And the OPENING side must be gated on both directions' facts: the download direction and
+        # the alignment's own switch. Either one alone promises work that cannot happen.
+        check("F-M340: the row is opened for the download only, and only with the fit switched on",
+              "if (upload || !config.QaDownloadAutoSync)" in _open_body,
+              "an upload run holds no fit at all, and with the switch off the row reports skipped - "
+              "opening it blue first would promise a run that never comes")
 
     # ---- F-M50 (operator order 08.10.2026): ONE setting, TWO effects ----
     # "Die correction attempts bestimmen wieviele Kandidaten pro Sprache gesucht werden und wie oft die
