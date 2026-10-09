@@ -1328,6 +1328,49 @@ def main():
           "the button below always runs" not in html,
           "the button sits directly under the line; naming it again is the noise the operator removed")
 
+    # ---- F-M336 (operator finding 09.10.2026): a worker row may not claim work the run did not do ----
+    # Measured on the test bench: a download DRY RUN stored "20 downloaded, 22 unavailable, 1 skipped"
+    # while carrying DryRun=1, and the run's own log line for the same run said "20 would have saved".
+    # Asserted as a PAIR of labels plus the WIRING, because each half alone stays green on the defect:
+    # the hypothetical label can exist and never be reached (a caller passing a constant false), and
+    # the mode can be read at the call site and never reach the label (the old two-argument call).
+    # Comments are stripped before the positive assertions - the fix's own comment quotes both labels,
+    # so a raw substring test would pass on a file whose code still prints the old claim.
+    disp_src = read_source("ScheduledTasks", "SubdlEventDispatcher.cs")
+    if disp_src:
+        code = re.sub(r"//[^\n]*", "", disp_src)
+        # The PAIRING is the claim: each count carries the hypothetical label in its dry-run arm and
+        # the plain one otherwise. Asserting the bare words is not enough - the plain label legitimately
+        # remains as the else-arm (measured: a "no unconditional label remains" check fired on correct
+        # code), and a hypothetical label that exists but is never chosen satisfies a word-level test.
+        check("F-M336: the download count is labelled by the run's mode (paired)",
+              'dryRun ? "{0} would have saved" : "{0} downloaded",' in code,
+              "the dry-run arm must read 'would have saved' - the run's own log line words")
+        check("F-M336: the upload count is labelled by the run's mode (paired)",
+              'dryRun ? "{0} would have uploaded" : "{0} uploaded",' in code,
+              "same rule for the upload direction - the two summaries are symmetric here")
+        check("F-M336: neither count is printed without its mode",
+              code.count("dryRun ?") >= 2 and '"{0} downloaded"' not in code.split("dryRun ?")[0],
+              "a label outside the ternary would print a claim the run cannot back")
+
+        # The wiring: the mode must be read and PASSED. A caller left on the two-argument form
+        # compiles and prints the old claim, which is exactly the state this fix left behind.
+        check("F-M336: DescribeDirectionRun takes the mode",
+              re.search(r"DescribeDirectionRun\s*\(bool upload[^)]*bool dryRun\s*\)", code) is not None,
+              "the label cannot be derived inside the method - it takes no configuration")
+        check("F-M336: the call site passes the run's own mode",
+              re.search(r"DescribeDirectionRun\s*\(upload,\s*upSummary,\s*downSummary,\s*directionWasDryRun\s*\)", code) is not None,
+              "a two-argument call would compile and keep the claim")
+        # Anchored on the VARIABLE, not on the expression: the same expression legitimately sits in
+        # CleanupDirectionQueue (measured: 2 occurrences), so a presence test stayed GREEN when the
+        # call site was mutated to read the OTHER direction's summary - the old read kept satisfying
+        # the check. Tying it to the name the call site uses is what makes the mutation visible.
+        check("F-M336: the mode is read from the summary of the direction being written",
+              re.search(r"bool directionWasDryRun = upload \? upSummary\?\.IsDryRun == true : downSummary\?\.IsDryRun == true;", code) is not None,
+              "each direction consults its OWN summary (the F-M335(1) asymmetry)")
+        check("F-M336: that read sits ABOVE the row write (asserted as an order)",
+              code.find("bool directionWasDryRun =") < code.find("DescribeDirectionRun(upload, upSummary, downSummary, directionWasDryRun)"),
+              "after the write a corrected value cannot reach the row")
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)

@@ -1003,8 +1003,19 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// <param name="upSummary">Upload run summary, when the upload leg produced one.</param>
     /// <param name="downSummary">Download run summary, when the download leg produced one.</param>
     /// <returns>Short detail text for the direction's row.</returns>
-    private static string DescribeDirectionRun(bool upload, Pipeline.RunSummary? upSummary, Pipeline.DownloadRunSummary? downSummary)
+    private static string DescribeDirectionRun(bool upload, Pipeline.RunSummary? upSummary, Pipeline.DownloadRunSummary? downSummary, bool dryRun)
     {
+        // F-M336 (operator finding 09.10.2026, live on the test bench): this row claimed work the
+        // run had not done. Measured: a download DRY RUN stored "20 downloaded, 22 unavailable,
+        // 1 skipped" while carrying DryRun=1, and the run's own log line for the same run said
+        // "20 would have saved". The log had the label right since F-M247; the row did not, because
+        // this method takes the summaries but never the mode - so the dry run's hypothetical count
+        // was printed as a claim. The row is what the operator reads on the page, which makes it
+        // the worse half of the two.
+        //
+        // The label follows the run's own log line ("would have saved" / "would have uploaded") so
+        // the two can be compared word for word. A dry run's counters are honest numbers about what
+        // it FOUND; only the verb was wrong, which is why the fix is the label and not the counter.
         var parts = new System.Collections.Generic.List<string>(3);
         if (upload)
         {
@@ -1015,7 +1026,10 @@ public sealed class SubdlEventDispatcher : IDisposable
 
             if (upSummary.Uploaded > 0)
             {
-                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} uploaded", upSummary.Uploaded));
+                parts.Add(string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    dryRun ? "{0} would have uploaded" : "{0} uploaded",
+                    upSummary.Uploaded));
             }
 
             if (upSummary.Failed > 0)
@@ -1053,7 +1067,10 @@ public sealed class SubdlEventDispatcher : IDisposable
 
             if (downSummary.Downloaded > 0)
             {
-                parts.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} downloaded", downSummary.Downloaded));
+                parts.Add(string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    dryRun ? "{0} would have saved" : "{0} downloaded",
+                    downSummary.Downloaded));
             }
 
             if (downSummary.Failed > 0)
@@ -1154,7 +1171,12 @@ public sealed class SubdlEventDispatcher : IDisposable
             // the waiting task never sees it and had to borrow the seeder's sentence instead.
             // Deliberately BEFORE CleanupDirectionQueue: that call overwrites both fields when the run
             // was quota-stopped, and a quota stop is this direction's own stronger fate.
-            SetDirectionDetail(upload, DescribeDirectionRun(upload, upSummary, downSummary));
+            // F-M336: the mode is read HERE, ahead of the row's own write, and passed in - the
+            // label cannot be derived inside DescribeDirectionRun (it takes no configuration) and a
+            // caller left on the old two-argument form would compile and print the old claim.
+            // The same expression CleanupDirectionQueue uses for its own dry-run guard.
+            bool directionWasDryRun = upload ? upSummary?.IsDryRun == true : downSummary?.IsDryRun == true;
+            SetDirectionDetail(upload, DescribeDirectionRun(upload, upSummary, downSummary, directionWasDryRun));
             CleanupDirectionQueue(upload, queue, filter, retriesAtStart, upSummary, downSummary);
         }
         catch (OperationCanceledException)
