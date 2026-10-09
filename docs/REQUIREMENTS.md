@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.224.
+**Status:** Implementation — v12.1.12.225.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -30,7 +30,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 5 requirements
 
 - [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 25 requirements
-- [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 13 requirements
+- [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 14 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 14 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
@@ -1170,7 +1170,9 @@ A failed or skipped candidate gets **no** transfer pause — nothing was transfe
 
 The "derive from the rate" sentinel `-1` is **not** clamped; only a real value is clamped. **Test: T21.**
 
-**F-M49 [D]:** **Daily-limit resume per direction:** two independent checkboxes, "Continue after daily limit" (Download) and "Continue after daily API limit" (Upload). **Both default ON.** ON → wait once until reset (max 24 h) and retry; OFF → clean stop.
+**F-M49 [D]:** **Daily-limit resume per direction:** two independent checkboxes, "Continue after daily limit" (Download) and "Continue after daily limit" (Upload). **Both default ON.** ON → wait once until reset (max 24 h) and retry; OFF → clean stop.
+
+**F-M338 [D] (operator order 09.10.2026):** **The two directions read the same sentence.** *"In upload gui: continue after daily limit (ohne api)"*. The upload control carried a word the download control does not — *"Continue after daily **API** limit"* against *"Continue after daily limit"* — and that difference is misleading rather than merely redundant: the two switches do the same thing in their own direction (F-M49), so different wording reads as different behaviour. The same fault was corrected on the page texts before (*"the three maintenance menus read just Manual"*), which is why the parity is asserted as a **pair of labels** and not as the absence of one word. **Test: T146.**
 
 **F-M51:** **Per-installation random schedule anchors:** all scheduled fires come from a background coordinator (30-s tick). Daily, weekly and monthly anchors are diced once per installation and persisted in config, and every maintenance job carries its own weekly anchor. No default fixed-time triggers. `Manual` disables the scheduled pipeline fires.
 
@@ -2034,5 +2036,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T144:** A worker row may not claim work the run did not do. Asserted as a **paired label** on both directions plus the **wiring**, because each half alone stays green on the defect: the hypothetical label can exist and never be reached (a caller passing a constant false), and the mode can be read at the call site and never reach the label (the old two-argument call compiles and prints the old claim). The pairing is what carries the claim — `dryRun ? "{0} would have saved" : "{0} downloaded"` — because the plain label legitimately REMAINS as the else-arm: a "no unconditional label remains" check was measured RED on correct code. The mode read is anchored on the **variable name** the call site uses, not on the expression: the same expression legitimately sits in `CleanupDirectionQueue`, so a presence test stayed GREEN when the call site was mutated to read the OTHER direction's summary. **Mutation-verified, six plants:** each label pinned, the parameter dropped, the call site passing a literal, the read taking the wrong direction, and the old two-argument call restored — each confirmed RED by name, baseline green on restore. (F-M336)
 
 **T145:** The General tab carries everything a run needs: Target languages sits on the General tab, directly below the library selection and above the refetch interval, and is **absent** from the Download tab. Asserted as an ORDER plus a COUNT plus the machinery, because every failure here is silent — the control renders perfectly on the wrong tab, a second copy renders too, and a moved block orphans the picker without changing a pixel. The tab boundaries are read from the DOM markers rather than counted, because the download tab is the last one and its section runs to the end of the page. **Mutation-verified, five plants:** block returned to the Download tab, a copy in both tabs, placed below the refetch interval, placed above the library list, and the picker modal dropped — each confirmed RED by name, baseline green on restore. (F-M337) The heading is asserted as an **element** and by its **name**: a bare "Target languages" fails, and so does a `<span>` styled to look like a heading, because a text check passes on both. The field-container form is required **absent** around it — an `inputContainer` is what made it read as a caption — and the old label form must be gone, since leaving it behind renders a second, stale caption. **Mutation-verified, four further plants:** the heading without the direction, the block back as a styled label, the heading as a `<span>`, and the old label left in place — each confirmed RED by name, baseline green on restore. (F-M337, follow-up)
+
+**T146:** The two daily-limit switches read the SAME sentence, and the upload one carries no "API". Asserted as a PARITY plus an ABSENCE, because each alone is passed by a wrong page: an absence check alone is satisfied by deleting the word from the wrong label, and the paragraph in the spec is only the statement of intent. The download label is pinned to its literal, so a change on the wrong side fails too. **Mutation-verified, three plants:** "API" back in the upload label, the download label altered instead, and the upload label rewritten wholesale — each confirmed RED by name, baseline green on restore. (F-M338)
 
 

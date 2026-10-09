@@ -825,6 +825,27 @@ def main():
           dl_section.count('id="QaDownloadAutoSync"') == 1,
           "count=%d" % dl_section.count('id="QaDownloadAutoSync"'))
 
+    # ---- F-M338 (operator order 09.10.2026): the two directions read the same --------------
+    # "In upload gui: continue after daily limit (ohne api)". The upload control carried a word the
+    # download control does not ("Continue after daily API limit" vs "Continue after daily limit"),
+    # and the operator dropped it. Asserted as a PARITY between the two labels plus the ABSENCE of
+    # the word: the two switches do the same thing in their own direction (F-M49), so a difference
+    # in wording reads as a difference in behaviour - which is what makes the extra words worse
+    # than redundant.
+    up_pos = html.find('id="UploadContinueAfterLimit"')
+    dl_pos = html.find('id="DownloadContinueAfterLimit"')
+    up_label = html[html.find("<span>", up_pos):html.find("</span>", up_pos) + 7] if up_pos != -1 else ""
+    dl_label = html[html.find("<span>", dl_pos):html.find("</span>", dl_pos) + 7] if dl_pos != -1 else ""
+    check("F-M338: the upload label carries no 'API'",
+          up_label != "" and "API" not in up_label,
+          "the operator asked for it without the word; measured label=%r" % up_label)
+    check("F-M338: both directions read the SAME sentence",
+          up_label != "" and up_label == dl_label,
+          "upload=%r download=%r - a wording difference reads as a behaviour difference" % (up_label, dl_label))
+    check("F-M338: the download label is unchanged",
+          dl_label == "<span>Continue after daily limit</span>",
+          "the fix is on the upload side only; measured download=%r" % dl_label)
+
     # ---- F-M337 (operator order 09.10.2026): the General tab carries everything that matters ----
     # "Target languages (download, required)" moves up under the library selection, so the first
     # tab holds the three things a run needs: which libraries, which languages, and the switches.
