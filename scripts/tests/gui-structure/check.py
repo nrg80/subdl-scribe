@@ -825,6 +825,39 @@ def main():
           dl_section.count('id="QaDownloadAutoSync"') == 1,
           "count=%d" % dl_section.count('id="QaDownloadAutoSync"'))
 
+    # ---- F-M337 (operator order 09.10.2026): the General tab carries everything that matters ----
+    # "Target languages (download, required)" moves up under the library selection, so the first
+    # tab holds the three things a run needs: which libraries, which languages, and the switches.
+    # Asserted as an ORDER plus a COUNT, because every failure here is silent: the control renders
+    # perfectly on the wrong tab and a second copy elsewhere renders too - only the operator's
+    # "warum ist das nicht auf der ersten Seite" reveals it.
+    # The tab boundaries are read from the DOM markers, not by counting characters: the download
+    # tab is the LAST one on the page, so its section runs to the end.
+    gen_start = html.find('data-tab-content="general"')
+    gen_end = html.find('data-tab-content=', gen_start + 1)
+    gen_section = html[gen_start:gen_end if gen_end != -1 else len(html)]
+    dl_start = html.rfind('data-tab-content="download"')
+    dl_section = html[dl_start:]
+    check("F-M337: Target languages sits on the General tab",
+          'for="DownloadLanguagesDisplay"' in gen_section,
+          "the operator asked for it there: the first page carries what a run needs")
+    check("F-M337: Target languages is GONE from the Download tab",
+          'for="DownloadLanguagesDisplay"' not in dl_section,
+          "a second copy would render and be saved twice, last one winning")
+    check("F-M337: Target languages sits BELOW the library selection",
+          gen_section.find('id="LibraryList"') < gen_section.find('for="DownloadLanguagesDisplay"'),
+          "the operator asked for it under the library list")
+    check("F-M337: Target languages sits ABOVE the refetch interval",
+          gen_section.find('for="DownloadLanguagesDisplay"') < gen_section.find('for="RefetchInterval"'),
+          "it belongs to the same block as the library, not below the schedule")
+    check("F-M337: exactly ONE Target languages control on the page",
+          html.count('id="DownloadLanguagesDisplay"') == 1,
+          "count=%d" % html.count('id="DownloadLanguagesDisplay"'))
+    check("F-M337: the picker button and the modal are still wired",
+          'id="DownloadLangList"' in html and 'DownloadLangPickerBtn' in html
+          and "subdlGetSelectedLangs" in html and "subdlPopulateLangList" in html,
+          "the control moved, not the machinery - moving the block must not orphan the picker")
+
     # ---- F-M324: one worker row, one worker's own result ----
     # The green branch handed the SEEDER's string to every direction row, so `Seeder` and `Upload`
     # carried the identical sentence on the live endpoint (measured on prod) while the upload row

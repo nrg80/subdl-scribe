@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.222"
+version: "12.1.12.223"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,9 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.223: Target languages (download, required) moves to the General tab, directly under
+    the library selection, so the first page carries what a run needs. Moved, not copied - a
+    second control would render on both tabs and the last one read would win at save.
   v12.1.12.222: A worker row may not claim work the run did not do. The Download row stored
     "20 downloaded, 22 unavailable, 1 skipped" while carrying DryRun=1, and the run's own log
     line said "20 would have saved" - DescribeDirectionRun took the summaries but never the
