@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.223"
+version: "12.1.12.224"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,9 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.224: "Target languages (download, required)" is a real heading now, and it names the
+    direction. It was a field caption (label in an inputContainer) whose text did not say whose
+    languages, while every other block on the General tab is introduced by an h3.
   v12.1.12.223: Target languages (download, required) moves to the General tab, directly under
     the library selection, so the first page carries what a run needs. Moved, not copied - a
     second control would render on both tabs and the last one read would win at save.

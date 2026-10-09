@@ -828,9 +828,14 @@ def main():
     # ---- F-M337 (operator order 09.10.2026): the General tab carries everything that matters ----
     # "Target languages (download, required)" moves up under the library selection, so the first
     # tab holds the three things a run needs: which libraries, which languages, and the switches.
-    # Asserted as an ORDER plus a COUNT, because every failure here is silent: the control renders
-    # perfectly on the wrong tab and a second copy elsewhere renders too - only the operator's
-    # "warum ist das nicht auf der ersten Seite" reveals it.
+    # FOLLOW-UP (same order, second pass): the control was a `<label class="inputLabel">` inside an
+    # `inputContainer` - the form used for FIELDS. Every other block on this tab is introduced by
+    # an `<h3>`, and the operator read the label as a field caption rather than as a section
+    # heading, and its text did not name the direction: "Target languages" alone does not say
+    # whose languages, while the sibling controls do ("Refetch interval", "SubDL Account").
+    # It is now `<h3>Target languages (download, …)</h3>` with the input below it, like its
+    # neighbours. Asserted as the ELEMENT, not only the text: a `<span>` styled to look like a
+    # heading passes a text check and is still not a heading.
     # The tab boundaries are read from the DOM markers, not by counting characters: the download
     # tab is the LAST one on the page, so its section runs to the end.
     gen_start = html.find('data-tab-content="general"')
@@ -839,24 +844,39 @@ def main():
     dl_start = html.rfind('data-tab-content="download"')
     dl_section = html[dl_start:]
     check("F-M337: Target languages sits on the General tab",
-          'for="DownloadLanguagesDisplay"' in gen_section,
+          'id="DownloadLanguagesDisplay"' in gen_section,
           "the operator asked for it there: the first page carries what a run needs")
     check("F-M337: Target languages is GONE from the Download tab",
-          'for="DownloadLanguagesDisplay"' not in dl_section,
+          'id="DownloadLanguagesDisplay"' not in dl_section,
           "a second copy would render and be saved twice, last one winning")
     check("F-M337: Target languages sits BELOW the library selection",
-          gen_section.find('id="LibraryList"') < gen_section.find('for="DownloadLanguagesDisplay"'),
+          gen_section.find('id="LibraryList"') < gen_section.find('id="DownloadLanguagesDisplay"'),
           "the operator asked for it under the library list")
     check("F-M337: Target languages sits ABOVE the refetch interval",
-          gen_section.find('for="DownloadLanguagesDisplay"') < gen_section.find('for="RefetchInterval"'),
+          gen_section.find('id="DownloadLanguagesDisplay"') < gen_section.find('id="RefetchInterval"'),
           "it belongs to the same block as the library, not below the schedule")
     check("F-M337: exactly ONE Target languages control on the page",
           html.count('id="DownloadLanguagesDisplay"') == 1,
-          "count=%d" % html.count('id="DownloadLanguagesDisplay"'))
+          "count=%d" % html.count('id="DownloadLanguagesDisplay"')) 
     check("F-M337: the picker button and the modal are still wired",
           'id="DownloadLangList"' in html and 'DownloadLangPickerBtn' in html
           and "subdlGetSelectedLangs" in html and "subdlPopulateLangList" in html,
           "the control moved, not the machinery - moving the block must not orphan the picker")
+    # The heading itself: an `<h3>` whose text names the direction, and the input is NOT inside a
+    # field container any more (an `inputContainer` around it is what made it read as a field).
+    head = re.search(r"<h3>Target languages \(download, <span class=\"subdl-required\">Required</span>\)</h3>", gen_section)
+    check("F-M337: the heading names the direction it belongs to",
+          head is not None,
+          "a bare \"Target languages\" does not say whose languages, while its siblings name theirs")
+    check("F-M337: the heading is a real heading element, not a styled label",
+          head is not None and '<div class="inputContainer">' not in gen_section[head.end():head.end() + 260],
+          "the field-container form is what made it read as a caption rather than a section")
+    check("F-M337: the control is the only one on the page with this heading",
+          html.count("Target languages (download") == 1,
+          "count=%d" % html.count("Target languages (download"))
+    check("F-M337: the old label form is gone",
+          'inputLabelUnfocused" for="DownloadLanguagesDisplay"' not in html,
+          "leaving it behind would render a second, stale caption")
 
     # ---- F-M324: one worker row, one worker's own result ----
     # The green branch handed the SEEDER's string to every direction row, so `Seeder` and `Upload`

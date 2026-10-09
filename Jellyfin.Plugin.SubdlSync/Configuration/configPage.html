@@ -44,14 +44,12 @@
                         <!-- F-M230: field descriptions state function plus default value, nothing else. -->
                         <div class="fieldDescription">Only selected libraries are processed. None: no upload or download. Default: None.</div>
 
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="DownloadLanguagesDisplay">Target languages (<span class="subdl-req-inline">Required</span>)</label>
-                            <div style="display:flex; gap:8px; align-items:center;">
-                                <input id="DownloadLanguagesDisplay" type="text" is="emby-input" readonly style="flex:1;" />
-                                <button is="emby-button" type="button" class="raised" id="DownloadLangPickerBtn">Select&hellip;</button>
-                            </div>
-                            <div class="fieldDescription">Languages to download. Empty = download off.</div>
+                        <h3>Target languages (download, <span class="subdl-required">Required</span>)</h3>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <input id="DownloadLanguagesDisplay" type="text" is="emby-input" readonly style="flex:1;" />
+                            <button is="emby-button" type="button" class="raised" id="DownloadLangPickerBtn">Select&hellip;</button>
                         </div>
+                        <div class="fieldDescription">Languages to download. Empty = download off.</div>
 
                         <h3>Refetch interval</h3>
                         <div class="selectContainer">
