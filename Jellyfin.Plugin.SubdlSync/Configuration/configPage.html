@@ -60,7 +60,7 @@
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
                             </select>
-                            <div class="fieldDescription">Unified refetch for both directions.</div>
+                            <div class="fieldDescription">Unified refetch for both download and upload.</div>
                         </div>
                         <div id="RandomScheduleInfo" style="margin-top:-0.4em; font-size:0.85em; opacity:0.8;"></div>
 
@@ -680,15 +680,42 @@
             // One date format for the whole page: US order (M/D/YYYY) with local AM/PM
             // time, so statistics, quota and status stamps read identically instead of
             // each call site relying on its own locale default.
+            //
+            // NAIVE UTC (rework 09.10.2026, user report "isn't this UTC instead of local?"):
+            // some stamps arrive WITHOUT a zone designator — WorkerRuns.Started/Ended,
+            // Stats.SinceUtc/Updated and Diagnostics.LastSeen are read back from the database,
+            // and the SQLite provider returns them with DateTimeKind.Unspecified, so
+            // ToString("O") omits the "Z" that DateTime.UtcNow itself would have written.
+            // JavaScript then follows ECMA-262: a date-time WITHOUT an offset is LOCAL time,
+            // so the browser applied no conversion and the UTC clock was shown verbatim —
+            // measured on prod (Europe/Berlin): a run stored as 07:36:28 UTC displayed as
+            // 7:36 AM although it happened at 9:36 AM local, two hours off, and the error
+            // grows with the viewer's distance from UTC.
+            //
+            // The values ARE UTC (every writer uses DateTime.UtcNow), so the missing
+            // designator is restored here rather than in the database: stamps that already
+            // carry "Z" or a numeric offset are left untouched, a bare "YYYY-MM-DDTHH:MM..."
+            // gets the "Z" appended. Fixing it at this ONE place covers every caller below,
+            // and any future stamp read from the database, without touching stored rows.
+            var subdlAsUtc = function (iso) {
+                if (iso instanceof Date) { return iso; }
+                if (typeof iso !== 'string') { return iso; }
+                var s = iso.trim();
+                if (!s) { return iso; }
+                // "Z" or a trailing +HH:MM/-HH:MM already pins the instant.
+                if (/Z$/i.test(s) || /[+-]\d{2}:?\d{2}$/.test(s)) { return s; }
+                // Only a bare ISO date-time is a naive UTC stamp; anything else stays as it was.
+                return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) ? s + 'Z' : s;
+            };
             var subdlFmtDateTime = function (iso) {
-                var d = (iso instanceof Date) ? iso : new Date(iso);
+                var d = (iso instanceof Date) ? iso : new Date(subdlAsUtc(iso));
                 if (isNaN(d.getTime())) { return ''; }
                 var date = d.toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' });
                 var time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
                 return date + ' ' + time;
             };
             var subdlFmtTime = function (iso) {
-                var d = (iso instanceof Date) ? iso : new Date(iso);
+                var d = (iso instanceof Date) ? iso : new Date(subdlAsUtc(iso));
                 if (isNaN(d.getTime())) { return ''; }
                 // SECONDS included on purpose (30.09.2026): the footer reads "Updated ...", and with
                 // minute resolution a refresh inside the same minute produced an identical string —

@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.229"
+version: "12.1.12.230"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,12 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.230: Timestamps show local time again on a server that does not run on UTC.
+    Run times, the statistics period and diagnostics came from the database without a
+    timezone designator, and browsers read such a value as LOCAL time — on a Berlin
+    server a run stored as 07:36 UTC read 7:36 AM although it happened at 9:36 AM. The
+    stamps are now marked as UTC before formatting. Also: the refetch description names
+    its two directions outright, "both download and upload".
   v12.1.12.229: Removes an experimental subtitle-alignment method that shipped in 228 by
     mistake. Nothing a run does changes - the alignment is the same one 227 used, unchanged.
   v12.1.12.228: The Auto-Sync numbers in the log are written with a decimal point, not with
