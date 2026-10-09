@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.219",
-        "changelog": "v12.1.12.219: \"Only missing languages\" gets a real second mode. Off now means once per language,\n    whatever the file already carries: only our own recorded download closes a pair, so library\n    sidecars, embedded tracks and the stream list stop counting. The fetched file is numbered against\n    the files actually in the directory instead of overwriting the one already there, and the label\n    drops its old \"(embedded count as present)\" parenthetical.",
+        "version": "12.1.12.220",
+        "changelog": "v12.1.12.220: A DOWNLOAD dry run escapes the DOWNLOAD brake, not the search one. With the account\n    at 50/50 the probe from F-M331 held back the very run meant to report what WOULD happen, so the\n    dry-run test could not be started at all. A dry run fetches no file, so the download counter no\n    longer stops it; the search allowance keeps holding it in both modes, because a dry run does\n    search every item and prints only what those answers carry.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.219-dev/Jellyfin.Plugin.SubdlSync_12.1.12.219.zip",
-        "checksum": "b3b6582e65471605c63c6c7bb4066b85",
-        "timestamp": "2026-10-08T22:13:59Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.220-dev/Jellyfin.Plugin.SubdlSync_12.1.12.220.zip",
+        "checksum": "009987806d28567b20cde007a4e60415",
+        "timestamp": "2026-10-09T03:05:32Z"
       }
     ]
   }
