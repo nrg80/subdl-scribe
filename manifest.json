@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.223",
-        "changelog": "v12.1.12.223: Target languages (download, required) moves to the General tab, directly under\n    the library selection, so the first page carries what a run needs. Moved, not copied - a\n    second control would render on both tabs and the last one read would win at save.",
+        "version": "12.1.12.224",
+        "changelog": "v12.1.12.224: \"Target languages (download, required)\" is a real heading now, and it names the\n    direction. It was a field caption (label in an inputContainer) whose text did not say whose\n    languages, while every other block on the General tab is introduced by an h3.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.223-dev/Jellyfin.Plugin.SubdlSync_12.1.12.223.zip",
-        "checksum": "6a6f2fa865767b528d44216bffb8f436",
-        "timestamp": "2026-10-09T05:10:35Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.224-dev/Jellyfin.Plugin.SubdlSync_12.1.12.224.zip",
+        "checksum": "eb0fab37f57b9ead95758fcf68031164",
+        "timestamp": "2026-10-09T05:17:06Z"
       }
     ]
   }
