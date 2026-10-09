@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.227"
+version: "12.1.12.228"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,10 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.228: The Auto-Sync numbers in the log are written with a decimal point, not with
+    whatever separator the machine prefers. The same line read "t = +8,62" on one day and
+    "t = +8.62" on the next, from unchanged code, because interpolated numbers follow the
+    host culture. Nothing about the alignment itself changed.
   v12.1.12.227: The Auto-Sync row is reachable while it runs. Start and finish sat in one
     synchronous block, so the light was never blue and its duration read as ~0. It now opens
     with the download run and is closed by whoever opened it - including a cancelled run.
