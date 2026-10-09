@@ -825,6 +825,47 @@ def main():
           dl_section.count('id="QaDownloadAutoSync"') == 1,
           "count=%d" % dl_section.count('id="QaDownloadAutoSync"'))
 
+    # ---- F-M339 (operator order 09.10.2026): every gate names its default --------------------
+    # "Bei Quality gates upload fehlen noch die defaults in der gui" - then, after the first pass:
+    # "3 von 5 fehlen". Of the FIVE gates in "Quality gates (before upload)" exactly three carried
+    # no default: Minimum cue count, Validate SRT structure and Check sync plausibility. The two
+    # that did were the ones written later, which is how the gap arose: the rule was applied to the
+    # newest rows only.
+    # Asserted by PAIRING each checkbox with its own description, because a count of the word
+    # "Default:" in the section is satisfied by one row carrying it twice - and the section also
+    # opens with a block intro that is not a field. Every gate the operator can tick must state
+    # what it is set to out of the box (F-M230), and the number of gates is asserted too, so a row
+    # added later cannot slip in unlabelled.
+    # The section ends with the UPLOAD TAB, not with the other heading: the download tab's markup
+    # sits between them (measured: the download tab opens 33 lines after this section starts), so
+    # slicing to the download heading swallowed the whole download tab and counted 12 "gates" for a
+    # section holding five. Bound on the tab marker, which is the real end.
+    ug_tab = html.find('data-tab-content="upload"')
+    ug_tab_end = html.find('data-tab-content=', ug_tab + 1)
+    ug_tab_section = html[ug_tab:ug_tab_end if ug_tab_end != -1 else len(html)]
+    ug_start = ug_tab_section.find("Quality gates (before upload)")
+    ug_section = ug_tab_section[ug_start:]
+    # The label text sits BETWEEN the input and </label>, so the pattern has to allow it - an
+    # earlier form demanded `</label>` directly after the input and matched ZERO rows, which read
+    # as "no gates in this section" rather than as a broken pattern.
+    # Bounded on BOTH sides: the gap may not cross `</label>` either, or the pattern walks out of
+    # a row that has no description into the next one that does (measured: 12 "rows" for a section
+    # holding six). A pattern that over-matches is as useless here as one that matches nothing.
+    gate_rows = re.findall(r'<input id="([A-Za-z0-9_]+)"[^>]*type="checkbox"[^>]*/>'
+                           r'(?:(?!</label>)(?!<input ).)*?</label>\s*'
+                           r'<div class="fieldDescription">(.*?)</div>',
+                           ug_section, re.S)
+    missing = [gid for gid, desc in gate_rows if "Default:" not in desc]
+    check("F-M339: every upload quality gate names its default",
+          gate_rows and not missing,
+          "gates=%d, without a default: %s" % (len(gate_rows), missing or "none"))
+    check("F-M339: the upload section still holds its five gates",
+          len(gate_rows) == 5,
+          "count=%d - a row added later must be checked for its default too" % len(gate_rows))
+    check("F-M339: the three that were missing are named explicitly",
+          not [g for g in ("QaMinCues", "QaValidateSrt", "QaCheckSync") if g in missing],
+          "the operator counted them: 3 of 5")
+
     # ---- F-M338 (operator order 09.10.2026): the two directions read the same --------------
     # "In upload gui: continue after daily limit (ohne api)". The upload control carried a word the
     # download control does not ("Continue after daily API limit" vs "Continue after daily limit"),

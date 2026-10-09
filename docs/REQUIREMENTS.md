@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.62
-**Status:** Implementation — v12.1.12.225.
+**Status:** Implementation — v12.1.12.226.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -1336,7 +1336,7 @@ Each field names its source in the order the user needs it — register first, t
 
 Libraries is opt-in AND required: nothing is processed until a library is picked, and the description states that an empty list stops every run.
 
-**F-M230:** **The Libraries description states function and default in one line.** Wording: `Only selected libraries are processed. None: no upload or download. Default: None.` Field descriptions state function plus default value, nothing else. **Test: T45.**
+**F-M230:** **The Libraries description states function and default in one line.** Wording: `Only selected libraries are processed. None: no upload or download. Default: None.` Field descriptions state function plus default value, nothing else. **Test: T45.** *Operator order 09.10.2026:* **every gate names its default, not only the newest rows** — *"Bei Quality gates upload fehlen noch die defaults in der gui"*, then *"3 von 5 fehlen"*. Measured: of the five gates in *"Quality gates (before upload)"* exactly three carried no default (`QaMinCues`, `QaValidateSrt`, `QaCheckSync`), while the two written later did. A default is what makes a switch readable without flipping it: the operator must be able to see what happens out of the box. **Test: T147.**
 
 **F-M299:** **An intro block under a section heading describes what the section does — measurements never appear on the settings page.** Measured values, episode counts, before/after numbers, accuracy figures and share-of-files statistics are **spec and commit material**, not UI text. **Budget: 300 rendered characters** per intro. The same holds for a `fieldDescription` under a checkbox: it states what the switch does and its default, and a diagnostic figure such as a failure share belongs in the log line that measures it. **Test: T113.**
 **F-M229:** **Links in the settings page use the same accent blue as the rest of the page.** Jellyfin's stylesheet ships only `a{color:inherit}`, so the links in the field descriptions fell back to the browser default `#0000EE`. Rule: `#SubdlSyncConfigPage a { color: #00a4dc; }` — exactly one blue, no separate hover shade. Scope: link colour only; the destructive red and the status colours are untouched. **Test: T44.**
@@ -1837,6 +1837,8 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T44:** Every anchor on the settings page is the accent blue, none the browser default (F-M229)
 
 **T45:** The Libraries description states function and default only (F-M230)
+
+**T147:** Every upload quality gate names its default. Asserted by **pairing** each checkbox with its OWN description inside the upload tab, because a count of the word "Default:" in the section is satisfied by one row carrying it twice — and the section opens with a block intro that is not a gate. The section is bounded by the **tab marker**, not by the next heading: the download tab sits between this section and that heading, so a slice to the heading swallowed the download tab and counted 12 rows for a section holding five. The row pattern is bounded on both sides for the same reason — unbounded it walks out of a row without a description into the next one that has one. The COUNT is asserted too, so a gate added later cannot slip in unlabelled. **Mutation-verified, five plants:** each of the three defaults removed individually, all three at once, and a sixth gate added without one — each confirmed RED by name, baseline green on restore. (F-M230 extension)
 
 **T46:** Jellyfin's ids are corrected by title and year, counted over both directions (F-M231)
 
