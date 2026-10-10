@@ -2556,7 +2556,8 @@ public sealed class UploadPipeline
             using var runCts = new CancellationTokenSource(TimeSpan.FromMinutes(maxRuntimeMinutes));
             var ct = runCts.Token;
 
-            var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            // F-M343: same client identity as every other SubDL call.
+            var http = SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(30));
             var api = new SubdlApiClient(http)
             {
                 Username = cfg.Username,

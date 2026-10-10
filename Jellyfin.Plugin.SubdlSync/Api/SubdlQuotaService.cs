@@ -37,7 +37,8 @@ public class SubdlQuota : ControllerBase
 {
     private readonly ILogger<SubdlQuota> _logger;
 
-    private static readonly Lazy<HttpClient> SharedHttp = new(() => new HttpClient { Timeout = TimeSpan.FromSeconds(20) });
+    // F-M343: /me is a SubDL call like any other, so it identifies the plugin too.
+    private static readonly Lazy<HttpClient> SharedHttp = new(() => SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(20)));
 
     // F-M70: 5-minute cache — repeated page loads/reloads don't hit SubDL at all.
     // Key + fetch time travel WITH the cache so (a) a changed API key never shows

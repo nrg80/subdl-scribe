@@ -69,7 +69,8 @@ public class SubdlPostprocessController : ControllerBase
         }
 
         var cfg = plugin.Configuration;
-        using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        // F-M343: this client also logs in, and the login call adds no per-request agent of its own.
+        using var http = SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(60));
         var api = new SubdlApiClient(http)
         {
             Username = cfg.Username,

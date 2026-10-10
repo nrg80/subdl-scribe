@@ -404,6 +404,30 @@ public sealed class SubdlApiClient
     public string UserAgent { get; set; } = DefaultUserAgent;
 
     /// <summary>
+    /// Creates an HttpClient that identifies itself as this plugin on every call it makes.
+    /// <para>
+    /// F-M343: the plugin builds HttpClient instances at more than one place — the main API client
+    /// through BuildApiClient, and ad-hoc ones in the status probe, the quota read, the upload
+    /// postprocessing controller and the upload pipeline's own pass. Those ad-hoc clients carried
+    /// no agent at all, so their calls (login in particular, which adds no per-request header)
+    /// arrived as the .NET default. One factory keeps them from drifting apart again.
+    /// </para>
+    /// </summary>
+    /// <param name="timeout">Optional client timeout; the BCL default is left in place when null.</param>
+    /// <returns>The client, owned by the caller.</returns>
+    public static HttpClient NewHttpClient(TimeSpan? timeout = null)
+    {
+        var client = new HttpClient();
+        if (timeout.HasValue)
+        {
+            client.Timeout = timeout.Value;
+        }
+
+        client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", DefaultUserAgent);
+        return client;
+    }
+
+    /// <summary>
     /// The integration name this plugin reports to SubDL: "other". See
     /// <see cref="IntegrationClient"/> for why this value and not another.
     /// </summary>

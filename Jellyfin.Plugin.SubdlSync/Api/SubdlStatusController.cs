@@ -36,7 +36,8 @@ public class SubdlStatusController : ControllerBase
 {
     private readonly ILogger<SubdlStatusController> _logger;
     private readonly ILibraryManager _libraryManager;
-    private static readonly HttpClient _httpClient = new();
+    // F-M343: the probe is a SubDL call like any other, so it identifies the plugin too.
+    private static readonly HttpClient _httpClient = SubdlApiClient.NewHttpClient();
 
     public SubdlStatusController(ILogger<SubdlStatusController> logger, ILibraryManager libraryManager)
     {
