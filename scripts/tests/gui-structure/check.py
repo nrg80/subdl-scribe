@@ -383,6 +383,17 @@ def main():
     check("the remaining rows are grouped by direction, downloads before uploads",
           bool(dl) and bool(up) and max(dl) < min(up),
           "downloads at %s, uploads at %s" % (dl, up))
+    # F-M345: the direction rows are grouped (downloads, then uploads) and the two rows that carry NO
+    # direction — the file counters the seeder writes, F-M311/F-M313 — stay the LAST two. Asserted
+    # because a newly added row reads naturally as "append here": the table still renders, the counts
+    # are right, and only the grouping is gone.
+    check("the two no-direction rows stay last",
+          order[-2:] == ["Media files: language codes added", "Loose subtitles: language codes added"],
+          "last two: %s" % order[-2:])
+    check("the prevented-re-upload row sits with the uploads",
+          order[order.index("Uploads: discarded before transfer") + 1]
+          == "Uploads: re-uploads of known subtitles prevented",
+          "uploads block: %s" % [o for o in order if o.startswith("Uploads:")])
     check("every quality row is present exactly once",
           len(order) == 8 and len(set(order)) == 8,
           "%d row(s): %s" % (len(order), order))

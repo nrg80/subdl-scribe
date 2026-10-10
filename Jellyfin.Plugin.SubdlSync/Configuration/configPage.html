@@ -1015,9 +1015,9 @@
                                 ['Downloads: rejected after being fetched', s.RejectedDownload || 0],
                                 ['Downloads: Auto-Sync', s.FittedToAudio || 0],
                                 ['Uploads: discarded before transfer', s.RejectedUpload || 0],
+                                ['Uploads: re-uploads of known subtitles prevented', s.ReuploadsPrevented || 0],
                                 ['Media files: language codes added', s.LanguageCodesAllocated || 0],
-                                ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0],
-                                ['Uploads: re-uploads of known subtitles prevented', s.ReuploadsPrevented || 0]
+                                ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0]
                             ];
                             el.innerHTML = '';
                             rows.forEach(function (r) {
