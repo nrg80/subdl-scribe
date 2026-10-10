@@ -225,7 +225,9 @@ public class SubdlStatusController : ControllerBase
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(15));
             using var http = new HttpClient();
-            http.DefaultRequestHeaders.Add("User-Agent", "SubDL-Sync-Status/1.0");
+            // F-M343: the same identity as every other SubDL call. This said
+            // "SubDL-Sync-Status/1.0" — the pre-rename product name and a frozen version.
+            http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", SubdlApiClient.DefaultUserAgent);
             var client = new SubdlApiClient(http)
             {
                 ApiKey = cfg.ApiKey,
@@ -283,7 +285,9 @@ public class SubdlStatusController : ControllerBase
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(15));
             // Lightweight search probe: query for a well-known imdb id with no real expectation of hits.
-            var url = $"https://api.subdl.com/api/v1/subtitles?api_key={WebUtility.UrlEncode(cfg.ApiKey)}&imdb_id=tt0137523&languages=en&subs_per_page=1";
+            // F-M343: this hits the same documented endpoint as the real search, so it carries the
+            // same integration name rather than arriving as an anonymous caller.
+            var url = $"https://api.subdl.com/api/v1/subtitles?api_key={WebUtility.UrlEncode(cfg.ApiKey)}&imdb_id=tt0137523&languages=en&subs_per_page=1&client={SubdlApiClient.IntegrationClientName}";
             using var resp = await _httpClient.GetAsync(url, cts.Token).ConfigureAwait(false);
             if (resp.StatusCode == HttpStatusCode.Unauthorized || resp.StatusCode == HttpStatusCode.Forbidden)
             {

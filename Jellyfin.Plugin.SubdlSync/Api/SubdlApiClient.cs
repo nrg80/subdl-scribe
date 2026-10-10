@@ -386,8 +386,41 @@ public sealed class SubdlApiClient
     /// <summary>Gets or sets the SubDL API key — preferred if set (F-M19).</summary>
     public string? ApiKey { get; set; }
 
+    /// <summary>
+    /// Gets the User-Agent every SubDL call carries: the product name plus the REAL assembly
+    /// version.
+    /// <para>
+    /// Until 10.10.2026 this was the fixed literal "Jellyfin.Plugin.SubdlSync/1.0", so every
+    /// release since 1.0 introduced itself to SubDL as version 1.0 — the server could not tell
+    /// two versions apart, and the string named the assembly rather than the product. Read from
+    /// the assembly, so a version bump needs no second edit and cannot fall out of step with it.
+    /// </para>
+    /// </summary>
+    public static string DefaultUserAgent { get; } =
+        "SubDL-Scribe/" + (typeof(SubdlApiClient).Assembly.GetName().Version?.ToString() ?? "0.0.0.0")
+        + " (+https://github.com/nrg80/subdl-scribe)";
+
     /// <summary>Gets or sets the SubDL user-agent used for all requests.</summary>
-    public string UserAgent { get; set; } = "Jellyfin.Plugin.SubdlSync/1.0";
+    public string UserAgent { get; set; } = DefaultUserAgent;
+
+    /// <summary>
+    /// The integration name this plugin reports to SubDL: "other". See
+    /// <see cref="IntegrationClient"/> for why this value and not another.
+    /// </summary>
+    public const string IntegrationClientName = "other";
+
+    /// <summary>
+    /// Gets or sets the integration name sent as <c>client</c> on the search call.
+    /// <para>
+    /// SubDL documents the accepted values — bazarr, stremio, kodi, subdl_player,
+    /// custom_integration, other (subdl.com/api-doc, read 10.10.2026) — and the parameter is
+    /// listed for the subtitles search ONLY, which is why it is not added to the upload or
+    /// download calls. This plugin has no entry of its own, so it reports "other": the honest
+    /// value, rather than claiming custom_integration, a category the operator did not choose.
+    /// A dedicated value is SubDL's call, not ours.
+    /// </para>
+    /// </summary>
+    public string IntegrationClient { get; set; } = IntegrationClientName;
 
     private void LogInfo(string msg) => Log?.Invoke(msg);
 
@@ -875,6 +908,14 @@ public sealed class SubdlApiClient
             // can only take the FIRST .srt — which is how one episode's subtitle
             // ended up written next to six different episodes (26.09.2026).
             url += "&unpack=1";
+
+            // F-M343 (operator order 10.10.2026): name the integration. Verified live before the
+            // change went in — the same search with and without this parameter returned an
+            // IDENTICAL payload (HTTP 200, status true, 10 candidates, same content signature),
+            // and an unknown value (client=bogus_wert) was accepted just as silently, so the
+            // documented value list is a convention rather than a server-side check. Our value
+            // cannot break a call, whatever SubDL does with it.
+            url += $"&client={Uri.EscapeDataString(IntegrationClient)}";
 
             url += $"&page={page}";
 
