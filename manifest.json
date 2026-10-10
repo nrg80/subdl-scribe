@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.231",
-        "changelog": "v12.1.12.231: The database refresh now refreshes the query statistics as well, and SubDL can see\n    who is calling. The refresh ran VACUUM alone — that shrinks the file but leaves the query\n    planner guessing which index to use. It now runs ANALYZE in the same pass, which costs one\n    database page; measured on this schema, the plan for one of the plugin's own lookups moved off\n    the worse index and onto the selective one. Separately, every API call now names the\n    integration (client=other) and carries the real plugin version in its User-Agent, which until\n    now reported \"1.0\" for every release.",
+        "version": "12.1.12.232",
+        "changelog": "v12.1.12.232: Follow-up to 231 — the identifying agent now rides on every SubDL call, not only on\n    the main ones. The plugin builds its SubDL clients at several places, and four of them (the\n    status probe, the quota read, the upload postprocessing check and the upload pipeline's own\n    pass) sent no agent at all, so their calls arrived unidentified. One factory builds all of them\n    now.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.231-dev/Jellyfin.Plugin.SubdlSync_12.1.12.231.zip",
-        "checksum": "647208665f061c87ec795ccec894d14a",
-        "timestamp": "2026-10-10T03:03:58Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.232-dev/Jellyfin.Plugin.SubdlSync_12.1.12.232.zip",
+        "checksum": "c211821cc0921947324d2fcc3b1bd952",
+        "timestamp": "2026-10-10T03:07:01Z"
       }
     ]
   }
