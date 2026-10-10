@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.230",
-        "changelog": "v12.1.12.230: Timestamps show local time again on a server that does not run on UTC.\n    Run times, the statistics period and diagnostics came from the database without a\n    timezone designator, and browsers read such a value as LOCAL time — on a Berlin\n    server a run stored as 07:36 UTC read 7:36 AM although it happened at 9:36 AM. The\n    stamps are now marked as UTC before formatting. Also: the refetch description names\n    its two directions outright, \"both download and upload\".",
+        "version": "12.1.12.231",
+        "changelog": "v12.1.12.231: The database refresh now refreshes the query statistics as well, and SubDL can see\n    who is calling. The refresh ran VACUUM alone — that shrinks the file but leaves the query\n    planner guessing which index to use. It now runs ANALYZE in the same pass, which costs one\n    database page; measured on this schema, the plan for one of the plugin's own lookups moved off\n    the worse index and onto the selective one. Separately, every API call now names the\n    integration (client=other) and carries the real plugin version in its User-Agent, which until\n    now reported \"1.0\" for every release.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.230-dev/Jellyfin.Plugin.SubdlSync_12.1.12.230.zip",
-        "checksum": "f31a4eaf325f578fbc9701312153cbc9",
-        "timestamp": "2026-10-09T11:57:02Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.231-dev/Jellyfin.Plugin.SubdlSync_12.1.12.231.zip",
+        "checksum": "647208665f061c87ec795ccec894d14a",
+        "timestamp": "2026-10-10T03:03:58Z"
       }
     ]
   }
