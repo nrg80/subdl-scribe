@@ -2,7 +2,7 @@
   {
     "guid": "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b",
     "name": "SubDL Scribe",
-    "description": "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key.",
+    "description": "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key. Created by AI under the directions of the maintainer.",
     "overview": "Sync subtitles with SubDL — download missing and upload new subtitles.",
     "owner": "nrg80",
     "category": "Subtitles",

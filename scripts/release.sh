@@ -90,7 +90,7 @@ ok "category   : $CATEGORY"
 # invisible while the card still shows the old essay. Guard both, and keep the card
 # to a glanceable length.
 python3 - <<'PY' || die "plugin description check failed"
-import re, sys
+import re, sys, json
 
 def build_yaml_desc():
     text = open('build.yaml', encoding='utf-8').read()
@@ -121,6 +121,24 @@ if yaml_desc != cs_desc:
     sys.exit('  FAIL: build.yaml and Plugin.cs descriptions differ — two carriers, '
              'one text. build.yaml:\n    ' + yaml_desc + '\n  Plugin.cs:\n    ' + cs_desc)
 print('  OK: both carriers identical, card is glanceable')
+
+# The CATALOGUE text is a THIRD carrier of the same words, plus one sentence the card must NOT
+# carry: the AI disclosure, on the operator's order of 10.10.2026 — "Den AI disclosure bitte auch
+# ins manifest: Created by AI under the directions of the maintainer." It stays out of the card
+# because the card is the glanceable one under the LIMIT above, while the catalogue is what somebody
+# reads BEFORE installing. Guarded as a RELATIONSHIP rather than as a copied string, for two
+# reasons: a manifest regenerated from build.yaml would otherwise drop the sentence in silence, and
+# two texts edited by hand drift — which is the failure this whole block exists to catch.
+AI_DISCLOSURE = 'Created by AI under the directions of the maintainer.'
+CATALOGUE_DESC = json.load(open('manifest.json', encoding='utf-8'))[0].get('description', '')
+if not CATALOGUE_DESC.endswith(AI_DISCLOSURE):
+    sys.exit('  FAIL: the catalogue description does not end with the AI disclosure:\n    '
+             + CATALOGUE_DESC)
+if CATALOGUE_DESC != yaml_desc + ' ' + AI_DISCLOSURE:
+    sys.exit('  FAIL: the catalogue description is not the card text plus the disclosure\n'
+             '    expected : ' + yaml_desc + ' ' + AI_DISCLOSURE + '\n'
+             '    found    : ' + CATALOGUE_DESC)
+print(f'  OK: catalogue = card + AI disclosure ({len(CATALOGUE_DESC)} chars)')
 PY
 
 CHANGELOG_ENTRY="$(python3 - "$VER" <<'PY'
