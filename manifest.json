@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.232",
-        "changelog": "v12.1.12.232: Follow-up to 231 — the identifying agent now rides on every SubDL call, not only on\n    the main ones. The plugin builds its SubDL clients at several places, and four of them (the\n    status probe, the quota read, the upload postprocessing check and the upload pipeline's own\n    pass) sent no agent at all, so their calls arrived unidentified. One factory builds all of them\n    now.",
+        "version": "12.1.12.233",
+        "changelog": "v12.1.12.233: Clean-up round on the settings page and the plugin text. The database section now\n    speaks of the plugin database throughout and its restore line is one sentence; the three cadence\n    menus spell the non-automatic choice \"Manual\", and a stored \"Never\" reads as Manual; upload\n    postprocessing defaults to Weekly for fresh installations. The plugin's description ends with\n    \"Created by AI under the directions of the maintainer.\" on the card and in the catalog, and every\n    SubDL search names the integration.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.232-dev/Jellyfin.Plugin.SubdlSync_12.1.12.232.zip",
-        "checksum": "c211821cc0921947324d2fcc3b1bd952",
-        "timestamp": "2026-10-10T03:07:01Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.233-dev/Jellyfin.Plugin.SubdlSync_12.1.12.233.zip",
+        "checksum": "a94ce366439ac23597afcaefc85e86e5",
+        "timestamp": "2026-10-10T04:23:10Z"
       }
     ]
   }
