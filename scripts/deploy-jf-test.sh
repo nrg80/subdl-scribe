@@ -78,30 +78,59 @@ echo
 echo "=== 4. meta.json schreiben ==="
 CHANGELOG=$(python3 "$ROOT/scripts/changelog_entry.py" "$ROOT/build.yaml" "$VER") || exit 1
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%S.0000000Z)
-python3 - "$TGT/meta.json" "$VER" "$TGT/logo.png" "$TIMESTAMP" "$CHANGELOG" <<'PY'
+
+# The three catalogue fields that CHANGE over time are read from build.yaml instead of being
+# written out here. Measured 10.10.2026: this block carried a literal copy of the description, so
+# the bench kept showing the old 258-char text after build.yaml had moved on — and the day before,
+# Jellyfin's own installer was measured taking the installed description from the package's
+# build.yaml (not from the manifest entry, which already carried a longer text): a literal here is
+# therefore a SECOND source for a field that has exactly one elsewhere. Same for the overview and
+# targetAbi, which move with the Jellyfin ABI.
+FIELDS=$(python3 - "$ROOT/build.yaml" <<'PY'
+import json, re, sys
+text = open(sys.argv[1], encoding='utf-8').read()
+desc = re.search(r'^description: >\n((?:[ \t].*\n|\n)*)', text, re.M)
+if not desc:
+    sys.exit('no description block in build.yaml')
+out = {
+    'description': ' '.join(l.strip() for l in desc.group(1).split('\n') if l.strip()),
+}
+for key in ('overview', 'targetAbi'):
+    m = re.search(r'^%s:\s*"([^"]*)"' % key, text, re.M)
+    if not m:
+        sys.exit('no %s in build.yaml' % key)
+    out[key] = m.group(1)
+print(json.dumps(out))
+PY
+) || exit 1
+
+python3 - "$TGT/meta.json" "$VER" "$TGT/logo.png" "$TIMESTAMP" "$CHANGELOG" "$FIELDS" <<'PY'
 import json, sys
-out, ver, logo, ts, changelog = sys.argv[1:6]
+out, ver, logo, ts, changelog, fields = sys.argv[1:7]
+catalogue = json.loads(fields)
 meta = {
     "category": "Subtitles",
     "changelog": json.loads(changelog),
-    "description": "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key.",
+    "description": catalogue["description"],
     "guid": "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b",
     "name": "SubDL Scribe",
-    "overview": "Sync subtitles with SubDL — download missing and upload new subtitles.",
+    "overview": catalogue["overview"],
     "owner": "nrg80",
-    "targetAbi": "12.1.0.0",
+    "targetAbi": catalogue["targetAbi"],
     "timestamp": ts,
     "version": ver,
     "status": "Active",
     # Off: this is a test bench driven by hand, and autoUpdate would pull the published prerelease
-    # over whatever was just deployed here.
+    # over whatever was just deployed here. (Jellyfin's own installer sets it True — measured
+    # 10.10.2026 when the package API was used on this bench, and it had to be put back by hand.)
     "autoUpdate": False,
     "imagePath": logo,
     "assemblies": [],
 }
 with open(out, "w", encoding="utf-8") as fh:
     json.dump(meta, fh, indent=2, ensure_ascii=False)
-print("  version=" + meta["version"] + "  changelog=" + str(len(meta["changelog"])) + " chars")
+print("  version=" + meta["version"] + "  changelog=" + str(len(meta["changelog"])) + " chars"
+      + "  description=" + str(len(meta["description"])) + " chars")
 PY
 
 echo
