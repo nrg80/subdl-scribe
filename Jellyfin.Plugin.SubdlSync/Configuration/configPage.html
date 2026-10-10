@@ -42,7 +42,7 @@
                         <h3>Libraries (opt-in, <span class="subdl-required">Required</span>)</h3>
                         <div id="LibraryList" class="checkboxList"></div>
                         <!-- F-M230: field descriptions state function plus default value, nothing else. -->
-                        <div class="fieldDescription">Only selected libraries are processed. None: no upload or download. Default: None.</div>
+                        <div class="fieldDescription">Libraries to work in. Empty = no run.</div>
 
                         <h3>Target languages (download, <span class="subdl-required">Required</span>)</h3>
                         <div style="display:flex; gap:8px; align-items:center;">
@@ -125,7 +125,7 @@
                                 <input id="AllocateMissingLanguageCodes" name="AllocateMissingLanguageCodes" type="checkbox" is="emby-checkbox" />
                                 <span>Allocate missing language codes to media files</span>
                             </label>
-                            <div class="fieldDescription">A track with no language tag reads as absent, so the file is searched for a language it already carries. With this on, that language is detected offline and written into the container as a real track tag. A loose subtitle file beside the media whose NAME carries no language is renamed to carry it, instead of being written into anything. Default: off.</div>
+                            <div class="fieldDescription">Tags subtitle tracks that carry no language, and names loose subtitle files by language. Default: off.</div>
                         </div>
 
                         <h3>Statistics</h3>

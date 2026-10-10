@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.233"
+version: "12.1.12.234"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -27,6 +27,9 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.234: Two settings texts shortened. The library selection line is one sentence and states
+    that an empty selection stops every run; the language-code switch says what it does and its
+    default in one sentence instead of four.
   v12.1.12.233: Clean-up round on the settings page and the plugin text. The database section now
     speaks of the plugin database throughout and its restore line is one sentence; the three cadence
     menus spell the non-automatic choice "Manual", and a stored "Never" reads as Manual; upload
