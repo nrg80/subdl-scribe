@@ -386,8 +386,80 @@ public sealed class SubdlApiClient
     /// <summary>Gets or sets the SubDL API key — preferred if set (F-M19).</summary>
     public string? ApiKey { get; set; }
 
+    /// <summary>
+    /// Gets the User-Agent the plugin's HTTP clients carry: the product name plus the REAL assembly
+    /// version.
+    /// <para>
+    /// Until 10.10.2026 this was the fixed literal "Jellyfin.Plugin.SubdlSync/1.0", so every
+    /// release since 1.0 introduced itself to SubDL as version 1.0 — the server could not tell
+    /// two versions apart, and the string named the assembly rather than the product. Read from
+    /// the assembly, so a version bump needs no second edit and cannot fall out of step with it.
+    /// </para>
+    /// <para>
+    /// WHO SEES IT — traced through the tree on 10.10.2026, three counterparties: api.subdl.com
+    /// (search, login, quota read, status probe), dl.subdl.com (the subtitle file download) and
+    /// api.themoviedb.org. The last one is not an oversight: BuildApiClient's HttpClient is handed
+    /// to TmdbImdbResolver, and SubdlStatusController's probe client serves the TMDb configuration
+    /// probe as well. Both services sit behind a TLS-terminating front, so the operator and its
+    /// edge read the header; the plugin's own log, Jellyfin itself, the LAN and the ISP do not.
+    /// The operator decided on 10.10.2026 that TMDb may see it too — the agent says where a call
+    /// comes from, and that is as true of an id lookup as of a subtitle search.
+    /// </para>
+    /// </summary>
+    public static string DefaultUserAgent { get; } =
+        "SubDL-Scribe/" + (typeof(SubdlApiClient).Assembly.GetName().Version?.ToString() ?? "0.0.0.0")
+        + " (+https://github.com/nrg80/subdl-scribe)";
+
     /// <summary>Gets or sets the SubDL user-agent used for all requests.</summary>
-    public string UserAgent { get; set; } = "Jellyfin.Plugin.SubdlSync/1.0";
+    public string UserAgent { get; set; } = DefaultUserAgent;
+
+    /// <summary>
+    /// Creates an HttpClient that identifies itself as this plugin on every call it makes.
+    /// <para>
+    /// F-M343: the plugin builds HttpClient instances at more than one place — the main API client
+    /// through BuildApiClient, and ad-hoc ones in the status probe, the quota read, the upload
+    /// postprocessing controller and the upload pipeline's own pass. Those ad-hoc clients carried
+    /// no agent at all, so their calls (login in particular, which adds no per-request header) went
+    /// out with no User-Agent whatsoever. One factory keeps them from drifting apart again.
+    /// </para>
+    /// <para>
+    /// Not every client built here is a SubDL caller: SubdlStatusController holds one and uses it
+    /// for the SubDL search probe AND the TMDb configuration probe, so TMDb sees this agent too.
+    /// That is intended — see <see cref="DefaultUserAgent"/> for who sees it and why.
+    /// </para>
+    /// </summary>
+    /// <param name="timeout">Optional client timeout; the BCL default is left in place when null.</param>
+    /// <returns>The client, owned by the caller.</returns>
+    public static HttpClient NewHttpClient(TimeSpan? timeout = null)
+    {
+        var client = new HttpClient();
+        if (timeout.HasValue)
+        {
+            client.Timeout = timeout.Value;
+        }
+
+        client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", DefaultUserAgent);
+        return client;
+    }
+
+    /// <summary>
+    /// The integration name this plugin reports to SubDL: "other". See
+    /// <see cref="IntegrationClient"/> for why this value and not another.
+    /// </summary>
+    public const string IntegrationClientName = "other";
+
+    /// <summary>
+    /// Gets or sets the integration name sent as <c>client</c> on the search call.
+    /// <para>
+    /// SubDL documents the accepted values — bazarr, stremio, kodi, subdl_player,
+    /// custom_integration, other (subdl.com/api-doc, read 10.10.2026) — and the parameter is
+    /// listed for the subtitles search ONLY, which is why it is not added to the upload or
+    /// download calls. This plugin has no entry of its own, so it reports "other": the honest
+    /// value, rather than claiming custom_integration, a category the operator did not choose.
+    /// A dedicated value is SubDL's call, not ours.
+    /// </para>
+    /// </summary>
+    public string IntegrationClient { get; set; } = IntegrationClientName;
 
     private void LogInfo(string msg) => Log?.Invoke(msg);
 
@@ -875,6 +947,14 @@ public sealed class SubdlApiClient
             // can only take the FIRST .srt — which is how one episode's subtitle
             // ended up written next to six different episodes (26.09.2026).
             url += "&unpack=1";
+
+            // F-M343 (operator order 10.10.2026): name the integration. Verified live before the
+            // change went in — the same search with and without this parameter returned an
+            // IDENTICAL payload (HTTP 200, status true, 10 candidates, same content signature),
+            // and an unknown value (client=bogus_wert) was accepted just as silently, so the
+            // documented value list is a convention rather than a server-side check. Our value
+            // cannot break a call, whatever SubDL does with it.
+            url += $"&client={Uri.EscapeDataString(IntegrationClient)}";
 
             url += $"&page={page}";
 

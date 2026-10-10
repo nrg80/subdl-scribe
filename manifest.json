@@ -2,19 +2,19 @@
   {
     "guid": "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b",
     "name": "SubDL Scribe",
-    "description": "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key.",
+    "description": "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key. Created by AI under the directions of the maintainer.",
     "overview": "Sync subtitles with SubDL — download missing and upload new subtitles.",
     "owner": "nrg80",
     "category": "Subtitles",
-    "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/main/logo.png",
+    "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.229",
-        "changelog": "v12.1.12.229: Removes an experimental subtitle-alignment method that shipped in 228 by\n    mistake. Nothing a run does changes - the alignment is the same one 227 used, unchanged.",
+        "version": "12.1.12.233",
+        "changelog": "v12.1.12.233: Clean-up round on the settings page and the plugin text. The database section now\n    speaks of the plugin database throughout and its restore line is one sentence; the three cadence\n    menus spell the non-automatic choice \"Manual\", and a stored \"Never\" reads as Manual; upload\n    postprocessing defaults to Weekly for fresh installations. The plugin's description ends with\n    \"Created by AI under the directions of the maintainer.\" on the card and in the catalog, and every\n    SubDL search names the integration.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.229/Jellyfin.Plugin.SubdlSync_12.1.12.229.zip",
-        "checksum": "93d496ac422f9eea34dcbdc9a7eeee18",
-        "timestamp": "2026-10-09T10:24:11Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.233-dev/Jellyfin.Plugin.SubdlSync_12.1.12.233.zip",
+        "checksum": "a94ce366439ac23597afcaefc85e86e5",
+        "timestamp": "2026-10-10T04:23:10Z"
       }
     ]
   }

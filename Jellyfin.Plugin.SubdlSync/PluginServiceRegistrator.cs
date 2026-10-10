@@ -51,6 +51,16 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // and cancel them mid-sequence.
         var retry = new TransientRetryHandler(new SocketsHttpHandler());
         var http = new HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+
+        // F-M343: the client identity travels with EVERY call this client makes — and it is not
+        // only a SubDL caller: the registrator hands this very HttpClient to TmdbImdbResolver, so
+        // the TMDb id lookups carry the same agent. Intended, per the operator decision recorded on
+        // DefaultUserAgent. The per-request header inside SubdlApiClient covers search, download
+        // and upload; the login call builds its own request and carried no agent at all (verified
+        // 10.10.2026: the call succeeds with the plugin agent, with the old one and with none), so
+        // the identity is set once here as the client's own default rather than at a fourth site.
+        http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", SubdlApiClient.DefaultUserAgent);
+
         var api = new SubdlApiClient(http)
         {
             Username = config.Username,

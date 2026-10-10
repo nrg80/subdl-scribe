@@ -15,6 +15,10 @@ using System.Globalization;
 using System.IO;
 using System.Xml.Linq;
 using Jellyfin.Plugin.SubdlScribe.Data;
+// The cadence enums live in the Configuration namespace. Imported as a namespace, NOT reached
+// through the `Configuration` property of this class, which would resolve to the config object and
+// not to the type (the migration in DiceSchedulerConfig needs the TYPES).
+using Jellyfin.Plugin.SubdlScribe.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
@@ -230,6 +234,32 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             changed = true;
         }
 
+        // F-M210a (operator order 10.10.2026): "Never / manual für alle 3 jobs zu manual auflösen".
+        // The three cadence menus had two spellings for ONE setting — the label read Manual while the
+        // stored value was Never — because the value had been frozen to avoid resetting a choice
+        // already made. Now the page offers Manual as the VALUE, so a file still carrying Never is
+        // read as Manual here, on every load.
+        //
+        // Deliberately NOT written back, and deliberately NOT `changed = true`: these are USER fields
+        // and this plugin persists only its own (F-M201), so the file keeps Never until its owner
+        // saves the page — and the two spellings mean the same thing, which is what makes leaving the
+        // file alone safe. The legacy members stay in the enums so an old name still deserialises
+        // instead of throwing and falling back to a cadence nobody chose.
+        if (c.PruneMode == PruneMode.Never)
+        {
+            c.PruneMode = PruneMode.Manual;
+        }
+
+        if (c.OshashRefresh == OshashRefreshMode.Never)
+        {
+            c.OshashRefresh = OshashRefreshMode.Manual;
+        }
+
+        if (c.UploadPostprocessInterval == UpdateInterval.Never)
+        {
+            c.UploadPostprocessInterval = UpdateInterval.Manual;
+        }
+
         if (changed)
         {
             SavePluginState();
@@ -371,9 +401,13 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// card is a one-glance summary, not a feature list or an explanation of the id
     /// resolution design (that lives in F-M203/F-M219 and the README).
     /// </remarks>
-    /// F-M220/F-M221: this string and build.yaml must hold the same text, under 260 characters, and
+    /// F-M220/F-M221: this string and build.yaml must hold the same text, under 320 characters, and
     /// must name both required keys. The card reads the DLL, not build.yaml.
-    public override string Description => "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key.";
+    /// Operator order 10.10.2026: the card carries the AI disclosure as its last sentence. The card
+    /// and the catalogue therefore say the same thing; the catalogue reads it from build.yaml, and a
+    /// Jellyfin with the plugin installed copies this text into its own meta.json at install time —
+    /// so a card without the sentence would hide it exactly where the plugin is in use.
+    public override string Description => "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key. Created by AI under the directions of the maintainer.";
 
     /// <summary>
     /// Gets the current plugin instance.

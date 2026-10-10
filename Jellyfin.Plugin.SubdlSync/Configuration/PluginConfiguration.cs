@@ -20,10 +20,16 @@ namespace Jellyfin.Plugin.SubdlScribe.Configuration;
 /// </summary>
 public enum UpdateInterval
 {
-    /// <summary>Never run automatically; dashboard trigger only.</summary>
+    /// <summary>
+    /// Legacy member, kept at its original position so a configuration file written before
+    /// 10.10.2026 still LOADS. Same meaning as <see cref="Manual"/> — no automatic run, dashboard
+    /// trigger only — and read as Manual in memory once (Plugin.DiceSchedulerConfig). The page never
+    /// offers it.
+    /// <para>Never renumber this member — it is 0 in every file written so far.</para>
+    /// </summary>
     Never,
 
-    /// <summary>Manual trigger only (dashboard).</summary>
+    /// <summary>Manual trigger only (dashboard). The value the page offers for "no automatic run".</summary>
     Manual,
 
     /// <summary>Once a day.</summary>
@@ -50,8 +56,17 @@ public enum UpdateInterval
 /// </summary>
 public enum OshashRefreshMode
 {
-    /// <summary>Trust the cached fingerprint (size+mtime) — only a fingerprint mismatch
-    /// recomputes. Zero media reads in the steady state.</summary>
+    /// <summary>
+    /// Legacy member, kept at its original position so a configuration file written before
+    /// 10.10.2026 still LOADS and still means what it meant. Dropping it would make the deserialiser
+    /// throw on the name, and a silent fallback to Monthly would start rehashing a library whose
+    /// owner had switched that off. Read as <see cref="Manual"/> and rewritten in memory once
+    /// (Plugin.DiceSchedulerConfig); the page never offers it.
+    /// <para>
+    /// Never renumber this member: it is 0 in every file written so far, and a member that moves
+    /// would turn a stored 0 into a different cadence.
+    /// </para>
+    /// </summary>
     Never,
 
     /// <summary>Force one full recompute per cached file per week.</summary>
@@ -61,17 +76,32 @@ public enum OshashRefreshMode
     Monthly,
 
     /// <summary>Force one full recompute per cached file per year.</summary>
-    Yearly
+    Yearly,
+
+    /// <summary>
+    /// No scheduled revalidation — trust the cached fingerprint (size+mtime) and recompute only on
+    /// a mismatch, plus whatever the manual button starts. This is the value the page offers.
+    /// Appended at the END so no existing member changes its number.
+    /// </summary>
+    Manual
 }
 /// <summary>
 /// (14.09.2026, user decision): database-refresh cadence. The refresh fires on
 /// its own diced weekly anchor; Weekly/Monthly/Yearly pick how often that anchor
-/// actually fires (every nth week), Never disables it entirely.
+/// actually fires (every nth week), Manual disables it entirely.
 /// </summary>
-/// F-M210a: `Never` disables, where no manual start button exists.
+/// F-M210a: the disabling member is `Manual` — the value the page offers, next to the manual run
+/// button. `Never` is the same setting under its pre-10.10.2026 name and stays readable.
 public enum PruneMode
 {
-    /// <summary>Database refresh disabled — no scheduled fires, manual dashboard runs only.</summary>
+    /// <summary>
+    /// Legacy member, kept at its original position so a configuration file written before
+    /// 10.10.2026 still LOADS and still means what it meant: no scheduled fires, manual dashboard
+    /// runs only. Dropping it would make the deserialiser throw on the name, and a silent fallback to
+    /// Weekly would put a manual-only refresh back on a schedule. Read as <see cref="Manual"/> and
+    /// rewritten in memory once (Plugin.DiceSchedulerConfig); the page never offers it.
+    /// <para>Never renumber this member — it is 0 in every file written so far.</para>
+    /// </summary>
     Never,
 
     /// <summary>Fire on every weekly anchor.</summary>
@@ -81,7 +111,14 @@ public enum PruneMode
     Monthly,
 
     /// <summary>Fire on every 52nd weekly anchor (≈ yearly).</summary>
-    Yearly
+    Yearly,
+
+    /// <summary>
+    /// No scheduled fires — manual runs from the dashboard only. This is the value the page offers,
+    /// and it means exactly what the legacy <see cref="Never"/> meant. Appended at the END so no
+    /// existing member changes its number.
+    /// </summary>
+    Manual
 }
 
 
@@ -527,8 +564,14 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>
     /// F-M176 (user decision 21.09.2026): cadence for the upload postprocessing task.
     /// Independent from the upload pipeline. Manual disables it entirely.
+    /// <para>
+    /// Default changed to Weekly on 10.10.2026 (operator order). Rejected-upload rows are a slow
+    /// trickle, and every run costs a /user/mySubtitles read: a daily sweep mostly re-read the same
+    /// pages to find nothing, while a weekly one still resolves a rejection within days of it
+    /// happening. The dice anchor is a day+time either way, so Weekly uses the stored value as-is.
+    /// </para>
     /// </summary>
-    public UpdateInterval UploadPostprocessInterval { get; set; } = UpdateInterval.Daily;
+    public UpdateInterval UploadPostprocessInterval { get; set; } = UpdateInterval.Weekly;
 
     /// <summary>
     /// F-M176: diced postprocessing anchor, "D HH:mm" (D=1..7 Mon..Sun). Empty = not diced yet.

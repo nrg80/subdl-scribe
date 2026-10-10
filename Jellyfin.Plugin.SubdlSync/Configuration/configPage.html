@@ -60,7 +60,7 @@
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
                             </select>
-                            <div class="fieldDescription">Unified refetch for both directions.</div>
+                            <div class="fieldDescription">Unified refetch for both download and upload.</div>
                         </div>
                         <div id="RandomScheduleInfo" style="margin-top:-0.4em; font-size:0.85em; opacity:0.8;"></div>
 
@@ -262,7 +262,7 @@
 <h3>Database refresh</h3>
                         <div class="selectContainer">
                             <select is="emby-select" id="PruneMode" name="PruneMode" class="emby-select-withcolor emby-select">
-                                <option value="Never">Manual</option>
+                                <option value="Manual">Manual</option>
                                 <option value="Weekly">Weekly refresh</option>
                                 <option value="Monthly">Monthly refresh</option>
                                 <option value="Yearly">Yearly refresh</option>
@@ -277,7 +277,7 @@
 <h3>OSHash refresh</h3>
                         <div class="selectContainer">
                             <select is="emby-select" id="OshashRefresh" name="OshashRefresh" class="emby-select-withcolor emby-select">
-                                <option value="Never">Manual</option>
+                                <option value="Manual">Manual</option>
                                 <option value="Weekly">Weekly revalidation</option>
                                 <option value="Monthly">Monthly revalidation</option>
                                 <option value="Yearly">Yearly revalidation</option>
@@ -330,12 +330,12 @@
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="UploadPostprocessInterval">Upload postprocessing interval</label>
                             <select is="emby-select" id="UploadPostprocessInterval" name="UploadPostprocessInterval" class="emby-select-withcolor emby-select">
-                                <option value="Never">Manual</option>
+                                <option value="Manual">Manual</option>
                                 <option value="Daily">Daily</option>
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
                             </select>
-                            <div class="fieldDescription">How often rejected uploads are resolved against /user/mySubtitles. Scheduled run is inhibited if upload is disabled. Default: Daily.</div>
+                            <div class="fieldDescription">How often rejected uploads are resolved against /user/mySubtitles. Scheduled run is inhibited if upload is disabled. Default: Weekly.</div>
                             <!-- Operator order 08.10.2026: the third refresh job gets its manual button too
                                  ("Knopf für upload Postprocessing habe ich dann vergessen. Auch manual dann statt never").
                                  It starts the TASK, like the two refresh buttons above — NOT the job's own
@@ -349,7 +349,7 @@
                             <button is="emby-button" type="button" class="raised button-submit" id="RunPostprocessNow" style="margin-top:0.6em;">▶ Run upload postprocessing now</button>
                         </div>
 
-                        <h3>Database</h3>
+                        <h3>Plugin database</h3>
                         <div class="fieldDescription" style="max-width:60em;">
                             <b>Reset plugin database.</b> Deletes all persistent state. A backup is kept. Rebuild costs API quota.
                         </div>
@@ -358,11 +358,10 @@
                         </div>
 
                         <div class="fieldDescription" style="max-width:60em;">
-                            Restore a timestamped backup of a state file. The current file is kept as .pre-restore-&lt;timestamp&gt; before anything is overwritten.
+                            Restores a timestamped backup of the plugin database.
                         </div>
                         <div style="margin-top:0.8em;">
                             <button is="emby-button" type="button" class="raised" id="RestoreBackup">Restore from backup…</button>
-                            <div class="fieldDescription">Restores a timestamped backup of a state file.</div>
                         </div>
                     </div>
 
@@ -680,15 +679,42 @@
             // One date format for the whole page: US order (M/D/YYYY) with local AM/PM
             // time, so statistics, quota and status stamps read identically instead of
             // each call site relying on its own locale default.
+            //
+            // NAIVE UTC (rework 09.10.2026, user report "isn't this UTC instead of local?"):
+            // some stamps arrive WITHOUT a zone designator — WorkerRuns.Started/Ended,
+            // Stats.SinceUtc/Updated and Diagnostics.LastSeen are read back from the database,
+            // and the SQLite provider returns them with DateTimeKind.Unspecified, so
+            // ToString("O") omits the "Z" that DateTime.UtcNow itself would have written.
+            // JavaScript then follows ECMA-262: a date-time WITHOUT an offset is LOCAL time,
+            // so the browser applied no conversion and the UTC clock was shown verbatim —
+            // measured on prod (Europe/Berlin): a run stored as 07:36:28 UTC displayed as
+            // 7:36 AM although it happened at 9:36 AM local, two hours off, and the error
+            // grows with the viewer's distance from UTC.
+            //
+            // The values ARE UTC (every writer uses DateTime.UtcNow), so the missing
+            // designator is restored here rather than in the database: stamps that already
+            // carry "Z" or a numeric offset are left untouched, a bare "YYYY-MM-DDTHH:MM..."
+            // gets the "Z" appended. Fixing it at this ONE place covers every caller below,
+            // and any future stamp read from the database, without touching stored rows.
+            var subdlAsUtc = function (iso) {
+                if (iso instanceof Date) { return iso; }
+                if (typeof iso !== 'string') { return iso; }
+                var s = iso.trim();
+                if (!s) { return iso; }
+                // "Z" or a trailing +HH:MM/-HH:MM already pins the instant.
+                if (/Z$/i.test(s) || /[+-]\d{2}:?\d{2}$/.test(s)) { return s; }
+                // Only a bare ISO date-time is a naive UTC stamp; anything else stays as it was.
+                return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) ? s + 'Z' : s;
+            };
             var subdlFmtDateTime = function (iso) {
-                var d = (iso instanceof Date) ? iso : new Date(iso);
+                var d = (iso instanceof Date) ? iso : new Date(subdlAsUtc(iso));
                 if (isNaN(d.getTime())) { return ''; }
                 var date = d.toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' });
                 var time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
                 return date + ' ' + time;
             };
             var subdlFmtTime = function (iso) {
-                var d = (iso instanceof Date) ? iso : new Date(iso);
+                var d = (iso instanceof Date) ? iso : new Date(subdlAsUtc(iso));
                 if (isNaN(d.getTime())) { return ''; }
                 // SECONDS included on purpose (30.09.2026): the footer reads "Updated ...", and with
                 // minute resolution a refresh inside the same minute produced an identical string —
@@ -918,7 +944,7 @@
                         document.querySelector('#LogMode').value = config.LogMode;
                         document.querySelector('#OshashRefresh').value = config.OshashRefresh || 'Monthly';
         document.querySelector('#PruneMode').value = config.PruneMode || 'Weekly';
-        document.querySelector('#UploadPostprocessInterval').value = config.UploadPostprocessInterval || 'Daily';
+        document.querySelector('#UploadPostprocessInterval').value = config.UploadPostprocessInterval || 'Weekly';
                         document.querySelector('#QaValidateSrt').checked = config.QaValidateSrt;
                         document.querySelector('#QaCheckSync').checked = config.QaCheckSync;
                         document.querySelector('#QaVerifyLanguage').checked = config.QaVerifyLanguage;
@@ -1396,7 +1422,7 @@ workers.forEach(function (w) {
                 document.querySelector('#ResetRegistry').addEventListener('click', function (e) {
                     e.preventDefault();
                     // F-M90: two-stage confirmation — the wording is intentionally blunt.
-                    if (!confirm('Reset the plugin database?\n\nThis deletes ALL persistent state files: uploaded/rejected memory, stream positions, hash cache. On the next run every stream is re-screened from scratch and re-verified against SubDL (existing uploads are skipped, nothing is uploaded twice). Timestamped backups are kept in the plugin data directory.\n\nAre you absolutely sure?')) {
+                    if (!confirm('Reset the plugin database?\n\nThis deletes ALL persistent state: uploaded/rejected memory, stream positions, hash cache. On the next run every stream is re-screened from scratch and re-verified against SubDL (existing uploads are skipped, nothing is uploaded twice). Timestamped backups are kept in the plugin data directory.\n\nAre you absolutely sure?')) {
                         return;
                     }
                     if (!confirm('FINAL CONFIRMATION\n\nThis makes EVERYTHING new — the plugin forgets every decision it ever made. A full re-screen will consume API quota and may take several runs.\n\nProceed only if you really want this.')) {
@@ -1432,7 +1458,7 @@ workers.forEach(function (w) {
                             return;
                         }
                         var stamp = backups[0]; // Newest first
-                        if (!confirm('Restore subdl-scribe.db from backup ' + stamp + '?\n\nThe current database will be kept as .pre-restore copy before overwriting.\n\nProceed?')) {
+                        if (!confirm('Restore the plugin database from backup ' + stamp + '?\n\nThe current database will be kept as .pre-restore copy before overwriting.\n\nProceed?')) {
                             return;
                         }
                         Dashboard.showLoadingMsg();
@@ -1441,7 +1467,7 @@ workers.forEach(function (w) {
                         }).then(function (res2) {
                             Dashboard.hideLoadingMsg();
                             if (res2 && res2.ok) {
-                                Dashboard.alert('Restored subdl-scribe.db from ' + res2.stamp + '. Previous live file kept as .pre-restore-' + res2.restoreStamp + '.');
+                                Dashboard.alert('Restored the plugin database (subdl-scribe.db) from ' + res2.stamp + '. Previous live file kept as .pre-restore-' + res2.restoreStamp + '.');
                             } else {
                                 Dashboard.alert('Restore failed: ' + (res2 && res2.error ? res2.error : 'unknown'));
                             }

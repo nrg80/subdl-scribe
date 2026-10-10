@@ -1291,45 +1291,60 @@ def main():
               f"{cfg_id}" not in handler and "subdlStartTask" in handler,
               "a manual button that also sets the interval would be a hidden scheduler (F-M210)")
 
-    # The LABEL follows the button (F-M210a, operator order 08.10.2026: "Never -> manual in beiden
-    # Auswahlmenüs"). The VALUE must stay `Never` — the enum and every stored configuration key on it,
-    # so a renamed label that also renamed the value would silently reset what a user had chosen.
-    # Operator order 08.10.2026: the menu entry itself reads just "Manual" — no see-below sentence
-    # tacked onto it. The button sits directly under its own description, so naming it in the option
-    # text was noise the operator removed twice ("Never -> manual in beiden Auswahlmenüs", then
-    # "Und nur manual im Auswahlmenü der 3 worker bitte, kein see below bla bla blah").
-    for cfg_id, expected in [("PruneMode", "Manual"),
-                             ("OshashRefresh", "Manual")]:
-        check(f"{cfg_id} offers a Manual option (F-M210a)",
-              f'<option value="Never">{expected}</option>' in html,
-              "a service with a manual button must offer Manual, not Never")
+    # F-M210a as re-decided 10.10.2026 (operator order: "Never / manual für alle 3 jobs zu manual
+    # auflösen"). Until then one setting carried TWO spellings: the label read Manual while the stored
+    # value was `Never` — frozen that way on 08.10.2026 precisely so a rename could not reset a
+    # configuration already made. The operator has now asked for the value to be Manual as well, so
+    # this guard has to MOVE rather than disappear: the risk did not go away, it relocated into the
+    # migration. Four assertions carry it —
+    #   (a) all three menus offer value="Manual" and read exactly "Manual" (no see-below suffix: the
+    #       button sits right under its own description, and the operator removed that noise twice),
+    #   (b) the page offers `value="Never"` nowhere any more — an absence is invisible in a passing
+    #       run, so it needs its own check,
+    #   (c) each enum still DECLARES the legacy member, because an old configuration file names it and
+    #       a dropped name either throws or silently falls back to a cadence nobody chose,
+    #   (d) the load path reads a stored Never as Manual, so the menu shows the value the file means
+    #       instead of showing nothing at all.
+    for cfg_id in ("PruneMode", "OshashRefresh", "UploadPostprocessInterval"):
         # Scoped to THIS select's own option list. A page-wide search is wrong twice over: the page
         # carries tab buttons AND a cycle-interval menu that legitimately uses value="Manual"
         # (measured — the page-wide version went RED on a correct file). Bound the block by the
-        # select's own delimiters instead.
-        # `split` takes LITERAL text, not a pattern: index the id, then take the block up to the
-        # select's own closing tag.
+        # select's own delimiters instead: index the id, then take up to its closing tag.
         _i = html.find(f'id="{cfg_id}"')
         blk = html[_i:html.find('</select>', _i)] if _i != -1 else ''
-        check(f"{cfg_id} keeps the stored VALUE Never",
-              f'<option value="Never">{expected}</option>' in blk and '<option value="Manual"' not in blk,
-              "renaming the value would reset an existing configuration")
-    # The third job joined them (operator order 08.10.2026: "Knopf für upload Postprocessing habe ich
-    # dann vergessen. Auch manual dann statt never") - so all three carry a button AND the Manual label,
-    # and no service on this page offers Manual without a way to trigger it.
-    check("postprocessing offers Manual (F-M210a)",
-          '<option value="Never">Manual</option>' in html,
-          "every service with a manual button must label its disabling option Manual")
-    # Operator order 08.10.2026: the option reads EXACTLY "Manual" — no see-below sentence after it.
-    # Asserted on all three menus by reading each select's own block, because the entry is the label the
-    # operator keeps shortening and a suffix would otherwise only be caught by the VALUE check above,
-    # which would report the wrong reason ("renaming the value") for a purely cosmetic change.
-    for cfg_id in ("PruneMode", "OshashRefresh", "UploadPostprocessInterval"):
-        _i = html.find(f'id="{cfg_id}"')
-        blk = html[_i:html.find('</select>', _i)] if _i != -1 else ''
+        check(f"{cfg_id} offers Manual as the VALUE (F-M210a)",
+              '<option value="Manual">Manual</option>' in blk,
+              "one setting, one spelling: the menu must store the word it shows")
         check(f"{cfg_id} menu entry reads just 'Manual'",
-              '<option value="Never">Manual</option>' in blk,
+              blk.count('<option value="Manual">Manual</option>') == 1,
               "the label is the bare word; the button sits right below and needs no pointing at")
+
+    check("the page no longer offers the legacy value Never",
+          'value="Never"' not in html,
+          "the value was renamed deliberately; leaving it in the markup keeps two spellings alive")
+
+    _enums = read_source("Configuration", "PluginConfiguration.cs")
+    for _enum in ("UpdateInterval", "PruneMode", "OshashRefreshMode"):
+        _m = re.search(r'public enum %s\s*\{(.*?)\n\}' % _enum, _enums, re.S)
+        _body = _m.group(1) if _m else ""
+        check(f"{_enum} still declares the legacy member Never",
+              re.search(r'^\s*Never,?\s*$', _body, re.M) is not None,
+              "an old configuration file names it; a dropped name deserialises to another cadence")
+
+    _plugin = read_source("Plugin.cs")
+    for _field, _legacy, _current in [("PruneMode", "PruneMode.Never", "PruneMode.Manual"),
+                                      ("OshashRefresh", "OshashRefreshMode.Never", "OshashRefreshMode.Manual"),
+                                      ("UploadPostprocessInterval", "UpdateInterval.Never", "UpdateInterval.Manual")]:
+        check(f"the load path reads a stored {_field} Never as Manual",
+              f"c.{_field} == {_legacy}" in _plugin and f"c.{_field} = {_current}" in _plugin,
+              "without it an existing choice keeps its old spelling and the menu shows neither")
+
+    # The disabling member must be named EXPLICITLY in the OSHash switch: its fallback is Monthly, so
+    # a value that fell through would start rehashing a library whose owner had switched it off.
+    _oshtask = read_source("ScheduledTasks", "SubdlOshashRefreshTask.cs")
+    check("the OSHash task treats Manual as 'no revalidation'",
+          "OshashRefreshMode.Manual => TimeSpan.Zero" in _oshtask,
+          "the switch falls back to Monthly — an unnamed disabling value would start rehashing")
 
     # F-M60 REMOVED (operator order 08.10.2026: "Dann bitte file-retry weg in code und gui. Alleinige
     # Aufgabe database refresh."). A removal is invisible in a passing run, so it needs its own absence

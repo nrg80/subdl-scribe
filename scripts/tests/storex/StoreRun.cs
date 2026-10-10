@@ -288,6 +288,37 @@ using (var db = new SubdlDbContext(workdir, null))
 // ---------------------------------------------------------------------------------------------
 Console.WriteLine();
 Console.WriteLine("--- compaction ---");
+
+// F-M342: the compaction must ALSO refresh the query statistics. Read straight from the FILE,
+// because "did ANALYZE run" is visible in none of the store's own APIs — and a check on the
+// returned outcome passes on a build that only vacuums, which is exactly the build this guards.
+// The negative control is built in: the store above was created and written WITHOUT a compaction,
+// so the same probe must find no statistics yet. A probe that cannot report "absent" proves nothing.
+var statsDbPath = DbFiles.PathIn(workdir);
+int StatsRows()
+{
+    if (!File.Exists(statsDbPath))
+    {
+        return -1;
+    }
+
+    using var conn = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + statsDbPath);
+    conn.Open();
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1';";
+    if (Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0)
+    {
+        return 0;
+    }
+
+    cmd.CommandText = "SELECT count(*) FROM sqlite_stat1;";
+    return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+}
+
+int statsBefore = StatsRows();
+Check(statsBefore == 0, "no query statistics exist before the compaction (the probe can report absence)",
+    statsBefore.ToString(System.Globalization.CultureInfo.InvariantCulture) + " row(s)");
+
 using (var db = new SubdlDbContext(workdir, null))
 {
     var (before, after, areas, outcome) = db.Compact();
@@ -296,6 +327,10 @@ using (var db = new SubdlDbContext(workdir, null))
     Check(db.Meta.FindById("db") != null, "store answers after compaction");
     Check(db.Media.Count() > 0, "rows survive compaction");
 }
+
+int statsAfter = StatsRows();
+Console.WriteLine("   query statistics: " + statsAfter + " index row(s)");
+Check(statsAfter > 0, "the compaction refreshed the query statistics", statsAfter + " row(s) in sqlite_stat1");
 
 Console.WriteLine();
 Console.WriteLine("=== " + (failures == 0 ? "STORE OK" : failures + " FAILURE(S)") + " ===");
