@@ -353,6 +353,40 @@ public sealed class SubdlDbContext : IDisposable
 
             _db.Database.ExecuteSqlRaw("VACUUM;");
 
+            // F-M342 (operator order 10.10.2026): refresh the query statistics in the SAME pass.
+            // VACUUM shrinks the file; ANALYZE is what fills sqlite_stat1 — the row count and the
+            // rows-per-key average of every index — and sqlite_stat1 is what the query planner reads
+            // to pick an index. Without it the planner only guesses, and the guess is measurably
+            // wrong: on "MediaHash = ? AND Status = ?" against this schema it chose IX_embeds_Status
+            // before the statistics existed and IX_embeds_MediaHash after, and MediaHash is the
+            // selective one (13 rows per key against 29).
+            //
+            // Its OWN try, deliberately: a statistics failure must NOT be reported as a failed
+            // compaction. The file WAS shrunk at this point, and the outcomes below ("recovered",
+            // "the data file was NOT shrunk") would be a lie about a file that is smaller than it was.
+            // The statistics are the cheaper half of the pair and lose nothing but their own freshness.
+            bool statisticsRefreshed = false;
+            try
+            {
+                _db.Database.ExecuteSqlRaw("ANALYZE;");
+                statisticsRefreshed = true;
+            }
+            catch (Exception statEx)
+            {
+                _logger?.LogWarning(
+                    "[SubDL-DB] ANALYZE skipped ({Msg}) — the file was compacted, the query statistics stay stale.",
+                    statEx.Message);
+            }
+
+            // Fold the rewrite in before measuring. VACUUM and ANALYZE BOTH write into the journal
+            // in WAL mode, so without this second checkpoint the "after" number describes a journal
+            // holding the whole rebuilt database rather than the settled file — measured in the
+            // store harness: main 159 744 B plus wal 164 856 B gave the 324 600 B the line reported,
+            // against a 155 648 B "before", which reads as a file that doubled while it shrank.
+            // F-M214 wants the footprint of the settled store, and the file is meant to be
+            // self-contained afterwards (a plain copy is a backup) — one fold serves both.
+            _db.Database.ExecuteSqlRaw("PRAGMA wal_checkpoint(TRUNCATE);");
+
             // A VACUUM rewrites every table; SQLite reports nothing, so the count that the previous
             // engine got from its rebuild is taken from the collections that actually hold rows.
             long rebuilt = _db.GetAreaRowCounts().Count(x => x.Rows > 0);
@@ -363,9 +397,10 @@ public sealed class SubdlDbContext : IDisposable
             LogUtil.Detail(_logger,
                 "[SubDL-DB] compacted: {BeforeTotal} -> {AfterTotal} bytes total "
                 + "(main {MainBefore} -> {MainAfter}, wal {WalBefore} -> {WalAfter}); "
-                + "{Rebuilt} area(s) rewritten, {Released} bytes released.",
+                + "{Rebuilt} area(s) rewritten, {Released} bytes released; statistics {Stats}.",
                 beforeTotal, afterTotal, mainBefore, mainAfter, walBefore, walAfter,
-                rebuilt, beforeTotal - afterTotal);
+                rebuilt, beforeTotal - afterTotal,
+                statisticsRefreshed ? "refreshed" : "stale (ANALYZE did not run)");
             return (beforeTotal, afterTotal, rebuilt, CompactOutcome.Compacted);
         }
         catch (Exception ex)

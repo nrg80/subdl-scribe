@@ -25,7 +25,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
   - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
   - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 19 requirements
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 14 requirements
-- [6. Database Refresh](#6-database-refresh) — 7 requirements
+- [6. Database Refresh](#6-database-refresh) — 8 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
 - [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 5 requirements
 
@@ -766,6 +766,14 @@ The rebuild's side files are addressed by their STEM (`subdl-scribe-log.db`, `su
 The compaction is verified, not trusted: after a failed rebuild the database is probed with a real query (the compatibility row), and only a failing probe replaces the engine.
 
 The repair preserves the data: the failed swap leaves the original file on disk, so rows survive. **See T51.**
+
+**F-M342 [D] (operator order 10.10.2026):** **A database refresh refreshes the query statistics in the same pass as the compaction.** After the rebuild the run executes `ANALYZE`, which fills `sqlite_stat1` — the row count and the rows-per-key average of every index — because that is what the query planner reads to pick an index; without it the plan is a guess. Measured on this schema: `embeds WHERE MediaHash = ? AND Status = ?` searched `IX_embeds_Status` before the statistics existed and `IX_embeds_MediaHash` after, and MediaHash is the selective one (13 rows per key against 29).
+
+The cost is one database page: +4 096 B on the bench store (21 statistic rows), measured before and after in a file copy.
+
+The statistics run as their OWN guarded step. A failure is logged as a warning and does **not** turn a shrunken file into a failed compaction — the file WAS rebuilt at that point, and the failure wording belongs to the rebuild alone.
+
+The rewrite is folded in before the footprint is measured (the journal fold), so the reported "after" describes the settled file instead of a journal holding the rebuilt database. **Test: T150.** See F-M214.
 
 ## 7. OSHash Refresh
 
@@ -1723,4 +1731,4 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T149:** Every number in an Auto-Sync log line is separated by a POINT, whatever the host's culture wants. Asserted against a culture that wants a comma, because a check run under the machine's own culture passes on any English host and proves nothing: the number is formatted through `InvariantCulture`, the resulting line carries no comma **between digits**, and the SRT timestamp formatter is required to KEEP its comma — that one is the file format and a "fix" there would corrupt every written subtitle. The two directions are asserted together for that reason: a check that only greps for `,` would be satisfied by breaking the timestamps. **Mutation-verified:** reverting one interpolation to its plain form turns it RED, and replacing the timestamp comma with a point turns it RED by name. (F-M339)
 
-
+**T150:** The compaction refreshes the query statistics. Asserted at the FILE, because "did ANALYZE run" is visible in none of the store's own APIs and the outcome the store returns is `Compacted` on a build that only vacuums. The harness opens the data file itself and reads `sqlite_stat1`: it must be ABSENT before the compaction — the built-in negative control, since a probe that cannot report absence proves nothing — and carry one row per index after it. **Mutation-verified:** commenting the `ANALYZE` statement out turns the check RED by name (`0 row(s) in sqlite_stat1`) while the store still reports `Compacted`; restoring it turns the check green. (F-M342)
