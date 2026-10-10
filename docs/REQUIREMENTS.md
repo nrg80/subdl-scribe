@@ -1086,11 +1086,13 @@ It used to answer the HI question with LANGUAGES and carry the variant as a `:hi
 
 **Not in scope:** the database refresh's full-server id probe stays unscoped. It answers "does this item still exist", not "should this item be worked", so narrowing it would delete rows for merely deselected libraries. **Test: T32.**
 
-**F-M220:** **The plugin description has TWO carriers and they must not drift — the card reads the DLL, not build.yaml.**
+**F-M220:** **The plugin description has THREE carriers and they must not drift — the card reads the DLL, not build.yaml, and an installed Jellyfin reads the package's build.yaml, not the manifest.**
 
-Both must hold the same text, capped at **260 characters**, and must still name the required SubDL and TMDb keys.
+All three — `Plugin.cs` (the card the dashboard renders), `build.yaml` (the package) and `manifest.json` (the catalogue) — must hold the same text, capped at **320 characters**, must name the required SubDL and TMDb keys, and must end with the **AI disclosure** (`Created by AI under the directions of the maintainer.`, operator order 10.10.2026).
 
-`scripts/release.sh` enforces all three (identical, under the limit, keys named) as a precondition, so changing one carrier alone aborts the release. **Test: T37.**
+The disclosure rides in all three because the reach differs: somebody browsing the catalogue reads `manifest.json`, while a server that has the plugin installed shows the description Jellyfin copied out of the package's `build.yaml` at install time. Measured 10.10.2026: Jellyfin's own installer wrote that package text into the plugin's `meta.json`, not the manifest entry — so a card without the sentence would hide it exactly where the plugin is in use.
+
+`scripts/release.sh` enforces all of it (three identical, under the limit, keys named, disclosure last) as a precondition, so changing one carrier alone aborts the release. **Test: T37.**
 
 Changing the card text requires a **DLL rebuild and a Jellyfin restart**; the string is not read at runtime.
 

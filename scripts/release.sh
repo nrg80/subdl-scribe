@@ -106,7 +106,7 @@ def plugin_cs_desc():
         sys.exit('no Description override in Plugin.cs')
     return m.group(1)
 
-LIMIT = 260
+LIMIT = 320
 yaml_desc, cs_desc = build_yaml_desc(), plugin_cs_desc()
 for label, desc in (('build.yaml', yaml_desc), ('Plugin.cs (plugin card)', cs_desc)):
     print(f'  {label:22s}: {len(desc)} chars')
@@ -120,25 +120,29 @@ if 'TMDb API Key' not in cs_desc or 'SubDL' not in cs_desc:
 if yaml_desc != cs_desc:
     sys.exit('  FAIL: build.yaml and Plugin.cs descriptions differ — two carriers, '
              'one text. build.yaml:\n    ' + yaml_desc + '\n  Plugin.cs:\n    ' + cs_desc)
-print('  OK: both carriers identical, card is glanceable')
+print(f'  OK: both carriers identical, card within the {LIMIT}-char limit')
 
-# The CATALOGUE text is a THIRD carrier of the same words, plus one sentence the card must NOT
-# carry: the AI disclosure, on the operator's order of 10.10.2026 — "Den AI disclosure bitte auch
-# ins manifest: Created by AI under the directions of the maintainer." It stays out of the card
-# because the card is the glanceable one under the LIMIT above, while the catalogue is what somebody
-# reads BEFORE installing. Guarded as a RELATIONSHIP rather than as a copied string, for two
-# reasons: a manifest regenerated from build.yaml would otherwise drop the sentence in silence, and
-# two texts edited by hand drift — which is the failure this whole block exists to catch.
+# The CATALOGUE text (manifest.json) is a THIRD carrier of the same words. The operator's order of
+# 10.10.2026 put the AI disclosure in the manifest ("Den AI disclosure bitte auch ins manifest:
+# Created by AI under the directions of the maintainer."), and the follow-up order the same day put
+# it in the card as well — because a Jellyfin with the plugin installed builds its own copy of the
+# description from build.yaml at install time (measured 10.10.2026: its installer wrote the package's
+# build.yaml text into the plugin's meta.json, not the manifest entry), so a card without the
+# sentence would hide it exactly where the plugin is in use. ONE text in three carriers, each ending
+# with the disclosure. Guarded as identity rather than as three copied strings: a manifest
+# regenerated from build.yaml must not be able to drop the sentence in silence, and texts edited by
+# hand drift — which is the failure this whole block exists to catch.
 AI_DISCLOSURE = 'Created by AI under the directions of the maintainer.'
 CATALOGUE_DESC = json.load(open('manifest.json', encoding='utf-8'))[0].get('description', '')
 if not CATALOGUE_DESC.endswith(AI_DISCLOSURE):
     sys.exit('  FAIL: the catalogue description does not end with the AI disclosure:\n    '
              + CATALOGUE_DESC)
-if CATALOGUE_DESC != yaml_desc + ' ' + AI_DISCLOSURE:
-    sys.exit('  FAIL: the catalogue description is not the card text plus the disclosure\n'
-             '    expected : ' + yaml_desc + ' ' + AI_DISCLOSURE + '\n'
-             '    found    : ' + CATALOGUE_DESC)
-print(f'  OK: catalogue = card + AI disclosure ({len(CATALOGUE_DESC)} chars)')
+if CATALOGUE_DESC != yaml_desc:
+    sys.exit('  FAIL: the catalogue description differs from the card text — three carriers, one\n'
+             '    expected : ' + yaml_desc + '\n'
+             '    found    : ' + CATALOGUE_DESC + '\n'
+             '  (build.yaml and Plugin.cs are compared just above; all three must be equal)')
+print(f'  OK: three carriers identical, disclosure present ({len(CATALOGUE_DESC)} chars)')
 PY
 
 CHANGELOG_ENTRY="$(python3 - "$VER" <<'PY'

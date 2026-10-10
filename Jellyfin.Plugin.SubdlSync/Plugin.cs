@@ -401,9 +401,13 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// card is a one-glance summary, not a feature list or an explanation of the id
     /// resolution design (that lives in F-M203/F-M219 and the README).
     /// </remarks>
-    /// F-M220/F-M221: this string and build.yaml must hold the same text, under 260 characters, and
+    /// F-M220/F-M221: this string and build.yaml must hold the same text, under 320 characters, and
     /// must name both required keys. The card reads the DLL, not build.yaml.
-    public override string Description => "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key.";
+    /// Operator order 10.10.2026: the card carries the AI disclosure as its last sentence. The card
+    /// and the catalogue therefore say the same thing; the catalogue reads it from build.yaml, and a
+    /// Jellyfin with the plugin installed copies this text into its own meta.json at install time —
+    /// so a card without the sentence would hide it exactly where the plugin is in use.
+    public override string Description => "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key. Created by AI under the directions of the maintainer.";
 
     /// <summary>
     /// Gets the current plugin instance.

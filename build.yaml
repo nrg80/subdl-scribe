@@ -19,7 +19,8 @@ description: >
   SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing
   subtitles for the languages and libraries you pick and uploads your own.
   Download is on by default; upload is off — enable at your choice.
-  Requires a SubDL login and API Key plus a TMDb API Key.
+  Requires a SubDL login and API Key plus a TMDb API Key. Created by AI
+  under the directions of the maintainer.
 category: "Subtitles"
 artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
