@@ -123,6 +123,8 @@ public sealed class SubdlDbContext : IDisposable
 
         _db = new SubdlSqliteContext(_dbPath);
         _db.Database.EnsureCreated();
+        EnsureAddedColumns();
+
         _db.ConfigurePragmas();
 
         Meta = new SubdlSet<MetaEntity>(_db, e => e.Id);
@@ -180,6 +182,70 @@ public sealed class SubdlDbContext : IDisposable
     /// write in that case: the newer build may store fields this one would silently drop.
     /// </summary>
     public bool IsWrittenByNewerVersion { get; private set; }
+
+    /// <summary>
+    /// Adds a column this build knows and an older store does not have yet.
+    /// <para>
+    /// <c>EnsureCreated</c> creates a schema only when the file does not exist; an installation that
+    /// already owns a store never receives a NEW column through it, and the first query naming that
+    /// column fails with "no such column". The statistics row grows by addition only — no field
+    /// changes meaning, no row is rewritten, and an older build reading the file simply ignores the
+    /// extra column — so the column is added in place instead of bumping
+    /// <see cref="CurrentSchemaVersion"/>: a bump marks the file as written by a NEWER build and makes
+    /// the previous build stop writing, a downgrade lock bought for nothing.
+    /// </para>
+    /// </summary>
+    private void EnsureAddedColumns()
+    {
+        try
+        {
+            var connection = _db.Database.GetDbConnection();
+            bool opened = connection.State != System.Data.ConnectionState.Open;
+            if (opened)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                var present = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+                using (var probe = connection.CreateCommand())
+                {
+                    probe.CommandText = "PRAGMA table_info(\"status_stats\");";
+                    using var reader = probe.ExecuteReader();
+                    while (reader.Read())
+                    {
+                        present.Add(
+                            System.Convert.ToString(reader.GetValue(1), System.Globalization.CultureInfo.InvariantCulture)
+                            ?? string.Empty);
+                    }
+                }
+
+                // An empty list means the table does not exist yet — EnsureCreated has just written it
+                // with every column, so there is nothing to add. F-M345 is the first entry.
+                if (present.Count > 0 && !present.Contains("ReuploadsPrevented"))
+                {
+                    using var alter = connection.CreateCommand();
+                    alter.CommandText = "ALTER TABLE \"status_stats\" ADD COLUMN \"ReuploadsPrevented\" INTEGER NOT NULL DEFAULT 0;";
+                    alter.ExecuteNonQuery();
+                    LogUtil.Normal(_logger, "[SubDL] data file: added the column status_stats.ReuploadsPrevented.");
+                }
+            }
+            finally
+            {
+                if (opened)
+                {
+                    connection.Close();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // A store missing a column must not stop the plugin from starting; the statistics writer
+            // reports its own failures on its own path.
+            _logger?.LogWarning("[SubDL] column check failed (continuing): {Msg}", ex.Message);
+        }
+    }
 
     /// <summary>
     /// Reads area 0 and decides whether this build may write to the file.

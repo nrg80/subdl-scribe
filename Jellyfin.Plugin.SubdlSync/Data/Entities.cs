@@ -563,6 +563,23 @@ public class StatusStatsEntity
     /// </summary>
     public long LooseSubtitlesRenamed { get; set; }
 
+    /// <summary>
+    /// F-M345 (operator request 10.10.2026): subtitle uploads that did NOT happen because the same
+    /// subtitle was already known for that content. Counted per SUB — one count is one embedded track
+    /// (stream position) or one loose sidecar file, not one media file — because that is the grain the
+    /// duplicate answer is given at: the registry holds a verdict per position and per sidecar name.
+    /// A file with three known tracks therefore reads 3.
+    /// <para>
+    /// Counted only for a file a run NEWLY found in the library (an item-scoped, arrival-driven scan).
+    /// A full scan walks the whole library, and counting it would report every already settled
+    /// subtitle of the installation — a property of the library, not of the run. The live case
+    /// (10.10.2026): a byte-identical second copy of a film arrived in the other library, the seeder
+    /// resolved it to the already settled content and queued nothing. Correct, and until now
+    /// invisible: the row showed the work that happened, never the work that was prevented.
+    /// </para>
+    /// </summary>
+    public long ReuploadsPrevented { get; set; }
+
     /// <summary>Start of the counting period; set by "Reset statistics", null before first use.</summary>
     public DateTime? SinceUtc { get; set; }
 

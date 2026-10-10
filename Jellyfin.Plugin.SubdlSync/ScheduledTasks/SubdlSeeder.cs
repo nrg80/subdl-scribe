@@ -61,6 +61,14 @@ public sealed class SeedSnapshot
     /// and a reader seeing one number must be able to tell which happened.
     /// </summary>
     public int LooseSubtitlesRenamed { get; set; }
+
+    /// <summary>
+    /// F-M345: subtitles this scan did NOT send again because the registry already held a verdict for
+    /// them — per embedded track (stream position) and per loose sidecar file. Only an item-scoped,
+    /// arrival-driven scan counts: a full scan walks the library and would report the settled
+    /// subtitles of the whole installation, which measures the library and not the run.
+    /// </summary>
+    public int ReuploadsPrevented { get; set; }
 }
 
 /// <summary>One queue entry (shared by seeder and dispatcher).</summary>
@@ -372,9 +380,22 @@ public sealed class SubdlSeeder
                 }
 
                 if (dir != SubdlEventDispatcher.CycleDirection.DownloadOnly
-                    && config.UploadEnabled && IsUploadTodo(item, mediaPath, config))
+                    && config.UploadEnabled)
                 {
-                    snapshot.Upload.Add(Clone(qi));
+                    // F-M345: only an item-scoped (arrival-driven) scan counts the prevented
+                    // re-uploads. A full scan walks the whole library, and counting it would report
+                    // every settled subtitle of the installation — a property of the library, not of
+                    // the run. The count rides back with the predicate's answer.
+                    bool uploadTodo = IsUploadTodo(item, mediaPath, config, onlyItemIds != null, out int prevented);
+                    if (onlyItemIds != null)
+                    {
+                        snapshot.ReuploadsPrevented += prevented;
+                    }
+
+                    if (uploadTodo)
+                    {
+                        snapshot.Upload.Add(Clone(qi));
+                    }
                 }
             }
 
@@ -631,8 +652,14 @@ public sealed class SubdlSeeder
     /// streams or a complete known-pairs set without loose sidecars → skip.
     /// Loose sidecars keep the item as todo — the pipeline owns their checks.
     /// </summary>
-    private bool IsUploadTodo(BaseItem item, string mediaPath, Configuration.PluginConfiguration config)
+    private bool IsUploadTodo(
+        BaseItem item,
+        string mediaPath,
+        Configuration.PluginConfiguration config,
+        bool countPrevented,
+        out int prevented)
     {
+        prevented = 0;
         try
         {
             var db = Plugin.Instance!.SharedDbContext;
@@ -662,7 +689,13 @@ public sealed class SubdlSeeder
                     return true;
                 }
 
-                return SidecarsNeedWork(looseOnly, looseHash);
+                bool sidecarTodo = SidecarsNeedWork(looseOnly, looseHash, out int settledSidecars);
+                if (countPrevented && !sidecarTodo)
+                {
+                    prevented = settledSidecars; // F-M345: settled loose files, counted per file
+                }
+
+                return sidecarTodo;
             }
 
             string? mediaHash = registry.GetMediaHash(mediaPath);
@@ -680,8 +713,18 @@ public sealed class SubdlSeeder
             if (registry.ArePositionsTerminal(mediaHash, textStreams.Select(s => allSubs.FindIndex(x => x == s))))
             {
                 var loose = Pipeline.UploadPipeline.FindLooseSrts(mediaPath);
-                if (!SidecarsNeedWork(loose, mediaHash))
+                bool sidecarTodo = SidecarsNeedWork(loose, mediaHash, out int settledSidecars);
+                if (!sidecarTodo)
                 {
+                    if (countPrevented)
+                    {
+                        // F-M345: every dialogue track of this file already carries a verdict, plus the
+                        // settled loose files. Counted per SUB, which is why a file with three tracks
+                        // reports three.
+                        prevented = CountTerminalTracks(registry, mediaHash, textStreams.Select(s => allSubs.FindIndex(x => x == s)))
+                            + settledSidecars;
+                    }
+
                     return false; // embedded settled + every sidecar uploaded/rejected/hash-known
                 }
 
@@ -709,6 +752,13 @@ public sealed class SubdlSeeder
 
                 if (registry.CountKnownPairs(mediaHash) >= needed.Count + untagged)
                 {
+                    if (countPrevented)
+                    {
+                        // F-M345: asked per POSITION, not as `needed.Count` — the pair count is a sum
+                        // over the whole file, so it can be reached by pairs this file does not carry.
+                        prevented = CountTerminalTracks(registry, mediaHash, textStreams.Select(s => allSubs.FindIndex(x => x == s)));
+                    }
+
                     return false;
                 }
             }
@@ -717,9 +767,23 @@ public sealed class SubdlSeeder
         }
         catch
         {
+            prevented = 0;
             return true; // prefilter failure → treat as todo (pipeline decides)
         }
     }
+
+    /// <summary>
+    /// F-M345: how many of this file's own subtitle positions already carry a verdict. Answers the
+    /// same question as <see cref="Registry.ContentHashRegistry.ArePositionsTerminal"/> — asked per
+    /// position instead of all-or-nothing, off the same rows, so the two cannot disagree about a
+    /// track and the counter cannot drift away from the queue decision it explains.
+    /// </summary>
+    /// <param name="registry">The content-hash registry.</param>
+    /// <param name="mediaHash">Parent media hash.</param>
+    /// <param name="positions">Stream positions to check.</param>
+    /// <returns>Number of distinct positions with a verdict.</returns>
+    private static int CountTerminalTracks(Registry.ContentHashRegistry registry, string? mediaHash, System.Collections.Generic.IEnumerable<int> positions)
+        => positions.Where(p => p >= 0).Distinct().Count(p => registry.IsEmbedTerminal(mediaHash, p));
 
     /// <summary>
     /// True when any loose sidecar still needs the upload pipeline: neither
@@ -729,15 +793,21 @@ public sealed class SubdlSeeder
     /// for sidecars that pass the registry lookups — settled items cost two
     /// dictionary hits and no I/O.
     /// </summary>
-    private bool SidecarsNeedWork(List<(string Path, string Lang, bool HearingImpaired, bool Forced)> loose, string mediaHash)
+    private bool SidecarsNeedWork(
+        List<(string Path, string Lang, bool HearingImpaired, bool Forced)> loose,
+        string mediaHash,
+        out int prevented)
     {
+        prevented = 0;
         var db = Plugin.Instance!.SharedDbContext;
         var registry = new Registry.ContentHashRegistry(db);
+        int settled = 0;
 
         foreach (var (loosePath, looseLang, looseHi, _) in loose)
         {
             if (registry.IsUploaded(mediaHash, looseLang, looseHi))
             {
+                settled++; // F-M345: this language is already up for that content
                 continue;
             }
 
@@ -756,6 +826,7 @@ public sealed class SubdlSeeder
             string looseHash = Registry.ContentHashRegistry.ComputeHash(looseContent);
             if (registry.IsSidecarUploaded(looseHash) || registry.SidecarRejectedReason(looseHash) != null)
             {
+                settled++; // F-M345: this very file went up before, or was rejected
                 continue;
             }
 
@@ -764,17 +835,20 @@ public sealed class SubdlSeeder
                 string content = File.ReadAllText(loosePath);
                 if (registry.IsContentKnown(Registry.ContentHashRegistry.ComputeHash(content)))
                 {
+                    settled++; // F-M345: same bytes, so the upload would have been refused as a duplicate
                     continue;
                 }
             }
             catch
             {
+                prevented = settled; // F-M345: what was settled before the unreadable file
                 return true; // unreadable sidecar → let the pipeline decide
             }
 
             return true;
         }
 
+        prevented = settled;
         return false;
     }
 

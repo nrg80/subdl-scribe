@@ -153,6 +153,11 @@ public sealed class SubdlEventDispatcher : IDisposable
     // Same channel and same rule as the counter above: accumulated across scans, consumed once by
     // the statistics writer. Kept separate because it is a different act on a different file kind.
     private int _pendingLooseSubtitlesRenamed;
+
+    // F-M345: subtitles a scan did NOT send again because the registry already held a verdict for
+    // them — per embedded track and per loose sidecar. Same channel and same rule as the counters
+    // above: accumulated across scans, consumed exactly once by the statistics writer.
+    private int _pendingReuploadsPrevented;
     // Rev.3: the ITEM IDS the last seed added (per direction) — the
     // final sweep run processes ONLY these, never the retry-queued leftovers
     // of the earlier run in the same cycle.
@@ -1474,6 +1479,8 @@ public sealed class SubdlEventDispatcher : IDisposable
         _pendingLanguageCodesAllocated = 0;
         long looseRenamed = _pendingLooseSubtitlesRenamed;
         _pendingLooseSubtitlesRenamed = 0;
+        long reuploadsPrevented = _pendingReuploadsPrevented;
+        _pendingReuploadsPrevented = 0;
 
         // F-M247 (user decision 28.09.2026: "Dryrun geht nie in die Statistik"): the dry-run
         // filter lives in StatusCounterDelta.From, not here — this method stays a plain
@@ -1481,7 +1488,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         // ranking, id test, QA) and so fills its summary, but it writes nothing to SubDL or
         // to disk; counting it reported subtitles nobody ever wrote. Live 28.09.2026: 771 of
         // the 858 "downloaded" entries came from one afternoon of dry runs.
-        var delta = Pipeline.StatusCounterDelta.From(upSummary, downSummary, langAllocated, looseRenamed);
+        var delta = Pipeline.StatusCounterDelta.From(upSummary, downSummary, langAllocated, looseRenamed, reuploadsPrevented);
         if (delta.IsEmpty)
         {
             return;
@@ -1496,7 +1503,8 @@ public sealed class SubdlEventDispatcher : IDisposable
                 delta.RejectedUpload,
                 delta.FittedToAudio,
                 delta.LanguageCodesAllocated,
-                delta.LooseSubtitlesRenamed);
+                delta.LooseSubtitlesRenamed,
+                delta.ReuploadsPrevented);
         }
         catch (Exception ex)
         {
@@ -2196,6 +2204,9 @@ public sealed class SubdlEventDispatcher : IDisposable
                 // once, by the writer, and only a scan adds to it.
                 _pendingLanguageCodesAllocated += snapshot.LanguageCodesAllocated;
                 _pendingLooseSubtitlesRenamed += snapshot.LooseSubtitlesRenamed;
+                // F-M345: no direction prefix and the same accumulate-across-scans rule — the seeder
+                // serves both directions and only the upload leg can produce this number.
+                _pendingReuploadsPrevented += snapshot.ReuploadsPrevented;
                 // Accumulate the leg, then report the cycle's running total — see SeederQueuedDetail.
                 // The gate mirrors the scan's own: a leg only counts the direction it was asked for,
                 // because the foreign queue is left structurally empty by that gate.

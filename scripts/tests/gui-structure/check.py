@@ -368,9 +368,9 @@ def main():
     order = re.findall(r"\['([^']+)'", renderer)
     # F-M322 (operator order 08.10.2026): the type row and the year row were WITHDRAWN, with their
     # counters — the operator asked for both to go ("Type movies series und searches run without the
-    # year kann entfallen. In statistik und der Zähler"). The table is SEVEN rows now and the volume
-    # pair leads directly; the both-directions row that used to sit between them no longer exists, so
-    # the prefix assertion covers the two volume rows only.
+    # year kann entfallen. In statistik und der Zähler"). The table is EIGHT rows now (F-M345 added the
+    # prevented-re-upload row) and the volume pair leads directly; the both-directions row that used to
+    # sit between them no longer exists, so the prefix assertion covers the two volume rows only.
     expected_prefix = [
         "Subtitles downloaded",
         "Subtitles uploaded",
@@ -384,7 +384,7 @@ def main():
           bool(dl) and bool(up) and max(dl) < min(up),
           "downloads at %s, uploads at %s" % (dl, up))
     check("every quality row is present exactly once",
-          len(order) == 7 and len(set(order)) == 7,
+          len(order) == 8 and len(set(order)) == 8,
           "%d row(s): %s" % (len(order), order))
     # The two withdrawn counters must not come back by halves: a row deleted from the page while the
     # field stays in the API is the F-M218 file-pair trap in reverse, and it leaves a counter that
@@ -481,6 +481,10 @@ def main():
         check("the language-code row reads a field the API sends",
               "LanguageCodesAllocated" in api_names,
               "LanguageCodesAllocated missing from the Stats endpoint")
+        # F-M345: same for the prevented-re-upload counter.
+        check("the prevented-re-upload row reads a field the API sends",
+              "ReuploadsPrevented" in api_names,
+              "ReuploadsPrevented missing from the Stats endpoint")
 
         # The reset must zero EVERY counter the API publishes. This is a source cross-check
         # because the failure is silent in the worst way: add a column, forget the reset, and the
