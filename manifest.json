@@ -12,9 +12,9 @@
         "version": "12.1.12.233",
         "changelog": "v12.1.12.233: Clean-up round on the settings page and the plugin text. The database section now\n    speaks of the plugin database throughout and its restore line is one sentence; the three cadence\n    menus spell the non-automatic choice \"Manual\", and a stored \"Never\" reads as Manual; upload\n    postprocessing defaults to Weekly for fresh installations. The plugin's description ends with\n    \"Created by AI under the directions of the maintainer.\" on the card and in the catalog, and every\n    SubDL search names the integration.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.233-dev/Jellyfin.Plugin.SubdlSync_12.1.12.233.zip",
-        "checksum": "a94ce366439ac23597afcaefc85e86e5",
-        "timestamp": "2026-10-10T04:23:10Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.233/Jellyfin.Plugin.SubdlSync_12.1.12.233.zip",
+        "checksum": "6a0fec4e34ff3fa9ceffe1e2ed607513",
+        "timestamp": "2026-10-10T04:28:48Z"
       }
     ]
   }
