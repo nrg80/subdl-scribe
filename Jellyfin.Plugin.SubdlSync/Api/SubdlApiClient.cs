@@ -642,12 +642,19 @@ public sealed class SubdlApiClient
 
     /// <summary>
     /// Performs the 3-step upload: getNId → uploadSingleSubtitle → uploadSubtitle (F-M8).
+    /// <para>
+    /// <paramref name="quality"/> is the source quality the metadata step reports (F-M344). It is a
+    /// parameter and no longer a literal: the documented values are web, bluray, dvd, hdtv and cam,
+    /// and only the caller knows where the subtitle it hands over came from. See
+    /// <see cref="Pipeline.SourceQuality"/> for the value list and the recognition rule.
+    /// </para>
     /// </summary>
     public async Task<UploadResult> UploadSubtitleAsync(
         string srtContent,
         string subFileName,
         string subdlLanguage,
         string releaseName,
+        string quality,
         string? imdbId,
         string? tmdbId,
         bool isSeries,
@@ -751,7 +758,9 @@ public sealed class SubdlApiClient
             ["type"] = isSeries ? "tv" : "movie",
             ["name"] = Path.GetFileNameWithoutExtension(subFileName),
             ["lang"] = subdlLanguage,
-            ["quality"] = "web",
+            // F-M344: the caller's value, never a literal. SourceQuality returns one of the five
+            // documented values, so the wire carries a value SubDL documents.
+            ["quality"] = quality,
             ["production_type"] = "0",
             ["releases"] = JsonSerializer.Serialize(new[] { releaseName }),
             ["framerate"] = "0",

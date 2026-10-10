@@ -1806,6 +1806,11 @@ public sealed class UploadPipeline
 
         string releaseName = Path.GetFileNameWithoutExtension(mediaPath);
 
+        // F-M344: the source quality this upload reports. The subtitle's OWN name decides — a loose
+        // sidecar states where that subtitle came from — and the container's name is read only when
+        // the own name says nothing. Unrecognized stays "web", which is what shipped before.
+        string quality = SourceQuality.Detect(loosePath, mediaPath);
+
         // F-M22: dry run — no API calls
         if (_config.DryRun)
         {
@@ -1821,7 +1826,7 @@ public sealed class UploadPipeline
         // tmdb_id is the SubDL-recommended field; imdb_id rides along too. The API-side
         // precedence rule (tmdb empty → imdb only; both → both) lives in the client —
         // here we simply forward what JF metadata provided.
-        var result = await _api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired).ConfigureAwait(false);
+        var result = await _api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired).ConfigureAwait(false);
         if (result.Ok)
         {
             // F-M17y/F-M184: SubDL returns "sent for review" for every upload. The final
