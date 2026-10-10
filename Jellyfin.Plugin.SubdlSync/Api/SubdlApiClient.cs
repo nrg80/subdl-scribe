@@ -387,13 +387,23 @@ public sealed class SubdlApiClient
     public string? ApiKey { get; set; }
 
     /// <summary>
-    /// Gets the User-Agent every SubDL call carries: the product name plus the REAL assembly
+    /// Gets the User-Agent the plugin's HTTP clients carry: the product name plus the REAL assembly
     /// version.
     /// <para>
     /// Until 10.10.2026 this was the fixed literal "Jellyfin.Plugin.SubdlSync/1.0", so every
     /// release since 1.0 introduced itself to SubDL as version 1.0 — the server could not tell
     /// two versions apart, and the string named the assembly rather than the product. Read from
     /// the assembly, so a version bump needs no second edit and cannot fall out of step with it.
+    /// </para>
+    /// <para>
+    /// WHO SEES IT — traced through the tree on 10.10.2026, three counterparties: api.subdl.com
+    /// (search, login, quota read, status probe), dl.subdl.com (the subtitle file download) and
+    /// api.themoviedb.org. The last one is not an oversight: BuildApiClient's HttpClient is handed
+    /// to TmdbImdbResolver, and SubdlStatusController's probe client serves the TMDb configuration
+    /// probe as well. Both services sit behind a TLS-terminating front, so the operator and its
+    /// edge read the header; the plugin's own log, Jellyfin itself, the LAN and the ISP do not.
+    /// The operator decided on 10.10.2026 that TMDb may see it too — the agent says where a call
+    /// comes from, and that is as true of an id lookup as of a subtitle search.
     /// </para>
     /// </summary>
     public static string DefaultUserAgent { get; } =
@@ -409,8 +419,13 @@ public sealed class SubdlApiClient
     /// F-M343: the plugin builds HttpClient instances at more than one place — the main API client
     /// through BuildApiClient, and ad-hoc ones in the status probe, the quota read, the upload
     /// postprocessing controller and the upload pipeline's own pass. Those ad-hoc clients carried
-    /// no agent at all, so their calls (login in particular, which adds no per-request header)
-    /// arrived as the .NET default. One factory keeps them from drifting apart again.
+    /// no agent at all, so their calls (login in particular, which adds no per-request header) went
+    /// out with no User-Agent whatsoever. One factory keeps them from drifting apart again.
+    /// </para>
+    /// <para>
+    /// Not every client built here is a SubDL caller: SubdlStatusController holds one and uses it
+    /// for the SubDL search probe AND the TMDb configuration probe, so TMDb sees this agent too.
+    /// That is intended — see <see cref="DefaultUserAgent"/> for who sees it and why.
     /// </para>
     /// </summary>
     /// <param name="timeout">Optional client timeout; the BCL default is left in place when null.</param>

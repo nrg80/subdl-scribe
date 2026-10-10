@@ -36,7 +36,9 @@ public class SubdlStatusController : ControllerBase
 {
     private readonly ILogger<SubdlStatusController> _logger;
     private readonly ILibraryManager _libraryManager;
-    // F-M343: the probe is a SubDL call like any other, so it identifies the plugin too.
+    // F-M343: this one client serves two probes — the SubDL search probe (a SubDL call like any
+    // other, see below) and the TMDb configuration probe at the bottom of this file — so both
+    // identify the plugin. TMDb seeing it is intended; see SubdlApiClient.DefaultUserAgent.
     private static readonly HttpClient _httpClient = SubdlApiClient.NewHttpClient();
 
     public SubdlStatusController(ILogger<SubdlStatusController> logger, ILibraryManager libraryManager)
