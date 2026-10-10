@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.231"
+version: "12.1.12.232"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,11 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.232: Follow-up to 231 — the identifying agent now rides on every SubDL call, not only on
+    the main ones. The plugin builds its SubDL clients at several places, and four of them (the
+    status probe, the quota read, the upload postprocessing check and the upload pipeline's own
+    pass) sent no agent at all, so their calls arrived unidentified. One factory builds all of them
+    now.
   v12.1.12.231: The database refresh now refreshes the query statistics as well, and SubDL can see
     who is calling. The refresh ran VACUUM alone — that shrinks the file but leaves the query
     planner guessing which index to use. It now runs ANALYZE in the same pass, which costs one
