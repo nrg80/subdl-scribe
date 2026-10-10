@@ -12,9 +12,9 @@
         "version": "12.1.12.234",
         "changelog": "v12.1.12.234: Two settings texts shortened. The library selection line is one sentence and states\n    that an empty selection stops every run; the language-code switch says what it does and its\n    default in one sentence instead of four.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.234-dev/Jellyfin.Plugin.SubdlSync_12.1.12.234.zip",
-        "checksum": "e06233f579717cdcd6af8301d4aad3cb",
-        "timestamp": "2026-10-10T04:43:34Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.234/Jellyfin.Plugin.SubdlSync_12.1.12.234.zip",
+        "checksum": "98f0fd4aa12703095684c90d3d33ee37",
+        "timestamp": "2026-10-10T04:46:12Z"
       }
     ]
   }
