@@ -262,7 +262,7 @@
 <h3>Database refresh</h3>
                         <div class="selectContainer">
                             <select is="emby-select" id="PruneMode" name="PruneMode" class="emby-select-withcolor emby-select">
-                                <option value="Never">Manual</option>
+                                <option value="Manual">Manual</option>
                                 <option value="Weekly">Weekly refresh</option>
                                 <option value="Monthly">Monthly refresh</option>
                                 <option value="Yearly">Yearly refresh</option>
@@ -277,7 +277,7 @@
 <h3>OSHash refresh</h3>
                         <div class="selectContainer">
                             <select is="emby-select" id="OshashRefresh" name="OshashRefresh" class="emby-select-withcolor emby-select">
-                                <option value="Never">Manual</option>
+                                <option value="Manual">Manual</option>
                                 <option value="Weekly">Weekly revalidation</option>
                                 <option value="Monthly">Monthly revalidation</option>
                                 <option value="Yearly">Yearly revalidation</option>
@@ -330,12 +330,12 @@
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="UploadPostprocessInterval">Upload postprocessing interval</label>
                             <select is="emby-select" id="UploadPostprocessInterval" name="UploadPostprocessInterval" class="emby-select-withcolor emby-select">
-                                <option value="Never">Manual</option>
+                                <option value="Manual">Manual</option>
                                 <option value="Daily">Daily</option>
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
                             </select>
-                            <div class="fieldDescription">How often rejected uploads are resolved against /user/mySubtitles. Scheduled run is inhibited if upload is disabled. Default: Daily.</div>
+                            <div class="fieldDescription">How often rejected uploads are resolved against /user/mySubtitles. Scheduled run is inhibited if upload is disabled. Default: Weekly.</div>
                             <!-- Operator order 08.10.2026: the third refresh job gets its manual button too
                                  ("Knopf für upload Postprocessing habe ich dann vergessen. Auch manual dann statt never").
                                  It starts the TASK, like the two refresh buttons above — NOT the job's own
@@ -944,7 +944,7 @@
                         document.querySelector('#LogMode').value = config.LogMode;
                         document.querySelector('#OshashRefresh').value = config.OshashRefresh || 'Monthly';
         document.querySelector('#PruneMode').value = config.PruneMode || 'Weekly';
-        document.querySelector('#UploadPostprocessInterval').value = config.UploadPostprocessInterval || 'Daily';
+        document.querySelector('#UploadPostprocessInterval').value = config.UploadPostprocessInterval || 'Weekly';
                         document.querySelector('#QaValidateSrt').checked = config.QaValidateSrt;
                         document.querySelector('#QaCheckSync').checked = config.QaCheckSync;
                         document.querySelector('#QaVerifyLanguage').checked = config.QaVerifyLanguage;
@@ -1422,7 +1422,7 @@ workers.forEach(function (w) {
                 document.querySelector('#ResetRegistry').addEventListener('click', function (e) {
                     e.preventDefault();
                     // F-M90: two-stage confirmation — the wording is intentionally blunt.
-                    if (!confirm('Reset the plugin database?\n\nThis deletes ALL persistent state files: uploaded/rejected memory, stream positions, hash cache. On the next run every stream is re-screened from scratch and re-verified against SubDL (existing uploads are skipped, nothing is uploaded twice). Timestamped backups are kept in the plugin data directory.\n\nAre you absolutely sure?')) {
+                    if (!confirm('Reset the plugin database?\n\nThis deletes ALL persistent state: uploaded/rejected memory, stream positions, hash cache. On the next run every stream is re-screened from scratch and re-verified against SubDL (existing uploads are skipped, nothing is uploaded twice). Timestamped backups are kept in the plugin data directory.\n\nAre you absolutely sure?')) {
                         return;
                     }
                     if (!confirm('FINAL CONFIRMATION\n\nThis makes EVERYTHING new — the plugin forgets every decision it ever made. A full re-screen will consume API quota and may take several runs.\n\nProceed only if you really want this.')) {
@@ -1458,7 +1458,7 @@ workers.forEach(function (w) {
                             return;
                         }
                         var stamp = backups[0]; // Newest first
-                        if (!confirm('Restore subdl-scribe.db from backup ' + stamp + '?\n\nThe current database will be kept as .pre-restore copy before overwriting.\n\nProceed?')) {
+                        if (!confirm('Restore the plugin database from backup ' + stamp + '?\n\nThe current database will be kept as .pre-restore copy before overwriting.\n\nProceed?')) {
                             return;
                         }
                         Dashboard.showLoadingMsg();
@@ -1467,7 +1467,7 @@ workers.forEach(function (w) {
                         }).then(function (res2) {
                             Dashboard.hideLoadingMsg();
                             if (res2 && res2.ok) {
-                                Dashboard.alert('Restored subdl-scribe.db from ' + res2.stamp + '. Previous live file kept as .pre-restore-' + res2.restoreStamp + '.');
+                                Dashboard.alert('Restored the plugin database (subdl-scribe.db) from ' + res2.stamp + '. Previous live file kept as .pre-restore-' + res2.restoreStamp + '.');
                             } else {
                                 Dashboard.alert('Restore failed: ' + (res2 && res2.error ? res2.error : 'unknown'));
                             }

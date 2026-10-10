@@ -15,6 +15,10 @@ using System.Globalization;
 using System.IO;
 using System.Xml.Linq;
 using Jellyfin.Plugin.SubdlScribe.Data;
+// The cadence enums live in the Configuration namespace. Imported as a namespace, NOT reached
+// through the `Configuration` property of this class, which would resolve to the config object and
+// not to the type (the migration in DiceSchedulerConfig needs the TYPES).
+using Jellyfin.Plugin.SubdlScribe.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
@@ -228,6 +232,32 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         {
             c.RandomPostprocessTime = $"{Random.Shared.Next(1, 8)} {Random.Shared.Next(0, 24):D2}:{Random.Shared.Next(0, 60):D2}";
             changed = true;
+        }
+
+        // F-M210a (operator order 10.10.2026): "Never / manual für alle 3 jobs zu manual auflösen".
+        // The three cadence menus had two spellings for ONE setting — the label read Manual while the
+        // stored value was Never — because the value had been frozen to avoid resetting a choice
+        // already made. Now the page offers Manual as the VALUE, so a file still carrying Never is
+        // read as Manual here, on every load.
+        //
+        // Deliberately NOT written back, and deliberately NOT `changed = true`: these are USER fields
+        // and this plugin persists only its own (F-M201), so the file keeps Never until its owner
+        // saves the page — and the two spellings mean the same thing, which is what makes leaving the
+        // file alone safe. The legacy members stay in the enums so an old name still deserialises
+        // instead of throwing and falling back to a cadence nobody chose.
+        if (c.PruneMode == PruneMode.Never)
+        {
+            c.PruneMode = PruneMode.Manual;
+        }
+
+        if (c.OshashRefresh == OshashRefreshMode.Never)
+        {
+            c.OshashRefresh = OshashRefreshMode.Manual;
+        }
+
+        if (c.UploadPostprocessInterval == UpdateInterval.Never)
+        {
+            c.UploadPostprocessInterval = UpdateInterval.Manual;
         }
 
         if (changed)

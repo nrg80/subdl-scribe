@@ -95,6 +95,10 @@ public class SubdlOshashRefreshTask : IScheduledTask
         var refresh = _config()?.OshashRefresh ?? OshashRefreshMode.Monthly;
         TimeSpan revalidateEvery = refresh switch
         {
+            // Manual (and its legacy spelling Never): no scheduled revalidation. Written out rather
+            // than left to the fallback below, which is Monthly — a disabling value that fell through
+            // would silently start rehashing.
+            OshashRefreshMode.Manual => TimeSpan.Zero,
             OshashRefreshMode.Never => TimeSpan.Zero,
             OshashRefreshMode.Weekly => TimeSpan.FromDays(7),
             OshashRefreshMode.Monthly => TimeSpan.FromDays(30),

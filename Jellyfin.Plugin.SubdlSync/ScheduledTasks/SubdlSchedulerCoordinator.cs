@@ -696,7 +696,9 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 Configuration.PruneMode.Weekly => 1,
                 Configuration.PruneMode.Monthly => 4,
                 Configuration.PruneMode.Yearly => 52,
-                _ => 0 // Never
+                // Manual, and its legacy spelling Never: no scheduled fire at all, the dashboard
+                // button is the only way in (F-M210a).
+                _ => 0
             };
             var refreshAnchor = IsWeeklyDaySpec(config.RandomPruneTime, now)
                 ? ParseWeeklySpec(config.RandomPruneTime, now)
