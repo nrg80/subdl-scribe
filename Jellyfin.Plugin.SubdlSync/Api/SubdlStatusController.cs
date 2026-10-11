@@ -96,7 +96,6 @@ public class SubdlStatusController : ControllerBase
             RejectedUpload = row.RejectedUpload,
             FittedToAudio = row.FittedToAudio,
             LanguageCodesAllocated = row.LanguageCodesAllocated,
-            ReuploadsPrevented = row.ReuploadsPrevented,
             LooseSubtitlesRenamed = row.LooseSubtitlesRenamed,
             SinceUtc = row.SinceUtc?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
             Updated = row.Updated.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
@@ -208,7 +207,6 @@ public class SubdlStatusController : ControllerBase
             RejectedUpload = row.RejectedUpload,
             FittedToAudio = row.FittedToAudio,
             LanguageCodesAllocated = row.LanguageCodesAllocated,
-            ReuploadsPrevented = row.ReuploadsPrevented,
             LooseSubtitlesRenamed = row.LooseSubtitlesRenamed,
             SinceUtc = row.SinceUtc?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
             Updated = row.Updated.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
