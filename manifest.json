@@ -13,8 +13,8 @@
         "changelog": "v12.1.12.236: The statistics row for prevented re-uploads is gone again; nothing else changed.",
         "targetAbi": "12.1.0.0",
         "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.236/Jellyfin.Plugin.SubdlSync_12.1.12.236.zip",
-        "checksum": "95cf7ce42ea7b75487b80902cf06898a",
-        "timestamp": "2026-10-11T07:35:43Z"
+        "checksum": "1232bdcbcbedf9ed6fca1aa7facbc255",
+        "timestamp": "2026-10-11T07:48:32Z"
       }
     ]
   }
