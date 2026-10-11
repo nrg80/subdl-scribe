@@ -1766,3 +1766,41 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 **T152:** The upload reports the source quality of the subtitle. Three things are asserted, because a unit test of the reader alone would be green while the upload still sent `web` — the exact shape of the bug this replaced: **the VALUE LIST** is SubDL's five documented values, asserted against `SourceQuality.Allowed` so an invented value cannot slip in (the server accepted an unknown `client` value silently, and this field cannot be assumed more forgiving just because the failure would be invisible); **the RECOGNITION RULE** on a name table that contains the two names which motivated the change (`Dark.Matter…WEBRip…NeoNoir` → `web`, `Dinosaurs (1991) … (480p DVD x265 Panda)` → `dvd`), the cases a substring rule gets wrong (`Cambridge` must not become a camera recording, `The.DVD.Club…BluRay` is a BluRay), and the fallback (an unplaceable name stays `web`, which is what shipped before); and **the WIRING on the source**, because the value has to reach the wire — the client must send the parameter and must no longer contain the literal assignment, asserted in a form a re-indent cannot flip and a comment mentioning the literal cannot satisfy. **Mutation-verified, two plants:** restoring `["quality"] = "web"` in the client turns two checks RED by name (`the metadata step sends the PARAMETER, not a literal`, `the old hardcoded literal is gone`); removing the `DVD` token from the table turns the Dinosaurs case and the full-path case RED (`expected dvd, got web`). Both restored → ALL GREEN. (F-M344)
 
 **T153:** The prevented-re-upload counter counts subtitles, reaches the row, and reaches an EXISTING store. Asserted on the source for the parts a green build cannot show — every failure here is silent — plus one runtime check: `StatusCounterDelta.From(null, null, 0, 0, 3)` reports 3 and is not empty, while `From(null, null)` stays empty. The **grain** is asserted on the count sites: the seeder asks `IsEmbedTerminal` per POSITION, on both branches that answer "nothing to do", plus one count per settled loose file — so a file carrying three known tracks reads 3 and not 1. The **guard** is asserted as the guarded STATEMENT itself (`if (onlyItemIds != null) { … += prevented; }`), not as a window above it: the predicate call one line up also names `onlyItemIds != null`, so a window check stays green with the guard deleted — planted and confirmed green, which is why the check reads the flattened statement. Without the guard, a nightly full scan would report the settled subtitles of the whole installation. The **chain** is asserted hop by hop (snapshot field, dispatcher accumulator and its once-only consumption, the delta's parameter and copy, the writer's parameter, its early-out, the reset, and both API responses), because a counter added but never carried dies at any one of them; and the **placement**, next to the other upload row and ahead of the two no-direction rows, which a table still renders correctly when a new row is simply appended. The **upgrade path** is asserted where nothing else looks: `EnsureAddedColumns()` must run after `EnsureCreated()`, must probe `PRAGMA table_info(status_stats)`, must add the column only when it is missing, and must not stop the plugin when it fails — an installation that already owns a store gets no new column from `EnsureCreated`, so without this the first query naming the field throws on every installation but a fresh one. **Mutation-verified, five plants:** removing the `onlyItemIds` guard on the addition (the naive window form of this check stayed GREEN — the reason it is written as a statement), removing the per-position count from the terminal branch, removing the `ALTER TABLE`, removing the runtime check's store round-trip, and publishing the field in only one API response: each turns its own checks RED by name. Restored → ALL GREEN. (F-M345)
+
+
+**F-M346:** The download's filename fallback is the last resort — it runs only when an item has no id at
+all — and there it **confirms instead of guessing**. An IMDb id stated in the name (`tt` plus seven to
+nine digits, the way uploaders write it: "The Counterfeiters 2007 tt0813547 sqi") is looked up through
+`/find/{id}` and used **only when the title route agrees with it**; a contradiction is logged and
+neither route is trusted. Reason: measured on 1224 real SubDL names, the id is the one part of a name
+that survives every title variant — a translated title cannot be found by text search at all ("Tan Thuy
+Hoang" is the Vietnamese title of "Qin Shi Huang") — while one measured entry stated an id belonging to
+a different film than its own title. The id is also stripped from the title, so a name never becomes one.
+
+**F-M347:** A **series** whose name states season and episode but no year is resolved through the
+**episode itself**: for the first few search candidates the plugin asks `tv/{id}/season/{s}/episode/{e}`
+and accepts the first candidate that really carries that episode. No candidate with it means no
+resolution. Reason: measured on 1224 names, **61 of 70 series names carry no year**, so the strict
+title+year test cannot run for them, and the loose route's first hit was right only **4 of 14** times. A
+**film** without a year stays unresolved for the same reason — never TMDb's most popular namesake. The
+loose first-hit call is gone from the fallback; it still serves the Jellyfin-title rung.
+
+**F-M348:** A parsed title that still carries brackets or percent signs is **not a title**, and the
+fallback refuses it (54 of 1224 measured names), while leading bracket labels (`[NETFLIX]`,
+`[Crunchyroll]`, `[cFpR]`) are stripped from the title (73 measured) — keeping one made the title search
+miss.
+
+**F-M349:** Names that dress their letters in presentation forms (mathematical alphanumerics, fullwidth)
+are folded with Unicode **NFKD** before parsing — but **only when such a character is present**, so
+ordinary names pass through byte-identical. Reason: the bold digits in
+"[𝐜𝐅𝐩𝐑] 𝐃𝐀𝐅𝐓 𝐒𝐓𝐀𝐓𝐄 (𝟐𝟎𝟐𝟒) 𝐏𝐑𝐈𝐌𝐄 - 𝐓𝐛𝐕" are a year to no pattern, and such a name yielded the whole
+string as title and no year (measured: **0 of 12** resolved). The check is a surrogate test, not a
+regex: .NET's regex engine has no `\U` escape, and the first version threw at type-initialisation time —
+caught by the harness, not by the build.
+
+**T154:** The filename fallback is covered by `scripts/tests/namefallback`: real SubDL names run through
+the plugin's own parser (reached by reflection, since the parser is internal), plus source assertions for
+the wiring — the series route, the strict title+year route, the confirmation of an id stated in the name,
+the refusal of a contradiction, the refusal of an unusable title, the episode call in the resolver and
+the gate in front of the fold. The fold checks skip themselves on a runtime without ICU instead of
+failing, because normalization is a globalization feature.

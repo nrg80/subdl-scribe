@@ -1068,11 +1068,69 @@ public sealed class DownloadPipeline : IDisposable
                 // 0 results, while search/tv finds it instantly.
                 if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId))
                 {
-                    var (fnTitle, fnYear, fnIsSeries) = ParseFileNameForIds(Path.GetFileName(mediaPath));
-                    if (fnTitle != null && (fnIsSeries != isSeries || fnTitle != title))
+                    string fnFileName = Path.GetFileName(mediaPath);
+                    var fnParsed = ParseFileNameForIds(fnFileName);
+                    string? fnTitle = fnParsed.Title;
+                    int? fnYear = fnParsed.Year;
+                    bool fnIsSeries = fnParsed.IsSeries;
+                    string? fnImdbFromName = MediaNameParser.ExtractImdbId(fnFileName);
+                    // F-M348 (11.10.2026, operator decision): a parsed title that still carries brackets or
+                    // percent signs is not a title — refusing here keeps the banal mis-hits out ("English"
+                    // → "Johnny English"; a name whose title is only "S01"). 54 of 1224 measured.
+                    bool fnTitleUsable = fnTitle != null && fnTitle.Length >= 2
+                        && !fnTitle.AsSpan().ContainsAny(UnusableTitleChars);
+                    if (fnTitle != null && !fnTitleUsable)
                     {
-                        (imdbId, tmdbId) = await _tmdb.ResolveImdbByTitleAsync(fnTitle, fnYear, fnIsSeries, ct).ConfigureAwait(false);
-                        if (!string.IsNullOrWhiteSpace(imdbId))
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] filename fallback refused {File} — the name yields no usable title (\"{Title}\")",
+                            fnFileName, fnTitle);
+                    }
+
+                    if (fnTitleUsable && (fnIsSeries != isSeries || fnTitle != title))
+                    {
+                        // F-M346/F-M347 (11.10.2026, operator decisions): this fallback CONFIRMS, it never
+                        // guesses. A series without a year is resolved through the episode its name states
+                        // (61 of 70 series names carry no year, and the loose first-hit route was right 4 of
+                        // 14 times). A film without a year stays unresolved instead of being pinned to TMDb's
+                        // most popular namesake. An id the name states counts only when the title route agrees
+                        // with it — one measured entry stated an id belonging to a different film.
+                        string? fnNameImdb = null;
+                        string? fnNameTmdb = null;
+                        if (fnIsSeries && fnParsed.Season is int fnSeason && fnParsed.Episode is int fnEpisode)
+                        {
+                            (fnNameImdb, fnNameTmdb) = await _tmdb.ResolveSeriesByEpisodeAsync(fnTitle!, fnSeason, fnEpisode, ct).ConfigureAwait(false);
+                        }
+                        else if (fnYear is int fnYearAsked)
+                        {
+                            var fnStrict = await _tmdb.ResolveByTitleYearAsync(fnTitle!, fnYearAsked, fnIsSeries, ct).ConfigureAwait(false);
+                            if (fnStrict.Found)
+                            {
+                                fnNameImdb = fnStrict.Imdb;
+                                fnNameTmdb = fnStrict.Tmdb;
+                            }
+                        }
+
+                        string? fnIdTmdb = null;
+                        if (fnImdbFromName != null)
+                        {
+                            fnIdTmdb = await _tmdb.ResolveTmdbByImdbAsync(fnImdbFromName, ct).ConfigureAwait(false);
+                            if (fnIdTmdb != null && fnNameTmdb != null
+                                && !string.Equals(fnIdTmdb, fnNameTmdb, StringComparison.Ordinal))
+                            {
+                                LogUtil.PerItem(_config.LogMode, _logger,
+                                    "[SubDL-D] filename fallback refused {File} — the name states imdb={Imdb} (tmdb={IdTmdb}) while its own title \"{Title}\" ({Year}) resolves to tmdb={NameTmdb}; neither is trusted",
+                                    fnFileName, fnImdbFromName, fnIdTmdb, fnTitle,
+                                    fnYear.HasValue ? fnYear.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "no year",
+                                    fnNameTmdb);
+                                fnIdTmdb = null;
+                                fnNameTmdb = null;
+                                fnNameImdb = null;
+                            }
+                        }
+
+                        imdbId = !string.IsNullOrWhiteSpace(fnNameImdb) ? fnNameImdb : (fnNameTmdb != null ? fnImdbFromName : null);
+                        tmdbId = fnNameTmdb ?? fnIdTmdb;
+                        if (!string.IsNullOrWhiteSpace(imdbId) || !string.IsNullOrWhiteSpace(tmdbId))
                         {
                             isSeries = fnIsSeries; // the filename knows the content type
                             summary.IdResolvedFromFilename++;
@@ -2991,11 +3049,12 @@ public sealed class DownloadPipeline : IDisposable
     /// It now delegates to <see cref="MediaNameParser"/>, which is the single authority for
     /// what a file name means. The return shape is unchanged.
     /// </remarks>
-    private static (string? Title, int? Year, bool IsSeries) ParseFileNameForIds(string fileName)
-    {
-        var parsed = MediaNameParser.Parse(fileName);
-        return (parsed.Title, parsed.Year, parsed.IsSeries);
-    }
+    /// <summary>F-M348: characters that make a parsed title unusable as a search term.</summary>
+    private static readonly System.Buffers.SearchValues<char> UnusableTitleChars =
+        System.Buffers.SearchValues.Create("%[](){}");
+
+    /// <summary>F-M346: the whole parse — the fallback needs the id and the season/episode too.</summary>
+    private static ParsedMediaName ParseFileNameForIds(string fileName) => MediaNameParser.Parse(fileName);
 
     private (string? Imdb, string? Tmdb, int Season, int Episode, bool IsSeries) ResolveIds(BaseItem item)
     {
