@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.234",
-        "changelog": "v12.1.12.234: Two settings texts shortened. The library selection line is one sentence and states\n    that an empty selection stops every run; the language-code switch says what it does and its\n    default in one sentence instead of four.",
+        "version": "12.1.12.235",
+        "changelog": "v12.1.12.235: Three changes at the two ends of the pipeline. The download's filename fallback — the\n    last resort, reached only for an item that carries no id at all — no longer guesses: an IMDb id a\n    name states is looked up and used only when the title route agrees, a contradiction is refused and\n    logged, a series without a year is resolved through the episode itself instead of TMDb's first hit,\n    a film without a year stays unresolved rather than pinned to a namesake, an unusable title is\n    refused, and names dressed in presentation forms are folded before parsing — measured on 1224 real\n    SubDL names, that fallback resolved none of the 12 dressed-up ones before this change. The\n    statistics gain a row counting uploads prevented as re-uploads of known subtitles, per subtitle\n    track and sidecar and only for what a new arrival brought in; it reaches an existing database\n    through a guarded ALTER TABLE without a schema bump. And the quality a subtitle reports on upload\n    is read from its actual source — web, bluray, dvd, hdtv, cam — instead of the fixed web that\n    shipped before.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.234-dev/Jellyfin.Plugin.SubdlSync_12.1.12.234.zip",
-        "checksum": "e06233f579717cdcd6af8301d4aad3cb",
-        "timestamp": "2026-10-10T04:43:34Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.235-dev/Jellyfin.Plugin.SubdlSync_12.1.12.235.zip",
+        "checksum": "9b0d88cebf2a91ea75a260052a58199a",
+        "timestamp": "2026-10-11T06:54:12Z"
       }
     ]
   }
