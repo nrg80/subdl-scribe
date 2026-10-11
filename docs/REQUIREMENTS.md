@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.64
-**Status:** Implementation — v12.1.12.234.
+**Status:** Implementation — v12.1.12.236.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -35,7 +35,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 15 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 33 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 32 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -1337,7 +1337,7 @@ Counted only when the write actually happened: a dry run `stand`s the write down
 
 **Placement:** the row sits with the upload rows, directly under `Uploads: discarded before transfer`, and the two rows that carry NO direction (F-M311/F-M313) stay the last two — asserted in T123, because a new row reads naturally as "append at the end" and only the grouping is lost when it goes there.
 
-The column reaches an EXISTING store: `EnsureCreated` writes a schema only for a new file, so a new column arrives through an explicit `ALTER TABLE` guarded by `PRAGMA table_info`. The schema version is deliberately not bumped — the row grows by addition, an older build ignores the extra column, and a bump would stop the previous build from writing for nothing. **Test: T153.** See F-M30, F-M308, F-M311.
+The column reaches an EXISTING store: `EnsureCreated` writes a schema only for a new file, so a new column arrives through an explicit `ALTER TABLE` guarded by `PRAGMA table_info`. The schema version is deliberately not bumped — the row grows by addition, an older build ignores the extra column, and a bump would stop the previous build from writing for nothing. **Test: T152.** See F-M30, F-M308, F-M311.
 
 **F-M308 [B1] (user decision 07.10.2026):** **The statistics counters are a TABLE, one row per counter, and the table names the direction each count belongs to.**
 
@@ -1787,7 +1787,7 @@ string as title and no year (measured: **0 of 12** resolved). The check is a sur
 regex: .NET's regex engine has no `\U` escape, and the first version threw at type-initialisation time —
 caught by the harness, not by the build.
 
-**T154:** The filename fallback is covered by `scripts/tests/namefallback`: real SubDL names run through
+**T153:** The filename fallback is covered by `scripts/tests/namefallback`: real SubDL names run through
 the plugin's own parser (reached by reflection, since the parser is internal), plus source assertions for
 the wiring — the series route, the strict title+year route, the confirmation of an id stated in the name,
 the refusal of a contradiction, the refusal of an unusable title, the episode call in the resolver and
