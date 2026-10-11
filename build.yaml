@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.234"
+version: "12.1.12.236"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -27,6 +27,19 @@ artifacts:
 - "LanguageDetection.dll"
 - "LiteDB.dll"
 changelog: >
+  v12.1.12.236: The statistics row for prevented re-uploads is gone again; nothing else changed.
+  v12.1.12.235: Three changes at the two ends of the pipeline. The download's filename fallback — the
+    last resort, reached only for an item that carries no id at all — no longer guesses: an IMDb id a
+    name states is looked up and used only when the title route agrees, a contradiction is refused and
+    logged, a series without a year is resolved through the episode itself instead of TMDb's first hit,
+    a film without a year stays unresolved rather than pinned to a namesake, an unusable title is
+    refused, and names dressed in presentation forms are folded before parsing — measured on 1224 real
+    SubDL names, that fallback resolved none of the 12 dressed-up ones before this change. The
+    statistics gain a row counting uploads prevented as re-uploads of known subtitles, per subtitle
+    track and sidecar and only for what a new arrival brought in; it reaches an existing database
+    through a guarded ALTER TABLE without a schema bump. And the quality a subtitle reports on upload
+    is read from its actual source — web, bluray, dvd, hdtv, cam — instead of the fixed web that
+    shipped before.
   v12.1.12.234: Two settings texts shortened. The library selection line is one sentence and states
     that an empty selection stops every run; the language-code switch says what it does and its
     default in one sentence instead of four.

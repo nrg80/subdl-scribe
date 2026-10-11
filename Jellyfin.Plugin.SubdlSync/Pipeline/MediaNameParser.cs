@@ -111,6 +111,35 @@ internal static class MediaNameParser
 
     private static readonly Regex WhitespacePattern = new(@"\s+", RegexOptions.Compiled);
 
+    /// <summary>F-M349: true when a name carries characters that are letter-shapes rather than letters —
+    /// mathematical alphanumeric symbols (bold, italic, fraktur …) and fullwidth forms. Such a name gets
+    /// folded before parsing.</summary>
+    /// <remarks>
+    /// Deliberately NOT a regex: the astral block behind U+1D400 has no <c>\U</c> escape in .NET's regex
+    /// engine, and the first attempt threw "Unrecognized escape sequence" at type-initialisation time —
+    /// caught by the harness, not by the build. A surrogate check has no such trap.
+    /// </remarks>
+    private static bool NeedsUnicodeFold(string name)
+    {
+        foreach (char c in name)
+        {
+            if (char.IsSurrogate(c) || (c >= '\uFF00' && c <= '\uFFEF'))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>F-M348: a bracketed tag at the START of a name is the uploader's label, not the title
+    /// ("[NETFLIX] Ranma ½", "[Crunchyroll] …", "[cFpR] …"). 73 of 1224 measured names carry one, and
+    /// keeping it made the title search miss.</summary>
+    private static readonly Regex LeadingBracketPrefixPattern = new(@"^\s*[\[\(\{][^\]\)\}]{0,24}[\]\)\}]\s*", RegexOptions.Compiled);
+
+    /// <summary>F-M346: an IMDb id as it appears in names — "tt" plus 7 to 9 digits.</summary>
+    private static readonly Regex ImdbIdPattern = new(@"\btt\d{7,9}\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     /// <summary>
     /// Parses a file name (with or without directory/extension).
     /// </summary>
@@ -118,6 +147,16 @@ internal static class MediaNameParser
     /// <returns>Title/year/type plus season+episode when the name states them.</returns>
     internal static ParsedMediaName Parse(string fileName)
     {
+
+        // F-M349 (11.10.2026, operator decision): names that dress their letters in presentation forms
+        // ("[𝐜𝐅𝐩𝐑] 𝐃𝐀𝐅𝐓 𝐒𝐓𝐀𝐓𝐄 (𝟐𝟎𝟐𝟒)") hide EVERYTHING from the parser — the bold digits are not a year
+        // to any of the patterns below, so such a name yielded the whole string as title and no year
+        // (measured: 0 of 12 resolved). Folding is applied only when such a character is present, so
+        // ordinary names pass through byte-identical and nothing else can shift.
+        if (NeedsUnicodeFold(fileName))
+        {
+            fileName = fileName.Normalize(System.Text.NormalizationForm.FormKD);
+        }
         if (string.IsNullOrWhiteSpace(fileName))
         {
             return new ParsedMediaName(null, null, false, null, null);
@@ -349,7 +388,43 @@ internal static class MediaNameParser
             t = t[..^1].Trim(Separators);
         }
 
+        // F-M348: strip leading bracket labels; a title needs at least two characters left to be one.
+        var lead = LeadingBracketPrefixPattern.Match(t);
+        while (lead.Success && t.Length - lead.Length >= 2)
+        {
+            t = t[lead.Length..].Trim(Separators);
+            lead = LeadingBracketPrefixPattern.Match(t);
+        }
+
+        // F-M346: an id standing on its own is never part of a title ("Zombies tt6878820 sqi" must
+        // yield "Zombies"). Names that put the id after the year are cut at the year anyway, but one
+        // without a year would otherwise keep the token.
+        t = ImdbIdPattern.Replace(t, " ");
+        t = WhitespacePattern.Replace(t, " ").Trim(Separators);
+
         return t;
+    }
+
+    /// <summary>
+    /// F-M346 (11.10.2026, operator decision): the IMDb id a NAME states, or null. Uploaders put the
+    /// film's id into the subtitle's name ("The Counterfeiters 2007 tt0813547 sqi"), and that id is the
+    /// one part of the name that survives every title variant: a translated title cannot be found by
+    /// text search at all (measured: "Tan Thuy Hoang" is the Vietnamese title of "Qin Shi Huang"),
+    /// while <c>/find/{id}</c> answers with the film itself. It is NOT trusted blindly — one measured
+    /// entry stated an id belonging to a different film than the name's own title — so the caller
+    /// confirms it against the title route before using it.
+    /// </summary>
+    /// <param name="name">File or subtitle name.</param>
+    /// <returns>The id in its canonical "tt0000000" form, or null.</returns>
+    internal static string? ExtractImdbId(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        var m = ImdbIdPattern.Match(name);
+        return m.Success ? m.Value.ToLowerInvariant() : null;
     }
 
     private static int? ParseInt(string raw)

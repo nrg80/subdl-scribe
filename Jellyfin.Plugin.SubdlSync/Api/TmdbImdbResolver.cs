@@ -656,6 +656,101 @@ public sealed class TmdbImdbResolver
     }
 
     /// <summary>
+    /// F-M347 (11.10.2026, operator decision): resolves a SERIES from its title plus the season and
+    /// episode its file name states — by asking the episode itself instead of trusting a title hit.
+    /// </summary>
+    /// <remarks>
+    /// Why: 61 of 70 series NAMES carry no year (measured on 1224 names from SubDL's latest list), so
+    /// the strict title+year test, which needs a year, can never run for them, and the loose path then
+    /// falls back to TMDb's FIRST hit — right only 4 times out of 14 measured. The episode is the better
+    /// witness: a show either has that episode or it does not. No candidate with the episode means no
+    /// resolution — never a guess.
+    /// </remarks>
+    /// <param name="title">Series name as parsed from the file name.</param>
+    /// <param name="season">Season number from the file name.</param>
+    /// <param name="episode">Episode number from the file name.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="maxCandidates">How many search hits to test; each test is one call.</param>
+    /// <returns>Ids of the first candidate that really has that episode, or nulls.</returns>
+    public async Task<(string? Imdb, string? Tmdb)> ResolveSeriesByEpisodeAsync(
+        string title, int season, int episode, CancellationToken ct, int maxCandidates = 5)
+    {
+        if (!IsConfigured || string.IsNullOrWhiteSpace(title) || AuthBroken || season <= 0 || episode <= 0)
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            string searchUrl = TmdbUrl($"search/tv?query={Uri.EscapeDataString(title)}");
+            System.Collections.Generic.List<string> candidates;
+            using (var searchReq = BuildTmdbRequest(searchUrl))
+            using (var searchResp = await _http.SendAsync(searchReq, ct).ConfigureAwait(false))
+            {
+                TraceCall("GET", searchUrl, (int)searchResp.StatusCode);
+                if (searchResp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    HandleAuthFailure();
+                    return (null, null);
+                }
+
+                if (!searchResp.IsSuccessStatusCode)
+                {
+                    return (null, null);
+                }
+
+                using var doc = await JsonDocument.ParseAsync(await searchResp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false), cancellationToken: ct).ConfigureAwait(false);
+                candidates = ReadTitleSearchHits(doc);
+            }
+
+            int tested = 0;
+            foreach (string candidateShow in candidates)
+            {
+                if (tested >= maxCandidates)
+                {
+                    break;
+                }
+
+                tested++;
+                string url = TmdbUrl($"tv/{candidateShow}/season/{season}/episode/{episode}");
+                using var req = BuildTmdbRequest(url);
+                using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+                TraceCall("GET", url, (int)resp.StatusCode);
+                if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    HandleAuthFailure();
+                    return (null, null);
+                }
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    continue;
+                }
+
+                using var epDoc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false), cancellationToken: ct).ConfigureAwait(false);
+                if (!epDoc.RootElement.TryGetProperty("id", out var epId) || epId.ValueKind != JsonValueKind.Number)
+                {
+                    continue;
+                }
+
+                string? imdb = await ResolveImdbAsync(candidateShow, true, ct).ConfigureAwait(false);
+                Trace?.Invoke($"[TMDB] series by episode: \"{title}\" S{season:00}E{episode:00} confirmed on show {candidateShow} (candidate {tested})");
+                return (imdb, candidateShow);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Trace?.Invoke($"[TMDB] series by episode failed for \"{title}\": {ex.Message}");
+        }
+
+        return (null, null);
+    }
+
+    /// <summary>
     /// F-M191 (24.09.2026): what is this IMDb id — an episode or the show itself?
     /// TMDB's /find answers tv_episode_results for an episode (its "show_id" IS the
     /// series TMDB id) and tv_results for the show. Verified live: tt38949652 →
