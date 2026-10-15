@@ -54,55 +54,6 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
         // Stats period start defaults to plugin install/first start —
         // the GUI "since" always shows a real date until "Reset statistics" re-sets it.
-        // Migrated to the database (25.09.2026): counters and the period start now live in the
-        // data file, so a database reset resets them too. The old XML values are adopted once.
-        MigrateStatusCounters();
-    }
-
-    /// <summary>
-    /// One-time adoption of the cumulative counters from the configuration XML into the database.
-    /// <para>
-    /// Runs only while the database has no stats row yet. The XML values are the only copy of the
-    /// pre-migration totals, so they are taken over verbatim; afterwards the XML fields are ignored
-    /// (and left in place, so a downgrade still finds them).
-    /// </para>
-    /// </summary>
-    private void MigrateStatusCounters()
-    {
-        try
-        {
-            if (Configuration.StatusCountersMigratedToDb)
-            {
-                return; // adopted once already — never re-import after a database reset
-            }
-
-            var db = SharedDbContext;
-            if (db.StatusStats.FindById("status") == null)
-            {
-                var seeded = new Data.StatusStatsEntity
-                {
-                    Id = "status",
-                    Uploaded = Configuration.StatusUploaded,
-                    Downloaded = Configuration.StatusDownloaded,
-                    SinceUtc = Configuration.StatusStatsSinceUtc ?? DateTime.UtcNow,
-                    Updated = DateTime.UtcNow
-                };
-                db.StatusStats.Upsert(seeded);
-                LogUtil.Detail(_loggerFactory?.CreateLogger<Plugin>(), 
-                    "[SubDL] status counters migrated to the database: {Up} uploaded, {Down} downloaded since {Since:yyyy-MM-dd}.",
-                    seeded.Uploaded, seeded.Downloaded, seeded.SinceUtc);
-            }
-
-            // Flag regardless of whether a row had to be created: after this point the XML values are
-            // a frozen historical snapshot and must never seed the data file again.
-            Configuration.StatusCountersMigratedToDb = true;
-            SavePluginState();
-        }
-        catch (Exception ex)
-        {
-            _loggerFactory?.CreateLogger<Plugin>().LogError(ex,
-                "[SubDL] failed to migrate status counters into the database.");
-        }
     }
 
     /// <summary>
@@ -276,7 +227,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     [
         "RandomDailyTime", "RandomWeeklyTime", "RandomMonthlyTime", "RandomMonthlyDay",
         "RandomPruneTime", "RandomOshashTime", "RandomPostprocessTime",
-        "StatusUploaded", "StatusDownloaded", "StatusStatsSinceUtc", "StatusCountersMigratedToDb"
+        "StatusUploaded", "StatusDownloaded", "StatusStatsSinceUtc"
     ];
 
     /// <summary>
@@ -317,7 +268,6 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             mine["StatusDownloaded"] = cfg.StatusDownloaded.ToString(CultureInfo.InvariantCulture);
             mine["StatusStatsSinceUtc"] = cfg.StatusStatsSinceUtc?.ToUniversalTime()
                 .ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", CultureInfo.InvariantCulture);
-            mine["StatusCountersMigratedToDb"] = cfg.StatusCountersMigratedToDb ? "true" : "false";
 
             PatchPluginStateFile(path, mine);
         }

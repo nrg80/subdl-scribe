@@ -31,7 +31,6 @@
     <Reference Include="SQLitePCLRaw.core"><HintPath>$(JellyfinDir)/SQLitePCLRaw.core.dll</HintPath></Reference>
     <Reference Include="SQLitePCLRaw.provider.e_sqlite3"><HintPath>$(JellyfinDir)/SQLitePCLRaw.provider.e_sqlite3.dll</HintPath></Reference>
     <Reference Include="SQLitePCLRaw.batteries_v2"><HintPath>$(JellyfinDir)/SQLitePCLRaw.batteries_v2.dll</HintPath></Reference>
-    <Reference Include="LiteDB"><HintPath>$(PluginDir)/LiteDB.dll</HintPath></Reference>
     <Reference Include="Microsoft.Extensions.Logging.Abstractions"><HintPath>$(JellyfinDir)/Microsoft.Extensions.Logging.Abstractions.dll</HintPath></Reference>
   </ItemGroup>
 </Project>

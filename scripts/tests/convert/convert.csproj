@@ -26,7 +26,6 @@
     <Reference Include="MediaBrowser.Common"><HintPath>$(JellyfinDir)/MediaBrowser.Common.dll</HintPath></Reference>
     <Reference Include="MediaBrowser.Controller"><HintPath>$(JellyfinDir)/MediaBrowser.Controller.dll</HintPath></Reference>
     <Reference Include="MediaBrowser.Model"><HintPath>$(JellyfinDir)/MediaBrowser.Model.dll</HintPath></Reference>
-    <Reference Include="LiteDB"><HintPath>$(PluginDir)/LiteDB.dll</HintPath></Reference>
     <Reference Include="Microsoft.Extensions.Logging.Abstractions"><HintPath>$(JellyfinDir)/Microsoft.Extensions.Logging.Abstractions.dll</HintPath></Reference>
   </ItemGroup>
 </Project>

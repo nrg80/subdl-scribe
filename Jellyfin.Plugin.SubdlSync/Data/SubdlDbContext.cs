@@ -118,8 +118,6 @@ public sealed class SubdlDbContext : IDisposable
 
         // F-M327: the one-time import runs BEFORE the store is opened. It is the only path that ever
         // reads the old format, it is skipped when there is nothing to import, and it never deletes
-        // the source file — see LiteDbImport.
-        LiteDbImport.RunOnce(dataDir, _dbPath, _logger);
 
         _db = new SubdlSqliteContext(_dbPath);
         _db.Database.EnsureCreated();

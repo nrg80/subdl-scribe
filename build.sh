@@ -38,7 +38,6 @@ DOTNET_CLI_TELEMETRY_OPTOUT=1 \
 ARTIFACTS=(
     "out/Jellyfin.Plugin.SubdlSync.dll"
     "out/LanguageDetection.dll"
-    "out/LiteDB.dll"
     "build.yaml"
 )
 
@@ -58,7 +57,6 @@ import zipfile, os
 files = [
     'out/Jellyfin.Plugin.SubdlSync.dll',
     'out/LanguageDetection.dll',
-    'out/LiteDB.dll',
     'build.yaml'
 ]
 # Licence texts: Apache-2.0 requires the licence and notice to travel with the
@@ -66,7 +64,6 @@ files = [
 licences = [
     'licenses/THIRD-PARTY.txt',
     'licenses/LanguageDetection-Apache-2.0.txt',
-    'licenses/LiteDB-MIT.txt',
     'licenses/SubDL-Scribe-GPL-3.0.txt',
 ]
 with zipfile.ZipFile('$ZIP', 'w', zipfile.ZIP_DEFLATED) as z:
