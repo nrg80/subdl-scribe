@@ -472,7 +472,7 @@ public class CounterEntity
 /// </summary>
 public class PipelineRunEntity
 {
-    /// <summary>LiteDB auto-id.</summary>
+    /// <summary>Legacy auto-assigned id from the previous document store.</summary>
     public int Id { get; set; }
 
     /// <summary>Direction: download, upload or both.</summary>

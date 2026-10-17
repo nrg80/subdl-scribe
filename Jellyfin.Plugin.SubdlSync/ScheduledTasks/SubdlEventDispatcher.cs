@@ -935,10 +935,12 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// </summary>
     private async Task RunFollowUpRoundsAsync(string trigger, System.Collections.Generic.ISet<string>? onlyLibs, PluginConfiguration config, CycleDirection dir, System.Collections.Generic.ISet<string>? onlyItems = null)
     {
-        bool followUpDown = Plugin.Instance?.Configuration?.FollowUpRoundsDownload != false
-            && dir != CycleDirection.UploadOnly;
-        bool followUpUp = Plugin.Instance?.Configuration?.FollowUpRoundsUpload != false
-            && dir != CycleDirection.DownloadOnly;
+        // F-M177/F-M1a: the follow-up SETTINGS decide which directions take part — the direction of
+        // the cycle that happened to be running does not. An arrival that lands inside a one-sided
+        // run gets both directions in the follow-up, exactly as an arrival that starts its own cycle
+        // does; gating the counter-direction out here left its work waiting for the next anchor.
+        bool followUpDown = Plugin.Instance?.Configuration?.FollowUpRoundsDownload != false;
+        bool followUpUp = Plugin.Instance?.Configuration?.FollowUpRoundsUpload != false;
 
         if (!followUpDown && !followUpUp)
         {

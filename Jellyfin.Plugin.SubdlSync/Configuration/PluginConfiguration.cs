@@ -717,16 +717,5 @@ public class PluginConfiguration : BasePluginConfiguration
     /// shown as "since" in the one-line stats display.</summary>
     public DateTime? StatusStatsSinceUtc { get; set; }
 
-    /// <summary>
-    /// True once the cumulative counters were adopted into the database (25.09.2026).
-    /// <para>
-    /// Guards the one-time migration. Without this flag a restart after a database reset would
-    /// re-import the old XML totals into the freshly emptied data file, and the counters would
-    /// silently jump back up — exactly the drift the move to the database is meant to remove.
-    /// The flag lives here because the configuration survives a database reset while the data
-    /// file does not.
-    /// </para>
-    /// </summary>
-    public bool StatusCountersMigratedToDb { get; set; }
     #endregion
 }

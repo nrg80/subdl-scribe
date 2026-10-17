@@ -34,7 +34,6 @@
     <Reference Include="MediaBrowser.Common"><HintPath>$(JellyfinDir)/MediaBrowser.Common.dll</HintPath></Reference>
     <Reference Include="MediaBrowser.Controller"><HintPath>$(JellyfinDir)/MediaBrowser.Controller.dll</HintPath></Reference>
     <Reference Include="MediaBrowser.Model"><HintPath>$(JellyfinDir)/MediaBrowser.Model.dll</HintPath></Reference>
-    <Reference Include="LiteDB"><HintPath>$(PluginDir)/LiteDB.dll</HintPath></Reference>
     <Reference Include="Microsoft.EntityFrameworkCore"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.dll</HintPath></Reference>
     <Reference Include="Microsoft.EntityFrameworkCore.Abstractions"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.Abstractions.dll</HintPath></Reference>
     <Reference Include="Microsoft.EntityFrameworkCore.Relational"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.Relational.dll</HintPath></Reference>

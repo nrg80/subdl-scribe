@@ -213,14 +213,13 @@ import sys, zipfile
 zip_path, ver, want_cat = sys.argv[1:4]
 z = zipfile.ZipFile(zip_path)
 names = z.namelist()
-for req in ('Jellyfin.Plugin.SubdlSync.dll', 'LanguageDetection.dll', 'LiteDB.dll', 'build.yaml'):
+for req in ('Jellyfin.Plugin.SubdlSync.dll', 'LanguageDetection.dll', 'build.yaml'):
     if req not in names:
         sys.exit(f"  FAIL: {req} missing from the ZIP")
 # The licence texts must travel with the published ZIP: LanguageDetection is
 # Apache-2.0, which requires the licence and notice alongside a redistribution.
 for req in ('licenses/THIRD-PARTY.txt',
             'licenses/LanguageDetection-Apache-2.0.txt',
-            'licenses/LiteDB-MIT.txt',
             'licenses/SubDL-Scribe-GPL-3.0.txt'):
     if req not in names:
         sys.exit(f"  FAIL: {req} missing from the ZIP — a required licence is not shipped")
