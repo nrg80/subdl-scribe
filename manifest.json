@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.236",
-        "changelog": "v12.1.12.236: The statistics row for prevented re-uploads is gone again; nothing else changed.",
+        "version": "12.1.12.237",
+        "changelog": "v12.1.12.237: The plugin no longer carries a second database engine — the one-time\n    import of the old data file and the adoption of the pre-migration counters are gone.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.236/Jellyfin.Plugin.SubdlSync_12.1.12.236.zip",
-        "checksum": "1232bdcbcbedf9ed6fca1aa7facbc255",
-        "timestamp": "2026-10-11T07:48:32Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.237/Jellyfin.Plugin.SubdlSync_12.1.12.237.zip",
+        "checksum": "4cec89f33394fa31aae960323464d5ed",
+        "timestamp": "2026-10-17T07:10:00Z"
       }
     ]
   }
