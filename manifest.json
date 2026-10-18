@@ -12,9 +12,9 @@
         "version": "12.1.12.241",
         "changelog": "v12.1.12.241: Pressing Stop now also cancels that direction's pending fire. Before, a stop only\n    aborted the cycle that was running, and the armed fire brought the direction back minutes later —\n    even wiping its own stop marker at run start. The other direction is untouched.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.241-dev/Jellyfin.Plugin.SubdlSync_12.1.12.241.zip",
-        "checksum": "35e5cae73fe31ef84d27e615e9cf9cb1",
-        "timestamp": "2026-10-18T22:22:47Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.241/Jellyfin.Plugin.SubdlSync_12.1.12.241.zip",
+        "checksum": "fe7d509350324fa7ef550d8b66013a78",
+        "timestamp": "2026-10-18T22:23:19Z"
       }
     ]
   }
