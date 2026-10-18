@@ -12,9 +12,9 @@
         "version": "12.1.12.242",
         "changelog": "v12.1.12.242: The log line for a cancelled fire now prints the moment in UTC, as stored — it read a\n    local time behind a \"UTC\" label. Documentation: the stop rule moved to §10 (scheduler) and the\n    reasoning behind the recent rules is in METHODIK.md.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.242-dev/Jellyfin.Plugin.SubdlSync_12.1.12.242.zip",
-        "checksum": "bda52a9a71b6c76b72b63c230910e9c0",
-        "timestamp": "2026-10-18T22:44:38Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.242/Jellyfin.Plugin.SubdlSync_12.1.12.242.zip",
+        "checksum": "406f0625abdfbdb6a51a8c8e0b3fbae7",
+        "timestamp": "2026-10-18T22:45:09Z"
       }
     ]
   }
