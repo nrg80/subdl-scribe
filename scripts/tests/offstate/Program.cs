@@ -87,7 +87,10 @@ Check("the page draws a note per off state", page.Contains("['download off', off
     && page.Contains("['upload off', offs.Upload]")
     && page.Contains("['upload postprocessing off', offs.Postprocessing]"));
 Check("the notes are appended AFTER the worker rows (last entries)", page.IndexOf("offNotes.forEach", page.IndexOf("workers.forEach")) > 0);
-Check("the notes carry the word off in grey", page.Contains("<span class=\"subdl-outcome\" style=\"color:#767676;\">off</span>"));
+Check("the note text ends in off and carries NO second off in the result cell",
+    page.Contains("<span class=\"subdl-label\" style=\"color:#767676;\">' + n[0] + '</span>")
+    && page.Contains("<span class=\"subdl-outcome\"></span>")
+    && !page.Contains("<span class=\"subdl-outcome\" style=\"color:#767676;\">off</span>"));
 Check("no off-case was added to the outcome words", !page.Contains("case 'off': return"));
 
 Console.WriteLine();

@@ -1140,10 +1140,12 @@ workers.forEach(function (w) {
                                 if (!n[1]) { return; }
                                 var note = document.createElement('div');
                                 note.className = 'subdl-status-row';
+                                // The note already ENDS in "off", so the outcome cell stays empty — measured in
+                                // the rendered list: "download off" plus a second "off" read as "Download off off".
                                 note.innerHTML = '<span class="subdl-light" style="background:#767676;"></span>' +
-                                    '<span class="subdl-label">' + n[0] + '</span>' +
-                                    '<span class="subdl-when">\u2014</span>' +
-                                    '<span class="subdl-outcome" style="color:#767676;">off</span>';
+                                    '<span class="subdl-label" style="color:#767676;">' + n[0] + '</span>' +
+                                    '<span class="subdl-when"></span>' +
+                                    '<span class="subdl-outcome"></span>';
                                 list.appendChild(note);
                             });
                         };
