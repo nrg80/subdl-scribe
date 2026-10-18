@@ -869,8 +869,20 @@ public static class OffsetFit
     /// is testable without decoding audio — the dry run over the real library caught this table putting a
     /// clearly-worse correction (t = -3.74, score 0.5032 -> 0.4914) into the hunting class.
     /// <para>
-    /// The refused set is the same as before the split — <c>{t &lt;= DeployZ} ⊇ {t &lt;= 0}</c>, so the
-    /// union of the four conditions is unchanged. Only the label moved.
+    /// Significance settles the class (operator 18.10.2026: "Signifikanz über 2 ist Pflicht für
+    /// verbesserte subs"). There is no such thing as a MATERIAL score improvement without significance:
+    /// +0.0131 at t = +1.54, +0.0076 at t = +1.71 and +0.0036 at t = +0.57 are all under 2 and therefore
+    /// prove nothing — they are "not sufficiently evidenced", which keeps the reserved 9x and pulls the
+    /// next candidate. Only a SIGNIFICANT worsening (t &lt;= -DeployZ: untreated better) or a difference
+    /// too small to matter (shift below the floor) is "no proven gain", where the file stays untouched.
+    /// </para>
+    /// <para>
+    /// The score can still veto, but ONLY where it decides: a correction with t &gt; 2 that would lower the
+    /// score is refused as "worse". Everywhere else the score is reported, not consulted — a lower score
+    /// at t = -1.59 is not evidence of anything, so it stays "not sufficiently evidenced" (hunt), which is
+    /// exactly the distinction the operator drew.
+    /// The refused set stays the same as before the split — <c>{t &lt;= DeployZ} ⊇ {t &lt;= -DeployZ}</c> —
+    /// so only the label moved, never which corrections get deployed.
     /// </para>
     /// </summary>
     /// <param name="moved">Number of cues the fit would move.</param>
@@ -881,8 +893,9 @@ public static class OffsetFit
     /// <returns>The cause; <see cref="RevertCause.None"/> means the correction is applied.</returns>
     public static RevertCause ClassifyCause(int moved, double scoreBefore, double scoreAfter, double tMoved, double largest)
         => moved == 0 ? RevertCause.NothingMoved
-            : scoreAfter < scoreBefore - 1e-9 || tMoved <= 0 ? RevertCause.ScoreWorse
             : largest < SubtitleSync.MinShiftSec ? RevertCause.BelowFloor
+            : tMoved > DeployZ && scoreAfter < scoreBefore - 1e-9 ? RevertCause.ScoreWorse
+            : tMoved <= -DeployZ ? RevertCause.ScoreWorse
             : tMoved <= DeployZ ? RevertCause.NotSignificant
             : RevertCause.None;
 

@@ -238,7 +238,7 @@ public static class SubtitleSync
             OffsetFit.RevertCause.NothingMoved =>
                 "nothing to move: 0/" + fit.CueCount.ToString(inv) + " cues, " + largest,
             OffsetFit.RevertCause.ScoreWorse =>
-                "the correction would make it worse (untreated better): score " + score + ", " + tPlain
+                "significantly worse, untreated is better: score " + score + ", " + tPlain
                 + ", " + moved + ", " + largest,
             OffsetFit.RevertCause.BelowFloor =>
                 "below floor: " + largest + " < MinShiftSec " + MinShiftSec.ToString("0.00", inv) + " s, " + tPlain + ", " + moved,
