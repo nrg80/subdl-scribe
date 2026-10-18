@@ -83,8 +83,13 @@ Check("MarkCancelled stamps BOTH times with now — a cancellation has a moment,
 Check("MarkCancelled writes Outcome.Cancelled itself", mcBody.Contains("row.Outcome = Outcome.Cancelled", StringComparison.Ordinal), "outcome");
 Check("MarkCancelled cannot break the stop", mcBody.Contains("catch (Exception", StringComparison.Ordinal), "try/catch");
 string page = File.ReadAllText(Path.Combine("/opt/data/subdl-scribe", "Jellyfin.Plugin.SubdlSync", "Configuration", "configPage.html"));
-Check("the operator's colour decision is pinned: cancel stays #ffc107, not grey",
-    page.Contains("case 'cancelled': return { color: '#ffc107', text: 'cancel' };", StringComparison.Ordinal), "cancel colour");
+Check("the operator's colour decision is pinned: cancel is ALWAYS grey #767676 (the state's colour, not the situation's)",
+    page.Contains("case 'cancelled': return { color: '#767676', text: 'cancel' };", StringComparison.Ordinal)
+    && !page.Contains("case 'cancelled': return { color: '#ffc107'", StringComparison.Ordinal), "cancel colour");
+Check("cancel and skip share the grey, so only defer is left yellow",
+    page.Contains("case 'cancelled': return { color: '#767676', text: 'cancel' };", StringComparison.Ordinal)
+    && page.Contains("case 'skipped': return { color: '#767676', text: 'skip' };", StringComparison.Ordinal)
+    && page.Contains("case 'deferred': return { color: '#ffc107', text: 'defer' };", StringComparison.Ordinal), "grey pairing");
 Check("the row's time column reads Started (that is why the cancellation must stamp it)",
     page.Contains("var when = w.Started ? subdlFmtDateTime(w.Started)", StringComparison.Ordinal), "when=Started");
 Check("the row is written AFTER the cancellation is persisted",
