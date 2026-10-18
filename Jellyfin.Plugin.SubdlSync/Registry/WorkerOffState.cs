@@ -63,12 +63,51 @@ public static class WorkerOffState
 
         if (string.Equals(workerKey, PostprocessWorkerKey, StringComparison.Ordinal))
         {
-            return !config.UploadEnabled
-                || config.UploadPostprocessInterval is UpdateInterval.Never or UpdateInterval.Manual or UpdateInterval.OnArrival;
+            return !config.UploadEnabled || IsManualOnly(PostprocessWorkerKey, config);
         }
 
         return false;
     }
+
+    /// <summary>
+    /// F-M352 (operator order 19.10.2026): the maintenance workers set to MANUAL instead of a cadence are
+    /// named on the status line too — as "manual", not as "off", because their dashboard button always
+    /// runs (the postprocessing one is explicit about it, F-M291; the two refresh tasks are ordinary
+    /// tasks and are started the same way).
+    /// </summary>
+    /// <param name="workerKey">The worker's row key.</param>
+    /// <param name="config">The live configuration.</param>
+    /// <returns>True when the worker has no automatic fire by configuration.</returns>
+    public static bool IsManualOnly(string? workerKey, PluginConfiguration? config)
+    {
+        if (string.IsNullOrEmpty(workerKey) || config == null)
+        {
+            return false;
+        }
+
+        if (string.Equals(workerKey, PostprocessWorkerKey, StringComparison.Ordinal))
+        {
+            return config.UploadPostprocessInterval is UpdateInterval.Never or UpdateInterval.Manual or UpdateInterval.OnArrival;
+        }
+
+        if (string.Equals(workerKey, DatabaseWorkerKey, StringComparison.Ordinal))
+        {
+            return config.PruneMode is PruneMode.Never or PruneMode.Manual;
+        }
+
+        if (string.Equals(workerKey, OshashWorkerKey, StringComparison.Ordinal))
+        {
+            return config.OshashRefresh is OshashRefreshMode.Never or OshashRefreshMode.Manual;
+        }
+
+        return false;
+    }
+
+    /// <summary>The database-refresh task's worker key.</summary>
+    public const string DatabaseWorkerKey = "SubdlSyncDatabaseRefreshTask";
+
+    /// <summary>The OSHash-refresh task's worker key.</summary>
+    public const string OshashWorkerKey = "SubdlSyncOshashRefreshTask";
 
     /// <summary>The postprocessing task's worker key (SubdlPostprocessTask.Key).</summary>
     public const string PostprocessWorkerKey = "SubDLPostprocessTask";

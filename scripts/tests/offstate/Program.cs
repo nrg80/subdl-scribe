@@ -57,6 +57,27 @@ var gate = Mutate(c => c.UploadEnabled = false);
 Check("the lamp override is gone from the registry", typeof(WorkerRunRegistry.Outcome).GetField("Off") == null);
 Check("no PaintsOff decision remains", typeof(WorkerOffState).GetMethod("PaintsOff") == null);
 
+// --- the maintenance workers say MANUAL, not off -----------------------------
+const string DB = WorkerOffState.DatabaseWorkerKey;
+const string OS = WorkerOffState.OshashWorkerKey;
+
+Check("database refresh is not manual by default", !WorkerOffState.IsManualOnly(DB, Mutate(c => { })));
+Check("database refresh manual on PruneMode.Manual", WorkerOffState.IsManualOnly(DB, Mutate(c => c.PruneMode = PruneMode.Manual)));
+Check("database refresh manual on the legacy PruneMode.Never", WorkerOffState.IsManualOnly(DB, Mutate(c => c.PruneMode = PruneMode.Never)));
+Check("database refresh NOT manual on Weekly/Monthly/Yearly",
+    !WorkerOffState.IsManualOnly(DB, Mutate(c => c.PruneMode = PruneMode.Weekly))
+    && !WorkerOffState.IsManualOnly(DB, Mutate(c => c.PruneMode = PruneMode.Monthly))
+    && !WorkerOffState.IsManualOnly(DB, Mutate(c => c.PruneMode = PruneMode.Yearly)));
+Check("oshash refresh manual on OshashRefreshMode.Manual", WorkerOffState.IsManualOnly(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Manual)));
+Check("oshash refresh manual on the legacy OshashRefreshMode.Never", WorkerOffState.IsManualOnly(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Never)));
+Check("oshash refresh NOT manual on Monthly", !WorkerOffState.IsManualOnly(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Monthly)));
+Check("postprocessing is manual on a Manual cadence", WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Manual)));
+Check("a manual worker is NEVER reported as off (manual runs still work)",
+    !WorkerOffState.Applies(DB, Mutate(c => c.PruneMode = PruneMode.Manual))
+    && !WorkerOffState.Applies(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Manual)));
+Check("postprocessing: upload off outranks a manual cadence (off, not manual)",
+    WorkerOffState.Applies(PP, Mutate(c => { c.UploadEnabled = false; c.UploadPostprocessInterval = UpdateInterval.Manual; })));
+
 // --- the language parse matches the download pipeline's ---------------------
 var parsed = WorkerOffState.ParseTargetLanguages(" en, de ,EN,,");
 Check("the language parse trims, upper-cases and dedupes", parsed.Count == 2 && parsed.Contains("EN") && parsed.Contains("DE"),
@@ -85,17 +106,18 @@ Check("the off note rides on the DEFERRAL line, not on a line of its own",
     page.Contains("var deferLine = document.querySelector('#SubdlLocalDeferLine')")
     && page.Contains("offNotes.forEach(function (t) { localLines.push(t); })")
     && !page.Contains("SubdlOffLine"));
-Check("the page reads the off facts from the same payload as the deferral", page.Contains("(loc && loc.off)"));
+Check("the page reads the off facts from the same payload as the deferral", page.Contains("(loc && loc.notes)"));
 
 string quota = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlQuotaService.cs"));
-Check("the quota answer carries the off list in its local block",
-    quota.Contains("var offEntries = OffDirections();") && quota.Contains("off = offEntries"));
-Check("the off list is built from the shared gate",
-    quota.Contains("WorkerOffState.Applies(") && quota.Contains("OffDirections()"));
+Check("the quota answer carries the notes in its local block",
+    quota.Contains("var offEntries = StatusNotes();") && quota.Contains("notes = offEntries"));
+Check("the notes list is built from the shared gates",
+    quota.Contains("WorkerOffState.Applies") && quota.Contains("WorkerOffState.IsManualOnly") && quota.Contains("StatusNotes()"));
 Check("the off wording is the three operator phrases",
-    quota.Contains("\"download off\"") && quota.Contains("\"upload off\"") && quota.Contains("\"upload postprocessing off\""));
-Check("the off list survives the early return when no fire is pending",
-    System.Text.RegularExpressions.Regex.Matches(quota, "off = offEntries").Count >= 2);
+    quota.Contains("\"download off\"") && quota.Contains("\"upload off\"") && quota.Contains("\"upload postprocessing off\"")
+    && quota.Contains("\"upload postprocessing manual\"") && quota.Contains("\"database refresh manual\"") && quota.Contains("\"oshash refresh manual\""));
+Check("the notes survive the early return when no fire is pending",
+    System.Text.RegularExpressions.Regex.Matches(quota, "notes = offEntries").Count >= 2);
 Check("the off notes are appended AFTER the deferral notes", page.IndexOf("localLines.push(t)") > page.IndexOf("var localLines = deferred.map"));
 Check("no off-case was added to the outcome words", !page.Contains("case 'off': return"));
 

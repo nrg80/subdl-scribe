@@ -145,13 +145,13 @@ public class SubdlQuota : ControllerBase
         // deferral ("als statustext da wo auch das deferred fire at x pm steht"), so they travel in the
         // same payload. Read before any early return — a page with nothing deferred still has to state
         // that a direction is off.
-        var offEntries = OffDirections();
+        var offEntries = StatusNotes();
         try
         {
             var coord = Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSchedulerCoordinator.Instance;
             if (coord == null)
             {
-                return new { deferred = entries, off = offEntries };
+                return new { deferred = entries, notes = offEntries };
             }
 
             var fires = coord.GetPendingFires();
@@ -159,7 +159,7 @@ public class SubdlQuota : ControllerBase
             {
                 // Nothing pending: no deferral note. A deferral whose fire is gone is over — the worker
                 // already ran again, and a stale row must not paint a line for it.
-                return new { deferred = entries, off = offEntries };
+                return new { deferred = entries, notes = offEntries };
             }
 
             var registry = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns;
@@ -197,48 +197,69 @@ public class SubdlQuota : ControllerBase
             // simply carries no note; it must never fail the quota call itself.
         }
 
-        return new { deferred = entries, off = offEntries };
+        return new { deferred = entries, notes = offEntries };
     }
 
     /// <summary>
-    /// F-M352: the directions that cannot start, in the wording the status line uses.
+    /// F-M352: what the status line says about directions and maintenance workers that do not run on
+    /// their own — "off" for a direction that cannot start at all, "manual" for a worker whose cadence
+    /// is Manual (its dashboard button still runs it).
     /// </summary>
-    /// <returns>One string per switched-off direction; empty when everything is on.</returns>
-    private static System.Collections.Generic.List<string> OffDirections()
+    /// <returns>One string per switched-off or manual-only worker, in the order the operator named them.</returns>
+    private static System.Collections.Generic.List<string> StatusNotes()
     {
-        var off = new System.Collections.Generic.List<string>();
+        var notes = new System.Collections.Generic.List<string>();
         try
         {
             var config = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.Configuration;
             if (config == null)
             {
-                return off;
+                return notes;
             }
 
-            if (Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.Applies(
-                    Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.DownloadWorkerKey, config))
+            var off = Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.Applies;
+            var manual = Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.IsManualOnly;
+            var keys = Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.DownloadWorkerKey;
+            var uploadKey = Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.UploadWorkerKey;
+            var postKey = Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey;
+
+            if (off(keys, config))
             {
-                off.Add("download off");
+                notes.Add("download off");
             }
 
-            if (Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.Applies(
-                    Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.UploadWorkerKey, config))
+            if (off(uploadKey, config))
             {
-                off.Add("upload off");
+                notes.Add("upload off");
             }
 
-            if (Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.Applies(
-                    Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey, config))
+            // The postprocessing is bound to the upload direction: with upload off it is OFF, with the
+            // cadence on Manual it is MANUAL — the two are different statements and are not merged.
+            if (!config.UploadEnabled)
             {
-                off.Add("upload postprocessing off");
+                notes.Add("upload postprocessing off");
+            }
+            else if (manual(postKey, config))
+            {
+                notes.Add("upload postprocessing manual");
+            }
+
+            if (manual(Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.DatabaseWorkerKey, config))
+            {
+                notes.Add("database refresh manual");
+            }
+
+            if (manual(Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.OshashWorkerKey, config))
+            {
+                notes.Add("oshash refresh manual");
             }
         }
         catch
         {
-            // The plugin may not be fully started — then the line simply carries no off note.
+            // The plugin may not be fully started — then the line simply carries no note.
         }
 
-        return off;
+        return notes;
     }
 
     /// <summary>
