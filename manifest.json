@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.238",
-        "changelog": "v12.1.12.238: Three changes in what the upload reports. The filename carries the full MD5 of the\n    bytes that were sent, between episode and language, so two uploads of the same episode are told\n    apart by their content and the hash can be recomputed from the delivered file. The frame rate is\n    reported instead of a fixed \"unknown\" — 0 stays only for rates SubDL does not know, and a broken\n    average falls back to the real rate. The docs no longer claim a database engine the plugin\n    stopped shipping.",
+        "version": "12.1.12.239",
+        "changelog": "v12.1.12.239: The auto-sync corrects from 0.7 s instead of 1.0 s — a real half-cue offset is no longer\n    left alone, while the measured ~0.5 s offset of an in-sync subtitle still keeps good files untouched.\n    A correction that improves the score but cannot prove it is no longer reported as \"no proven gain\":\n    it keeps the original in the reserved block and the run pulls the next candidate instead. Every\n    refusal now names its cause and carries the numbers it was decided on.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.238-dev/Jellyfin.Plugin.SubdlSync_12.1.12.238.zip",
-        "checksum": "44ed820eb72de685a6a37b99d19d8cbe",
-        "timestamp": "2026-10-18T13:29:28Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.239-dev/Jellyfin.Plugin.SubdlSync_12.1.12.239.zip",
+        "checksum": "7af762d6db50ced60e4651864f250847",
+        "timestamp": "2026-10-18T17:38:00Z"
       }
     ]
   }
