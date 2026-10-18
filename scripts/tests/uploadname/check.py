@@ -20,8 +20,8 @@ sinn") put the FULL MD5 of the normalized upload bytes into the name.
 The name is built in one place now (`BuildNeutralName`) and used by the dry run AND the real upload.
 Both used to build it inline, and two inline copies drift the moment one of them is edited — the dry
 run then advertises a name the upload never sends, which is the failure this check is here for. So
-the checks assert the helper, the ORDER of its placeholders, both call sites, and that no hashless
-inline name survived anywhere.
+the checks assert the helper, the ORDER of its placeholders, both call sites, that the hash sits in front of the
+language, and that no hashless inline name survived anywhere.
 
 Run: python3 scripts/tests/uploadname/check.py [path/to/UploadPipeline.cs]
 Exit code 0 = all checks pass.
@@ -64,7 +64,14 @@ def main():
     helper = src[start:body_end if body_end > end else end + 400]
 
     series = re.search(r'\$\"\{imdbId\}\.S\{season:00\}E\{episode:00\}[^"]*\"', helper)
-    movie = re.search(r'\$\"\{imdbId\}\.\{lang\}[^"]*\"', helper)
+    # The movie branch is matched structurally ("any non-episode name"), not by its expected text:
+    # anchoring on the target string made the check report "no movie pattern" when the hash was
+    # missing, which reads like a missing branch instead of a missing hash (measured on mutation B).
+    movie = None
+    for m in re.finditer(r'\$\"\{imdbId\}\.[^"]*\.srt\"', helper):
+        if "S{season:00}" not in m.group(0):
+            movie = m
+            break
     check("the episode pattern names imdbId, season, episode", bool(series),
           series.group(0) if series else "no episode pattern")
     check("the movie pattern names imdbId and lang", bool(movie),
@@ -74,8 +81,8 @@ def main():
     for label, m in (("episode", series), ("movie", movie)):
         pat = m.group(0) if m else ""
         check("the %s name carries the content hash" % label, "{contentHash}" in pat, pat)
-        check("the %s name puts the hash behind the language" % label,
-              "{lang}.{contentHash}" in pat, pat)
+        check("the %s name puts the hash in front of the language" % label,
+              "{contentHash}.{lang}.srt" in pat, pat)
 
     # --- the two call sites -----------------------------------------------------------------
     # Both build the name through the helper. The arguments are matched up to the end of the

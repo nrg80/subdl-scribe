@@ -1697,6 +1697,10 @@ public sealed class UploadPipeline
     /// rather than by who sent them.
     /// </summary>
     /// <remarks>
+    /// Shape: imdb id, season/episode, hash, language, extension — the hash sits directly in front of
+    /// the language, so the last two parts before the extension are always "what is inside" and "which
+    /// language it is" (operator choice 18.10.2026).
+    /// <para>
     /// The hash is the MD5 over the normalized bytes SubDL receives
     /// (<see cref="ContentHashRegistry.ComputeHash"/>), which makes it recomputable from the delivered
     /// file — a check, not a claim. It is deliberately the FULL 32 hex characters: the name is where
@@ -1710,8 +1714,8 @@ public sealed class UploadPipeline
     private static string BuildNeutralName(
         bool isSeries, string imdbId, int season, int episode, string lang, string contentHash)
         => isSeries
-            ? $"{imdbId}.S{season:00}E{episode:00}.{lang}.{contentHash}.srt"
-            : $"{imdbId}.{lang}.{contentHash}.srt";
+            ? $"{imdbId}.S{season:00}E{episode:00}.{contentHash}.{lang}.srt"
+            : $"{imdbId}.{contentHash}.{lang}.srt";
 
     /// <summary>
     /// F-M71:

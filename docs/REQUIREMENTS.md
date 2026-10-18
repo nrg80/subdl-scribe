@@ -168,7 +168,7 @@ Season and episode come from Jellyfin's own metadata where it reports them; the 
 
 **F-M29 [B1]:** **No user-identifying metadata in uploads:** exclusively IMDB ID + season/episode + language + subtitle file. No username, no library/path information, no source media filenames, no server/installation identifiers, no version telemetry. A content hash of the uploaded bytes is allowed in the filename: it is a property of the subtitle, not of the sender (F-M30).
 
-**F-M30 [B1]:** Neutral upload filename: derived generically from the IMDB/language/release info — never internal JF paths or user names. **Order 17.10.2026 („die volle md5 macht sinn"):** the name carries the **full MD5** of the normalized upload bytes between the language and the extension — `tt1234567.S01E02.EN.<32 hex>.srt` for an episode, `tt1234567.EN.<32 hex>.srt` for a movie — and is built in exactly ONE helper that the dry run and the real upload both call, so the advertised name and the sent name cannot drift. The hash is content-derived and recomputable from the delivered file: it names the bytes, never the sender (F-M29 stands). **Test: T155.**
+**F-M30 [B1]:** Neutral upload filename: derived generically from the IMDB/language/release info — never internal JF paths or user names. **Order 17.10.2026 („die volle md5 macht sinn"):** the name carries the **full MD5** of the normalized upload bytes directly in front of the language — `tt1234567.S01E02.<32 hex>.EN.srt` for an episode, `tt1234567.<32 hex>.EN.srt` for a movie — and is built in exactly ONE helper that the dry run and the real upload both call, so the advertised name and the sent name cannot drift. The hash is content-derived and recomputable from the delivered file: it names the bytes, never the sender (F-M29 stands). **Test: T155.**
 
 **F-M264:** **A media file is rewritten at most once — a track that already carries a tag in the container is never written again.**
 
@@ -1733,7 +1733,7 @@ name in two checks) and a swap of the two legs (RED on the order check). (F-M177
 **T155:** The upload filename carries the full content MD5, and both the dry run and the real upload
 take it from the same helper (F-M30). Asserted structurally on `UploadPipeline`, because a wrong name is
 invisible until somebody reads the file list at SubDL: `BuildNeutralName` must place `{contentHash}`
-behind `{lang}` in BOTH branches, the episode branch must keep imdbId/season/episode, both call sites
+in front of `{lang}` in BOTH branches, with `.srt` last, the episode branch must keep imdbId/season/episode, both call sites
 must go through the helper, one must feed `contentHashEarly` (the hash of the bytes actually sent) and
 the other `ContentHashRegistry.ComputeHash(cand.Srt)` (the candidate the dry run advertises), and no
 hashless inline name may survive outside the helper. **Mutation-verified, three plants:** re-inlining the
