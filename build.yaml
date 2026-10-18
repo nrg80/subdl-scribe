@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.238"
+version: "12.1.12.239"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,11 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.239: The auto-sync corrects from 0.7 s instead of 1.0 s — a real half-cue offset is no longer
+    left alone, while the measured ~0.5 s offset of an in-sync subtitle still keeps good files untouched.
+    A correction that improves the score but cannot prove it is no longer reported as "no proven gain":
+    it keeps the original in the reserved block and the run pulls the next candidate instead. Every
+    refusal now names its cause and carries the numbers it was decided on.
   v12.1.12.238: Three changes in what the upload reports. The filename carries the full MD5 of the
     bytes that were sent, between episode and language, so two uploads of the same episode are told
     apart by their content and the hash can be recomputed from the delivered file. The frame rate is
