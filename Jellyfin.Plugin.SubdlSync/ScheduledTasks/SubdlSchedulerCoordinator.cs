@@ -228,6 +228,58 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     }
 
     /// <summary>
+    /// F-M351 (order 18.10.2026): cancels this direction's pending one-shot fire, because pressing Stop
+    /// in the GUI means "stop, and do not come back on your own".
+    /// <para>
+    /// Measured on 18.10.2026: Stop only cancelled the RUNNING cycle (<c>_stopCts</c>) and wrote a marker;
+    /// the armed fire was untouched and nothing in the fire path reads that marker, so a deferred upload
+    /// re-armed itself and started as if the operator had not pressed anything. The marker was not even a
+    /// backstop: both pipelines clear the markers at run start, so the fire wiped its own stop signal.
+    /// </para>
+    /// <para>
+    /// The slot's reschedule counter is reset as well: the fire was removed by the operator, not
+    /// exhausted by the 16x budget, so the next genuine deferral gets its full allowance.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction whose fire is cancelled.</param>
+    /// <param name="reason">Why (log only).</param>
+    /// <returns>True when a fire was pending and is now gone.</returns>
+    public bool CancelPendingFire(bool upload, string reason)
+    {
+        bool had;
+        DateTime? was;
+        if (upload)
+        {
+            was = _recoveryFireUploadUtc;
+            had = was.HasValue;
+            _recoveryFireUploadUtc = null;
+        }
+        else
+        {
+            was = _recoveryFireDownloadUtc;
+            had = was.HasValue;
+            _recoveryFireDownloadUtc = null;
+        }
+
+        if (!had)
+        {
+            LogUtil.Detail(_logger,
+                "[SubDL] stop ({Direction}): no fire pending — nothing to cancel (F-M351).",
+                upload ? "upload" : "download");
+            return false;
+        }
+
+        ResetReschedule(upload ? "upload" : "download");
+        PersistRecoveryFires();
+        LogUtil.Normal(_logger,
+            "[SubDL] stop ({Direction}): pending fire for {Due:yyyy-MM-dd HH:mm} UTC cancelled — {Reason} (F-M351).",
+            upload ? "upload" : "download",
+            TimeZoneInfo.ConvertTimeFromUtc(was!.Value, TimeZoneInfo.Local),
+            reason);
+        return true;
+    }
+
+    /// <summary>
     /// F-M65: schedules a ONE-SHOT recovery fire for one direction at resetUtc + jitter.
     /// Called by a pipeline that stopped on the daily limit with ContinueAfterLimit OFF.
     /// </summary>

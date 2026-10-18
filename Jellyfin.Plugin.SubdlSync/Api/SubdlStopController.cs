@@ -71,8 +71,27 @@ public class SubdlStopController : ControllerBase
             }
 
             LogUtil.Normal(_logger, "[SubDL] Stop marker created for {Direction}.", direction);
+
+            // F-M351 (order 18.10.2026): a stop also cancels the pending fire of the direction it names.
+            // RequestUserStop only aborts the cycle that is RUNNING; without this the armed fire brought
+            // the direction back on its own minutes later, which is the opposite of what the button says.
+            bool cancelled = false;
+            var coord = ScheduledTasks.SubdlSchedulerCoordinator.Instance;
+            if (coord != null)
+            {
+                if (string.Equals(direction, "upload", StringComparison.OrdinalIgnoreCase) || string.Equals(direction, "all", StringComparison.OrdinalIgnoreCase))
+                {
+                    cancelled |= coord.CancelPendingFire(upload: true, reason: "stop marker upload");
+                }
+
+                if (string.Equals(direction, "download", StringComparison.OrdinalIgnoreCase) || string.Equals(direction, "all", StringComparison.OrdinalIgnoreCase))
+                {
+                    cancelled |= coord.CancelPendingFire(upload: false, reason: "stop marker download");
+                }
+            }
+
             ScheduledTasks.SubdlEventDispatcher.Instance?.RequestUserStop($"stop marker {direction}");
-            return Ok(new { ok = true, direction });
+            return Ok(new { ok = true, direction, fireCancelled = cancelled });
         }
         catch (Exception ex)
         {
