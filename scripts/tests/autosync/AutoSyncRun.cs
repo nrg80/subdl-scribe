@@ -452,11 +452,11 @@ public static class AutoSyncRun
         f += nothingOk ? 0 : 1;
 
         string worse = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildRefusalReason(
-            Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.ScoreWorse, 500, 500, 3.4, 1.5, 0.6000, 0.5800, [1.50]));
-        bool worseOk = worse.Contains("score would drop", StringComparison.Ordinal)
+            Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.ScoreWorse, 500, 500, -3.4, 1.5, 0.6000, 0.5800, [1.50]));
+        bool worseOk = worse.Contains("significantly worse, untreated is better", StringComparison.Ordinal)
                        && worse.Contains("0.6000 -> 0.5800 (-0.0200)", StringComparison.Ordinal)
                        && !worse.Contains("< 2.0", StringComparison.Ordinal);
-        Check("\"score would drop\" is its own cause, with both scores", worseOk, worse);
+        Check("\"the correction would make it worse (untreated better)\" is its own cause, with both scores", worseOk, worse);
         f += worseOk ? 0 : 1;
 
         string floor = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildRefusalReason(
@@ -467,6 +467,28 @@ public static class AutoSyncRun
         f += floorOk ? 0 : 1;
 
         // The prefix is the contract: F-M321 routing and the hunt both key on it, whatever the detail says.
+        // The decision table itself, as a pure function — the dry run over the real library found the
+        // first version of it classifying a clearly-worse correction (t = -3.74, score dropping) as
+        // "statistically not proven", which would have pulled a fresh download for a file that is fine.
+        (string label, int moved, double before, double after, double t, double largest, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause want)[] table =
+        {
+            ("nothing moved", 0, 0.50, 0.50, 0.00, 0.00, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NothingMoved),
+            ("significantly worse (real: t = -3.74)", 577, 0.5654, 0.5599, -3.74, 2.50, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.ScoreWorse),
+            ("negative t with a rising score is still significantly worse", 400, 0.5000, 0.5100, -2.50, 3.00, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.ScoreWorse),
+            ("score drop at t > 2 is vetoed", 400, 0.5000, 0.4900, 3.20, 3.00, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.ScoreWorse),
+            ("shift below the 0.7 s floor, however significant", 462, 0.5600, 0.5700, 3.36, 0.50, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.BelowFloor),
+            ("worse but NOT significant is still not sufficiently evidenced (real: t = -1.59)", 317, 0.5032, 0.4914, -1.59, 14.25, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NotSignificant),
+            ("insignificant score gain (real: t = +1.71, +0.0076)", 887, 0.5591, 0.5667, 1.71, 2.50, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NotSignificant),
+            ("smallest insignificant gain (real: t = +0.57, +0.0036)", 358, 0.4955, 0.4991, 0.57, 13.75, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NotSignificant),
+            ("proven gain is applied (t > 2 mandatory)", 887, 0.5591, 0.5667, 3.20, 2.50, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.None),
+        };
+        foreach ((string label, int moved, double before, double after, double t, double largest, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause want) in table)
+        {
+            var got = Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.ClassifyCause(moved, before, after, t, largest);
+            Check($"decision table: {label} -> {want}", got == want, got == want ? got.ToString() : $"got {got}, want {want}");
+            f += got == want ? 0 : 1;
+        }
+
         foreach ((string reason, bool expectsAlreadyGood) in new[]
         {
             (notSignificant, false),

@@ -409,13 +409,15 @@ public static class OffsetFit
             largest = Math.Max(largest, Math.Abs(v));
         }
 
-        // The cause is read in the SAME order the rule short-circuits below, so the reported reason is
-        // the first condition that actually refused — not whichever one happens to read best.
-        RevertCause cause = moved == 0 ? RevertCause.NothingMoved
-            : tMoved <= DeployZ ? RevertCause.NotSignificant
-            : scoreAfter < scoreBefore - 1e-9 ? RevertCause.ScoreWorse
-            : largest < SubtitleSync.MinShiftSec ? RevertCause.BelowFloor
-            : RevertCause.None;
+        // The cause is read in the order that keeps the CLASSES apart (order 18.10.2026). The set of
+        // refused corrections is unchanged — {t <= DeployZ} contains {t <= 0}, so the union is the same
+        // as before — but WHICH cause is reported now follows the operator's definition: "no proven
+        // gain" is the untreated file being better or the difference being small, and only a correction
+        // that looks better yet cannot be proven is "statistically not proven" (which hunts a new
+        // candidate). Reading significance first put every clearly-worse correction into the hunting
+        // class: the dry run over real files showed t = -3.74 with the score dropping and still
+        // classified as unproven, which would have pulled a fresh download for a file that is fine.
+        RevertCause cause = ClassifyCause(moved, scoreBefore, scoreAfter, tMoved, largest);
 
         // The measurement survives the revert here, so the refusal can REPORT what it found instead of
         // the zeros it left behind (order 18.10.2026).
@@ -861,6 +863,41 @@ public static class OffsetFit
         /// <summary>The largest shift does not reach <see cref="SubtitleSync.MinShiftSec"/>.</summary>
         BelowFloor = 4,
     }
+
+    /// <summary>
+    /// F-M307 (order 18.10.2026): names WHY a fitted correction was refused. Pure, so the decision table
+    /// is testable without decoding audio — the dry run over the real library caught this table putting a
+    /// clearly-worse correction (t = -3.74, score 0.5032 -> 0.4914) into the hunting class.
+    /// <para>
+    /// Significance settles the class (operator 18.10.2026: "Signifikanz über 2 ist Pflicht für
+    /// verbesserte subs"). There is no such thing as a MATERIAL score improvement without significance:
+    /// +0.0131 at t = +1.54, +0.0076 at t = +1.71 and +0.0036 at t = +0.57 are all under 2 and therefore
+    /// prove nothing — they are "not sufficiently evidenced", which keeps the reserved 9x and pulls the
+    /// next candidate. Only a SIGNIFICANT worsening (t &lt;= -DeployZ: untreated better) or a difference
+    /// too small to matter (shift below the floor) is "no proven gain", where the file stays untouched.
+    /// </para>
+    /// <para>
+    /// The score can still veto, but ONLY where it decides: a correction with t &gt; 2 that would lower the
+    /// score is refused as "worse". Everywhere else the score is reported, not consulted — a lower score
+    /// at t = -1.59 is not evidence of anything, so it stays "not sufficiently evidenced" (hunt), which is
+    /// exactly the distinction the operator drew.
+    /// The refused set stays the same as before the split — <c>{t &lt;= DeployZ} ⊇ {t &lt;= -DeployZ}</c> —
+    /// so only the label moved, never which corrections get deployed.
+    /// </para>
+    /// </summary>
+    /// <param name="moved">Number of cues the fit would move.</param>
+    /// <param name="scoreBefore">Score of the file as it is.</param>
+    /// <param name="scoreAfter">Score the measured shift reaches.</param>
+    /// <param name="tMoved">t statistic over the moved cues.</param>
+    /// <param name="largest">Largest absolute shift in seconds.</param>
+    /// <returns>The cause; <see cref="RevertCause.None"/> means the correction is applied.</returns>
+    public static RevertCause ClassifyCause(int moved, double scoreBefore, double scoreAfter, double tMoved, double largest)
+        => moved == 0 ? RevertCause.NothingMoved
+            : largest < SubtitleSync.MinShiftSec ? RevertCause.BelowFloor
+            : tMoved > DeployZ && scoreAfter < scoreBefore - 1e-9 ? RevertCause.ScoreWorse
+            : tMoved <= -DeployZ ? RevertCause.ScoreWorse
+            : tMoved <= DeployZ ? RevertCause.NotSignificant
+            : RevertCause.None;
 
     /// <summary>F-M307: the result of <see cref="Fit"/>.</summary>
     public sealed class FitResult

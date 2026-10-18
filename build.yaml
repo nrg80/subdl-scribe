@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.239"
+version: "12.1.12.240"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,11 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.240: Which refusal counts as "no proven gain" is settled by significance, not by the score.
+    A correction that is worse but NOT significantly worse is not evidence: it keeps the original in the
+    reserved block and the run pulls the next candidate, exactly like an improvement that cannot prove
+    itself. "No proven gain" is only: nothing to move, a shift below the 0.7 s floor, or the untreated
+    file being significantly better (t <= -2). No correction is deployed without t > 2.
   v12.1.12.239: The auto-sync corrects from 0.7 s instead of 1.0 s — a real half-cue offset is no longer
     left alone, while the measured ~0.5 s offset of an in-sync subtitle still keeps good files untouched.
     A correction that improves the score but cannot prove it is no longer reported as "no proven gain":
