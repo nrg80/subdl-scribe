@@ -1321,7 +1321,8 @@ public sealed class UploadPipeline
                     tmdbId: tmdbIdRaw,
                     hearingImpaired: cand.HearingImpaired,
                     subPos: cand.SubPos,
-                    forced: cand.Forced).ConfigureAwait(false);
+                    forced: cand.Forced,
+                    videoFps: GetVideoFps(item)).ConfigureAwait(false);
                 switch (result)
                 {
                     case { Ok: true }:
@@ -1711,6 +1712,40 @@ public sealed class UploadPipeline
     /// are byte-identical after normalization, which is a property of the subtitle, not of the sender.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// F-M350: the item's video frame rate, read the same way the download gate does (F-M43 stage 1) —
+    /// the average rate first, the real rate second, null when neither is known. Wrapped because
+    /// GetMediaStreams can throw for an item that is being re-scanned, and a missing rate must cost a
+    /// metadata field, never the upload.
+    /// </summary>
+    private double? GetVideoFps(BaseItem item)
+    {
+        try
+        {
+            var video = _mediaSourceManager.GetMediaStreams(item.Id)?
+                .FirstOrDefault(s => s.Type == MediaStreamType.Video);
+            if (video == null)
+            {
+                return null;
+            }
+
+            if (video.AverageFrameRate != 0)
+            {
+                return video.AverageFrameRate;
+            }
+
+            if (video.RealFrameRate != 0)
+            {
+                return video.RealFrameRate;
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
     private static string BuildNeutralName(
         bool isSeries, string imdbId, int season, int episode, string lang, string contentHash)
         => isSeries
@@ -1778,7 +1813,8 @@ public sealed class UploadPipeline
         string? tmdbId = null,
         bool hearingImpaired = false,
         int subPos = -1,
-        bool forced = false)
+        bool forced = false,
+        double? videoFps = null)
     {
         // F-M48: loose file — read from disk
         if (srtContent == null && loosePath != null)
@@ -1835,6 +1871,11 @@ public sealed class UploadPipeline
         // the own name says nothing. Unrecognized stays "web", which is what shipped before.
         string quality = SourceQuality.Detect(loosePath, mediaPath);
 
+        // F-M350 (operator order 18.10.2026): the frame rate code this upload reports. The caller
+        // hands over the item's video rate; anything outside SubDL's table stays "0" (default/unknown),
+        // which is what shipped before, so an unusual rate cannot become a wrong claim.
+        string framerate = SubdlFramerate.CodeFor(videoFps);
+
         // F-M22: dry run — no API calls
         if (_config.DryRun)
         {
@@ -1850,7 +1891,7 @@ public sealed class UploadPipeline
         // tmdb_id is the SubDL-recommended field; imdb_id rides along too. The API-side
         // precedence rule (tmdb empty → imdb only; both → both) lives in the client —
         // here we simply forward what JF metadata provided.
-        var result = await _api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired).ConfigureAwait(false);
+        var result = await _api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired, framerate).ConfigureAwait(false);
         if (result.Ok)
         {
             // F-M17y/F-M184: SubDL returns "sent for review" for every upload. The final
