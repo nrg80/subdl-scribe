@@ -52,23 +52,10 @@ Check("postprocessing off on OnArrival", Off(PP, c => c.UploadPostprocessInterva
 Check("postprocessing stays ON when no library is selected — it reads /user/mySubtitles",
     !WorkerOffState.Applies(PP, Mutate(c => c.SelectedLibraries.Clear())));
 
-// --- a real run must never be painted over (the operator's own finding) ------
-var gate = Mutate(c => c.UploadEnabled = false);           // postprocessing: off-condition holds
-var saved = new DateTime(2026, 10, 19, 10, 0, 0, DateTimeKind.Utc);
-
-Check("a RUNNING row is never off — the manual button must not turn the lamp grey",
-    !WorkerOffState.PaintsOff(PP, gate, WorkerRunRegistry.Outcome.Running, null, saved));
-Check("a run that ended after the switch is shown, not hidden",
-    !WorkerOffState.PaintsOff(PP, gate, WorkerRunRegistry.Outcome.Ok, saved.AddMinutes(5), saved));
-Check("a run that ended BEFORE the switch reads off",
-    WorkerOffState.PaintsOff(PP, gate, WorkerRunRegistry.Outcome.Ok, saved.AddMinutes(-5), saved));
-Check("never run reads off", WorkerOffState.PaintsOff(PP, gate, WorkerRunRegistry.Outcome.Never, null, saved));
-Check("unknown switch moment falls back to the config gate",
-    WorkerOffState.PaintsOff(PP, gate, WorkerRunRegistry.Outcome.Ok, saved.AddMinutes(5), null));
-Check("a run that ends in the same second as the save is still shown",
-    !WorkerOffState.PaintsOff(PP, gate, WorkerRunRegistry.Outcome.Ok, saved, saved));
-Check("a non-off worker is never painted off, whatever it did",
-    !WorkerOffState.PaintsOff(PP, Mutate(c => { }), WorkerRunRegistry.Outcome.Ok, saved.AddMinutes(-60), saved));
+// --- the lamps are NOT repainted (operator: note it, do not grey the row) ---
+var gate = Mutate(c => c.UploadEnabled = false);
+Check("the lamp override is gone from the registry", typeof(WorkerRunRegistry.Outcome).GetField("Off") == null);
+Check("no PaintsOff decision remains", typeof(WorkerOffState).GetMethod("PaintsOff") == null);
 
 // --- the language parse matches the download pipeline's ---------------------
 var parsed = WorkerOffState.ParseTargetLanguages(" en, de ,EN,,");
@@ -88,20 +75,20 @@ foreach (var other in new[] { "SubDLSeeder", "SubdlAutoSyncTask", "SubdlDatabase
 
 // --- wiring on the source ---------------------------------------------------
 string ctl = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlStatusController.cs"));
-Check("the endpoint applies the rule", ctl.Contains("WorkerOffState.PaintsOff(r.Id, liveConfig, r.Outcome, r.Ended, configSavedUtc)"));
-Check("the endpoint reads the configuration's own moment", ctl.Contains("GetLastWriteTimeUtc(cfgPath)"));
-Check("the endpoint REPLACES the outcome with off", ctl.Contains("Outcome = off ? Registry.WorkerRunRegistry.Outcome.Off : r.Outcome"));
-Check("off clears the detail — no reason is written", ctl.Contains("Detail = off ? string.Empty : r.Detail"));
-Check("off suppresses a pending fire (yellow must not outrank it)",
-    ctl.Contains("Deferred = !off && pendingFires.ContainsKey(r.Id)") && ctl.Contains("DeferUntil = !off &&"));
+Check("the endpoint reports the three off states", ctl.Contains("Download = Registry.WorkerOffState.Applies(Registry.WorkerRunRegistry.DownloadWorkerKey")
+    && ctl.Contains("Upload = Registry.WorkerOffState.Applies(Registry.WorkerRunRegistry.UploadWorkerKey")
+    && ctl.Contains("Postprocessing = Registry.WorkerOffState.Applies(Registry.WorkerOffState.PostprocessWorkerKey"));
+Check("the endpoint does NOT repaint an outcome", !ctl.Contains("Outcome = off ?"));
+Check("the endpoint does NOT hide a pending fire", !ctl.Contains("Deferred = !off"));
+Check("the endpoint keeps the stored detail", !ctl.Contains("Detail = off ?"));
 
 string page = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"));
-Check("the page paints off grey", page.Contains("case 'off': return { color: '#767676', text: 'off' };"));
-Check("the status word is at most 6 characters", "off".Length <= 6);
-
-string coord = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlSchedulerCoordinator.cs"));
-Check("the scheduler's own postprocessing gate uses the same three off states",
-    coord.Contains("config.UploadEnabled") && coord.Contains("UpdateInterval.Never or UpdateInterval.Manual or UpdateInterval.OnArrival"));
+Check("the page draws a note per off state", page.Contains("['download off', offs.Download]")
+    && page.Contains("['upload off', offs.Upload]")
+    && page.Contains("['upload postprocessing off', offs.Postprocessing]"));
+Check("the notes are appended AFTER the worker rows (last entries)", page.IndexOf("offNotes.forEach", page.IndexOf("workers.forEach")) > 0);
+Check("the notes carry the word off in grey", page.Contains("<span class=\"subdl-outcome\" style=\"color:#767676;\">off</span>"));
+Check("no off-case was added to the outcome words", !page.Contains("case 'off': return"));
 
 Console.WriteLine();
 Console.WriteLine(f == 0 ? ">>> OFFSTATE OK" : $">>> OFFSTATE {f} FAILURE(S)");

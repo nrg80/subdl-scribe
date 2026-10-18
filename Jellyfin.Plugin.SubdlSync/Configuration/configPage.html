@@ -1081,10 +1081,6 @@
                                 // did not happen. YELLOW, because green reads as success (user,
                                 // 30.09.2026) and grey would hide it. Word kept <=6 chars.
                                 case 'deferred': return { color: '#ffc107', text: 'defer' };
-                                // F-M352: switched off (toggle, no libraries, no languages, no
-                                // credential, postprocessing Manual). Grey, same colour as skip/never,
-                                // own word so it is not read as "has not run yet" or "declined".
-                                case 'off': return { color: '#767676', text: 'off' };
                                 default: return { color: '#767676', text: 'never' };
                             }
                         };
@@ -1130,6 +1126,25 @@ workers.forEach(function (w) {
                                     '<span class="subdl-outcome" style="color:' + oc.color + ';">' + oc.text +
                                     (w.DryRun ? '<span class="subdl-dryrun">dry run</span>' : '') + '</span>';
                                 list.appendChild(row);
+                            });
+                            // F-M352 (operator order 19.10.2026): the switched-off directions are NOTED here,
+                            // as the last entries under the OSHash lamp — grey, no outcome word changed, no lamp
+                            // repainted. One entry per direction that cannot start, in the list's own grid.
+                            var offs = (d && d.Off) || {};
+                            var offNotes = [
+                                ['download off', offs.Download],
+                                ['upload off', offs.Upload],
+                                ['upload postprocessing off', offs.Postprocessing]
+                            ];
+                            offNotes.forEach(function (n) {
+                                if (!n[1]) { return; }
+                                var note = document.createElement('div');
+                                note.className = 'subdl-status-row';
+                                note.innerHTML = '<span class="subdl-light" style="background:#767676;"></span>' +
+                                    '<span class="subdl-label">' + n[0] + '</span>' +
+                                    '<span class="subdl-when">\u2014</span>' +
+                                    '<span class="subdl-outcome" style="color:#767676;">off</span>';
+                                list.appendChild(note);
                             });
                         };
                         var subdlLoadWorkers = function () {

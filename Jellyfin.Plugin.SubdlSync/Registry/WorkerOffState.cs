@@ -6,7 +6,9 @@ using Jellyfin.Plugin.SubdlScribe.Configuration;
 namespace Jellyfin.Plugin.SubdlScribe.Registry;
 
 /// <summary>
-/// F-M352 (operator order 19.10.2026): decides which worker rows are painted GREY as <c>off</c>.
+/// F-M352 (operator order 19.10.2026): decides whether a worker is switched OFF — the note under the
+/// Workers list says "off" for it (operator: the lamps stay as they are, the off state is noted in the
+/// worker section as the last entry).
 /// <para>
 /// The conditions are not invented here — each one is a hard refusal that already exists in the code,
 /// so the lamp states what the run would actually do:
@@ -23,9 +25,9 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// the library, so libraries do not stop it.</item>
 /// </list>
 /// <para>
-/// Off outranks every stored outcome. A row that ran green yesterday must not claim health while the
-/// switch is off, and it also outranks a pending fire (F-M292/F-M294): a fire that was armed before
-/// the switch went off cannot produce work either.
+/// The lamps and every stored outcome are left untouched: this class only feeds the trailing "off"
+/// notes, so no run is ever hidden by a switch (operator finding: a greyed row made a just-started
+/// manual postprocessing run read "off").
 /// </para>
 /// </summary>
 public static class WorkerOffState
@@ -66,55 +68,6 @@ public static class WorkerOffState
         }
 
         return false;
-    }
-
-    /// <summary>
-    /// F-M352: the full decision behind the grey lamp — the configuration gate PLUS two guards that keep
-    /// the lamp from hiding real work.
-    /// <para>
-    /// Measured by the operator on the day the rule shipped: pressing the postprocessing button in the
-    /// dashboard made the row read "off" INSTANTLY, although a run had just started — the postprocessing
-    /// task deliberately has no upload gate (F-M291, the manual button must always run), so "off" was
-    /// stating a capability while the work was happening. Two guards follow from that:
-    /// </para>
-    /// <list type="number">
-    /// <item>A row that is RUNNING is never "off".</item>
-    /// <item>A row whose run ended AT OR AFTER the configuration was last saved is never "off" either:
-    /// that run belongs to the current setting, so it is the honest answer. Only a row that has not run
-    /// since the switch went off (or has never run) reads "off". The comparison is inclusive because a
-    /// run can finish in the same second the operator saves the page.</item>
-    /// </list>
-    /// </summary>
-    /// <param name="workerKey">The worker's row key.</param>
-    /// <param name="config">The live configuration.</param>
-    /// <param name="outcome">The row's stored outcome.</param>
-    /// <param name="endedUtc">The row's end, in UTC (null while running or never run).</param>
-    /// <param name="configSavedUtc">When the configuration file was last written, in UTC (null when unknown).</param>
-    /// <returns>True when the row must be painted "off".</returns>
-    public static bool PaintsOff(
-        string? workerKey,
-        PluginConfiguration? config,
-        string? outcome,
-        DateTime? endedUtc,
-        DateTime? configSavedUtc)
-    {
-        if (!Applies(workerKey, config))
-        {
-            return false;
-        }
-
-        if (string.Equals(outcome, WorkerRunRegistry.Outcome.Running, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        if (endedUtc.HasValue && configSavedUtc.HasValue
-            && endedUtc.Value.ToUniversalTime() >= configSavedUtc.Value.ToUniversalTime())
-        {
-            return false;
-        }
-
-        return true;
     }
 
     /// <summary>The postprocessing task's worker key (SubdlPostprocessTask.Key).</summary>
