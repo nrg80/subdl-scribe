@@ -140,20 +140,26 @@ public class SubdlQuota : ControllerBase
     private static object LocalRateLimitState()
     {
         var entries = new System.Collections.Generic.List<object>();
+
+        // F-M352 (operator order 19.10.2026): the switched-off directions belong on the SAME line as the
+        // deferral ("als statustext da wo auch das deferred fire at x pm steht"), so they travel in the
+        // same payload. Read before any early return — a page with nothing deferred still has to state
+        // that a direction is off.
+        var offEntries = OffDirections();
         try
         {
             var coord = Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSchedulerCoordinator.Instance;
             if (coord == null)
             {
-                return new { deferred = entries };
+                return new { deferred = entries, off = offEntries };
             }
 
             var fires = coord.GetPendingFires();
             if (fires.Count == 0)
             {
-                // Nothing pending: the line stays empty. A deferral whose fire is gone is over — the
-                // worker already ran again, and a stale row must not paint a line for it.
-                return new { deferred = entries };
+                // Nothing pending: no deferral note. A deferral whose fire is gone is over — the worker
+                // already ran again, and a stale row must not paint a line for it.
+                return new { deferred = entries, off = offEntries };
             }
 
             var registry = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns;
@@ -191,7 +197,48 @@ public class SubdlQuota : ControllerBase
             // simply carries no note; it must never fail the quota call itself.
         }
 
-        return new { deferred = entries };
+        return new { deferred = entries, off = offEntries };
+    }
+
+    /// <summary>
+    /// F-M352: the directions that cannot start, in the wording the status line uses.
+    /// </summary>
+    /// <returns>One string per switched-off direction; empty when everything is on.</returns>
+    private static System.Collections.Generic.List<string> OffDirections()
+    {
+        var off = new System.Collections.Generic.List<string>();
+        try
+        {
+            var config = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.Configuration;
+            if (config == null)
+            {
+                return off;
+            }
+
+            if (Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.Applies(
+                    Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.DownloadWorkerKey, config))
+            {
+                off.Add("download off");
+            }
+
+            if (Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.Applies(
+                    Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.UploadWorkerKey, config))
+            {
+                off.Add("upload off");
+            }
+
+            if (Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.Applies(
+                    Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey, config))
+            {
+                off.Add("upload postprocessing off");
+            }
+        }
+        catch
+        {
+            // The plugin may not be fully started — then the line simply carries no off note.
+        }
+
+        return off;
     }
 
     /// <summary>

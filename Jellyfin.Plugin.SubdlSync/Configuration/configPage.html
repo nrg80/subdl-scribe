@@ -153,12 +153,6 @@
                              space. It is NOT part of the quota box — those bars describe the server's
                              allowance, this line describes our own wait, and mixing the two made a
                              partly-used allowance read as a problem (user decision 03.10.2026). -->
-                        <!-- F-M352 (operator order 19.10.2026): the switched-off directions as ONE flowing
-                             text line under the worker list — not as grid rows ("Ist das eine Spalte, dachte
-                             das wäre fließtext"). Same shape as the deferral line below it: empty while
-                             nothing is off, one line otherwise, written by the worker renderer. -->
-                        <div class="fieldDescription" id="SubdlOffLine" style="margin-top:0.5em;color:#767676;"></div>
-
                         <div class="fieldDescription" id="SubdlLocalDeferLine" style="margin-top:0.5em;"></div>
 
                         <!-- One refresh for EVERY live readout (user order 30.09.2026: "es reicht wenn er
@@ -1133,18 +1127,6 @@ workers.forEach(function (w) {
                                     (w.DryRun ? '<span class="subdl-dryrun">dry run</span>' : '') + '</span>';
                                 list.appendChild(row);
                             });
-                            // F-M352: the switched-off directions, as ONE line of flowing text under the
-                            // worker list (operator: not a column, plain text). Only the directions that
-                            // cannot start are named; nothing is claimed about the runs themselves.
-                            var offs = (d && d.Off) || {};
-                            var offTexts = [];
-                            if (offs.Download) { offTexts.push('download off'); }
-                            if (offs.Upload) { offTexts.push('upload off'); }
-                            if (offs.Postprocessing) { offTexts.push('upload postprocessing off'); }
-                            var offLine = document.querySelector('#SubdlOffLine');
-                            if (offLine) {
-                                offLine.textContent = offTexts.join('  ·  ');
-                            }
                         };
                         var subdlLoadWorkers = function () {
                             // _t cache-buster, same reason as the stats loader above.
@@ -1340,10 +1322,15 @@ workers.forEach(function (w) {
                             var reason = d.reason || 'deferred';
                             return d.name + ': ' + reason + (when ? ' — next attempt ' + when : '');
                         });
+                        // F-M352 (operator order 19.10.2026): the switched-off directions ride on THIS
+                        // line — "als statustext da wo auch das deferred fire at x pm steht". Appended after
+                        // the deferral notes, same separator, no second line anywhere on the page.
+                        var offNotes = (loc && loc.off) || [];
+                        offNotes.forEach(function (t) { localLines.push(t); });
                         var deferLine = document.querySelector('#SubdlLocalDeferLine');
                         if (deferLine) {
-                            // Plain text, page default colour. Empty when nothing is deferred — then the
-                            // line carries no text and takes no visual space.
+                            // Plain text, page default colour. Empty when nothing is deferred and nothing
+                            // is off — then the line carries no text and takes no visual space.
                             deferLine.textContent = localLines.join('  ·  ');
                         }
                         var lines = [];

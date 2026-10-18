@@ -150,11 +150,10 @@ public class SubdlStatusController : ControllerBase
             // This endpoint must never fail over a lamp.
         }
 
-        // F-M352 (operator order 19.10.2026): the off state is NOT painted onto the lamps. It is reported
-        // as its own fact and the page notes it as the last entries of the Workers list. The stored
-        // outcome, the detail and a pending fire stay exactly as they are, so a run never disappears
-        // behind a switch (operator finding: a just-started manual postprocessing run read "off").
-        var liveConfig = plugin.Configuration;
+        // F-M352 (operator order 19.10.2026): the off state is NOT painted onto the lamps, and this
+        // endpoint does not carry it either — it rides on the deferral status line, which the quota
+        // answer feeds (SubdlQuotaService.LocalRateLimitState → `local.off`). The outcome, the detail and
+        // a pending fire here stay exactly as they are, so a run never disappears behind a switch.
         return Ok(new
         {
             Workers = rows.Select(r => new
@@ -172,12 +171,6 @@ public class SubdlStatusController : ControllerBase
                     ? due.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
                     : null
             }),
-            Off = new
-            {
-                Download = Registry.WorkerOffState.Applies(Registry.WorkerRunRegistry.DownloadWorkerKey, liveConfig),
-                Upload = Registry.WorkerOffState.Applies(Registry.WorkerRunRegistry.UploadWorkerKey, liveConfig),
-                Postprocessing = Registry.WorkerOffState.Applies(Registry.WorkerOffState.PostprocessWorkerKey, liveConfig)
-            },
             Timestamp = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
         });
     }

@@ -75,19 +75,28 @@ foreach (var other in new[] { "SubDLSeeder", "SubdlAutoSyncTask", "SubdlDatabase
 
 // --- wiring on the source ---------------------------------------------------
 string ctl = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlStatusController.cs"));
-Check("the endpoint reports the three off states", ctl.Contains("Download = Registry.WorkerOffState.Applies(Registry.WorkerRunRegistry.DownloadWorkerKey")
-    && ctl.Contains("Upload = Registry.WorkerOffState.Applies(Registry.WorkerRunRegistry.UploadWorkerKey")
-    && ctl.Contains("Postprocessing = Registry.WorkerOffState.Applies(Registry.WorkerOffState.PostprocessWorkerKey"));
+Check("the worker endpoint no longer carries an off block of its own", !ctl.Contains("Off = new"));
 Check("the endpoint does NOT repaint an outcome", !ctl.Contains("Outcome = off ?"));
 Check("the endpoint does NOT hide a pending fire", !ctl.Contains("Deferred = !off"));
 Check("the endpoint keeps the stored detail", !ctl.Contains("Detail = off ?"));
 
 string page = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"));
-Check("the page draws ONE flowing text line, not grid rows",
-    page.Contains("<div class=\"fieldDescription\" id=\"SubdlOffLine\"") && page.Contains("offLine.textContent = offTexts.join"));
-Check("the line names the three off states", page.Contains("'download off'") && page.Contains("'upload off'") && page.Contains("'upload postprocessing off'"));
-Check("the off notes add no rows to the worker grid", !page.Contains("class=\"subdl-outcome\" style=\"color:#767676;\">off</span>"));
-Check("the line sits after the worker list", page.IndexOf("id=\"SubdlOffLine\"") > page.IndexOf("id=\"WorkerRunList\""));
+Check("the off note rides on the DEFERRAL line, not on a line of its own",
+    page.Contains("var deferLine = document.querySelector('#SubdlLocalDeferLine')")
+    && page.Contains("offNotes.forEach(function (t) { localLines.push(t); })")
+    && !page.Contains("SubdlOffLine"));
+Check("the page reads the off facts from the same payload as the deferral", page.Contains("(loc && loc.off)"));
+
+string quota = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlQuotaService.cs"));
+Check("the quota answer carries the off list in its local block",
+    quota.Contains("var offEntries = OffDirections();") && quota.Contains("off = offEntries"));
+Check("the off list is built from the shared gate",
+    quota.Contains("WorkerOffState.Applies(") && quota.Contains("OffDirections()"));
+Check("the off wording is the three operator phrases",
+    quota.Contains("\"download off\"") && quota.Contains("\"upload off\"") && quota.Contains("\"upload postprocessing off\""));
+Check("the off list survives the early return when no fire is pending",
+    System.Text.RegularExpressions.Regex.Matches(quota, "off = offEntries").Count >= 2);
+Check("the off notes are appended AFTER the deferral notes", page.IndexOf("localLines.push(t)") > page.IndexOf("var localLines = deferred.map"));
 Check("no off-case was added to the outcome words", !page.Contains("case 'off': return"));
 
 Console.WriteLine();
