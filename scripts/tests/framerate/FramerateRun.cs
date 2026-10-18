@@ -22,7 +22,13 @@
 //   2. NO INVENTED CODE ESCAPES. Every result must be in SubdlFramerate.Allowed, and Allowed must
 //      be exactly those six values — the server accepted an unknown `client` value silently for the
 //      quality field, so an invented code here would fail invisibly.
-//   3. THE WIRING IS ON THE SOURCE. A green table with the upload still sending "0" is exactly the
+//   3. THE FALLBACK IS EXECUTED TOO. The operator's library shows neither field as trustworthy: 27 files
+//      carry a broken average (1000) with a correct real rate, 18 a good average with a real rate 0.05+
+//      off, 11 have both mapping to different codes. CodeFor(average, real) must take the average when it
+//      maps, fall back to the real rate when it does not, and prefer the average on the 11 conflicts
+//      (consistency with the download gate, F-M43). Both fields are handed over once per ITEM, not per
+//      uploadable track.
+//   4. THE WIRING IS ON THE SOURCE. A green table with the upload still sending "0" is exactly the
 //      bug this replaced (the hardcoded quality of F-M344). So the client must send the PARAMETER,
 //      the pipeline must compute it from the item's video stream, and the phase-3 call must hand
 //      that value over. `production_type` is asserted to remain the literal "0": SubDL documents no
@@ -85,6 +91,26 @@ foreach ((double? fps, string want, string why) in cases)
     Check(got == want, $"CodeFor({(fps.HasValue ? fps.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "null")}) = {want}", $"{why} — got {got}");
 }
 
+// --- 1b. the fallback, executed (measured cases from the operator's library) ---
+var pairCases = new (double? Avg, double? Real, string Want, string Why)[]
+{
+    (1000.0, 23.976025, "2", "broken average (one frame in 1 ms), real rate is good — 27 files in the library"),
+    (1000.0, 25.0, "3", "same, PAL"),
+    (29.966667, 29.916666, "4", "average carries it, real is 0.053 off — 18 files in the library"),
+    (23.976025, 24.0, "2", "both map, different codes: the average wins by design — 11 files in the library"),
+    (23.976025, 0.0, "2", "no real rate at all"),
+    (0.0, 25.0, "3", "no average rate, real is good"),
+    (null, null, "0", "nothing known"),
+    (1000.0, 50.0, "0", "neither maps — stays unknown, as before"),
+    (23.81, 23.81, "0", "23.81 is not in the table; decoding it as 23.976 would be a guess"),
+};
+
+foreach ((double? avg, double? real, string want, string why) in pairCases)
+{
+    string got = SubdlFramerate.CodeFor(avg, real);
+    Check(got == want, $"CodeFor(avg {avg?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}, real {real?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}) = {want}", $"{why} — got {got}");
+}
+
 // --- 2. no invented code -----------------------------------------------------------------
 string[] documented = { "0", "2", "3", "4", "5", "7" };
 Check(SubdlFramerate.Allowed.OrderBy(x => x).SequenceEqual(documented.OrderBy(x => x)),
@@ -101,14 +127,23 @@ Check(client.Contains("[\"framerate\"] = framerate"), "the client sends the fram
 Check(!client.Contains("[\"framerate\"] = \"0\""), "the old hardcoded framerate literal is gone");
 Check(client.Contains("string framerate = Pipeline.SubdlFramerate.Unknown"),
       "the parameter defaults to SubDL's unknown code, not to a guessed rate");
-Check(pipeline.Contains("SubdlFramerate.CodeFor(videoFps)"),
-      "the pipeline maps the video rate through SubdlFramerate");
+Check(pipeline.Contains("SubdlFramerate.CodeFor(video.AverageFrameRate, video.RealFrameRate)"),
+      "the pipeline hands BOTH rates to SubdlFramerate (average first, real as fallback)");
 Check(pipeline.Contains("episode, ct, hearingImpaired, framerate)"),
       "the computed code reaches the API call");
-Check(pipeline.Contains("videoFps: GetVideoFps(item)"),
-      "the phase-3 upload hands over the item's video rate");
-Check(pipeline.Contains("AverageFrameRate != 0") && pipeline.Contains("RealFrameRate != 0"),
-      "GetVideoFps reads the average rate first, the real rate second");
+Check(pipeline.Contains("framerate: itemFramerate"),
+      "the phase-3 upload hands over the item's code");
+
+// The lookup is a property of the VIDEO and must run once per item, before the candidate loop —
+// an item with four uploadable tracks must not look it up four times.
+const string HoistDecl = "string itemFramerate = GetFramerateCode(item);";
+int hoistCount = Regex.Matches(pipeline, Regex.Escape(HoistDecl)).Count;
+Check(hoistCount == 1, "the frame rate is looked up exactly once per item", $"{hoistCount} occurrence(s)");
+int hoistAt = pipeline.IndexOf(HoistDecl, StringComparison.Ordinal);
+int phase3At = pipeline.LastIndexOf("foreach (var cand in qaSurvivors)", StringComparison.Ordinal);
+Check(hoistAt >= 0 && phase3At > hoistAt,
+      "the lookup sits BEFORE the upload loop, not inside it",
+      hoistAt < 0 ? "no hoisted lookup" : $"lookup at {hoistAt}, loop at {phase3At}");
 
 // production_type is a deliberate non-goal: no documented value list, so it stays "0".
 Check(client.Contains("[\"production_type\"] = \"0\""),

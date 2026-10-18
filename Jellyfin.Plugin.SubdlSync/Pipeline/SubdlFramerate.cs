@@ -87,4 +87,41 @@ public static class SubdlFramerate
 
         return bestDistance <= Tolerance ? best : Unknown;
     }
+
+    /// <summary>
+    /// Maps the item's video stream to SubDL's code, using the AVERAGE rate first and the REAL one as
+    /// the fallback (operator order 18.10.2026 "dann bauen").
+    /// </summary>
+    /// <remarks>
+    /// Neither field is trustworthy on its own — measured over the operator's 2302 video files, they
+    /// fail on different subsets: 27 files carry a broken average (1000) with a correct real rate,
+    /// 18 carry a good average with a real rate that is 0.05+ off (29.9166), and 11 have both mapping
+    /// to a DIFFERENT code (23.9756 ⇒ 2 against 24 ⇒ 5). With the fallback, 2257 of 2302 files report
+    /// a code (98.0 %); average alone gives 96.8 %, real alone 97.3 %.
+    /// <para>
+    /// The average goes first because it is the PLAYBACK rate — frames divided by duration, which is
+    /// what SubDL's <c>fps</c> means — while the real rate is only the timing grid (a file with every
+    /// second frame dropped reports avg 12.6 against real 25). The download gate (F-M43 stage 1) reads
+    /// the same order, so a file gets the same rate in the gate and in the upload. On the 11 conflicts
+    /// the choice is therefore consistency, not truth: both readings are defensible and the difference
+    /// only shows on music videos.
+    /// </para>
+    /// <para>
+    /// A broken average is not a rate: 1000 comes from containers that report one frame in one
+    /// millisecond (reproduced with ffmpeg), so it is refused by the table and the real rate takes over.
+    /// </para>
+    /// </remarks>
+    /// <param name="averageFrameRate">The stream's average frame rate (0 when unknown).</param>
+    /// <param name="realFrameRate">The stream's real base frame rate (0 when unknown).</param>
+    /// <returns>One of <see cref="Allowed"/>.</returns>
+    public static string CodeFor(double? averageFrameRate, double? realFrameRate)
+    {
+        string fromAverage = CodeFor(averageFrameRate);
+        if (fromAverage != Unknown)
+        {
+            return fromAverage;
+        }
+
+        return CodeFor(realFrameRate);
+    }
 }

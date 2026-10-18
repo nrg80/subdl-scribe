@@ -1249,6 +1249,10 @@ public sealed class UploadPipeline
             // seeder owns all pre-queue checks (registry + content hash). The
             // pipeline uploads what the queue hands it; QA gates stay as the
             // upload action's own quality step.
+            // F-M350: the frame rate is a property of the VIDEO, so it is looked up once per item and
+            // handed to every candidate below — not once per uploadable track.
+            string itemFramerate = GetFramerateCode(item);
+
             foreach (var cand in qaSurvivors)
             {
                 runCt.ThrowIfCancellationRequested();
@@ -1322,7 +1326,7 @@ public sealed class UploadPipeline
                     hearingImpaired: cand.HearingImpaired,
                     subPos: cand.SubPos,
                     forced: cand.Forced,
-                    videoFps: GetVideoFps(item)).ConfigureAwait(false);
+                    framerate: itemFramerate).ConfigureAwait(false);
                 switch (result)
                 {
                     case { Ok: true }:
@@ -1713,12 +1717,18 @@ public sealed class UploadPipeline
     /// </para>
     /// </remarks>
     /// <summary>
-    /// F-M350: the item's video frame rate, read the same way the download gate does (F-M43 stage 1) —
-    /// the average rate first, the real rate second, null when neither is known. Wrapped because
+    /// F-M350: the frame rate code this item's video reports. Hands BOTH rates to
+    /// <see cref="SubdlFramerate.CodeFor(double?, double?)"/>, which takes the average first and falls
+    /// back to the real rate when the average is not a rate at all (measured on the operator's library:
+    /// 27 files report 1000 in the average field with a correct real rate). Wrapped because
     /// GetMediaStreams can throw for an item that is being re-scanned, and a missing rate must cost a
     /// metadata field, never the upload.
+    /// <para>
+    /// Called ONCE per item, before the candidate loop: the answer is a property of the video, not of
+    /// the subtitle track, so an item with four uploadable tracks must not look it up four times.
+    /// </para>
     /// </summary>
-    private double? GetVideoFps(BaseItem item)
+    private string GetFramerateCode(BaseItem item)
     {
         try
         {
@@ -1726,24 +1736,15 @@ public sealed class UploadPipeline
                 .FirstOrDefault(s => s.Type == MediaStreamType.Video);
             if (video == null)
             {
-                return null;
+                return SubdlFramerate.Unknown;
             }
 
-            if (video.AverageFrameRate != 0)
-            {
-                return video.AverageFrameRate;
-            }
-
-            if (video.RealFrameRate != 0)
-            {
-                return video.RealFrameRate;
-            }
+            return SubdlFramerate.CodeFor(video.AverageFrameRate, video.RealFrameRate);
         }
         catch
         {
+            return SubdlFramerate.Unknown;
         }
-
-        return null;
     }
 
     private static string BuildNeutralName(
@@ -1814,7 +1815,7 @@ public sealed class UploadPipeline
         bool hearingImpaired = false,
         int subPos = -1,
         bool forced = false,
-        double? videoFps = null)
+        string framerate = SubdlFramerate.Unknown)
     {
         // F-M48: loose file — read from disk
         if (srtContent == null && loosePath != null)
@@ -1871,10 +1872,9 @@ public sealed class UploadPipeline
         // the own name says nothing. Unrecognized stays "web", which is what shipped before.
         string quality = SourceQuality.Detect(loosePath, mediaPath);
 
-        // F-M350 (operator order 18.10.2026): the frame rate code this upload reports. The caller
-        // hands over the item's video rate; anything outside SubDL's table stays "0" (default/unknown),
-        // which is what shipped before, so an unusual rate cannot become a wrong claim.
-        string framerate = SubdlFramerate.CodeFor(videoFps);
+        // F-M350 (operator order 18.10.2026): the frame rate code this upload reports, computed once
+        // per item by the caller; anything outside SubDL's table is "0" (default/unknown), which is
+        // what shipped before, so an unusual rate cannot become a wrong claim.
 
         // F-M22: dry run — no API calls
         if (_config.DryRun)
