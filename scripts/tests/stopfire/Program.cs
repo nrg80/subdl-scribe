@@ -65,11 +65,28 @@ Check("the detail says the fire was cancelled by the operator, not that a run fa
 
 string cancels = src.Substring(Math.Max(0, src.IndexOf("public bool CancelPendingFire", StringComparison.Ordinal)),
     Math.Min(4200, src.Length - Math.Max(0, src.IndexOf("public bool CancelPendingFire", StringComparison.Ordinal))));
-Check("the row is written with Outcome.Cancelled (word 'cancel', not 'defer')",
-    cancels.Contains("Outcome.Cancelled", StringComparison.Ordinal) && cancels.Contains("CancelledRow(upload)", StringComparison.Ordinal), "cancelled-row write");
+Check("the row is written for a cancellation and NOT with a 'defer' outcome",
+    cancels.Contains("CancelledRow(upload)", StringComparison.Ordinal)
+    && !cancels.Contains("Outcome.Deferred, row.Detail", StringComparison.Ordinal), "cancelled-row write");
 Check("the row write happens only AFTER the fire was proven pending (the early return stays)",
     cancels.IndexOf("if (!had)", StringComparison.Ordinal) < cancels.IndexOf("CancelledRow(upload)", StringComparison.Ordinal), "order vs early return");
 Check("a failing row write cannot make the stop fail", cancels.Contains("catch (Exception", StringComparison.Ordinal), "try/catch");
+Check("the cancellation goes through MarkCancelled, NOT through Finish (which would keep the old start)",
+    cancels.Contains("MarkCancelled(row.Key, row.Name, row.Detail)", StringComparison.Ordinal)
+    && !cancels.Contains("Outcome.Cancelled, row.Detail", StringComparison.Ordinal), "MarkCancelled");
+string reg = File.ReadAllText(Path.Combine("/opt/data/subdl-scribe", "Jellyfin.Plugin.SubdlSync", "Registry", "WorkerRunRegistry.cs"));
+int mc = reg.IndexOf("public void MarkCancelled", StringComparison.Ordinal);
+string mcBody = mc < 0 ? "" : reg.Substring(mc, Math.Min(1200, reg.Length - mc));
+Check("MarkCancelled stamps BOTH times with now — a cancellation has a moment, not a run",
+    mcBody.Contains("row.Started = now", StringComparison.Ordinal) && mcBody.Contains("row.Ended = now", StringComparison.Ordinal)
+    && mcBody.Contains("var now = DateTime.UtcNow;", StringComparison.Ordinal), "start=end=now");
+Check("MarkCancelled writes Outcome.Cancelled itself", mcBody.Contains("row.Outcome = Outcome.Cancelled", StringComparison.Ordinal), "outcome");
+Check("MarkCancelled cannot break the stop", mcBody.Contains("catch (Exception", StringComparison.Ordinal), "try/catch");
+string page = File.ReadAllText(Path.Combine("/opt/data/subdl-scribe", "Jellyfin.Plugin.SubdlSync", "Configuration", "configPage.html"));
+Check("the operator's colour decision is pinned: cancel stays #ffc107, not grey",
+    page.Contains("case 'cancelled': return { color: '#ffc107', text: 'cancel' };", StringComparison.Ordinal), "cancel colour");
+Check("the row's time column reads Started (that is why the cancellation must stamp it)",
+    page.Contains("var when = w.Started ? subdlFmtDateTime(w.Started)", StringComparison.Ordinal), "when=Started");
 Check("the row is written AFTER the cancellation is persisted",
     cancels.IndexOf("PersistRecoveryFires()", StringComparison.Ordinal) < cancels.IndexOf("CancelledRow(upload)", StringComparison.Ordinal), "order vs persist");
 

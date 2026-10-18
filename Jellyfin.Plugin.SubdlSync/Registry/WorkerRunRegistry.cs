@@ -170,6 +170,44 @@ public sealed class WorkerRunRegistry
     }
 
     /// <summary>
+    /// Marks a worker row as cancelled by the operator (F-M353).
+    /// <para>
+    /// A cancellation is NOT a run: it has a moment, not a beginning and an end. So unlike
+    /// <see cref="Finish"/>, which keeps an existing start because that is the real beginning of the run,
+    /// this overwrites BOTH stamps with now. Live on prod 19.10.2026 the row read "cancel" next to a
+    /// start three days old (10/16 5:14 PM), because the cancel inherited Finish's keep-the-start rule —
+    /// the display shows Started, so the cancellation wore the old run's date.
+    /// </para>
+    /// </summary>
+    /// <param name="key">Worker task key.</param>
+    /// <param name="name">Worker display name; null keeps the stored one.</param>
+    /// <param name="detail">Why it was cancelled, in the operator's words.</param>
+    public void MarkCancelled(string key, string? name, string detail)
+    {
+        try
+        {
+            var row = _db.WorkerRuns.FindById(key) ?? new WorkerRunEntity { Id = key };
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                row.Name = name;
+            }
+
+            var now = DateTime.UtcNow;
+            row.Started = now;
+            row.Ended = now;
+            row.Outcome = Outcome.Cancelled;
+            row.Detail = detail;
+            row.DryRun = false;
+            _db.WorkerRuns.Upsert(row);
+        }
+        catch (Exception ex)
+        {
+            // Recording a cancellation must never break the stop itself.
+            _logger?.LogWarning("[SubDL] recording the cancellation of worker {Key} failed: {Msg}", key, ex.Message);
+        }
+    }
+
+    /// <summary>
     /// The seeder's worker key.
     /// <para>
     /// The seeder is NOT a Jellyfin scheduled task — it is the dispatcher's own scan step — so it

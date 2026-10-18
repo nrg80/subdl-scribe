@@ -295,12 +295,14 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         // deferral it no longer has. Until now a stop only cleared the fire, so the row kept reading
         // "defer" (live 19.10.2026 01:34: the fire was cancelled and the download row still said defer,
         // detail "download limit spent (50/50)" from the evening before). The row now carries the
-        // cancellation: word "cancel", the moment it happened, and why. A stop is NOT a run, so nothing
-        // else about the row is invented — Finish() keeps the old Started and sets the end to now.
+        // cancellation: word "cancel", the moment it happened, and why. A stop is NOT a run, so it has a
+        // moment and no beginning/end — MarkCancelled stamps BOTH with now. Finish() would keep the old
+        // start (that is its job for real runs), and the display reads Started, so the cancellation would
+        // wear the previous run's date — exactly what happened on the test bench on 19.10.2026.
         try
         {
             var row = CancelledRow(upload);
-            Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns?.Finish(row.Key, row.Name, Registry.WorkerRunRegistry.Outcome.Cancelled, row.Detail);
+            Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns?.MarkCancelled(row.Key, row.Name, row.Detail);
             LogUtil.Detail(_logger, "[SubDL] stop ({Direction}): worker row marked cancelled.", upload ? "upload" : "download");
         }
         catch (Exception ex)
