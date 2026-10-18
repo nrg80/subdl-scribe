@@ -1222,9 +1222,8 @@ public sealed class UploadPipeline
             {
             foreach (var cand in qaSurvivors)
             {
-                string neutralName = isSeries
-                    ? $"{imdbId}.S{season:00}E{episode:00}.{cand.Lang}.srt"
-                    : $"{imdbId}.{cand.Lang}.srt";
+                string neutralName = BuildNeutralName(
+                    isSeries, imdbId!, season, episode, cand.Lang, ContentHashRegistry.ComputeHash(cand.Srt));
                 LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] DRY-RUN would upload {Name}", neutralName);
             }
 
@@ -1250,6 +1249,10 @@ public sealed class UploadPipeline
             // seeder owns all pre-queue checks (registry + content hash). The
             // pipeline uploads what the queue hands it; QA gates stay as the
             // upload action's own quality step.
+            // F-M350: the frame rate is a property of the VIDEO, so it is looked up once per item and
+            // handed to every candidate below — not once per uploadable track.
+            string itemFramerate = GetFramerateCode(item);
+
             foreach (var cand in qaSurvivors)
             {
                 runCt.ThrowIfCancellationRequested();
@@ -1322,7 +1325,8 @@ public sealed class UploadPipeline
                     tmdbId: tmdbIdRaw,
                     hearingImpaired: cand.HearingImpaired,
                     subPos: cand.SubPos,
-                    forced: cand.Forced).ConfigureAwait(false);
+                    forced: cand.Forced,
+                    framerate: itemFramerate).ConfigureAwait(false);
                 switch (result)
                 {
                     case { Ok: true }:
@@ -1693,6 +1697,63 @@ public sealed class UploadPipeline
     }
 
     /// <summary>
+    /// F-M30 (order 17.10.2026, "die volle md5 macht sinn"): the upload filename carries the content
+    /// hash, so two uploads of the same item and language are told apart by what is INSIDE them
+    /// rather than by who sent them.
+    /// </summary>
+    /// <remarks>
+    /// Shape: imdb id, season/episode, hash, language, extension — the hash sits directly in front of
+    /// the language, so the last two parts before the extension are always "what is inside" and "which
+    /// language it is" (operator choice 18.10.2026).
+    /// <para>
+    /// The hash is the MD5 over the normalized bytes SubDL receives
+    /// (<see cref="ContentHashRegistry.ComputeHash"/>), which makes it recomputable from the delivered
+    /// file — a check, not a claim. It is deliberately the FULL 32 hex characters: the name is where
+    /// a wrong pairing would be read by people, so uniqueness beats brevity.
+    /// <para>
+    /// It is not an installation, run or user identifier. F-M29 still forbids anything that links
+    /// uploads to a user, a library, a path or a server; a content hash links nothing but files that
+    /// are byte-identical after normalization, which is a property of the subtitle, not of the sender.
+    /// </para>
+    /// </remarks>
+    /// <summary>
+    /// F-M350: the frame rate code this item's video reports. Hands BOTH rates to
+    /// <see cref="SubdlFramerate.CodeFor(double?, double?)"/>, which takes the average first and falls
+    /// back to the real rate when the average is not a rate at all (measured on the operator's library:
+    /// 27 files report 1000 in the average field with a correct real rate). Wrapped because
+    /// GetMediaStreams can throw for an item that is being re-scanned, and a missing rate must cost a
+    /// metadata field, never the upload.
+    /// <para>
+    /// Called ONCE per item, before the candidate loop: the answer is a property of the video, not of
+    /// the subtitle track, so an item with four uploadable tracks must not look it up four times.
+    /// </para>
+    /// </summary>
+    private string GetFramerateCode(BaseItem item)
+    {
+        try
+        {
+            var video = _mediaSourceManager.GetMediaStreams(item.Id)?
+                .FirstOrDefault(s => s.Type == MediaStreamType.Video);
+            if (video == null)
+            {
+                return SubdlFramerate.Unknown;
+            }
+
+            return SubdlFramerate.CodeFor(video.AverageFrameRate, video.RealFrameRate);
+        }
+        catch
+        {
+            return SubdlFramerate.Unknown;
+        }
+    }
+
+    private static string BuildNeutralName(
+        bool isSeries, string imdbId, int season, int episode, string lang, string contentHash)
+        => isSeries
+            ? $"{imdbId}.S{season:00}E{episode:00}.{contentHash}.{lang}.srt"
+            : $"{imdbId}.{contentHash}.{lang}.srt";
+
+    /// <summary>
     /// F-M71:
     /// detects a hearing-impaired (SDH) embedded subtitle stream. Sources, in order:
     /// the JF stream Title ("SDH"/"Hearing Impaired" — set by MediaElch/ TinyMediaManager
@@ -1753,7 +1814,8 @@ public sealed class UploadPipeline
         string? tmdbId = null,
         bool hearingImpaired = false,
         int subPos = -1,
-        bool forced = false)
+        bool forced = false,
+        string framerate = SubdlFramerate.Unknown)
     {
         // F-M48: loose file — read from disk
         if (srtContent == null && loosePath != null)
@@ -1799,10 +1861,9 @@ public sealed class UploadPipeline
         }
 
 
-        // F-M29/F-M30: neutral filename, no user-identifying data
-        string neutralName = isSeries
-            ? $"{imdbId}.S{season:00}E{episode:00}.{lang}.srt"
-            : $"{imdbId}.{lang}.srt";
+        // F-M29/F-M30: neutral filename, no user-identifying data; the content hash keeps two uploads
+        // of the same item and language apart without identifying anybody (full MD5, order 17.10.2026)
+        string neutralName = BuildNeutralName(isSeries, imdbId, season, episode, lang, contentHashEarly);
 
         string releaseName = Path.GetFileNameWithoutExtension(mediaPath);
 
@@ -1810,6 +1871,10 @@ public sealed class UploadPipeline
         // sidecar states where that subtitle came from — and the container's name is read only when
         // the own name says nothing. Unrecognized stays "web", which is what shipped before.
         string quality = SourceQuality.Detect(loosePath, mediaPath);
+
+        // F-M350 (operator order 18.10.2026): the frame rate code this upload reports, computed once
+        // per item by the caller; anything outside SubDL's table is "0" (default/unknown), which is
+        // what shipped before, so an unusual rate cannot become a wrong claim.
 
         // F-M22: dry run — no API calls
         if (_config.DryRun)
@@ -1826,7 +1891,7 @@ public sealed class UploadPipeline
         // tmdb_id is the SubDL-recommended field; imdb_id rides along too. The API-side
         // precedence rule (tmdb empty → imdb only; both → both) lives in the client —
         // here we simply forward what JF metadata provided.
-        var result = await _api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired).ConfigureAwait(false);
+        var result = await _api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired, framerate).ConfigureAwait(false);
         if (result.Ok)
         {
             // F-M17y/F-M184: SubDL returns "sent for review" for every upload. The final

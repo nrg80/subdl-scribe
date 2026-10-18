@@ -661,7 +661,8 @@ public sealed class SubdlApiClient
         int season,
         int? episode,
         CancellationToken ct,
-        bool hearingImpaired = false)
+        bool hearingImpaired = false,
+        string framerate = Pipeline.SubdlFramerate.Unknown)
     {
         string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");
         if (string.IsNullOrWhiteSpace(imdbId))
@@ -763,7 +764,9 @@ public sealed class SubdlApiClient
             ["quality"] = quality,
             ["production_type"] = "0",
             ["releases"] = JsonSerializer.Serialize(new[] { releaseName }),
-            ["framerate"] = "0",
+            // F-M350: the caller's code, never a literal. SubdlFramerate returns one of the codes SubDL
+            // documents (0 = default/unknown), so the wire carries a value the server knows.
+            ["framerate"] = framerate,
             ["comment"] = "",
             ["season"] = season.ToString(System.Globalization.CultureInfo.InvariantCulture),
             // F-M71: hi is no longer hardcoded — SDH/HI variants are uploaded with
