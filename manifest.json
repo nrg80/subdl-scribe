@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.242",
-        "changelog": "v12.1.12.242: The log line for a cancelled fire now prints the moment in UTC, as stored — it read a\n    local time behind a \"UTC\" label. Documentation: the stop rule moved to §10 (scheduler) and the\n    reasoning behind the recent rules is in METHODIK.md.",
+        "version": "12.1.12.243",
+        "changelog": "v12.1.12.243: The status line under the worker list now says what does not run by itself - as\n    words, not as a greyed lamp. \"download off\" and \"upload off\" mean the direction cannot start at\n    all (switch, no library, no target language, no credentials); \"download manual\", \"upload manual\",\n    \"upload postprocessing manual\", \"database refresh manual\" and \"oshash refresh manual\" mean it can\n    start but nothing starts it by itself. OnArrival is an automatism and carries no word at all. The\n    notes ride on the line that already reports a pending fire, from the same answer, so the two cannot\n    disagree. Lamps, stored results and pending fires are untouched, so a run never disappears behind a\n    switch.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.242-dev/Jellyfin.Plugin.SubdlSync_12.1.12.242.zip",
-        "checksum": "bda52a9a71b6c76b72b63c230910e9c0",
-        "timestamp": "2026-10-18T22:44:38Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.243-dev/Jellyfin.Plugin.SubdlSync_12.1.12.243.zip",
+        "checksum": "d21c1d84017c9bacb55998da020e3a1a",
+        "timestamp": "2026-10-18T23:29:18Z"
       }
     ]
   }
