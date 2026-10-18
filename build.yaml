@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.241"
+version: "12.1.12.242"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,9 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.242: The log line for a cancelled fire now prints the moment in UTC, as stored — it read a
+    local time behind a "UTC" label. Documentation: the stop rule moved to §10 (scheduler) and the
+    reasoning behind the recent rules is in METHODIK.md.
   v12.1.12.241: Pressing Stop now also cancels that direction's pending fire. Before, a stop only
     aborted the cycle that was running, and the armed fire brought the direction back minutes later —
     even wiping its own stop marker at run start. The other direction is untouched.
