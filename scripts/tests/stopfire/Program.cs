@@ -54,6 +54,25 @@ bool converts = block.Contains("ConvertTimeFromUtc", StringComparison.Ordinal);
 Check("the cancel log prints UTC and does not convert to local behind the label", claimsUtc && !converts,
     $"claimsUtc={claimsUtc}, converts={converts}");
 
+// --- F-M353: the cancelled fire must also reach the worker row -------------------------------
+var dlRow = SubdlSchedulerCoordinator.CancelledRow(upload: false);
+var ulRow = SubdlSchedulerCoordinator.CancelledRow(upload: true);
+Check("the download cancellation writes the DOWNLOAD row", dlRow.Key == "SubdlSyncDownloadTask" && dlRow.Name == "Download", dlRow.Key + "/" + dlRow.Name);
+Check("the upload cancellation writes the UPLOAD row", ulRow.Key == "SubdlSyncUploadTask" && ulRow.Name == "Upload", ulRow.Key + "/" + ulRow.Name);
+Check("the two rows are distinct — a stop names one direction", dlRow.Key != ulRow.Key && dlRow.Name != ulRow.Name, dlRow.Key + "/" + ulRow.Key);
+Check("the detail says the fire was cancelled by the operator, not that a run failed",
+    dlRow.Detail == ulRow.Detail && dlRow.Detail.Contains("cancelled") && dlRow.Detail.Contains("operator"), dlRow.Detail);
+
+string cancels = src.Substring(Math.Max(0, src.IndexOf("public bool CancelPendingFire", StringComparison.Ordinal)),
+    Math.Min(4200, src.Length - Math.Max(0, src.IndexOf("public bool CancelPendingFire", StringComparison.Ordinal))));
+Check("the row is written with Outcome.Cancelled (word 'cancel', not 'defer')",
+    cancels.Contains("Outcome.Cancelled", StringComparison.Ordinal) && cancels.Contains("CancelledRow(upload)", StringComparison.Ordinal), "cancelled-row write");
+Check("the row write happens only AFTER the fire was proven pending (the early return stays)",
+    cancels.IndexOf("if (!had)", StringComparison.Ordinal) < cancels.IndexOf("CancelledRow(upload)", StringComparison.Ordinal), "order vs early return");
+Check("a failing row write cannot make the stop fail", cancels.Contains("catch (Exception", StringComparison.Ordinal), "try/catch");
+Check("the row is written AFTER the cancellation is persisted",
+    cancels.IndexOf("PersistRecoveryFires()", StringComparison.Ordinal) < cancels.IndexOf("CancelledRow(upload)", StringComparison.Ordinal), "order vs persist");
+
 Console.WriteLine();
 Console.WriteLine(f == 0 ? ">>> STOPFIRE OK" : $">>> STOPFIRE {f} FAILURE(S)");
 return f == 0 ? 0 : 1;

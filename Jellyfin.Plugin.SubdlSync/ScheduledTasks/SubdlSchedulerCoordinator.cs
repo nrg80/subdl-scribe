@@ -244,6 +244,25 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     /// <param name="upload">Direction whose fire is cancelled.</param>
     /// <param name="reason">Why (log only).</param>
     /// <returns>True when a fire was pending and is now gone.</returns>
+    /// <summary>
+    /// F-M353 (operator order 19.10.2026): the detail written to the row of a direction whose pending fire
+    /// was cancelled. It names the cause, not a run — a stop is not a run.
+    /// </summary>
+    public const string CancelledDetail = "fire cancelled — stopped by operator";
+
+    /// <summary>
+    /// F-M353: the worker row a cancelled fire belongs to.
+    /// <para>
+    /// Static and free of side effects so a harness can prove the direction mapping without a database.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">True for the upload direction, false for the download.</param>
+    /// <returns>The row key, its display name, and the detail to store.</returns>
+    public static (string Key, string Name, string Detail) CancelledRow(bool upload)
+        => upload
+            ? (Registry.WorkerRunRegistry.UploadWorkerKey, "Upload", CancelledDetail)
+            : (Registry.WorkerRunRegistry.DownloadWorkerKey, "Download", CancelledDetail);
+
     public bool CancelPendingFire(bool upload, string reason)
     {
         bool had;
@@ -271,6 +290,24 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
 
         ResetReschedule(upload ? "upload" : "download");
         PersistRecoveryFires();
+
+        // F-M353 (operator order 19.10.2026, "A. Für upload und download"): the lamp must stop claiming a
+        // deferral it no longer has. Until now a stop only cleared the fire, so the row kept reading
+        // "defer" (live 19.10.2026 01:34: the fire was cancelled and the download row still said defer,
+        // detail "download limit spent (50/50)" from the evening before). The row now carries the
+        // cancellation: word "cancel", the moment it happened, and why. A stop is NOT a run, so nothing
+        // else about the row is invented — Finish() keeps the old Started and sets the end to now.
+        try
+        {
+            var row = CancelledRow(upload);
+            Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns?.Finish(row.Key, row.Name, Registry.WorkerRunRegistry.Outcome.Cancelled, row.Detail);
+            LogUtil.Detail(_logger, "[SubDL] stop ({Direction}): worker row marked cancelled.", upload ? "upload" : "download");
+        }
+        catch (Exception ex)
+        {
+            // A row that cannot be written must never make the stop fail — the fire is already gone.
+            LogUtil.Detail(_logger, "[SubDL] stop ({Direction}): marking the worker row failed: {Msg}", upload ? "upload" : "download", ex.Message);
+        }
         // The moment is logged in UTC and NOT converted: DeferFire prints its retry the same way, and a
         // local time labelled "UTC" is worse than no label — the first live test on the dev instance
         // reported "02:30 UTC" for a fire that was armed at 00:30Z.
