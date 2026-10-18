@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.243"
+version: "12.1.12.244"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,13 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.244: A stop now also rewrites the worker row of the direction it cancels. Until now the
+    pending fire was dropped correctly, but the row kept reading "defer" with the previous evening's
+    detail, because only a run ever wrote it - measured on prod: fire cancelled at 01:34, lamp still
+    yellow on defer from the night before. The row now says "cancel" (yellow, same colour: the work did
+    not happen), carries the moment of the cancellation and the detail "fire cancelled - stopped by
+    operator". Upload and download are handled independently, a stop without a pending fire changes
+    nothing, and a row that cannot be written never makes the stop fail.
   v12.1.12.243: The status line under the worker list now says what does not run by itself - as
     words, not as a greyed lamp. "download off" and "upload off" mean the direction cannot start at
     all (switch, no library, no target language, no credentials); "download manual", "upload manual",
