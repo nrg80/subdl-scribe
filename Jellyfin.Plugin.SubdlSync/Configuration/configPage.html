@@ -153,6 +153,12 @@
                              space. It is NOT part of the quota box — those bars describe the server's
                              allowance, this line describes our own wait, and mixing the two made a
                              partly-used allowance read as a problem (user decision 03.10.2026). -->
+                        <!-- F-M352 (operator order 19.10.2026): the switched-off directions as ONE flowing
+                             text line under the worker list — not as grid rows ("Ist das eine Spalte, dachte
+                             das wäre fließtext"). Same shape as the deferral line below it: empty while
+                             nothing is off, one line otherwise, written by the worker renderer. -->
+                        <div class="fieldDescription" id="SubdlOffLine" style="margin-top:0.5em;color:#767676;"></div>
+
                         <div class="fieldDescription" id="SubdlLocalDeferLine" style="margin-top:0.5em;"></div>
 
                         <!-- One refresh for EVERY live readout (user order 30.09.2026: "es reicht wenn er
@@ -1127,27 +1133,18 @@ workers.forEach(function (w) {
                                     (w.DryRun ? '<span class="subdl-dryrun">dry run</span>' : '') + '</span>';
                                 list.appendChild(row);
                             });
-                            // F-M352 (operator order 19.10.2026): the switched-off directions are NOTED here,
-                            // as the last entries under the OSHash lamp — grey, no outcome word changed, no lamp
-                            // repainted. One entry per direction that cannot start, in the list's own grid.
+                            // F-M352: the switched-off directions, as ONE line of flowing text under the
+                            // worker list (operator: not a column, plain text). Only the directions that
+                            // cannot start are named; nothing is claimed about the runs themselves.
                             var offs = (d && d.Off) || {};
-                            var offNotes = [
-                                ['download off', offs.Download],
-                                ['upload off', offs.Upload],
-                                ['upload postprocessing off', offs.Postprocessing]
-                            ];
-                            offNotes.forEach(function (n) {
-                                if (!n[1]) { return; }
-                                var note = document.createElement('div');
-                                note.className = 'subdl-status-row';
-                                // The note already ENDS in "off", so the outcome cell stays empty — measured in
-                                // the rendered list: "download off" plus a second "off" read as "Download off off".
-                                note.innerHTML = '<span class="subdl-light" style="background:#767676;"></span>' +
-                                    '<span class="subdl-label" style="color:#767676;">' + n[0] + '</span>' +
-                                    '<span class="subdl-when"></span>' +
-                                    '<span class="subdl-outcome"></span>';
-                                list.appendChild(note);
-                            });
+                            var offTexts = [];
+                            if (offs.Download) { offTexts.push('download off'); }
+                            if (offs.Upload) { offTexts.push('upload off'); }
+                            if (offs.Postprocessing) { offTexts.push('upload postprocessing off'); }
+                            var offLine = document.querySelector('#SubdlOffLine');
+                            if (offLine) {
+                                offLine.textContent = offTexts.join('  ·  ');
+                            }
                         };
                         var subdlLoadWorkers = function () {
                             // _t cache-buster, same reason as the stats loader above.

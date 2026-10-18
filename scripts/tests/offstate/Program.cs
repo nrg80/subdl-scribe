@@ -83,14 +83,11 @@ Check("the endpoint does NOT hide a pending fire", !ctl.Contains("Deferred = !of
 Check("the endpoint keeps the stored detail", !ctl.Contains("Detail = off ?"));
 
 string page = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"));
-Check("the page draws a note per off state", page.Contains("['download off', offs.Download]")
-    && page.Contains("['upload off', offs.Upload]")
-    && page.Contains("['upload postprocessing off', offs.Postprocessing]"));
-Check("the notes are appended AFTER the worker rows (last entries)", page.IndexOf("offNotes.forEach", page.IndexOf("workers.forEach")) > 0);
-Check("the note text ends in off and carries NO second off in the result cell",
-    page.Contains("<span class=\"subdl-label\" style=\"color:#767676;\">' + n[0] + '</span>")
-    && page.Contains("<span class=\"subdl-outcome\"></span>")
-    && !page.Contains("<span class=\"subdl-outcome\" style=\"color:#767676;\">off</span>"));
+Check("the page draws ONE flowing text line, not grid rows",
+    page.Contains("<div class=\"fieldDescription\" id=\"SubdlOffLine\"") && page.Contains("offLine.textContent = offTexts.join"));
+Check("the line names the three off states", page.Contains("'download off'") && page.Contains("'upload off'") && page.Contains("'upload postprocessing off'"));
+Check("the off notes add no rows to the worker grid", !page.Contains("class=\"subdl-outcome\" style=\"color:#767676;\">off</span>"));
+Check("the line sits after the worker list", page.IndexOf("id=\"SubdlOffLine\"") > page.IndexOf("id=\"WorkerRunList\""));
 Check("no off-case was added to the outcome words", !page.Contains("case 'off': return"));
 
 Console.WriteLine();
