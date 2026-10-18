@@ -113,7 +113,14 @@ public static class SubtitleSync
     /// the decision.
     /// </para>
     /// </summary>
-    public const double MinShiftSec = 1.0;
+    /// <remarks>
+    /// 1.0 s until 18.10.2026, when the operator weighed the two ends ("1 Sekunde ist zuviel, 0.2
+    /// Sekunden zuwenig") and set 0.7. The measured floor of the reference episode's own in-sync
+    /// subtitle is about 0.5 s, so 0.7 keeps a 0.2 s margin over what is normal and no longer refuses
+    /// a real half-cue finding. Do not go below the floor: at 0.20 s the feature MOVED a file that was
+    /// already correct (caught by the end-to-end test, not by reasoning).
+    /// </remarks>
+    public const double MinShiftSec = 0.7;
 
     /// <summary>The outcome of one sync attempt.</summary>
     /// <param name="Applied">True when a corrected file was written.</param>

@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.65
-**Status:** Implementation — v12.1.12.237.
+**Status:** Implementation — v12.1.12.238.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -406,8 +406,8 @@ sign flip fails loudly instead of silently doubling.
 file nothing is wrong with, measures **−0.50 s** against its own audio: that is this material's
 measurement floor (a cue leads the speech onset by a per-cue varying amount), and it is the same order
 as a small real offset. With a floor of 0.20 s the feature therefore **moved a file that was already in
-sync** — caught by the end-to-end test, not by reasoning. `MinShiftSec` is **1.0 s**, at which a finding
-is at least twice the floor and applying it can still be expected to remove more error than it adds.
+sync** — caught by the end-to-end test, not by reasoning. `MinShiftSec` was **1.0 s**, at which a finding
+is at least twice the floor. **Operator order 18.10.2026: 0.7 s.** He weighed both ends ("1 Sekunde ist zuviel, 0.2 Sekunden zuwenig"): 0.2 s is the value that already moved a correct file, 1.0 s leaves a real half-cue finding untouched, and 0.7 s keeps a 0.2 s margin over the ~0.5 s floor while reaching into the band the operator sees on screen. The number is fixed in code, not a setting.
 
 **The refusal list, and what replaced one of its entries.** A drifting file has **no valid single
 offset** (see F-M295): every number is an average over the drift and describes no real state, so
