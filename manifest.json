@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.243",
-        "changelog": "v12.1.12.243: The status line under the worker list now says what does not run by itself - as\n    words, not as a greyed lamp. \"download off\" and \"upload off\" mean the direction cannot start at\n    all (switch, no library, no target language, no credentials); \"download manual\", \"upload manual\",\n    \"upload postprocessing manual\", \"database refresh manual\" and \"oshash refresh manual\" mean it can\n    start but nothing starts it by itself. OnArrival is an automatism and carries no word at all. The\n    notes ride on the line that already reports a pending fire, from the same answer, so the two cannot\n    disagree. Lamps, stored results and pending fires are untouched, so a run never disappears behind a\n    switch.",
+        "version": "12.1.12.244",
+        "changelog": "v12.1.12.244: A stop now also rewrites the worker row of the direction it cancels. Until now the\n    pending fire was dropped correctly, but the row kept reading \"defer\" with the previous evening's\n    detail, because only a run ever wrote it - measured on prod: fire cancelled at 01:34, lamp still\n    yellow on defer from the night before. The row now says \"cancel\" (yellow, same colour: the work did\n    not happen), carries the moment of the cancellation and the detail \"fire cancelled - stopped by\n    operator\". Upload and download are handled independently, a stop without a pending fire changes\n    nothing, and a row that cannot be written never makes the stop fail.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.243-dev/Jellyfin.Plugin.SubdlSync_12.1.12.243.zip",
-        "checksum": "d21c1d84017c9bacb55998da020e3a1a",
-        "timestamp": "2026-10-18T23:29:18Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.244-dev/Jellyfin.Plugin.SubdlSync_12.1.12.244.zip",
+        "checksum": "6e9d9330fa5510df185e808e084c788b",
+        "timestamp": "2026-10-18T23:43:01Z"
       }
     ]
   }
