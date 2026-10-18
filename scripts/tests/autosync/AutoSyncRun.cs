@@ -429,27 +429,29 @@ public static class AutoSyncRun
 
         // The case the operator asked about: a better score, 887 moved cues, 2.50 s — refused because
         // t = 1.71 misses DeployZ = 2.0. The reason must SAY that, with the numbers.
-        string notSignificant = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildNoGainReason(
+        string notSignificant = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildRefusalReason(
             Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NotSignificant, 887, 887, 1.71, 2.50, 0.5591, 0.5667, five));
-        bool nsOk = notSignificant.Contains("not significant", StringComparison.Ordinal)
+        bool nsOk = notSignificant.StartsWith("gain not statistically proven", StringComparison.Ordinal)
+                    && notSignificant.Contains("t = +1.71 < 2.0", StringComparison.Ordinal)
                     && notSignificant.Contains("t = +1.71 < 2.0", StringComparison.Ordinal)
                     && notSignificant.Contains("0.5591 -> 0.5667 (+0.0076)", StringComparison.Ordinal)
                     && notSignificant.Contains("5 segment(s) [+2.00/+1.25/+0.50/-0.50/+2.50]", StringComparison.Ordinal)
                     && notSignificant.Contains("887/887 cues", StringComparison.Ordinal)
                     && notSignificant.Contains("largest 2.50 s", StringComparison.Ordinal)
-                    && notSignificant.Contains("left as downloaded", StringComparison.Ordinal);
-        Check("a thin gain names the significance AND the numbers it decided on", nsOk, notSignificant);
+                    && notSignificant.Contains("original kept, next candidate", StringComparison.Ordinal);
+        Check("a thin gain is \"not statistically proven\" (NOT \"no proven gain\") and names what happens next",
+            nsOk, notSignificant);
         f += nsOk ? 0 : 1;
 
         // The other three causes must be distinguishable from it, not merely shorter.
-        string nothing = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildNoGainReason(
+        string nothing = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildRefusalReason(
             Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NothingMoved, 412, 0, 0, 0, 0.5100, 0.5100, []));
         bool nothingOk = nothing.Contains("nothing to move", StringComparison.Ordinal)
                          && nothing.Contains("0/412 cues", StringComparison.Ordinal);
         Check("\"nothing to move\" is its own cause, with the cue count", nothingOk, nothing);
         f += nothingOk ? 0 : 1;
 
-        string worse = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildNoGainReason(
+        string worse = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildRefusalReason(
             Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.ScoreWorse, 500, 500, 3.4, 1.5, 0.6000, 0.5800, [1.50]));
         bool worseOk = worse.Contains("score would drop", StringComparison.Ordinal)
                        && worse.Contains("0.6000 -> 0.5800 (-0.0200)", StringComparison.Ordinal)
@@ -457,7 +459,7 @@ public static class AutoSyncRun
         Check("\"score would drop\" is its own cause, with both scores", worseOk, worse);
         f += worseOk ? 0 : 1;
 
-        string floor = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildNoGainReason(
+        string floor = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildRefusalReason(
             Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.BelowFloor, 300, 300, 5.0, 0.50, 0.5200, 0.5300, [0.50]));
         bool floorOk = floor.Contains("below floor", StringComparison.Ordinal)
                        && floor.Contains("largest 0.50 s < MinShiftSec 0.70 s", StringComparison.Ordinal);
@@ -465,16 +467,24 @@ public static class AutoSyncRun
         f += floorOk ? 0 : 1;
 
         // The prefix is the contract: F-M321 routing and the hunt both key on it, whatever the detail says.
-        foreach (string reason in new[] { notSignificant, nothing, worse, floor })
+        foreach ((string reason, bool expectsAlreadyGood) in new[]
+        {
+            (notSignificant, false),
+            (nothing, true),
+            (worse, true),
+            (floor, true),
+        })
         {
             bool good = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(reason);
-            // The pipeline asks "already good" FIRST and ends the walk there; candidate-specific is the
-            // second question (about re-downloading a different candidate), so both may answer true and
-            // the order is what decides. What must never happen is good=false for this prefix.
             bool candidateSpecific = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalIsCandidateSpecific(reason);
-            bool routed = good;
-            Check("the new wording still answers \"already good\" (the walk ends)",
-                routed, routed ? $"prefix intact (candidate-specific={candidateSpecific}, AlreadyGood wins)" : $"good=false — {reason}");
+            // Operator order 18.10.2026: the two classes must be answered DIFFERENTLY, or the rule is not
+            // implemented. A thin gain keeps the 9x original and pulls the next candidate; the three
+            // genuine "no proven gain" shapes end the walk.
+            bool routed = good == expectsAlreadyGood && (expectsAlreadyGood || candidateSpecific);
+            Check($"{(expectsAlreadyGood ? "\"no proven gain\"" : "a thin gain")} routes as "
+                + (expectsAlreadyGood ? "already-good (walk ends)" : "candidate-specific (9x kept, next candidate)"),
+                routed, routed ? $"good={good}, candidateSpecific={candidateSpecific}"
+                    : $"good={good}, candidateSpecific={candidateSpecific} — {reason}");
             f += routed ? 0 : 1;
         }
 

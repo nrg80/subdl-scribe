@@ -175,17 +175,18 @@ public static class SubtitleSync
     /// <summary>
     /// F-M321 (operator order 08.10.2026): whether a refusal means the file needs NO correction.
     /// <para>
-    /// "no proven gain" is the deploy rule DECLINING to move the file: nothing had to move, or the
-    /// measured gain did not prove itself, or the needed shift sits below the measurement floor. In
+    /// "no proven gain" is the deploy rule DECLINING to move the file: nothing had to move, the
+    /// correction would make the file worse, or the needed shift sits below the measurement floor. In
     /// every one of those cases the file AS DOWNLOADED is the best version of that language there is,
     /// and the operator's rule is that it is then treated like a correction — the walk ENDS (no quota
     /// spent hunting a candidate that cannot beat a file the fit found nothing wrong with) and the
     /// file takes the corrected range.
     /// </para>
     /// <para>
-    /// Every OTHER refusal says the file is WRONG — a shift beyond the limit, too few cues, a first
-    /// cue that would go negative — and another candidate may well fit, so those keep the F-M318 hunt
-    /// alive exactly as before. Matched by exact prefix, like <see cref="RefusalIsCandidateSpecific"/>:
+    /// Every OTHER refusal keeps the F-M318 hunt alive: a file that is WRONG (a shift beyond the limit,
+    /// too few cues, a first cue that would go negative) and — order 18.10.2026 — a correction that is
+    /// <c>gain not statistically proven</c>, where the evidence is missing rather than the file being
+    /// good or bad. Matched by exact prefix, like <see cref="RefusalIsCandidateSpecific"/>:
     /// this class composes the reason itself, so the prefix is the contract rather than a guess at
     /// wording.
     /// </para>
@@ -198,12 +199,20 @@ public static class SubtitleSync
     /// <summary>
     /// F-M307 (order 18.10.2026): names the condition that refused the correction and carries the
     /// numbers the decision was made on — the measured segments, the moved cues, the significance and
-    /// the score the measurement reached. The prefix stays <c>no proven gain</c> because
-    /// <see cref="RefusalMeansAlreadyGood"/> and the whole F-M321 routing key on it.
+    /// the score the measurement reached.
+    /// <para>
+    /// TWO classes, and the difference decides whether another candidate is fetched (operator order
+    /// 18.10.2026): "statistisch nicht ausreichend belegt" is NOT "no proven gain". A correction that
+    /// improves the score but cannot prove it (<c>NotSignificant</c>) is a verdict about the EVIDENCE,
+    /// not a statement that the subtitle is right — the original is kept in the reserved block and the
+    /// next candidate is pulled. <c>no proven gain</c> stays for the three cases where the file really
+    /// is the best there is: nothing had to move, the correction would make it worse, or the shift is
+    /// too small to matter (below the floor).
+    /// </para>
     /// </summary>
     /// <param name="fit">The fitted result whose revert is being reported.</param>
-    /// <returns>The reason string, one of four shapes.</returns>
-    public static string BuildNoGainReason(OffsetFit.FitResult fit)
+    /// <returns>The reason string; only the "no proven gain" shapes mean the file is already good.</returns>
+    public static string BuildRefusalReason(OffsetFit.FitResult fit)
     {
         CultureInfo inv = CultureInfo.InvariantCulture;
         string offsets = fit.MeasuredOffsetsSec.Count == 0
@@ -215,13 +224,19 @@ public static class SubtitleSync
         string t = tPlain + " < " + OffsetFit.DeployZ.ToString("0.0", inv);
         string moved = fit.MeasuredMovedCues.ToString(inv) + "/" + fit.CueCount.ToString(inv) + " cues";
         string largest = "largest " + fit.MeasuredLargestShiftSec.ToString("0.00", inv) + " s";
+        if (fit.Cause == OffsetFit.RevertCause.NotSignificant)
+        {
+            // Evidence missing, not file wrong and not file good: keep the measured numbers, keep the
+            // original in the reserved block, and let the pipeline pull the next candidate.
+            return "gain not statistically proven (" + t + ", score " + score + ", "
+                + fit.MeasuredOffsetsSec.Count.ToString(inv) + " segment(s) [" + offsets + "], " + moved + ", "
+                + largest + ") — original kept, next candidate";
+        }
+
         string detail = fit.Cause switch
         {
             OffsetFit.RevertCause.NothingMoved =>
                 "nothing to move: 0/" + fit.CueCount.ToString(inv) + " cues, " + largest,
-            OffsetFit.RevertCause.NotSignificant =>
-                "not significant: " + t + ", score " + score + ", "
-                + fit.MeasuredOffsetsSec.Count.ToString(inv) + " segment(s) [" + offsets + "], " + moved + ", " + largest,
             OffsetFit.RevertCause.ScoreWorse =>
                 "score would drop: " + score + ", " + tPlain + ", " + moved + ", " + largest,
             OffsetFit.RevertCause.BelowFloor =>
@@ -308,7 +323,7 @@ public static class SubtitleSync
             // Order 18.10.2026: the refusal names its cause and carries the numbers it decided on. The
             // old text read "0 cue(s) moved, t = +0.00" — the state AFTER the revert — so a perfectly
             // in-sync file and one measured 1.7 s off produced the identical line.
-            return new Result(false, 0, srtText, null, BuildNoGainReason(fit));
+            return new Result(false, 0, srtText, null, BuildRefusalReason(fit));
         }
 
         double largestShift = 0;
