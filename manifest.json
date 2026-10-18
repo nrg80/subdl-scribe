@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.239",
-        "changelog": "v12.1.12.239: The auto-sync corrects from 0.7 s instead of 1.0 s — a real half-cue offset is no longer\n    left alone, while the measured ~0.5 s offset of an in-sync subtitle still keeps good files untouched.\n    A correction that improves the score but cannot prove it is no longer reported as \"no proven gain\":\n    it keeps the original in the reserved block and the run pulls the next candidate instead. Every\n    refusal now names its cause and carries the numbers it was decided on.",
+        "version": "12.1.12.240",
+        "changelog": "v12.1.12.240: Which refusal counts as \"no proven gain\" is settled by significance, not by the score.\n    A correction that is worse but NOT significantly worse is not evidence: it keeps the original in the\n    reserved block and the run pulls the next candidate, exactly like an improvement that cannot prove\n    itself. \"No proven gain\" is only: nothing to move, a shift below the 0.7 s floor, or the untreated\n    file being significantly better (t <= -2). No correction is deployed without t > 2.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.239-dev/Jellyfin.Plugin.SubdlSync_12.1.12.239.zip",
-        "checksum": "7af762d6db50ced60e4651864f250847",
-        "timestamp": "2026-10-18T17:38:00Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.240-dev/Jellyfin.Plugin.SubdlSync_12.1.12.240.zip",
+        "checksum": "f1eaf4f7ec4da9371b29bf727606887d",
+        "timestamp": "2026-10-18T18:25:15Z"
       }
     ]
   }
