@@ -409,8 +409,23 @@ public static class OffsetFit
             largest = Math.Max(largest, Math.Abs(v));
         }
 
-        bool reverted = moved == 0 || tMoved <= DeployZ || scoreAfter < scoreBefore - 1e-9
-                        || largest < SubtitleSync.MinShiftSec;
+        // The cause is read in the SAME order the rule short-circuits below, so the reported reason is
+        // the first condition that actually refused — not whichever one happens to read best.
+        RevertCause cause = moved == 0 ? RevertCause.NothingMoved
+            : tMoved <= DeployZ ? RevertCause.NotSignificant
+            : scoreAfter < scoreBefore - 1e-9 ? RevertCause.ScoreWorse
+            : largest < SubtitleSync.MinShiftSec ? RevertCause.BelowFloor
+            : RevertCause.None;
+
+        // The measurement survives the revert here, so the refusal can REPORT what it found instead of
+        // the zeros it left behind (order 18.10.2026).
+        List<double> measuredOffsets = segs.ConvertAll(g => -States[g.State]);
+        int measuredMoved = moved;
+        double measuredT = tMoved;
+        double measuredLargest = largest;
+        double measuredScoreAfter = scoreAfter;
+
+        bool reverted = cause != RevertCause.None;
         if (reverted)
         {
             Array.Clear(eff);
@@ -424,6 +439,12 @@ public static class OffsetFit
         {
             Ran = true,
             Reverted = reverted,
+            Cause = cause,
+            MeasuredOffsetsSec = measuredOffsets,
+            MeasuredMovedCues = measuredMoved,
+            MeasuredTMoved = measuredT,
+            MeasuredLargestShiftSec = measuredLargest,
+            MeasuredScoreAfter = measuredScoreAfter,
             Segments = segs.Count,
             SegmentStartTimesSec = segs.ConvertAll(g => starts[g.Lo]),
             SegmentOffsetsSec = segs.ConvertAll(g => -States[g.State]),
@@ -818,6 +839,29 @@ public static class OffsetFit
         return (sorted[i0] * (1 - frac)) + (sorted[i1] * frac);
     }
 
+    /// <summary>
+    /// Why the deploy rule refused a fitted correction (order 18.10.2026: the refusal has to name its
+    /// cause and carry the numbers it decided on — "no proven gain (0 cue(s) moved, t = +0.00)" was the
+    /// state AFTER the revert and told the operator nothing).
+    /// </summary>
+    public enum RevertCause
+    {
+        /// <summary>Nothing was refused — the correction is applied.</summary>
+        None = 0,
+
+        /// <summary>No cue had to move at all.</summary>
+        NothingMoved = 1,
+
+        /// <summary>The moved cues do not gain over <see cref="DeployZ"/> standard errors.</summary>
+        NotSignificant = 2,
+
+        /// <summary>The whole file would get worse.</summary>
+        ScoreWorse = 3,
+
+        /// <summary>The largest shift does not reach <see cref="SubtitleSync.MinShiftSec"/>.</summary>
+        BelowFloor = 4,
+    }
+
     /// <summary>F-M307: the result of <see cref="Fit"/>.</summary>
     public sealed class FitResult
     {
@@ -829,6 +873,24 @@ public static class OffsetFit
 
         /// <summary>Gets a value indicating whether the deploy rule refused the correction.</summary>
         public bool Reverted { get; init; }
+
+        /// <summary>Gets the condition that refused the correction (None when it was applied).</summary>
+        public RevertCause Cause { get; init; }
+
+        /// <summary>Gets the segment offsets that were MEASURED, before the revert zeroed them.</summary>
+        public List<double> MeasuredOffsetsSec { get; init; } = [];
+
+        /// <summary>Gets how many cues the measurement wanted to move, before the revert zeroed it.</summary>
+        public int MeasuredMovedCues { get; init; }
+
+        /// <summary>Gets the significance the measurement had, before the revert zeroed it.</summary>
+        public double MeasuredTMoved { get; init; }
+
+        /// <summary>Gets the largest measured shift, before the revert zeroed it.</summary>
+        public double MeasuredLargestShiftSec { get; init; }
+
+        /// <summary>Gets the score the measurement reached, before the revert discarded it.</summary>
+        public double MeasuredScoreAfter { get; init; }
 
         /// <summary>Gets the number of segments.</summary>
         public int Segments { get; init; }

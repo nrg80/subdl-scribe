@@ -196,6 +196,43 @@ public static class SubtitleSync
         => reason != null && reason.StartsWith("no proven gain", StringComparison.Ordinal);
 
     /// <summary>
+    /// F-M307 (order 18.10.2026): names the condition that refused the correction and carries the
+    /// numbers the decision was made on — the measured segments, the moved cues, the significance and
+    /// the score the measurement reached. The prefix stays <c>no proven gain</c> because
+    /// <see cref="RefusalMeansAlreadyGood"/> and the whole F-M321 routing key on it.
+    /// </summary>
+    /// <param name="fit">The fitted result whose revert is being reported.</param>
+    /// <returns>The reason string, one of four shapes.</returns>
+    public static string BuildNoGainReason(OffsetFit.FitResult fit)
+    {
+        CultureInfo inv = CultureInfo.InvariantCulture;
+        string offsets = fit.MeasuredOffsetsSec.Count == 0
+            ? "none"
+            : string.Join("/", fit.MeasuredOffsetsSec.ConvertAll(v => v.ToString("+0.00;-0.00", inv)));
+        string score = fit.ScoreBefore.ToString("0.0000", inv) + " -> " + fit.MeasuredScoreAfter.ToString("0.0000", inv)
+            + " (" + (fit.MeasuredScoreAfter - fit.ScoreBefore).ToString("+0.0000;-0.0000", inv) + ")";
+        string tPlain = "t = " + fit.MeasuredTMoved.ToString("+0.00;-0.00", inv);
+        string t = tPlain + " < " + OffsetFit.DeployZ.ToString("0.0", inv);
+        string moved = fit.MeasuredMovedCues.ToString(inv) + "/" + fit.CueCount.ToString(inv) + " cues";
+        string largest = "largest " + fit.MeasuredLargestShiftSec.ToString("0.00", inv) + " s";
+        string detail = fit.Cause switch
+        {
+            OffsetFit.RevertCause.NothingMoved =>
+                "nothing to move: 0/" + fit.CueCount.ToString(inv) + " cues, " + largest,
+            OffsetFit.RevertCause.NotSignificant =>
+                "not significant: " + t + ", score " + score + ", "
+                + fit.MeasuredOffsetsSec.Count.ToString(inv) + " segment(s) [" + offsets + "], " + moved + ", " + largest,
+            OffsetFit.RevertCause.ScoreWorse =>
+                "score would drop: " + score + ", " + tPlain + ", " + moved + ", " + largest,
+            OffsetFit.RevertCause.BelowFloor =>
+                "below floor: " + largest + " < MinShiftSec " + MinShiftSec.ToString("0.00", inv) + " s, " + tPlain + ", " + moved,
+            _ => "measurement refused the correction",
+        };
+
+        return "no proven gain (" + detail + ") — left as downloaded";
+    }
+
+    /// <summary>
     /// Measures and applies the shift for one downloaded subtitle.
     /// </summary>
     /// <param name="mediaPath">Media file the subtitle belongs to.</param>
@@ -268,13 +305,10 @@ public static class SubtitleSync
 
         if (fit.Reverted)
         {
-            return new Result(
-                false,
-                0,
-                srtText,
-                null,
-                "no proven gain (" + fit.MovedCues.ToString(CultureInfo.InvariantCulture) + " cue(s) moved, t = "
-                + fit.TMoved.ToString("+0.00;-0.00", CultureInfo.InvariantCulture) + ") — left as downloaded");
+            // Order 18.10.2026: the refusal names its cause and carries the numbers it decided on. The
+            // old text read "0 cue(s) moved, t = +0.00" — the state AFTER the revert — so a perfectly
+            // in-sync file and one measured 1.7 s off produced the identical line.
+            return new Result(false, 0, srtText, null, BuildNoGainReason(fit));
         }
 
         double largestShift = 0;

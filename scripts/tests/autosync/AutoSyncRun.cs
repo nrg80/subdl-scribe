@@ -382,6 +382,105 @@ public static class AutoSyncRun
         return f;
     }
 
+    /// <summary>
+    /// F-M307 (order 18.10.2026): the deploy rule's refusal must name WHICH condition refused it and
+    /// carry the numbers behind the decision.
+    /// <para>
+    /// Why this matters: the old text was built from the values the revert had already zeroed, so
+    /// "no proven gain (0 cue(s) moved, t = +0.00)" was printed for a perfectly in-sync file AND for one
+    /// whose fit had measured 887 moved cues at t = 1.71 on a better score — the operator could not tell
+    /// the two apart, and asked whether the file had been 1.4 s out while the log said "no gain".
+    /// </para>
+    /// <para>
+    /// Driven on the REAL builder with synthetic fits, one per cause, so each shape is pinned; the
+    /// prefix is pinned separately because <see cref="RefusalMeansAlreadyGood"/> and the F-M321 routing
+    /// key on exactly that string.
+    /// </para>
+    /// </summary>
+    /// <returns>Number of failures.</returns>
+    private static int NoGainReasonNames()
+    {
+        int f = 0;
+
+        Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.FitResult Make(
+            Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause cause,
+            int cueCount,
+            int moved,
+            double t,
+            double largest,
+            double scoreBefore,
+            double scoreAfter,
+            System.Collections.Generic.List<double> offsets)
+            => new Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.FitResult
+            {
+                Ran = true,
+                Reverted = cause != Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.None,
+                Cause = cause,
+                CueCount = cueCount,
+                MeasuredMovedCues = moved,
+                MeasuredTMoved = t,
+                MeasuredLargestShiftSec = largest,
+                ScoreBefore = scoreBefore,
+                MeasuredScoreAfter = scoreAfter,
+                MeasuredOffsetsSec = offsets,
+            };
+
+        var five = new System.Collections.Generic.List<double> { 2.00, 1.25, 0.50, -0.50, 2.50 };
+
+        // The case the operator asked about: a better score, 887 moved cues, 2.50 s — refused because
+        // t = 1.71 misses DeployZ = 2.0. The reason must SAY that, with the numbers.
+        string notSignificant = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildNoGainReason(
+            Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NotSignificant, 887, 887, 1.71, 2.50, 0.5591, 0.5667, five));
+        bool nsOk = notSignificant.Contains("not significant", StringComparison.Ordinal)
+                    && notSignificant.Contains("t = +1.71 < 2.0", StringComparison.Ordinal)
+                    && notSignificant.Contains("0.5591 -> 0.5667 (+0.0076)", StringComparison.Ordinal)
+                    && notSignificant.Contains("5 segment(s) [+2.00/+1.25/+0.50/-0.50/+2.50]", StringComparison.Ordinal)
+                    && notSignificant.Contains("887/887 cues", StringComparison.Ordinal)
+                    && notSignificant.Contains("largest 2.50 s", StringComparison.Ordinal)
+                    && notSignificant.Contains("left as downloaded", StringComparison.Ordinal);
+        Check("a thin gain names the significance AND the numbers it decided on", nsOk, notSignificant);
+        f += nsOk ? 0 : 1;
+
+        // The other three causes must be distinguishable from it, not merely shorter.
+        string nothing = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildNoGainReason(
+            Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NothingMoved, 412, 0, 0, 0, 0.5100, 0.5100, []));
+        bool nothingOk = nothing.Contains("nothing to move", StringComparison.Ordinal)
+                         && nothing.Contains("0/412 cues", StringComparison.Ordinal);
+        Check("\"nothing to move\" is its own cause, with the cue count", nothingOk, nothing);
+        f += nothingOk ? 0 : 1;
+
+        string worse = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildNoGainReason(
+            Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.ScoreWorse, 500, 500, 3.4, 1.5, 0.6000, 0.5800, [1.50]));
+        bool worseOk = worse.Contains("score would drop", StringComparison.Ordinal)
+                       && worse.Contains("0.6000 -> 0.5800 (-0.0200)", StringComparison.Ordinal)
+                       && !worse.Contains("< 2.0", StringComparison.Ordinal);
+        Check("\"score would drop\" is its own cause, with both scores", worseOk, worse);
+        f += worseOk ? 0 : 1;
+
+        string floor = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildNoGainReason(
+            Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.BelowFloor, 300, 300, 5.0, 0.50, 0.5200, 0.5300, [0.50]));
+        bool floorOk = floor.Contains("below floor", StringComparison.Ordinal)
+                       && floor.Contains("largest 0.50 s < MinShiftSec 0.70 s", StringComparison.Ordinal);
+        Check("\"below floor\" names the floor it missed (0.7 s, not 1.0)", floorOk, floor);
+        f += floorOk ? 0 : 1;
+
+        // The prefix is the contract: F-M321 routing and the hunt both key on it, whatever the detail says.
+        foreach (string reason in new[] { notSignificant, nothing, worse, floor })
+        {
+            bool good = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(reason);
+            // The pipeline asks "already good" FIRST and ends the walk there; candidate-specific is the
+            // second question (about re-downloading a different candidate), so both may answer true and
+            // the order is what decides. What must never happen is good=false for this prefix.
+            bool candidateSpecific = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalIsCandidateSpecific(reason);
+            bool routed = good;
+            Check("the new wording still answers \"already good\" (the walk ends)",
+                routed, routed ? $"prefix intact (candidate-specific={candidateSpecific}, AlreadyGood wins)" : $"good=false — {reason}");
+            f += routed ? 0 : 1;
+        }
+
+        return f;
+    }
+
     private static void Check(string label, bool ok, string detail)
     {
         Console.WriteLine($"  [{(ok ? "PASS" : "FAIL")}] {label}: {detail}");
@@ -1227,6 +1326,10 @@ public static class AutoSyncRun
         Console.WriteLine();
         Console.WriteLine("[5d] a \"no proven gain\" file IS the best version (F-M321)");
         f += AlreadyGoodAsCorrected(src);
+
+        Console.WriteLine();
+        Console.WriteLine("[5f] the refusal NAMES its cause and carries the numbers (F-M307, order 18.10.2026)");
+        f += NoGainReasonNames();
 
         Console.WriteLine();
         return f;
