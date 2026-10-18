@@ -12,9 +12,9 @@
         "version": "12.1.12.239",
         "changelog": "v12.1.12.239: The auto-sync corrects from 0.7 s instead of 1.0 s — a real half-cue offset is no longer\n    left alone, while the measured ~0.5 s offset of an in-sync subtitle still keeps good files untouched.\n    A correction that improves the score but cannot prove it is no longer reported as \"no proven gain\":\n    it keeps the original in the reserved block and the run pulls the next candidate instead. Every\n    refusal now names its cause and carries the numbers it was decided on.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.239-dev/Jellyfin.Plugin.SubdlSync_12.1.12.239.zip",
-        "checksum": "7af762d6db50ced60e4651864f250847",
-        "timestamp": "2026-10-18T17:38:00Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.239/Jellyfin.Plugin.SubdlSync_12.1.12.239.zip",
+        "checksum": "e612644bf1948f0ea99404f44a8119d6",
+        "timestamp": "2026-10-18T17:38:25Z"
       }
     ]
   }
