@@ -35,7 +35,7 @@ does not match `build.yaml`), that branch is not pushed, the tag already exists,
 - the plugin description is identical in `build.yaml` and in the plugin card, is at most 260 characters, and names both required keys
 - tree clean, branch is `develop` or `main`, and that branch is pushed
 - the tag does not exist yet
-- the ZIP carries the plugin DLL, its two dependencies (`LanguageDetection`, `LiteDB`) and `build.yaml`, and no `meta.json`
+- the ZIP carries the plugin DLL, the one dependency it ships (`LanguageDetection`) and `build.yaml`, and no `meta.json`
 - version and category inside the ZIP, not in the working tree
 - exactly one asset after upload
 - the md5 of the downloaded asset equals the built one
