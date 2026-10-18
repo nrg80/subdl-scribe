@@ -75,7 +75,7 @@ Check("postprocessing is manual on a Manual cadence", WorkerOffState.IsManualOnl
 Check("a manual worker is NEVER reported as off (manual runs still work)",
     !WorkerOffState.Applies(DB, Mutate(c => c.PruneMode = PruneMode.Manual))
     && !WorkerOffState.Applies(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Manual)));
-Check("postprocessing: upload off outranks a manual cadence (off, not manual)",
+Check("postprocessing is off in the gate when upload is off (the gate itself is unchanged)",
     WorkerOffState.Applies(PP, Mutate(c => { c.UploadEnabled = false; c.UploadPostprocessInterval = UpdateInterval.Manual; })));
 
 // --- the language parse matches the download pipeline's ---------------------
@@ -113,8 +113,9 @@ Check("the quota answer carries the notes in its local block",
     quota.Contains("var offEntries = StatusNotes();") && quota.Contains("notes = offEntries"));
 Check("the notes list is built from the shared gates",
     quota.Contains("WorkerOffState.Applies") && quota.Contains("WorkerOffState.IsManualOnly") && quota.Contains("StatusNotes()"));
-Check("the off wording is the three operator phrases",
-    quota.Contains("\"download off\"") && quota.Contains("\"upload off\"") && quota.Contains("\"upload postprocessing off\"")
+Check("postprocessing has ONE wording - manual, never off", quota.Contains("!config.UploadEnabled || manual(postKey, config)"));
+Check("the wording is the operator's five phrases", quota.Contains("\"download off\"") && quota.Contains("\"upload off\"")
+    && !quota.Contains("\"upload postprocessing off\"")
     && quota.Contains("\"upload postprocessing manual\"") && quota.Contains("\"database refresh manual\"") && quota.Contains("\"oshash refresh manual\""));
 Check("the notes survive the early return when no fire is pending",
     System.Text.RegularExpressions.Regex.Matches(quota, "notes = offEntries").Count >= 2);

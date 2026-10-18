@@ -233,13 +233,11 @@ public class SubdlQuota : ControllerBase
                 notes.Add("upload off");
             }
 
-            // The postprocessing is bound to the upload direction: with upload off it is OFF, with the
-            // cadence on Manual it is MANUAL — the two are different statements and are not merged.
-            if (!config.UploadEnabled)
-            {
-                notes.Add("upload postprocessing off");
-            }
-            else if (manual(postKey, config))
+            // F-M352 (operator order 19.10.2026, "Upload Postprocessing off bitte komplett durch manual
+            // ersetzen"): the postprocessing has exactly ONE wording — "manual". Whether the upload switch
+            // is off or the cadence sits on Manual, the fact is the same: it does not run by itself, and
+            // its button does. No "off" for this worker.
+            if (!config.UploadEnabled || manual(postKey, config))
             {
                 notes.Add("upload postprocessing manual");
             }
