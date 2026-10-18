@@ -91,6 +91,14 @@ Check("oshash refresh manual on OshashRefreshMode.Manual", WorkerOffState.IsManu
 Check("oshash refresh manual on the legacy OshashRefreshMode.Never", WorkerOffState.IsManualOnly(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Never)));
 Check("oshash refresh NOT manual on Monthly", !WorkerOffState.IsManualOnly(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Monthly)));
 Check("postprocessing is manual on a Manual cadence", WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Manual)));
+Check("postprocessing is manual on the legacy Never", WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Never)));
+Check("postprocessing OnArrival is an automatism, NOT manual",
+    !WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.OnArrival)));
+Check("postprocessing OnArrival arms no clock (the gate still refuses the anchor)",
+    WorkerOffState.Applies(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.OnArrival)));
+Check("a weekly postprocessing is neither off nor manual",
+    !WorkerOffState.Applies(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Weekly))
+    && !WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Weekly)));
 Check("a manual worker is NEVER reported as off (manual runs still work)",
     !WorkerOffState.Applies(DB, Mutate(c => c.PruneMode = PruneMode.Manual))
     && !WorkerOffState.Applies(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Manual)));

@@ -63,7 +63,11 @@ public static class WorkerOffState
 
         if (string.Equals(workerKey, PostprocessWorkerKey, StringComparison.Ordinal))
         {
-            return !config.UploadEnabled || IsManualOnly(PostprocessWorkerKey, config);
+            // The gate is "no automatic fire", and OnArrival arms no clock either — it runs on arrivals
+            // only. That is an automatism (so the status line says nothing), but it is not a scheduled
+            // anchor, so the gate still covers it.
+            return !config.UploadEnabled
+                || config.UploadPostprocessInterval is UpdateInterval.Never or UpdateInterval.Manual or UpdateInterval.OnArrival;
         }
 
         return false;
@@ -97,7 +101,11 @@ public static class WorkerOffState
 
         if (string.Equals(workerKey, PostprocessWorkerKey, StringComparison.Ordinal))
         {
-            return config.UploadPostprocessInterval is UpdateInterval.Never or UpdateInterval.Manual or UpdateInterval.OnArrival;
+            // OnArrival is an automatism too (operator: "On arrival ist auch ein Automatismus und kein
+            // manuell") — an arrival starts it, so it carries no "manual" note. Only Never/Manual are manual.
+            // The scheduler's time-anchor gate (Applies) still refuses OnArrival: it arms no clock, but the
+            // worker is not idle.
+            return config.UploadPostprocessInterval is UpdateInterval.Never or UpdateInterval.Manual;
         }
 
         if (string.Equals(workerKey, DatabaseWorkerKey, StringComparison.Ordinal))
