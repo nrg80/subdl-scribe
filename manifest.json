@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.244",
-        "changelog": "v12.1.12.244: A stop now also rewrites the worker row of the direction it cancels. Until now the\n    pending fire was dropped correctly, but the row kept reading \"defer\" with the previous evening's\n    detail, because only a run ever wrote it - measured on prod: fire cancelled at 01:34, lamp still\n    yellow on defer from the night before. The row now says \"cancel\" (yellow, same colour: the work did\n    not happen), carries the moment of the cancellation and the detail \"fire cancelled - stopped by\n    operator\". Upload and download are handled independently, a stop without a pending fire changes\n    nothing, and a row that cannot be written never makes the stop fail.",
+        "version": "12.1.12.245",
+        "changelog": "v12.1.12.245: The cancellation now also carries the right time. 244 wrote the row through Finish(),\n    which keeps an existing start because that is the real beginning of a run - the test bench then showed\n    \"cancel\" next to a start three days old, since the column displays Started. A cancellation is not a\n    run: MarkCancelled() stamps BOTH times with the moment of the stop, so the row reads \"cancel\" at the\n    time it happened. The colour stays yellow like defer - the operator declined the grey change on\n    19.10.2026, and the colour line is now pinned by T157 so it cannot drift.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.244-dev/Jellyfin.Plugin.SubdlSync_12.1.12.244.zip",
-        "checksum": "6e9d9330fa5510df185e808e084c788b",
-        "timestamp": "2026-10-18T23:43:01Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.245-dev/Jellyfin.Plugin.SubdlSync_12.1.12.245.zip",
+        "checksum": "1b52d8932dc6f0fafbbe685f6708c150",
+        "timestamp": "2026-10-18T23:50:35Z"
       }
     ]
   }
