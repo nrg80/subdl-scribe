@@ -88,6 +88,21 @@ public sealed class WorkerRunRegistry
 
         /// <summary>The worker has not run since this record was created.</summary>
         public const string Never = "never";
+
+        /// <summary>
+        /// F-M352 (operator order 19.10.2026): the worker CANNOT start — the operator switched it off,
+        /// no library is selected, no target language is configured, a credential is missing, or the
+        /// postprocessing cadence sits on Manual/Never/OnArrival.
+        /// <para>
+        /// Its own word because it is neither of the two greys that already exist: <c>never</c> claims
+        /// the work has not happened YET, and <c>skipped</c> records one run that declined. Both leave
+        /// the reader guessing whether something is owed. "Off" states that nothing is owed until the
+        /// operator changes a switch — and on the delivery state of a fresh install (upload off) that
+        /// is the truth the row was missing.
+        /// </para>
+        /// <para>Same grey as <c>skipped</c>/<c>never</c>, so the palette of F-M268 is unchanged.</para>
+        /// </summary>
+        public const string Off = "off";
     }
 
     /// <summary>

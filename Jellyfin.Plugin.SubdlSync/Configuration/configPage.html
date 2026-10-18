@@ -1081,6 +1081,10 @@
                                 // did not happen. YELLOW, because green reads as success (user,
                                 // 30.09.2026) and grey would hide it. Word kept <=6 chars.
                                 case 'deferred': return { color: '#ffc107', text: 'defer' };
+                                // F-M352: switched off (toggle, no libraries, no languages, no
+                                // credential, postprocessing Manual). Grey, same colour as skip/never,
+                                // own word so it is not read as "has not run yet" or "declined".
+                                case 'off': return { color: '#767676', text: 'off' };
                                 default: return { color: '#767676', text: 'never' };
                             }
                         };

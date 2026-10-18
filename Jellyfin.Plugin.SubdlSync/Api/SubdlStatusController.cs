@@ -150,22 +150,50 @@ public class SubdlStatusController : ControllerBase
             // This endpoint must never fail over a lamp.
         }
 
+        // F-M352 (operator order 19.10.2026): a worker that cannot start reads "off" — grey, and it
+        // outranks the stored outcome AND a pending fire: a row that ran green yesterday must not claim
+        // health while the switch is off, and a fire armed before the switch went off cannot produce work
+        // either. The row keeps its name and its timestamps (it is still a record); the outcome and the
+        // detail are replaced. No reason is written into the detail (operator: "Kein Grund für off angeben").
+        var liveConfig = plugin.Configuration;
+
+        // F-M352: the switch's own moment, so a run that happened AFTER it is not painted over. Reading
+        // the config file's mtime is the only truthful "since when" the plugin has — Jellyfin rewrites
+        // the file on every save, and no timestamp is stored inside the configuration object.
+        DateTime? configSavedUtc = null;
+        try
+        {
+            var cfgPath = plugin.ConfigurationFilePath;
+            if (!string.IsNullOrEmpty(cfgPath) && System.IO.File.Exists(cfgPath))
+            {
+                configSavedUtc = System.IO.File.GetLastWriteTimeUtc(cfgPath);
+            }
+        }
+        catch
+        {
+            // Unknown "since when" — the config gate alone decides, which is the pre-manual-run behaviour.
+        }
+
         return Ok(new
         {
-            Workers = rows.Select(r => new
+            Workers = rows.Select(r =>
             {
-                r.Id,
-                r.Name,
-                Started = r.Started?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
-                Ended = r.Ended?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
-                r.Outcome,
-                r.Detail,
-                r.DryRun,
-                // F-M294: per worker, plus the moment the fire is due so the page can name it.
-                Deferred = pendingFires.ContainsKey(r.Id),
-                DeferUntil = pendingFires.TryGetValue(r.Id, out var due)
-                    ? due.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
-                    : null
+                bool off = Registry.WorkerOffState.PaintsOff(r.Id, liveConfig, r.Outcome, r.Ended, configSavedUtc);
+                return new
+                {
+                    r.Id,
+                    r.Name,
+                    Started = r.Started?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                    Ended = r.Ended?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                    Outcome = off ? Registry.WorkerRunRegistry.Outcome.Off : r.Outcome,
+                    Detail = off ? string.Empty : r.Detail,
+                    r.DryRun,
+                    // F-M294: per worker, plus the moment the fire is due so the page can name it.
+                    Deferred = !off && pendingFires.ContainsKey(r.Id),
+                    DeferUntil = !off && pendingFires.TryGetValue(r.Id, out var due)
+                        ? due.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+                        : null
+                };
             }),
             Timestamp = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
         });
