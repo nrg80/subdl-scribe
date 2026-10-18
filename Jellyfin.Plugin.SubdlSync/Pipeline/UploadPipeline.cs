@@ -1222,9 +1222,8 @@ public sealed class UploadPipeline
             {
             foreach (var cand in qaSurvivors)
             {
-                string neutralName = isSeries
-                    ? $"{imdbId}.S{season:00}E{episode:00}.{cand.Lang}.srt"
-                    : $"{imdbId}.{cand.Lang}.srt";
+                string neutralName = BuildNeutralName(
+                    isSeries, imdbId!, season, episode, cand.Lang, ContentHashRegistry.ComputeHash(cand.Srt));
                 LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] DRY-RUN would upload {Name}", neutralName);
             }
 
@@ -1693,6 +1692,28 @@ public sealed class UploadPipeline
     }
 
     /// <summary>
+    /// F-M30 (order 17.10.2026, "die volle md5 macht sinn"): the upload filename carries the content
+    /// hash, so two uploads of the same item and language are told apart by what is INSIDE them
+    /// rather than by who sent them.
+    /// </summary>
+    /// <remarks>
+    /// The hash is the MD5 over the normalized bytes SubDL receives
+    /// (<see cref="ContentHashRegistry.ComputeHash"/>), which makes it recomputable from the delivered
+    /// file — a check, not a claim. It is deliberately the FULL 32 hex characters: the name is where
+    /// a wrong pairing would be read by people, so uniqueness beats brevity.
+    /// <para>
+    /// It is not an installation, run or user identifier. F-M29 still forbids anything that links
+    /// uploads to a user, a library, a path or a server; a content hash links nothing but files that
+    /// are byte-identical after normalization, which is a property of the subtitle, not of the sender.
+    /// </para>
+    /// </remarks>
+    private static string BuildNeutralName(
+        bool isSeries, string imdbId, int season, int episode, string lang, string contentHash)
+        => isSeries
+            ? $"{imdbId}.S{season:00}E{episode:00}.{lang}.{contentHash}.srt"
+            : $"{imdbId}.{lang}.{contentHash}.srt";
+
+    /// <summary>
     /// F-M71:
     /// detects a hearing-impaired (SDH) embedded subtitle stream. Sources, in order:
     /// the JF stream Title ("SDH"/"Hearing Impaired" — set by MediaElch/ TinyMediaManager
@@ -1799,10 +1820,9 @@ public sealed class UploadPipeline
         }
 
 
-        // F-M29/F-M30: neutral filename, no user-identifying data
-        string neutralName = isSeries
-            ? $"{imdbId}.S{season:00}E{episode:00}.{lang}.srt"
-            : $"{imdbId}.{lang}.srt";
+        // F-M29/F-M30: neutral filename, no user-identifying data; the content hash keeps two uploads
+        // of the same item and language apart without identifying anybody (full MD5, order 17.10.2026)
+        string neutralName = BuildNeutralName(isSeries, imdbId, season, episode, lang, contentHashEarly);
 
         string releaseName = Path.GetFileNameWithoutExtension(mediaPath);
 
