@@ -228,7 +228,7 @@ public static class SubtitleSync
         {
             // Evidence missing, not file wrong and not file good: keep the measured numbers, keep the
             // original in the reserved block, and let the pipeline pull the next candidate.
-            return "gain not statistically proven (" + t + ", score " + score + ", "
+            return "gain not statistically proven (direction better, evidence thin: " + t + ", score " + score + ", "
                 + fit.MeasuredOffsetsSec.Count.ToString(inv) + " segment(s) [" + offsets + "], " + moved + ", "
                 + largest + ") — original kept, next candidate";
         }
@@ -238,7 +238,8 @@ public static class SubtitleSync
             OffsetFit.RevertCause.NothingMoved =>
                 "nothing to move: 0/" + fit.CueCount.ToString(inv) + " cues, " + largest,
             OffsetFit.RevertCause.ScoreWorse =>
-                "score would drop: " + score + ", " + tPlain + ", " + moved + ", " + largest,
+                "the correction would make it worse (untreated better): score " + score + ", " + tPlain
+                + ", " + moved + ", " + largest,
             OffsetFit.RevertCause.BelowFloor =>
                 "below floor: " + largest + " < MinShiftSec " + MinShiftSec.ToString("0.00", inv) + " s, " + tPlain + ", " + moved,
             _ => "measurement refused the correction",
