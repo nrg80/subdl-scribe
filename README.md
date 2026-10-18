@@ -37,11 +37,10 @@ Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
    /var/lib/jellyfin/plugins/SubDL Scribe/
    ├── Jellyfin.Plugin.SubdlSync.dll
    ├── LanguageDetection.dll
-   ├── LiteDB.dll
+   ├── build.yaml
    └── licenses/
        ├── THIRD-PARTY.txt
        ├── LanguageDetection-Apache-2.0.txt
-       ├── LiteDB-MIT.txt
        └── SubDL-Scribe-GPL-3.0.txt
    ```
 
