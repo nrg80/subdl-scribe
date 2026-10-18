@@ -271,10 +271,13 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
 
         ResetReschedule(upload ? "upload" : "download");
         PersistRecoveryFires();
+        // The moment is logged in UTC and NOT converted: DeferFire prints its retry the same way, and a
+        // local time labelled "UTC" is worse than no label — the first live test on the dev instance
+        // reported "02:30 UTC" for a fire that was armed at 00:30Z.
         LogUtil.Normal(_logger,
             "[SubDL] stop ({Direction}): pending fire for {Due:yyyy-MM-dd HH:mm} UTC cancelled — {Reason} (F-M351).",
             upload ? "upload" : "download",
-            TimeZoneInfo.ConvertTimeFromUtc(was!.Value, TimeZoneInfo.Local),
+            was!.Value,
             reason);
         return true;
     }

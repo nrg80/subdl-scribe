@@ -42,6 +42,18 @@ string payload = File.Exists(file) ? File.ReadAllText(file) : "<missing>";
 Check("the cancellation is PERSISTED (a restart cannot resurrect it)",
     payload.Contains("\"upload\":\"\"") && payload.Contains("\"download\":\"\""), payload);
 
+// Source contract: the log line must print UTC without converting — the first live run claimed "UTC" on a
+// local time (02:30 for a fire armed at 00:30Z), which reads as a wrong deferral moment.
+string src = File.ReadAllText(Path.Combine("/opt/data/subdl-scribe", "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlSchedulerCoordinator.cs"));
+int at = src.IndexOf("pending fire for", StringComparison.Ordinal);
+string block = at >= 0
+    ? src.Substring(Math.Max(0, at - 500), Math.Min(900, src.Length - Math.Max(0, at - 500)))
+    : string.Empty;
+bool claimsUtc = block.Contains("UTC cancelled", StringComparison.Ordinal);
+bool converts = block.Contains("ConvertTimeFromUtc", StringComparison.Ordinal);
+Check("the cancel log prints UTC and does not convert to local behind the label", claimsUtc && !converts,
+    $"claimsUtc={claimsUtc}, converts={converts}");
+
 Console.WriteLine();
 Console.WriteLine(f == 0 ? ">>> STOPFIRE OK" : $">>> STOPFIRE {f} FAILURE(S)");
 return f == 0 ? 0 : 1;
