@@ -57,6 +57,25 @@ var gate = Mutate(c => c.UploadEnabled = false);
 Check("the lamp override is gone from the registry", typeof(WorkerRunRegistry.Outcome).GetField("Off") == null);
 Check("no PaintsOff decision remains", typeof(WorkerOffState).GetMethod("PaintsOff") == null);
 
+// --- a runnable direction whose refetch rhythm is Manual ---------------------
+Check("download is not manual on the default rhythm", !WorkerOffState.IsManualOnly(DL, Mutate(c => { })));
+Check("download manual when the refetch rhythm is Manual",
+    WorkerOffState.IsManualOnly(DL, Mutate(c => c.RefetchInterval = UpdateInterval.Manual))
+    && WorkerOffState.IsManualOnly(UL, Mutate(c => c.RefetchInterval = UpdateInterval.Manual)));
+Check("download manual on the legacy UpdateInterval.Never",
+    WorkerOffState.IsManualOnly(DL, Mutate(c => c.RefetchInterval = UpdateInterval.Never)));
+Check("OnArrival is NOT manual - arrivals start the pipeline",
+    !WorkerOffState.IsManualOnly(DL, Mutate(c => c.RefetchInterval = UpdateInterval.OnArrival))
+    && !WorkerOffState.IsManualOnly(UL, Mutate(c => c.RefetchInterval = UpdateInterval.OnArrival)));
+Check("a scheduled rhythm is NOT manual",
+    !WorkerOffState.IsManualOnly(DL, Mutate(c => c.RefetchInterval = UpdateInterval.Daily))
+    && !WorkerOffState.IsManualOnly(UL, Mutate(c => c.RefetchInterval = UpdateInterval.Monthly)));
+Check("manual needs a runnable direction - upload off is off, not manual",
+    WorkerOffState.Applies(UL, Mutate(c => { c.UploadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; })));
+Check("download manual and off are mutually exclusive by construction",
+    WorkerOffState.Applies(DL, Mutate(c => { c.DownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; }))
+    && WorkerOffState.IsManualOnly(DL, Mutate(c => { c.DownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; })));
+
 // --- the maintenance workers say MANUAL, not off -----------------------------
 const string DB = WorkerOffState.DatabaseWorkerKey;
 const string OS = WorkerOffState.OshashWorkerKey;
@@ -114,11 +133,13 @@ Check("the quota answer carries the notes in its local block",
 Check("the notes list is built from the shared gates",
     quota.Contains("WorkerOffState.Applies") && quota.Contains("WorkerOffState.IsManualOnly") && quota.Contains("StatusNotes()"));
 Check("postprocessing has ONE wording - manual, never off", quota.Contains("!config.UploadEnabled || manual(postKey, config)"));
-Check("the wording is the operator's five phrases", quota.Contains("\"download off\"") && quota.Contains("\"upload off\"")
+Check("the wording is the operator's seven phrases", quota.Contains("\"download off\"") && quota.Contains("\"upload off\"") && quota.Contains("\"download manual\"") && quota.Contains("\"upload manual\"")
     && !quota.Contains("\"upload postprocessing off\"")
     && quota.Contains("\"upload postprocessing manual\"") && quota.Contains("\"database refresh manual\"") && quota.Contains("\"oshash refresh manual\""));
 Check("the notes survive the early return when no fire is pending",
     System.Text.RegularExpressions.Regex.Matches(quota, "notes = offEntries").Count >= 2);
+Check("off outranks manual per direction (else-if, not two words)",
+    System.Text.RegularExpressions.Regex.Matches(quota, "else if \\(manual\\(").Count >= 2);
 Check("the off notes are appended AFTER the deferral notes", page.IndexOf("localLines.push(t)") > page.IndexOf("var localLines = deferred.map"));
 Check("no off-case was added to the outcome words", !page.Contains("case 'off': return"));
 

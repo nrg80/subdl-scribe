@@ -85,6 +85,16 @@ public static class WorkerOffState
             return false;
         }
 
+        // F-M352 (operator order 19.10.2026): a direction that CAN run but whose refetch rhythm stands on
+        // Manual does not cycle on its own — the pipeline only runs when someone presses the button. That is
+        // "manual", not "off": the task would start. Only Manual counts (and the legacy Never, which is read
+        // as Manual); OnArrival is a different statement — arrivals do start it, so it is not manual.
+        if (string.Equals(workerKey, WorkerRunRegistry.DownloadWorkerKey, StringComparison.Ordinal)
+            || string.Equals(workerKey, WorkerRunRegistry.UploadWorkerKey, StringComparison.Ordinal))
+        {
+            return config.RefetchInterval is UpdateInterval.Never or UpdateInterval.Manual;
+        }
+
         if (string.Equals(workerKey, PostprocessWorkerKey, StringComparison.Ordinal))
         {
             return config.UploadPostprocessInterval is UpdateInterval.Never or UpdateInterval.Manual or UpdateInterval.OnArrival;

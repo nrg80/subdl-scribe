@@ -223,14 +223,25 @@ public class SubdlQuota : ControllerBase
             var uploadKey = Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.UploadWorkerKey;
             var postKey = Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey;
 
+            // "off" says the direction cannot start; "manual" says it can, but nothing starts it by itself
+            // (the unified refetch rhythm stands on Manual). "off" outranks "manual" — both at once would be
+            // two words for one fact.
             if (off(keys, config))
             {
                 notes.Add("download off");
+            }
+            else if (manual(keys, config))
+            {
+                notes.Add("download manual");
             }
 
             if (off(uploadKey, config))
             {
                 notes.Add("upload off");
+            }
+            else if (manual(uploadKey, config))
+            {
+                notes.Add("upload manual");
             }
 
             // F-M352 (operator order 19.10.2026, "Upload Postprocessing off bitte komplett durch manual
