@@ -25,7 +25,6 @@ category: "Subtitles"
 artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
-- "LiteDB.dll"
 changelog: >
   v12.1.12.237: The plugin no longer carries a second database engine — the one-time
     import of the old data file and the adoption of the pre-migration counters are gone.
