@@ -12,9 +12,9 @@
         "version": "12.1.12.253",
         "changelog": "v12.1.12.253: The auto-sync fits a subtitle on its DIALOGUE lines only: music and sound labels\n    (\"♪\", \"[door slams]\", bare capitalised sound words) are dropped from the fit's input and\n    re-attached afterwards by time, so each of them still moves with the dialogue around it. They\n    used to sit in the cue list as silent voters, where they set the noise estimate, the\n    segment-length floor and the block grid: on Line.of.Fire S01E02 that decided between one 6 s step\n    (3 s off over four and a half minutes) and the two 3 s steps the plain subtitle shows, and on\n    Lioness S02E06 a 12 s block was left standing. Both are gone; seven further files were already\n    exact before and stay exact.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.253-dev/Jellyfin.Plugin.SubdlSync_12.1.12.253.zip",
-        "checksum": "02b49a16241969ee8b30e21625b6d9ab",
-        "timestamp": "2026-10-19T04:45:30Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.253/Jellyfin.Plugin.SubdlSync_12.1.12.253.zip",
+        "checksum": "3aaefbfee98aebb1db00391fa698d77e",
+        "timestamp": "2026-10-19T05:00:00Z"
       }
     ]
   }
