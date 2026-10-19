@@ -1564,6 +1564,15 @@ def main():
           "expected the message as the only content")
     check("F-M355: the path stays available in the API answer (diagnostics)",
           "public string Path { get; set; }" in status, "DirectoryStatusDto.Path")
+    # --- F-M356: the state word is right-aligned, one column with the workers block --------------
+    check("F-M356: the status message is pushed to the row end (margin-left:auto)",
+          re.search(r"\.subdl-msg \{[^}]*margin-left: auto", html) is not None, "margin-left:auto missing")
+    check("F-M356: and right-aligned, so longer messages end on the same edge",
+          re.search(r"\.subdl-msg \{[^}]*text-align: right", html) is not None, "text-align:right missing")
+    check("F-M356: the login/api/tmdb rows and the directory rows all carry that class",
+          html.count('class="subdl-msg"') >= 3, "expected the three status rows to carry subdl-msg")
+    check("F-M356: the JS-injected CSS block still parses (no stray backtick inside it)",
+          html.count("var css = `") == 1 and html.count("`;") >= 1, "template literal broken")
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)

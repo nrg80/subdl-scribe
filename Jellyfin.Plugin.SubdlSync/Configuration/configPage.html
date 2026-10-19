@@ -563,7 +563,14 @@
         .subdl-status-row { display: flex; align-items: center; gap: 0.6em; margin: 0.25em 0; }
         .subdl-light { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--color, #767676); flex-shrink: 0; }
         .subdl-label { font-weight: 600; min-width: 8em; }
-        .subdl-msg { opacity: 0.85; }
+/* F-M356 (operator wish 19.10.2026): the state word sits on the RIGHT edge of the row, in one
+   column with the workers block, instead of starting right after the label. The labels here
+   have different widths (SubDL Login, SubDL API, Movies 2, Test_SubDL), so a left-aligned
+   message started at a different x on every line and the block read ragged. margin-left:auto
+   pushes it to the row end whatever the label width; text-align:right keeps longer messages
+   (Not writable: ...) ending on that same edge.
+   NO backticks in this comment: the whole block is a JS template literal. */
+                .subdl-msg { opacity: 0.85; margin-left: auto; text-align: right; }
         /* Innenluft in der Zeitspalte: the cell is max-content, so padding is what separates the
            date from the column edges. Keep it small and re-check the line's minimum width. */
         .subdl-when { opacity: 0.85; padding: 0 0.45em; }
