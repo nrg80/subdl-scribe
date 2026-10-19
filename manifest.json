@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.242",
-        "changelog": "v12.1.12.242: The log line for a cancelled fire now prints the moment in UTC, as stored — it read a\n    local time behind a \"UTC\" label. Documentation: the stop rule moved to §10 (scheduler) and the\n    reasoning behind the recent rules is in METHODIK.md.",
+        "version": "12.1.12.246",
+        "changelog": "v12.1.12.246: \"cancel\" is grey now, and grey everywhere: the colour belongs to the STATE, not to the\n    situation (operator, 19.10.2026: \"wenn cancel grau ist ist cancel immer grau\"). Same grey as skip\n    (#767676) - in both cases nothing went wrong and nothing is owed - so yellow stays reserved for\n    defer, where work is still owed. T157 pins the colour line and the pairing.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.242/Jellyfin.Plugin.SubdlSync_12.1.12.242.zip",
-        "checksum": "406f0625abdfbdb6a51a8c8e0b3fbae7",
-        "timestamp": "2026-10-18T22:45:09Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.246/Jellyfin.Plugin.SubdlSync_12.1.12.246.zip",
+        "checksum": "2a7e1c6de0dc377856e982053a71b21e",
+        "timestamp": "2026-10-19T00:04:36Z"
       }
     ]
   }
