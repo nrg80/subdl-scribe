@@ -1541,6 +1541,21 @@ def main():
         check("F-M336: that read sits ABOVE the row write (asserted as an order)",
               code.find("bool directionWasDryRun =") < code.find("DescribeDirectionRun(upload, upSummary, downSummary, directionWasDryRun)"),
               "after the write a corrected value cannot reach the row")
+    # --- F-M354: a status line names the STATE, not the row's own name again -------------------
+    status_path = os.path.join(DEFAULT, "..", "..", "Api", "SubdlStatusController.cs")
+    status = open(os.path.normpath(status_path), encoding="utf-8").read()
+    check("F-M354: the SubDL-API success line says 'reachable', not 'API reachable' (the label says SubDL API)",
+          'dto.Message = "reachable";' in status and 'dto.Message = "API reachable";' not in status,
+          "'API reachable' next to the label 'SubDL API'")
+    check("F-M354: the same line feeds TMDb — one wording, not two",
+          status.count('dto.Message = "reachable";') == 2, "expected exactly 2 occurrences")
+    check("F-M354: the login success line says 'OK', not 'Login OK' (the label says SubDL Login)",
+          'dto.Message = "OK";' in status and 'dto.Message = "Login OK";' not in status,
+          "'Login OK' next to the label 'SubDL Login'")
+    for gone in ("Login failed: wrong username/password", "Login failed: not authorized — check API key",
+                 "Login rate-limited — try again later", "Login succeeded but returned no token"):
+        check("F-M354: the failure line no longer repeats 'Login ...' (%s)" % gone.split(":")[0],
+              gone not in status, gone)
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)

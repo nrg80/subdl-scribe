@@ -245,28 +245,28 @@ public class SubdlStatusController : ControllerBase
             if (string.IsNullOrWhiteSpace(token))
             {
                 dto.Light = "red";
-                dto.Message = "Login succeeded but returned no token";
+                dto.Message = "no token returned";
             }
             else
             {
                 dto.Light = "green";
-                dto.Message = "Login OK";
+                dto.Message = "OK";
             }
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("credentials wrong", StringComparison.OrdinalIgnoreCase))
         {
             dto.Light = "red";
-            dto.Message = "Login failed: wrong username/password";
+            dto.Message = "wrong username/password";
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not authorized", StringComparison.OrdinalIgnoreCase))
         {
             dto.Light = "red";
-            dto.Message = "Login failed: not authorized — check API key";
+            dto.Message = "not authorized — check API key";
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("429", StringComparison.OrdinalIgnoreCase))
         {
             dto.Light = "yellow";
-            dto.Message = "Login rate-limited — try again later";
+            dto.Message = "rate-limited — try again later";
         }
         catch (Exception ex)
         {
@@ -310,7 +310,7 @@ public class SubdlStatusController : ControllerBase
             else if (resp.IsSuccessStatusCode)
             {
                 dto.Light = "green";
-                dto.Message = "API reachable";
+                dto.Message = "reachable";
             }
             else
             {
@@ -361,7 +361,7 @@ public class SubdlStatusController : ControllerBase
             else if (resp.IsSuccessStatusCode)
             {
                 dto.Light = "green";
-                dto.Message = "API reachable";
+                dto.Message = "reachable";
             }
             else
             {
