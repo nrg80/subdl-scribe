@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.246"
+version: "12.1.12.252"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,26 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.252: The deferral note under the workers list names the DAY of the next attempt ("next
+    attempt Tue 6:10 AM") instead of a bare time ("6:10:00 AM"), which left open which morning was
+    meant.
+  v12.1.12.251: The spacing of the login/api/tmdb and library-directory rows did not work on a
+    phone: they sat 40px apart (line + row margin + flex gap) while the workers block packs its lines
+    at one line height. The gap and the row margin are gone, so both blocks share one rhythm.
+  v12.1.12.250: The description under the refetch select reads "Refetch interval for download and
+    upload." instead of "Unified refetch for both download and upload." - it now uses the words of the
+    field label instead of a second name for the same thing.
+  v12.1.12.249: The status word of the login/api/tmdb rows and of the library-directory rows is
+    right-aligned on the row edge, in one column with the workers block - the labels have different
+    widths, so a left-aligned message started at a different x on every line.
+  v12.1.12.248: The library-directory rows show the library name and its state only ("Writable"), no longer
+    the absolute path after it - "Movies  Writable - /media/Movies" said it twice and pushed the state
+    off a phone-width line. The path stays in the API answer for diagnostics.
+  v12.1.12.247: Status lines name the state only, not the row's own name a second time. "SubDL API ... API
+    reachable" read as doppelt gemoppelt on a phone; it now says "reachable", and the login row says "OK"
+    instead of "Login OK" - same for the failure lines ("wrong username/password" instead of "Login
+    failed: wrong username/password"). Statements about the API KEY keep their wording: the key is a
+    different subject than the endpoint.
   v12.1.12.246: "cancel" is grey now, and grey everywhere: the colour belongs to the STATE, not to the
     situation (operator, 19.10.2026: "wenn cancel grau ist ist cancel immer grau"). Same grey as skip
     (#767676) - in both cases nothing went wrong and nothing is owed - so yellow stays reserved for

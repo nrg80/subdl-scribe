@@ -1541,6 +1541,57 @@ def main():
         check("F-M336: that read sits ABOVE the row write (asserted as an order)",
               code.find("bool directionWasDryRun =") < code.find("DescribeDirectionRun(upload, upSummary, downSummary, directionWasDryRun)"),
               "after the write a corrected value cannot reach the row")
+    # --- F-M354: a status line names the STATE, not the row's own name again -------------------
+    status_path = os.path.join(DEFAULT, "..", "..", "Api", "SubdlStatusController.cs")
+    status = open(os.path.normpath(status_path), encoding="utf-8").read()
+    check("F-M354: the SubDL-API success line says 'reachable', not 'API reachable' (the label says SubDL API)",
+          'dto.Message = "reachable";' in status and 'dto.Message = "API reachable";' not in status,
+          "'API reachable' next to the label 'SubDL API'")
+    check("F-M354: the same line feeds TMDb — one wording, not two",
+          status.count('dto.Message = "reachable";') == 2, "expected exactly 2 occurrences")
+    check("F-M354: the login success line says 'OK', not 'Login OK' (the label says SubDL Login)",
+          'dto.Message = "OK";' in status and 'dto.Message = "Login OK";' not in status,
+          "'Login OK' next to the label 'SubDL Login'")
+    for gone in ("Login failed: wrong username/password", "Login failed: not authorized — check API key",
+                 "Login rate-limited — try again later", "Login succeeded but returned no token"):
+        check("F-M354: the failure line no longer repeats 'Login ...' (%s)" % gone.split(":")[0],
+              gone not in status, gone)
+    # --- F-M355: the directory row names the library and its state, not the path again ---------
+    check("F-M355: the directory row does NOT append the path to the status message",
+          "(d.Message || '') + ' — ' + (d.Path" not in html, "path is still concatenated into the visible status")
+    check("F-M355: it renders the status message alone",
+          re.search(r"<span class=\"subdl-msg\">' \+ \(d\.Message \|\| ''\) \+ '</span>';", html) is not None,
+          "expected the message as the only content")
+    check("F-M355: the path stays available in the API answer (diagnostics)",
+          "public string Path { get; set; }" in status, "DirectoryStatusDto.Path")
+    # --- F-M356: the state word is right-aligned, one column with the workers block --------------
+    check("F-M356: the status message is pushed to the row end (margin-left:auto)",
+          re.search(r"\.subdl-msg \{[^}]*margin-left: auto", html) is not None, "margin-left:auto missing")
+    check("F-M356: and right-aligned, so longer messages end on the same edge",
+          re.search(r"\.subdl-msg \{[^}]*text-align: right", html) is not None, "text-align:right missing")
+    check("F-M356: the login/api/tmdb rows and the directory rows all carry that class",
+          html.count('class="subdl-msg"') >= 3, "expected the three status rows to carry subdl-msg")
+    check("F-M356: the JS-injected CSS block still parses (no stray backtick inside it)",
+          html.count("var css = `") == 1 and html.count("`;") >= 1, "template literal broken")
+    # --- F-M357: the refetch field says what it is, in the words of the field name -----------------
+    check("F-M357: the refetch description reads 'Refetch interval for download and upload'",
+          "Refetch interval for download and upload." in html, "expected the plain wording")
+    check("F-M357: the older wording 'Unified refetch for both ...' is gone",
+          "Unified refetch" not in html, "'Unified refetch' still present")
+    # --- F-M358: the status rows sit on the same rhythm as the worker lines ----------------------
+    check("F-M358: the status box no longer adds a flex gap of its own",
+          "gap:0.8em" not in html, "the inline gap is still on #SubdlStatusBox")
+    check("F-M358: its rows carry no margin (same rhythm as the workers block)",
+          "#SubdlStatusBox .subdl-status-row { margin: 0; }" in html, "margin:0 rule missing")
+    # --- F-M359: the deferral note names the DAY of the next attempt, not just the time --------
+    check("F-M359: a day+time formatter exists",
+          "var subdlFmtDayTime = function (iso)" in html, "subdlFmtDayTime missing")
+    check("F-M359: it renders the short weekday from the locale",
+          "weekday: 'short'" in html, "weekday:short missing")
+    check("F-M359: the deferral note uses it instead of the bare time",
+          "var when = d.due ? subdlFmtDayTime(d.due) : '';" in html, "deferral note still time-only")
+    check("F-M359: the bare-time helper is no longer wired into the deferral note",
+          "var when = d.due ? resetLocal(d.due) : '';" not in html, "resetLocal still used for the note")
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)

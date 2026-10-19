@@ -60,13 +60,13 @@
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
                             </select>
-                            <div class="fieldDescription">Unified refetch for both download and upload.</div>
+                            <div class="fieldDescription">Refetch interval for download and upload.</div>
                         </div>
                         <div id="RandomScheduleInfo" style="margin-top:-0.4em; font-size:0.85em; opacity:0.8;"></div>
 
                         <h3>SubDL/TMDb Status</h3>
                         <div id="SubdlQuotaBox" style="margin-bottom:1em;"></div>
-                        <div id="SubdlStatusBox" style="display:flex;flex-direction:column;gap:0.8em;margin-bottom:1em;">
+                        <div id="SubdlStatusBox" style="display:flex;flex-direction:column;margin-bottom:1em;">
                             <div class="subdl-status-row" id="SubdlLoginStatus">
                                 <span class="subdl-light"></span>
                                 <span class="subdl-label">SubDL Login</span>
@@ -563,7 +563,25 @@
         .subdl-status-row { display: flex; align-items: center; gap: 0.6em; margin: 0.25em 0; }
         .subdl-light { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--color, #767676); flex-shrink: 0; }
         .subdl-label { font-weight: 600; min-width: 8em; }
-        .subdl-msg { opacity: 0.85; }
+/* F-M356 (operator wish 19.10.2026): the state word sits on the RIGHT edge of the row, in one
+   column with the workers block, instead of starting right after the label. The labels here
+   have different widths (SubDL Login, SubDL API, Movies 2, Test_SubDL), so a left-aligned
+   message started at a different x on every line and the block read ragged. margin-left:auto
+   pushes it to the row end whatever the label width; text-align:right keeps longer messages
+   (Not writable: ...) ending on that same edge.
+   NO backticks in this comment: the whole block is a JS template literal. */
+                /* F-M358 (operator bug report 19.10.2026): the spacing of the status rows did not work on a
+            phone. Measured at 390px: the three rows sat 40px apart (19px line + 2*4px row margin +
+            12.8px flex gap from the inline style), while the workers block packs its lines at one
+            line height, because the worker rows are display:contents and the list is a grid without
+            a row-gap -- margins and gap have no effect there. Two blocks of the same page therefore
+            breathed differently, and on a narrow screen the airy one looked broken.
+            Fix: the gap leaves the inline style and the rows of this box carry no margin, so the
+            state rows sit on the same rhythm as the worker lines. The h4 between the two groups
+            keeps its own margin -- that separation is wanted.
+            NO backticks in this comment: the block is a JS template literal. */
+         #SubdlStatusBox .subdl-status-row { margin: 0; }
+         .subdl-msg { opacity: 0.85; margin-left: auto; text-align: right; }
         /* Innenluft in der Zeitspalte: the cell is max-content, so padding is what separates the
            date from the column edges. Keep it small and re-check the line's minimum width. */
         .subdl-when { opacity: 0.85; padding: 0 0.45em; }
@@ -721,6 +739,17 @@
                 // the button looked dead ("es andert sich nix beim draufdrücken") although all four
                 // requests fired. Seconds make the effect visible immediately.
                 return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+            };
+            // F-M359 (operator 19.10.2026): a planned fire that lands on another day must NAME the day.
+            // "next attempt 6:10:00 AM" alone left the reader guessing WHICH morning -- the operator read
+            // the deferral note and asked for "Tue, Wed etc." next to the time. Short weekday plus the
+            // time to the minute; the seconds of subdlFmtTime are noise for a planned fire.
+            var subdlFmtDayTime = function (iso) {
+                var d = (iso instanceof Date) ? iso : new Date(subdlAsUtc(iso));
+                if (isNaN(d.getTime())) { return ''; }
+                var day = d.toLocaleDateString('en-US', { weekday: 'short' });
+                var time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                return day + ' ' + time;
             };
 
             // --- Tab switching (plain JS, works standalone + in dashboard) ---
@@ -1323,7 +1352,8 @@ workers.forEach(function (w) {
                         // condition, and it is read per worker rather than for two directions.
                         var deferred = (loc && loc.deferred) || [];
                         var localLines = deferred.map(function (d) {
-                            var when = d.due ? resetLocal(d.due) : '';
+                            // F-M359: day + time, so a fire on Tuesday does not read like this morning.
+                            var when = d.due ? subdlFmtDayTime(d.due) : '';
                             var reason = d.reason || 'deferred';
                             return d.name + ': ' + reason + (when ? ' — next attempt ' + when : '');
                         });
@@ -1648,7 +1678,12 @@ workers.forEach(function (w) {
                                 var colors = { red: '#a4262c', yellow: '#ffc107', green: '#107c10', grey: '#767676' };
                                 row.innerHTML = '<span class="subdl-light" style="background:' + (colors[(d.Light || 'grey').toLowerCase()] || colors.grey) + ';"></span>' +
                                     '<span class="subdl-label">' + (d.LibraryName || '?') + '</span>' +
-                                    '<span class="subdl-msg">' + (d.Message || '') + ' — ' + (d.Path || '') + '</span>';
+                                    // F-M355 (operator order 19.10.2026): the row names the library and its
+                                    // STATE — the path is not repeated. "Movies  Writable — /media/Movies" read
+                                    // as the same information twice; the label already says which directory is
+                                    // meant, and a long path pushed the status off a phone-width line. The path
+                                    // stays in the API answer (DirectoryStatusDto.Path) for diagnostics.
+                                    '<span class="subdl-msg">' + (d.Message || '') + '</span>';
                                 dirList.appendChild(row);
                             });
                         }
