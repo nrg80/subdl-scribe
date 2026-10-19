@@ -140,20 +140,26 @@ public class SubdlQuota : ControllerBase
     private static object LocalRateLimitState()
     {
         var entries = new System.Collections.Generic.List<object>();
+
+        // F-M352 (operator order 19.10.2026): the switched-off directions belong on the SAME line as the
+        // deferral ("als statustext da wo auch das deferred fire at x pm steht"), so they travel in the
+        // same payload. Read before any early return — a page with nothing deferred still has to state
+        // that a direction is off.
+        var offEntries = StatusNotes();
         try
         {
             var coord = Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSchedulerCoordinator.Instance;
             if (coord == null)
             {
-                return new { deferred = entries };
+                return new { deferred = entries, notes = offEntries };
             }
 
             var fires = coord.GetPendingFires();
             if (fires.Count == 0)
             {
-                // Nothing pending: the line stays empty. A deferral whose fire is gone is over — the
-                // worker already ran again, and a stale row must not paint a line for it.
-                return new { deferred = entries };
+                // Nothing pending: no deferral note. A deferral whose fire is gone is over — the worker
+                // already ran again, and a stale row must not paint a line for it.
+                return new { deferred = entries, notes = offEntries };
             }
 
             var registry = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns;
@@ -191,7 +197,78 @@ public class SubdlQuota : ControllerBase
             // simply carries no note; it must never fail the quota call itself.
         }
 
-        return new { deferred = entries };
+        return new { deferred = entries, notes = offEntries };
+    }
+
+    /// <summary>
+    /// F-M352: what the status line says about directions and maintenance workers that do not run on
+    /// their own — "off" for a direction that cannot start at all, "manual" for a worker whose cadence
+    /// is Manual (its dashboard button still runs it).
+    /// </summary>
+    /// <returns>One string per switched-off or manual-only worker, in the order the operator named them.</returns>
+    private static System.Collections.Generic.List<string> StatusNotes()
+    {
+        var notes = new System.Collections.Generic.List<string>();
+        try
+        {
+            var config = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.Configuration;
+            if (config == null)
+            {
+                return notes;
+            }
+
+            var off = Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.Applies;
+            var manual = Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.IsManualOnly;
+            var keys = Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.DownloadWorkerKey;
+            var uploadKey = Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.UploadWorkerKey;
+            var postKey = Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey;
+
+            // "off" says the direction cannot start; "manual" says it can, but nothing starts it by itself
+            // (the unified refetch rhythm stands on Manual). "off" outranks "manual" — both at once would be
+            // two words for one fact.
+            if (off(keys, config))
+            {
+                notes.Add("download off");
+            }
+            else if (manual(keys, config))
+            {
+                notes.Add("download manual");
+            }
+
+            if (off(uploadKey, config))
+            {
+                notes.Add("upload off");
+            }
+            else if (manual(uploadKey, config))
+            {
+                notes.Add("upload manual");
+            }
+
+            // F-M352 (operator order 19.10.2026, "Upload Postprocessing off bitte komplett durch manual
+            // ersetzen"): the postprocessing has exactly ONE wording — "manual". Whether the upload switch
+            // is off or the cadence sits on Manual, the fact is the same: it does not run by itself, and
+            // its button does. No "off" for this worker.
+            if (!config.UploadEnabled || manual(postKey, config))
+            {
+                notes.Add("upload postprocessing manual");
+            }
+
+            if (manual(Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.DatabaseWorkerKey, config))
+            {
+                notes.Add("database refresh manual");
+            }
+
+            if (manual(Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.OshashWorkerKey, config))
+            {
+                notes.Add("oshash refresh manual");
+            }
+        }
+        catch
+        {
+            // The plugin may not be fully started — then the line simply carries no note.
+        }
+
+        return notes;
     }
 
     /// <summary>

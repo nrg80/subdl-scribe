@@ -150,6 +150,10 @@ public class SubdlStatusController : ControllerBase
             // This endpoint must never fail over a lamp.
         }
 
+        // F-M352 (operator order 19.10.2026): the off state is NOT painted onto the lamps, and this
+        // endpoint does not carry it either — it rides on the deferral status line, which the quota
+        // answer feeds (SubdlQuotaService.LocalRateLimitState → `local.off`). The outcome, the detail and
+        // a pending fire here stay exactly as they are, so a run never disappears behind a switch.
         return Ok(new
         {
             Workers = rows.Select(r => new

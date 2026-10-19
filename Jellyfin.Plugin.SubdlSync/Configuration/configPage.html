@@ -1075,7 +1075,12 @@
                                 case 'run': return { color: '#00a4dc', text: 'run' };
                                 case 'ok': return { color: '#107c10', text: 'ok' };
                                 case 'failed': return { color: '#a4262c', text: 'fail' };
-                                case 'cancelled': return { color: '#ffc107', text: 'cancel' };
+                                // F-M353 (operator, 19.10.2026: "wenn cancel grau ist, ist cancel immer grau"):
+                                // the colour belongs to the STATE, not to the situation -- cancelled is grey
+                                // everywhere, exactly like `skip` below, because in both cases nothing went
+                                // wrong and nothing is owed. Yellow stays reserved for `defer` (work still
+                                // owed), so the two can no longer be confused. Word kept <=6 chars.
+                                case 'cancelled': return { color: '#767676', text: 'cancel' };
                                 case 'skipped': return { color: '#767676', text: 'skip' };
                                 // Quota/rate limit or a lock deferral: the cycle finished, the work
                                 // did not happen. YELLOW, because green reads as success (user,
@@ -1322,10 +1327,15 @@ workers.forEach(function (w) {
                             var reason = d.reason || 'deferred';
                             return d.name + ': ' + reason + (when ? ' — next attempt ' + when : '');
                         });
+                        // F-M352 (operator order 19.10.2026): the switched-off directions and the manual-only workers ride on THIS
+                        // line — "als statustext da wo auch das deferred fire at x pm steht". Appended after
+                        // the deferral notes, same separator, no second line anywhere on the page.
+                        var offNotes = (loc && loc.notes) || [];
+                        offNotes.forEach(function (t) { localLines.push(t); });
                         var deferLine = document.querySelector('#SubdlLocalDeferLine');
                         if (deferLine) {
-                            // Plain text, page default colour. Empty when nothing is deferred — then the
-                            // line carries no text and takes no visual space.
+                            // Plain text, page default colour. Empty when nothing is deferred and nothing
+                            // is off — then the line carries no text and takes no visual space.
                             deferLine.textContent = localLines.join('  ·  ');
                         }
                         var lines = [];

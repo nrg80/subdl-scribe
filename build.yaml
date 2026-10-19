@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.242"
+version: "12.1.12.246"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,31 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.246: "cancel" is grey now, and grey everywhere: the colour belongs to the STATE, not to the
+    situation (operator, 19.10.2026: "wenn cancel grau ist ist cancel immer grau"). Same grey as skip
+    (#767676) - in both cases nothing went wrong and nothing is owed - so yellow stays reserved for
+    defer, where work is still owed. T157 pins the colour line and the pairing.
+  v12.1.12.245: The cancellation now also carries the right time. 244 wrote the row through Finish(),
+    which keeps an existing start because that is the real beginning of a run - the test bench then showed
+    "cancel" next to a start three days old, since the column displays Started. A cancellation is not a
+    run: MarkCancelled() stamps BOTH times with the moment of the stop, so the row reads "cancel" at the
+    time it happened. The colour stays yellow like defer - the operator declined the grey change on
+    19.10.2026, and the colour line is now pinned by T157 so it cannot drift.
+  v12.1.12.244: A stop now also rewrites the worker row of the direction it cancels. Until now the
+    pending fire was dropped correctly, but the row kept reading "defer" with the previous evening's
+    detail, because only a run ever wrote it - measured on prod: fire cancelled at 01:34, lamp still
+    yellow on defer from the night before. The row now says "cancel" (yellow, same colour: the work did
+    not happen), carries the moment of the cancellation and the detail "fire cancelled - stopped by
+    operator". Upload and download are handled independently, a stop without a pending fire changes
+    nothing, and a row that cannot be written never makes the stop fail.
+  v12.1.12.243: The status line under the worker list now says what does not run by itself - as
+    words, not as a greyed lamp. "download off" and "upload off" mean the direction cannot start at
+    all (switch, no library, no target language, no credentials); "download manual", "upload manual",
+    "upload postprocessing manual", "database refresh manual" and "oshash refresh manual" mean it can
+    start but nothing starts it by itself. OnArrival is an automatism and carries no word at all. The
+    notes ride on the line that already reports a pending fire, from the same answer, so the two cannot
+    disagree. Lamps, stored results and pending fires are untouched, so a run never disappears behind a
+    switch.
   v12.1.12.242: The log line for a cancelled fire now prints the moment in UTC, as stored — it read a
     local time behind a "UTC" label. Documentation: the stop rule moved to §10 (scheduler) and the
     reasoning behind the recent rules is in METHODIK.md.
