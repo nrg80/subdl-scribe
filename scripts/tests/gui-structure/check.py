@@ -1556,6 +1556,14 @@ def main():
                  "Login rate-limited — try again later", "Login succeeded but returned no token"):
         check("F-M354: the failure line no longer repeats 'Login ...' (%s)" % gone.split(":")[0],
               gone not in status, gone)
+    # --- F-M355: the directory row names the library and its state, not the path again ---------
+    check("F-M355: the directory row does NOT append the path to the status message",
+          "(d.Message || '') + ' — ' + (d.Path" not in html, "path is still concatenated into the visible status")
+    check("F-M355: it renders the status message alone",
+          re.search(r"<span class=\"subdl-msg\">' \+ \(d\.Message \|\| ''\) \+ '</span>';", html) is not None,
+          "expected the message as the only content")
+    check("F-M355: the path stays available in the API answer (diagnostics)",
+          "public string Path { get; set; }" in status, "DirectoryStatusDto.Path")
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)

@@ -1648,7 +1648,12 @@ workers.forEach(function (w) {
                                 var colors = { red: '#a4262c', yellow: '#ffc107', green: '#107c10', grey: '#767676' };
                                 row.innerHTML = '<span class="subdl-light" style="background:' + (colors[(d.Light || 'grey').toLowerCase()] || colors.grey) + ';"></span>' +
                                     '<span class="subdl-label">' + (d.LibraryName || '?') + '</span>' +
-                                    '<span class="subdl-msg">' + (d.Message || '') + ' — ' + (d.Path || '') + '</span>';
+                                    // F-M355 (operator order 19.10.2026): the row names the library and its
+                                    // STATE — the path is not repeated. "Movies  Writable — /media/Movies" read
+                                    // as the same information twice; the label already says which directory is
+                                    // meant, and a long path pushed the status off a phone-width line. The path
+                                    // stays in the API answer (DirectoryStatusDto.Path) for diagnostics.
+                                    '<span class="subdl-msg">' + (d.Message || '') + '</span>';
                                 dirList.appendChild(row);
                             });
                         }

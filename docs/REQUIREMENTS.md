@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.65
-**Status:** Implementation — v12.1.12.247.
+**Status:** Implementation — v12.1.12.248.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -35,7 +35,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 14 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 35 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 36 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -1432,6 +1432,8 @@ The accent is also the link colour (F-M229) and the required-field colour (F-M22
 **F-M353 [D] (19.10.2026): a cancelled fire also changes the worker row — the lamp says `cancel`, not `defer`.** When the operator presses Stop and a pending fire exists for that direction, the row of THAT direction is written with outcome `cancelled` (the page's word is `cancel`, yellow), the moment of the cancellation as its time, and the detail `fire cancelled — stopped by operator`. Upload and download are handled the same way and independently — a stop names one direction, so only its row changes. The row is written only after the fire was proven pending and after the cancellation is persisted; a stop that finds no fire changes nothing (F-M351). A stop is not a run, so it has a moment and no beginning and no end: unlike `Finish()` (which keeps an existing start because that is the real beginning of a run), the cancellation stamps BOTH times with the moment it happened — the row displays `Started`, so keeping the old one would dress the cancellation in the previous run's date (measured on the test bench 19.10.2026: word `cancel` next to `10/16/2026 5:14 PM`). The colour is grey `#767676`, identical to `skip` — operator order 19.10.2026, "wenn cancel grau ist ist cancel immer grau": the colour belongs to the STATE, not to the situation, so `cancel` is grey wherever it appears; yellow stays reserved for `defer`, which means work is still owed. The page's colour line is pinned by T157, and the pairing (cancel grey = skip grey, defer the only yellow) is pinned with it. A failing row write must never make the stop fail — the fire is already gone. **Reason:** live on prod 19.10.2026 at 01:34 the fire WAS cancelled (`stop ("download"): pending fire for 2026-10-19 01:35 UTC cancelled`), the quota answer already carried no fire (`deferred: []`, the row even reported `Deferred: false`), yet the download lamp kept sitting on `defer` with the previous evening's detail `download limit spent (50/50)` — the row was only ever rewritten by a run. **Test: T157.**
 
 **F-M354 [D] (19.10.2026): a status line names the STATE, not the row's own name a second time.** The three status rows are labelled `SubDL Login`, `SubDL API` and `TMDb API`. Their messages therefore carry the state only: `OK`, `reachable`, `wrong username/password`, `not authorized — check API key`, `rate-limited — try again later`, `no token returned`. The success lines used to read `Login OK` and `API reachable`, which the operator read as "doppelt gemoppelt" on a phone-width line: `SubDL API … API reachable`. Upload and download share one API row, so `reachable` is ONE wording used twice, not two strings — T-gui pins the count at exactly 2. Only the redundant prefix is removed; statements about the KEY (`API key invalid / not authorized`, `API key not configured`, `API key invalid (HTTP 401)`) stay as they are, because the key is a different subject than the endpoint. **Test: gui-structure (7 checks).**
+
+**F-M355 [D] (19.10.2026): a directory row names the library and its state — the path is not repeated.** The `Library directories` rows render the library name plus the state only (`Writable`, `Not writable: …`, `Directory does not exist`); the absolute path is no longer appended, because "Movies  Writable — /media/Movies" says the same thing twice and a long path pushed the state off a phone-width line. The path stays in the API answer (`DirectoryStatusDto.Path`) — diagnostics and tests read it from there, the page does not. **Test: gui-structure (3 checks).**
 
 **Where.** The line under the Workers list that already reports a pending fire (`#SubdlLocalDeferLine`). The notes are appended after the fire notes, separated with `·`, and come from the same answer as the fire notes (quota `local.notes`), so the two cannot disagree. Nothing to say ⇒ empty line.
 
