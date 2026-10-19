@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.65
-**Status:** Implementation — v12.1.12.250.
+**Status:** Implementation — v12.1.12.251.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -35,7 +35,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 14 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 38 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 39 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -1438,6 +1438,8 @@ The accent is also the link colour (F-M229) and the required-field colour (F-M22
 **F-M356 [D] (19.10.2026, operator wish "Evtl"): the state word sits on the RIGHT edge of its row.** `SubDL Login`, `SubDL API`, `TMDb API` and the `Library directories` rows put the state word on the row's right edge (`.subdl-msg { margin-left: auto; text-align: right; }`), in one column with the workers block, instead of starting right after the label. Reason: the labels have different widths (`SubDL Login`, `SubDL API`, `Movies 2`, `Test_SubDL`), so a left-aligned message began at a different x on every line and the block read ragged; `text-align: right` also keeps long messages (`Not writable: …`) ending on that same edge. The workers block itself stays LEFT-aligned — a right-pinned worker table was rejected earlier (F-M308 comment) and is not reintroduced. **Test: gui-structure (4 checks).**
 
 **F-M357 [D] (19.10.2026): the refetch field describes itself in the words of its own name.** The description under `Refetch interval` reads `Refetch interval for download and upload.` — it used to say `Unified refetch for both download and upload.`, which named the field `Unified refetch` while the label says `Refetch interval`, and the word `Unified` explained nothing the label did not already say. Same line as F-M354/F-M355: the text names the thing, not a second name for it. **Test: gui-structure (2 checks).**
+
+**F-M358 [D] (19.10.2026, operator bug report): the status rows sit on the same rhythm as the worker lines.** Measured at 390 px: the three status rows sat **40 px** apart (19 px line + 2×4 px row margin + 12.8 px flex gap from the inline style), while the workers block packs its lines at **one line height** — its rows are `display:contents` inside a grid without row-gap, so margins and gap have no effect there. Two blocks of the same page therefore breathed differently and the airy one looked broken on a phone. The flex gap left the inline style of `#SubdlStatusBox` and `#SubdlStatusBox .subdl-status-row { margin: 0; }` puts both groups on one rhythm; the `h4` between them keeps its own margin. **Test: gui-structure (2 checks).**
 
 **Where.** The line under the Workers list that already reports a pending fire (`#SubdlLocalDeferLine`). The notes are appended after the fire notes, separated with `·`, and come from the same answer as the fire notes (quota `local.notes`), so the two cannot disagree. Nothing to say ⇒ empty line.
 

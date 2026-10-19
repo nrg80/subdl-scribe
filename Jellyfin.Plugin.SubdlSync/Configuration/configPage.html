@@ -66,7 +66,7 @@
 
                         <h3>SubDL/TMDb Status</h3>
                         <div id="SubdlQuotaBox" style="margin-bottom:1em;"></div>
-                        <div id="SubdlStatusBox" style="display:flex;flex-direction:column;gap:0.8em;margin-bottom:1em;">
+                        <div id="SubdlStatusBox" style="display:flex;flex-direction:column;margin-bottom:1em;">
                             <div class="subdl-status-row" id="SubdlLoginStatus">
                                 <span class="subdl-light"></span>
                                 <span class="subdl-label">SubDL Login</span>
@@ -570,7 +570,18 @@
    pushes it to the row end whatever the label width; text-align:right keeps longer messages
    (Not writable: ...) ending on that same edge.
    NO backticks in this comment: the whole block is a JS template literal. */
-                .subdl-msg { opacity: 0.85; margin-left: auto; text-align: right; }
+                /* F-M358 (operator bug report 19.10.2026): the spacing of the status rows did not work on a
+            phone. Measured at 390px: the three rows sat 40px apart (19px line + 2*4px row margin +
+            12.8px flex gap from the inline style), while the workers block packs its lines at one
+            line height, because the worker rows are display:contents and the list is a grid without
+            a row-gap -- margins and gap have no effect there. Two blocks of the same page therefore
+            breathed differently, and on a narrow screen the airy one looked broken.
+            Fix: the gap leaves the inline style and the rows of this box carry no margin, so the
+            state rows sit on the same rhythm as the worker lines. The h4 between the two groups
+            keeps its own margin -- that separation is wanted.
+            NO backticks in this comment: the block is a JS template literal. */
+         #SubdlStatusBox .subdl-status-row { margin: 0; }
+         .subdl-msg { opacity: 0.85; margin-left: auto; text-align: right; }
         /* Innenluft in der Zeitspalte: the cell is max-content, so padding is what separates the
            date from the column edges. Keep it small and re-check the line's minimum width. */
         .subdl-when { opacity: 0.85; padding: 0 0.45em; }

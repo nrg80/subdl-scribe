@@ -1578,6 +1578,11 @@ def main():
           "Refetch interval for download and upload." in html, "expected the plain wording")
     check("F-M357: the older wording 'Unified refetch for both ...' is gone",
           "Unified refetch" not in html, "'Unified refetch' still present")
+    # --- F-M358: the status rows sit on the same rhythm as the worker lines ----------------------
+    check("F-M358: the status box no longer adds a flex gap of its own",
+          "gap:0.8em" not in html, "the inline gap is still on #SubdlStatusBox")
+    check("F-M358: its rows carry no margin (same rhythm as the workers block)",
+          "#SubdlStatusBox .subdl-status-row { margin: 0; }" in html, "margin:0 rule missing")
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)
