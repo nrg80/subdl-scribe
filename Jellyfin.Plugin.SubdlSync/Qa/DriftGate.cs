@@ -243,7 +243,14 @@ public static class DriftGate
             return false;
         }
 
-        if (bare.StartsWith('[') || bare.StartsWith('{'))
+        // F-M361: a cue that is NOTHING BUT bracket groups — "(gunshot)", "(crowd shouting)",
+        // "[door slams]". Embedded SDH writes these in lower case, where the capitals rule below
+        // cannot see them (measured over 30 embedded HI tracks, 22 992 cues: 2 630 such cues,
+        // 336 of them counted as speech until now). Any letter left OUTSIDE the groups means the
+        // cue carries dialogue and stays speech — "(SCOFFS) Okay, so now what?" and
+        // "[Shirley] Hey!" are dialogue, and the old leading-bracket rule threw 1 848 of those away.
+        string outsideGroups = Regex.Replace(bare, @"\([^()]{0,120}\)|\[[^\[\]]{0,120}\]|\{[^{}]{0,120}\}", " ");
+        if (!outsideGroups.Any(char.IsLetterOrDigit))
         {
             return false;
         }

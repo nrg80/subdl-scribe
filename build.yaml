@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.253"
+version: "12.1.12.254"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,14 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.254: The auto-sync no longer guesses a cue's kind from its capitalisation. A cue that is
+    nothing but bracket groups — "(gunshot)", "(crowd shouting)", "[door slams]" — is a sound label
+    and stays out of the fit, however it is written; embedded SDH tracks write these in lower case,
+    where the capitals rule saw nothing (336 of 22 992 cues measured over 30 embedded HI tracks). The
+    opposite direction matters more: a cue that STARTS with a bracket group but carries dialogue
+    outside it ("(SCOFFS) Okay, so now what?", "[Shirley] Hey!") is dialogue and now feeds the fit
+    again — the old rule dropped 1 848 such cues. Net effect on the same corpus: sound labels fall
+    from 22.9 % to 16.3 % of the cues, and the fit gains 1 848 real dialogue anchors.
   v12.1.12.253: The auto-sync fits a subtitle on its DIALOGUE lines only: music and sound labels
     ("♪", "[door slams]", bare capitalised sound words) are dropped from the fit's input and
     re-attached afterwards by time, so each of them still moves with the dialogue around it. They
