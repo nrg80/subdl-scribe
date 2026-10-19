@@ -12,9 +12,9 @@
         "version": "12.1.12.252",
         "changelog": "v12.1.12.252: The deferral note under the workers list names the DAY of the next attempt (\"next\n    attempt Tue 6:10 AM\") instead of a bare time (\"6:10:00 AM\"), which left open which morning was\n    meant.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.252-dev/Jellyfin.Plugin.SubdlSync_12.1.12.252.zip",
-        "checksum": "a04d5ec99b855f3084d805a7ce0a57b8",
-        "timestamp": "2026-10-19T01:05:19Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.252/Jellyfin.Plugin.SubdlSync_12.1.12.252.zip",
+        "checksum": "50483c5b2d5d40afca5d9a6c41c0948e",
+        "timestamp": "2026-10-19T01:07:27Z"
       }
     ]
   }
