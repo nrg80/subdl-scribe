@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.65
-**Status:** Implementation — v12.1.12.251.
+**Status:** Implementation — v12.1.12.252.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -35,7 +35,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 14 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 39 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 40 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -1440,6 +1440,8 @@ The accent is also the link colour (F-M229) and the required-field colour (F-M22
 **F-M357 [D] (19.10.2026): the refetch field describes itself in the words of its own name.** The description under `Refetch interval` reads `Refetch interval for download and upload.` — it used to say `Unified refetch for both download and upload.`, which named the field `Unified refetch` while the label says `Refetch interval`, and the word `Unified` explained nothing the label did not already say. Same line as F-M354/F-M355: the text names the thing, not a second name for it. **Test: gui-structure (2 checks).**
 
 **F-M358 [D] (19.10.2026, operator bug report): the status rows sit on the same rhythm as the worker lines.** Measured at 390 px: the three status rows sat **40 px** apart (19 px line + 2×4 px row margin + 12.8 px flex gap from the inline style), while the workers block packs its lines at **one line height** — its rows are `display:contents` inside a grid without row-gap, so margins and gap have no effect there. Two blocks of the same page therefore breathed differently and the airy one looked broken on a phone. The flex gap left the inline style of `#SubdlStatusBox` and `#SubdlStatusBox .subdl-status-row { margin: 0; }` puts both groups on one rhythm; the `h4` between them keeps its own margin. **Test: gui-structure (2 checks).**
+
+**F-M359 [D] (19.10.2026, operator reading prod): the deferral note names the DAY of the next attempt.** The line below the Workers list reads e.g. `Download: download quota/rate limit — rescheduled — next attempt Tue 6:10 AM`: short weekday from the locale plus the time to the minute. It used to carry the time only (`6:10:00 AM`), which left the reader guessing WHICH morning — the operator asked for `Tue, Wed etc.` beside the time. The seconds of `subdlFmtTime` are dropped here (they exist for the refresh footer, where an identical string inside one minute made the button look dead); a planned fire does not need them. **Test: gui-structure (4 checks).**
 
 **Where.** The line under the Workers list that already reports a pending fire (`#SubdlLocalDeferLine`). The notes are appended after the fire notes, separated with `·`, and come from the same answer as the fire notes (quota `local.notes`), so the two cannot disagree. Nothing to say ⇒ empty line.
 

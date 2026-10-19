@@ -1583,6 +1583,15 @@ def main():
           "gap:0.8em" not in html, "the inline gap is still on #SubdlStatusBox")
     check("F-M358: its rows carry no margin (same rhythm as the workers block)",
           "#SubdlStatusBox .subdl-status-row { margin: 0; }" in html, "margin:0 rule missing")
+    # --- F-M359: the deferral note names the DAY of the next attempt, not just the time --------
+    check("F-M359: a day+time formatter exists",
+          "var subdlFmtDayTime = function (iso)" in html, "subdlFmtDayTime missing")
+    check("F-M359: it renders the short weekday from the locale",
+          "weekday: 'short'" in html, "weekday:short missing")
+    check("F-M359: the deferral note uses it instead of the bare time",
+          "var when = d.due ? subdlFmtDayTime(d.due) : '';" in html, "deferral note still time-only")
+    check("F-M359: the bare-time helper is no longer wired into the deferral note",
+          "var when = d.due ? resetLocal(d.due) : '';" not in html, "resetLocal still used for the note")
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)

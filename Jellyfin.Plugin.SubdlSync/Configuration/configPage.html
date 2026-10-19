@@ -740,6 +740,17 @@
                 // requests fired. Seconds make the effect visible immediately.
                 return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
             };
+            // F-M359 (operator 19.10.2026): a planned fire that lands on another day must NAME the day.
+            // "next attempt 6:10:00 AM" alone left the reader guessing WHICH morning -- the operator read
+            // the deferral note and asked for "Tue, Wed etc." next to the time. Short weekday plus the
+            // time to the minute; the seconds of subdlFmtTime are noise for a planned fire.
+            var subdlFmtDayTime = function (iso) {
+                var d = (iso instanceof Date) ? iso : new Date(subdlAsUtc(iso));
+                if (isNaN(d.getTime())) { return ''; }
+                var day = d.toLocaleDateString('en-US', { weekday: 'short' });
+                var time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                return day + ' ' + time;
+            };
 
             // --- Tab switching (plain JS, works standalone + in dashboard) ---
             function subdlShowTab(tab) {
@@ -1341,7 +1352,8 @@ workers.forEach(function (w) {
                         // condition, and it is read per worker rather than for two directions.
                         var deferred = (loc && loc.deferred) || [];
                         var localLines = deferred.map(function (d) {
-                            var when = d.due ? resetLocal(d.due) : '';
+                            // F-M359: day + time, so a fire on Tuesday does not read like this morning.
+                            var when = d.due ? subdlFmtDayTime(d.due) : '';
                             var reason = d.reason || 'deferred';
                             return d.name + ': ' + reason + (when ? ' — next attempt ' + when : '');
                         });
