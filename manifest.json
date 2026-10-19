@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.248",
-        "changelog": "v12.1.12.248: The library-directory rows show the library name and its state only (\"Writable\"), no longer\n    the absolute path after it - \"Movies  Writable - /media/Movies\" said it twice and pushed the state\n    off a phone-width line. The path stays in the API answer for diagnostics.",
+        "version": "12.1.12.249",
+        "changelog": "v12.1.12.249: The status word of the login/api/tmdb rows and of the library-directory rows is\n    right-aligned on the row edge, in one column with the workers block - the labels have different\n    widths, so a left-aligned message started at a different x on every line.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.248-dev/Jellyfin.Plugin.SubdlSync_12.1.12.248.zip",
-        "checksum": "27e88793e00e60c04609630612fb77a8",
-        "timestamp": "2026-10-19T00:50:41Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.249-dev/Jellyfin.Plugin.SubdlSync_12.1.12.249.zip",
+        "checksum": "90ca77a6268c25800a5027daa27d1575",
+        "timestamp": "2026-10-19T00:58:02Z"
       }
     ]
   }
