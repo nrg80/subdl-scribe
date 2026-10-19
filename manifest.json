@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.251",
-        "changelog": "v12.1.12.251: The spacing of the login/api/tmdb and library-directory rows did not work on a\n    phone: they sat 40px apart (line + row margin + flex gap) while the workers block packs its lines\n    at one line height. The gap and the row margin are gone, so both blocks share one rhythm.",
+        "version": "12.1.12.252",
+        "changelog": "v12.1.12.252: The deferral note under the workers list names the DAY of the next attempt (\"next\n    attempt Tue 6:10 AM\") instead of a bare time (\"6:10:00 AM\"), which left open which morning was\n    meant.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.251-dev/Jellyfin.Plugin.SubdlSync_12.1.12.251.zip",
-        "checksum": "55d6863089d1aa68f8950c2e73784051",
-        "timestamp": "2026-10-19T01:02:14Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.252-dev/Jellyfin.Plugin.SubdlSync_12.1.12.252.zip",
+        "checksum": "a04d5ec99b855f3084d805a7ce0a57b8",
+        "timestamp": "2026-10-19T01:05:19Z"
       }
     ]
   }
