@@ -45,6 +45,10 @@ internal static class FitRun
         Console.WriteLine("=== T122: music and sound labels do not vote ===");
         SpeechLabelChecks();
 
+        Console.WriteLine();
+        Console.WriteLine("=== T123: bracket groups alone are a label, anything outside them is dialogue ===");
+        BracketGroupChecks();
+
         string goodMkv = "/data/movies/Better.Call.Saul/S01/Better.Call.Saul.S01E04.720p.HDTV.X264-MRSK.mkv";
         string goodSrt = "/data/movies/Better.Call.Saul/S01/Better.Call.Saul.S01E04.720p.HDTV.X264-MRSK.en.sdh.srt";
 
@@ -73,6 +77,51 @@ internal static class FitRun
             new[] { 1.75, -1.00, -4.25, -6.75, -9.50 });
 
         return 0;
+    }
+
+    /// <summary>
+    /// T123: F-M361. The five shapes a cue takes in an embedded SDH track, and the verdict for
+    /// each. The interesting half is the recovery: a cue that starts with a bracket group but
+    /// carries dialogue outside it IS dialogue — the old leading-bracket rule dropped it.
+    /// </summary>
+    private static void BracketGroupChecks()
+    {
+        (string Text, bool Speech)[] cases =
+        [
+            // 1. music line
+            ("\u266a I know \u266a", false),
+            // 2. only bracket groups — upper case (caught before) and lower case (the gap)
+            ("(GUNSHOT)", false),
+            ("[DOOR SLAMS]", false),
+            ("{phone rings}", false),
+            ("(gunshot)", false),
+            ("(crowd shouting)", false),
+            ("(people cheering)", false),
+            // 3. bracket group first, dialogue outside it — dialogue, was dropped
+            ("(SCOFFS) Okay, so now what?", true),
+            ("[Shirley] Hey!", true),
+            // 4. bracket group inside dialogue
+            ("- (JOHN CLEARING THROAT) - God damn.", true),
+            ("HAL: (SOFTLY) Well...", true),
+            // 5. plain dialogue, and a bare sound word that is not bracketed
+            ("HAL: Copy that.", true),
+            ("GUNSHOT", false),
+        ];
+        int pass = 0;
+        foreach ((string text, bool speech) in cases)
+        {
+            bool got = DriftGate.IsSpeechCue(text);
+            bool ok = got == speech;
+            pass += ok ? 1 : 0;
+            Console.WriteLine($"   [{(ok ? "PASS" : "FAIL")}] \"{text}\" -> {(got ? "speech" : "label")}, expected {(speech ? "speech" : "label")}");
+        }
+
+        // The weights must keep lining up with the cue list when labels and dialogue alternate.
+        string srt = "1\n00:00:01,000 --> 00:00:02,000\n(gunshot)\n\n2\n00:00:03,000 --> 00:00:04,000\n[Shirley] Hey!\n\n3\n00:00:05,000 --> 00:00:06,000\n[CAR HORN]\n\n4\n00:00:07,000 --> 00:00:08,000\n\u266a music \u266a\n\n5\n00:00:09,000 --> 00:00:10,000\nHello there.\n";
+        (double[] st, double[] en, double[] wt) = DriftGate.ParseCuesWeighted(srt);
+        bool aligned = wt.Length == 5 && wt[0] == 0.0 && wt[1] == 1.0 && wt[2] == 0.0 && wt[3] == 0.0 && wt[4] == 1.0;
+        Console.WriteLine($"   [{(aligned ? "PASS" : "FAIL")}] 5 cues, weights [{string.Join(", ", wt)}] expected [0, 1, 0, 0, 1]");
+        Console.WriteLine($"   -> {pass}/{cases.Length} shape cases, weights {(aligned ? "aligned" : "MISALIGNED")}");
     }
 
     /// <summary>
