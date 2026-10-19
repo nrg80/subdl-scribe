@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.247",
-        "changelog": "v12.1.12.247: Status lines name the state only, not the row's own name a second time. \"SubDL API ... API\n    reachable\" read as doppelt gemoppelt on a phone; it now says \"reachable\", and the login row says \"OK\"\n    instead of \"Login OK\" - same for the failure lines (\"wrong username/password\" instead of \"Login\n    failed: wrong username/password\"). Statements about the API KEY keep their wording: the key is a\n    different subject than the endpoint.",
+        "version": "12.1.12.248",
+        "changelog": "v12.1.12.248: The library-directory rows show the library name and its state only (\"Writable\"), no longer\n    the absolute path after it - \"Movies  Writable - /media/Movies\" said it twice and pushed the state\n    off a phone-width line. The path stays in the API answer for diagnostics.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.247-dev/Jellyfin.Plugin.SubdlSync_12.1.12.247.zip",
-        "checksum": "846d3d675588e0a334d333316aefa44c",
-        "timestamp": "2026-10-19T00:35:17Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.248-dev/Jellyfin.Plugin.SubdlSync_12.1.12.248.zip",
+        "checksum": "27e88793e00e60c04609630612fb77a8",
+        "timestamp": "2026-10-19T00:50:41Z"
       }
     ]
   }
