@@ -152,23 +152,109 @@ public static class DriftGate
     /// <summary>Cue start and end times in seconds, ascending by start.</summary>
     public static (double[] Starts, double[] Ends) ParseCues(string srtText)
     {
+        (double[] starts, double[] ends, _) = ParseCuesWeighted(srtText);
+        return (starts, ends);
+    }
+
+    /// <summary>
+    /// Cue times PLUS a per-cue weight, in the same order as <see cref="ParseCues"/>.
+    /// Weight 0 marks a line the offset fit must not score on: music (<c>♪</c>) and
+    /// sound labels (<c>[door slams]</c>, <c>GUNSHOT</c>). Such a cue still gets MOVED
+    /// by its segment's shift — it belongs to the same time frame as the dialogue
+    /// around it — but it may not vote on where the steps go, and it may not inflate
+    /// the segment charge <c>Z·σ·√(cues)</c>. Measured on Line.of.Fire S01E02: with
+    /// music labelled in the score the fit collapsed a real 6 s drop into ONE step
+    /// and sat 3 s off for four minutes; the same cues at weight 0 let it split the
+    /// drop into the two 3 s steps that the plain subtitle shows.
+    /// </summary>
+    /// <param name="srtText">Subtitle text.</param>
+    /// <returns>Starts, ends and weights (1.0 = scored, 0.0 = music/sound label).</returns>
+    public static (double[] Starts, double[] Ends, double[] Weights) ParseCuesWeighted(string srtText)
+    {
         var starts = new List<double>();
         var ends = new List<double>();
-        foreach (Match m in CueRegex.Matches(srtText))
+        var weights = new List<double>();
+        string normalised = srtText.Replace("\r\n", "\n", StringComparison.Ordinal);
+        foreach (string block in Regex.Split(normalised, @"\n[ \t]*\n"))
         {
-            double s = ToSeconds(m, 1);
-            double e = ToSeconds(m, 5);
-            starts.Add(s);
-            ends.Add(e);
+            Match m = CueRegex.Match(block);
+            if (!m.Success)
+            {
+                continue;
+            }
+
+            string[] lines = block.Split('\n');
+            int at = -1;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (CueRegex.IsMatch(lines[i]))
+                {
+                    at = i;
+                    break;
+                }
+            }
+
+            string text = at >= 0 && at + 1 < lines.Length
+                ? string.Join(" ", lines.Skip(at + 1)).Trim()
+                : string.Empty;
+            starts.Add(ToSeconds(m, 1));
+            ends.Add(ToSeconds(m, 5));
+            weights.Add(IsSpeechCue(text) ? 1.0 : 0.0);
         }
 
         if (starts.Count == 0)
         {
-            return ([], []);
+            return ([], [], []);
         }
 
         var order = Enumerable.Range(0, starts.Count).OrderBy(i => starts[i]).ToArray();
-        return (order.Select(i => starts[i]).ToArray(), order.Select(i => ends[i]).ToArray());
+        return (
+            order.Select(i => starts[i]).ToArray(),
+            order.Select(i => ends[i]).ToArray(),
+            order.Select(i => weights[i]).ToArray());
+    }
+
+    /// <summary>
+    /// Whether a subtitle line carries spoken dialogue, i.e. whether the offset fit
+    /// may score on it. Music lines (<c>♪</c>/<c>♫</c>), bracketed sound labels
+    /// (<c>[door slams]</c>, <c>{phone rings}</c>) and bare capitalised sound words
+    /// (<c>GUNSHOT</c>) are not speech: they sit on music or effects, vote the same
+    /// at nearly every candidate offset, and so dilute the evidence and inflate the
+    /// segment charge.
+    /// </summary>
+    /// <param name="text">Cue text, markup allowed.</param>
+    /// <returns><c>true</c> when the line is dialogue.</returns>
+    public static bool IsSpeechCue(string text)
+    {
+        string t = Regex.Replace(text, "<[^>]*>", " ").Trim();
+        if (t.Length == 0)
+        {
+            return false;
+        }
+
+        if (t.Contains("♪", StringComparison.Ordinal) || t.Contains("♫", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string bare = t.TrimStart('-', '–', '—', ' ').Trim();
+        if (bare.Length == 0)
+        {
+            return false;
+        }
+
+        if (bare.StartsWith('[') || bare.StartsWith('{'))
+        {
+            return false;
+        }
+
+        // A bare sound word: all capitals, no lower case letter at all.
+        if (bare.Length >= 2 && !bare.Any(char.IsLower) && bare.Any(char.IsLetter))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static double ToSeconds(Match m, int g)

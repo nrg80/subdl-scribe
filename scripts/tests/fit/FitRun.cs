@@ -41,6 +41,10 @@ internal static class FitRun
         Console.WriteLine("=== T121: the two defects, as arithmetic ===");
         DefectChecks();
 
+        Console.WriteLine();
+        Console.WriteLine("=== T122: music and sound labels do not vote ===");
+        SpeechLabelChecks();
+
         string goodMkv = "/data/movies/Better.Call.Saul/S01/Better.Call.Saul.S01E04.720p.HDTV.X264-MRSK.mkv";
         string goodSrt = "/data/movies/Better.Call.Saul/S01/Better.Call.Saul.S01E04.720p.HDTV.X264-MRSK.en.sdh.srt";
 
@@ -69,6 +73,44 @@ internal static class FitRun
             new[] { 1.75, -1.00, -4.25, -6.75, -9.50 });
 
         return 0;
+    }
+
+    /// <summary>
+    /// T122: the classifier that keeps music and sound labels out of the fit, and the
+    /// alignment of the resulting weights with the cue list the fit receives.
+    /// </summary>
+    private static void SpeechLabelChecks()
+    {
+        (string Text, bool Speech)[] cases =
+        [
+            ("\u266a I know \u266a", false),
+            ("<i>\u266a The only way out</i>", false),
+            ("[door slams]", false),
+            ("{phone rings}", false),
+            ("GUNSHOT", false),
+            ("- [sighs]", false),
+            ("OK", false),
+            ("Hello, is anybody there?", true),
+            ("- Your mother. And just now.", true),
+            ("(whispering) not now", true),
+            ("Mr. Baylor?", true),
+        ];
+        int pass = 0;
+        foreach ((string text, bool speech) in cases)
+        {
+            bool got = DriftGate.IsSpeechCue(text);
+            bool ok = got == speech;
+            pass += ok ? 1 : 0;
+            Console.WriteLine($"   [{(ok ? "PASS" : "FAIL")}] \"{text}\" -> {(got ? "speech" : "label")}, expected {(speech ? "speech" : "label")}");
+        }
+
+        // The weights must line up with the cue list one-to-one: same length, and a label
+        // cue carries 0. A dropped entry instead of a 0 would shift every later index.
+        string srt = "1\n00:00:01,000 --> 00:00:02,000\n\u266a music \u266a\n\n2\n00:00:03,000 --> 00:00:04,000\nHello there.\n\n3\n00:00:05,000 --> 00:00:06,000\n[door slams]\n";
+        (double[] st, double[] en, double[] wt) = DriftGate.ParseCuesWeighted(srt);
+        bool aligned = st.Length == 3 && en.Length == 3 && wt.Length == 3 && wt[0] == 0.0 && wt[1] == 1.0 && wt[2] == 0.0;
+        Console.WriteLine($"   [{(aligned ? "PASS" : "FAIL")}] weights align with {st.Length} cue(s): [{string.Join(", ", wt)}]");
+        Console.WriteLine($"   -> {pass}/{cases.Length} classifier cases, weights {(aligned ? "aligned" : "MISALIGNED")}");
     }
 
     private static void DefectChecks()
