@@ -121,6 +121,13 @@ public static class OffsetFit
     public const int MinSegFloor = 40;
 
     /// <summary>
+    /// Fewest dialogue cues a fit may run on. Below this the file is fitted on every
+    /// cue it has: a subtitle that barely labels any speech (karaoke, a bad export)
+    /// would otherwise be measured on a handful of lines.
+    /// </summary>
+    public const int MinFitCues = 40;
+
+    /// <summary>
     /// Significance of a step, in standard errors of its own gain, as charged INSIDE the
     /// fit. This is the DP charge only — it decides where segments are placed. Do not
     /// raise it to make the deploy rule stricter: that changes the segmentation, and the
@@ -320,7 +327,8 @@ public static class OffsetFit
         double[] starts,
         double[] ends,
         double[] level,
-        double? minSegFraction = null)
+        double? minSegFraction = null,
+        double[]? cueWeights = null)
     {
         double[] pFit = Dilate(SpeechProbability(level), SlackSec);
         double[] pRaw = SpeechProbability(level);
@@ -332,21 +340,76 @@ public static class OffsetFit
         int nFrame = pFit.Length;
         double[] cumFit = Cumulative(pFit);
         double[] cumRaw = Cumulative(pRaw);
-        (double[,] s, bool[,] w) = CueTable(starts, ends, cumFit, nFrame);
+        // The FIT runs on the dialogue cues only. Music and sound labels are dropped from
+        // its input entirely and re-attached afterwards by time. Muting them in the score
+        // is NOT the same experiment: as long as they hold slots in the cue list they
+        // still set sigma, the segment-length floor and the block grid. Measured on
+        // Line.of.Fire S01E02 that difference alone decided between one 6 s step (wrong,
+        // 3 s off over four minutes) and the two 3 s steps the plain subtitle shows:
+        // weights 0 -> 4 segments, cues actually removed -> 5 segments.
+        int nCues = starts.Length;
+        bool[] scoredCue = new bool[nCues];
+        int nScored = 0;
+        for (int c = 0; c < nCues; c++)
+        {
+            scoredCue[c] = cueWeights is not { } cwv || cwv.Length != nCues || cwv[c] > 0;
+            if (scoredCue[c])
+            {
+                nScored++;
+            }
+        }
+
+        // A file that barely labels any dialogue (karaoke, hard-of-hearing only, a bad
+        // export) is fitted on everything instead of on a handful of cues.
+        bool subset = nScored >= MinFitCues && nScored < nCues;
+        int nFit;
+        double[] fst;
+        double[] fen;
+        if (subset)
+        {
+            fst = new double[nScored];
+            fen = new double[nScored];
+            int j = 0;
+            for (int c = 0; c < nCues; c++)
+            {
+                if (scoredCue[c])
+                {
+                    fst[j] = starts[c];
+                    fen[j] = ends[c];
+                    j++;
+                }
+            }
+
+            nFit = nScored;
+        }
+        else
+        {
+            fst = starts;
+            fen = ends;
+            nFit = nCues;
+        }
+
+        (double[,] s, bool[,] w) = CueTable(fst, fen, cumFit, nFrame);
 
         // The REPORT uses the UNDILATED curve, so "before" and "after" are on the same
         // scale. SLACK exists only to sharpen the peak for the fit; scoring the report on
         // the dilated curve inflates both numbers (measured 0.5434 against 0.5385) and
         // makes the deploy rule decide on a quantity that is not the one being improved.
+        // It stays on ALL cues: the numbers in the log keep their old meaning.
         (double[,] sRaw, bool[,] _) = CueTable(starts, ends, cumRaw, nFrame);
 
-        double sigma = MedianAbsStep(s);
-        int nCues = starts.Length;
-        double frac = minSegFraction ?? MinSegFrac;
-        int minSeg = Math.Max(MinSegFloor, (int)Math.Round(frac * nCues));
-        int[] bounds = MakeBounds(nCues);
+        var cumW = new double[nFit + 1];
+        for (int c = 0; c < nFit; c++)
+        {
+            cumW[c + 1] = cumW[c] + 1.0;
+        }
 
-        List<(int Lo, int Hi, int State)> segs = FitDp(s, w, bounds, minSeg, sigma);
+        double sigma = MedianAbsStep(s);
+        double frac = minSegFraction ?? MinSegFrac;
+        int minSeg = Math.Max(MinSegFloor, (int)Math.Round(frac * nFit));
+        int[] bounds = MakeBounds(nFit);
+
+        List<(int Lo, int Hi, int State)> segs = FitDp(s, w, bounds, minSeg, sigma, cumW);
         RefineBoundaries(s, segs);
         DropEdgeSegments(segs);
 
@@ -361,10 +424,39 @@ public static class OffsetFit
         if (segs.Count > 1
             && ZeroObjective(s, w, sigma) >= Objective(s, w, segs, sigma))
         {
-            segs = [(0, nCues, ZeroState)];
+            segs = [(0, nFit, ZeroState)];
         }
 
-        double[] eff = ShiftsToEffective(segs, nCues);
+        // The staircase was fitted on the dialogue cues; every other cue inherits the
+        // shift of the last dialogue cue at or before it. That is what keeps a ♪ line in
+        // the same time frame as the dialogue around it instead of leaving it behind.
+        double[] eff;
+        if (subset)
+        {
+            double[] effFit = ShiftsToEffective(segs, nFit);
+            eff = new double[nCues];
+            for (int c = 0; c < nCues; c++)
+            {
+                int last = 0;
+                for (int j = 0; j < nFit; j++)
+                {
+                    if (fst[j] <= starts[c] + 1e-6)
+                    {
+                        last = j;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+
+                eff[c] = effFit[last];
+            }
+        }
+        else
+        {
+            eff = ShiftsToEffective(segs, nCues);
+        }
 
         // Order guard FIRST, then the decision: the guard pulls individual cues away from
         // their segment's value at a step, and those pulled values are what the deploy rule
@@ -375,6 +467,7 @@ public static class OffsetFit
         // NO-REGRESSION: only write a correction that proves itself. The evidence lives
         // in the cues the fit MOVES, so the paired test runs there.
         int moved = 0;
+        int movedScored = 0;
         double sumDiff = 0, sumSq = 0;
         double rawSum = 0, newSum = 0;
         for (int c = 0; c < nCues; c++)
@@ -387,19 +480,27 @@ public static class OffsetFit
             {
                 double diff = after - before;
                 moved++;
-                sumDiff += diff;
-                sumSq += diff * diff;
+
+                // The paired test asks whether the DIALOGUE improved. A music line
+                // gains about nothing at any offset and would only dilute the mean,
+                // so it may be moved but not counted here.
+                if (cueWeights is not { } cwt || cwt.Length != nCues || cwt[c] > 0)
+                {
+                    movedScored++;
+                    sumDiff += diff;
+                    sumSq += diff * diff;
+                }
             }
         }
 
         double scoreBefore = rawSum / nCues;
         double scoreAfter = newSum / nCues;
         double tMoved = 0;
-        if (moved > 1)
+        if (movedScored > 1)
         {
-            double mean = sumDiff / moved;
-            double var = Math.Max((sumSq - (moved * mean * mean)) / (moved - 1), 0.0);
-            double se = Math.Sqrt(var / moved);
+            double mean = sumDiff / movedScored;
+            double var = Math.Max((sumSq - (movedScored * mean * mean)) / (movedScored - 1), 0.0);
+            double se = Math.Sqrt(var / movedScored);
             tMoved = se > 0 ? mean / se : 0.0;
         }
 
@@ -431,7 +532,7 @@ public static class OffsetFit
         if (reverted)
         {
             Array.Clear(eff);
-            segs = [(0, nCues, ZeroState)];
+            segs = [(0, nFit, ZeroState)];
             scoreAfter = scoreBefore;
             tMoved = 0;
             moved = 0;
@@ -448,7 +549,7 @@ public static class OffsetFit
             MeasuredLargestShiftSec = measuredLargest,
             MeasuredScoreAfter = measuredScoreAfter,
             Segments = segs.Count,
-            SegmentStartTimesSec = segs.ConvertAll(g => starts[g.Lo]),
+            SegmentStartTimesSec = segs.ConvertAll(g => fst[g.Lo]),
             SegmentOffsetsSec = segs.ConvertAll(g => -States[g.State]),
             AppliedShiftsSec = eff,
             MovedCues = moved,
@@ -602,7 +703,7 @@ public static class OffsetFit
     }
 
     private static List<(int Lo, int Hi, int State)> FitDp(
-        double[,] s, bool[,] w, int[] bounds, int minSegCues, double sigma)
+        double[,] s, bool[,] w, int[] bounds, int minSegCues, double sigma, double[] cumW)
     {
         int nb = bounds.Length - 1;
         int minBlocks = Math.Max(1, (int)Math.Ceiling(minSegCues / (double)BlockCues));
@@ -681,7 +782,18 @@ public static class OffsetFit
                     }
                 }
 
-                double charge = Z * sigma * Math.Sqrt(bounds[j] - bounds[i]);
+                // The charge is paid on the SCORED cues only: a segment made mostly of
+                // music would otherwise carry a bill for cues that put nothing in.
+                // A segment with no scored cue at all is free, so it is not allowed —
+                // it would let the DP split on noise and move the music-only stretch
+                // to an offset nothing measured.
+                double scored = cumW[bounds[j]] - cumW[bounds[i]];
+                if (!wholeFile && scored < 1.0)
+                {
+                    continue;
+                }
+
+                double charge = Z * sigma * Math.Sqrt(scored);
                 double tot = v[i] + bestVal - charge;
                 if (tot > v[j])
                 {

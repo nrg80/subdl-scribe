@@ -1456,6 +1456,8 @@ The accent is also the link colour (F-M229) and the required-field colour (F-M22
 **Test: T158.**
 
 
+**F-M360 [D] (19.10.2026, operator: "Dann nimm sie raus"): the offset fit is fitted on the DIALOGUE lines only.** Music (`♪`/`♫`), bracketed sound labels (`[door slams]`, `{phone rings}`) and bare capitalised sound words (`GUNSHOT`) are excluded from the fit's input; every other cue is used. They are still MOVED — each takes the shift of the last dialogue cue at or before it, so the writer shifts every cue of the file. Fewer than `MinFitCues` = 40 dialogue cues ⇒ the file is fitted on all its cues. Why: those lines sit on music or effects, vote the same at every candidate offset, and set σ, the segment-length floor and the block grid — measured, Line.of.Fire S01E02 collapsed a real 6 s drop into one step (3 s off for 4.5 minutes) and Lioness S02E06 left a 12 s block standing; the exclusion fixed both and left seven exact files exact. **Test: fit (T122, 12 checks).**
+
 **F-M193 [B1]:** **`/user/mySubtitles` is NOT paginated — the counters must count DISTINCT upload ids.** The endpoint ignores `page`, `per_page`, `offset`, `limit` and `start`. The listing deduplicates by the upload id and breaks on the first page that adds no new id; rows with `UploadId <= 0` are kept unconditionally. The status line does not claim "in N pages".
 
 **F-M265:** **The LAST run of each worker is stored in the database and shown in a "Workers" section on the General tab of the configuration page — one line per worker with the time of its last run and how it ended.** Only the last run is stored, not a history.

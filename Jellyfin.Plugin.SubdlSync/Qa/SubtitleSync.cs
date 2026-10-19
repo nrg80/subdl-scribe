@@ -298,7 +298,7 @@ public static class SubtitleSync
             return new Result(false, 0, srtText, null, "not measured: no audio samples");
         }
 
-        (double[] fst, double[] fen) = DriftGate.ParseCues(srtText);
+        (double[] fst, double[] fen, double[] fwt) = DriftGate.ParseCuesWeighted(srtText);
         if (fst.Length < 40)
         {
             return new Result(false, 0, srtText, null, $"not measured: only {fst.Length} cues");
@@ -306,7 +306,7 @@ public static class SubtitleSync
 
         try
         {
-            fit = OffsetFit.Fit(fst, fen, levels);
+            fit = OffsetFit.Fit(fst, fen, levels, cueWeights: fwt);
         }
         catch (Exception ex)
         {
