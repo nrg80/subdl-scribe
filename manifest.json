@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.249",
-        "changelog": "v12.1.12.249: The status word of the login/api/tmdb rows and of the library-directory rows is\n    right-aligned on the row edge, in one column with the workers block - the labels have different\n    widths, so a left-aligned message started at a different x on every line.",
+        "version": "12.1.12.250",
+        "changelog": "v12.1.12.250: The description under the refetch select reads \"Refetch interval for download and\n    upload.\" instead of \"Unified refetch for both download and upload.\" - it now uses the words of the\n    field label instead of a second name for the same thing.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.249-dev/Jellyfin.Plugin.SubdlSync_12.1.12.249.zip",
-        "checksum": "90ca77a6268c25800a5027daa27d1575",
-        "timestamp": "2026-10-19T00:58:02Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.250-dev/Jellyfin.Plugin.SubdlSync_12.1.12.250.zip",
+        "checksum": "b460c3cda4833b7ec0399a43f8bf7e99",
+        "timestamp": "2026-10-19T01:00:09Z"
       }
     ]
   }
