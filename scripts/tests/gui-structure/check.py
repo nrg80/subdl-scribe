@@ -1573,6 +1573,11 @@ def main():
           html.count('class="subdl-msg"') >= 3, "expected the three status rows to carry subdl-msg")
     check("F-M356: the JS-injected CSS block still parses (no stray backtick inside it)",
           html.count("var css = `") == 1 and html.count("`;") >= 1, "template literal broken")
+    # --- F-M357: the refetch field says what it is, in the words of the field name -----------------
+    check("F-M357: the refetch description reads 'Refetch interval for download and upload'",
+          "Refetch interval for download and upload." in html, "expected the plain wording")
+    check("F-M357: the older wording 'Unified refetch for both ...' is gone",
+          "Unified refetch" not in html, "'Unified refetch' still present")
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)
