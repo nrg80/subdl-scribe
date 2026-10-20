@@ -1992,40 +1992,26 @@ public sealed class SubdlEventDispatcher : IDisposable
         // this cycle-level write must leave it alone. What is left here is the case the direction
         // cannot report itself: its run never began (switched off, or nothing queued), where the row
         // would otherwise keep a stale outcome from a previous cycle.
-        if (dir != CycleDirection.UploadOnly && !_dirRowWrittenDown && !_downHeldByAllowance)
+        // F-M366 (operator decision 20.10.2026): nothing ran, so there is no status. Both blocks
+        // below used to write a direction row for a direction that did NOTHING this cycle — the
+        // switch being off ("skipped/disabled", which the lamps render as a grey "skip"), or a run
+        // that never began, where DescribeCycle fell back to the SEEDER's sentence. A direction row
+        // is now written by exactly one thing: its own run, when it begins. The cycle still says in
+        // the log what it did not do, which is where a missing row has an explanation.
+        if (dir != CycleDirection.UploadOnly && !_dirRowWrittenDown)
         {
-            if (!config.DownloadEnabled)
-            {
-                plugin.WorkerRuns.Finish(
-                    Registry.WorkerRunRegistry.DownloadWorkerKey, "Download",
-                    Registry.WorkerRunRegistry.Outcome.Skipped, "disabled");
-            }
-            else
-            {
-                var (downOutcome, downDetail) = GetDirectionOutcome(upload: false);
-                var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
-                    cycleFinished: true, seedOutcome, seedDetail, downOutcome, downDetail);
-                plugin.WorkerRuns.Finish(
-                    Registry.WorkerRunRegistry.DownloadWorkerKey, "Download", outcome, detail, config.DownloadDryRun);
-            }
+            LogUtil.Normal(
+                _logger,
+                "[SubDL-Dispatch] download ran nothing this cycle ({Why}) — no worker row (F-M366).",
+                config.DownloadEnabled ? "run never began" : "switched off");
         }
 
         if (dir != CycleDirection.DownloadOnly && !_dirRowWrittenUp)
         {
-            if (!config.UploadEnabled)
-            {
-                plugin.WorkerRuns.Finish(
-                    Registry.WorkerRunRegistry.UploadWorkerKey, "Upload",
-                    Registry.WorkerRunRegistry.Outcome.Skipped, "disabled");
-            }
-            else
-            {
-                var (upOutcome, upDetail) = GetDirectionOutcome(upload: true);
-                var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
-                    cycleFinished: true, seedOutcome, seedDetail, upOutcome, upDetail);
-                plugin.WorkerRuns.Finish(
-                    Registry.WorkerRunRegistry.UploadWorkerKey, "Upload", outcome, detail, config.DryRun);
-            }
+            LogUtil.Normal(
+                _logger,
+                "[SubDL-Dispatch] upload ran nothing this cycle ({Why}) — no worker row (F-M366).",
+                config.UploadEnabled ? "run never began" : "switched off");
         }
     }
 

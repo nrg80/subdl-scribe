@@ -90,8 +90,8 @@ public class SubdlUploadTask : IScheduledTask
         var config = plugin.Configuration;
         if (!config.UploadEnabled)
         {
-            LogUtil.Normal(_logger, "[SubDL] Upload inactive (UploadEnabled=false) — run skipped.");
-            RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Skipped, "disabled");
+            // F-M366: no row for a direction that ran nothing — the lamps have no "disabled".
+            LogUtil.Normal(_logger, "[SubDL] Upload inactive (UploadEnabled=false) — run skipped, no worker row (F-M366).");
             return;
         }
 
@@ -110,9 +110,8 @@ public class SubdlUploadTask : IScheduledTask
         var started = dispatcher.TriggerCycle("scheduled-upload");
         if (!started)
         {
-            // A cycle is already running and this direction is part of it: a DEFERRAL (yellow),
-            // not a switch-off. Grey stays for "disabled" and "never run".
-            RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Deferred, "cycle already active");
+            // F-M366: a cycle is already running, but THIS task ran nothing — log only, no row.
+            LogUtil.Normal(_logger, "[SubDL] cycle already active — this task ran nothing, no worker row (F-M366).");
             return; // cycle already active — nothing to wait for
         }
         try
@@ -137,9 +136,16 @@ public class SubdlUploadTask : IScheduledTask
                 return;
             }
 
-            var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
-                cycleFinished, seedOutcome, seedDetail, dirOutcome, dirDetail);
-            RecordWorker(plugin, outcome, detail);
+            // F-M366: the direction's run never began, so nothing ran — a row here would carry the
+            // SEEDER's sentence on the Upload line. Log only.
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] cycle finished without an upload run (cycleFinished {Done}, seeder {SO}/{SD}, direction {DO}/{DD}) — no worker row (F-M366).",
+                cycleFinished,
+                seedOutcome ?? "-",
+                seedDetail ?? "-",
+                dirOutcome ?? "-",
+                dirDetail ?? "-");
         }
         catch (OperationCanceledException)
         {
@@ -151,9 +157,14 @@ public class SubdlUploadTask : IScheduledTask
                 dispatcher.RequestUserStop("upload task cancelled");
                 RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Cancelled, "user stop");
             }
+            else if (dispatcher.DirectionRowWritten(upload: true))
+            {
+                LogUtil.Normal(_logger, "[SubDL] jellyfin restart — the run's own row stands.");
+            }
             else
             {
-                RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Ok, "restart");
+                // F-M366: restart before any upload run — no row for work that did not happen.
+                LogUtil.Normal(_logger, "[SubDL] jellyfin restart before any upload run — no worker row (F-M366).");
             }
         }
     }
