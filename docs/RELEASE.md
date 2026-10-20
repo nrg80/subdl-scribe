@@ -11,6 +11,25 @@ scripts/release.sh
 
 `scripts/release.sh --dry-run` builds and verifies without committing, tagging or uploading.
 
+## The changelog entry is one line per change
+
+**Rule:** one bullet per change, one line, no prose. The entry names what changed, not why it was
+hard, what was measured on the way, or which alternative was rejected.
+
+```
+v12.1.12.256: Modified autosync to feature a segment postprocessing step.
+```
+
+That is the whole entry. A release note is a signpost for the person deciding whether to install;
+the reasoning, the calibration numbers and the rejected variants belong in the requirement entry in
+`docs/REQUIREMENTS.md`, which is where the next person looks when the behaviour surprises them.
+Long prose in the changelog does not get read, it gets skimmed — so it protects nobody and buries
+the one sentence that mattered.
+
+- Several distinct changes in one version: several bullets, still one line each.
+- Say what a user notices, in the vocabulary the UI uses.
+- No measurement tables, no "calibrated on 46 files", no code paths, no commit-style prefixes.
+
 **One branch, one channel:**
 
 | branch | tag | release |
