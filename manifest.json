@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.254",
-        "changelog": "v12.1.12.254: The auto-sync no longer guesses a cue's kind from its capitalisation. A cue that is\n    nothing but bracket groups — \"(gunshot)\", \"(crowd shouting)\", \"[door slams]\" — is a sound label\n    and stays out of the fit, however it is written; embedded SDH tracks write these in lower case,\n    where the capitals rule saw nothing (336 of 22 992 cues measured over 30 embedded HI tracks). The\n    opposite direction matters more: a cue that STARTS with a bracket group but carries dialogue\n    outside it (\"(SCOFFS) Okay, so now what?\", \"[Shirley] Hey!\") is dialogue and now feeds the fit\n    again — the old rule dropped 1 848 such cues. Net effect on the same corpus: sound labels fall\n    from 22.9 % to 16.3 % of the cues, and the fit gains 1 848 real dialogue anchors.",
+        "version": "12.1.12.255",
+        "changelog": "v12.1.12.255: A correction that buys its gain by landing on a SONG is now taken back. The\n    objective is the mean level in the voice band under a cue, and sung vocals are louder there\n    than speech: on The Rainmaker S02E01 the opening block scored 0.640 placed on the title song\n    against 0.538 where the dialogue actually is, so the fit moved 58 cues 15.5 s early and wrote\n    two of them as 00:00:00,000 --> 00:00:00,000. Mean level cannot tell the two apart, but the\n    ONSET at a cue start can — the level jumps when speech starts and does not jump over a\n    through-composed song. Each segment is now checked after the fit: if it wins at least 0.10\n    mean level over the unshifted placement while its cue starts show no onset, it takes its\n    NEIGHBOUR's shift instead, the level the file already proves right next door. Calibrated on\n    46 subtitles: exactly one segment in the corpus reaches the 0.10 floor (Rainmaker, +0.132,\n    against a next-highest 0.057), so nothing else changes — Rainmaker now lands on −2.00 s, the\n    same shift as the rest of its file, instead of −15.50 s.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.254-dev/Jellyfin.Plugin.SubdlSync_12.1.12.254.zip",
-        "checksum": "1e985aa741352d7a978524e5e0b3080d",
-        "timestamp": "2026-10-19T05:35:10Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.255-dev/Jellyfin.Plugin.SubdlSync_12.1.12.255.zip",
+        "checksum": "9eec50ff6a9be13528f825d1693894b9",
+        "timestamp": "2026-10-20T14:00:39Z"
       }
     ]
   }
