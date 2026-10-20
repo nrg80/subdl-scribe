@@ -106,8 +106,11 @@ public class SubdlDownloadTask : IScheduledTask
         var config = plugin.Configuration;
         if (!config.DownloadEnabled)
         {
-            LogUtil.Normal(_logger, "[SubDL-D] Download pipeline disabled — run skipped.");
-            RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Skipped, "disabled");
+            // F-M366 (operator decision 20.10.2026: "Wir haben kein disabled in der Ampel").
+            // The lamps know run/ok/fail/cancel/skip/defer — a disabled direction rendered as a
+            // grey "skip", which reads like a run that skipped something. Nothing ran, so nothing
+            // is claimed: the log carries the line, the row stays as it is.
+            LogUtil.Normal(_logger, "[SubDL-D] Download pipeline disabled — run skipped, no worker row (F-M366).");
             return;
         }
 
@@ -124,9 +127,10 @@ public class SubdlDownloadTask : IScheduledTask
         var started = dispatcher.TriggerCycle("scheduled-download");
         if (!started)
         {
-            // A cycle is already running and this direction is part of it: a DEFERRAL (yellow),
-            // not a switch-off. Grey stays for "disabled" and "never run".
-            RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Deferred, "cycle already active");
+            // F-M366: a cycle is already running and this direction is part of it, but THIS task
+            // ran nothing. The deferral belongs in the log, not in a row that would have to borrow
+            // the running cycle's timestamp.
+            LogUtil.Normal(_logger, "[SubDL-D] cycle already active — this task ran nothing, no worker row (F-M366).");
             return;
         }
         try
@@ -158,9 +162,17 @@ public class SubdlDownloadTask : IScheduledTask
                 return;
             }
 
-            var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
-                cycleFinished, seedOutcome, seedDetail, dirOutcome, dirDetail);
-            RecordWorker(plugin, outcome, detail);
+            // F-M366: neither row guard above returned, so this direction's run never began —
+            // nothing ran. Writing DescribeCycle here made the Download line carry the SEEDER's
+            // sentence, which is a status for work that did not happen. Log only.
+            LogUtil.Normal(
+                _logger,
+                "[SubDL-D] cycle finished without a download run (cycleFinished {Done}, seeder {SO}/{SD}, direction {DO}/{DD}) — no worker row (F-M366).",
+                cycleFinished,
+                seedOutcome ?? "-",
+                seedDetail ?? "-",
+                dirOutcome ?? "-",
+                dirDetail ?? "-");
         }
         catch (OperationCanceledException)
         {
@@ -178,9 +190,17 @@ public class SubdlDownloadTask : IScheduledTask
                 dispatcher.RequestUserStop("download task cancelled");
                 RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Cancelled, "user stop");
             }
+            else if (dispatcher.DirectionRowWritten(upload: false))
+            {
+                // The run's own row is already there and stays: it describes work that really
+                // happened before the restart.
+                LogUtil.Normal(_logger, "[SubDL-D] jellyfin restart — the run's own row stands.");
+            }
             else
             {
-                RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Ok, "restart");
+                // F-M366: the restart cut this task before any download run began, so "ok / restart"
+                // claimed a run that never happened. Log only.
+                LogUtil.Normal(_logger, "[SubDL-D] jellyfin restart before any download run — no worker row (F-M366).");
             }
         }
     }
