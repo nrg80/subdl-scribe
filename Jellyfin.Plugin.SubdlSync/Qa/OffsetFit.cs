@@ -117,6 +117,26 @@ public static class OffsetFit
     /// </summary>
     public const double MinSegFrac = 0.12;
 
+    /// <summary>Half-width, in frames, of the onset window used by <see cref="RiseTable"/> (200 ms).</summary>
+    public const int RiseWindowFrames = 10;
+
+    /// <summary>
+    /// A segment is vetoed when its shift buys this much mean level over the unshifted
+    /// placement while its cue starts show no onset at all. Calibrated on 46 subtitles
+    /// (16 000+ cues): exactly one segment reached 0.10 — The Rainmaker S02E01 with +0.132
+    /// for its opening block on the title song, at an onset of +0.0056 against +0.0227 in
+    /// its own dialogue. The next highest gain in the corpus was 0.057, so the floor is
+    /// deliberately far above the noise; this is a guard against the song attractor, not a
+    /// general quality test.
+    /// </summary>
+    public const double VetoLevelGain = 0.10;
+
+    /// <summary>
+    /// Onset below which a heavily-gained segment counts as "no speech starts here". The
+    /// dialogue segments of the same corpus start at +0.0096 to +0.0466 on average.
+    /// </summary>
+    public const double VetoOnsetFloor = 0.01;
+
     /// <summary>Floor for the shortest segment, in cues.</summary>
     public const int MinSegFloor = 40;
 
@@ -315,6 +335,123 @@ public static class OffsetFit
     }
 
     /// <summary>
+    /// Level RISE across each cue start, per candidate shift, in score units.
+    /// <para>
+    /// The shipped objective is the mean level under a cue, which cannot tell a dialogue
+    /// line from a sung one — both fill the voice band. A cue that starts where speech
+    /// starts sees the level jump; a cue laid over a through-composed song does not. This
+    /// table is that jump: the mean over the first <see cref="RiseWindowFrames"/> frames of
+    /// the cue minus the mean over the frames just before its start.
+    /// </para>
+    /// </summary>
+    /// <param name="starts">Cue start times in seconds.</param>
+    /// <param name="ends">Cue end times in seconds.</param>
+    /// <param name="cum">Cumulative curve the rise is read from (the UNDILATED one).</param>
+    /// <param name="nFrame">Number of frames in the curve.</param>
+    /// <returns>The rise per (cue, state), 0 where the window does not fit.</returns>
+    private static double[,] RiseTable(double[] starts, double[] ends, double[] cum, int nFrame)
+    {
+        int nc = starts.Length;
+        int ns = States.Length;
+        var rise = new double[nc, ns];
+        int w = RiseWindowFrames;
+        for (int k = 0; k < ns; k++)
+        {
+            double d = States[k];
+            for (int c = 0; c < nc; c++)
+            {
+                int a = (int)Math.Round((starts[c] + d) / FrameSec);
+                int b = Math.Max((int)Math.Round((ends[c] + d) / FrameSec), a + 1);
+                if (a - w < 0 || a + w > nFrame || b > nFrame)
+                {
+                    continue;
+                }
+
+                double after = (cum[a + w] - cum[a]) / w;
+                double before = (cum[a] - cum[a - w]) / w;
+                rise[c, k] = after - before;
+            }
+        }
+
+        return rise;
+    }
+
+
+    /// <summary>
+    /// Vetoes segments that buy their level gain without a single cue start on an onset, and
+    /// gives them the shift of their neighbour instead.
+    /// </summary>
+    /// <param name="segs">The segments from the DP, modified in place.</param>
+    /// <param name="fst">Fit cue start times in seconds.</param>
+    /// <param name="fen">Fit cue end times in seconds.</param>
+    /// <param name="cumRaw">Cumulative UNDILATED curve.</param>
+    /// <param name="nFrame">Number of frames in the curve.</param>
+    /// <returns>How many segments were vetoed.</returns>
+    private static int ApplyOnsetVeto(
+        List<(int Lo, int Hi, int State)> segs, double[] fst, double[] fen, double[] cumRaw, int nFrame)
+    {
+        if (segs.Count == 0 || fst.Length == 0)
+        {
+            return 0;
+        }
+
+        double[,] rise = RiseTable(fst, fen, cumRaw, nFrame);
+        (double[,] lvl, bool[,] _) = CueTable(fst, fen, cumRaw, nFrame);
+        int vetoed = 0;
+        for (int i = 0; i < segs.Count; i++)
+        {
+            (int lo, int hi, int st) = segs[i];
+            if (hi - lo < 5)
+            {
+                continue;
+            }
+
+            double lvChosen = SegmentMean(lvl, lo, hi, st);
+            double lvZero = SegmentMean(lvl, lo, hi, ZeroState);
+            double onChosen = SegmentMean(rise, lo, hi, st);
+            if (double.IsNaN(lvChosen) || double.IsNaN(onChosen) || double.IsNaN(lvZero))
+            {
+                continue;
+            }
+
+            if (lvChosen - lvZero < VetoLevelGain || onChosen >= VetoOnsetFloor)
+            {
+                continue;
+            }
+
+            int fallback = i + 1 < segs.Count ? segs[i + 1].State : i > 0 ? segs[i - 1].State : ZeroState;
+            if (fallback == st)
+            {
+                continue;
+            }
+
+            segs[i] = (lo, hi, fallback);
+            vetoed++;
+        }
+
+        return vetoed;
+    }
+
+    /// <summary>Mean of one column of a (cue, state) table over a cue range, NaN if none fit.</summary>
+    /// <param name="table">The table.</param>
+    /// <param name="lo">First cue index.</param>
+    /// <param name="hi">One past the last cue index.</param>
+    /// <param name="state">State index.</param>
+    /// <returns>The mean, or NaN.</returns>
+    private static double SegmentMean(double[,] table, int lo, int hi, int state)
+    {
+        double sum = 0;
+        int n = 0;
+        for (int c = lo; c < hi; c++)
+        {
+            sum += table[c, state];
+            n++;
+        }
+
+        return n == 0 ? double.NaN : sum / n;
+    }
+
+    /// <summary>
     /// Fits the offset. Returns the segments, the per-cue applied shift, and the report
     /// the deploy rule needs.
     /// </summary>
@@ -407,6 +544,7 @@ public static class OffsetFit
         double sigma = MedianAbsStep(s);
         double frac = minSegFraction ?? MinSegFrac;
         int minSeg = Math.Max(MinSegFloor, (int)Math.Round(frac * nFit));
+
         int[] bounds = MakeBounds(nFit);
 
         List<(int Lo, int Hi, int State)> segs = FitDp(s, w, bounds, minSeg, sigma, cumW);
@@ -426,6 +564,17 @@ public static class OffsetFit
         {
             segs = [(0, nFit, ZeroState)];
         }
+
+        // F-M364: the veto. The objective is the mean level under a cue, and singing is
+        // louder in the voice band than speech, so a segment can buy its gain by landing on
+        // a song instead of on the dialogue it belongs to. Mean level cannot tell the two
+        // apart, but the ONSET at the cue start can: the level jumps when speech starts and
+        // does not jump over a through-composed song. A segment that gains heavily while
+        // showing no onset takes its NEIGHBOUR's shift — the level the file already proves
+        // right for the material next to it. The onset curve inside such a segment is too
+        // noisy to pick a shift on its own (measured ±0.1 between neighbouring 0.25 s
+        // grid points), which is exactly why the neighbour is the honest fallback.
+        int vetoed = ApplyOnsetVeto(segs, fst, fen, cumRaw, nFrame);
 
         // The staircase was fitted on the dialogue cues; every other cue inherits the
         // shift of the last dialogue cue at or before it. That is what keeps a ♪ line in
@@ -558,7 +707,8 @@ public static class OffsetFit
             ScoreAfter = scoreAfter,
             CueCount = nCues,
             MinSegCues = minSeg,
-            GuardedCues = guardCount
+            GuardedCues = guardCount,
+            VetoedSegments = vetoed
         };
     }
 
@@ -1076,6 +1226,9 @@ public static class OffsetFit
 
         /// <summary>Gets the number of cues the order guard touched.</summary>
         public int GuardedCues { get; init; }
+
+        /// <summary>Gets how many segments the onset veto took back (F-M364).</summary>
+        public int VetoedSegments { get; init; }
 
         /// <summary>Builds a "did not run" result.</summary>
         /// <param name="reason">Why it did not run.</param>

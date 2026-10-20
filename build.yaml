@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.254"
+version: "12.1.12.255"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,18 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.255: A correction that buys its gain by landing on a SONG is now taken back. The
+    objective is the mean level in the voice band under a cue, and sung vocals are louder there
+    than speech: on The Rainmaker S02E01 the opening block scored 0.640 placed on the title song
+    against 0.538 where the dialogue actually is, so the fit moved 58 cues 15.5 s early and wrote
+    two of them as 00:00:00,000 --> 00:00:00,000. Mean level cannot tell the two apart, but the
+    ONSET at a cue start can — the level jumps when speech starts and does not jump over a
+    through-composed song. Each segment is now checked after the fit: if it wins at least 0.10
+    mean level over the unshifted placement while its cue starts show no onset, it takes its
+    NEIGHBOUR's shift instead, the level the file already proves right next door. Calibrated on
+    46 subtitles: exactly one segment in the corpus reaches the 0.10 floor (Rainmaker, +0.132,
+    against a next-highest 0.057), so nothing else changes — Rainmaker now lands on −2.00 s, the
+    same shift as the rest of its file, instead of −15.50 s.
   v12.1.12.254: The auto-sync no longer guesses a cue's kind from its capitalisation. A cue that is
     nothing but bracket groups — "(gunshot)", "(crowd shouting)", "[door slams]" — is a sound label
     and stays out of the fit, however it is written; embedded SDH tracks write these in lower case,
