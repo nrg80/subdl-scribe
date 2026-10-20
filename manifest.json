@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.255",
-        "changelog": "v12.1.12.255: A correction that buys its gain by landing on a SONG is now taken back. The\n    objective is the mean level in the voice band under a cue, and sung vocals are louder there\n    than speech: on The Rainmaker S02E01 the opening block scored 0.640 placed on the title song\n    against 0.538 where the dialogue actually is, so the fit moved 58 cues 15.5 s early and wrote\n    two of them as 00:00:00,000 --> 00:00:00,000. Mean level cannot tell the two apart, but the\n    ONSET at a cue start can — the level jumps when speech starts and does not jump over a\n    through-composed song. Each segment is now checked after the fit: if it wins at least 0.10\n    mean level over the unshifted placement while its cue starts show no onset, it takes its\n    NEIGHBOUR's shift instead, the level the file already proves right next door. Calibrated on\n    46 subtitles: exactly one segment in the corpus reaches the 0.10 floor (Rainmaker, +0.132,\n    against a next-highest 0.057), so nothing else changes — Rainmaker now lands on −2.00 s, the\n    same shift as the rest of its file, instead of −15.50 s.",
+        "version": "12.1.12.256",
+        "changelog": "v12.1.12.256: A download held back by the spent SubDL daily limit no longer writes a worker\n    row — nothing ran, so there is no status.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.255/Jellyfin.Plugin.SubdlSync_12.1.12.255.zip",
-        "checksum": "b599e07e1bef01028e8d6754d391c686",
-        "timestamp": "2026-10-20T14:03:50Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.256/Jellyfin.Plugin.SubdlSync_12.1.12.256.zip",
+        "checksum": "e2b80fffbce5ea553425ba0d92cf4e3c",
+        "timestamp": "2026-10-20T19:36:58Z"
       }
     ]
   }
