@@ -151,6 +151,13 @@ public class SubdlDownloadTask : IScheduledTask
                 return;
             }
 
+            // F-M365 (operator decision 20.10.2026): a download held back by a spent allowance ran
+            // nothing, so it gets no row at all — least of all one carrying the seeder's sentence.
+            if (dispatcher.DownloadHeldByAllowance())
+            {
+                return;
+            }
+
             var (outcome, detail) = Registry.WorkerRunRegistry.DescribeCycle(
                 cycleFinished, seedOutcome, seedDetail, dirOutcome, dirDetail);
             RecordWorker(plugin, outcome, detail);

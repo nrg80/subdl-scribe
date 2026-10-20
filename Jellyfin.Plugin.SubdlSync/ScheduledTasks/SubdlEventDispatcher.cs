@@ -727,6 +727,7 @@ public sealed class SubdlEventDispatcher : IDisposable
     {
         _upQuotaStopped = false;
         _downQuotaStopped = false;
+        _downHeldByAllowance = false;
         _dirOutcomeUp = null;
         _dirOutcomeDown = null;
         _dirDetailUp = null;
@@ -892,8 +893,10 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             if (heldByAllowance)
             {
-                SetDirectionOutcome(upload: false, Registry.WorkerRunRegistry.Outcome.Deferred, _downloadAllowanceHeld!);
-                LogUtil.Normal(_logger, "[SubDL-Dispatch] download held back — {Reason}. Queued items stay due (F-M331).", _downloadAllowanceHeld);
+                // F-M365: no direction outcome, so no row — nothing ran, and a status row would
+                // have to invent a time for work that did not happen.
+                _downHeldByAllowance = true;
+                LogUtil.Normal(_logger, "[SubDL-Dispatch] download held back — {Reason}. Queued items stay due (F-M331); no worker row (F-M365).", _downloadAllowanceHeld);
             }
 
             return true; // toggle off (or no allowance) = direction permanently "done" for this cycle
@@ -1700,12 +1703,27 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// <returns>Outcome word and detail, both possibly null.</returns>
     public (string? Outcome, string? Detail) GetSeederOutcome() => (_seederOutcome, _seederDetail);
 
+    /// <summary>
+    /// True when THIS cycle held the download direction back for a spent allowance (F-M365).
+    /// The direction ran nothing, so neither the waiting task nor the cycle-end writer may give it
+    /// a row: a status with a timestamp would claim a run that never happened.
+    /// </summary>
+    /// <returns>True when the download was held by the allowance.</returns>
+    public bool DownloadHeldByAllowance() => _downHeldByAllowance;
+
     // F-M331 (operator order 08.10.2026): "Api limit oder download limit voll, downloader startet
     // erst garnicht." The reason the download direction may not be filled/run this cycle, or null
     // when it may. Read once per cycle before the download seed and consulted exactly where
     // `config.DownloadEnabled` is consulted, so a spent allowance acts like the download switch
     // being off rather than like a decision the seeder makes.
     private string? _downloadAllowanceHeld;
+
+    // F-M365 (operator decision 20.10.2026): "Wenn nix läuft gibt es keinen Status." A download
+    // direction held back by a spent allowance runs NOTHING — no seed, no fetch, no queue work —
+    // so it must not write a worker row either. The row used to be written with the cycle's
+    // timestamp and the word "defer", which read as "a download run happened at 20:41 and was
+    // deferred", while the statistics stayed at zero. The hold is logged; the row is left alone.
+    private volatile bool _downHeldByAllowance;
 
     // True when THIS cycle already wrote a direction's own row (start AND finish). The waiting
     // task and the arrival path then leave that row alone — see FinishDirectionRow.
@@ -1974,7 +1992,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         // this cycle-level write must leave it alone. What is left here is the case the direction
         // cannot report itself: its run never began (switched off, or nothing queued), where the row
         // would otherwise keep a stale outcome from a previous cycle.
-        if (dir != CycleDirection.UploadOnly && !_dirRowWrittenDown)
+        if (dir != CycleDirection.UploadOnly && !_dirRowWrittenDown && !_downHeldByAllowance)
         {
             if (!config.DownloadEnabled)
             {
