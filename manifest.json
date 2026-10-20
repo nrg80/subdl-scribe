@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.256",
-        "changelog": "v12.1.12.256: A download held back by the spent SubDL daily limit no longer writes a worker\n    row — nothing ran, so there is no status.",
+        "version": "12.1.12.257",
+        "changelog": "v12.1.12.257: The remaining cases where a worker row appeared without a run — switched off, a\n    cycle already running, a restart before the run — write no row either.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.256/Jellyfin.Plugin.SubdlSync_12.1.12.256.zip",
-        "checksum": "e2b80fffbce5ea553425ba0d92cf4e3c",
-        "timestamp": "2026-10-20T19:36:58Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.257/Jellyfin.Plugin.SubdlSync_12.1.12.257.zip",
+        "checksum": "5005d0565c7af58bd45af046cbfec57e",
+        "timestamp": "2026-10-20T20:00:33Z"
       }
     ]
   }
