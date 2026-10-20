@@ -46,11 +46,17 @@ internal static class FitRun
         SpeechLabelChecks();
 
         Console.WriteLine();
+        Console.WriteLine("=== T124: the onset veto takes back a segment that lands on a song ===");
+        OnsetVetoChecks();
+
+        Console.WriteLine();
         Console.WriteLine("=== T123: bracket groups alone are a label, anything outside them is dialogue ===");
         BracketGroupChecks();
 
         string goodMkv = "/data/movies/Better.Call.Saul/S01/Better.Call.Saul.S01E04.720p.HDTV.X264-MRSK.mkv";
-        string goodSrt = "/data/movies/Better.Call.Saul/S01/Better.Call.Saul.S01E04.720p.HDTV.X264-MRSK.en.sdh.srt";
+        // The library copies were removed in the 19.10. subtitle cleanup; the untouched
+        // original lives in drift-lab and is the better fixture anyway.
+        string goodSrt = "/opt/data/drift-lab/raw/bcs_raw.sdh.srt";
 
         Console.WriteLine();
         Console.WriteLine("=== T119: planted staircases on the operator-confirmed-good file ===");
@@ -77,6 +83,63 @@ internal static class FitRun
             new[] { 1.75, -1.00, -4.25, -6.75, -9.50 });
 
         return 0;
+    }
+
+
+    /// <summary>
+    /// T124: the onset veto (F-M364). A block of dialogue cues sits where the audio really
+    /// speaks, but 25 s earlier there is a continuous loud stretch — a song — that scores
+    /// higher in the voice band than any dialogue does. Mean level alone moves the cues
+    /// there; the veto takes the block back because the move buys level without a single
+    /// onset at a cue start.
+    /// </summary>
+    private static void OnsetVetoChecks()
+    {
+        const double Frame = 0.02;
+        const int Frames = 12000;                 // 240 s
+        var level = new double[Frames];
+        for (int i = 0; i < Frames; i++)
+        {
+            double t = i * Frame;
+            if (t < 30.0)
+            {
+                level[i] = 76.0;                  // song: loud, continuous, no onsets
+            }
+            else
+            {
+                // speech: 0.45 s bursts with gaps between them
+                level[i] = (t % 1.2) < 0.45 ? 63.0 : 33.0;
+            }
+        }
+
+        // Cues on the burst starts, from 32 s on: shift 0 is correct.
+        var starts = new List<double>();
+        var ends = new List<double>();
+        for (double t = 32.0; t < 230.0; t += 1.2)
+        {
+            starts.Add(t);
+            ends.Add(t + 1.1);
+        }
+
+        double[] st = starts.ToArray();
+        double[] en = ends.ToArray();
+        var fit = OffsetFit.Fit(st, en, level, null, null);
+        double first = fit.Segments > 0 ? -fit.SegmentOffsetsSec[0] : 0.0;
+        bool kept = Math.Abs(first) <= 1.0;
+        Console.WriteLine($"   [{(kept ? "PASS" : "FAIL")}] erster Shift {first:+0.00;-0.00}s (erwartet ~0) bei {fit.Segments} Segment(en), vetoed {fit.VetoedSegments}");
+        Console.WriteLine($"   -> {fit.VetoedSegments} Segment(e) zurueckgenommen, Score {fit.ScoreBefore:F4} -> {fit.ScoreAfter:F4}, t = {fit.TMoved:F2}");
+
+        // Ohne den Song darf derselbe Aufbau nicht vetoed werden.
+        var levelNoSong = new double[Frames];
+        for (int i = 0; i < Frames; i++)
+        {
+            double t = i * Frame;
+            levelNoSong[i] = t < 30.0 ? 33.0 : (t % 1.2) < 0.45 ? 63.0 : 33.0;
+        }
+
+        var fit2 = OffsetFit.Fit(st, en, levelNoSong, null, null);
+        bool quiet = fit2.VetoedSegments == 0;
+        Console.WriteLine($"   [{(quiet ? "PASS" : "FAIL")}] ohne Song: vetoed {fit2.VetoedSegments} (erwartet 0), Shift {(-(fit2.Segments > 0 ? fit2.SegmentOffsetsSec[0] : 0.0)):+0.00;-0.00}s");
     }
 
     /// <summary>
