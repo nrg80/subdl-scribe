@@ -574,11 +574,30 @@ public static class SidecarNaming
     /// One predicate for both directions, so neither can drift. A hearing-impaired track is NOT
     /// affected: SDH is the same dialogue with annotations.
     /// </para>
+    /// <para>
+    /// F-M367 (26.10.2026): the FLAG alone is not enough — the TITLE is the second source, as
+    /// <see cref="IsHearingImpairedStream"/> already reads it, because a muxer may leave
+    /// <c>DISPOSITION:forced</c> at 0 on a track titled <c>Forced</c>. Word boundary, so
+    /// <c>enforced</c> is no marker.
+    /// </para>
     /// </summary>
     /// <param name="stream">Media stream.</param>
     /// <returns>True when the stream is a forced subtitle track.</returns>
     public static bool IsForcedStream(MediaStream stream)
-        => stream != null && stream.IsForced == true;
+    {
+        if (stream == null)
+        {
+            return false;
+        }
+
+        if (stream.IsForced == true)
+        {
+            return true;
+        }
+
+        string title = stream.Title ?? string.Empty;
+        return Regex.IsMatch(title, @"(?<![a-z])forced(?![a-z])", RegexOptions.IgnoreCase);
+    }
 
     /// <summary>
     /// Language token → SubDL code: two letters direct, three through the mapper.
