@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.257",
-        "changelog": "v12.1.12.257: The remaining cases where a worker row appeared without a run — switched off, a\n    cycle already running, a restart before the run — write no row either.",
+        "version": "12.1.12.258",
+        "changelog": "v12.1.12.258: A forced subtitle track is now recognized by its track name too, not only by the\n    file's flag — so its language no longer counts as already present.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.257-dev/Jellyfin.Plugin.SubdlSync_12.1.12.257.zip",
-        "checksum": "c1f1725ffff42312453f88df717e460b",
-        "timestamp": "2026-10-20T19:57:30Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.258-dev/Jellyfin.Plugin.SubdlSync_12.1.12.258.zip",
+        "checksum": "213673600690d3d86fde054b5cd4ff54",
+        "timestamp": "2026-10-26T21:29:21Z"
       }
     ]
   }
