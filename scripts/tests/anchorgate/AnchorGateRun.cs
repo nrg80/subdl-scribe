@@ -157,6 +157,17 @@ internal static class Program
         Check(!src.Contains("var spacedRef = now.AddMinutes", StringComparison.Ordinal),
             "no retry time is merely printed any more");
 
+        // F-M368, third part: the display. A deadline that has already passed was still reported as a
+        // pending fire, so the row read "defer - next attempt Wed 4:40 PM" hours after 16:40 while the run
+        // had finished green. Every one of the five keys must be gated by a deadline still in the future.
+        var pend = src.IndexOf("public System.Collections.Generic.Dictionary<string, DateTime> GetPendingFires()", StringComparison.Ordinal);
+        var body = pend >= 0 ? src.Substring(pend, Math.Min(2500, src.Length - pend)) : string.Empty;
+        Check(body.Length > 0, "GetPendingFires is present");
+        Check((body.Split("nowUtc < ").Length - 1) >= 5,
+            "all five pending-fire keys are gated by a future deadline");
+        Check(body.Contains("if (prune != DateTime.MinValue && nowUtc < prune)", StringComparison.Ordinal),
+            "the database deadline specifically is gated");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"anchorgate: {_checks} checks, all green."
