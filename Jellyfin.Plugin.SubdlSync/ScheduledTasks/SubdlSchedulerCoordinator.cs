@@ -776,6 +776,9 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         // "OSHash-refresh fire at", 0 "Postprocessing fire at" — the only runs were
         // manual API triggers and one lock-recovery start).
         var now = DateTime.Now;
+        // F-M368: `nowUtc` (declared above) is for deadlines, `now` is for anchors — local wall-clock
+        // time. Keep both and never mix them: the mixed comparison is what made a "re-fire at 15:40 UTC"
+        // look already expired at 16:25 local, and what silently dropped the retry afterwards.
 
         // The database refresh runs regardless of pipeline switches (rationale).
         // (14.09.2026): the refresh block no longer aborts the tick —
@@ -799,9 +802,12 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 : (DateTime?)null;
             var refreshMarker = refreshAnchor?.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
             var refreshCadenceDue = refreshWeekMod > 0 && IsoWeek(now) % refreshWeekMod == 0;
-            var refreshDue = refreshAnchor.HasValue && now >= refreshAnchor.Value && refreshCadenceDue
-                && (_lastPruneMarker != refreshMarker || now < _pruneDeferredUntil);
-            if (refreshDue && now >= _pruneDeferredUntil)
+            // F-M368: the deferral is its own term. It used to sit INSIDE "due" as
+            // `|| now < _pruneDeferredUntil`, which cancelled the gate in the block below.
+            var refreshDeferPending = _pruneDeferredUntil != DateTime.MinValue;
+            var refreshDue = AnchorJobGate.IsDue(
+                now, refreshAnchor, refreshCadenceDue, _lastPruneMarker, refreshMarker, refreshDeferPending);
+            if (refreshDue && AnchorJobGate.DeferralElapsed(nowUtc, _pruneDeferredUntil))
             {
                 if (!IsTaskRegistered<SubdlDatabaseRefreshTask>())
                 {
@@ -824,9 +830,9 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                     // attempt JobSpacingMinutes out, regardless of the anchor window.
                     if (TryCountReschedule("refresh", "lock-busy anchor"))
                     {
-                        _pruneDeferredUntil = now.AddMinutes(Math.Max(1, config.JobSpacingMinutes));
+                        _pruneDeferredUntil = nowUtc.AddMinutes(Math.Max(1, config.JobSpacingMinutes));
                         _stateDirty = true;
-                        LogUtil.Normal(_logger, "[SubDL] Database refresh deferred to {Until:HH:mm} local (lock busy).", _pruneDeferredUntil);
+                        LogUtil.Normal(_logger, "[SubDL] Database refresh deferred to {Until:HH:mm} local (lock busy).", _pruneDeferredUntil.ToLocalTime());
                     }
                 }
             }
@@ -843,9 +849,11 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 ? ParseWeeklySpec(config.RandomOshashTime, now)
                 : (DateTime?)null;
             var osMarker = osAnchor?.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
-            var osDue = osAnchor.HasValue && now >= osAnchor.Value
-                && (_lastOshashMarker != osMarker || now < _oshashDeferredUntil);
-            if (osDue && now >= _oshashDeferredUntil)
+            // F-M368: same split as the refresh block — deferral separate from due, UTC deadline.
+            var osDeferPending = _oshashDeferredUntil != DateTime.MinValue;
+            var osDue = AnchorJobGate.IsDue(
+                now, osAnchor, cadenceDue: true, _lastOshashMarker, osMarker, osDeferPending);
+            if (osDue && AnchorJobGate.DeferralElapsed(nowUtc, _oshashDeferredUntil))
             {
                 if (!IsTaskRegistered<SubdlOshashRefreshTask>())
                 {
@@ -866,9 +874,9 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 {
                     if (TryCountReschedule("oshash", "lock-busy anchor"))
                     {
-                        _oshashDeferredUntil = now.AddMinutes(Math.Max(1, config.JobSpacingMinutes));
+                        _oshashDeferredUntil = nowUtc.AddMinutes(Math.Max(1, config.JobSpacingMinutes));
                         _stateDirty = true;
-                        LogUtil.Normal(_logger, "[SubDL] OSHash-refresh deferred to {Until:HH:mm} local (lock busy).", _oshashDeferredUntil);
+                        LogUtil.Normal(_logger, "[SubDL] OSHash-refresh deferred to {Until:HH:mm} local (lock busy).", _oshashDeferredUntil.ToLocalTime());
                     }
                 }
             }
@@ -901,10 +909,12 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 if (ppAnchor.HasValue)
                 {
                     var ppMarker = ppAnchor?.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture);
-                    bool ppDue = now >= ppAnchor.Value
-                        && (_lastPostprocessMarker != ppMarker || now < _postprocessDeferredUntil);
+                    // F-M368: same split as the refresh and OSHash blocks.
+                    var ppDeferPending = _postprocessDeferredUntil != DateTime.MinValue;
+                    bool ppDue = AnchorJobGate.IsDue(
+                        now, ppAnchor, cadenceDue: true, _lastPostprocessMarker, ppMarker, ppDeferPending);
 
-                    if (ppDue && now >= _postprocessDeferredUntil)
+                    if (ppDue && AnchorJobGate.DeferralElapsed(nowUtc, _postprocessDeferredUntil))
                     {
                         if (!IsTaskRegistered<SubdlPostprocessTask>())
                         {
@@ -1460,7 +1470,9 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         if (fields.TryGetValue(key, out var raw)
             && DateTime.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var when))
         {
-            return when;
+            // F-M368: a state file written before the fix carries LOCAL deadlines next to UTC ones, and
+            // DateTime comparisons ignore Kind — normalise so the mixed clock cannot survive an upgrade.
+            return AnchorJobGate.NormalizeDeadline(when);
         }
 
         return DateTime.MinValue;
