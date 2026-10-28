@@ -132,6 +132,16 @@ internal static class Program
         Check(src.Contains("AnchorJobGate.NormalizeDeadline(when)", StringComparison.Ordinal),
             "the state parser normalises deadlines on load");
 
+        // F-M368: one counter per job. "dbrefresh" was a SECOND budget for the refresh — counted by
+        // ScheduleRefreshFire, never reset by the fire — so after 16 task-side deferrals the arming call
+        // refused silently and left no deadline at all.
+        Check(src.Contains("TryCountReschedule(\"refresh\",", StringComparison.Ordinal),
+            "the task-side deferral counts on the same slot the fire resets (refresh)");
+        Check(!src.Contains("TryCountReschedule(\"dbrefresh\",", StringComparison.Ordinal),
+            "no second, never-reset budget under the name dbrefresh");
+        Check(src.Contains("ResetReschedule(\"refresh\")", StringComparison.Ordinal),
+            "a real refresh fire clears that counter");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"anchorgate: {_checks} checks, all green."

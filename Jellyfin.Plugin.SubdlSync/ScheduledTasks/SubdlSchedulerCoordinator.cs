@@ -149,7 +149,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     /// exhausted — the caller must then NOT reschedule (the regular anchor owns
     /// the slot again).
     /// </summary>
-    /// <param name="slot">Slot label: download, upload, postprocess, dbrefresh, oshash, refetch.</param>
+    /// <param name="slot">Slot label: download, upload, postprocess, refresh, oshash, refetch.</param>
     /// <param name="reason">Why the reschedule happened (lock-busy, rate-limit, …) — log only.</param>
     /// <returns>True when another reschedule is still allowed.</returns>
     /// F-M205: one counter per slot, cleared on a real fire and by the per-day budget reset (F-M208).
@@ -356,7 +356,10 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
 
     public void ScheduleRefreshFire(DateTime fireAtUtc)
     {
-        if (!TryCountReschedule("dbrefresh", "lock-busy"))
+        // F-M368: the slot is "refresh" — the same one the anchor block counts and the fire resets.
+        // "dbrefresh" was a second, never-reset budget: after 16 task-side deferrals in one UTC day
+        // ScheduleRefreshFire refused silently and armed no deadline at all.
+        if (!TryCountReschedule("refresh", "lock-busy"))
         {
             return;
         }
