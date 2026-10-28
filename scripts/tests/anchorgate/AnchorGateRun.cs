@@ -142,6 +142,21 @@ internal static class Program
         Check(src.Contains("ResetReschedule(\"refresh\")", StringComparison.Ordinal),
             "a real refresh fire clears that counter");
 
+        // F-M368, second half: the refetch slot PRINTED a retry time and stored nothing, so it re-probed
+        // every 30-s tick, burnt its 16x budget in ~8 minutes and then went silent. The spacing is a
+        // stored UTC deadline now — gated, cleared on fire, persisted.
+        Check(src.Contains("_refetchDeferredUntil = nowUtc.AddMinutes", StringComparison.Ordinal),
+            "the refetch deferral arms a real UTC deadline");
+        Check(src.Contains("AnchorJobGate.DeferralElapsed(nowUtc, _refetchDeferredUntil)", StringComparison.Ordinal),
+            "and the slot is gated by it instead of re-probing every tick");
+        Check(src.Contains("_refetchDeferredUntil = DateTime.MinValue; // F-M368: fired", StringComparison.Ordinal),
+            "a real refetch fire clears it");
+        Check(src.Contains("refetchDefer", StringComparison.Ordinal)
+              && src.Contains("ParseInstant(fields, \"refetchDefer\")", StringComparison.Ordinal),
+            "it survives a restart (written into the state payload and parsed back)");
+        Check(!src.Contains("var spacedRef = now.AddMinutes", StringComparison.Ordinal),
+            "no retry time is merely printed any more");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"anchorgate: {_checks} checks, all green."

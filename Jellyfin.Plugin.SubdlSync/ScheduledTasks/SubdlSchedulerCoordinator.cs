@@ -109,6 +109,10 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     private bool _catchUpFired;
 
     private string? _lastFiredMarker;
+    // F-M368: the spacing the refetch deferral PRINTS, now actually stored. Kept out of
+    // GetPendingFires deliberately: the refetch slot is the pipeline cycle, not one worker, and the
+    // direction lamps are painted from their own recovery fires.
+    private DateTime _refetchDeferredUntil = DateTime.MinValue;
     private string? _lastPruneMarker; // Dedup for the weekly database refresh job
     private string? _lastOshashMarker; // F-M119: dedup for the weekly oshash-refresh job
     private string? _lastPostprocessMarker; // F-M176: dedup for postprocessing job
@@ -970,14 +974,25 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             // A due anchor fire respects the global lock — if a run is
             // active, defer (retry at now + JobSpacing) instead of dropping the
             // window. The marker is NOT set on defer, so the slot stays claimable.
+            // F-M368: honour the spacing this block PRINTS. It stored nothing before, so the next tick
+            // (30 s) found the slot due again, deferred again, and burned the 16× budget in about eight
+            // minutes — after which it kept probing every tick without a log line. The deadline is armed
+            // on every deferral; the counter now only decides whether it gets logged.
+            if (!AnchorJobGate.DeferralElapsed(nowUtc, _refetchDeferredUntil))
+            {
+                return;
+            }
+
             if (!Pipeline.PipelineRunLock.IsFree(_logger))
             {
+                _refetchDeferredUntil = nowUtc.AddMinutes(JobSpacing(config));
+                _stateDirty = true;
+
                 if (TryCountReschedule("refetch", "lock-busy anchor"))
                 {
-                    var spacedRef = now.AddMinutes(JobSpacing(config));
-                    LogUtil.Normal(_logger, 
+                    LogUtil.Normal(_logger,
                         "[SubDL] Refetch fire ({Anchor}) deferred — a run holds the lock; retrying at {Retry:yyyy-MM-dd HH:mm} local (F-M117).",
-                        fire.AnchorDesc, spacedRef);
+                        fire.AnchorDesc, _refetchDeferredUntil.ToLocalTime());
                 }
 
                 return; // marker NOT set → slot retries after the spacing window
@@ -994,6 +1009,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             }
 
             _lastFiredMarker = fire.Marker;
+            _refetchDeferredUntil = DateTime.MinValue; // F-M368: fired — the spacing is spent
             _catchUpFired = false; // regular fire resets global catch-up state
             _stateDirty = true;
             ResetReschedule("refetch"); // fired — clear the 16x counter
@@ -1373,7 +1389,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             var payload = string.Format(
                 CultureInfo.InvariantCulture,
                 "{{\"refresh\":\"{0}\",\"oshash\":\"{1}\",\"postprocess\":\"{2}\",\"fired\":\"{3}\","
-                + "\"catchup\":{4},\"refreshDefer\":\"{5}\",\"oshashDefer\":\"{6}\",\"postprocessDefer\":\"{7}\"}}",
+                + "\"catchup\":{4},\"refreshDefer\":\"{5}\",\"oshashDefer\":\"{6}\",\"postprocessDefer\":\"{7}\",\"refetchDefer\":\"{8}\"}}",
                 _lastPruneMarker ?? string.Empty,
                 _lastOshashMarker ?? string.Empty,
                 _lastPostprocessMarker ?? string.Empty,
@@ -1381,7 +1397,8 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 _catchUpFired ? "true" : "false",
                 _pruneDeferredUntil.ToString("O", CultureInfo.InvariantCulture),
                 _oshashDeferredUntil.ToString("O", CultureInfo.InvariantCulture),
-                _postprocessDeferredUntil.ToString("O", CultureInfo.InvariantCulture));
+                _postprocessDeferredUntil.ToString("O", CultureInfo.InvariantCulture),
+                _refetchDeferredUntil.ToString("O", CultureInfo.InvariantCulture));
             File.WriteAllText(Path.Combine(_configDirectory, SchedulerStateFile), payload);
             _stateDirty = false;
         }
@@ -1451,6 +1468,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             _pruneDeferredUntil = ParseInstant(fields, "refreshDefer");
             _oshashDeferredUntil = ParseInstant(fields, "oshashDefer");
             _postprocessDeferredUntil = ParseInstant(fields, "postprocessDefer");
+            _refetchDeferredUntil = ParseInstant(fields, "refetchDefer");
 
             LogUtil.Normal(_logger,
                 "[SubDL] Scheduler state restored from disk: refresh {Refresh}, oshash {Oshash}, postprocessing {Pp}, refetch slot {Fired}, catch-up {CatchUp}.",
