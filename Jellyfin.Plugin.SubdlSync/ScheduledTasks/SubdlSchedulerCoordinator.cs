@@ -451,27 +451,34 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         var prune = _pruneDeferredUntil;
         var oshash = _oshashDeferredUntil;
 
-        if (down.HasValue)
+        // F-M368: a deadline that has already passed is NOT a pending fire. The anchor jobs store one,
+        // but the task itself can also run on Jellyfin's own trigger, and nobody tells the coordinator —
+        // measured 28.10.2026: the Database row still read "defer — next attempt Wed 4:40 PM" at half
+        // past ten, six hours after 16:40, while the run had finished green at 22:50. An elapsed
+        // deadline is what AnchorJobGate.DeferralElapsed lets through, so the display must not show it.
+        var nowUtc = DateTime.UtcNow;
+
+        if (down.HasValue && nowUtc < down.Value)
         {
             result[Registry.WorkerRunRegistry.DownloadWorkerKey] = down.Value;
         }
 
-        if (up.HasValue)
+        if (up.HasValue && nowUtc < up.Value)
         {
             result[Registry.WorkerRunRegistry.UploadWorkerKey] = up.Value;
         }
 
-        if (post != DateTime.MinValue)
+        if (post != DateTime.MinValue && nowUtc < post)
         {
             result["SubDLPostprocessTask"] = post;
         }
 
-        if (prune != DateTime.MinValue)
+        if (prune != DateTime.MinValue && nowUtc < prune)
         {
             result["SubdlSyncDatabaseRefreshTask"] = prune;
         }
 
-        if (oshash != DateTime.MinValue)
+        if (oshash != DateTime.MinValue && nowUtc < oshash)
         {
             result["SubdlSyncOshashRefreshTask"] = oshash;
         }

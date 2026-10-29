@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.259",
-        "changelog": "v12.1.12.259: Deferred background jobs (database, OSHash, post-processing, refetch) now retry at\n    the time the log names instead of staying idle until the next scheduled run.",
+        "version": "12.1.12.260",
+        "changelog": "v12.1.12.260: A worker no longer shows a deferral note for a moment that has already passed.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.259/Jellyfin.Plugin.SubdlSync_12.1.12.259.zip",
-        "checksum": "6ad275c506c3008324d3ba785406b224",
-        "timestamp": "2026-10-28T17:22:01Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.260-dev/Jellyfin.Plugin.SubdlSync_12.1.12.260.zip",
+        "checksum": "4012f36e88d458d3ba2bbd989f429c3e",
+        "timestamp": "2026-10-29T00:24:29Z"
       }
     ]
   }
