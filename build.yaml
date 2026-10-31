@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.260"
+version: "12.1.12.261"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,8 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.261: A subtitle archive is downloaded once per run, not again for every variant taken
+    out of it.
   v12.1.12.260: A worker no longer shows a deferral note for a moment that has already passed.
   v12.1.12.259: Deferred background jobs (database, OSHash, post-processing, refetch) now retry at
     the time the log names instead of staying idle until the next scheduled run.
