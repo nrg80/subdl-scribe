@@ -35,6 +35,10 @@ public sealed class SubdlApiClient
     // api3.subdl.com appears NOWHERE in the docs — it is an undocumented mirror).
     private const string ApiBase = "https://api.subdl.com";
     private readonly HttpClient _http;
+
+    // F-M369: one quota unit per archive instead of per extraction — see RunArchiveCache.
+    // Empty outside a download run; the pipeline clears it at start and in its finally.
+    private readonly RunArchiveCache _archiveCache = new();
     private string? _token;
     private DateTime _tokenObtained;
 
@@ -46,6 +50,12 @@ public sealed class SubdlApiClient
     {
         _http = http;
     }
+
+    /// <summary>
+    /// Gets the run-scoped archive cache (F-M369). The download pipeline empties it at run
+    /// start and in the run's finally block; outside a run it holds nothing.
+    /// </summary>
+    public RunArchiveCache ArchiveCache => _archiveCache;
 
     /// <summary>Event raised (message only) when a token needs to be logged — never credentials.</summary>
     public event Action<string>? Log;
@@ -1365,30 +1375,15 @@ public sealed class SubdlApiClient
     }
 
     /// <summary>
-    /// Downloads a subtitle file from dl.subdl.com. Handles the URL prefix variants
-    /// and retries on HTTP 429/5xx with exponential backoff (F-M11/F-M27): x2, x4,
-    /// x8 — max 3 attempts, then gives up (caller moves to the next candidate).
+    /// F-M369: raw GET of a download URL with the F-M27 retry ladder (2 s, 4 s, give up).
+    /// Split out of <see cref="DownloadSubtitleFileAsync"/> so the cache lookup stays one
+    /// branch and the retry semantics stay untouched.
     /// </summary>
-    /// <param name="dlUrl">Download path or URL from the search result.</param>
+    /// <param name="fullUrl">Absolute download URL.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Raw subtitle bytes (SRT extracted when ZIP-packaged) or null on failure.</returns>
-    public async Task<byte[]?> DownloadSubtitleFileAsync(string dlUrl, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0)
+    /// <returns>The response body, or null when every attempt failed.</returns>
+    private async Task<byte[]?> FetchArchiveAsync(string fullUrl, CancellationToken ct)
     {
-        string fullUrl;
-        if (dlUrl.StartsWith('/'))
-        {
-            fullUrl = $"https://dl.subdl.com{dlUrl}";
-        }
-        else if (dlUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-        {
-            fullUrl = dlUrl.Replace("://subdl.com", "://dl.subdl.com", StringComparison.OrdinalIgnoreCase);
-        }
-        else
-        {
-            fullUrl = $"https://dl.subdl.com/{dlUrl}";
-        }
-
-        byte[]? bytes = null;
         const int maxAttempts = 3;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -1402,8 +1397,7 @@ public sealed class SubdlApiClient
             Trace("GET", fullUrl, (int)resp.StatusCode, $"download attempt {attempt}");
             if (resp.IsSuccessStatusCode)
             {
-                bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
-                break;
+                return await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
             }
 
             // F-M27: 429/5xx → exponential backoff (2s, 4s, 8s), then give up.
@@ -1430,6 +1424,54 @@ public sealed class SubdlApiClient
             }
 
             return null; // other status codes (404 etc.) — no retry
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Downloads a subtitle file from dl.subdl.com. Handles the URL prefix variants
+    /// and retries on HTTP 429/5xx with exponential backoff (F-M11/F-M27): x2, x4,
+    /// x8 — max 3 attempts, then gives up (caller moves to the next candidate).
+    /// </summary>
+    /// <param name="dlUrl">Download path or URL from the search result.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Raw subtitle bytes (SRT extracted when ZIP-packaged) or null on failure.</returns>
+    public async Task<byte[]?> DownloadSubtitleFileAsync(string dlUrl, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0)
+    {
+        string fullUrl;
+        if (dlUrl.StartsWith('/'))
+        {
+            fullUrl = $"https://dl.subdl.com{dlUrl}";
+        }
+        else if (dlUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            fullUrl = dlUrl.Replace("://subdl.com", "://dl.subdl.com", StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            fullUrl = $"https://dl.subdl.com/{dlUrl}";
+        }
+
+        // F-M369: one quota unit per archive, not per extraction. Inside a single run the same
+        // ZIP is fetched again whenever an episode needs a second variant out of it (measured
+        // 31.10.2026: three archives downloaded twice in fifteen minutes; 50 quota units for
+        // 46 saved files). The cache is run-scoped — the pipeline clears it at start and in
+        // the run's finally — so it never serves stale bytes and never grows across runs.
+        byte[]? bytes;
+        bool cacheHit = _archiveCache.TryGet(fullUrl, out byte[]? cachedArchive);
+        if (cacheHit)
+        {
+            bytes = cachedArchive;
+            Trace("GET", fullUrl, 200, "archive cache hit (run)");
+        }
+        else
+        {
+            bytes = await FetchArchiveAsync(fullUrl, ct).ConfigureAwait(false);
+            if (bytes != null && bytes.Length > 0)
+            {
+                _archiveCache.Put(fullUrl, bytes);
+            }
         }
 
         if (bytes == null || bytes.Length == 0)
