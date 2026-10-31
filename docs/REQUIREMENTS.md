@@ -31,11 +31,11 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 27 requirements
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 15 requirements
-- [11. Content Registry and Identity](#11-content-registry-and-identity) — 14 requirements
+- [11. Content Registry and Identity](#11-content-registry-and-identity) — 17 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 14 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 40 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 45 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -1803,7 +1803,7 @@ fix and is exactly the fingerprint F-M29 forbids).
 
 **T161:** An archive is fetched once per run (F-M369). `scripts/tests/archivecache`, 36 checks against the published assembly: a miss returns null and stores nothing, the second lookup of the same URL hits and carries the same bytes, a different URL still misses; an archive above the per-entry ceiling is refused instead of held; the entry ceiling drops the oldest and the total budget is never exceeded; re-storing a URL replaces the bytes rather than adding them; empty keys and empty bodies store nothing; `Reset` empties every entry and every counter, so the next run misses. On the source: the client owns the cache and asks it before the network, the retry ladder lives in `FetchArchiveAsync`, a hit is traced without a quota line, the pipeline resets at run start and in the `finally`, and the run summary reports the hits. **36 checks.**
 
-**T160:** A deferred anchor job comes back, and deadlines are read in the clock they were written in (F-M368). `scripts/tests/anchorgate`, 25 checks against the published assembly: `AnchorJobGate.IsDue` is true with a consumed marker plus a pending deferral (false before the fix), false for a fired day without one; `DeferralElapsed` holds a run until 15:40 UTC is reached (16:25 local read raw says "expired" an hour early — the defect); `NormalizeDeadline` returns local values as UTC and leaves UTC/MinValue alone; and the source must use both gates, write no local-clock deadline, carry no `|| now < …DeferredUntil` term, count the refresh on the one slot its fire resets, and gate every pending-fire key on a future deadline.
+**T160:** A deferred anchor job comes back, and deadlines are read in the clock they were written in (F-M368). `scripts/tests/anchorgate`, 36 checks against the published assembly: `AnchorJobGate.IsDue` is true with a consumed marker plus a pending deferral (false before the fix), false for a fired day without one; `DeferralElapsed` holds a run until 15:40 UTC is reached (16:25 local read raw says "expired" an hour early — the defect); `NormalizeDeadline` returns local values as UTC and leaves UTC/MinValue alone; and the source must use both gates, write no local-clock deadline, carry no `|| now < …DeferredUntil` term, count the refresh on the one slot its fire resets, and gate every pending-fire key on a future deadline.
 
 
 
