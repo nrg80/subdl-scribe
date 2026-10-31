@@ -124,8 +124,23 @@ internal static class Program
         Check(run.Hits == 0 && run.Misses == 0 && run.Stores == 0, "and the counters are fresh again");
         Check(!run.TryGet(Url("p"), out _), "the next run misses, as it must — no cross-run reuse");
 
-        // ── 6. Wiring on the source ─────────────────────────────────────────────
-        Console.WriteLine("6. Source contract");
+        // ── 6. The published limits ──────────────────────────────────────────────
+        // The Lastenheft (F-M369) names these numbers; asserting them here is what keeps the
+        // document from drifting away from the code without a single test going red.
+        Console.WriteLine("6. Published limits");
+        Check(RunArchiveCache.DefaultMaxEntries == 32, "32 archives at once");
+        Check(RunArchiveCache.DefaultMaxEntryBytes == 16 * 1024 * 1024, "16 MB per archive");
+        Check(RunArchiveCache.DefaultMaxTotalBytes == 64L * 1024 * 1024, "64 MB in total");
+        var published = new RunArchiveCache();
+        published.Put(Url("nine-mb"), Bytes(9 * 1024 * 1024));
+        Check(published.TryGet(Url("nine-mb"), out _), "a 9 MB pack IS cached now (it was refused at 8 MB)");
+        published.Put(Url("seventeen-mb"), Bytes(17 * 1024 * 1024));
+        Check(!published.TryGet(Url("seventeen-mb"), out _), "a 17 MB pack is still refused");
+        Check(published.Refused == 1, "and only that one was refused");
+        published.Reset();
+
+        // ── 7. Wiring on the source ──────────────────────────────────────────────
+        Console.WriteLine("7. Source contract");
         var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlApiClient.cs"));
         Check(api.Contains("private readonly RunArchiveCache _archiveCache = new();", StringComparison.Ordinal),
             "the client owns one cache");

@@ -21,11 +21,11 @@ public sealed class RunArchiveCache
     /// <summary>Default number of archives kept at once.</summary>
     public const int DefaultMaxEntries = 32;
 
-    /// <summary>Default ceiling for one archive (8 MB); bigger packs are not cached.</summary>
-    public const int DefaultMaxEntryBytes = 8 * 1024 * 1024;
+    /// <summary>Default ceiling for one archive (16 MB); bigger packs are not cached.</summary>
+    public const int DefaultMaxEntryBytes = 16 * 1024 * 1024;
 
-    /// <summary>Default ceiling for the whole cache (32 MB).</summary>
-    public const long DefaultMaxTotalBytes = 32L * 1024 * 1024;
+    /// <summary>Default ceiling for the whole cache (64 MB).</summary>
+    public const long DefaultMaxTotalBytes = 64L * 1024 * 1024;
 
     private readonly int _maxEntries;
     private readonly int _maxEntryBytes;
