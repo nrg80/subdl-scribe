@@ -89,6 +89,27 @@ public static class SeasonPack
         => $"{imdbId}.S{season.ToString("00", CultureInfo.InvariantCulture)}.{packHash}.{language}";
 
     /// <summary>
+    /// The string that has to stand FIRST in a pack's release list (F-M374). SubDL titles a
+    /// full-season upload after the first element of `releases` and ignores the `name` field
+    /// (measured 01.11.2026: name "MEIN-PACK-NAME" + releases ["RELEASE-MARKER-XYZ"] was listed
+    /// as "RELEASE-MARKER-XYZ" in /user/mySubtitles). Without this the pack is titled after the
+    /// first episode's release name and therefore reads like a single episode.
+    /// </summary>
+    /// <param name="seriesName">Series name when Jellyfin knows it; the IMDb id otherwise.</param>
+    /// <param name="imdbId">IMDb id — fallback title.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>Pack title, also used as the download's ZIP name stem.</returns>
+    public static string ReleaseLabel(string? seriesName, string imdbId, int season, string language, bool hearingImpaired)
+    {
+        string title = string.IsNullOrWhiteSpace(seriesName) ? imdbId : seriesName!.Trim();
+        return $"{title} S{season.ToString("00", CultureInfo.InvariantCulture)} - complete season"
+            + (hearingImpaired ? " (SDH)" : string.Empty)
+            + $" [{language}]";
+    }
+
+    /// <summary>
     /// The name a single subtitle upload carries (F-M29/F-M30). Lives here because the pack's
     /// inner entries must stay byte-identical in name to what a single upload would have sent.
     /// </summary>

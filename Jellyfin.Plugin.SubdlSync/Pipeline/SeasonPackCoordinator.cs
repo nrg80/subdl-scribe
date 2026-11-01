@@ -9,6 +9,7 @@ using Jellyfin.Plugin.SubdlScribe.Configuration;
 using Jellyfin.Plugin.SubdlScribe.Data;
 using Jellyfin.Plugin.SubdlScribe.Registry;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.TV;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
@@ -228,7 +229,7 @@ public sealed class SeasonPackCoordinator
             files,
             name,
             key.Lang,
-            ordered.Select(c => c.ReleaseName).Distinct().ToList(),
+            PackReleases(ordered, key),
             first.Quality,
             key.ImdbId,
             first.TmdbId,
@@ -282,6 +283,33 @@ public sealed class SeasonPackCoordinator
             name, ordered.Count, key.ImdbId, key.Season, key.Lang,
             ordered.Min(c => c.Episode), ordered.Max(c => c.Episode), packId ?? "-");
     }
+
+    /// <summary>
+    /// F-M374: SubDL titles a pack after the FIRST entry of `releases`, so that entry has to name
+    /// the season — the real release names follow behind it and stay searchable.
+    /// </summary>
+    /// <param name="ordered">Candidates in episode order.</param>
+    /// <param name="key">Buffer key.</param>
+    /// <returns>Release list with the season label up front.</returns>
+    private static List<string> PackReleases(List<Candidate> ordered, (string ImdbId, int Season, string Lang, bool Hi) key)
+    {
+        var releases = new List<string>
+        {
+            SeasonPack.ReleaseLabel(SeriesNameOf(ordered[0].Item), key.ImdbId, key.Season, key.Lang, key.Hi)
+        };
+        releases.AddRange(ordered.Select(c => c.ReleaseName).Distinct(StringComparer.Ordinal));
+        return releases;
+    }
+
+    /// <summary>
+    /// Jellyfin's series name for an episode item, when it has one.
+    /// </summary>
+    /// <param name="item">Episode item.</param>
+    /// <returns>Series name or null.</returns>
+    private static string? SeriesNameOf(BaseItem item)
+        => item is Episode episode && !string.IsNullOrWhiteSpace(episode.SeriesName)
+            ? episode.SeriesName
+            : null;
 
     private async Task UploadSinglesAsync(List<Candidate> group, CancellationToken ct)
     {

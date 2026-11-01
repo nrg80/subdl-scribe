@@ -141,8 +141,21 @@ internal static class Program
         Check(coordinator.Contains("subdlId: packId", StringComparison.Ordinal), "every episode of a pack carries the pack's id");
         Check(!coordinator.Contains("c.ReleaseName).Distinct().Count() == 1", StringComparison.Ordinal),
             "differing release names do not block a pack — only quality and frame rate do");
-        Check(coordinator.Contains("ordered.Select(c => c.ReleaseName).Distinct().ToList()", StringComparison.Ordinal),
-            "all release names of the season travel with the pack");
+        Check(coordinator.Contains("PackReleases(ordered, key)", StringComparison.Ordinal),
+            "a pack builds its release list through the season label");
+        Check(coordinator.Contains("ordered.Select(c => c.ReleaseName).Distinct(StringComparer.Ordinal)", StringComparison.Ordinal),
+            "all release names of the season still travel with the pack, behind the label");
+        Check(coordinator.Contains("SeasonPack.ReleaseLabel(", StringComparison.Ordinal),
+            "the pack title comes from the shared label helper");
+
+        // F-M374: SubDL titles a full-season upload after releases[0] and ignores `name`
+        // (measured 01.11.2026 against /user/mySubtitles), so the first entry has to name the season.
+        Check(SeasonPack.ReleaseLabel("Lanterns", "tt26545992", 1, "EN", false) == "Lanterns S01 - complete season [EN]",
+            "the label names series, season and language");
+        Check(SeasonPack.ReleaseLabel(null, "tt26545992", 3, "EN", true) == "tt26545992 S03 - complete season (SDH) [EN]",
+            "without a series name the IMDb id carries the label and SDH is marked");
+        Check(SeasonPack.ReleaseLabel("  ", "tt26545992", 2, "FR", false) == "tt26545992 S02 - complete season [FR]",
+            "a blank series name falls back to the IMDb id");
         Check(coordinator.Contains("DRY-RUN would upload season pack", StringComparison.Ordinal), "a dry run names the pack it would send and sends nothing");
         Check(coordinator.Contains("ReadPackId(result.Response) ?? name", StringComparison.Ordinal),
             "with no id in the response the pack name is the identity the rows carry");
@@ -188,6 +201,7 @@ internal static class Program
             "the dry run hands its candidates to the same buffer as the real run");
         Check(pipeline.Contains("a dry run shows the PACK it would send", StringComparison.Ordinal),
             "a dry run names the pack instead of eight singles");
+
 
         var index = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SeasonEpisodeIndex.cs"));
         Check(index.Contains("caching.graphql.imdb.com", StringComparison.Ordinal), "IMDb is asked first");
