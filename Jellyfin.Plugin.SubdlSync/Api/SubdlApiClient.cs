@@ -1785,6 +1785,31 @@ public sealed class SubdlApiClient
     }
 
     /// <summary>
+    /// F-M384: whether the archive behind this download URL already sits in the run or the disk
+    /// cache — asking costs no request, and a hit costs no download unit. The download side uses
+    /// it to prefer a season pack it has paid for already over a single file it would have to
+    /// fetch (measured 01.11.2026: one archive fetch, then nine cache hits for the same season,
+    /// at 1 download unit for all ten episodes).
+    /// </summary>
+    /// <param name="dlUrl">Download path or URL from a search result.</param>
+    /// <returns>True when the body is cached.</returns>
+    public bool IsArchiveCached(string? dlUrl)
+    {
+        string? key = ArchiveKey.FromUrl(dlUrl);
+        if (key == null)
+        {
+            return false;
+        }
+
+        if (_archiveCache.TryGet(key, out byte[]? runBytes) && runBytes is { Length: > 0 })
+        {
+            return true;
+        }
+
+        return _archiveDiskCache.TryGet(key, out byte[]? diskBytes) && diskBytes is { Length: > 0 };
+    }
+
+    /// <summary>
     /// F-M369: turns an archive body into the one subtitle this call wants. Returns the body
     /// unchanged when it is a plain SRT, the matching entry when it is a pack, and null when the
     /// pack cannot be resolved for this episode (F-M215: never hand back the wrong episode).

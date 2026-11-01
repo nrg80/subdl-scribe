@@ -1490,9 +1490,16 @@ public sealed class DownloadPipeline : IDisposable
             // HI filtering happens here any more. The old filter had to strip HI out of a mixed
             // response, which meant the regular ranking silently depended on how many HI releases
             // SubDL happened to return.
+            // F-M384 (measured 01.11.2026): one archive fetch serves every episode of the pack, so a
+            // pack candidate beats an equally good single — and a pack whose archive is ALREADY
+            // cached beats both, because it costs no download unit at all. The preference is a sort
+            // key in front of the text score, not a change to it: a pack only wins when it carries
+            // this episode (PackPreference returns 0 otherwise), and the text similarity still
+            // decides between two packs.
             var ranked = langCands
-                .Select(c => (Cand: c, Score: Score(c, videoBase)))
-                .OrderByDescending(x => x.Score)
+                .Select(c => (Cand: c, Score: Score(c, videoBase), Pack: PackPreference(c, season, episode)))
+                .OrderByDescending(x => x.Pack)
+                .ThenByDescending(x => x.Score)
                 .ToList();
 
             // Skip candidates already QA-rejected in earlier runs —
@@ -1560,7 +1567,7 @@ public sealed class DownloadPipeline : IDisposable
             int refusalsThisRun = 0;
             int correctedSaved = 0;
             bool correctionHuntAbandoned = false;
-            foreach (var (cand, _) in ranked)
+            foreach (var (cand, _, _) in ranked)
             {
                 // THE walk's limit (F-M318/F-M331): the configured correction attempts are spent —
                 // give up on this language for this run. Sits BEFORE the fetch on purpose: breaking
@@ -2848,6 +2855,38 @@ public sealed class DownloadPipeline : IDisposable
                         season, episode, cand.ReleaseName, want.Name, want.HearingImpaired);
                 }
 
+                // F-M383 (measured 01.11.2026 on rosetestdev, /api/v2/me before and after each
+                // fetch): a single archive ENTRY costs one download unit, and the whole ARCHIVE
+                // costs one unit too — 58,376 B for one episode and 196,283 B for all ten. Ten
+                // single fetches therefore spend ten of the fifty daily units on a season that
+                // one archive fetch serves completely. The archive is fetched through
+                // DownloadSubtitleFileAsync, so the run cache and the disk cache (F-M369/F-M370)
+                // answer every further episode of the same pack without a request; UnpackAsync
+                // then takes the entry that names OUR episode, never "the first .srt".
+                bool archiveUrl = cand.Url.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                    || cand.Url.Contains(".zip?", StringComparison.OrdinalIgnoreCase);
+                if (cand.UnpackFiles.Count >= 2 && archiveUrl)
+                {
+                    byte[]? whole = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode).ConfigureAwait(false);
+                    if (whole is { Length: > 0 })
+                    {
+                        // Info, not Detail: this line marks every episode that is served from the
+                        // ARCHIVE instead of its own member URL — once per pack the archive is
+                        // fetched, every further episode of the same pack is a cache hit (the run
+                        // summary names the split: "N archive hit(s) (M from disk)").
+                        _logger.LogInformation(
+                            "[SubDL] pack served whole — {N} file(s) per archive fetch: {Release}",
+                            cand.UnpackFiles.Count, cand.ReleaseName);
+                        return (whole, want);
+                    }
+
+                    // The archive did not resolve to our episode (F-M215): fall through to the
+                    // single member URL rather than saving the wrong text.
+                    _logger.LogWarning(
+                        "[SubDL-D] pack {Release} did not resolve S{Season}E{Episode} from the archive — trying the single file.",
+                        cand.ReleaseName, season, episode);
+                }
+
                 var packBytes = await _api.DownloadSubtitleFileAsync(want.Url, ct).ConfigureAwait(false);
                 return (packBytes, want);
             }
@@ -2880,6 +2919,31 @@ public sealed class DownloadPipeline : IDisposable
 
         var fallback = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode).ConfigureAwait(false);
         return (fallback, null);
+    }
+
+    /// <summary>
+    /// F-M384: how much a candidate is worth as an ARCHIVE. <c>2</c> when the pack carries this
+    /// episode and its archive is already cached (free), <c>1</c> when it carries the episode but
+    /// must be fetched (one unit for the whole season), <c>0</c> for anything else — including a
+    /// pack that does not contain the episode, which the download path would refuse anyway.
+    /// </summary>
+    /// <param name="c">Candidate from the search.</param>
+    /// <param name="season">Wanted season (0 = unknown).</param>
+    /// <param name="episode">Wanted episode (0 = unknown).</param>
+    /// <returns>Preference rank, higher wins.</returns>
+    private long PackPreference(SubtitleCandidate c, int season, int episode)
+    {
+        if (c.UnpackFiles.Count < 2 || (season <= 0 && episode <= 0))
+        {
+            return 0;
+        }
+
+        if (c.FindUnpackFile(season, episode) == null)
+        {
+            return 0;
+        }
+
+        return _api.IsArchiveCached(c.Url) ? 2 : 1;
     }
 
     private long Score(SubtitleCandidate c, string videoBase)
