@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.263",
-        "changelog": "v12.1.12.263: Subtitle packs are cached per archive rather than per download URL and stay on\n    disk for 14 days, so a season pack is not fetched again for every episode.",
+        "version": "12.1.12.264",
+        "changelog": "v12.1.12.264: A file that already carries a Norwegian subtitle is no longer given a second one, whichever written form the existing subtitle uses.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.263-dev/Jellyfin.Plugin.SubdlSync_12.1.12.263.zip",
-        "checksum": "f5e82e8693ee1cfbf8bcf93d95700260",
-        "timestamp": "2026-11-01T12:22:58Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.264-dev/Jellyfin.Plugin.SubdlSync_12.1.12.264.zip",
+        "checksum": "afdf5f17f2aabd81ee9ec00ea5969b6e",
+        "timestamp": "2026-11-01T12:47:07Z"
       }
     ]
   }
