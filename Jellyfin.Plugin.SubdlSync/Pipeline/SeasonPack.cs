@@ -164,7 +164,9 @@ public static partial class SeasonPack
         string number = episode.ToString("00", CultureInfo.InvariantCulture);
         string title = (episodeTitle ?? string.Empty).Trim();
 
-        foreach (char bad in System.IO.Path.GetInvalidFileNameChars())
+        // The set is fixed, not the platform's: the pack lands on SubDL's disk, where a name has to
+        // survive every filesystem, and Linux' own list would let `:` and `?` through.
+        foreach (char bad in "\\/:*?\"<>|")
         {
             title = title.Replace(bad.ToString(), " ", StringComparison.Ordinal);
         }
