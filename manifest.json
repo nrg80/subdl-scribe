@@ -10,11 +10,11 @@
     "versions": [
       {
         "version": "12.1.12.279",
-        "changelog": "v12.1.12.279: Season packs name the resolution by the video width (a cropped 1920x800 encode is 1080p, not\n  720p), keep illegal characters out of the name, and append the release group the file name states. A cue too\n  short to be seen (100 ms or less) is dropped instead of failing the whole file — one 1 ms cue had cost a\n  complete season pack.",
+        "changelog": "v12.1.12.279: Release names take the resolution from the video width, drop illegal characters and append the\n  group the file name states; cues of 100 ms or less are dropped instead of failing the file.",
         "targetAbi": "12.1.0.0",
         "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.279-dev/Jellyfin.Plugin.SubdlSync_12.1.12.279.zip",
-        "checksum": "51f75579cb22bfe744a00285dce04705",
-        "timestamp": "2026-11-01T21:50:20Z"
+        "checksum": "c3f238b260063ed4513b05bb88f6703b",
+        "timestamp": "2026-11-01T22:01:05Z"
       }
     ]
   }
