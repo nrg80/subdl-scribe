@@ -510,7 +510,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// (user decision 08.10.2026): default 1 — a full import is complete well inside
     /// this window, so the cycle starts sooner without splitting one season drop.
     /// </summary>
-    public int ArrivalDebounceMinutes { get; set; } = 1;
+    public int ArrivalDebounceMinutes { get; set; } = 2;
 
     /// <summary>
     /// (user decision 14.09.2026): when a due job (anchor fire, recovery

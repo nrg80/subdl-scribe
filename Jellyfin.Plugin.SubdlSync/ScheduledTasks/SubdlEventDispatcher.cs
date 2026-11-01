@@ -34,7 +34,7 @@ namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
 /// <summary>
 /// (user decision 14.09.2026): the EXECUTION engine ("EventTrigger").
 /// Three event sources feed one cycle machine:
-///   1. Library change (ItemAdded) → on-arrival gates (F-M55) → 5-min debounce
+///   1. Library change (ItemAdded) → on-arrival gates (F-M55) → arrival debounce (F-M1a)
 ///      (NOT reset by further events, user decision 12.09.2026) → cycle scoped
 ///      to the directions that want on-arrival.
 ///   2. Refetch tick (from the scheduler coordinator / scheduled tasks) → cycle.
@@ -236,9 +236,9 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
     }
 
-    /// <summary>Debounce window (minutes, config-driven, default 1).</summary>
+    /// <summary>Debounce window (minutes, config-driven, default 2).</summary>
     private static TimeSpan DebounceWindow => TimeSpan.FromMinutes(
-        Plugin.Instance?.Configuration.ArrivalDebounceMinutes is int m && m > 0 ? Math.Clamp(m, 1, 120) : 1);
+        Plugin.Instance?.Configuration.ArrivalDebounceMinutes is int m && m > 0 ? Math.Clamp(m, 1, 120) : 2);
 
     // ────────────────────────────────────────────────────────────────────────
     //  EVENT SOURCE 1: library changes
