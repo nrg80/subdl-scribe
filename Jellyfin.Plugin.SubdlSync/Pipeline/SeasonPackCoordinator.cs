@@ -250,7 +250,11 @@ public sealed class SeasonPackCoordinator
             return;
         }
 
-        string? packId = ReadPackId(result.Response);
+        // The Upload API answers a completed upload with {"status":true,"message":"subtitle sent for
+        // review"} — no id. The pack's identity in our own rows is therefore the pack NAME when the
+        // response carries no id: it is unique per season and content, and it is what the
+        // postprocessing pass can match against /user/mySubtitles.
+        string? packId = ReadPackId(result.Response) ?? name;
         foreach (var candidate in ordered)
         {
             var c = candidate;

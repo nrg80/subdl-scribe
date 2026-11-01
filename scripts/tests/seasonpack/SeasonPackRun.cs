@@ -145,6 +145,8 @@ internal static class Program
         Check(coordinator.Contains("ordered.Select(c => c.ReleaseName).Distinct().ToList()", StringComparison.Ordinal),
             "all release names of the season travel with the pack");
         Check(coordinator.Contains("DRY-RUN would upload season pack", StringComparison.Ordinal), "a dry run names the pack it would send and sends nothing");
+        Check(coordinator.Contains("ReadPackId(result.Response) ?? name", StringComparison.Ordinal),
+            "with no id in the response the pack name is the identity the rows carry");
 
         var pipeline = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         Check(pipeline.Contains("&& !cand.IsLoose && !cand.Forced", StringComparison.Ordinal), "no pack for a loose sidecar or a forced track");
