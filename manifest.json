@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.274",
-        "changelog": "v12.1.12.274: A lying language tag is corrected on upload, and a pack without a release in its names is named after the file's own resolution, source and codec.",
+        "version": "12.1.12.275",
+        "changelog": "v12.1.12.275: A season pack states no episode range, which is what made SubDL file it as episode one.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.274-dev/Jellyfin.Plugin.SubdlSync_12.1.12.274.zip",
-        "checksum": "2350e12df5e37493d74bc7c403c5eda3",
-        "timestamp": "2026-11-01T18:17:50Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.275-dev/Jellyfin.Plugin.SubdlSync_12.1.12.275.zip",
+        "checksum": "95105fee612515142908e1412581a47c",
+        "timestamp": "2026-11-01T18:29:38Z"
       }
     ]
   }
