@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.262",
-        "changelog": "v12.1.12.262: The run cache now also holds large archives — 16 MB each instead of 8, 64 MB in\n    total — so a whole-series pack is not fetched a second time.",
+        "version": "12.1.12.263",
+        "changelog": "v12.1.12.263: Subtitle packs are cached per archive rather than per download URL and stay on\n    disk for 14 days, so a season pack is not fetched again for every episode.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.262-dev/Jellyfin.Plugin.SubdlSync_12.1.12.262.zip",
-        "checksum": "b1f884bfe7d08f49ffbddbf1fc33184f",
-        "timestamp": "2026-10-31T04:30:40Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.263-dev/Jellyfin.Plugin.SubdlSync_12.1.12.263.zip",
+        "checksum": "f5e82e8693ee1cfbf8bcf93d95700260",
+        "timestamp": "2026-11-01T12:22:58Z"
       }
     ]
   }
