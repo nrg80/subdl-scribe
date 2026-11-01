@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.264",
-        "changelog": "v12.1.12.264: A file that already carries a Norwegian subtitle is no longer given a second one, whichever written form the existing subtitle uses.",
+        "version": "12.1.12.265",
+        "changelog": "v12.1.12.265: A season whose episodes are all present and pass the checks goes up as one pack instead of one subtitle per episode.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.264-dev/Jellyfin.Plugin.SubdlSync_12.1.12.264.zip",
-        "checksum": "afdf5f17f2aabd81ee9ec00ea5969b6e",
-        "timestamp": "2026-11-01T12:47:07Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.265-dev/Jellyfin.Plugin.SubdlSync_12.1.12.265.zip",
+        "checksum": "fd4bd5e3c235acbd42fd5c78f4876efd",
+        "timestamp": "2026-11-01T14:56:06Z"
       }
     ]
   }
