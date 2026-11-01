@@ -26,10 +26,8 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
-  v12.1.12.279: Season packs name the resolution by the video width (a cropped 1920x800 encode is 1080p, not
-  720p), keep illegal characters out of the name, and append the release group the file name states. A cue too
-  short to be seen (100 ms or less) is dropped instead of failing the whole file — one 1 ms cue had cost a
-  complete season pack.
+  v12.1.12.279: Release names take the resolution from the video width, drop illegal characters and append the
+  group the file name states; cues of 100 ms or less are dropped instead of failing the file.
   v12.1.12.278: The hearing-impaired (SDH) subtitle states it in its name — .SDH after the language code —
   in the pack title, in the pack member and in the single upload, instead of only in the hi field.
   v12.1.12.277: Pack members name their season, so SubDL no longer files them under season zero.
