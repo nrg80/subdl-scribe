@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.65
-**Status:** Implementation — v12.1.12.279.
+**Version:** 2.66
+**Status:** Implementation — v12.1.12.280.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -20,7 +20,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 49 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 51 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 7 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 19 requirements
@@ -290,6 +290,14 @@ A dry run reports the HI pick from the HI pool; the real selection happens after
 **The ZIP fallback matches the entry NAME** (`S01E06`, `s01.e06`, `1x06`, SubDL's `S0106`). A multi-file archive whose entry cannot be resolved returns **null**.
 
 A pack with no entry for this episode is **skipped**, not saved wrong. Non-pack paths keep their existing behaviour.
+
+**F-M383 [D] (measured 01.11.2026):** **A pack that lists at least two files is fetched as the whole archive; the episode is then taken from that archive's own listing.** Measured on the test account: one member file costs **one** download unit, and the whole archive costs the same **one** unit — ten episodes of a season therefore cost one unit instead of ten.
+
+The archive body stays in the run cache and in the disk cache (14 days), so the remaining episodes of the same season are served without another request; the run summary reports the split as archive hits. The episode is still chosen by name from `unpack_files` (F-M215), never as "the first .srt": an archive that lacks this episode, and a pack that lists only one file, fall back to the single-file download.
+
+**F-M384 [D] (development, 01.11.2026):** **The ranking prefers a season pack over an equally good single file, and a cached pack over one it would still have to fetch.** Two sort keys sit in front of the text score, which itself is unchanged: `2` for a pack that carries this episode and whose archive already sits in the run or disk cache (free), `1` for a pack that carries it but must be fetched, `0` for everything else — a pack without the episode never wins the preference.
+
+Between two packs the text similarity still decides, and a matching release group still beats a foreign pack, because the preference is a rank and not a score bonus. Bench evidence: ten candidates per episode, the pack was chosen for every episode, and one season cost two units instead of ten.
 
 **F-M156:** **Missed refetch anchors:** an unhandled anchor is taken up by the next regular fire; the marker counts the claim, not the outcome. Missed slots do not stack.
 
