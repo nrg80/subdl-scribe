@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.280",
-        "changelog": "v12.1.12.280: A season pack is fetched as one archive and every episode is taken from it — a whole season costs one download unit instead of one per episode.",
+        "version": "12.1.12.281",
+        "changelog": "v12.1.12.281: Quality-gate switches say what they do: upload corrects the language, download rejects the candidate, and uploads that never left are no longer called discarded.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.280-dev/Jellyfin.Plugin.SubdlSync_12.1.12.280.zip",
-        "checksum": "e6d0bc2942ed121a35ce06cb2b97dcf5",
-        "timestamp": "2026-11-01T23:22:01Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.281-dev/Jellyfin.Plugin.SubdlSync_12.1.12.281.zip",
+        "checksum": "500b95e0d41f69b12728cb7e11c5f1ed",
+        "timestamp": "2026-11-01T23:46:46Z"
       }
     ]
   }
