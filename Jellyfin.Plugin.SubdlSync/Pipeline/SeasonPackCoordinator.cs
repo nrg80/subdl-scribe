@@ -68,6 +68,7 @@ public sealed class SeasonPackCoordinator
     private readonly ILogger _logger;
     private readonly PluginConfiguration _config;
     private readonly IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> _complete;
+    private readonly ISet<(string ImdbId, int Season)> _packable;
     private readonly Dictionary<(string ImdbId, int Season, string Lang, bool Hi), List<Candidate>> _buffers = new();
     private readonly Action<string, int> _countUploaded;
     private readonly Action<int> _countFailed;
@@ -81,6 +82,11 @@ public sealed class SeasonPackCoordinator
     /// <param name="logger">Logger.</param>
     /// <param name="config">Plugin configuration.</param>
     /// <param name="complete">Seasons that are complete, with their aired episode set.</param>
+    /// <param name="packable">
+    /// Seasons whose QUEUED episodes cover the whole aired season. Only those are buffered: a season
+    /// whose other episodes are already up individually cannot become a pack, and making it wait for
+    /// the end of the run would delay its uploads for nothing (F-M373).
+    /// </param>
     /// <param name="countUploaded">Called with (season label, number uploaded) after a pack.</param>
     /// <param name="countFailed">Called with the number of failed episodes.</param>
     /// <param name="reportDone">Called with an item id whose position is done.</param>
@@ -90,6 +96,7 @@ public sealed class SeasonPackCoordinator
         ILogger logger,
         PluginConfiguration config,
         IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
+        ISet<(string ImdbId, int Season)> packable,
         Action<string, int> countUploaded,
         Action<int> countFailed,
         Action<string> reportDone)
@@ -99,17 +106,20 @@ public sealed class SeasonPackCoordinator
         _logger = logger;
         _config = config;
         _complete = complete;
+        _packable = packable;
         _countUploaded = countUploaded;
         _countFailed = countFailed;
         _reportDone = reportDone;
     }
 
-    /// <summary>True when this season is complete and therefore worth buffering.</summary>
+    /// <summary>True when this season is complete AND fully queued, therefore worth buffering.</summary>
     /// <param name="imdbId">Series IMDb id.</param>
     /// <param name="season">Season number.</param>
     /// <returns>True when buffering applies.</returns>
     public bool ShouldBuffer(string? imdbId, int season)
-        => !string.IsNullOrWhiteSpace(imdbId) && season > 0 && _complete.ContainsKey((imdbId!, season));
+        => !string.IsNullOrWhiteSpace(imdbId) && season > 0
+           && _complete.ContainsKey((imdbId!, season))
+           && _packable.Contains((imdbId!, season));
 
     /// <summary>
     /// Adds an episode's candidate to its buffer and uploads the pack as soon as the buffer holds

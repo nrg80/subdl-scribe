@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.65
-**Status:** Implementation — v12.1.12.267.
+**Status:** Implementation — v12.1.12.268.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -31,7 +31,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 27 requirements
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 15 requirements
-- [11. Content Registry and Identity](#11-content-registry-and-identity) — 20 requirements
+- [11. Content Registry and Identity](#11-content-registry-and-identity) — 21 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 14 requirements
@@ -1058,6 +1058,8 @@ The upload side follows the same rule: a forced track is removed from the upload
 
 **F-M370 (01.11.2026):** **Packs are cached across runs; single files are not.** Only a ZIP body enters a cache. A cached archive that does not contain the entry a call wants is fetched again, and the call is not rejected. On disk the plugin keeps archives for a configurable number of days (default 14) in its data folder, bounded by a configurable ceiling (default 512 MB, oldest first) and trimmed at the start of every run; 0 in either setting switches the disk cache off. A hit on disk restarts the retention. The run summary reports the number of archive hits and how many of them came from disk; both settings sit in the Download tab.
 **F-M372 (01.11.2026):** **A season pack is earned, never assumed.** SubDL builds the container itself: one `uploadSingleSubtitle` per episode, then one `uploadSubtitle` carrying the array `file_n_ids`, `is_full_season=true`, the episode range in `ef`/`ee`, and a `name` that becomes the zip name on download. The switch sends a season that way only when the season is complete — the episodes on disk are exactly the episodes that aired, asked at IMDb with TMDB as the fallback — and every episode passed the gates the single upload passes. Incomplete seasons, a failed gate, mixed sources, loose sidecars and forced tracks stay single uploads. The switch sits directly above the upload gates and is on by default. One pack is one language, one HI flag and one source; its name is `{imdb}.S{ss}.{pack hash}.{LANG}`, the pack hash being the MD5 over the episodes' content hashes in episode order, and every episode of the pack carries the pack's id in its own registry row.
+
+**F-M373 (01.11.2026):** **A pack needs the whole season in the same run.** The run plans its packable seasons before the first item: a season is packable only when the episodes queued for this run are exactly the episodes that aired — an episode that is already up individually cannot join a container, so a season that is only partly queued is uploaded as singles immediately instead of waiting for the end of the run. The plan is worked first and consecutively, per series then per season then per episode, so a season closes in one go and no buffer outlives it; queued work outside the plan keeps the order the queue gave it. The plan names each season it takes and each season it leaves behind.
 **F-M371 (01.11.2026):** **Norwegian is one language.** SubDL offers no split between Bokmål and Nynorsk, so a track tagged `nob`, `nno`, `nb` or `nn` counts as `NO` present — a file that already carries one written form is not given a second Norwegian subtitle.
 
 **F-M240 [B1] (superseded by F-M282/F-M283, 02.10.2026):** **The hearing-impaired variant is its own subtitle datum, and completeness is derived rather than marked.**
@@ -1783,7 +1785,9 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T161:** Proves that one archive serves a whole download run — a second pass hits, the per-archive ceiling refuses oversized archives, the entry and byte ceilings evict the oldest, a re-store replaces, an empty body is refused, `Reset` empties entries and counters, and the pipeline resets at both points.
 **T162:** Proves the archive key and the disk cache — the entries of one pack share a key, an unusable URL has none, only ZIP bodies are stored, retention expires and a hit restarts it, the ceiling drops the oldest first, and both switches read 0 as off.
 
-**T163 (01.11.2026):** The season-pack suite asks the arithmetic and the documented upload shape without a network: the aired set drops the E0 entry IMDb reports, completeness is set equality on both sides, the pack hash is order-sensitive and changes with a corrected episode, the name carries no `.zip` because SubDL appends it, and the pack call sends the array of file ids with `is_full_season=true` and the episode range. **47 checks.**
+**T164 (01.11.2026):** The season-pack suite asks the run plan without a library: a packable season is worked first and in episode order, the queued work outside it keeps its order, an empty plan leaves the order untouched, a season that is only partly queued is not the season that aired and is therefore not buffered, and the plan asks the same completeness rule as the season index. Part of the T163 suite's **56 checks.**
+
+**T163 (01.11.2026):** The season-pack suite asks the arithmetic and the documented upload shape without a network: the aired set drops the E0 entry IMDb reports, completeness is set equality on both sides, the pack hash is order-sensitive and changes with a corrected episode, the name carries no `.zip` because SubDL appends it, and the pack call sends the array of file ids with `is_full_season=true` and the episode range. **56 checks.**
 
 **T160:** A deferred anchor job comes back, and deadlines are read in the clock they were written in (F-M368). `scripts/tests/anchorgate`, 36 checks against the published assembly: `AnchorJobGate.IsDue` is true with a consumed marker plus a pending deferral (false before the fix), false for a fired day without one; `DeferralElapsed` holds a run until 15:40 UTC is reached (16:25 local read raw says "expired" an hour early — the defect); `NormalizeDeadline` returns local values as UTC and leaves UTC/MinValue alone; and the source must use both gates, write no local-clock deadline, carry no `|| now < …DeferredUntil` term, count the refresh on the one slot its fire resets, and gate every pending-fire key on a future deadline.
 

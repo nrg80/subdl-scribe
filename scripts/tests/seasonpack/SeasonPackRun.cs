@@ -153,6 +153,38 @@ internal static class Program
         Check(pipeline.Contains("SeasonPack.IsComplete(aired, entry.Value)", StringComparison.Ordinal), "the pipeline asks the completeness rule");
         Check(pipeline.Contains("SeasonEpisodeIndex.AiredAsync", StringComparison.Ordinal), "and gets the answered season from IMDb");
 
+        // F-M373: a pack needs the WHOLE season in this run. Episodes that are already up
+        // individually cannot join, so a season that is only partly queued is worked as singles
+        // right away — and the seasons that can still pack are closed in one go, one after another.
+        var queuedItems = new List<SeasonPack.RunItem>
+        {
+            new("e5", "tt1", 1, 5),
+            new("e1", "tt1", 1, 1),
+            new("m1", null, -1, -1),
+            new("e9", "tt2", 2, 3),
+            new("e3", "tt1", 1, 3),
+        };
+        var order = SeasonPack.ClosureOrder(queuedItems, new HashSet<(string, int)> { ("tt1", 1) });
+        Check(order.Take(3).SequenceEqual(new[] { "e1", "e3", "e5" }),
+            "a packable season runs first and in episode order, so it closes in one go");
+        Check(order.Skip(3).SequenceEqual(new[] { "m1", "e9" }),
+            "everything outside the plan keeps the order the queue gave it");
+        Check(SeasonPack.ClosureOrder(queuedItems, new HashSet<(string, int)>())
+                .SequenceEqual(queuedItems.Select(i => i.Id)),
+            "with nothing packable the run order is untouched");
+        Check(!SeasonPack.IsComplete(new[] { 1, 2, 3 }, new[] { 1, 3 }),
+            "a season that is only partly queued is not the season that aired");
+        Check(coordinator.Contains("&& _packable.Contains((imdbId!, season))", StringComparison.Ordinal),
+            "a partly queued season is not buffered — it stays single right away");
+        Check(pipeline.Contains("var packable = PlanSeasons(completeSeasons, items);", StringComparison.Ordinal),
+            "the plan is computed before the loop, from the queue");
+        Check(pipeline.Contains("SeasonPack.IsComplete(entry.Value, have)", StringComparison.Ordinal),
+            "the plan asks the same completeness rule as the season index");
+        Check(pipeline.Contains("items = OrderForClosure(items, packable);", StringComparison.Ordinal),
+            "the run works the plan's seasons first");
+        Check(pipeline.Contains("the rest is already up, stays single", StringComparison.Ordinal),
+            "a partly queued season says why it stays single");
+
         var index = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SeasonEpisodeIndex.cs"));
         Check(index.Contains("caching.graphql.imdb.com", StringComparison.Ordinal), "IMDb is asked first");
         Check(index.Contains("/tv/{tmdbId}/season/{season}", StringComparison.Ordinal), "TMDB is the fallback");

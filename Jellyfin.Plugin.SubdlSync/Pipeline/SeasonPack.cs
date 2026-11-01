@@ -18,6 +18,43 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 /// </summary>
 public static class SeasonPack
 {
+    /// <summary>
+    /// One item of a run, as far as the pack plan needs it: identity, series IMDb id and the
+    /// position inside the season. Movies carry a null IMDb id and never join a pack.
+    /// </summary>
+    /// <param name="Id">Item id.</param>
+    /// <param name="ImdbId">Series IMDb id (null for films and unresolved items).</param>
+    /// <param name="Season">Season number.</param>
+    /// <param name="Episode">Episode number.</param>
+    public readonly record struct RunItem(string Id, string? ImdbId, int Season, int Episode);
+
+    /// <summary>
+    /// F-M373: the order a run works in. A season that goes up as a pack is closed in one go — its
+    /// queued episodes run consecutively and in episode order — so the buffer never outlives a
+    /// season and no season waits for the end of the run. Everything else keeps the order it had.
+    /// </summary>
+    /// <param name="items">The queued items of the run.</param>
+    /// <param name="packable">Seasons whose queued episodes cover the whole aired season.</param>
+    /// <returns>Item ids in working order.</returns>
+    public static IReadOnlyList<string> ClosureOrder(
+        IReadOnlyList<RunItem> items, ISet<(string ImdbId, int Season)> packable)
+    {
+        var grouped = items
+            .Where(i => i.ImdbId != null && packable.Contains((i.ImdbId!, i.Season)))
+            .OrderBy(i => i.ImdbId, StringComparer.Ordinal)
+            .ThenBy(i => i.Season)
+            .ThenBy(i => i.Episode)
+            .Select(i => i.Id)
+            .ToList();
+
+        var rest = items
+            .Where(i => i.ImdbId == null || !packable.Contains((i.ImdbId!, i.Season)))
+            .Select(i => i.Id)
+            .ToList();
+
+        return grouped.Concat(rest).ToList();
+    }
+
     /// <summary>The episode numbers that count as aired: everything above zero, distinct, ascending.</summary>
     /// <param name="raw">Episode numbers as the index reported them.</param>
     /// <returns>Aired set.</returns>

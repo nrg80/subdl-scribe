@@ -409,15 +409,25 @@ public sealed class UploadPipeline
             var completeSeasons = await CompleteSeasonsAsync(runCt).ConfigureAwait(false);
             if (completeSeasons.Count > 0)
             {
-                packCoordinator = new SeasonPackCoordinator(
-                    _api,
-                    Registry,
-                    _logger,
-                    _config,
-                    completeSeasons,
-                    (label, count) => { summary.Uploaded += count; },
-                    count => { summary.Failed += count; },
-                    itemId => ItemResult?.Invoke(itemId, ItemOutcome.Done));
+                // F-M373: a pack needs the WHOLE season in this run. Episodes that are already up
+                // individually cannot join, so a season whose queue covers less than it aired is
+                // worked as singles right away instead of waiting for the end of the run.
+                var packable = PlanSeasons(completeSeasons, items);
+                if (packable.Count > 0)
+                {
+                    packCoordinator = new SeasonPackCoordinator(
+                        _api,
+                        Registry,
+                        _logger,
+                        _config,
+                        completeSeasons,
+                        packable,
+                        (label, count) => { summary.Uploaded += count; },
+                        count => { summary.Failed += count; },
+                        itemId => ItemResult?.Invoke(itemId, ItemOutcome.Done));
+
+                    items = OrderForClosure(items, packable);
+                }
             }
         }
 
@@ -2578,6 +2588,105 @@ public sealed class UploadPipeline
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// F-M373: which complete seasons can still become a pack in THIS run — only those whose queued
+    /// episodes are exactly the season that aired. A season that is only partly queued is already
+    /// partly up, so it is worked as singles right away rather than buffered to the end of the run.
+    /// </summary>
+    /// <param name="complete">Complete seasons with their aired episode set.</param>
+    /// <param name="items">The run's items, before the loop.</param>
+    /// <returns>The seasons that may still form a pack.</returns>
+    private ISet<(string ImdbId, int Season)> PlanSeasons(
+        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
+        IReadOnlyList<BaseItem> items)
+    {
+        var queued = new Dictionary<(string ImdbId, int Season), List<int>>();
+        foreach (var item in items)
+        {
+            if (QueueFilter != null && !QueueFilter.Contains(item.Id.ToString()))
+            {
+                continue;
+            }
+
+            var (imdb, _, season, episode, isSeries) = ResolveIdsRaw(item);
+            if (!isSeries || string.IsNullOrWhiteSpace(imdb) || season < 1 || episode < 1)
+            {
+                continue;
+            }
+
+            var key = (imdb!, season);
+            if (!complete.ContainsKey(key))
+            {
+                continue;
+            }
+
+            if (!queued.TryGetValue(key, out var numbers))
+            {
+                numbers = new List<int>();
+                queued[key] = numbers;
+            }
+
+            if (!numbers.Contains(episode))
+            {
+                numbers.Add(episode);
+            }
+        }
+
+        var packable = new HashSet<(string ImdbId, int Season)>();
+        foreach (var entry in complete)
+        {
+            queued.TryGetValue(entry.Key, out var numbers);
+            var have = numbers ?? new List<int>();
+            if (SeasonPack.IsComplete(entry.Value, have))
+            {
+                packable.Add(entry.Key);
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack plan: {Imdb} S{Season} — all {Count} episode(s) queued, they go up as one pack.",
+                    entry.Key.Item1, entry.Key.Item2, entry.Value.Count);
+            }
+            else
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack skipped: {Imdb} S{Season} — {Have} of {Count} episode(s) queued, the rest is already up, stays single.",
+                    entry.Key.Item1, entry.Key.Item2, have.Count, entry.Value.Count);
+            }
+        }
+
+        return packable;
+    }
+
+    /// <summary>
+    /// F-M373: works the packable seasons first and consecutively, so a season closes in one go and
+    /// no buffer outlives it. Everything else keeps the order the queue gave it.
+    /// </summary>
+    /// <param name="items">The run's items.</param>
+    /// <param name="packable">Seasons that may form a pack.</param>
+    /// <returns>The items in working order.</returns>
+    private List<BaseItem> OrderForClosure(
+        List<BaseItem> items, ISet<(string ImdbId, int Season)> packable)
+    {
+        var run = new List<SeasonPack.RunItem>(items.Count);
+        foreach (var item in items)
+        {
+            var (imdb, _, season, episode, isSeries) = ResolveIdsRaw(item);
+            run.Add(new SeasonPack.RunItem(item.Id.ToString(), isSeries ? imdb : null, season, episode));
+        }
+
+        var rank = new Dictionary<string, int>(StringComparer.Ordinal);
+        var order = SeasonPack.ClosureOrder(run, packable);
+        for (int i = 0; i < order.Count; i++)
+        {
+            rank[order[i]] = i;
+        }
+
+        // Stable: items outside the plan keep their relative order behind the planned seasons.
+        return items
+            .OrderBy(i => rank.TryGetValue(i.Id.ToString(), out var r) ? r : int.MaxValue)
+            .ToList();
     }
 
     private static (string? ImdbId, string? TmdbId, int Season, int Episode, bool IsSeries) ResolveIdsRaw(BaseItem item)
