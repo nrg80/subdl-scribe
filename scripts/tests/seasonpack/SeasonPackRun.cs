@@ -106,8 +106,12 @@ internal static class Program
         Check(api.Contains("[\"is_full_season\"] = \"true\"", StringComparison.Ordinal), "the pack claims a full season");
         Check(api.Contains("[\"is_full_season\"] = \"false\"", StringComparison.Ordinal), "a single upload still claims nothing");
         Check(api.Contains("[\"name\"] = packName", StringComparison.Ordinal), "the name field carries the pack name SubDL zips under");
-        Check(api.Contains("[\"ef\"] = episodeFrom", StringComparison.Ordinal) && api.Contains("[\"ee\"] = episodeTo", StringComparison.Ordinal),
-            "ef/ee carry the episode range");
+        // F-M377 (measured 01.11.2026): ef/ee are the reason our packs were filed as episode 1 with
+        // full_season=false. The file set is the range — the fields must NOT travel.
+        Check(api.IndexOf("[\"ef\"] = episodeFrom", StringComparison.Ordinal) < 0
+              && api.IndexOf("[\"ee\"] = episodeTo", StringComparison.Ordinal) < 0,
+            "a pack carries no ef/ee — SubDL files it as episode 1 when they are present");
+        Check(api.Contains("F-M377"), "… and the measurement is recorded at the call site");
         Check(api.Contains("UploadSingleFileAsync", StringComparison.Ordinal), "one file per uploadSingleSubtitle call");
         Check(api.Contains("pack-file-refused", StringComparison.Ordinal), "a refused file is recognised as such");
         Check(api.Contains("JsonSerializer.Serialize(releaseNames)", StringComparison.Ordinal),

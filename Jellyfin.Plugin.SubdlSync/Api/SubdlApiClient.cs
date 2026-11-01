@@ -1003,9 +1003,14 @@ public sealed class SubdlApiClient
             ["comment"] = string.Empty,
             ["season"] = season.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["hi"] = hearingImpaired ? "true" : "false",
-            ["is_full_season"] = "true",
-            ["ef"] = episodeFrom.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["ee"] = episodeTo.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            ["is_full_season"] = "true"
+
+            // F-M377 (measured 01.11.2026): NO `ef`/`ee` here. SubDL files a full-season upload by
+            // these two fields when they are present — our packs came back as `episode: 1,
+            // episode_from: 1, episode_end: 10, full_season: false`, i.e. single episode 1 with a
+            // range note, while a real full-season entry (ClassicLover's Foundation packs) carries
+            // `episode: null, episode_from: null, episode_end: 0, full_season: true`. The file set
+            // IS the range; stating it again is what broke the pack.
         };
         if (!string.IsNullOrWhiteSpace(imdbId))
         {
