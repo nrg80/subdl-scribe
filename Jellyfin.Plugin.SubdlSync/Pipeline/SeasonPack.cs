@@ -151,17 +151,19 @@ public static partial class SeasonPack
     }
 
     /// <summary>
-    /// F-M378: the name one episode carries INSIDE a pack. It must not state the season: SubDL reads
-    /// season and episode from the file name, and a member that names a season turns the whole
-    /// submission into an episode range instead of a full season.
+    /// F-M378: the name one episode carries INSIDE a pack. It MUST state the season and the episode:
+    /// SubDL reads both from the member's own file name, and a member without them is listed as
+    /// <c>S00E05</c> — the pack then hangs under season zero.
     /// </summary>
+    /// <param name="season">Season number.</param>
     /// <param name="episode">Episode number.</param>
     /// <param name="episodeTitle">Episode title as Jellyfin knows it, when it does.</param>
     /// <param name="language">SubDL language code.</param>
     /// <returns>Name such as <c>01 The Emperor's Peace.en.srt</c>.</returns>
-    public static string MemberFileName(int episode, string? episodeTitle, string language)
+    public static string MemberFileName(int season, int episode, string? episodeTitle, string language)
     {
-        string number = episode.ToString("00", CultureInfo.InvariantCulture);
+        string number = "S" + season.ToString("00", CultureInfo.InvariantCulture)
+            + "E" + episode.ToString("00", CultureInfo.InvariantCulture);
         string title = (episodeTitle ?? string.Empty).Trim();
 
         // The set is fixed, not the platform's: the pack lands on SubDL's disk, where a name has to
@@ -172,7 +174,7 @@ public static partial class SeasonPack
         }
 
         title = string.Join(' ', title.Split(' ', StringSplitOptions.RemoveEmptyEntries));
-        string stem = title.Length == 0 ? number : number + " " + title;
+        string stem = title.Length == 0 ? number : number + " - " + title;
         return stem + "." + language.ToLowerInvariant() + ".srt";
     }
 

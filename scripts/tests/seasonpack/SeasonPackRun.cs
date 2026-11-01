@@ -202,13 +202,12 @@ internal static class Program
         // F-M376: when no name carries a release, the file's own facts name the season.
         // F-M378: SubDL reads s/e from each member's own name — a season in the member name turns the
         // pack into an episode range.
-        Check(SeasonPack.MemberFileName(1, "The Emperor's Peace", "EN") == "01 The Emperor's Peace.en.srt",
-            "a member carries number and title, never a season");
-        Check(!SeasonPack.MemberFileName(3, "The Mathematician's Ghost", "DE").Contains("S03", StringComparison.Ordinal)
-              && !SeasonPack.MemberFileName(3, "x", "DE").Contains("E03", StringComparison.Ordinal),
-            "no season or episode marker in a member name");
-        Check(SeasonPack.MemberFileName(7, null, "FR") == "07.fr.srt", "a missing title leaves the number");
-        Check(SeasonPack.MemberFileName(2, "Bad/Name: Here?", "ES") == "02 Bad Name Here.es.srt",
+        Check(SeasonPack.MemberFileName(1, 1, "The Emperor's Peace", "EN") == "S01E01 - The Emperor's Peace.en.srt",
+            "a member names its season and episode — SubDL reads both from that name");
+        Check(SeasonPack.MemberFileName(2, 7, "Mysteries and Martyrs", "DE") == "S02E07 - Mysteries and Martyrs.de.srt",
+            "season and episode follow the pack's own season");
+        Check(SeasonPack.MemberFileName(3, 7, null, "FR") == "S03E07.fr.srt", "a missing title leaves number and episode");
+        Check(SeasonPack.MemberFileName(1, 2, "Bad/Name: Here?", "ES") == "S01E02 - Bad Name Here.es.srt",
             "file-name characters are stripped, the language is lower case");
 
         Check(SeasonPack.MediaRelease("Foundation", "tt0804484", 1, "web", 1080, "h264")

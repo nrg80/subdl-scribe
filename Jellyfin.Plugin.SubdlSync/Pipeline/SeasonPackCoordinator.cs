@@ -218,7 +218,7 @@ public sealed class SeasonPackCoordinator
         // carry the episode NUMBER AND TITLE and no season, which is also how the seasoned
         // uploaders' packs are built inside.
         var files = ordered
-            .Select(c => (FileName: SeasonPack.MemberFileName(c.Episode, c.Item?.Name, key.Lang), Srt: c.Srt))
+            .Select(c => (FileName: SeasonPack.MemberFileName(key.Season, c.Episode, c.Item?.Name, key.Lang), Srt: c.Srt))
             .ToList();
         string name = SeasonPack.Name(
             key.ImdbId, key.Season, SeasonPack.PackHash(files.Select(f => ContentHashRegistry.ComputeHash(f.Srt))), key.Lang);
