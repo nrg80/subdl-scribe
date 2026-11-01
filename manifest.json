@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.266",
-        "changelog": "v12.1.12.266: Season packs are on by default and the switch sits directly above the upload gates.",
+        "version": "12.1.12.267",
+        "changelog": "v12.1.12.267: Corrected subtitles take slots 01 to 49 and kept originals 50 to 99, both counting up from the bottom of their block.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.266-dev/Jellyfin.Plugin.SubdlSync_12.1.12.266.zip",
-        "checksum": "39cab6817d037fc4fd8b4cd197496da3",
-        "timestamp": "2026-11-01T15:13:33Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.267-dev/Jellyfin.Plugin.SubdlSync_12.1.12.267.zip",
+        "checksum": "65a894d6e2c49efc8a12b03638f371b2",
+        "timestamp": "2026-11-01T15:28:09Z"
       }
     ]
   }
