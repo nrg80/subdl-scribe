@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.277",
-        "changelog": "v12.1.12.277: Pack members name their season, so SubDL no longer files them under season zero.",
+        "version": "12.1.12.278",
+        "changelog": "v12.1.12.278: The hearing-impaired (SDH) subtitle states it in its name — .SDH after the language code —\n  in the pack title, in the pack member and in the single upload, instead of only in the hi field.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.277-dev/Jellyfin.Plugin.SubdlSync_12.1.12.277.zip",
-        "checksum": "662079e74892df23528bf9378753e1e6",
-        "timestamp": "2026-11-01T20:14:42Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.278-dev/Jellyfin.Plugin.SubdlSync_12.1.12.278.zip",
+        "checksum": "da01ef958ee940e73dd9d1b60eb85851",
+        "timestamp": "2026-11-01T20:54:02Z"
       }
     ]
   }
