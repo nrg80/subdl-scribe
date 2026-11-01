@@ -31,7 +31,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 27 requirements
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 15 requirements
-- [11. Content Registry and Identity](#11-content-registry-and-identity) — 21 requirements
+- [11. Content Registry and Identity](#11-content-registry-and-identity) — 25 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 14 requirements
