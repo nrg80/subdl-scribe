@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.267",
-        "changelog": "v12.1.12.267: Corrected subtitles take slots 01 to 49 and kept originals 50 to 99, both counting up from the bottom of their block.",
+        "version": "12.1.12.268",
+        "changelog": "v12.1.12.268: A season pack is planned before the run: only a season whose queued episodes are the whole aired season is packed, and its episodes are worked consecutively so the pack closes in one go.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.267-dev/Jellyfin.Plugin.SubdlSync_12.1.12.267.zip",
-        "checksum": "65a894d6e2c49efc8a12b03638f371b2",
-        "timestamp": "2026-11-01T15:28:09Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.268-dev/Jellyfin.Plugin.SubdlSync_12.1.12.268.zip",
+        "checksum": "f5ecf91017160cab3eb5d6884f83653d",
+        "timestamp": "2026-11-01T15:45:55Z"
       }
     ]
   }
