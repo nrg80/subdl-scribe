@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.275"
+version: "12.1.12.276"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.276: Pack members name no season, which is what SubDL filed as a single episode.
   v12.1.12.275: A season pack states no episode range, which is what made SubDL file it as episode one.
   v12.1.12.274: A lying language tag is corrected on upload, and a pack without a release in its names is named after the file's own resolution, source and codec.
   v12.1.12.273: A pack names a release only when every episode comes from that one release.

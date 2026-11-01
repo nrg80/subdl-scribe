@@ -211,8 +211,14 @@ public sealed class SeasonPackCoordinator
         // SubDL builds the container itself: one file per call, then one metadata call with the
         // array of file ids. What we owe is the pack's NAME and its identity — the MD5 over the
         // episodes' content hashes, in episode order.
+        // F-M378 (measured 01.11.2026): SubDL reads season and episode out of each file's OWN name —
+        // `tt0804484.S01E01.<hash>.EN.srt` comes back as (s=1, e=1), `01 The Emperor's Peace.en.srt`
+        // as (s=0, e=1). A member that names a season makes the whole submission an episode range
+        // (episode_from/episode_end set, full_season=false, i.e. no pack). The members therefore
+        // carry the episode NUMBER AND TITLE and no season, which is also how the seasoned
+        // uploaders' packs are built inside.
         var files = ordered
-            .Select(c => (FileName: SeasonPack.NeutralFileName(true, key.ImdbId, key.Season, c.Episode, key.Lang, ContentHashRegistry.ComputeHash(c.Srt)), Srt: c.Srt))
+            .Select(c => (FileName: SeasonPack.MemberFileName(c.Episode, c.Item?.Name, key.Lang), Srt: c.Srt))
             .ToList();
         string name = SeasonPack.Name(
             key.ImdbId, key.Season, SeasonPack.PackHash(files.Select(f => ContentHashRegistry.ComputeHash(f.Srt))), key.Lang);

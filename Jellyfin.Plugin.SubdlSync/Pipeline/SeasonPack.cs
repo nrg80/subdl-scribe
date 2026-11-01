@@ -151,6 +151,30 @@ public static partial class SeasonPack
     }
 
     /// <summary>
+    /// F-M378: the name one episode carries INSIDE a pack. It must not state the season: SubDL reads
+    /// season and episode from the file name, and a member that names a season turns the whole
+    /// submission into an episode range instead of a full season.
+    /// </summary>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="episodeTitle">Episode title as Jellyfin knows it, when it does.</param>
+    /// <param name="language">SubDL language code.</param>
+    /// <returns>Name such as <c>01 The Emperor's Peace.en.srt</c>.</returns>
+    public static string MemberFileName(int episode, string? episodeTitle, string language)
+    {
+        string number = episode.ToString("00", CultureInfo.InvariantCulture);
+        string title = (episodeTitle ?? string.Empty).Trim();
+
+        foreach (char bad in System.IO.Path.GetInvalidFileNameChars())
+        {
+            title = title.Replace(bad.ToString(), " ", StringComparison.Ordinal);
+        }
+
+        title = string.Join(' ', title.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        string stem = title.Length == 0 ? number : number + " " + title;
+        return stem + "." + language.ToLowerInvariant() + ".srt";
+    }
+
+    /// <summary>
     /// F-M376: a season release built from facts the file itself carries — resolution and codec from
     /// the video stream, the documented source quality, and the series name. No group is invented: the
     /// name ends where the facts end. Returns null when the file says nothing usable.

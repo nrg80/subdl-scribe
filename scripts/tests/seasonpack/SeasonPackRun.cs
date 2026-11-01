@@ -200,6 +200,17 @@ internal static class Program
               == "Lanterns S01 - complete season (SDH) [EN]", "an empty list still yields a title");
 
         // F-M376: when no name carries a release, the file's own facts name the season.
+        // F-M378: SubDL reads s/e from each member's own name — a season in the member name turns the
+        // pack into an episode range.
+        Check(SeasonPack.MemberFileName(1, "The Emperor's Peace", "EN") == "01 The Emperor's Peace.en.srt",
+            "a member carries number and title, never a season");
+        Check(!SeasonPack.MemberFileName(3, "The Mathematician's Ghost", "DE").Contains("S03", StringComparison.Ordinal)
+              && !SeasonPack.MemberFileName(3, "x", "DE").Contains("E03", StringComparison.Ordinal),
+            "no season or episode marker in a member name");
+        Check(SeasonPack.MemberFileName(7, null, "FR") == "07.fr.srt", "a missing title leaves the number");
+        Check(SeasonPack.MemberFileName(2, "Bad/Name: Here?", "ES") == "02 Bad Name Here.es.srt",
+            "file-name characters are stripped, the language is lower case");
+
         Check(SeasonPack.MediaRelease("Foundation", "tt0804484", 1, "web", 1080, "h264")
               == "Foundation.S01.1080p.WEB.x264", "resolution, source and codec from the file name the season");
         Check(SeasonPack.MediaRelease("Dark Matter", "tt1", 2, "bluray", 2160, "hevc")
