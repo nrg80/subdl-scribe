@@ -1066,8 +1066,15 @@ def main():
               "heldByAllowance" in disp_src
               and "!config.DownloadEnabled || heldByAllowance" in disp_src,
               "gating only the fill still walks what earlier cycles queued")
-        check("and the held-back direction still reports why, deferred",
-              "Outcome.Deferred, _downloadAllowanceHeld" in disp_src)
+        # F-M365 superseded the deferred row: a held-back download writes NO row (a row would have
+        # to invent a time for work that did not happen) and says why in the log instead.
+        check("and a held-back download writes no row, it sets the flag",
+              "_downHeldByAllowance = true" in disp_src
+              and "Outcome.Deferred, _downloadAllowanceHeld" not in disp_src,
+              "F-M365: no direction outcome, so no row")
+        check("and the log line carries the reason the direction was held back",
+              "download held back \u2014 {Reason}" in disp_src
+              and "no worker row (F-M365)" in disp_src)
         check("the flag is handed to the seeder, so the queue stays empty too",
               "downloadAllowed: _downloadAllowanceHeld == null" in disp_src)
 
