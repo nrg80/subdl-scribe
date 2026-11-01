@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.65
-**Status:** Implementation — v12.1.12.264.
+**Status:** Implementation — v12.1.12.265.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -1783,7 +1783,7 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T161:** Proves that one archive serves a whole download run — a second pass hits, the per-archive ceiling refuses oversized archives, the entry and byte ceilings evict the oldest, a re-store replaces, an empty body is refused, `Reset` empties entries and counters, and the pipeline resets at both points.
 **T162:** Proves the archive key and the disk cache — the entries of one pack share a key, an unusable URL has none, only ZIP bodies are stored, retention expires and a hit restarts it, the ceiling drops the oldest first, and both switches read 0 as off.
 
-**T163 (01.11.2026):** The season-pack suite asks the arithmetic and the documented upload shape without a network: the aired set drops the E0 entry IMDb reports, completeness is set equality on both sides, the pack hash is order-sensitive and changes with a corrected episode, the name carries no `.zip` because SubDL appends it, and the pack call sends the array of file ids with `is_full_season=true` and the episode range. **42 checks.**
+**T163 (01.11.2026):** The season-pack suite asks the arithmetic and the documented upload shape without a network: the aired set drops the E0 entry IMDb reports, completeness is set equality on both sides, the pack hash is order-sensitive and changes with a corrected episode, the name carries no `.zip` because SubDL appends it, and the pack call sends the array of file ids with `is_full_season=true` and the episode range. **47 checks.**
 
 **T160:** A deferred anchor job comes back, and deadlines are read in the clock they were written in (F-M368). `scripts/tests/anchorgate`, 36 checks against the published assembly: `AnchorJobGate.IsDue` is true with a consumed marker plus a pending deferral (false before the fix), false for a fired day without one; `DeferralElapsed` holds a run until 15:40 UTC is reached (16:25 local read raw says "expired" an hour early — the defect); `NormalizeDeadline` returns local values as UTC and leaves UTC/MinValue alone; and the source must use both gates, write no local-clock deadline, carry no `|| now < …DeferredUntil` term, count the refresh on the one slot its fire resets, and gate every pending-fire key on a future deadline.
 
