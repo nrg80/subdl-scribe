@@ -42,7 +42,8 @@ public static class LanguageMapper
         ["arm"] = "HY", ["bos"] = "BS", ["bel"] = "BE", ["bur"] = "MY", ["mya"] = "MY",
         ["kan"] = "KN", ["kur"] = "KU", ["pus"] = "PS", ["kin"] = "RW", ["sin"] = "SI",
         ["som"] = "SO", ["sun"] = "SU", ["cre"] = "CR",
-        ["kaz"] = "KK", ["kir"] = "KY", ["nob"] = "NO", ["scc"] = "SR", ["fr"] = "FR",
+        ["kaz"] = "KK", ["kir"] = "KY", ["nob"] = "NO", ["nno"] = "NO", ["nb"] = "NO",
+        ["nn"] = "NO", ["scc"] = "SR", ["fr"] = "FR",
         ["mac"] = "MK", ["mon"] = "MN",
     };
 

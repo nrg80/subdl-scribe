@@ -106,6 +106,17 @@ internal static class Program
         Check(open.Any(r => r.Language == "EN"), "EN is OPEN — the download pipeline will search for it");
         Check(!open.Any(r => r.Language == "DE"), "DE is closed — nothing to fetch");
 
+        // Norwegian is one language on SubDL (measured 01.11.2026: languages=NB and NN are ignored by the
+        // API, every hit carries NO), so both written forms count as NO present — a file that carries
+        // Nynorsk must not trigger a second Norwegian download.
+        foreach (var norwegian in new[] { "nob", "nno", "nb", "nn", "nor" })
+        {
+            var noStreams = new List<MediaStream> { Sub(norwegian, null) };
+            var noPresent = SidecarNaming.EmbeddedPresentLanguages(noStreams);
+            Check(noPresent.Contains("NO"), $"a '{norwegian}' track counts as Norwegian present");
+            Check(!noPresent.Contains("EN"), $"a '{norwegian}' track does not make English present");
+        }
+
         var forcedObservation = SubtitleCoverage.FromPairs(new[] { new SubtitleRef("EN", false, true) });
         Check(!forcedObservation.Covers(new SubtitleRef("EN", false)), "a forced datum never covers the regular (F-M284)");
 
