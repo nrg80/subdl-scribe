@@ -85,8 +85,83 @@ public sealed class ContentHashRegistry : IDisposable
         string normalized = srtContent
             .Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace('\r', '\n');
-        return normalized.TrimEnd();
+        return DropInvisibleCues(normalized).TrimEnd();
     }
+
+    /// <summary>
+    /// The shortest cue worth keeping: one that is on screen for at least a tenth of a second
+    /// (a frame at 25 fps is 40 ms, so a 1 ms cue is never seen).
+    /// </summary>
+    public const long MinVisibleCueMs = 100;
+
+    private static readonly System.Text.RegularExpressions.Regex CueTiming = new(
+        @"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// Drops cues that are too short to be seen and renumbers the rest (operator decision
+    /// 01.11.2026). One 1 ms cue (a doubled <c>♪ MTV ♪</c> line at 3.898 s) made the whole file fail
+    /// <c>qa-invalid-srt</c> — measured on MobLand S01E02 — and thereby cost the ENTIRE season pack:
+    /// 9 of 10 episodes were left, so every episode went up as a single and E02 not at all. Nobody
+    /// watching is bothered by such a cue, the rule that judged it cost far more than the cue.
+    /// </summary>
+    /// <param name="normalized">LF-normalised SRT text.</param>
+    /// <returns>The same text when nothing was dropped, otherwise the text without those cues.</returns>
+    private static string DropInvisibleCues(string normalized)
+    {
+        if (normalized.IndexOf("-->", StringComparison.Ordinal) < 0)
+        {
+            return normalized;
+        }
+
+        string[] blocks = normalized.Split("\n\n", StringSplitOptions.RemoveEmptyEntries);
+        var kept = new List<string>(blocks.Length);
+        int dropped = 0;
+        foreach (string block in blocks)
+        {
+            string[] lines = block.Split('\n');
+            int timing = Array.FindIndex(lines, l => l.Contains("-->", StringComparison.Ordinal));
+            if (timing < 0)
+            {
+                kept.Add(block);
+                continue;
+            }
+
+            var m = CueTiming.Match(lines[timing]);
+            if (!m.Success)
+            {
+                kept.Add(block);
+                continue;
+            }
+
+            long span = CueMs(m, 5) - CueMs(m, 1);
+            if (span <= MinVisibleCueMs)
+            {
+                dropped++;
+                continue;
+            }
+
+            if (timing > 0)
+            {
+                lines[timing - 1] = (kept.Count + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            kept.Add(string.Join('\n', lines));
+        }
+
+        if (dropped == 0)
+        {
+            return normalized;
+        }
+
+        return string.Join("\n\n", kept) + "\n";
+    }
+
+    private static long CueMs(System.Text.RegularExpressions.Match m, int firstGroup)
+        => ((long.Parse(m.Groups[firstGroup].Value, System.Globalization.CultureInfo.InvariantCulture) * 3600)
+            + (long.Parse(m.Groups[firstGroup + 1].Value, System.Globalization.CultureInfo.InvariantCulture) * 60)
+            + long.Parse(m.Groups[firstGroup + 2].Value, System.Globalization.CultureInfo.InvariantCulture)) * 1000
+            + long.Parse(m.Groups[firstGroup + 3].Value, System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// MD5 of the normalized content, in SubDL's own format: the hash of exactly the bytes that get
