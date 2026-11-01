@@ -111,14 +111,13 @@ public static partial class SeasonPack
     }
 
     /// <summary>
-    /// F-M374: the release list a season pack carries. Other uploaders name ONE season release in
-    /// it (measured 01.11.2026 on tt0804484/tt0944947: "Foundation.2021.S03.COMPLETE.ATVP.WEB-DL…",
-    /// "Game of Thrones, SEASON 8 4K x265 [23.976 FPS]") — never the episode releases, because
-    /// SubDL titles the pack after the first entry. So each episode release name is reduced to its
-    /// season form ("…S01E05…" → "…S01…"); where the episodes come from one release that leaves a
-    /// single season name, where they do not, the distinct ones stand side by side, first episode
-    /// first. A release name without any episode marker cannot be reduced and falls back to the
-    /// neutral label.
+    /// F-M374: the one entry a season pack carries in `releases` — SubDL titles the pack after it
+    /// and ignores `name`. Other uploaders put a season release there (measured 01.11.2026 on
+    /// tt0804484/tt0944947: "Foundation.2021.S03.COMPLETE.ATVP.WEB-DL…", "Game of Thrones, SEASON 8
+    /// 4K x265 [23.976 FPS]"), never a list of episode releases — and this plugin mixes nothing:
+    /// only when EVERY episode reduces to the same season release ("…S01E05…" → "…S01…") is that
+    /// release named. Different groups name no release at all; the neutral label stands in, so the
+    /// pack never claims a source it does not have.
     /// </summary>
     /// <param name="episodeReleaseNames">Release names in episode order.</param>
     /// <param name="seriesName">Series name when Jellyfin knows it.</param>
@@ -126,8 +125,8 @@ public static partial class SeasonPack
     /// <param name="season">Season number.</param>
     /// <param name="language">SubDL language code.</param>
     /// <param name="hearingImpaired">HI/SDH variant.</param>
-    /// <returns>Release list, at most three entries, season label as the last resort.</returns>
-    public static IReadOnlyList<string> SeasonReleases(
+    /// <returns>The pack's single release entry.</returns>
+    public static string PackRelease(
         IEnumerable<string> episodeReleaseNames,
         string? seriesName,
         string imdbId,
@@ -136,33 +135,31 @@ public static partial class SeasonPack
         bool hearingImpaired)
     {
         string seasonTag = "S" + season.ToString("00", CultureInfo.InvariantCulture);
-        var seen = new List<string>();
+        string? common = null;
         foreach (string name in episodeReleaseNames)
         {
             if (string.IsNullOrWhiteSpace(name))
             {
-                continue;
+                return ReleaseLabel(seriesName, imdbId, season, language, hearingImpaired);
             }
 
             string reduced = ReduceToSeason(name.Trim(), seasonTag);
-            if (reduced.Length == 0 || seen.Contains(reduced, StringComparer.Ordinal))
+            if (reduced.Length == 0)
             {
-                continue;
+                return ReleaseLabel(seriesName, imdbId, season, language, hearingImpaired);
             }
 
-            seen.Add(reduced);
-            if (seen.Count == 3)
+            if (common is null)
             {
-                break;
+                common = reduced;
+            }
+            else if (!string.Equals(common, reduced, StringComparison.Ordinal))
+            {
+                return ReleaseLabel(seriesName, imdbId, season, language, hearingImpaired);
             }
         }
 
-        if (seen.Count == 0)
-        {
-            seen.Add(ReleaseLabel(seriesName, imdbId, season, language, hearingImpaired));
-        }
-
-        return seen;
+        return common ?? ReleaseLabel(seriesName, imdbId, season, language, hearingImpaired);
     }
 
     /// <summary>
