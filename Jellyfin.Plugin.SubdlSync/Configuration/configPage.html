@@ -288,6 +288,16 @@
                         </div>
 
                         <h3>Download</h3>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadArchiveCacheDays">Archive cache — days on disk</label>
+                            <input id="DownloadArchiveCacheDays" name="DownloadArchiveCacheDays" type="number" is="emby-input" min="0" max="365" />
+                            <div class="fieldDescription">A downloaded subtitle pack is kept this many days and reused instead of being fetched again. A season pack serves one episode per run, and the daily limit is 50 downloads, so the same pack is asked for on the following days — on disk it costs no quota. <strong>0 = off.</strong> Default: 14.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadArchiveCacheMaxMb">Archive cache — ceiling (MB)</label>
+                            <input id="DownloadArchiveCacheMaxMb" name="DownloadArchiveCacheMaxMb" type="number" is="emby-input" min="0" max="10240" />
+                            <div class="fieldDescription">Size ceiling for the archive cache. Past it the oldest archives are dropped first, and the cache is trimmed at the start of every run. <strong>0 = off</strong> — either this or the days at 0 disables the cache. Default: 512.</div>
+                        </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="DownloadDryRun" name="DownloadDryRun" type="checkbox" is="emby-checkbox" />
@@ -1007,6 +1017,8 @@
                         document.querySelector('#UploadContinueAfterLimit').checked = config.UploadContinueAfterLimit;
                         document.querySelector('#DownloadContinueAfterLimit').checked = config.DownloadContinueAfterLimit;
                         document.querySelector('#DownloadDryRun').checked = config.DownloadDryRun;
+                        document.querySelector('#DownloadArchiveCacheDays').value = config.DownloadArchiveCacheDays ?? 14;
+                        document.querySelector('#DownloadArchiveCacheMaxMb').value = config.DownloadArchiveCacheMaxMb ?? 512;
 
                         // F-M23 (rework 25.09.2026): the counters live in the database now, so the GUI
                         // asks the plugin API instead of the configuration.
@@ -1616,6 +1628,8 @@ workers.forEach(function (w) {
                                                 config.DownloadOnArrival = document.querySelector('#DownloadOnArrival').checked;
                         config.DownloadContinueAfterLimit = document.querySelector('#DownloadContinueAfterLimit').checked;
                         config.DownloadDryRun = document.querySelector('#DownloadDryRun').checked;
+                        config.DownloadArchiveCacheDays = Math.max(0, parseInt(document.querySelector('#DownloadArchiveCacheDays').value || '0', 10) || 0);
+                        config.DownloadArchiveCacheMaxMb = Math.max(0, parseInt(document.querySelector('#DownloadArchiveCacheMaxMb').value || '0', 10) || 0);
                         // Union of both library views — a tick in either the
                         // General or the Download tab selects the library.
                         var selected = [];

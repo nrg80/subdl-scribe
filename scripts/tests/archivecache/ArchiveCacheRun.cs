@@ -50,6 +50,9 @@ internal static class Program
 
     private static string Url(string id) => "https://dl.subdl.com/subtitle/" + id + ".zip";
 
+    /// <summary>A body that passes the ZIP signature check the caches apply.</summary>
+    private static byte[] Zip(int n) => new byte[] { 0x50, 0x4B, 3, 4 }.Concat(Bytes(n)).ToArray();
+
     private static int Main(string[] args)
     {
         var root = args.Length > 0 ? args[0] : "/opt/data/subdl-scribe";
@@ -139,32 +142,156 @@ internal static class Program
         Check(published.Refused == 1, "and only that one was refused");
         published.Reset();
 
-        // ── 7. Wiring on the source ──────────────────────────────────────────────
-        Console.WriteLine("7. Source contract");
+                // ── 7. The key: an archive, not an entry ────────────────────────────────
+        // Measured 01.11.2026 (run 04:07-04:24Z, 44 files): 51 archive fetches, ZERO cache hits,
+        // although three packs served many entries —
+        //   Xhfe8mD1w5/  ten entries,  0p9xSnSU4g/  nine,  BlwZSYtLaU/  seven.
+        // The key was the full URL, so the same pack was downloaded once per entry. Keying on the
+        // archive segment turns 23 of those 51 fetches into hits.
+        Console.WriteLine("7. Archive key");
+        Check(ArchiveKey.FromUrl("https://dl.subdl.com/subtitle/Xhfe8mD1w5/5Ibw144l42") == "Xhfe8mD1w5",
+            "an entry URL keys on the archive segment");
+        Check(ArchiveKey.FromUrl("https://dl.subdl.com/subtitle/Xhfe8mD1w5/SUK5YnspZX?api_key=secret") == "Xhfe8mD1w5",
+            "the query string does not change the key");
+        Check(ArchiveKey.FromUrl("https://dl.subdl.com/subtitle/Xhfe8mD1w5/5Ibw144l42")
+              == ArchiveKey.FromUrl("https://dl.subdl.com/subtitle/Xhfe8mD1w5/SUK5YnspZX"),
+            "two entries of one pack share the key — that is the whole point");
+        Check(ArchiveKey.FromUrl("https://dl.subdl.com/subtitle/0p9xSnSU4g/Rc8foE2T9m") != "Xhfe8mD1w5",
+            "a different pack gets a different key");
+        Check(ArchiveKey.FromUrl("https://dl.subdl.com/subtitle/1778460-1115627.zip") == "1778460-1115627",
+            "a bare zip name is its own archive");
+        Check(ArchiveKey.FromUrl("https://dl.subdl.com/subtitle/abc") == null, "too short to be a key");
+        Check(ArchiveKey.FromUrl("https://dl.subdl.com/subtitle/../../etc/passwd") == null,
+            "path traversal never becomes a key");
+        Check(ArchiveKey.FromUrl("") == null && ArchiveKey.FromUrl(null) == null, "no URL, no key");
+        Check(!ArchiveKey.IsCacheable("https://dl.subdl.com/other/thing.srt"), "a non-archive URL is not cacheable");
+
+        // ── 8. The disk cache: days and megabytes, each 0 = off ─────────────────
+        Console.WriteLine("8. Disk cache");
+        var dir = Path.Combine(Path.GetTempPath(), "archivecache-" + Guid.NewGuid().ToString("N")[..8]);
+        string InCache(string d) => Path.Combine(d, "archive-cache"); // Configure legt diesen Unterordner an
+
+        var off = new ArchiveDiskCache();
+        off.Configure(dir, 0, 512);
+        Check(!off.Enabled, "days = 0 switches the cache off");
+        off.Put("Xhfe8mD1w5", Zip(64));
+        Check(!off.TryGet("Xhfe8mD1w5", out _), "and nothing is read back");
+        Check(!Directory.Exists(InCache(dir)) || Directory.GetFiles(InCache(dir)).Length == 0, "and nothing was written at all");
+
+        var off2 = new ArchiveDiskCache();
+        off2.Configure(dir, 14, 0);
+        Check(!off2.Enabled, "megabytes = 0 switches it off as well");
+
+        var disk = new ArchiveDiskCache();
+        disk.Configure(dir, 14, 512);
+        Check(disk.Enabled, "14 days and 512 MB switch it on");
+        var pack = Zip(2048);
+        disk.Put("Xhfe8mD1w5", pack);
+        Check(File.Exists(Path.Combine(InCache(dir), "Xhfe8mD1w5.zip")), "the archive is a file named after its key");
+        Check(disk.TryGet("Xhfe8mD1w5", out var fromDisk) && fromDisk!.Length == pack.Length && disk.Hits == 1,
+            "a second run gets the same bytes without a fetch");
+        Check(disk.SizeBytes() > 0 && disk.Count() == 1, "size and count are readable for diagnostics");
+
+        disk.Put("plain", Bytes(512));
+        Check(!disk.TryGet("plain", out _), "a body that is not a ZIP is never stored — a single file must not be served for another");
+
+        // Ceiling: oldest goes first.
+        var narrow = new ArchiveDiskCache();
+        var dir2 = dir + "-narrow";
+        narrow.Configure(dir2, 14, 4);
+        for (int i = 0; i < 5; i++)
+        {
+            narrow.Put("k" + i, Zip(1024 * 1024));
+            File.SetLastWriteTimeUtc(Path.Combine(InCache(dir2), "k" + i + ".zip"), DateTime.UtcNow.AddMinutes(-(30 - i)));
+        }
+
+        Check(narrow.SizeBytes() > 4L * 1024 * 1024, "five megabytes in a four megabyte cache");
+        narrow.Trim();
+        Check(narrow.SizeBytes() <= 4L * 1024 * 1024, "the trim brings it back under the ceiling");
+        Check(!File.Exists(Path.Combine(InCache(dir2), "k0.zip")) && File.Exists(Path.Combine(InCache(dir2), "k4.zip")),
+            "the oldest went first, the newest stayed");
+        Check(narrow.Removed >= 1, "and the removal is counted");
+
+        // Expiry and the touch that keeps a hot pack alive.
+        var exp = new ArchiveDiskCache();
+        var dir3 = dir + "-exp";
+        exp.Configure(dir3, 14, 512);
+        exp.Put("old", Zip(256));
+        File.SetLastWriteTimeUtc(Path.Combine(InCache(dir3), "old.zip"), DateTime.UtcNow.AddDays(-20));
+        Check(!exp.TryGet("old", out _), "an archive older than the retention is a miss");
+        Check(!File.Exists(Path.Combine(InCache(dir3), "old.zip")) && exp.Removed >= 1, "and it is deleted, not kept");
+
+        exp.Put("hot", Zip(256));
+        File.SetLastWriteTimeUtc(Path.Combine(InCache(dir3), "hot.zip"), DateTime.UtcNow.AddDays(-13));
+        Check(exp.TryGet("hot", out _), "an archive inside the retention is a hit");
+        var touched = File.GetLastWriteTimeUtc(Path.Combine(InCache(dir3), "hot.zip"));
+        Check((DateTime.UtcNow - touched).TotalMinutes < 5,
+            "a hit restarts the clock, so a pack that keeps serving episodes does not expire mid-season");
+        exp.Trim();
+        Check(File.Exists(Path.Combine(InCache(dir3), "hot.zip")), "and the trim leaves it alone");
+
+        try
+        {
+            Directory.Delete(dir, recursive: true);
+            Directory.Delete(dir2, recursive: true);
+            Directory.Delete(dir3, recursive: true);
+        }
+        catch (Exception)
+        {
+            // A leftover temp directory must not decide the suite.
+        }
+
+        // ── 9. Wiring on the source ─────────────────────────────────────────────
+        Console.WriteLine("9. Source contract");
         var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlApiClient.cs"));
-        Check(api.Contains("private readonly RunArchiveCache _archiveCache = new();", StringComparison.Ordinal),
-            "the client owns one cache");
-        Check(api.Contains("public RunArchiveCache ArchiveCache => _archiveCache;", StringComparison.Ordinal),
-            "the cache is reachable for the pipeline's reset");
-        Check(api.Contains("_archiveCache.TryGet(fullUrl, out byte[]? cachedArchive)", StringComparison.Ordinal),
-            "the download path asks the cache first");
-        Check(api.Contains("_archiveCache.Put(fullUrl, bytes)", StringComparison.Ordinal),
-            "and stores what it fetched");
+        Check(api.Contains("private readonly RunArchiveCache _archiveCache = new();", StringComparison.Ordinal)
+              && api.Contains("private readonly ArchiveDiskCache _archiveDiskCache = new();", StringComparison.Ordinal),
+            "the client owns both layers");
+        Check(api.Contains("public RunArchiveCache ArchiveCache => _archiveCache;", StringComparison.Ordinal)
+              && api.Contains("public ArchiveDiskCache ArchiveDiskCache => _archiveDiskCache;", StringComparison.Ordinal),
+            "both are reachable for the pipeline");
+        Check(api.Contains("string? key = ArchiveKey.FromUrl(fullUrl);", StringComparison.Ordinal),
+            "the download path derives the key before it fetches");
+        Check(api.Contains("_archiveCache.TryGet(key, out byte[]? runBytes)", StringComparison.Ordinal)
+              && api.Contains("_archiveDiskCache.TryGet(key, out byte[]? diskBytes)", StringComparison.Ordinal),
+            "run layer first, disk layer second");
+        Check(api.Contains("StoreArchive(key, bytes)", StringComparison.Ordinal), "a fetch fills both layers");
+        Check((api.Split("if (bytes.Length <= 4 || bytes[0] != 'P' || bytes[1] != 'K')").Length - 1) >= 2,
+            "packs only — the store and the unpacker agree on what a ZIP is");
+        Check(api.Contains("archive cache does not hold this entry — refetching", StringComparison.Ordinal),
+            "a cached pack without the wanted entry is refetched instead of reported as rejected");
+        Check(api.Contains("Trace(\"GET\", fullUrl, 200, \"archive cache hit (disk)\")", StringComparison.Ordinal),
+            "a disk hit is visible without being counted as a download");
         Check(api.Contains("private async Task<byte[]?> FetchArchiveAsync(string fullUrl, CancellationToken ct)", StringComparison.Ordinal),
-            "the retry ladder moved into its own method");
-        Check(!api.Contains("bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);\n                break;", StringComparison.Ordinal),
-            "no second GET loop left in the cached path");
-        Check(api.Contains("Trace(\"GET\", fullUrl, 200, \"archive cache hit (run)\")", StringComparison.Ordinal),
-            "a hit is visible in the trace without being counted as a download");
+            "the retry ladder still lives in its own method");
 
         var pipe = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
         Check((pipe.Split("_api.ArchiveCache.Reset();").Length - 1) == 2,
-            "the pipeline empties the cache at run start AND in the finally block");
-        Check(pipe.Contains("_api.ArchiveCache.Hits", StringComparison.Ordinal),
-            "the run summary reports the hits");
+            "the pipeline empties the run cache at start AND in the finally block");
+        Check(pipe.Contains("_api.ArchiveDiskCache.Configure(", StringComparison.Ordinal)
+              && pipe.Contains("_api.ArchiveDiskCache.Trim();", StringComparison.Ordinal),
+            "it configures the disk cache and trims it before the first request");
+        Check(pipe.Contains("_config.DownloadArchiveCacheDays", StringComparison.Ordinal)
+              && pipe.Contains("_config.DownloadArchiveCacheMaxMb", StringComparison.Ordinal),
+            "both switches come from the configuration");
+        Check(pipe.Contains("_api.ArchiveDiskCache.Hits", StringComparison.Ordinal), "the summary counts the disk hits");
         var resetIdx = pipe.IndexOf("_api.ArchiveCache.Reset();", StringComparison.Ordinal);
-        var lockIdx = pipe.IndexOf("_dailyLimitWaits = 0;", StringComparison.Ordinal);
-        Check(lockIdx >= 0 && resetIdx > lockIdx, "the first reset sits with the per-run counters");
+        var limitIdx = pipe.IndexOf("_dailyLimitWaits = 0;", StringComparison.Ordinal);
+        Check(limitIdx >= 0 && resetIdx > limitIdx, "the first reset sits with the per-run counters");
+
+        var cfg = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"));
+        Check(cfg.Contains("public int DownloadArchiveCacheDays { get; set; } = 14;", StringComparison.Ordinal),
+            "the default retention is 14 days");
+        Check(cfg.Contains("public int DownloadArchiveCacheMaxMb { get; set; } = 512;", StringComparison.Ordinal),
+            "the default ceiling is 512 MB");
+
+        var page = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"));
+        Check(page.Contains("id=\"DownloadArchiveCacheDays\"", StringComparison.Ordinal)
+              && page.Contains("id=\"DownloadArchiveCacheMaxMb\"", StringComparison.Ordinal),
+            "both switches are fields in the Download tab");
+        Check(page.Contains("config.DownloadArchiveCacheDays =", StringComparison.Ordinal)
+              && page.Contains("config.DownloadArchiveCacheMaxMb =", StringComparison.Ordinal),
+            "the config page writes them back, clamped at 0");
 
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
