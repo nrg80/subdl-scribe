@@ -184,6 +184,10 @@ internal static class Program
             "the run works the plan's seasons first");
         Check(pipeline.Contains("the rest is already up, stays single", StringComparison.Ordinal),
             "a partly queued season says why it stays single");
+        Check(pipeline.Split("await packCoordinator.AddAsync(").Length - 1 >= 2,
+            "the dry run hands its candidates to the same buffer as the real run");
+        Check(pipeline.Contains("a dry run shows the PACK it would send", StringComparison.Ordinal),
+            "a dry run names the pack instead of eight singles");
 
         var index = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SeasonEpisodeIndex.cs"));
         Check(index.Contains("caching.graphql.imdb.com", StringComparison.Ordinal), "IMDb is asked first");

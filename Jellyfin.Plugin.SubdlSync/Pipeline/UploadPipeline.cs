@@ -1250,10 +1250,27 @@ public sealed class UploadPipeline
             // Language so doubles can be matched per stream.
             // F-M184 (23.09.2026): the dry run no longer probes SubDL for duplicates —
             // it reports what WOULD be uploaded, without spending a search call.
+            // F-M373: the frame rate is what decides whether the episodes share one source, so the
+            // plan needs it in the dry run too — looked up once per item, as in phase 3.
+            string itemFramerate = GetFramerateCode(item);
+
             if (_config.DryRun)
             {
             foreach (var cand in qaSurvivors)
             {
+                // F-M372/F-M373: a dry run shows the PACK it would send, not eight singles — the
+                // plan is part of what the run decides, so it has to be visible without uploading.
+                if (packCoordinator != null && !cand.IsLoose && !cand.Forced
+                    && packCoordinator.ShouldBuffer(imdbId, season))
+                {
+                    await packCoordinator.AddAsync(
+                        PackCandidate(item, mediaHash!, imdbId!, tmdbIdRaw, season, episode,
+                            cand.Lang, cand.HearingImpaired, cand.Forced, cand.SubPos, cand.Srt,
+                            mediaPath, itemFramerate),
+                        runCt).ConfigureAwait(false);
+                    continue;
+                }
+
                 string neutralName = BuildNeutralName(
                     isSeries, imdbId!, season, episode, cand.Lang, ContentHashRegistry.ComputeHash(cand.Srt));
                 LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] DRY-RUN would upload {Name}", neutralName);
@@ -1282,8 +1299,8 @@ public sealed class UploadPipeline
             // pipeline uploads what the queue hands it; QA gates stay as the
             // upload action's own quality step.
             // F-M350: the frame rate is a property of the VIDEO, so it is looked up once per item and
-            // handed to every candidate below — not once per uploadable track.
-            string itemFramerate = GetFramerateCode(item);
+            // handed to every candidate below — not once per uploadable track. (Computed above the
+            // dry-run gate since F-M373 — the pack decision needs it there as well.)
 
             foreach (var cand in qaSurvivors)
             {
@@ -1348,22 +1365,9 @@ public sealed class UploadPipeline
                     && packCoordinator.ShouldBuffer(imdbId, season))
                 {
                     await packCoordinator.AddAsync(
-                        new SeasonPackCoordinator.Candidate(
-                            item,
-                            item.Id.ToString(),
-                            mediaHash!,
-                            imdbId!,
-                            tmdbIdRaw,
-                            season,
-                            episode,
-                            cand.Lang,
-                            cand.HearingImpaired,
-                            cand.Forced,
-                            cand.SubPos,
-                            cand.Srt,
-                            Path.GetFileNameWithoutExtension(mediaPath),
-                            SourceQuality.Detect(null, mediaPath),
-                            itemFramerate),
+                        PackCandidate(item, mediaHash!, imdbId!, tmdbIdRaw, season, episode,
+                            cand.Lang, cand.HearingImpaired, cand.Forced, cand.SubPos, cand.Srt,
+                            mediaPath, itemFramerate),
                         runCt).ConfigureAwait(false);
                     continue;
                 }
@@ -2589,6 +2593,45 @@ public sealed class UploadPipeline
 
         return result;
     }
+
+    /// <summary>
+    /// The coordinator's view of one candidate — used wherever a pack may take it, so the single
+    /// path and the dry run hand over exactly the same thing.
+    /// </summary>
+    /// <param name="item">Media item.</param>
+    /// <param name="mediaHash">Media hash.</param>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="tmdbId">TMDB id as it was read.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="lang">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <param name="forced">Forced flag.</param>
+    /// <param name="subPos">Stream position of the source track.</param>
+    /// <param name="srt">Canonical subtitle text.</param>
+    /// <param name="mediaPath">Path of the media file.</param>
+    /// <param name="framerate">Frame rate code of the video.</param>
+    /// <returns>The candidate as the coordinator expects it.</returns>
+    private static SeasonPackCoordinator.Candidate PackCandidate(
+        BaseItem item, string mediaHash, string imdbId, string? tmdbId, int season, int episode,
+        string lang, bool hearingImpaired, bool forced, int subPos, string srt,
+        string mediaPath, string framerate)
+        => new(
+            item,
+            item.Id.ToString(),
+            mediaHash,
+            imdbId,
+            tmdbId,
+            season,
+            episode,
+            lang,
+            hearingImpaired,
+            forced,
+            subPos,
+            srt,
+            Path.GetFileNameWithoutExtension(mediaPath),
+            SourceQuality.Detect(null, mediaPath),
+            framerate);
 
     /// <summary>
     /// F-M373: which complete seasons can still become a pack in THIS run — only those whose queued
