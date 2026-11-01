@@ -230,6 +230,11 @@ if [[ -d "$JFDIR" ]]; then
         echo "$OUT"
         grep -q "all green" <<<"$OUT" || die "suite $suite is not green — the Lastenheft's counts and the code disagree"
     done
+
+    OUT="$(DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 /opt/data/.dotnet/dotnet run \
+        --project "$ROOT/scripts/tests/autosync/autosync.csproj" -- "$ROOT" 2>&1 | tail -2)"
+    echo "$OUT"
+    grep -q "ALL CASES PASSED" <<<"$OUT" || die "suite autosync is not green — the slot blocks and the code disagree"
 else
     ok "(skipped: no Jellyfin reference at $JFDIR, set JF_TEST_DIR to run them)"
 fi

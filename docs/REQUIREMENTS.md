@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.65
-**Status:** Implementation — v12.1.12.266.
+**Status:** Implementation — v12.1.12.267.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -315,7 +315,7 @@ The download chain runs against each candidate in score order, before the file i
 
 **Two gates carry this, and both must stay.** The ladder's id-less branch returns before any search, and `ProcessItemAsync`'s own gate does the same for an item that arrives id-less *after* the ladder — the TMDb fetch needs a tmdb id to begin with, and a directed fire never runs the ladder.
 
-**F-M50 [D] (operator order 08.10.2026):** **ONE setting, TWO effects: how many candidates per language are searched, and how many the downloader may pull before it gives up** (page label: *Auto-Sync attempts and max. download/search limit*). The second setting ("Max candidates per language") is gone — the two knobs described one intent and drifted: the walk's cap was checked before the correction budget and counted the same attempts, so at equal defaults the cap always fired first and the budget could never trigger. With the Auto-Sync **on** the limit counts only **fits** the walk could not resolve, never gate rejections (F-M320). With the Auto-Sync **off** there is no fit and no verdict, so the walk pulls N candidates through the active quality gates and keeps them at 99, 98, 97 … `0` = no limit, in both modes. Fixed with it: the "correction hunt abandoned" break fired on the **first** candidate of every language whenever the Auto-Sync was off.
+**F-M50 [D] (operator order 08.10.2026):** **ONE setting, TWO effects: how many candidates per language are searched, and how many the downloader may pull before it gives up** (page label: *Auto-Sync attempts and max. download/search limit*). The second setting ("Max candidates per language") is gone — the two knobs described one intent and drifted: the walk's cap was checked before the correction budget and counted the same attempts, so at equal defaults the cap always fired first and the budget could never trigger. With the Auto-Sync **on** the limit counts only **fits** the walk could not resolve, never gate rejections (F-M320). With the Auto-Sync **off** there is no fit and no verdict, so the walk pulls N candidates through the active quality gates and keeps them at 50, 51, 52 … `0` = no limit, in both modes. Fixed with it: the "correction hunt abandoned" break fired on the **first** candidate of every language whenever the Auto-Sync was off.
 
 **The same language verification runs here verbatim** (F-M15), on the downloaded bytes, with its own per-direction switch.
 
@@ -566,39 +566,39 @@ not undo the corrected file; it is logged as a warning.
 
 **F-M306 [D] (development):** **The untouched original is kept as a selectable sidecar in the reserved slot block, and is locked against upload.** *(Superseded the one-entry archive on 07.10.2026 by operator order.)*
 
-**Rule.** After a correction the pipeline writes the original beside the corrected file as a **loose sidecar** `<base>.<lang>.99.srt`, **numbered from 99 downward** to the first free number down to **90**. It carries the corrected file's language token and `.sdh` marker, and **no marker of its own**. The reserved block is **90–99**; the writer of *corrected* files stops at slot **89** (F-M315). With all ten reserved, **no original is written** and the pipeline refuses.
+**Rule.** After a correction the pipeline writes the original beside the corrected file as a **loose sidecar** `<base>.<lang>.50.srt`, **numbered from 50 upward** to the first free number up to **99**. It carries the corrected file's language token and `.sdh` marker, and **no marker of its own**. The reserved block is **50–99**; the writer of *corrected* files stops at slot **49** (F-M315). With every reserved slot taken, **no original is written** and the pipeline refuses.
 
 **The lock.** The original is registered like every other downloaded subtitle — a `downloaded` row `MarkDownloaded` keyed on the content hash of the bytes on disk. `IsContentKnown` counts every row **except `observed`** as known content and the uploader does too, so the seeder drops the file and the uploader returns `duplicate-content`. **Canonical** bytes (F-M296); both tracks share one helper under `QaDownloadAutoSync` (F-M304).
 
-**F-M315 [D] (user decision 07.10.2026):** **The slots 90–99 are reserved for kept originals; corrected files stop at 89.**
+**F-M315 [D] (operator order 01.11.2026):** **The slots 50–99 are reserved for kept originals; corrected files stop at 49.**
 
-**Rule.** `SidecarNaming` carries the reservation as a pure property of the number: `IsOriginalSlot(slot)` is true for 90–99 and for nothing else. `PlanTarget` — the name a *corrected* sidecar is moved to, and the name the downloader composes — never returns a reserved slot: it walks 1…89 and, when every one is taken, returns slot 1 so the caller's own existence check refuses the move. `PlanOriginalTarget` walks **99…90** and returns **null** when all ten are taken. Slot assignment for originals is downward on purpose: corrected names grow up from 1, originals come down from 99, and a viewer sees the reserved number in the track list (F-M316).
+**Rule.** `SidecarNaming` carries the reservation as a pure property of the number: `IsOriginalSlot(slot)` is true for 50–99 and for nothing else. `PlanTarget` — the name a *corrected* sidecar is moved to, and the name the downloader composes — never returns a reserved slot: it walks 1…49 and, when every one is taken, returns slot 1 so the caller's own existence check refuses the move. `PlanOriginalTarget` walks **50…99** and returns **null** when all fifty are taken. Both blocks count upward on purpose — corrected from 1, originals from 50 — so a viewer reads the reserved number in the track list and tells the two kinds apart without opening anything (F-M316).
 
-**Why the cap is not cosmetic.** Without it, the next corrected file of a language whose slots 1–89 are taken would be handed a name an original already occupies — the correction would overwrite the very file it exists to keep. Measured 07.10.2026 against the loop bound of 999: with 1–89 taken the corrected writer returns slot 1 (`<base>.<lang>.01.srt`, F-M316), never a reserved number.
+**Why the cap is not cosmetic.** Without it, the next corrected file of a language whose slots 1–49 are taken would be handed a name an original already occupies — the correction would overwrite the very file it exists to keep. The corrected writer therefore stops at 49 and returns slot 1 when the block is full, never a reserved number (F-M316).
 
 **F-M316 [D] (operator order 08.10.2026):** **The slot is always written, always two digits; it is the track order.**
 
-**Rule.** `SidecarNaming.Build` composes every sidecar name as `<base>.<lang>[.sdh][.forced].<NN>.srt` with `NN` = the slot as `D2` (`01`…`99`). Slot 1 is no longer the bare `<base>.<lang>.srt`. The number stays the LAST name token, so `Parse` and `ReadFlags` read it exactly as before — they accept one and two digits, so names written before F-M316 keep parsing and no migration shim exists. The track list therefore runs languages alphabetically and, within a language, `01`…`89` (corrected) before `90`…`99` (originals) — the order F-M315 reserves them for.
+**Rule.** `SidecarNaming.Build` composes every sidecar name as `<base>.<lang>[.sdh][.forced].<NN>.srt` with `NN` = the slot as `D2` (`01`…`99`). Slot 1 is no longer the bare `<base>.<lang>.srt`. The number stays the LAST name token, so `Parse` and `ReadFlags` read it exactly as before — they accept one and two digits, so names written before F-M316 keep parsing and no migration shim exists. The track list therefore runs languages alphabetically and, within a language, `01`…`49` (corrected) before `50`…`99` (originals) — the order F-M315 reserves them for.
 
 **Cost.** Names written before this rule keep their old form until they are renamed; the pipeline only writes new names, and nothing renames on disk by itself.
 
-**F-M317 [D] (operator order 08.10.2026):** **The slot encodes WHICH KIND the file is: aligned takes 01 upward, unprocessed takes 99 downward.**
+**F-M317 [D] (operator order 01.11.2026):** **The slot encodes WHICH KIND the file is: aligned takes 01 upward, unprocessed 50 upward.**
 
 **Rule.** A downloaded subtitle goes into one of two ranges: was it ALIGNED?
 
 - **Aligned** (the fit applied a correction, or the fit is off and the file is the corrected artifact) → `<base>.<lang>.<NN>.srt`, `NN` = `01`, `02`, `03` … **upward**, its own counter.
-- **Unprocessed** (the fit found the file **WRONG** — shift beyond the limit, first cue negative, too few cues — or the fit is off) → the **reserved block**, `99`, `98`, `97` … **downward**.
-- **`no proven gain` is NEITHER** (F-M321): `01` **and** a byte-identical copy at `99`.
+- **Unprocessed** (the fit found the file **WRONG** — shift beyond the limit, first cue negative, too few cues — or the fit is off) → the **reserved block**, `50`, `51`, `52` … **upward**.
+- **`no proven gain` is NEITHER** (F-M321): `01` **and** a byte-identical copy at `50`.
 
 **"Regardless of whether a corrected version exists"**: an unprocessed file takes a reserved slot **even with no corrected sibling beside it** (F-M321).
 
-`correctedSlotCount` / `hiCorrectedSlotCount` increment on the aligned path only; the unprocessed path writes once. Ten taken reserved slots → the write is **refused** and counted. F-M315's reservation (90–99, corrected stops at 89) stands; GUI text must match the code (F-M302).
+`correctedSlotCount` / `hiCorrectedSlotCount` increment on the aligned path only; the unprocessed path writes once. Every reserved slot taken → the write is **refused** and counted. F-M315's reservation (50–99, corrected stops at 49) stands; GUI text must match the code (F-M302).
 
 **F-M318 [D] (operator order 08.10.2026):** **The download REPEATS until a candidate's correction proves itself, capped at the QA retry limit.**
 
 **The rule.** A fetched subtitle whose correction the fit REFUSES does not end the walk. The pipeline keeps fetching lower-ranked candidates — up to **`DownloadQaRetryLimit`** candidates refused by the fit (default 3, the same knob the QA-reject give-up already uses; `0` = no cap) — and stops at the first candidate whose correction proves itself against the audio.
 
-Only a verdict on the FILE justifies another download; a verdict on the AUDIO or the tooling ends the hunt (T131). Each refused candidate is still kept, landing in the reserved block as an unprocessed file (`99`, `98`, `97` … F-M317).
+Only a verdict on the FILE justifies another download; a verdict on the AUDIO or the tooling ends the hunt (T131). Each refused candidate is still kept, landing in the reserved block as an unprocessed file (`50`, `51`, `52` … F-M317).
 
 The repeat sits AFTER every other download gate (FPS, no-bytes, language verification, structure, min-cues, runtime). The walk's candidate limit still caps the total fetches, counting only fits the worker could not resolve, never gate rejections (F-M50); each budget has its own log line.
 
@@ -608,7 +608,7 @@ The repeat sits AFTER every other download gate (FPS, no-bytes, language verific
 
 The failed-run counter (`QaFailTracker.RecordFailure`/`IsExhausted`) is gone, and with it the two status counters that reported it (`SkippedQaGiveUp`, `QaGiveUpLanguages`); nothing closes a (item, language) pair. `QaFailTracker` is now the burned-candidate record and nothing else. What bounds the work is the download budget per run (F-M50) plus the burned-release memory (F-M200).
 
-**F-M321 [D] (operator order 08.10.2026):** **A file the fit finds nothing wrong with is a GOOD file: it is written at 01 upward, its original at 99 downward, and the walk ends.**
+**F-M321 [D] (operator order 01.11.2026):** **A file the fit finds nothing wrong with is a GOOD file: it is written at 01 upward, its original at 50 upward, and the walk ends.**
 
 **The rule.** `no proven gain` is not a failure — the deploy rule DECLINES to move the file, so the file as downloaded is the best version of that language. It is written as a **good file at `01` upward** (`<base>.<lang>.01.srt`, then `02` … F-M316), advances the **corrected counter** (the reserved block stays free for wrong files), and its **original is written too**, into the reserved block (`99` downward) — "beide original": BOTH carry the original subtitle, identical by construction because the reserved write REUSES the array sent to `01`. The walk **ENDS** there: no candidate can beat a file the fit found nothing wrong with (F-M318).
 
