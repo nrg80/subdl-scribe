@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.265",
-        "changelog": "v12.1.12.265: A season whose episodes are all present and pass the checks goes up as one pack instead of one subtitle per episode.",
+        "version": "12.1.12.266",
+        "changelog": "v12.1.12.266: Season packs are on by default and the switch sits directly above the upload gates.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.265-dev/Jellyfin.Plugin.SubdlSync_12.1.12.265.zip",
-        "checksum": "fd4bd5e3c235acbd42fd5c78f4876efd",
-        "timestamp": "2026-11-01T14:56:06Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.266-dev/Jellyfin.Plugin.SubdlSync_12.1.12.266.zip",
+        "checksum": "39cab6817d037fc4fd8b4cd197496da3",
+        "timestamp": "2026-11-01T15:13:33Z"
       }
     ]
   }
