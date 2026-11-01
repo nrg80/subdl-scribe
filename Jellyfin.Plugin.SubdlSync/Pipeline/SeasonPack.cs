@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 
@@ -16,7 +17,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 /// that decide identity: which episodes count, what the container is called, and what goes in it.
 /// </para>
 /// </summary>
-public static class SeasonPack
+public static partial class SeasonPack
 {
     /// <summary>
     /// One item of a run, as far as the pack plan needs it: identity, series IMDb id and the
@@ -108,6 +109,90 @@ public static class SeasonPack
             + (hearingImpaired ? " (SDH)" : string.Empty)
             + $" [{language}]";
     }
+
+    /// <summary>
+    /// F-M374: the release list a season pack carries. Other uploaders name ONE season release in
+    /// it (measured 01.11.2026 on tt0804484/tt0944947: "Foundation.2021.S03.COMPLETE.ATVP.WEB-DL…",
+    /// "Game of Thrones, SEASON 8 4K x265 [23.976 FPS]") — never the episode releases, because
+    /// SubDL titles the pack after the first entry. So each episode release name is reduced to its
+    /// season form ("…S01E05…" → "…S01…"); where the episodes come from one release that leaves a
+    /// single season name, where they do not, the distinct ones stand side by side, first episode
+    /// first. A release name without any episode marker cannot be reduced and falls back to the
+    /// neutral label.
+    /// </summary>
+    /// <param name="episodeReleaseNames">Release names in episode order.</param>
+    /// <param name="seriesName">Series name when Jellyfin knows it.</param>
+    /// <param name="imdbId">IMDb id — fallback title.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>Release list, at most three entries, season label as the last resort.</returns>
+    public static IReadOnlyList<string> SeasonReleases(
+        IEnumerable<string> episodeReleaseNames,
+        string? seriesName,
+        string imdbId,
+        int season,
+        string language,
+        bool hearingImpaired)
+    {
+        string seasonTag = "S" + season.ToString("00", CultureInfo.InvariantCulture);
+        var seen = new List<string>();
+        foreach (string name in episodeReleaseNames)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            string reduced = ReduceToSeason(name.Trim(), seasonTag);
+            if (reduced.Length == 0 || seen.Contains(reduced, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            seen.Add(reduced);
+            if (seen.Count == 3)
+            {
+                break;
+            }
+        }
+
+        if (seen.Count == 0)
+        {
+            seen.Add(ReleaseLabel(seriesName, imdbId, season, language, hearingImpaired));
+        }
+
+        return seen;
+    }
+
+    /// <summary>
+    /// Cuts an episode marker out of a release name and leaves the season form behind.
+    /// </summary>
+    /// <param name="releaseName">Release name.</param>
+    /// <param name="seasonTag">Season tag such as <c>S01</c>.</param>
+    /// <returns>Season form, or an empty string when the name carries no episode marker.</returns>
+    private static string ReduceToSeason(string releaseName, string seasonTag)
+    {
+        string reduced = EpisodeMarker().Replace(releaseName, seasonTag);
+        if (string.Equals(reduced, releaseName, StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
+        while (reduced.Contains("..", StringComparison.Ordinal))
+        {
+            reduced = reduced.Replace("..", ".", StringComparison.Ordinal);
+        }
+
+        return reduced.Trim(' ', '.', '-', '_');
+    }
+
+    /// <summary>
+    /// Episode markers as they appear in release names: <c>S01E05</c>, <c>s1e5</c>, <c>1x05</c>.
+    /// </summary>
+    /// <returns>The compiled pattern.</returns>
+    [GeneratedRegex(@"(?i)s\d{1,2}[\s._-]?e\d{1,4}|\d{1,2}x\d{1,4}")]
+    private static partial Regex EpisodeMarker();
 
     /// <summary>
     /// The name a single subtitle upload carries (F-M29/F-M30). Lives here because the pack's

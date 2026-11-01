@@ -285,20 +285,21 @@ public sealed class SeasonPackCoordinator
     }
 
     /// <summary>
-    /// F-M374: SubDL titles a pack after the FIRST entry of `releases`, so that entry has to name
-    /// the season — the real release names follow behind it and stay searchable.
+    /// F-M374: SubDL titles a pack after the FIRST entry of `releases`, so the list carries the
+    /// season form of the release names — "…S01E05…" reduced to "…S01…", never the episode.
     /// </summary>
     /// <param name="ordered">Candidates in episode order.</param>
     /// <param name="key">Buffer key.</param>
     /// <returns>Release list with the season label up front.</returns>
     private static List<string> PackReleases(List<Candidate> ordered, (string ImdbId, int Season, string Lang, bool Hi) key)
     {
-        var releases = new List<string>
-        {
-            SeasonPack.ReleaseLabel(SeriesNameOf(ordered[0].Item), key.ImdbId, key.Season, key.Lang, key.Hi)
-        };
-        releases.AddRange(ordered.Select(c => c.ReleaseName).Distinct(StringComparer.Ordinal));
-        return releases;
+        return SeasonPack.SeasonReleases(
+            ordered.Select(c => c.ReleaseName),
+            SeriesNameOf(ordered[0].Item),
+            key.ImdbId,
+            key.Season,
+            key.Lang,
+            key.Hi).ToList();
     }
 
     /// <summary>

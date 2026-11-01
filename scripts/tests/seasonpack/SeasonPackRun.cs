@@ -143,10 +143,10 @@ internal static class Program
             "differing release names do not block a pack — only quality and frame rate do");
         Check(coordinator.Contains("PackReleases(ordered, key)", StringComparison.Ordinal),
             "a pack builds its release list through the season label");
-        Check(coordinator.Contains("ordered.Select(c => c.ReleaseName).Distinct(StringComparer.Ordinal)", StringComparison.Ordinal),
-            "all release names of the season still travel with the pack, behind the label");
-        Check(coordinator.Contains("SeasonPack.ReleaseLabel(", StringComparison.Ordinal),
-            "the pack title comes from the shared label helper");
+        Check(coordinator.Contains("SeasonPack.SeasonReleases(", StringComparison.Ordinal),
+            "the pack's release list is built from the season form of the episode releases");
+        Check(!coordinator.Contains("ordered.Select(c => c.ReleaseName).Distinct().ToList()", StringComparison.Ordinal),
+            "the episode release names are never handed to SubDL as the pack's release list");
 
         // F-M374: SubDL titles a full-season upload after releases[0] and ignores `name`
         // (measured 01.11.2026 against /user/mySubtitles), so the first entry has to name the season.
@@ -156,6 +156,42 @@ internal static class Program
             "without a series name the IMDb id carries the label and SDH is marked");
         Check(SeasonPack.ReleaseLabel("  ", "tt26545992", 2, "FR", false) == "tt26545992 S02 - complete season [FR]",
             "a blank series name falls back to the IMDb id");
+
+        // F-M374: what other uploaders put in `releases` — one season release, not the episodes.
+        var foundation = SeasonPack.SeasonReleases(
+            new[]
+            {
+                "Foundation.S01E01.1080p.WEB.H264-NHTFS",
+                "Foundation.S01E02.1080p.WEB.H264-NHTFS",
+                "Foundation.S01E03.1080p.WEB.H264-NHTFS",
+            },
+            "Foundation", "tt0804484", 1, "EN", false);
+        Check(foundation.Count == 1 && foundation[0] == "Foundation.S01.1080p.WEB.H264-NHTFS",
+            "episodes from one release give exactly one season release name");
+        Check(!foundation[0].Contains("E01", StringComparison.Ordinal), "the episode marker never survives");
+        var mixed = SeasonPack.SeasonReleases(
+            new[]
+            {
+                "Foundation.S02E01.1080p.WEB.H264-NHTFS",
+                "Foundation.S02E02.1080p.WEB.H264-SuccessfulCrab",
+                "Foundation.S02E03.1080p.WEB.H264-NHTFS",
+            },
+            "Foundation", "tt0804484", 2, "EN", false);
+        Check(mixed.Count == 2 && mixed[0] == "Foundation.S02.1080p.WEB.H264-NHTFS"
+              && mixed[1] == "Foundation.S02.1080p.WEB.H264-SuccessfulCrab",
+            "differing groups stand side by side, first episode first, without repeats");
+        var dashed = SeasonPack.SeasonReleases(
+            new[] { "Lanterns - S01E01 - Test", "Lanterns - S01E08 - Test" },
+            "Lanterns", "tt26545992", 1, "EN", false);
+        Check(dashed.Count == 1 && dashed[0] == "Lanterns - S01 - Test", "the marker is cut out, not replaced by junk");
+        var xStyle = SeasonPack.SeasonReleases(new[] { "Reacher.3x04.1080p.WEB" }, "Reacher", "tt9288030", 3, "EN", false);
+        Check(xStyle.Count == 1 && xStyle[0] == "Reacher.S03.1080p.WEB", "1x05 style markers reduce to the season too");
+        var noMarker = SeasonPack.SeasonReleases(new[] { "Folge eins", "Folge zwei" }, "Lanterns", "tt26545992", 1, "EN", false);
+        Check(noMarker.Count == 1 && noMarker[0] == "Lanterns S01 - complete season [EN]",
+            "a release name without a marker cannot be reduced and the label stands in");
+        var many = SeasonPack.SeasonReleases(
+            Enumerable.Range(1, 6).Select(e => $"Show.S01E0{e}.Group{e}").ToList(), "Show", "tt1", 1, "EN", false);
+        Check(many.Count == 3, "at most three season releases travel with a pack");
         Check(coordinator.Contains("DRY-RUN would upload season pack", StringComparison.Ordinal), "a dry run names the pack it would send and sends nothing");
         Check(coordinator.Contains("ReadPackId(result.Response) ?? name", StringComparison.Ordinal),
             "with no id in the response the pack name is the identity the rows carry");
