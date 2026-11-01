@@ -218,10 +218,10 @@ public sealed class SeasonPackCoordinator
         // carry the episode NUMBER AND TITLE and no season, which is also how the seasoned
         // uploaders' packs are built inside.
         var files = ordered
-            .Select(c => (FileName: SeasonPack.MemberFileName(key.Season, c.Episode, c.Item?.Name, key.Lang), Srt: c.Srt))
+            .Select(c => (FileName: SeasonPack.MemberFileName(key.Season, c.Episode, c.Item?.Name, key.Lang, key.Hi), Srt: c.Srt))
             .ToList();
         string name = SeasonPack.Name(
-            key.ImdbId, key.Season, SeasonPack.PackHash(files.Select(f => ContentHashRegistry.ComputeHash(f.Srt))), key.Lang);
+            key.ImdbId, key.Season, SeasonPack.PackHash(files.Select(f => ContentHashRegistry.ComputeHash(f.Srt))), key.Lang, key.Hi);
         var first = ordered[0];
 
         if (_config.DryRun)
@@ -340,7 +340,7 @@ public sealed class SeasonPackCoordinator
         foreach (var c in group.OrderBy(x => x.Episode))
         {
             ct.ThrowIfCancellationRequested();
-            var neutral = SeasonPack.NeutralFileName(true, c.ImdbId, c.Season, c.Episode, c.Lang, ContentHashRegistry.ComputeHash(c.Srt));
+            var neutral = SeasonPack.NeutralFileName(true, c.ImdbId, c.Season, c.Episode, c.Lang, ContentHashRegistry.ComputeHash(c.Srt), c.HearingImpaired);
             UploadResult result = await _api.UploadSubtitleAsync(
                 c.Srt, neutral, c.Lang, c.ReleaseName, c.Quality, c.ImdbId, c.TmdbId, true, c.Season, c.Episode,
                 ct, c.HearingImpaired, c.Framerate).ConfigureAwait(false);

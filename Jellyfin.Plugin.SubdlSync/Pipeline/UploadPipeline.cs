@@ -1285,7 +1285,7 @@ public sealed class UploadPipeline
                 }
 
                 string neutralName = BuildNeutralName(
-                    isSeries, imdbId!, season, episode, cand.Lang, ContentHashRegistry.ComputeHash(cand.Srt));
+                    isSeries, imdbId!, season, episode, cand.Lang, ContentHashRegistry.ComputeHash(cand.Srt), cand.HearingImpaired);
                 LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] DRY-RUN would upload {Name}", neutralName);
             }
 
@@ -1856,10 +1856,10 @@ public sealed class UploadPipeline
     }
 
     private static string BuildNeutralName(
-        bool isSeries, string imdbId, int season, int episode, string lang, string contentHash)
+        bool isSeries, string imdbId, int season, int episode, string lang, string contentHash, bool hi = false)
         => isSeries
-            ? $"{imdbId}.S{season:00}E{episode:00}.{contentHash}.{lang}.srt"
-            : $"{imdbId}.{contentHash}.{lang}.srt";
+            ? $"{imdbId}.S{season:00}E{episode:00}.{contentHash}.{lang}{SeasonPack.HiMarker(hi)}.srt"
+            : $"{imdbId}.{contentHash}.{lang}{SeasonPack.HiMarker(hi)}.srt";
 
     /// <summary>
     /// F-M71:
@@ -1974,7 +1974,7 @@ public sealed class UploadPipeline
 
         // F-M29/F-M30: neutral filename, no user-identifying data; the content hash keeps two uploads
         // of the same item and language apart without identifying anybody (full MD5, order 17.10.2026)
-        string neutralName = BuildNeutralName(isSeries, imdbId, season, episode, lang, contentHashEarly);
+        string neutralName = BuildNeutralName(isSeries, imdbId, season, episode, lang, contentHashEarly, hearingImpaired);
 
         string releaseName = Path.GetFileNameWithoutExtension(mediaPath);
 

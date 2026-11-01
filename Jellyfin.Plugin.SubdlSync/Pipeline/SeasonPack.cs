@@ -85,9 +85,20 @@ public static partial class SeasonPack
     /// <param name="season">Season number.</param>
     /// <param name="packHash">Lowercase MD5 over the episode content hashes.</param>
     /// <param name="language">SubDL language code.</param>
+    /// <param name="hi">True for the hearing-impaired (SDH) variant; appended to the name.</param>
     /// <returns>File name.</returns>
-    public static string Name(string imdbId, int season, string packHash, string language)
-        => $"{imdbId}.S{season.ToString("00", CultureInfo.InvariantCulture)}.{packHash}.{language}";
+    public static string Name(string imdbId, int season, string packHash, string language, bool hi = false)
+        => $"{imdbId}.S{season.ToString("00", CultureInfo.InvariantCulture)}.{packHash}.{language}{HiMarker(hi)}";
+
+    /// <summary>
+    /// The suffix that states the hearing-impaired (SDH) variant in a NAME. SubDL carries the
+    /// variant as the <c>hi</c> field, and that field ends where the name begins: whoever reads the
+    /// zip, the member file or the entry title sees only the name. Empty for the regular track, so
+    /// no existing name changes shape.
+    /// </summary>
+    /// <param name="hi">True for the SDH/HI variant.</param>
+    /// <returns><c>.SDH</c> for the variant, the empty string otherwise.</returns>
+    public static string HiMarker(bool hi) => hi ? ".SDH" : string.Empty;
 
     /// <summary>
     /// The string that has to stand FIRST in a pack's release list (F-M374). SubDL titles a
@@ -159,8 +170,9 @@ public static partial class SeasonPack
     /// <param name="episode">Episode number.</param>
     /// <param name="episodeTitle">Episode title as Jellyfin knows it, when it does.</param>
     /// <param name="language">SubDL language code.</param>
+    /// <param name="hi">True for the hearing-impaired (SDH) variant; appended to the name.</param>
     /// <returns>Name such as <c>01 The Emperor's Peace.en.srt</c>.</returns>
-    public static string MemberFileName(int season, int episode, string? episodeTitle, string language)
+    public static string MemberFileName(int season, int episode, string? episodeTitle, string language, bool hi = false)
     {
         string number = "S" + season.ToString("00", CultureInfo.InvariantCulture)
             + "E" + episode.ToString("00", CultureInfo.InvariantCulture);
@@ -175,7 +187,7 @@ public static partial class SeasonPack
 
         title = string.Join(' ', title.Split(' ', StringSplitOptions.RemoveEmptyEntries));
         string stem = title.Length == 0 ? number : number + " - " + title;
-        return stem + "." + language.ToLowerInvariant() + ".srt";
+        return stem + "." + language.ToLowerInvariant() + HiMarker(hi) + ".srt";
     }
 
     /// <summary>
@@ -360,11 +372,12 @@ public static partial class SeasonPack
     /// <param name="episode">Episode (TV) or 0.</param>
     /// <param name="language">Language code.</param>
     /// <param name="contentHash">MD5 of the subtitle content.</param>
+    /// <param name="hi">True for the hearing-impaired (SDH) variant; appended to the name.</param>
     /// <returns>File name.</returns>
-    public static string NeutralFileName(bool isSeries, string imdbId, int season, int episode, string language, string contentHash)
+    public static string NeutralFileName(bool isSeries, string imdbId, int season, int episode, string language, string contentHash, bool hi = false)
         => isSeries
-            ? $"{imdbId}.S{season.ToString("00", CultureInfo.InvariantCulture)}E{episode.ToString("00", CultureInfo.InvariantCulture)}.{contentHash}.{language}.srt"
-            : $"{imdbId}.{contentHash}.{language}.srt";
+            ? $"{imdbId}.S{season.ToString("00", CultureInfo.InvariantCulture)}E{episode.ToString("00", CultureInfo.InvariantCulture)}.{contentHash}.{language}{HiMarker(hi)}.srt"
+            : $"{imdbId}.{contentHash}.{language}{HiMarker(hi)}.srt";
 
     /// <summary>
     /// The pack's identity: MD5 over the episodes' content hashes in episode order.

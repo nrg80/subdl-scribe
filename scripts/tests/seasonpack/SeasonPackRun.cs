@@ -122,6 +122,21 @@ internal static class Program
         string hash = "0123456789abcdef0123456789abcdef";
         Check(SeasonPack.NeutralFileName(true, "tt0944947", 1, 3, "DE", hash) == $"tt0944947.S01E03.{hash}.DE.srt", "series form carries SxxEyy");
         Check(SeasonPack.NeutralFileName(false, "tt0944947", 0, 0, "DE", hash) == $"tt0944947.{hash}.DE.srt", "movie form carries no episode");
+        // F-M379 (operator decision 01.11.2026): the SDH variant has to be readable in the NAME. The
+        // `hi` field SubDL carries ends where the name begins — the zip, the member file and the entry
+        // title show nothing but the name, so two English packs were indistinguishable but for the hash.
+        Check(SeasonPack.Name("tt0944947", 1, packHash, "EN", true) == $"tt0944947.S01.{packHash}.EN.SDH",
+            "an SDH pack states the variant in its name");
+        Check(SeasonPack.NeutralFileName(true, "tt0944947", 1, 3, "EN", hash, true) == $"tt0944947.S01E03.{hash}.EN.SDH.srt",
+            "an SDH single upload states it as well");
+        Check(SeasonPack.MemberFileName(1, 1, "The Emperor's Peace", "EN", true) == "S01E01 - The Emperor's Peace.en.SDH.srt",
+            "a pack member names the variant too");
+        Check(SeasonPack.NeutralFileName(false, "tt0944947", 0, 0, "EN", hash, true) == $"tt0944947.{hash}.EN.SDH.srt",
+            "the movie form states it as well");
+        Check(SeasonPack.HiMarker(false) == string.Empty
+              && SeasonPack.Name("tt0944947", 1, packHash, "EN") == $"tt0944947.S01.{packHash}.EN"
+              && SeasonPack.MemberFileName(1, 1, "The Emperor's Peace", "EN") == "S01E01 - The Emperor's Peace.en.srt",
+            "the regular track keeps its old name unchanged");
 
         // ── 6. The rules in the code, not only in the arithmetic ────────────────
         Console.WriteLine("6. Rules wired");
