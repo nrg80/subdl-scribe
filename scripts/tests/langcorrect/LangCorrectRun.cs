@@ -150,8 +150,15 @@ internal static class LangCorrectRun
         Check(uploadGate.Contains("uploaded under the detected language"),
             "… and where it goes: under the detected language");
         Check(uploadGate.Contains("Default: on."), "… and its default");
-        Check(page.Contains("Rejects uploads with wrong language tag. Default: on."),
-            "the download gate keeps its reject wording — it saves files, it does not upload them");
+        Check(uploadGate.Contains("Correct language (content vs. tag)"),
+            "the upload switch is labelled as a CORRECTION, not as a verification");
+        string downloadGate = page.Substring(
+            page.IndexOf("id=\"QaDownloadVerifyLanguage\"", StringComparison.Ordinal),
+            Math.Min(600, page.Length - page.IndexOf("id=\"QaDownloadVerifyLanguage\"", StringComparison.Ordinal)));
+        Check(downloadGate.Contains("Reject wrong language (content vs. tag)"),
+            "the download switch is labelled as a REJECT — it discards the candidate");
+        Check(downloadGate.Contains("is discarded and the next candidate is tried"),
+            "… and its description says what happens instead of claiming an upload");
 
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0

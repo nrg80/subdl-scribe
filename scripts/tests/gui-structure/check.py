@@ -430,8 +430,11 @@ def main():
     # Asserted because the wording was copied from the download row and reads as plausible: nothing
     # breaks, the number is right, only the sentence is false. Also asserted positively, so a rename
     # to something else has to be a deliberate act rather than a silent drift.
-    check("the upload row says discarded before transfer, not fetched",
-          "Uploads: discarded before transfer" in order,
+    # 02.11.2026 (operator): the word "discarded" read as "SubDL threw an upload away" — the row
+    # counts attempts that never left, so it now says "stopped before sending". The point of the
+    # assertion stays the same: no upload row may claim a fetch, and a rename has to be deliberate.
+    check("the upload row says stopped before sending, not fetched",
+          "Uploads: stopped before sending" in order,
           "row missing or reverted: %s" % [o for o in order if o.startswith("Uploads:")])
     check("and no upload row claims a fetch",
           not any(o.startswith("Uploads:") and "fetch" in o for o in order),

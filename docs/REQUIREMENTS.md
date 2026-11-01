@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.66
-**Status:** Implementation — v12.1.12.280.
+**Version:** 2.67
+**Status:** Implementation — v12.1.12.281.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -33,7 +33,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 15 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 25 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
-- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 14 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 15 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 14 requirements
 - [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 45 requirements
 - [16. Non-Goals](#16-non-goals)
@@ -1197,6 +1197,8 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M181:** **Single backup retention:** after a database reset all older `subdl-scribe.db.bak-*` files are deleted; only the backup created by that reset remains.
 
+**F-M385 [D] (operator order 02.11.2026):** **A quality-gate switch names its own action, and the two directions do not share a wording.** The upload language gate corrects (F-M375) and is labelled `Correct language (content vs. tag)`; the download gate throws the candidate away and is labelled `Reject wrong language (content vs. tag)`. The statistics row for attempts that never left reads `Uploads: stopped before sending` — "discarded" was read as SubDL throwing a finished upload away.
+
 ## 14. Data Model and Persistence
 
 **F-M38 [B1]:** **Persistent state split by the kind of thing described** (section 14). Embedded tracks live under their video file, keyed by media hash + stream position; sidecars are keyed by normalized content hash; the file's own record carries path, IDs, season/episode and the derived language aggregate. The **hearing-impaired flag belongs to each subtitle datum**, never to the file (F-M282), and **completeness is derived rather than stored** (F-M283) — so the file record carries no download mark and no HI aggregate. Both pipelines read and write the same store.
@@ -1353,7 +1355,7 @@ The seeder's allocation pass (F-M261) rewrites media containers; it is work the 
 
 Counted only when the write actually happened: a dry run `stand`s the write down (F-M263), the switch `Allocate missing language codes` is off by default, and an undecidable detector writes nothing (F-M261) — all three leave the counter at 0. See F-M261, F-M308.
 
-**Placement:** the row sits with the upload rows, directly under `Uploads: discarded before transfer`, and the two rows that carry NO direction (F-M311/F-M313) stay the last two — asserted in T123, because a new row reads naturally as "append at the end" and only the grouping is lost when it goes there.
+**Placement:** the row sits with the upload rows, directly under `Uploads: stopped before sending`, and the two rows that carry NO direction (F-M311/F-M313) stay the last two — asserted in T123, because a new row reads naturally as "append at the end" and only the grouping is lost when it goes there.
 
 The column reaches an EXISTING store: `EnsureCreated` writes a schema only for a new file, so a new column arrives through an explicit `ALTER TABLE` guarded by `PRAGMA table_info`. The schema version is deliberately not bumped — the row grows by addition, an older build ignores the extra column, and a bump would stop the previous build from writing for nothing. See F-M30, F-M308, F-M311.
 

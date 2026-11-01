@@ -422,7 +422,7 @@
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaVerifyLanguage" name="QaVerifyLanguage" type="checkbox" is="emby-checkbox" />
-                                <span>Verify language (content vs. tag)</span>
+                                <span>Correct language (content vs. tag)</span>
                             </label>
                             <div class="fieldDescription">Corrects a subtitle whose content speaks another language than its tag claims — it is uploaded under the detected language. Default: on.</div>
                         </div>
@@ -524,9 +524,9 @@
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaDownloadVerifyLanguage" name="QaDownloadVerifyLanguage" type="checkbox" is="emby-checkbox" />
-                                <span>Verify language (content vs. tag)</span>
+                                <span>Reject wrong language (content vs. tag)</span>
                             </label>
-                            <div class="fieldDescription">Rejects uploads with wrong language tag. Default: on.</div>
+                            <div class="fieldDescription">A candidate whose content speaks another language than its tag claims is discarded and the next candidate is tried. Default: on.</div>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
@@ -1064,7 +1064,7 @@
                                 ['Subtitles uploaded', s.Uploaded || 0, true],
                                 ['Downloads: rejected after being fetched', s.RejectedDownload || 0],
                                 ['Downloads: Auto-Sync', s.FittedToAudio || 0],
-                                ['Uploads: discarded before transfer', s.RejectedUpload || 0],
+                                ['Uploads: stopped before sending', s.RejectedUpload || 0],
                                 ['Media files: language codes added', s.LanguageCodesAllocated || 0],
                                 ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0]
                             ];
