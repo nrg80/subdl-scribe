@@ -199,18 +199,22 @@ public static partial class SeasonPack
     /// <param name="imdbId">IMDb id — stands in for a missing series name.</param>
     /// <param name="season">Season number.</param>
     /// <param name="quality">Documented quality code (web, bluray, dvd, hdtv, cam).</param>
-    /// <param name="height">Video height in pixels, when the stream reports one.</param>
+    /// <param name="width">Video width in pixels, when the stream reports one.</param>
+    /// <param name="height">Video height in pixels, when the stream reports one — fallback only.</param>
     /// <param name="codec">Video codec name from the stream.</param>
+    /// <param name="releaseGroup">Group the media file name states, if any.</param>
     /// <returns>Release-shaped name, or null.</returns>
     public static string? MediaRelease(
         string? seriesName,
         string imdbId,
         int season,
         string? quality,
+        int? width,
         int? height,
-        string? codec)
+        string? codec,
+        string? releaseGroup = null)
     {
-        string? resolution = ResolutionToken(height);
+        string? resolution = ResolutionToken(width, height);
         string? source = quality?.Trim().ToLowerInvariant() switch
         {
             "web" => "WEB",
@@ -227,9 +231,16 @@ public static partial class SeasonPack
             return null;
         }
 
-        string series = string.IsNullOrWhiteSpace(seriesName)
-            ? imdbId.Trim()
-            : string.Join('.', seriesName!.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        // F-M381: a series name is not a release name yet — "Dexter: Resurrection" became
+        // "Dexter:.Resurrection", and that colon travelled into SubDL's zip name. The same character
+        // set the member names already strip is stripped here, so the name survives a filesystem.
+        string rawSeries = string.IsNullOrWhiteSpace(seriesName) ? imdbId.Trim() : seriesName!.Trim();
+        foreach (char bad in "\\/:*?\"<>|")
+        {
+            rawSeries = rawSeries.Replace(bad.ToString(), string.Empty, StringComparison.Ordinal);
+        }
+
+        string series = string.Join('.', rawSeries.Split(' ', StringSplitOptions.RemoveEmptyEntries));
 
         var parts = new List<string>
         {
@@ -252,16 +263,38 @@ public static partial class SeasonPack
             parts.Add(videoCodec);
         }
 
-        return string.Join('.', parts);
+        string joined = string.Join('.', parts);
+        return string.IsNullOrWhiteSpace(releaseGroup) ? joined : joined + "-" + releaseGroup!.Trim();
     }
 
     /// <summary>
     /// F-M376: the resolution token a release name would carry.
     /// </summary>
-    /// <param name="height">Video height in pixels.</param>
+    /// <param name="width">Video width in pixels — decides when known.</param>
+    /// <param name="height">Video height in pixels — only the fallback when the width is unknown.</param>
     /// <returns>Token such as <c>1080p</c>, or null.</returns>
-    public static string? ResolutionToken(int? height)
+    /// <remarks>
+    /// F-M380 (measured 01.11.2026, Dexter: Resurrection): the WIDTH decides, not the height. A
+    /// cropped 1080p encode reads 1920x800, and 800 fell into the <c>&gt;= 700</c> bucket — the pack was
+    /// named 720p while the file is 1080p class. The height is only consulted when no width was reported,
+    /// which keeps the old behaviour for sources that expose height alone.
+    /// </remarks>
+    public static string? ResolutionToken(int? width, int? height)
     {
+        if (width is > 0)
+        {
+            int w = width.Value;
+            return w switch
+            {
+                >= 3800 => "2160p",
+                >= 1900 => "1080p",
+                >= 1250 => "720p",
+                >= 1000 => "576p",
+                >= 700 => "480p",
+                _ => null,
+            };
+        }
+
         if (height is null || height <= 0)
         {
             return null;
@@ -277,6 +310,47 @@ public static partial class SeasonPack
             >= 460 => "480p",
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// The release group a media file name states, if it states one: the last <c>-</c>-segment of the
+    /// name, when that segment is a plain alphanumeric token. Nothing is invented — a name that ends in
+    /// an episode title yields null, and so does a technical token such as <c>-AAC5.1</c>.
+    /// </summary>
+    /// <param name="releaseName">File name without extension, or a release name.</param>
+    /// <returns>Group token such as <c>Rapta</c>, or null.</returns>
+    public static string? ReleaseGroup(string? releaseName)
+    {
+        if (string.IsNullOrWhiteSpace(releaseName))
+        {
+            return null;
+        }
+
+        string name = releaseName.Trim();
+        int dash = name.LastIndexOf('-');
+        if (dash < 0 || dash == name.Length - 1)
+        {
+            return null;
+        }
+
+        string tail = name[(dash + 1)..].Trim();
+        if (tail.Length is < 2 or > 16)
+        {
+            return null;
+        }
+
+        bool hasLetter = false;
+        foreach (char c in tail)
+        {
+            if (!char.IsAsciiLetterOrDigit(c))
+            {
+                return null;
+            }
+
+            hasLetter |= char.IsAsciiLetter(c);
+        }
+
+        return hasLetter ? tail : null;
     }
 
     /// <summary>

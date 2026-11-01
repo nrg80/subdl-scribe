@@ -206,6 +206,27 @@ internal static class Program
             new[] { "Lanterns - S01E01 - Test", "Lanterns - S01E08 - Test" },
             "Lanterns", "tt26545992", 1, "EN", false);
         Check(dashed == "Lanterns - S01 - Test", "the marker is cut out, not replaced by junk");
+        // F-M380 (measured 01.11.2026, Dexter: Resurrection): the WIDTH decides the resolution token.
+        // 1920x800 is a cropped 1080p encode and was named 720p by the height-only rule.
+        Check(SeasonPack.MediaRelease("Dexter: Resurrection", "tt33043892", 1, "web", 1920, 800, "hevc")
+              == "Dexter.Resurrection.S01.1080p.WEB.x265",
+            "a cropped 1080p encode is 1080p, and the colon of the series name does not survive");
+        Check(SeasonPack.MediaRelease("Foundation", "tt0804484", 1, "web", null, 800, "h264")
+              == "Foundation.S01.720p.WEB.x264", "without a width the height stays the fallback");
+        Check(SeasonPack.MediaRelease("Dexter: Resurrection", "tt33043892", 1, "web", 1920, 800, "hevc", "Rapta")
+              == "Dexter.Resurrection.S01.1080p.WEB.x265-Rapta",
+            "a group the file name states is appended — never invented");
+
+        // The group is read off the file name, and only when that name states one.
+        Check(SeasonPack.ReleaseGroup("Dexter.Resurrection.S01.1080p.WEBRip.AAC5.1.10bits.x265-Rapta") == "Rapta",
+            "the last dash segment of a release name is the group");
+        Check(SeasonPack.ReleaseGroup("Dexter - Resurrection - S01E01 - A Beating Heart...") == null,
+            "an episode title after the last dash is no group");
+        Check(SeasonPack.ReleaseGroup("Show.S01.1080p.WEB.x265-AAC5.1") == null,
+            "a technical token with a dot is no group");
+        Check(SeasonPack.ReleaseGroup(null) == null && SeasonPack.ReleaseGroup("") == null,
+            "no name, no group");
+
         Check(SeasonPack.PackRelease(new[] { "Reacher.3x04.1080p.WEB" }, "Reacher", "tt9288030", 3, "EN", false)
               == "Reacher.S03.1080p.WEB", "1x05 style markers reduce to the season too");
         Check(SeasonPack.PackRelease(new[] { "Folge eins", "Folge zwei" }, "Lanterns", "tt26545992", 1, "EN", false)
@@ -225,20 +246,20 @@ internal static class Program
         Check(SeasonPack.MemberFileName(1, 2, "Bad/Name: Here?", "ES") == "S01E02 - Bad Name Here.es.srt",
             "file-name characters are stripped, the language is lower case");
 
-        Check(SeasonPack.MediaRelease("Foundation", "tt0804484", 1, "web", 1080, "h264")
+        Check(SeasonPack.MediaRelease("Foundation", "tt0804484", 1, "web", 1920, 1080, "h264")
               == "Foundation.S01.1080p.WEB.x264", "resolution, source and codec from the file name the season");
-        Check(SeasonPack.MediaRelease("Dark Matter", "tt1", 2, "bluray", 2160, "hevc")
+        Check(SeasonPack.MediaRelease("Dark Matter", "tt1", 2, "bluray", 3840, 2160, "hevc")
               == "Dark.Matter.S02.2160p.BluRay.x265", "spaces and codec names are release-shaped");
-        Check(SeasonPack.MediaRelease("Foundation", "tt0804484", 1, "web", null, null) == "Foundation.S01.WEB",
+        Check(SeasonPack.MediaRelease("Foundation", "tt0804484", 1, "web", null, null, null) == "Foundation.S01.WEB",
             "a file without a video stream still names its source");
-        Check(SeasonPack.MediaRelease("Foundation", "tt0804484", 1, null, null, null) == null,
+        Check(SeasonPack.MediaRelease("Foundation", "tt0804484", 1, null, null, null, null) == null,
             "no facts at all is no release");
-        Check(SeasonPack.MediaRelease(null, "tt0804484", 3, "hdtv", 720, "av1") == "tt0804484.S03.720p.HDTV.AV1",
+        Check(SeasonPack.MediaRelease(null, "tt0804484", 3, "hdtv", 1280, 720, "av1") == "tt0804484.S03.720p.HDTV.AV1",
             "an unknown series name is replaced by the IMDb id");
         Check(SeasonPack.PackRelease(
                 new[] { "S01E01 - The Emperor's Peace", "S01E02 - Preparing to Live" },
                 "Foundation", "tt0804484", 1, "EN", false,
-                SeasonPack.MediaRelease("Foundation", "tt0804484", 1, "web", 1080, "h264"))
+                SeasonPack.MediaRelease("Foundation", "tt0804484", 1, "web", 1920, 1080, "h264"))
               == "Foundation.S01.1080p.WEB.x264",
             "names without a release fall through to the built release");
         Check(SeasonPack.PackRelease(

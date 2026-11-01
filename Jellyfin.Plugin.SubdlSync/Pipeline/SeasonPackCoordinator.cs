@@ -47,7 +47,8 @@ public sealed class SeasonPackCoordinator
     /// <param name="ReleaseName">Release name the episode came from.</param>
     /// <param name="Quality">Documented quality code.</param>
     /// <param name="Framerate">Documented frame rate code.</param>
-    /// <param name="VideoHeight">Video height in pixels — the file's own word on its resolution.</param>
+    /// <param name="VideoWidth">Video width in pixels — the file's own word on its resolution class.</param>
+    /// <param name="VideoHeight">Video height in pixels — kept for cropped encodes that need it as a fallback.</param>
     /// <param name="VideoCodec">Video codec name from the stream.</param>
     public sealed record Candidate(
         BaseItem Item,
@@ -65,6 +66,7 @@ public sealed class SeasonPackCoordinator
         string ReleaseName,
         string Quality,
         string Framerate,
+        int? VideoWidth = null,
         int? VideoHeight = null,
         string? VideoCodec = null);
 
@@ -309,8 +311,10 @@ public sealed class SeasonPackCoordinator
             key.ImdbId,
             key.Season,
             first.Quality,
+            first.VideoWidth,
             first.VideoHeight,
-            first.VideoCodec);
+            first.VideoCodec,
+            SeasonPack.ReleaseGroup(first.ReleaseName));
 
         return new List<string>
         {

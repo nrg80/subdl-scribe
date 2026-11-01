@@ -1265,7 +1265,7 @@ public sealed class UploadPipeline
 
             // F-M376: what the file itself says about its resolution and codec — the only release
             // facts a pack has when the file names carry no release at all. One lookup per item.
-            (int? itemVideoHeight, string? itemVideoCodec) = GetVideoFacts(item);
+            (int? itemVideoWidth, int? itemVideoHeight, string? itemVideoCodec) = GetVideoFacts(item);
 
             if (_config.DryRun)
             {
@@ -1279,7 +1279,7 @@ public sealed class UploadPipeline
                     await packCoordinator.AddAsync(
                         PackCandidate(item, mediaHash!, imdbId!, tmdbIdRaw, season, episode,
                             cand.Lang, cand.HearingImpaired, cand.Forced, cand.SubPos, cand.Srt,
-                            mediaPath, itemFramerate, itemVideoHeight, itemVideoCodec),
+                            mediaPath, itemFramerate, itemVideoWidth, itemVideoHeight, itemVideoCodec),
                         runCt).ConfigureAwait(false);
                     continue;
                 }
@@ -1380,7 +1380,7 @@ public sealed class UploadPipeline
                     await packCoordinator.AddAsync(
                         PackCandidate(item, mediaHash!, imdbId!, tmdbIdRaw, season, episode,
                             cand.Lang, cand.HearingImpaired, cand.Forced, cand.SubPos, cand.Srt,
-                            mediaPath, itemFramerate, itemVideoHeight, itemVideoCodec),
+                            mediaPath, itemFramerate, itemVideoWidth, itemVideoHeight, itemVideoCodec),
                         runCt).ConfigureAwait(false);
                     continue;
                 }
@@ -1836,7 +1836,7 @@ public sealed class UploadPipeline
     /// </summary>
     /// <param name="item">Media item.</param>
     /// <returns>Height in pixels and codec name, both nullable.</returns>
-    private (int? Height, string? Codec) GetVideoFacts(BaseItem item)
+    private (int? Width, int? Height, string? Codec) GetVideoFacts(BaseItem item)
     {
         try
         {
@@ -1844,14 +1844,15 @@ public sealed class UploadPipeline
                 .FirstOrDefault(s => s.Type == MediaStreamType.Video);
             if (video == null)
             {
-                return (null, null);
+                return (null, null, null);
             }
 
-            return (video.Height, video.Codec);
+            // F-M380: the width decides the resolution token; the height is cropped on many encodes.
+            return (video.Width, video.Height, video.Codec);
         }
         catch
         {
-            return (null, null);
+            return (null, null, null);
         }
     }
 
@@ -2658,7 +2659,7 @@ public sealed class UploadPipeline
     private static SeasonPackCoordinator.Candidate PackCandidate(
         BaseItem item, string mediaHash, string imdbId, string? tmdbId, int season, int episode,
         string lang, bool hearingImpaired, bool forced, int subPos, string srt,
-        string mediaPath, string framerate, int? videoHeight, string? videoCodec)
+        string mediaPath, string framerate, int? videoWidth, int? videoHeight, string? videoCodec)
     => new(
             item,
             item.Id.ToString(),
@@ -2675,6 +2676,7 @@ public sealed class UploadPipeline
             Path.GetFileNameWithoutExtension(mediaPath),
             SourceQuality.Detect(null, mediaPath),
             framerate,
+            videoWidth,
             videoHeight,
             videoCodec);
 
