@@ -122,9 +122,8 @@ internal static class Program
         // ── 6. The rules in the code, not only in the arithmetic ────────────────
         Console.WriteLine("6. Rules wired");
         var config = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"));
-        Check(config.Contains("public bool UploadSeasonPacks { get; set; }", StringComparison.Ordinal)
-              && !config.Contains("public bool UploadSeasonPacks { get; set; } = true;", StringComparison.Ordinal),
-            "the switch exists and is off by default");
+        Check(config.Contains("public bool UploadSeasonPacks { get; set; } = true;", StringComparison.Ordinal),
+            "the switch exists and is on by default");
 
         var page = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"));
         Check(page.Contains("id=\"UploadSeasonPacks\"", StringComparison.Ordinal), "the switch is a field in the upload section");
