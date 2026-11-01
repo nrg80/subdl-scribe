@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.276",
-        "changelog": "v12.1.12.276: Pack members name no season, which is what SubDL filed as a single episode.",
+        "version": "12.1.12.277",
+        "changelog": "v12.1.12.277: Pack members name their season, so SubDL no longer files them under season zero.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.276-dev/Jellyfin.Plugin.SubdlSync_12.1.12.276.zip",
-        "checksum": "857e285fee39b21288596f8ad350a92c",
-        "timestamp": "2026-11-01T18:45:48Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.277-dev/Jellyfin.Plugin.SubdlSync_12.1.12.277.zip",
+        "checksum": "662079e74892df23528bf9378753e1e6",
+        "timestamp": "2026-11-01T20:14:42Z"
       }
     ]
   }
