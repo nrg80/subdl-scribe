@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.269",
-        "changelog": "v12.1.12.269: A dry run names the season pack it would send instead of one line per episode.",
+        "version": "12.1.12.270",
+        "changelog": "v12.1.12.270: The arrival debounce window defaults to two minutes instead of one.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.269-dev/Jellyfin.Plugin.SubdlSync_12.1.12.269.zip",
-        "checksum": "673080aac74973592492612a2654ebb5",
-        "timestamp": "2026-11-01T16:06:35Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.270-dev/Jellyfin.Plugin.SubdlSync_12.1.12.270.zip",
+        "checksum": "02d2af5e5221351e87a4ad7f784c7ad2",
+        "timestamp": "2026-11-01T16:13:46Z"
       }
     ]
   }
