@@ -125,6 +125,10 @@ public static partial class SeasonPack
     /// <param name="season">Season number.</param>
     /// <param name="language">SubDL language code.</param>
     /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <param name="builtRelease">
+    /// F-M376: what the media files themselves say about the season — resolution, source, codec.
+    /// Used when no file name carries a release, because a pack that names nothing says nothing.
+    /// </param>
     /// <returns>The pack's single release entry.</returns>
     public static string PackRelease(
         IEnumerable<string> episodeReleaseNames,
@@ -132,7 +136,134 @@ public static partial class SeasonPack
         string imdbId,
         int season,
         string language,
-        bool hearingImpaired)
+        bool hearingImpaired,
+        string? builtRelease = null)
+    {
+        string? fromNames = SeasonReleaseFromNames(episodeReleaseNames, season);
+        if (fromNames != null)
+        {
+            return fromNames;
+        }
+
+        return !string.IsNullOrWhiteSpace(builtRelease)
+            ? builtRelease!
+            : ReleaseLabel(seriesName, imdbId, season, language, hearingImpaired);
+    }
+
+    /// <summary>
+    /// F-M376: a season release built from facts the file itself carries — resolution and codec from
+    /// the video stream, the documented source quality, and the series name. No group is invented: the
+    /// name ends where the facts end. Returns null when the file says nothing usable.
+    /// </summary>
+    /// <param name="seriesName">Series name when Jellyfin knows it.</param>
+    /// <param name="imdbId">IMDb id — stands in for a missing series name.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="quality">Documented quality code (web, bluray, dvd, hdtv, cam).</param>
+    /// <param name="height">Video height in pixels, when the stream reports one.</param>
+    /// <param name="codec">Video codec name from the stream.</param>
+    /// <returns>Release-shaped name, or null.</returns>
+    public static string? MediaRelease(
+        string? seriesName,
+        string imdbId,
+        int season,
+        string? quality,
+        int? height,
+        string? codec)
+    {
+        string? resolution = ResolutionToken(height);
+        string? source = quality?.Trim().ToLowerInvariant() switch
+        {
+            "web" => "WEB",
+            "bluray" => "BluRay",
+            "dvd" => "DVD",
+            "hdtv" => "HDTV",
+            "cam" => "CAM",
+            _ => null,
+        };
+        string? videoCodec = CodecToken(codec);
+
+        if (resolution == null && source == null && videoCodec == null)
+        {
+            return null;
+        }
+
+        string series = string.IsNullOrWhiteSpace(seriesName)
+            ? imdbId.Trim()
+            : string.Join('.', seriesName!.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+
+        var parts = new List<string>
+        {
+            series,
+            "S" + season.ToString("00", CultureInfo.InvariantCulture),
+        };
+
+        if (resolution != null)
+        {
+            parts.Add(resolution);
+        }
+
+        if (source != null)
+        {
+            parts.Add(source);
+        }
+
+        if (videoCodec != null)
+        {
+            parts.Add(videoCodec);
+        }
+
+        return string.Join('.', parts);
+    }
+
+    /// <summary>
+    /// F-M376: the resolution token a release name would carry.
+    /// </summary>
+    /// <param name="height">Video height in pixels.</param>
+    /// <returns>Token such as <c>1080p</c>, or null.</returns>
+    public static string? ResolutionToken(int? height)
+    {
+        if (height is null || height <= 0)
+        {
+            return null;
+        }
+
+        int h = height.Value;
+        return h switch
+        {
+            >= 2000 => "2160p",
+            >= 1000 => "1080p",
+            >= 700 => "720p",
+            >= 560 => "576p",
+            >= 460 => "480p",
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// F-M376: the codec token a release name would carry.
+    /// </summary>
+    /// <param name="codec">Codec name as the stream reports it.</param>
+    /// <returns>Token such as <c>x265</c>, or null.</returns>
+    public static string? CodecToken(string? codec)
+    {
+        return codec?.Trim().ToLowerInvariant() switch
+        {
+            "h264" or "avc" => "x264",
+            "hevc" or "h265" => "x265",
+            "av1" => "AV1",
+            "vp9" => "VP9",
+            "mpeg2video" or "mpeg2" => "MPEG2",
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// The season release every episode name agrees on, or null when they do not agree.
+    /// </summary>
+    /// <param name="episodeReleaseNames">Release names in episode order.</param>
+    /// <param name="season">Season number.</param>
+    /// <returns>Season form, or null.</returns>
+    private static string? SeasonReleaseFromNames(IEnumerable<string> episodeReleaseNames, int season)
     {
         string seasonTag = "S" + season.ToString("00", CultureInfo.InvariantCulture);
         string? common = null;
@@ -140,13 +271,13 @@ public static partial class SeasonPack
         {
             if (string.IsNullOrWhiteSpace(name))
             {
-                return ReleaseLabel(seriesName, imdbId, season, language, hearingImpaired);
+                return null;
             }
 
             string reduced = ReduceToSeason(name.Trim(), seasonTag);
             if (reduced.Length == 0)
             {
-                return ReleaseLabel(seriesName, imdbId, season, language, hearingImpaired);
+                return null;
             }
 
             if (common is null)
@@ -155,11 +286,11 @@ public static partial class SeasonPack
             }
             else if (!string.Equals(common, reduced, StringComparison.Ordinal))
             {
-                return ReleaseLabel(seriesName, imdbId, season, language, hearingImpaired);
+                return null;
             }
         }
 
-        return common ?? ReleaseLabel(seriesName, imdbId, season, language, hearingImpaired);
+        return common;
     }
 
     /// <summary>

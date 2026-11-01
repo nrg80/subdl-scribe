@@ -1194,7 +1194,7 @@ public sealed class UploadPipeline
             {
                 runCt.ThrowIfCancellationRequested();
                 watchdog.Heartbeat();
-                string? qaReject = ScreenContentQa(cand.Srt, cand.Lang, runtimeMs, out string contentHash);
+                string? qaReject = ScreenContentQa(cand.Srt, cand.Lang, runtimeMs, out string contentHash, out string? correctedLang);
                 if (qaReject != null)
                 {
                     // F-M298: `duplicate-content` says "this text is already known" — and IsContentKnown
@@ -1235,6 +1235,15 @@ public sealed class UploadPipeline
                     continue;
                 }
 
+                if (correctedLang != null)
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL] CORRECT {File} [{Tag}] — the tag lies, the text is {Lang}; it goes up as {Lang} (F-M375)",
+                        Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang, correctedLang, correctedLang);
+                    qaSurvivors.Add((cand.IsLoose, cand.Stream, cand.SubPos, cand.LoosePath, correctedLang, cand.Srt, cand.HearingImpaired, cand.Forced));
+                    continue;
+                }
+
                 qaSurvivors.Add(cand);
             }
 
@@ -1254,6 +1263,10 @@ public sealed class UploadPipeline
             // plan needs it in the dry run too — looked up once per item, as in phase 3.
             string itemFramerate = GetFramerateCode(item);
 
+            // F-M376: what the file itself says about its resolution and codec — the only release
+            // facts a pack has when the file names carry no release at all. One lookup per item.
+            (int? itemVideoHeight, string? itemVideoCodec) = GetVideoFacts(item);
+
             if (_config.DryRun)
             {
             foreach (var cand in qaSurvivors)
@@ -1266,7 +1279,7 @@ public sealed class UploadPipeline
                     await packCoordinator.AddAsync(
                         PackCandidate(item, mediaHash!, imdbId!, tmdbIdRaw, season, episode,
                             cand.Lang, cand.HearingImpaired, cand.Forced, cand.SubPos, cand.Srt,
-                            mediaPath, itemFramerate),
+                            mediaPath, itemFramerate, itemVideoHeight, itemVideoCodec),
                         runCt).ConfigureAwait(false);
                     continue;
                 }
@@ -1367,7 +1380,7 @@ public sealed class UploadPipeline
                     await packCoordinator.AddAsync(
                         PackCandidate(item, mediaHash!, imdbId!, tmdbIdRaw, season, episode,
                             cand.Lang, cand.HearingImpaired, cand.Forced, cand.SubPos, cand.Srt,
-                            mediaPath, itemFramerate),
+                            mediaPath, itemFramerate, itemVideoHeight, itemVideoCodec),
                         runCt).ConfigureAwait(false);
                     continue;
                 }
@@ -1622,8 +1635,9 @@ public sealed class UploadPipeline
     /// (or null when the content passes) plus the computed content hash.
     /// </summary>
 
-    private string? ScreenContentQa(string srtContent, string lang, long runtimeMs, out string contentHash)
+    private string? ScreenContentQa(string srtContent, string lang, long runtimeMs, out string contentHash, out string? correctedLang)
     {
+        correctedLang = null;
         contentHash = ContentHashRegistry.ComputeHash(srtContent);
 
         // B1 simple size gate (full QA is B2/F-M13–M16)
@@ -1635,17 +1649,15 @@ public sealed class UploadPipeline
         // ---- B2 QA gates (F-M13–M16), each opt-in via config checkbox ----
         var stats = Qa.QaGates.ParseSrt(srtContent);
 
-        // F-M15: language verification — detected content language vs. stream tag
+        // F-M15 + F-M375 (operator order 01.11.2026): language verification — detected content
+        // language vs. stream tag. A track whose tag lies is not thrown away any more: the
+        // detected language wins and the subtitle goes up under it, which is what the tag
+        // should have said in the first place. Only the checkbox decides whether this runs.
         if (_config.QaVerifyLanguage)
         {
-            string? detected = Qa.QaGates.DetectLanguage(srtContent);
-            if (detected != null && !string.Equals(detected, lang, StringComparison.OrdinalIgnoreCase)
-                && !Qa.QaGates.IsFamilyMatch(lang, detected))
-            {
-                return $"qa-lang-mismatch (tag {lang}, content {detected})";
-            }
+            correctedLang = Qa.QaGates.CorrectedLanguage(lang, srtContent);
 
-            // detected == null → no confident verdict → gate stays silent (fail-open)
+            // null → tag holds, or no confident verdict → nothing to correct (fail-open)
         }
 
         // F-M16: minimum cue count (≥30) — beyond the hard 2 KB size floor
@@ -1732,7 +1744,8 @@ public sealed class UploadPipeline
         if (reason.StartsWith("qa-lang-mismatch", StringComparison.Ordinal))
         {
             // "qa-lang-mismatch (tag SK, content IT)" → readable form
-            return string.Concat("quality gate: subtitle language does not match its tag (", reason.AsSpan("qa-lang-mismatch ".Length), ")");
+            // F-M375: no reject of this kind is written any more; rows from older runs stay readable.
+            return string.Concat("quality gate: subtitle language did not match its tag (", reason.AsSpan("qa-lang-mismatch ".Length), ")");
         }
 
         return reason switch
@@ -1814,6 +1827,31 @@ public sealed class UploadPipeline
         catch
         {
             return SubdlFramerate.Unknown;
+        }
+    }
+
+    /// <summary>
+    /// F-M376: resolution and codec of the item's video, read from the stream. A missing or throwing
+    /// stream costs the release name a token, never the upload.
+    /// </summary>
+    /// <param name="item">Media item.</param>
+    /// <returns>Height in pixels and codec name, both nullable.</returns>
+    private (int? Height, string? Codec) GetVideoFacts(BaseItem item)
+    {
+        try
+        {
+            var video = _mediaSourceManager.GetMediaStreams(item.Id)?
+                .FirstOrDefault(s => s.Type == MediaStreamType.Video);
+            if (video == null)
+            {
+                return (null, null);
+            }
+
+            return (video.Height, video.Codec);
+        }
+        catch
+        {
+            return (null, null);
         }
     }
 
@@ -1923,11 +1961,14 @@ public sealed class UploadPipeline
             // incremented in the phase-1 precheck (the normal path, where the run
             // summary is in scope); counting this safety net as well would report
             // one rejection twice. This branch only runs for a direct/retry call.
-            string? qaReject = ScreenContentQa(srtContent, lang, runtimeMs, out _);
+            string? qaReject = ScreenContentQa(srtContent, lang, runtimeMs, out _, out string? correctedLang);
             if (qaReject != null)
             {
                 return UploadResult.Skipped(qaReject);
             }
+
+            // F-M375: the retry path corrects the same way the phase-1 precheck does.
+            lang = correctedLang ?? lang;
         }
 
 
@@ -2611,12 +2652,14 @@ public sealed class UploadPipeline
     /// <param name="srt">Canonical subtitle text.</param>
     /// <param name="mediaPath">Path of the media file.</param>
     /// <param name="framerate">Frame rate code of the video.</param>
+    /// <param name="videoHeight">Video height in pixels, when the stream reports one.</param>
+    /// <param name="videoCodec">Video codec name from the stream.</param>
     /// <returns>The candidate as the coordinator expects it.</returns>
     private static SeasonPackCoordinator.Candidate PackCandidate(
         BaseItem item, string mediaHash, string imdbId, string? tmdbId, int season, int episode,
         string lang, bool hearingImpaired, bool forced, int subPos, string srt,
-        string mediaPath, string framerate)
-        => new(
+        string mediaPath, string framerate, int? videoHeight, string? videoCodec)
+    => new(
             item,
             item.Id.ToString(),
             mediaHash,
@@ -2631,7 +2674,9 @@ public sealed class UploadPipeline
             srt,
             Path.GetFileNameWithoutExtension(mediaPath),
             SourceQuality.Detect(null, mediaPath),
-            framerate);
+            framerate,
+            videoHeight,
+            videoCodec);
 
     /// <summary>
     /// F-M373: which complete seasons can still become a pack in THIS run — only those whose queued

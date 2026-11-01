@@ -194,6 +194,35 @@ internal static class Program
             "a release name without a marker cannot be reduced and the label stands in");
         Check(SeasonPack.PackRelease(Array.Empty<string>(), "Lanterns", "tt26545992", 1, "EN", true)
               == "Lanterns S01 - complete season (SDH) [EN]", "an empty list still yields a title");
+
+        // F-M376: when no name carries a release, the file's own facts name the season.
+        Check(SeasonPack.MediaRelease("Foundation", "tt0804484", 1, "web", 1080, "h264")
+              == "Foundation.S01.1080p.WEB.x264", "resolution, source and codec from the file name the season");
+        Check(SeasonPack.MediaRelease("Dark Matter", "tt1", 2, "bluray", 2160, "hevc")
+              == "Dark.Matter.S02.2160p.BluRay.x265", "spaces and codec names are release-shaped");
+        Check(SeasonPack.MediaRelease("Foundation", "tt0804484", 1, "web", null, null) == "Foundation.S01.WEB",
+            "a file without a video stream still names its source");
+        Check(SeasonPack.MediaRelease("Foundation", "tt0804484", 1, null, null, null) == null,
+            "no facts at all is no release");
+        Check(SeasonPack.MediaRelease(null, "tt0804484", 3, "hdtv", 720, "av1") == "tt0804484.S03.720p.HDTV.AV1",
+            "an unknown series name is replaced by the IMDb id");
+        Check(SeasonPack.PackRelease(
+                new[] { "S01E01 - The Emperor's Peace", "S01E02 - Preparing to Live" },
+                "Foundation", "tt0804484", 1, "EN", false,
+                SeasonPack.MediaRelease("Foundation", "tt0804484", 1, "web", 1080, "h264"))
+              == "Foundation.S01.1080p.WEB.x264",
+            "names without a release fall through to the built release");
+        Check(SeasonPack.PackRelease(
+                new[] { "Foundation.S01E01.1080p.WEB.x264-NTb", "Foundation.S01E02.1080p.WEB.x264-NTb" },
+                "Foundation", "tt0804484", 1, "EN", false,
+                "Foundation.S01.1080p.WEB.x264")
+              == "Foundation.S01.1080p.WEB.x264-NTb",
+            "a release the names carry still wins over the built one");
+        Check(SeasonPack.PackRelease(
+                new[] { "S01E01 - One", "S01E02 - Two" },
+                "Foundation", "tt0804484", 1, "FR", false, null)
+              == "Foundation S01 - complete season [FR]",
+            "no names, no facts — the neutral label stands in");
         Check(coordinator.Contains("DRY-RUN would upload season pack", StringComparison.Ordinal), "a dry run names the pack it would send and sends nothing");
         Check(coordinator.Contains("ReadPackId(result.Response) ?? name", StringComparison.Ordinal),
             "with no id in the response the pack name is the identity the rows carry");

@@ -47,6 +47,8 @@ public sealed class SeasonPackCoordinator
     /// <param name="ReleaseName">Release name the episode came from.</param>
     /// <param name="Quality">Documented quality code.</param>
     /// <param name="Framerate">Documented frame rate code.</param>
+    /// <param name="VideoHeight">Video height in pixels — the file's own word on its resolution.</param>
+    /// <param name="VideoCodec">Video codec name from the stream.</param>
     public sealed record Candidate(
         BaseItem Item,
         string ItemId,
@@ -62,7 +64,9 @@ public sealed class SeasonPackCoordinator
         string Srt,
         string ReleaseName,
         string Quality,
-        string Framerate);
+        string Framerate,
+        int? VideoHeight = null,
+        string? VideoCodec = null);
 
     private readonly SubdlApiClient _api;
     private readonly ContentHashRegistry _registry;
@@ -293,15 +297,25 @@ public sealed class SeasonPackCoordinator
     /// <returns>Release list with the season label up front.</returns>
     private static List<string> PackReleases(List<Candidate> ordered, (string ImdbId, int Season, string Lang, bool Hi) key)
     {
+        Candidate first = ordered[0];
+        string? built = SeasonPack.MediaRelease(
+            SeriesNameOf(first.Item),
+            key.ImdbId,
+            key.Season,
+            first.Quality,
+            first.VideoHeight,
+            first.VideoCodec);
+
         return new List<string>
         {
             SeasonPack.PackRelease(
                 ordered.Select(c => c.ReleaseName),
-                SeriesNameOf(ordered[0].Item),
+                SeriesNameOf(first.Item),
                 key.ImdbId,
                 key.Season,
                 key.Lang,
-                key.Hi)
+                key.Hi,
+                built)
         };
     }
 

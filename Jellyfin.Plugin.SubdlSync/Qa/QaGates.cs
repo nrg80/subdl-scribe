@@ -170,6 +170,26 @@ public static class QaGates
         ["ID"] = new[] { "MS" },
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// F-M375: the language a subtitle must be uploaded under when its stream tag lies.
+    /// Returns the detected language when the content clearly speaks another language than
+    /// the tag claims, and null when the tag holds (or when there is no confident verdict —
+    /// the gate stays fail-open, as it always did).
+    /// </summary>
+    /// <param name="tag">The language tag the container gave the stream.</param>
+    /// <param name="content">The subtitle text.</param>
+    /// <returns>Replacement language, or null when the tag stands.</returns>
+    public static string? CorrectedLanguage(string tag, string content)
+    {
+        string? detected = DetectLanguage(content);
+        if (detected == null || IsFamilyMatch(tag, detected))
+        {
+            return null;
+        }
+
+        return detected;
+    }
+
     /// <summary>True when <paramref name="detected"/> is an accepted relative
     /// of the tagged <paramref name="lang"/> (or identical).</summary>
     public static bool IsFamilyMatch(string lang, string detected)
