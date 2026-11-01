@@ -528,6 +528,22 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool DownloadDryRun { get; set; } = false;
 
     /// <summary>
+    /// Gets or sets how many days a downloaded archive is kept on disk (F-M370). A season pack
+    /// serves one episode per run, and the free daily limit is 50 downloads, so the same pack is
+    /// asked for again on the following days — on disk it is answered without a request. Measured
+    /// 01.11.2026: 51 archive fetches for 45 files, 26 of them on three packs. 0 turns the disk
+    /// cache off (user decision 01.11.2026, Download tab).
+    /// </summary>
+    public int DownloadArchiveCacheDays { get; set; } = 14;
+
+    /// <summary>
+    /// Gets or sets the size ceiling of the archive cache in megabytes (F-M370). When the cache
+    /// grows past it the oldest archives are dropped first. 0 turns the disk cache off as well —
+    /// either switch at 0 disables it (user decision 01.11.2026: 512 MB default).
+    /// </summary>
+    public int DownloadArchiveCacheMaxMb { get; set; } = 512;
+
+    /// <summary>
     /// (user decision 20.09.2026): override for the ffmpeg executable path used to
     /// extract embedded text subtitles. Empty means auto-detect: Jellyfin's configured
     /// encoder path first, then "ffmpeg" in PATH, then common system locations.

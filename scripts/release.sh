@@ -200,11 +200,39 @@ else
     ok "(dry-run: git state and token not checked)"
 fi
 
+# --- 1b. the Lastenheft ------------------------------------------------------
+# NF-9 makes the specification the eighth suite: every Contents counter must match the definitions
+# in its section, every id must be defined once, the test numbering must stay gapless from T1, every
+# test a requirement names must exist, and the header status must name the version build.yaml
+# builds. Until 31.10.2026 it ran by hand — and drifted: two Contents counters and T160's check
+# count were behind the code, so the document described a different release than the one that
+# shipped. A gate is the only thing that keeps a document honest while the code moves.
+say "Specification"
+python3 scripts/tests/spec-doc/check.py | tail -3 \
+    || die "spec-doc check failed — the Lastenheft does not describe this build"
+
 # --- 2. build ----------------------------------------------------------------
 say "Build"
 ./build.sh "$VER" | tail -3
 ZIP="$ROOT/out/Jellyfin.Plugin.SubdlSync_${VER}.zip"
 [[ -f "$ZIP" ]] || die "build produced no ZIP at $ZIP"
+
+# --- 2b. the suites named by the Lastenheft ----------------------------------
+# T158/T159/T160/T161 name three projects and their check counts. They run against the DLL that
+# was just built: a stale bin/Release would let a suite pass while the shipped assembly is a
+# different one. Skipped (not silently passed) when this host has no Jellyfin to reference.
+say "Test suites"
+JFDIR="${JF_TEST_DIR:-/opt/data/jf-test/jellyfin}"
+if [[ -d "$JFDIR" ]]; then
+    for suite in anchorgate forcedtitle archivecache; do
+        OUT="$(DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 /opt/data/.dotnet/dotnet run \
+            --project "scripts/tests/$suite/$suite.csproj" -- "$ROOT" 2>&1 | tail -2)"
+        echo "$OUT"
+        grep -q "all green" <<<"$OUT" || die "suite $suite is not green — the Lastenheft's counts and the code disagree"
+    done
+else
+    ok "(skipped: no Jellyfin reference at $JFDIR, set JF_TEST_DIR to run them)"
+fi
 
 # --- 3. verify the artifact --------------------------------------------------
 say "Verify artifact"
