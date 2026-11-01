@@ -395,6 +395,14 @@
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
+                                <input id="UploadSeasonPacks" name="UploadSeasonPacks" type="checkbox" is="emby-checkbox" />
+                                <span>Upload season packs</span>
+                            </label>
+                            <div class="fieldDescription">A complete season goes up as one pack instead of one upload per episode. Default: off.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
                                 <input id="UploadContinueAfterLimit" name="UploadContinueAfterLimit" type="checkbox" is="emby-checkbox" />
                                 <span>Continue after daily limit</span>
                             </label>
@@ -978,6 +986,7 @@
                             rsi.textContent = txt;
                         }
                         document.querySelector('#UploadOnArrival').checked = config.UploadOnArrival;
+                        document.querySelector('#UploadSeasonPacks').checked = config.UploadSeasonPacks;
                         document.querySelector('#UploadEnabled').checked = config.UploadEnabled;
                         document.querySelector('#DryRun').checked = config.DryRun;
                         document.querySelector('#LogMode').value = config.LogMode;
@@ -1599,6 +1608,7 @@ workers.forEach(function (w) {
                         config.FollowUpRoundsDownload = document.querySelector('#FollowUpRoundsDownload').checked;
                         config.FollowUpRoundsUpload = document.querySelector('#FollowUpRoundsUpload').checked;
                         config.UploadOnArrival = document.querySelector('#UploadOnArrival').checked;
+                        config.UploadSeasonPacks = document.querySelector('#UploadSeasonPacks').checked;
                                                 config.UploadEnabled = document.querySelector('#UploadEnabled').checked;
                         config.DryRun = document.querySelector('#DryRun').checked;
                         config.LogMode = document.querySelector('#LogMode').value;

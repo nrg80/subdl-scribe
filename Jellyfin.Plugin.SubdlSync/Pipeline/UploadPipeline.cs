@@ -399,6 +399,28 @@ public sealed class UploadPipeline
             .Select(x => x.Item)
             .ToList();
 
+        // F-M372: which seasons are worth buffering? Asked BEFORE the loop, because the answer is a
+        // property of the season and not of the queue: a season is complete when the episodes the
+        // library holds are exactly the episodes that aired (IMDb, TMDB as the fallback). A run that
+        // sees only part of a season does not make it incomplete — the folder decides, not the queue.
+        SeasonPackCoordinator? packCoordinator = null;
+        if (_config.UploadSeasonPacks)
+        {
+            var completeSeasons = await CompleteSeasonsAsync(runCt).ConfigureAwait(false);
+            if (completeSeasons.Count > 0)
+            {
+                packCoordinator = new SeasonPackCoordinator(
+                    _api,
+                    Registry,
+                    _logger,
+                    _config,
+                    completeSeasons,
+                    (label, count) => { summary.Uploaded += count; },
+                    count => { summary.Failed += count; },
+                    itemId => ItemResult?.Invoke(itemId, ItemOutcome.Done));
+            }
+        }
+
         int idx = 0;
 
         // F-M8: login once per run — token needed for uploads (dry-run skips it)
@@ -1309,6 +1331,33 @@ public sealed class UploadPipeline
                 // counters, answered below by the 429/QuotaStopDecision path).
                 // The upload→upload transfer pause (F-M26) sits at the end of this loop, unchanged.
 
+                // F-M372: a candidate of a complete season waits for its siblings instead of going
+                // up alone. Loose sidecars and forced tracks never join a pack — the first has no
+                // place in the season's container, the second is not the season's subtitle.
+                if (packCoordinator != null && !cand.IsLoose && !cand.Forced
+                    && packCoordinator.ShouldBuffer(imdbId, season))
+                {
+                    await packCoordinator.AddAsync(
+                        new SeasonPackCoordinator.Candidate(
+                            item,
+                            item.Id.ToString(),
+                            mediaHash!,
+                            imdbId!,
+                            tmdbIdRaw,
+                            season,
+                            episode,
+                            cand.Lang,
+                            cand.HearingImpaired,
+                            cand.Forced,
+                            cand.SubPos,
+                            cand.Srt,
+                            Path.GetFileNameWithoutExtension(mediaPath),
+                            SourceQuality.Detect(null, mediaPath),
+                            itemFramerate),
+                        runCt).ConfigureAwait(false);
+                    continue;
+                }
+
                 var result = await UploadSrtContentAsync(
                     cand.IsLoose ? cand.LoosePath : null,
                     mediaPath,
@@ -1484,6 +1533,13 @@ public sealed class UploadPipeline
         // per-item SKIP lines remain the Verbose detail.
         // F-M247: a dry run uploaded nothing, so its number is labelled hypothetical —
         // "N uploaded" would be a claim the run cannot back.
+        // F-M372: every buffer that never filled goes up the single way before the run is closed —
+        // an incomplete season must not lose the episodes it did have.
+        if (packCoordinator != null)
+        {
+            await packCoordinator.FlushAsync(runCt).ConfigureAwait(false);
+        }
+
         if (summary.IsDryRun)
         {
             LogUtil.Normal(_logger, "[SubDL] upload: finished — lock released. DRY RUN, would have uploaded {N} | {Rejected} rejected, {Skipped} stream(s) skipped",
@@ -2429,6 +2485,101 @@ public sealed class UploadPipeline
     /// F-M9/F-M28 raw ID resolution from JF metadata ONLY (no TMDB calls — the key
     /// is spent only after the metadata wait, user decision 08.09.2026).
     /// </summary>
+    /// <summary>
+    /// F-M372: the seasons whose episodes on disk are exactly the episodes that aired, with the
+    /// aired episode set. Only these are worth buffering into a pack.
+    /// <para>
+    /// Two questions, two sources: what we hold comes from the library (every Episode item of the
+    /// season, deduplicated by episode number — a two-part file carries one number), what aired
+    /// comes from <see cref="SeasonEpisodeIndex"/>. A season nobody can answer for is not packed.
+    /// </para>
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Complete seasons keyed by (imdb id, season).</returns>
+    private async Task<Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>> CompleteSeasonsAsync(CancellationToken ct)
+    {
+        var result = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>();
+
+        // The same collection the run itself uses (path scope, not library name — F-M189), so the
+        // seasons judged here are the seasons this run can actually see.
+        List<BaseItem> episodes;
+        try
+        {
+            episodes = CollectItems(_config.SelectedLibraries);
+        }
+        catch (Exception ex)
+        {
+            LogUtil.Normal(_logger, "[SubDL] season pack: library query failed ({Msg}) — no season is packed this run.", ex.Message);
+            return result;
+        }
+
+        var present = new Dictionary<(string ImdbId, int Season), List<int>>();
+        var tmdbOf = new Dictionary<(string ImdbId, int Season), string?>();
+        foreach (var episode in episodes)
+        {
+            var (imdb, tmdb, season, number, isSeries) = ResolveIdsRaw(episode);
+            if (!isSeries || string.IsNullOrWhiteSpace(imdb) || season < 1 || number < 1)
+            {
+                continue;
+            }
+
+            var key = (imdb!, season);
+            if (!present.TryGetValue(key, out var numbers))
+            {
+                numbers = new List<int>();
+                present[key] = numbers;
+            }
+
+            if (!numbers.Contains(number))
+            {
+                numbers.Add(number);
+            }
+
+            if (!tmdbOf.ContainsKey(key) && !string.IsNullOrWhiteSpace(tmdb))
+            {
+                tmdbOf[key] = tmdb;
+            }
+        }
+
+        LogUtil.Normal(_logger, "[SubDL] season pack: {Count} season(s) with at least two episodes on disk.", present.Count);
+        foreach (var entry in present)
+        {
+            if (entry.Value.Count < 2)
+            {
+                continue;
+            }
+
+            tmdbOf.TryGetValue(entry.Key, out string? tmdbId);
+            var aired = await SeasonEpisodeIndex.AiredAsync(entry.Key.Item1, entry.Key.Item2, tmdbId, _config.TmdbApiKey, _logger, ct).ConfigureAwait(false);
+            if (aired == null)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack skipped: {Imdb} S{Season} — no episode count (IMDb and TMDB both silent), stays single.",
+                    entry.Key.Item1, entry.Key.Item2);
+                continue;
+            }
+
+            if (SeasonPack.IsComplete(aired, entry.Value))
+            {
+                result[entry.Key] = aired;
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack candidate: {Imdb} S{Season} — {Count} of {Aired} episode(s) on disk, season complete.",
+                    entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count);
+            }
+            else
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack skipped: {Imdb} S{Season} — {Have} episode(s) on disk against {Aired} aired, stays single.",
+                    entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count);
+            }
+        }
+
+        return result;
+    }
+
     private static (string? ImdbId, string? TmdbId, int Season, int Episode, bool IsSeries) ResolveIdsRaw(BaseItem item)
     {
         switch (item)

@@ -895,6 +895,243 @@ public sealed class SubdlApiClient
         return UploadResult.Success(responseDoc);
     }
 
+    /// <summary>
+    /// F-M372: the three-step upload for a whole season — one object on SubDL's side instead of one
+    /// per episode.
+    /// <para>
+    /// The Upload API documents the shape: <c>uploadSingleSubtitle</c> takes ONE file per call,
+    /// <c>uploadSubtitle</c> then takes the <b>array</b> <c>file_n_ids</c>, and for packed
+    /// multi-file uploads the <c>name</c> field becomes the zip name on download. The container is
+    /// therefore built by SubDL, never by us; what we send is the files plus the claim
+    /// <c>is_full_season=true</c> and the episode range in <c>ef</c>/<c>ee</c>.
+    /// </para>
+    /// </summary>
+    /// <param name="files">Episode files, ascending: the name each subtitle carries and its text.</param>
+    /// <param name="packName">Pack name (<see cref="Pipeline.SeasonPack.Name"/>) — SubDL appends .zip.</param>
+    /// <param name="subdlLanguage">SubDL language code (one pack = one language).</param>
+    /// <param name="releaseNames">Release names of the season's episodes — the array SubDL stores is exactly why a pack can carry them all.</param>
+    /// <param name="quality">Documented quality code (F-M344).</param>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="tmdbId">TMDB id when known.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episodeFrom">First episode in the pack.</param>
+    /// <param name="episodeTo">Last episode in the pack.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="hearingImpaired">HI/SDH variant — a pack never mixes both sides.</param>
+    /// <param name="framerate">Documented frame rate code (F-M350).</param>
+    /// <returns>Success with the raw response attached; the caller reads the pack id from it.</returns>
+    public async Task<UploadResult> UploadSeasonPackAsync(
+        IReadOnlyList<(string FileName, string Srt)> files,
+        string packName,
+        string subdlLanguage,
+        IReadOnlyList<string> releaseNames,
+        string quality,
+        string? imdbId,
+        string? tmdbId,
+        int season,
+        int episodeFrom,
+        int episodeTo,
+        CancellationToken ct,
+        bool hearingImpaired = false,
+        string framerate = Pipeline.SubdlFramerate.Unknown)
+    {
+        string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");
+        if (string.IsNullOrWhiteSpace(imdbId))
+        {
+            return UploadResult.Skipped("no-imdb");
+        }
+
+        if (files.Count == 0)
+        {
+            return UploadResult.Failed("pack-file-refused: no files");
+        }
+
+        // Step 1: getNId — once for the whole pack, it is the upload session, not a file.
+        using var nReq = new HttpRequestMessage(HttpMethod.Get, $"{ApiBase}/user/getNId");
+        nReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        TraceCall("GET", $"{ApiBase}/user/getNId");
+        using var nResp = await _http.SendAsync(nReq, ct).ConfigureAwait(false);
+        ApiActivity?.Invoke();
+        Trace("GET", "user/getNId", (int)nResp.StatusCode);
+        string nBody = await nResp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        string? nId = null;
+        try
+        {
+            using var nd = JsonDocument.Parse(nBody);
+            if (nd.RootElement.TryGetProperty("n_id", out var nIdEl))
+            {
+                nId = nIdEl.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        if (string.IsNullOrWhiteSpace(nId))
+        {
+            return UploadResult.Failed($"getNId failed: {Trim(nBody)}");
+        }
+
+        // Step 2: one uploadSingleSubtitle per episode. Built MANUALLY for the same reason the
+        // single path does it: SubDL rejects MultipartFormDataContent output.
+        var fileNIds = new List<string>(files.Count);
+        foreach (var file in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            string? fileNId = await UploadSingleFileAsync(token, nId, file.FileName, file.Srt, ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(fileNId))
+            {
+                // A refused file must not cost the season its subtitles — the caller falls back.
+                return UploadResult.Failed($"pack-file-refused: {file.FileName}");
+            }
+
+            fileNIds.Add(fileNId);
+        }
+
+        // Step 3: complete the upload as ONE pack.
+        var meta = new Dictionary<string, string>
+        {
+            ["file_n_ids"] = JsonSerializer.Serialize(fileNIds),
+            ["n_id"] = nId,
+            ["type"] = "tv",
+            ["name"] = packName,
+            ["lang"] = subdlLanguage,
+            ["quality"] = quality,
+            ["production_type"] = "0",
+            ["releases"] = JsonSerializer.Serialize(releaseNames),
+            ["framerate"] = framerate,
+            ["comment"] = string.Empty,
+            ["season"] = season.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["hi"] = hearingImpaired ? "true" : "false",
+            ["is_full_season"] = "true",
+            ["ef"] = episodeFrom.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["ee"] = episodeTo.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        };
+        if (!string.IsNullOrWhiteSpace(imdbId))
+        {
+            meta["imdb_id"] = imdbId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(tmdbId))
+        {
+            meta["tmdb_id"] = tmdbId;
+        }
+
+        using var metaReq = new HttpRequestMessage(HttpMethod.Post, $"{ApiBase}/user/uploadSubtitle")
+        {
+            Content = new FormUrlEncodedContent(meta)
+        };
+        metaReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        TraceCall("POST", $"{ApiBase}/user/uploadSubtitle");
+        using var metaResp = await _http.SendAsync(metaReq, ct).ConfigureAwait(false);
+        ApiActivity?.Invoke();
+        Trace("POST", "user/uploadSubtitle", (int)metaResp.StatusCode);
+        string metaBody = await metaResp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+        if ((int)metaResp.StatusCode == 429)
+        {
+            Classify429(metaResp, metaBody);
+            return UploadResult.Failed("rate-limited");
+        }
+
+        bool ok;
+        try
+        {
+            using var md = JsonDocument.Parse(metaBody);
+            ok = md.RootElement.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.True;
+            if (!ok && md.RootElement.TryGetProperty("message", out var msgEl) && msgEl.ValueKind == JsonValueKind.String)
+            {
+                string msg = msgEl.GetString() ?? string.Empty;
+                if (msg.Contains("500 subtitles per hour", StringComparison.OrdinalIgnoreCase)
+                    || (msg.Contains("limit", StringComparison.OrdinalIgnoreCase) && msg.Contains("hour", StringComparison.OrdinalIgnoreCase)))
+                {
+                    // Not a failure — the season stays due and the run stops cleanly (F-M72).
+                    HourlyUploadCapHit = true;
+                    return UploadResult.Skipped("upload-hourly-cap");
+                }
+
+                if (msg.Contains("already exist", StringComparison.OrdinalIgnoreCase)
+                    || msg.Contains("duplicate", StringComparison.OrdinalIgnoreCase))
+                {
+                    return UploadResult.Skipped("duplicate-content");
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            ok = false;
+        }
+
+        if (!ok)
+        {
+            return UploadResult.Failed($"pack-metadata failed: {Trim(metaBody)}");
+        }
+
+        System.Text.Json.JsonDocument? responseDoc = null;
+        try
+        {
+            responseDoc = System.Text.Json.JsonDocument.Parse(metaBody);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            responseDoc = null;
+        }
+
+        return UploadResult.Success(responseDoc);
+    }
+
+    /// <summary>
+    /// Step 2 of the upload for one file: returns the <c>file_n_id</c> SubDL assigns, or null when
+    /// the file was refused.
+    /// </summary>
+    private async Task<string?> UploadSingleFileAsync(string token, string nId, string fileName, string content, CancellationToken ct)
+    {
+        var boundary = "----Boundary" + Guid.NewGuid().ToString("N");
+        var sb = new System.Text.StringBuilder();
+        sb.Append("--").Append(boundary).Append("\r\n");
+        sb.Append("Content-Disposition: form-data; name=\"n_id\"\r\n\r\n");
+        sb.Append(nId).Append("\r\n");
+        sb.Append("--").Append(boundary).Append("\r\n");
+        sb.Append("Content-Disposition: form-data; name=\"subtitle\"; filename=\"").Append(fileName).Append("\"\r\n");
+        sb.Append("Content-Type: application/octet-stream\r\n\r\n");
+        byte[] head = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+        byte[] payload = System.Text.Encoding.UTF8.GetBytes(content);
+        byte[] tail = System.Text.Encoding.UTF8.GetBytes($"\r\n--{boundary}--\r\n");
+        byte[] body = new byte[head.Length + payload.Length + tail.Length];
+        head.CopyTo(body, 0);
+        payload.CopyTo(body, head.Length);
+        tail.CopyTo(body, head.Length + payload.Length);
+
+        using var upReq = new HttpRequestMessage(HttpMethod.Post, $"{ApiBase}/user/uploadSingleSubtitle")
+        {
+            Content = new ByteArrayContent(body)
+        };
+        upReq.Content.Headers.ContentType = new MediaTypeHeaderValue("multipart/form-data")
+        {
+            Parameters = { new System.Net.Http.Headers.NameValueHeaderValue("boundary", $"\"{boundary}\"") }
+        };
+        upReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        TraceCall("POST", $"{ApiBase}/user/uploadSingleSubtitle");
+        using var upResp = await _http.SendAsync(upReq, ct).ConfigureAwait(false);
+        ApiActivity?.Invoke();
+        Trace("POST", "user/uploadSingleSubtitle", (int)upResp.StatusCode);
+        string upBody = await upResp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using var ud = JsonDocument.Parse(upBody);
+            if (ud.RootElement.TryGetProperty("file", out var fileEl) && fileEl.ValueKind == JsonValueKind.Object
+                && fileEl.TryGetProperty("file_n_id", out var fni))
+            {
+                return fni.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return null;
+    }
+
     private static string Trim(string s) => s.Length <= 200 ? s : s[..200];
 
     /// <summary>

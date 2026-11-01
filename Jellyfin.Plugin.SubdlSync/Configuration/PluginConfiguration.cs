@@ -324,6 +324,14 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool UploadEnabled { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether F-M372 is on: a season that is complete (every aired
+    /// episode, asked at IMDb) and clean on every gate goes up as ONE season pack instead of one
+    /// upload per episode. Anything else — an incomplete season, a failed gate, a loose sidecar —
+    /// stays a single upload. Off by default.
+    /// </summary>
+    public bool UploadSeasonPacks { get; set; }
+
     #endregion
 
     #region Download pipeline ([D], F-M41–M47)
