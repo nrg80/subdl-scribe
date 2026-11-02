@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.71
-**Status:** Implementation — v12.1.12.304.
+**Status:** Implementation — v12.1.12.305.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 51 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 52 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403
@@ -289,6 +289,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M412 [P] (Operator-Anordnung 02.11.2026):** **Der State beantwortet zwei Fragen je Einzelfolge: ob wir sie hochgeladen haben, und ob wir sie löschen können.** Die erste steht im Status der Embed-Zeile (`uploaded`), die zweite in ihrer SubDL-Id — ohne Id gibt es nichts zu löschen. Der Pack nennt deshalb vor dem Absenden jede Mitgliedsfolge ohne Id: `… carries no SubDL id in the store — uploaded by us, but not deletable, they stay beside the pack.` Asserted by `scripts/tests/packretry`.
 
 **F-M413 [P] (Operator-Anordnung 02.11.2026):** **Die Upload-Id einer Einzelfolge wird beim Hochladen nachgeholt, wenn die Antwort keine enthält.** SubDL antwortet auf einen Upload mit „subtitle sent for review" und ohne Id; die Id steht aber in `GET /user/mySubtitles` (`subtitle.id`). Sie wird direkt nach dem Upload dort abgeholt — erst über den Dateinamen, sonst über IMDb-Id, Staffel, Folge und Sprache, neueste zuerst — und in dieselbe Zeile geschrieben. Ohne sie kann ein Pack die Einzelfolge, die es ersetzt, nie löschen. Asserted by `scripts/tests/packretry`.
+
+**F-M414 [P] (gemessen und angeordnet 02.11.2026):** **Die Upload-Id wird für Einzelfolgen und für Staffelpacks auf demselben Weg geholt — aus `/user/mySubtitles`, direkt nach dem Upload.** Der Probelauf hat es belegt: Einzel-Upload → `id 376477`, Staffelpack (zwei Folgen, `is_full_season=true`) → `id 376481`, jeweils Sekunden nach der Antwort `"subtitle sent for review"`. Der Abgleich läuft über den **Release-Namen**, weil die Liste den Eintrag so benennt (`…S01…` beim Pack, `…S01E08…` bei der Einzelfolge) und nicht nach dem Dateinamen; die Sprache kommt dort ausgeschrieben („Turkish") und wird über `LanguageMapper` verglichen. Ohne Treffer bleibt beim Pack der Name als Kennung, bei der Einzelfolge die Spalte leer. Asserted by `scripts/tests/packretry`.
 
 ## 4. Download Pipeline
 

@@ -2142,7 +2142,7 @@ public sealed class UploadPipeline : IPackFiller
             // per upload, and written into the same row.
             if (uploadId == null)
             {
-                uploadId = await ResolveOwnUploadIdAsync(imdbId, season, episode, lang, loosePath, ct)
+                uploadId = await ResolveOwnUploadIdAsync(imdbId, season, episode, lang, releaseName, loosePath, ct)
                     .ConfigureAwait(false);
                 if (uploadId != null)
                 {
@@ -2834,7 +2834,8 @@ public sealed class UploadPipeline : IPackFiller
     /// episode and language, newest first.
     /// </summary>
     private async Task<int?> ResolveOwnUploadIdAsync(
-        string? imdbId, int season, int episode, string lang, string? filePath, CancellationToken ct)
+        string? imdbId, int season, int episode, string lang, string? releaseName, string? filePath,
+        CancellationToken ct)
     {
         List<OwnSubtitleEntry>? entries;
         try
@@ -2856,18 +2857,53 @@ public sealed class UploadPipeline : IPackFiller
             return null;
         }
 
+        // F-M414 (measured 02.11.2026): mySubtitles reports `name` as the RELEASE name, not the
+        // file name we uploaded ("CliffIdProbe.1080p.WEB-DL", not "…srt"), and `lang` as the written
+        // language ("Turkish", not "TR"). Both are compared the way the list delivers them.
         string file = Path.GetFileName(filePath ?? string.Empty);
-        var exact = entries.FirstOrDefault(e => !string.IsNullOrEmpty(file)
-            && string.Equals(e.Name, file, StringComparison.OrdinalIgnoreCase));
+        var exact = entries.FirstOrDefault(e =>
+            MatchesRelease(e.Name, releaseName) || MatchesRelease(e.Name, file));
         exact ??= entries
             .Where(e => string.Equals(e.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase)
                         && e.Season == season && e.Episode == episode
-                        && (string.IsNullOrEmpty(e.Language)
-                            || e.Language.StartsWith(lang, StringComparison.OrdinalIgnoreCase)))
+                        && SameLanguage(e.Language, lang))
             .OrderByDescending(e => e.CreatedAt)
             .FirstOrDefault();
 
         return exact?.UploadId;
+    }
+
+    /// <summary>F-M414: does the entry's release name carry ours, extension and case aside?</summary>
+    private static bool MatchesRelease(string? entryName, string? ours)
+    {
+        if (string.IsNullOrWhiteSpace(entryName) || string.IsNullOrWhiteSpace(ours))
+        {
+            return false;
+        }
+
+        string a = Path.GetFileNameWithoutExtension(entryName.Trim());
+        string b = Path.GetFileNameWithoutExtension(ours.Trim());
+        return string.Equals(a, b, StringComparison.OrdinalIgnoreCase)
+               || a.Contains(b, StringComparison.OrdinalIgnoreCase)
+               || b.Contains(a, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>F-M414: "Turkish" and "TR" are the same language; both spellings come over the wire.</summary>
+    private static bool SameLanguage(string? entryLanguage, string? ours)
+    {
+        if (string.IsNullOrWhiteSpace(entryLanguage) || string.IsNullOrWhiteSpace(ours))
+        {
+            return true;
+        }
+
+        if (string.Equals(entryLanguage, ours, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string? mapped = LanguageMapper.MapToSubdlName(entryLanguage);
+        return string.Equals(mapped, ours, StringComparison.OrdinalIgnoreCase)
+               || entryLanguage.StartsWith(ours, StringComparison.OrdinalIgnoreCase);
     }
 
     private static SeasonPackCoordinator.Candidate PackCandidate(

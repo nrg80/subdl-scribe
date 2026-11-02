@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.SubdlScribe.Api;
 using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubdlScribe.Language;
 using Jellyfin.Plugin.SubdlScribe.Data;
 using Jellyfin.Plugin.SubdlScribe.Registry;
 using MediaBrowser.Controller.Entities;
@@ -549,7 +550,17 @@ public sealed class SeasonPackCoordinator
         // review"} — no id. The pack's identity in our own rows is therefore the pack NAME when the
         // response carries no id: it is unique per season and content, and it is what the
         // postprocessing pass can match against /user/mySubtitles.
-        string? packId = ReadPackId(result.Response) ?? name;
+        // F-M414 (measured 02.11.2026, probe pack id 376481): the upload answer carries no id — it
+        // says "subtitle sent for review" — but /user/mySubtitles lists the entry seconds later with
+        // its UploadId. The pack asks for it the same way a single does, matched by the release name
+        // it was uploaded under and the season it covers.
+        string? packId = ReadPackId(result.Response);
+        if (string.IsNullOrWhiteSpace(packId))
+        {
+            packId = await ResolveOwnPackIdAsync(releases: PackReleases(ordered, key), key, ct).ConfigureAwait(false)
+                     ?? name;
+        }
+
         foreach (var candidate in ordered)
         {
             var c = candidate;
@@ -579,6 +590,87 @@ public sealed class SeasonPackCoordinator
             "[SubDL] SEASON PACK {Name} — {Count} episode(s), {Imdb} S{Season} [{Lang}], Ef/Ee {From}-{To}, id {Id}",
             name, ordered.Count, key.ImdbId, key.Season, key.Lang,
             ordered.Min(c => c.Episode), ordered.Max(c => c.Episode), packId ?? "-");
+    }
+
+    /// <summary>
+    /// F-M414: the SubDL upload id of this pack, read back from <c>/user/mySubtitles</c>. The list
+    /// names the entry after the release (pack: "…S01…", single: "…S01E08…") and states the language
+    /// in words ("Turkish"), so the match runs over the release name first and falls back to IMDb
+    /// id, season and language, newest first.
+    /// </summary>
+    private async Task<string?> ResolveOwnPackIdAsync(
+        IReadOnlyList<string> releases, (string ImdbId, int Season, string Lang, bool Hi) key, CancellationToken ct)
+    {
+        List<OwnSubtitleEntry>? entries;
+        try
+        {
+            entries = await _api.ListMySubtitlesAsync(ct, maxPages: 2).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[SubDL] could not read mySubtitles for the pack id.");
+            return null;
+        }
+
+        if (entries == null || entries.Count == 0)
+        {
+            return null;
+        }
+
+        var byRelease = entries.FirstOrDefault(e => releases.Any(r => MatchesRelease(e.Name, r)));
+        byRelease ??= entries
+            .Where(e => string.Equals(e.ImdbId, key.ImdbId, StringComparison.OrdinalIgnoreCase)
+                        && e.Season == key.Season && SameLanguage(e.Language, key.Lang))
+            .OrderByDescending(e => e.CreatedAt)
+            .FirstOrDefault();
+
+        if (byRelease == null)
+        {
+            return null;
+        }
+
+        LogUtil.Normal(
+            _logger,
+            "[SubDL] pack id {Id} taken from mySubtitles for {Imdb} S{Season} [{Lang}] — without it the pack could never be matched against the account's own list.",
+            byRelease.UploadId, key.ImdbId, key.Season, key.Lang);
+        return byRelease.UploadId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>F-M414: the entry's release name carries ours, extension and case aside.</summary>
+    private static bool MatchesRelease(string? entryName, string? ours)
+    {
+        if (string.IsNullOrWhiteSpace(entryName) || string.IsNullOrWhiteSpace(ours))
+        {
+            return false;
+        }
+
+        string a = System.IO.Path.GetFileNameWithoutExtension(entryName.Trim());
+        string b = System.IO.Path.GetFileNameWithoutExtension(ours.Trim());
+        return string.Equals(a, b, StringComparison.OrdinalIgnoreCase)
+               || a.Contains(b, StringComparison.OrdinalIgnoreCase)
+               || b.Contains(a, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>F-M414: "Turkish" and "TR" are the same language; both spellings come over the wire.</summary>
+    private static bool SameLanguage(string? entryLanguage, string? ours)
+    {
+        if (string.IsNullOrWhiteSpace(entryLanguage) || string.IsNullOrWhiteSpace(ours))
+        {
+            return true;
+        }
+
+        if (string.Equals(entryLanguage, ours, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string? mapped = LanguageMapper.MapToSubdlName(entryLanguage);
+        return string.Equals(mapped, ours, StringComparison.OrdinalIgnoreCase)
+               || entryLanguage.StartsWith(ours, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

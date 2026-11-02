@@ -367,8 +367,11 @@ internal static class Program
               == "Foundation S01 - complete season [FR]",
             "no names, no facts — the neutral label stands in");
         Check(coordinator.Contains("DRY-RUN would upload season pack", StringComparison.Ordinal), "a dry run names the pack it would send and sends nothing");
-        Check(coordinator.Contains("ReadPackId(result.Response) ?? name", StringComparison.Ordinal),
-            "with no id in the response the pack name is the identity the rows carry");
+        // F-M414: the id comes from mySubtitles right after the upload; the pack name is only the
+        // last resort when the account's own list has nothing matching.
+        Check(coordinator.Contains("ResolveOwnPackIdAsync", StringComparison.Ordinal)
+              && coordinator.Contains("?? name", StringComparison.Ordinal),
+            "the pack takes its id from mySubtitles and keeps the name only as the last resort");
 
         var pipeline = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         Check(pipeline.Contains("&& !cand.IsLoose && !cand.Forced", StringComparison.Ordinal), "no pack for a loose sidecar or a forced track");

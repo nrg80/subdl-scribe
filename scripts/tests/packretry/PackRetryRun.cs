@@ -325,6 +325,13 @@ internal static class Program
         Check(upload.Contains("upload id {Id} taken from mySubtitles"),
             "F-M413: the resolution is logged");
 
+        // ── 20. F-M414: dieselbe Methode für Packs ──────────────────────────────
+        Console.WriteLine("20. Packs resolve their id the same way");
+        Check(coordPackSrc.Contains("ResolveOwnPackIdAsync") && coordPackSrc.Contains("ListMySubtitlesAsync(ct, maxPages: 2)"),
+            "F-M414: a pack resolves its id from mySubtitles");
+        Check(upload.Contains("MatchesRelease") && upload.Contains("MapToSubdlName"),
+            "F-M414: the match runs over the release name and the written language");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."
