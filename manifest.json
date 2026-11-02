@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.293",
-        "changelog": "v12.1.12.293: The language line in the log states the finding — tagged X, detected Y, uploaded under Y — instead of calling the tag a liar.",
+        "version": "12.1.12.294",
+        "changelog": "v12.1.12.294: A worker in dry mode says so while it runs — the workers line reads \"run dry\" instead of only turning grey after the run.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.293-dev/Jellyfin.Plugin.SubdlSync_12.1.12.293.zip",
-        "checksum": "28c00e7784499b174814bdf4a60b8815",
-        "timestamp": "2026-11-02T10:42:28Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.294-dev/Jellyfin.Plugin.SubdlSync_12.1.12.294.zip",
+        "checksum": "03cb3d2b389a31f12585a0c7c55051ca",
+        "timestamp": "2026-11-02T10:43:54Z"
       }
     ]
   }
