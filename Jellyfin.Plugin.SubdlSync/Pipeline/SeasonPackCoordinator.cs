@@ -304,6 +304,18 @@ public sealed class SeasonPackCoordinator
             return;
         }
 
+        // F-M415 (operator order 02.11.2026): the decision belongs BEFORE the extraction. Is this
+        // season already up as a pack, the run does not extract anything for it — it used to pull
+        // every episode out of every file first and only then notice that there was nothing to do.
+        if (_registry != null && _registry.HasPack(imdbId, season, lang, hi))
+        {
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: already up as a pack, nothing is extracted.",
+                imdbId, season, lang);
+            return;
+        }
+
         var group = new List<Candidate>(aired.Count);
         foreach (int episode in SeasonPack.AiredNumbers(aired))
         {

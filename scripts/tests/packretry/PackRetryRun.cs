@@ -332,6 +332,14 @@ internal static class Program
         Check(upload.Contains("MatchesRelease") && upload.Contains("MapToSubdlName"),
             "F-M414: the match runs over the release name and the written language");
 
+        // ── 21. F-M415: Prüfung vor der Extraktion ──────────────────────────────
+        Console.WriteLine("21. The pack check runs before the extraction");
+        var m415Start = coordPackSrc.IndexOf("FillOnlyAsync", StringComparison.Ordinal);
+        var fillBody = m415Start > 0 ? coordPackSrc.Substring(m415Start) : string.Empty;
+        Check(fillBody.Contains("HasPack(", StringComparison.Ordinal)
+              && fillBody.Contains("nothing is extracted", StringComparison.Ordinal),
+            "F-M415: a season already up as a pack is skipped before any extraction");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."
