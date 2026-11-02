@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.71
-**Status:** Implementation — v12.1.12.301.
+**Status:** Implementation — v12.1.12.302.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 47 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 49 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403
@@ -35,7 +35,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 15 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 26 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
-- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 16 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 17 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 15 requirements
 - [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 45 requirements
 - [16. Non-Goals](#16-non-goals)
@@ -281,6 +281,10 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M407 [P] (Operator-Anordnung 02.11.2026):** **Die ausgestrahlte Folgenmenge kommt von TMDb, und künftige Folgen zählen nicht mit.** IMDb antwortet auf die Staffel-Abfrage mit der ganzen Serie — für `tt33270224` S1 mit `total: 20` und den Nummern 1 bis 20, wo die Staffel 7 Folgen hat und 4 gelaufen sind —, und dieses eine Zahl entschied über Vollständigkeit: Die Staffel konnte nie vollständig werden und blieb dauerhaft einzeln. TMDb wird jetzt zuerst gefragt (der Staffel-Endpunkt ist je Staffel richtig), IMDb bleibt Rückfall für Titel, die TMDb nicht kennt. Auf Ausstrahlungsdaten kommt es dabei nicht an: eine Staffel ist vollständig, wenn ihre Folgen auf Platte liegen. Asserted by `scripts/tests/seasonpack`.
 
 **F-M408 [P] (Operator-Anordnung 02.11.2026):** **Eine Staffel ist vollständig, wenn alle Folgen aus derselben Release-Gruppe vorliegen.** Ein Pack trägt eine Release, eine Qualität und eine Bildrate; eine Staffel aus zwei Gruppen ist kein Pack. Es gewinnt die Gruppe, die alle ausgestrahlten Folgen stellt, und nur ihre Dateien dürfen mit — bei Cupertino S01 (`-MeGusta` E01/E02, `-ELiTE` E03/E04) deckt keine Gruppe die Staffel, sie bleibt einzeln. Die Folgenmenge selbst kommt von TMDb (F-M407). Asserted by `scripts/tests/seasonpack`.
+
+**F-M410 [P] (Operator-Anordnung 02.11.2026):** **Der Pack-Filler fragt den Medien-Hash einmal je Folge, nicht zweimal.** Beleg-Hash (F-M395) und Kandidaten-Hash waren zwei Aufrufe derselben Abfrage; jede schrieb ihre eigene oshash-Zeile. Asserted by `scripts/tests/packretry`.
+
+**F-M411 [P] (Operator-Anordnung 02.11.2026):** **Ein Cache-Treffer wird einmal je Datei protokolliert, nicht einmal je Spur.** Gemessen: 1341 Trefferzeilen in einem Zyklus, für eine einzelne Folge 215 Mal dieselbe Zeile — der Lauf sah aus, als würde er nur nachschlagen. Asserted by `scripts/tests/packretry`.
 
 ## 4. Download Pipeline
 
@@ -1273,6 +1277,8 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 **F-M385 [D] (operator order 02.11.2026):** **A quality-gate switch names its own action, and the two directions do not share a wording.** The upload language gate corrects (F-M375) and is labelled `Correct language (content vs. tag)`; the download gate throws the candidate away and is labelled `Reject wrong language (content vs. tag)`. The statistics row for attempts that never left reads `Uploads: stopped before sending` — "discarded" was read as SubDL throwing a finished upload away.
 
 **F-M398 [P] (Operator-Anordnung 02.11.2026):** **Die Worker-Zeile der Statusseite markiert einen Trockenlauf mit dem Wort `dry`, grau, direkt neben dem Ergebniswort.** Steht der Worker auf `run` (blau), liest sich die Zeile als „run dry"; ein Badge in eigener Spalte verbreiterte die Zeile um rund 50 px und schob den Status auf schmalen Anzeigen aus dem Bild. Asserted by `scripts/tests/gui-structure`.
+
+**F-M409 [P] (Operator-Anordnung 02.11.2026):** **Der `dry`-Marker trägt dasselbe Grau wie das Wort `cancel` (`#767676`).** Zwei Grautöne nebeneinander auf derselben Seite behaupteten zwei Bedeutungen, wo eine gemeint ist: „nichts passiert". Asserted by `scripts/tests/gui-structure`.
 
 ## 14. Data Model and Persistence
 

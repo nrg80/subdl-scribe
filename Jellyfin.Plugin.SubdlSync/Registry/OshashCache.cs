@@ -46,6 +46,9 @@ public sealed class OshashCache
         _logger = logger;
     }
 
+    /// <summary>F-M411: paths whose cache hit has already been logged in this process.</summary>
+    private static readonly HashSet<string> LoggedHits = new(StringComparer.Ordinal);
+
     public string? Lookup(string mediaPath, long size, long mtimeUnix, TimeSpan revalidateEvery, out DateTime validatedUtc)
     {
         validatedUtc = DateTime.MinValue;
@@ -63,7 +66,20 @@ public sealed class OshashCache
             return null;
         }
 
-        LogUtil.Detail(_logger, "[SubDL-DB] oshash lookup hit {Path}", mediaPath);
+        // F-M411 (operator order 02.11.2026): one line per file, not one per stream. A single
+        // episode was logged 215 times in one cycle — the run looked like it was doing nothing but
+        // looking things up.
+        bool firstHit;
+        lock (LoggedHits)
+        {
+            firstHit = LoggedHits.Add(mediaPath);
+        }
+
+        if (firstHit)
+        {
+            LogUtil.Detail(_logger, "[SubDL-DB] oshash lookup hit {Path}", mediaPath);
+        }
+
         return e.Hash;
     }
 

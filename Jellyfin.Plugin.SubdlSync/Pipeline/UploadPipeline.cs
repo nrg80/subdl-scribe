@@ -2942,6 +2942,9 @@ public sealed class UploadPipeline : IPackFiller
         // So the proof is the row of THIS track: uploaded, not merely "content known" (which counts a
         // download and a reject just the same).
         string contentHash = ContentHashRegistry.ComputeHash(srt);
+        // F-M410 (operator order 02.11.2026): one hash look per file. The proof and the candidate
+        // both asked MediaHashFor and each call wrote its own oshash line — two lines per file for
+        // one answer.
         string? proofMediaHash = MediaHashFor(mediaPath);
         var uploadedRow = string.IsNullOrWhiteSpace(proofMediaHash)
             ? null
@@ -2957,7 +2960,7 @@ public sealed class UploadPipeline : IPackFiller
             return null;
         }
 
-        string? mediaHash = MediaHashFor(mediaPath);
+        string? mediaHash = proofMediaHash;
         if (string.IsNullOrWhiteSpace(mediaHash))
         {
             LogUtil.Normal(

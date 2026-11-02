@@ -304,6 +304,13 @@ internal static class Program
         Check(upload.Contains("watchdog.Heartbeat)"), "the pipeline hands the watchdog beat to the coordinator");
         Check(coordSrc.Contains("Action? progress = null"), "and th callback is optional");
 
+        // ── 17. F-M410/F-M411: ein Hash je Folge, eine Logzeile je Datei ─────────
+        Console.WriteLine("17. One hash per episode, one log line per file");
+        var fillPart = upload.Split("public async Task<SeasonPackCoordinator.Candidate?> FillAsync")[1].Split("private ")[0];
+        Check(fillPart.Contains("mediaHash = proofMediaHash"), "F-M410: the filler reuses the proof hash");
+        Check(File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Registry/OshashCache.cs")).Contains("LoggedHits"),
+            "F-M411: a cache hit is logged once per file");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

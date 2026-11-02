@@ -1683,6 +1683,11 @@ def main():
     check("return cfg.DryRun;" in ctrl_src and "return cfg.DownloadDryRun;" in ctrl_src,
           "F-M401: upload and download read their own switch")
 
+    # ---- F-M409: dry traegt das Grau von cancel.
+    page_src = open(os.path.join(root_cs, "Configuration/configPage.html"), encoding="utf-8").read()
+    check(".subdl-dryrun { color: #767676;" in page_src,
+          "F-M409: the dry marker uses the same grey as cancel")
+
     print(">>> GUI-STRUKTUR %s: %d/%d Pruefungen bestanden"
           % ("OK" if not failed else "FEHLER", len(results) - len(failed), len(results)))
     return 1 if failed else 0
