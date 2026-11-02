@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.295",
-        "changelog": "v12.1.12.295: The cycle lines in the log say whether the cycle ran dry — \"cycle start (..., dry)\" and the matching end line.",
+        "version": "12.1.12.296",
+        "changelog": "v12.1.12.296: One spelling for the mode — \"dry\" inline in the start lines, \"DRY-RUN\" as the prefix on event lines; the dry-run=True form is gone.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.295-dev/Jellyfin.Plugin.SubdlSync_12.1.12.295.zip",
-        "checksum": "2a6ad8bbcfccd2113a48e000276e962f",
-        "timestamp": "2026-11-02T10:47:19Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.296-dev/Jellyfin.Plugin.SubdlSync_12.1.12.296.zip",
+        "checksum": "3f03e7f6aea8045be774383778584524",
+        "timestamp": "2026-11-02T10:55:46Z"
       }
     ]
   }
