@@ -17,12 +17,16 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 /// <para>
 /// Two switches, both in the Download tab: <c>days</c> (0 = off) and <c>megabytes</c>
 /// (0 = off). Either at 0 disables the whole thing. The ceiling is enforced oldest-first, and
-/// only <c>.zip</c> bodies under <see cref="RunArchiveCache.DefaultMaxEntryBytes"/> are stored,
+/// only <c>.zip</c> bodies under <see cref="MaxEntryBytes"/> are stored,
 /// so a runaway upstream cannot fill the volume.
 /// </para>
 /// </summary>
 public sealed class ArchiveDiskCache
 {
+    /// <summary>Ceiling per archive: bodies above this are not written (F-M386: own constant,
+    /// it used to be borrowed from the removed run cache).</summary>
+    private const int MaxEntryBytes = 16 * 1024 * 1024;
+
     private readonly object _sync = new();
     private string? _directory;
     private int _ttlDays;
@@ -153,8 +157,8 @@ public sealed class ArchiveDiskCache
     }
 
     /// <summary>
-    /// Stores an archive. Bodies that are not ZIPs, or that exceed the run cache's per-archive
-    /// ceiling, are not written — a disk cache must not become a dump.
+    /// Stores an archive. Bodies that are not ZIPs, or that exceed the per-archive ceiling, are
+    /// not written — a cache must not become a dump.
     /// </summary>
     /// <param name="key">Archive key.</param>
     /// <param name="bytes">Archive body.</param>
@@ -165,7 +169,7 @@ public sealed class ArchiveDiskCache
             return;
         }
 
-        if (bytes.Length > RunArchiveCache.DefaultMaxEntryBytes)
+        if (bytes.Length > MaxEntryBytes)
         {
             return;
         }

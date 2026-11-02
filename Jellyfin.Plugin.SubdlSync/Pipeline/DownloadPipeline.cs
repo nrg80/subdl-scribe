@@ -367,7 +367,6 @@ public sealed class DownloadPipeline : IDisposable
         // must not receive them. Set here, at the source, so a later counter cannot forget it.
         summary.IsDryRun = _config.DownloadDryRun;
         _dailyLimitWaits = 0; // F-M49: fresh per run
-        _api.ArchiveCache.Reset(); // F-M369: an archive serves the whole run, never the next one
 
         // F-M370: point the disk cache at this plugin's data folder and apply the two switches.
         // Either at 0 leaves it off; the trim happens before the first request so a run never
@@ -577,7 +576,7 @@ public sealed class DownloadPipeline : IDisposable
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
         LogUtil.Normal(_logger, 
-            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {Rejected} rejected after fetch | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s) ({DiskHits} from disk)",
+            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {Rejected} rejected after fetch | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
             summary.Downloaded,
             summary.FittedToAudio,
             (summary.FitMsTotal / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
@@ -593,7 +592,6 @@ public sealed class DownloadPipeline : IDisposable
             summary.Failed,
             idx,
             queuedTotal,
-            _api.ArchiveCache.Hits + _api.ArchiveDiskCache.Hits,
             _api.ArchiveDiskCache.Hits);
         return summary;
         }
@@ -627,7 +625,6 @@ public sealed class DownloadPipeline : IDisposable
 
             // F-M369: the archive cache is run-scoped — release its memory with the run so a
             // finished run leaves nothing behind on the Pi.
-            _api.ArchiveCache.Reset();
 
             // F-M23: keep the partial summary even when the run is cancelled — the caller
             // reads StopRequested and the counters include the work that did land.

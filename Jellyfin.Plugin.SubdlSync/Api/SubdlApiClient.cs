@@ -36,13 +36,13 @@ public sealed class SubdlApiClient
     private const string ApiBase = "https://api.subdl.com";
     private readonly HttpClient _http;
 
-    // F-M369: one quota unit per archive instead of per extraction — see RunArchiveCache.
-    // Empty outside a download run; the pipeline clears it at start and in its finally.
-    private readonly RunArchiveCache _archiveCache = new();
-
-    // F-M370: archives that outlive the run — a season pack serves one episode per run, and the
-    // daily limit is 50 downloads, so the same pack is asked for again on the next day. Disabled
-    // until the pipeline configures it (days and megabytes, either at 0 = off).
+    // F-M369/F-M386 (operator order 02.11.2026: "nur noch den Platten-Cache"): ONE archive cache,
+    // and it is the disk cache. It answers inside a run as well — the pack is fetched once and
+    // every further episode of it is a read from disk — so the run-scoped layer that used to sit
+    // in front of it was removed rather than kept alongside. Two layers meant two code paths and
+    // a summary line whose second number was always 0 in practice.
+    // Disabled until the pipeline configures it (days and megabytes, either at 0 = off); while
+    // it is off nothing is cached, not even within a run.
     private readonly ArchiveDiskCache _archiveDiskCache = new();
     private string? _token;
     private DateTime _tokenObtained;
@@ -55,12 +55,6 @@ public sealed class SubdlApiClient
     {
         _http = http;
     }
-
-    /// <summary>
-    /// Gets the run-scoped archive cache (F-M369). The download pipeline empties it at run
-    /// start and in the run's finally block; outside a run it holds nothing.
-    /// </summary>
-    public RunArchiveCache ArchiveCache => _archiveCache;
 
     /// <summary>
     /// Gets the disk cache (F-M370). The download pipeline points it at the plugin's data folder
@@ -1710,19 +1704,13 @@ public sealed class SubdlApiClient
         // archive entry, so a season pack that serves ten episodes arrives as ten URLs whose only
         // common part is the archive segment (measured 01.11.2026: Xhfe8mD1w5/… ten times,
         // 0p9xSnSU4g/… nine times, BlwZSYtLaU/… seven times — and no cache hit, because the key
-        // was the full URL). The key comes from the URL alone, so a cache can answer without a
-        // request; the bytes live in a run-scoped layer and, when switched on, on disk.
+        // was the full URL). The key comes from the URL alone, so the cache can answer without a
+        // request; the bytes live on disk (F-M386: one layer, not two).
         string? key = ArchiveKey.FromUrl(fullUrl);
         byte[]? bytes;
         bool fromCache;
 
-        if (key != null && _archiveCache.TryGet(key, out byte[]? runBytes) && runBytes is { Length: > 0 })
-        {
-            bytes = runBytes;
-            fromCache = true;
-            Trace("GET", fullUrl, 200, "archive cache hit (run)");
-        }
-        else if (key != null && _archiveDiskCache.TryGet(key, out byte[]? diskBytes) && diskBytes is { Length: > 0 })
+        if (key != null && _archiveDiskCache.TryGet(key, out byte[]? diskBytes) && diskBytes is { Length: > 0 })
         {
             bytes = diskBytes;
             fromCache = true;
@@ -1780,13 +1768,12 @@ public sealed class SubdlApiClient
             return;
         }
 
-        _archiveCache.Put(key, bytes);
         _archiveDiskCache.Put(key, bytes);
     }
 
     /// <summary>
-    /// F-M384: whether the archive behind this download URL already sits in the run or the disk
-    /// cache — asking costs no request, and a hit costs no download unit. The download side uses
+    /// F-M384: whether the archive behind this download URL already sits in the cache — asking
+    /// costs no request, and a hit costs no download unit. The download side uses
     /// it to prefer a season pack it has paid for already over a single file it would have to
     /// fetch (measured 01.11.2026: one archive fetch, then nine cache hits for the same season,
     /// at 1 download unit for all ten episodes).
@@ -1799,11 +1786,6 @@ public sealed class SubdlApiClient
         if (key == null)
         {
             return false;
-        }
-
-        if (_archiveCache.TryGet(key, out byte[]? runBytes) && runBytes is { Length: > 0 })
-        {
-            return true;
         }
 
         return _archiveDiskCache.TryGet(key, out byte[]? diskBytes) && diskBytes is { Length: > 0 };

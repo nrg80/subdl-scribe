@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.67
-**Status:** Implementation — v12.1.12.281.
+**Version:** 2.68
+**Status:** Implementation — v12.1.12.282.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -31,7 +31,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 27 requirements
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 15 requirements
-- [11. Content Registry and Identity](#11-content-registry-and-identity) — 25 requirements
+- [11. Content Registry and Identity](#11-content-registry-and-identity) — 26 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 15 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 14 requirements
@@ -293,7 +293,7 @@ A pack with no entry for this episode is **skipped**, not saved wrong. Non-pack 
 
 **F-M383 [D] (measured 01.11.2026):** **A pack that lists at least two files is fetched as the whole archive; the episode is then taken from that archive's own listing.** Measured on the test account: one member file costs **one** download unit, and the whole archive costs the same **one** unit — ten episodes of a season therefore cost one unit instead of ten.
 
-The archive body stays in the run cache and in the disk cache (14 days), so the remaining episodes of the same season are served without another request; the run summary reports the split as archive hits. The episode is still chosen by name from `unpack_files` (F-M215), never as "the first .srt": an archive that lacks this episode, and a pack that lists only one file, fall back to the single-file download.
+The archive body stays in the archive cache on disk (14 days, F-M370/F-M386), so the remaining episodes of the same season are served without another request; the run summary reports them as archive hits. The episode is still chosen by name from `unpack_files` (F-M215), never as "the first .srt": an archive that lacks this episode, and a pack that lists only one file, fall back to the single-file download.
 
 **F-M384 [D] (development, 01.11.2026):** **The ranking prefers a season pack over an equally good single file, and a cached pack over one it would still have to fetch.** Two sort keys sit in front of the text score, which itself is unchanged: `2` for a pack that carries this episode and whose archive already sits in the run or disk cache (free), `1` for a pack that carries it but must be fetched, `0` for everything else — a pack without the episode never wins the preference.
 
@@ -1062,9 +1062,13 @@ A hearing-impaired track DOES count: SDH is the same dialogue with annotations. 
 
 The upload side follows the same rule: a forced track is removed from the upload set, through the same predicate the pipeline's collector and the seeder's upload-todo prefilter use.
 
-**F-M369 (31.10.2026):** **One download unit per archive, not per extraction.** Downloaded archives are cached for the duration of one download run, keyed by the archive segment of their download URL, and the cache is emptied at the start of the run and in its `finally` block. Ceilings: 16 MB per archive (larger archives are not cached), 64 MB and 32 entries in total, oldest first. A hit is traced as `archive cache hit (run)` and consumes no download unit.
+**F-M369 (31.10.2026, superseded by F-M386 on 02.11.2026):** **One download unit per archive, not per extraction.** An archive is fetched once and its body is kept for later calls, keyed by the archive segment of its download URL, so the same pack yields every episode without a second quota unit. Until 02.11.2026 the body lived in a run-scoped memory cache in front of the disk cache; F-M386 removed that layer.
 
 **F-M370 (01.11.2026):** **Packs are cached across runs; single files are not.** Only a ZIP body enters a cache. A cached archive that does not contain the entry a call wants is fetched again, and the call is not rejected. On disk the plugin keeps archives for a configurable number of days (default 14) in its data folder, bounded by a configurable ceiling (default 512 MB, oldest first) and trimmed at the start of every run; 0 in either setting switches the disk cache off. A hit on disk restarts the retention. The run summary reports the number of archive hits and how many of them came from disk; both settings sit in the Download tab.
+**F-M386 [D] (operator order 02.11.2026: "nur noch den Platten-Cache"):** **There is ONE archive cache, and it is the disk cache.** The run-scoped layer (F-M369) is removed, not merely bypassed: a pack is fetched once, written to disk, and every further episode of it — in this run and on the following days — is a read from that one entry. Two layers meant two code paths for the same rule, and the second number of the run summary (`N archive hit(s) (M from disk)`) was 0 on every measured run; the summary now reports a single count.
+
+The consequence is deliberate: with `days = 0` or `megabytes = 0` nothing is cached at all, not even within a run. The per-archive ceiling that the disk cache used to borrow from the removed class is its own constant (16 MB). Asserted by 57 checks in `scripts/tests/archivecache`.
+
 **F-M372 (01.11.2026):** **A season pack is earned, never assumed.** SubDL builds the container itself: one `uploadSingleSubtitle` per episode, then one `uploadSubtitle` carrying the array `file_n_ids`, `is_full_season=true`, the episode range in `ef`/`ee`, and a `name` that becomes the zip name on download. The switch sends a season that way only when the season is complete — the episodes on disk are exactly the episodes that aired, asked at IMDb with TMDB as the fallback — and every episode passed the gates the single upload passes. Incomplete seasons, a failed gate, mixed sources, loose sidecars and forced tracks stay single uploads. The switch sits directly above the upload gates and is on by default. One pack is one language, one HI flag and one source; its name is `{imdb}.S{ss}.{pack hash}.{LANG}`, the pack hash being the MD5 over the episodes' content hashes in episode order, and every episode of the pack carries the pack's id in its own registry row.
 
 **F-M373 (01.11.2026):** **A pack needs the whole season in the same run.** The run plans its packable seasons before the first item: a season is packable only when the episodes queued for this run are exactly the episodes that aired — an episode that is already up individually cannot join a container, so a season that is only partly queued is uploaded as singles immediately instead of waiting for the end of the run. The plan is worked first and consecutively, per series then per season then per episode, so a season closes in one go and no buffer outlives it; queued work outside the plan keeps the order the queue gave it.
