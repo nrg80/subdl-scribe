@@ -297,6 +297,13 @@ internal static class Program
                   .Split("private ")[0].Contains("ExtractSingleStreamAsync"),
             "the per-stream call is gone from the filler");
 
+        // ── 16. F-M406: die Pack-Schleife schlägt den Herzschlag ─────────────────
+        Console.WriteLine("16. The pack loop keeps the watchdog quiet");
+        var coordSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+        Check(coordSrc.Contains("_progress?.Invoke()"), "the coordinator reports progress per episode");
+        Check(upload.Contains("watchdog.Heartbeat)"), "the pipeline hands the watchdog beat to the coordinator");
+        Check(coordSrc.Contains("Action? progress = null"), "and th callback is optional");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

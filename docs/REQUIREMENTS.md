@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.71
-**Status:** Implementation — v12.1.12.298.
+**Status:** Implementation — v12.1.12.299.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 44 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 45 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403
@@ -276,6 +276,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **Aufräumen.** Pack-Zeilen, deren `PackId` auf keiner Untertitelzeile mehr steht, entfernt der Database Refresh und zählt sie in seiner Summe — sonst legte eine verschwundene Staffel sich selbst für immer still (F-M396).
 
 **F-M405 [P] (Operator-Anordnung 02.11.2026):** **Der Pack-Filler liest eine Datei einmal je Lauf aus, nicht einmal je Sprache.** Für eine Staffel mit 37 Sprachen waren das 37 volle ffmpeg-Durchläufe über denselben Container — bei acht Folgen 296 Zugriffe, wo acht genügen. Der Filler nutzt jetzt denselben Ein-Pass-Aufruf wie der Einzel-Upload seit F-M5 und hält das Ergebnis je Medienpfad für die Dauer des Laufs. Asserted by `scripts/tests/packretry`.
+**F-M406 [P] (Operator-Anordnung 02.11.2026):** **Die Pack-Schleife meldet Fortschritt, damit der Lauf nicht als Stillstand gilt und abgebrochen wird.** Der `RunWatchdog` bricht einen Lauf nach sechs Minuten ohne Lebenszeichen ab; die Pack-Schleife baute stumm und wurde deshalb nach elf bis zwölf Minuten mitten im Plan gekillt — bei 659 angekündigten Paaren blieben 28 Packs, was wie Unfähigkeit aussah und ein Abbruch war. Sie meldet jetzt jede Folge, die sie ausliest. Asserted by `scripts/tests/packretry`.
+
 ## 4. Download Pipeline
 
 **F-M151a [B3] (superseded by F-M283, 02.10.2026):** **Download-side short-circuit — replaced by the derived open-pair question.**

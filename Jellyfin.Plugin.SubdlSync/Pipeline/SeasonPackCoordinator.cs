@@ -89,6 +89,14 @@ public sealed class SeasonPackCoordinator
     private readonly IPackFiller? _filler;
 
     /// <summary>
+    /// F-M406 (operator order 02.11.2026): the run's progress heartbeat. The watchdog aborts a run
+    /// after six minutes without one, and the pack loop used to build silently — it was killed at
+    /// eleven to twelve minutes with a dozen packs done, which read like "the plugin only manages
+    /// five percent". The loop now reports every episode it works on.
+    /// </summary>
+    private readonly Action? _progress;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="SeasonPackCoordinator"/> class.
     /// </summary>
     /// <param name="api">SubDL client.</param>
@@ -119,7 +127,8 @@ public sealed class SeasonPackCoordinator
         Action<string, int> countUploaded,
         Action<int> countFailed,
         Action<string> reportDone,
-        IPackFiller? filler = null)
+        IPackFiller? filler = null,
+        Action? progress = null)
     {
         _api = api;
         _registry = registry;
@@ -131,6 +140,7 @@ public sealed class SeasonPackCoordinator
         _countFailed = countFailed;
         _reportDone = reportDone;
         _filler = filler;
+        _progress = progress;
     }
 
     /// <summary>True when this season is complete AND fully queued, therefore worth buffering.</summary>
@@ -297,6 +307,7 @@ public sealed class SeasonPackCoordinator
         foreach (int episode in SeasonPack.AiredNumbers(aired))
         {
             ct.ThrowIfCancellationRequested();
+            _progress?.Invoke(); // F-M406: an episode being extracted is progress, not a stall
             var candidate = await _filler.FillAsync(imdbId, season, episode, lang, hi, ct).ConfigureAwait(false);
             if (candidate == null)
             {

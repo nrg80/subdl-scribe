@@ -474,7 +474,9 @@ public sealed class UploadPipeline : IPackFiller
                         itemId => ItemResult?.Invoke(itemId, ItemOutcome.Done),
                         // F-M389: an episode that is already up does not have to be queued for the
                         // season to become a pack — the pipeline itself supplies it.
-                        this);
+                        this,
+                        // F-M406: the pack loop reports progress so the watchdog does not abort it.
+                        watchdog.Heartbeat);
 
                     if (packable.Count > 0)
                     {
