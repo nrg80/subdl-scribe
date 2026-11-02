@@ -1168,17 +1168,16 @@ workers.forEach(function (w) {
                                 var when = w.Started ? subdlFmtDateTime(w.Started) : '\u2014';
                                 var row = document.createElement('div');
                                 row.className = 'subdl-status-row';
-                                // FOUR cells, one per column: light, name, time, result. The dry-run note
-                                // is grey text INSIDE the result cell (not a separate badge/cell) --
-                                // a badge in its own column widened the line by ~50px and pushed the
-                                // status off the right edge on a narrow phone. Inside the result cell it
-                                // costs nothing extra in column alignment, because the cell is already
-                                // sized by its own content.
+                                // FOUR cells, one per column: light, name, time, result. The dry marker
+                                // is the single word 'dry' in grey INSIDE the result cell, right beside
+                                // the outcome word (the blue 'run' tag while a worker is running) -- a
+                                // badge in its own column widened the line by ~50px and pushed the
+                                // status off the right edge on a narrow phone.
                                 row.innerHTML = '<span class="subdl-light" style="background:' + oc.color + ';"></span>' +
                                     '<span class="subdl-label">' + (w.Name || '?') + '</span>' +
                                     '<span class="subdl-when">' + when + '</span>' +
                                     '<span class="subdl-outcome" style="color:' + oc.color + ';">' + oc.text +
-                                    (w.DryRun ? '<span class="subdl-dryrun">dry run</span>' : '') + '</span>';
+                                    (w.DryRun ? '<span class="subdl-dryrun">dry</span>' : '') + '</span>';
                                 list.appendChild(row);
                             });
                         };

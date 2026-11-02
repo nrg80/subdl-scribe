@@ -1616,6 +1616,13 @@ def main():
             line += "  (%s)" % detail
         print(line)
     print()
+    # ---- F-M398 (operator order 02.11.2026): in the workers line a dry worker is marked with the
+    # single word "dry", standing right beside the outcome word — the blue "run" tag while it runs.
+    check(html.count('subdl-dryrun\">dry<') == 1,
+          "F-M398: the workers line marks a dry worker with the word 'dry', not 'dry run'")
+    check(re.search(r"oc\.text \+\s*\n\s*\(w\.DryRun \? '<span class=\"subdl-dryrun\">dry</span>' : ''\)", html) is not None,
+          "F-M398: the marker is appended to the outcome text in the same cell, beside the run tag")
+
     print(">>> GUI-STRUKTUR %s: %d/%d Pruefungen bestanden"
           % ("OK" if not failed else "FEHLER", len(results) - len(failed), len(results)))
     return 1 if failed else 0
