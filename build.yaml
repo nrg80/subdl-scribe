@@ -26,7 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
-  v12.1.12.282: One archive fetch serves the season; a refused file gets the next one from the same archive, and an unreadable cue is dropped before the hash is taken.
+  v12.1.12.282: One archive fetch serves the season; a refused file gets the next one from the same archive, an unreadable cue is dropped before the hash is taken, and kept originals are numbered from 51.
   v12.1.12.278: The hearing-impaired (SDH) subtitle states it in its name — .SDH after the language code —
   in the pack title, in the pack member and in the single upload, instead of only in the hi field.
   v12.1.12.277: Pack members name their season, so SubDL no longer files them under season zero.
