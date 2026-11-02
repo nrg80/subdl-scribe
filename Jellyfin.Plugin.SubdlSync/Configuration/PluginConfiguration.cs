@@ -506,11 +506,10 @@ public class PluginConfiguration : BasePluginConfiguration
     /// how long the arrival watcher waits after the first event before running
     /// the cycle (download first, then upload), so that files arriving together
     /// (season import, NAS sync) are processed in ONE cycle.
-    /// (user decision 11.09.2026): default back to 5 (10 was too sluggish).
-    /// (user decision 08.10.2026): default 1 — a full import is complete well inside
-    /// this window, so the cycle starts sooner without splitting one season drop.
+    /// (user decision 02.11.2026): default back to 5 — the shorter windows split a
+    /// slow NAS import into several cycles, and the operator prefers one pass.
     /// </summary>
-    public int ArrivalDebounceMinutes { get; set; } = 2;
+    public int ArrivalDebounceMinutes { get; set; } = 5;
 
     /// <summary>
     /// (user decision 14.09.2026): when a due job (anchor fire, recovery

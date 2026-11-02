@@ -236,7 +236,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
     }
 
-    /// <summary>Debounce window (minutes, config-driven, default 2).</summary>
+    /// <summary>Debounce window (minutes, config-driven, default 5).</summary>
     private static TimeSpan DebounceWindow => TimeSpan.FromMinutes(
         Plugin.Instance?.Configuration.ArrivalDebounceMinutes is int m && m > 0 ? Math.Clamp(m, 1, 120) : 2);
 
