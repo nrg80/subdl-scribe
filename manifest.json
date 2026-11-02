@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.304",
-        "changelog": "v12.1.12.304: a single upload resolves its SubDL id from mySubtitles right after the upload — without it a pack can never delete the single it replaces.",
+        "version": "12.1.12.305",
+        "changelog": "v12.1.12.305: a pack resolves its SubDL id from mySubtitles the same way a single does — matched by release name, language by its written name.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.304-dev/Jellyfin.Plugin.SubdlSync_12.1.12.304.zip",
-        "checksum": "6097e427c2086aa3ab4d89ada6c9173d",
-        "timestamp": "2026-11-02T13:16:51Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.305-dev/Jellyfin.Plugin.SubdlSync_12.1.12.305.zip",
+        "checksum": "00c2a0b993c0fde4f8c1430c136644b7",
+        "timestamp": "2026-11-02T13:29:47Z"
       }
     ]
   }
