@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.296",
-        "changelog": "v12.1.12.296: One spelling for the mode — \"dry\" inline in the start lines, \"DRY-RUN\" as the prefix on event lines; the dry-run=True form is gone.",
+        "version": "12.1.12.297",
+        "changelog": "v12.1.12.297: A running worker reports the live dry flag, so the workers line reads \"run dry\" while the run is in flight instead of only afterwards.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.296-dev/Jellyfin.Plugin.SubdlSync_12.1.12.296.zip",
-        "checksum": "3f03e7f6aea8045be774383778584524",
-        "timestamp": "2026-11-02T10:55:46Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.297-dev/Jellyfin.Plugin.SubdlSync_12.1.12.297.zip",
+        "checksum": "374abba82c5f167f234bf2659e60583b",
+        "timestamp": "2026-11-02T11:11:28Z"
       }
     ]
   }
