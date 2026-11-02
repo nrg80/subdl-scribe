@@ -955,6 +955,41 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="language">Language code.</param>
     /// <param name="hearingImpaired">HI/SDH variant.</param>
     /// <returns>The episode numbers, unordered.</returns>
+    /// <summary>
+    /// F-M417: the languages the store knows for a season — the input the plan needs to ask the
+    /// cheap questions first (pack already up? language complete?) before it looks at release names.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <returns>Language and HI variant, unordered.</returns>
+    public List<(string Language, bool HearingImpaired)> LanguagesInSeason(string? imdbId, int season)
+    {
+        if (string.IsNullOrWhiteSpace(imdbId))
+        {
+            return new List<(string, bool)>();
+        }
+
+        var episodes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var media in _db.Media.Find(m => m.ImdbId == imdbId && m.Season == season))
+        {
+            if (!string.IsNullOrEmpty(media.Id))
+            {
+                episodes.Add(media.Id);
+            }
+        }
+
+        var seen = new HashSet<(string, bool)>();
+        foreach (var embed in _db.Embeds.Find(e => true))
+        {
+            if (embed.MediaHash != null && episodes.Contains(embed.MediaHash) && !string.IsNullOrEmpty(embed.Language))
+            {
+                seen.Add((embed.Language, embed.HearingImpaired ?? false));
+            }
+        }
+
+        return seen.ToList();
+    }
+
     public List<int> EpisodesWithLanguage(string? imdbId, int season, string language, bool hearingImpaired)
     {
         if (string.IsNullOrWhiteSpace(imdbId))

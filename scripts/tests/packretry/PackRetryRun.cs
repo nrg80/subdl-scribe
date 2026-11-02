@@ -346,6 +346,15 @@ internal static class Program
               && coordPackSrc.Contains("no pack, they go up as singles", StringComparison.Ordinal),
             "F-M416: a language that is not complete on every aired episode forms no pack");
 
+        // ── 23. F-M417: Store vor Dateinamen vor Extraktion ─────────────────────
+        Console.WriteLine("23. The store is asked before the release names");
+        var langAt = upload.IndexOf("LanguagesInSeason(", StringComparison.Ordinal);
+        var groupAt = upload.IndexOf("SeasonPack.ReleaseGroup(item.Path)", StringComparison.Ordinal);
+        Check(langAt >= 0 && groupAt > langAt,
+            "F-M417: languages and packs are looked up before the release group is read");
+        Check(upload.Contains("not every aired episode carries this language in the store", StringComparison.Ordinal),
+            "F-M417: an incomplete language ends before any extraction");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

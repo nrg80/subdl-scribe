@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.71
-**Status:** Implementation — v12.1.12.307.
+**Status:** Implementation — v12.1.12.308.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 54 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 55 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403
@@ -295,6 +295,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M415 [P] (Operator-Anordnung 02.11.2026):** **Die Staffelpack-Prüfung läuft vor der Extraktion.** Liegt die Staffel in dieser Sprache schon als Pack im Store (`HasPack`), wird kein einziges Mal extrahiert: `season pack skipped — …: already up as a pack, nothing is extracted.` Zuvor zog der Lauf erst jede Folge aus jeder Datei und stellte danach fest, dass nichts zu tun war — der teuerste Teil des Zyklus. Die übrigen Vorprüfungen (Mixed Releases, unvollständige Staffel, QA-Durchfall) verhindern weiterhin nur den Pack, nicht die Einzel-Uploads. Asserted by `scripts/tests/packretry`.
 
 **F-M416 [P] (Operator-Anordnung 02.11.2026):** **Vollständigkeit wird je Sprache aus dem State entschieden, vor der Extraktion.** Eine Staffel kann für EN vollständig und für DE unvollständig sein, weil zwei Folgen keine deutsche Spur tragen. `EpisodesWithLanguage` liest aus dem Store, welche Folgen diese Sprache kennen; fehlt eine, entsteht kein Pack für diese Sprache und die vorhandenen Folgen gehen einzeln hoch: `… {Have} of {Aired} episode(s) carry this language in the store, no pack, they go up as singles.` Zusammen mit `HasPack` (F-M415) und der Release-Gruppe (F-M408) sind damit alle Pack-Entscheidungen vor der Extraktion möglich; nur der QA-Durchfall bleibt beim Untertiteltext. Asserted by `scripts/tests/packretry`.
+
+**F-M417 [P] (Operator-Anordnung 02.11.2026):** **Die Prüfreihenfolge ist: Store, dann Dateinamen, dann Extraktion.** Je Staffel fragt die Planung zuerst `LanguagesInSeason`, dann für jede bekannte Sprache `HasPack` und `EpisodesWithLanguage`; erst wenn mindestens eine Sprache offen und vollständig ist, wird die Release-Gruppe gelesen und die Kandidatenzeile geschrieben. Bleibt nichts übrig, endet die Staffel vor jeder Extraktion („already up as a pack, nothing is extracted" bzw. „not every aired episode carries this language in the store") — vor jeder Extraktion. Damit steht die teuerste Arbeit ganz hinten. Asserted by `scripts/tests/packretry`.
 
 ## 4. Download Pipeline
 

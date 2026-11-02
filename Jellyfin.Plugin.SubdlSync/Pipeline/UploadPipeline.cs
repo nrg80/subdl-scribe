@@ -2740,6 +2740,41 @@ public sealed class UploadPipeline : IPackFiller
                 continue;
             }
 
+            // F-M417 (operator order 02.11.2026): the cheap questions come first — the store, not the
+            // release names. Is the season already up as a pack for the languages the store knows, and
+            // does any of them cover every aired episode? Only then are release groups worth reading,
+            // and only then does anything get extracted.
+            var known = Registry.LanguagesInSeason(entry.Key.Item1, entry.Key.Item2);
+            var open = new List<(string Language, bool HearingImpaired)>();
+            foreach (var (language, hi) in known)
+            {
+                if (Registry.HasPack(entry.Key.Item1, entry.Key.Item2, language, hi))
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: already up as a pack, nothing is extracted.",
+                        entry.Key.Item1, entry.Key.Item2, language);
+                    continue;
+                }
+
+                if (SeasonPack.IsComplete(aired, Registry.EpisodesWithLanguage(entry.Key.Item1, entry.Key.Item2, language, hi)))
+                {
+                    open.Add((language, hi));
+                }
+                else
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: not every aired episode carries this language in the store, no pack, they go up as singles.",
+                        entry.Key.Item1, entry.Key.Item2, language);
+                }
+            }
+
+            if (known.Count > 0 && open.Count == 0)
+            {
+                continue;
+            }
+
             // F-M408 (operator order 02.11.2026): "die staffel ist vollstaendig wenn alle episoden der
             // gleichen release group da sind". Ein Pack traegt eine Release, eine Qualitaet, eine
             // Bildrate — eine Staffel aus zwei Gruppen ist kein Pack. Es gewinnt die Gruppe, die alle

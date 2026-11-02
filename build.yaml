@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.307"
+version: "12.1.12.308"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.308: the pack questions are asked in cost order — store first (already up? language complete?), release names second, extraction last.
   v12.1.12.307: completeness is decided per language from the store, before any extraction — an incomplete language goes up as singles.
   v12.1.12.306: a season already up as a pack is skipped before the extraction, not after it.
   v12.1.12.305: a pack resolves its SubDL id from mySubtitles the same way a single does — matched by release name, language by its written name.
