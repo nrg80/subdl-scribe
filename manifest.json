@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.285",
-        "changelog": "v12.1.12.285: A run can be braked (packs per run, checked before anything is deleted) and aimed (pack only for these series), so a library-wide pack wave starts as a probe.",
+        "version": "12.1.12.286",
+        "changelog": "v12.1.12.286: The pack brake and the series allow-list are gone again — a probe knob has no place in the build; the pack path does what the library and the config already say.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.285-dev/Jellyfin.Plugin.SubdlSync_12.1.12.285.zip",
-        "checksum": "f1d571be24dfa99c02aad639eab88af4",
-        "timestamp": "2026-11-02T08:39:13Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.286-dev/Jellyfin.Plugin.SubdlSync_12.1.12.286.zip",
+        "checksum": "c98a1cd5074dbbe7ba453f8157fc1e36",
+        "timestamp": "2026-11-02T08:55:06Z"
       }
     ]
   }
