@@ -266,6 +266,19 @@ internal static class Program
         Check(reg.Contains("public int PruneOrphanedPacks()", StringComparison.Ordinal),
             "the registry owns that prune");
 
+        // ── 13. F-M397: eine srt aus SubDL-Herkunft tötet den Pack ─────────────
+        Console.WriteLine("13. A member of SubDL origin kills the pack");
+        Check(reg.Contains("public bool IsSubdlOrigin(string? contentHash)", StringComparison.Ordinal),
+            "the registry can answer whether a text came from SubDL");
+        Check(reg.Contains("x.Status, SubtitleStatus.Downloaded", StringComparison.Ordinal),
+            "and it answers from the downloaded sidecar row, not from a guess");
+        Check(coord.Contains("season pack refused", StringComparison.Ordinal),
+            "the coordinator refuses the whole pack, not just that member");
+        Check(coord.Contains("came from SubDL itself", StringComparison.Ordinal)
+              && coord.IndexOf("_registry.IsSubdlOrigin", StringComparison.Ordinal)
+                 < coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
+            "and it refuses BEFORE anything is deleted");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

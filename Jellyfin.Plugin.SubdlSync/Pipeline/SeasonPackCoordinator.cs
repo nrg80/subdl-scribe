@@ -422,6 +422,23 @@ public sealed class SeasonPackCoordinator
             }
         }
 
+        // F-M397 (operator order 02.11.2026): comes ANY member of this pack from SubDL itself — a
+        // subtitle we downloaded, or a member we unpacked out of a downloaded pack — the whole season
+        // is not packed. Not just that member: the operator's rule is "one srt of SubDL origin kills
+        // the pack", because a container built around such text is a re-upload by construction.
+        var fromSubdl = ordered
+            .Where(c => _registry.IsSubdlOrigin(ContentHashRegistry.ComputeHash(c.Srt)))
+            .Select(c => $"S{key.Season:00}E{c.Episode:00}")
+            .ToList();
+        if (fromSubdl.Count > 0)
+        {
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] season pack refused — {Imdb} S{Season} [{Lang}]: {Count} member(s) came from SubDL itself ({Episodes}); a pack is never built around those.",
+                key.ImdbId, key.Season, key.Lang, fromSubdl.Count, string.Join(", ", fromSubdl.Take(5)));
+            return;
+        }
+
         // F-M391 (operator order 02.11.2026): the single uploads this pack absorbs are deleted FIRST.
         // A pack that competes with entries carrying the same content is the case we do not want to
         // find out about on SubDL's side; deleting first makes the pack the only carrier.

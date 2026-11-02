@@ -1246,6 +1246,27 @@ public sealed class ContentHashRegistry : IDisposable
     }
 
     /// <summary>
+    /// F-M397 (operator order 02.11.2026): true when this exact text once CAME FROM SubDL — a sidecar
+    /// that this account downloaded, including a member unpacked out of a downloaded season pack.
+    /// <para>
+    /// Such text must never end up in a pack: it would send back to SubDL what SubDL itself handed out,
+    /// under our name, as a new container. The check is content-based on purpose — the file may have
+    /// been renamed, moved or re-attached since, and the hash is what actually travels.
+    /// </para>
+    /// </summary>
+    public bool IsSubdlOrigin(string? contentHash)
+    {
+        if (string.IsNullOrEmpty(contentHash))
+        {
+            return false;
+        }
+
+        return _db.Sidecars.FindAll()
+            .Any(x => string.Equals(x.ContentHash, contentHash, StringComparison.Ordinal)
+                      && string.Equals(x.Status, SubtitleStatus.Downloaded, StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// F-M396: removes pack rows nothing carries any more.
     /// <para>
     /// A pack row whose <c>PackId</c> is no longer written on any subtitle row is a pack without

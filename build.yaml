@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.289"
+version: "12.1.12.290"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.290: A pack is refused outright when any of its members came from SubDL itself — downloaded, or unpacked out of a downloaded pack.
   v12.1.12.289: A pack already up with the same members is not sent twice, and the database refresh drops pack rows nothing carries any more instead of disabling a season forever.
   v12.1.12.288: A pack is never built from a subtitle that was only downloaded — the filler demands an uploaded row of that very track, so a download cannot be published back under our name.
   v12.1.12.287: One rule for season packs — every complete season is packed, the queue only orders the members and the fill closes the gap; a partly queued season no longer drains into single uploads.
