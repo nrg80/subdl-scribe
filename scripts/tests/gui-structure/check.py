@@ -1640,6 +1640,19 @@ def main():
     check("dryRun: plugin.Configuration.DownloadDryRun" in down_src,
           "F-M401: the download worker passes its dry flag when it starts")
 
+    # ---- F-M402 (operator order 02.11.2026): the cycle line in the log carries the same marker.
+    try:
+        disp_src = open(os.path.join(root_cs, "ScheduledTasks/SubdlEventDispatcher.cs"), encoding="utf-8").read()
+    except OSError as exc:
+        check(False, "F-M402: dispatcher source readable (%s)" % exc)
+        disp_src = ""
+    check("cycle start ({Trigger}, dir {Dir}{Dry})." in disp_src,
+          "F-M402: the cycle start line carries the dry marker")
+    check(disp_src.count("cycle end ({Trigger}, dir {Dir}{Dry})") == 2,
+          "F-M402: and so do both cycle end lines")
+    check('return ", dry";' in disp_src,
+          "F-M402: one helper decides the word, so the lines cannot drift apart")
+
     print(">>> GUI-STRUKTUR %s: %d/%d Pruefungen bestanden"
           % ("OK" if not failed else "FEHLER", len(results) - len(failed), len(results)))
     return 1 if failed else 0

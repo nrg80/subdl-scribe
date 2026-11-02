@@ -121,6 +121,28 @@ public sealed class SubdlEventDispatcher : IDisposable
     // outcome handler (OnItemResult / ApplyOutcomeUpload) fires DURING the pipeline and used to
     // mark items `Done` for a run that only described them. The run's own summary is not available
     // yet at that moment, so the flag is set before the pipeline starts and cleared in `finally`.
+    /// <summary>
+    /// F-M402: ", dry" when either direction is in dry mode, empty otherwise — appended to the cycle
+    /// lines so a log reader never has to guess whether the numbers describe real work.
+    /// </summary>
+    private static string DrySuffix()
+    {
+        try
+        {
+            var c = Plugin.Instance?.Configuration;
+            if (c != null && (c.DryRun || c.DownloadDryRun))
+            {
+                return ", dry";
+            }
+        }
+        catch (Exception)
+        {
+            // A log suffix must never be the reason a cycle fails.
+        }
+
+        return string.Empty;
+    }
+
     private volatile bool _upInFlightDryRun;
     private volatile bool _downInFlightDryRun;
 
@@ -748,7 +770,9 @@ public sealed class SubdlEventDispatcher : IDisposable
         lock (_lock) { _userStopActive = false; }
         try { _stopCts.Dispose(); } catch { }
         _stopCts = new CancellationTokenSource();
-        LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle start ({Trigger}, dir {Dir}).", trigger, initialDirection);
+        // F-M402 (operator order 02.11.2026): the cycle line says whether this cycle runs dry — the
+        // log has to answer "was that a dry run?" the same way the workers line does.
+        LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle start ({Trigger}, dir {Dir}{Dry}).", trigger, initialDirection, DrySuffix());
 
         CycleDirection dir;
         lock (_lock)
@@ -787,11 +811,11 @@ public sealed class SubdlEventDispatcher : IDisposable
     {
         if (_userStopActive)
         {
-            LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle end ({Trigger}, dir {Dir}) — user stop.", trigger, dir);
+            LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle end ({Trigger}, dir {Dir}{Dry}) — user stop.", trigger, dir, DrySuffix());
         }
         else
         {
-            LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle end ({Trigger}, dir {Dir}).", trigger, dir);
+            LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle end ({Trigger}, dir {Dir}{Dry}).", trigger, dir, DrySuffix());
         }
     }
 
