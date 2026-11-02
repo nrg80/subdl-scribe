@@ -1620,7 +1620,9 @@ def main():
     check("F-M393: the pack allow-list field exists", 'id="PackOnlyImdbIds"' in html)
     check("F-M393: it is loaded from the config", "config.PackOnlyImdbIds || ''" in html)
     check("F-M393: and saved trimmed", "config.PackOnlyImdbIds = (document.querySelector('#PackOnlyImdbIds').value || '').trim()" in html)
-    check("F-M393: its description names the example id", "e.g. tt4378376" in html)
+    _allow_block = html.split("PackOnlyImdbIds")[1][:700]
+    check("F-M393: the field description carries no concrete series id (a probe id must not live in the build)",
+          re.search(r"tt\d{4,}", _allow_block) is None)
 
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
