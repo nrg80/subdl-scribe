@@ -1816,6 +1816,9 @@ public sealed class DownloadPipeline : IDisposable
                             continue;
                         }
 
+                        // F-M388: the same correction the fetched candidate got — a gate must judge
+                        // the file as it would be written, not as the archive happened to store it.
+                        siblingBytes = CorrectInvisibleCues(siblingBytes) ?? siblingBytes;
                         string? siblingFail = QaGateFailure(siblingBytes);
                         if (siblingFail != null)
                         {
@@ -1896,6 +1899,8 @@ public sealed class DownloadPipeline : IDisposable
                 // same fit with one segment, so the constant and the staircase cases cannot
                 // disagree. The fit applies its own deploy rule (a correction must PROVE
                 // itself against the audio), so a refusal here is a measurement, not a policy.
+                // F-M388: these are the CORRECTED bytes (invisible cues dropped, renumbered), so the
+                // file on disk, the hash computed just below and the text the gates saw are one artefact.
                 byte[] writeBytes = bytes;
                 string content = DecodeSrt(bytes);
                 string? unsyncPayload = null;
@@ -2280,7 +2285,8 @@ public sealed class DownloadPipeline : IDisposable
                             // gaps contain an alignment — this one the main track's, the next one the
                             // HI track's. Floor 0.
                             await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
-                            var hiBytes = await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false);
+                            var hiBytes = CorrectInvisibleCues(
+                                await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false));
                             var hiStats = hiBytes != null && hiBytes.Length >= 100 ? Qa.QaGates.ParseSrt(DecodeSrt(hiBytes)) : null;
                             bool hiStructureOk = hiStats != null
                                 && hiStats.Monotonic
@@ -2857,7 +2863,62 @@ public sealed class DownloadPipeline : IDisposable
     /// <param name="episode">Wanted episode (0 = none).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The bytes, and the source they came from (null source = the candidate as a whole).</returns>
+    /// <summary>
+    /// F-M388 (operator order 02.11.2026): every candidate leaves here with its invisible cues
+    /// already gone. A cue that is on screen for a millimetre of time is dropped and the file is
+    /// renumbered — the same rule the upload side has had since F-M382 — instead of the file being
+    /// convicted by a gate for carrying one.
+    /// <para>
+    /// It happens HERE, before the gates and long before the write, because the state hash must
+    /// describe the file that gets written. <c>writeBytes</c> starts as these very bytes and
+    /// <c>ComputeHash</c> describes the normalized text; if the correction came later, the hash would
+    /// describe a file that exists nowhere on disk.
+    /// </para>
+    /// </summary>
+    /// <param name="cand">Candidate being fetched (only for the log line).</param>
+    /// <param name="season">Wanted season.</param>
+    /// <param name="episode">Wanted episode.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The fetched payload, corrected.</returns>
     private async Task<(byte[]? Bytes, SubtitleUnpackFile? PackFile)> DownloadCandidateAsync(
+        SubtitleCandidate cand, int season, int episode, CancellationToken ct)
+    {
+        var (raw, packFile) = await DownloadCandidateRawAsync(cand, season, episode, ct).ConfigureAwait(false);
+        byte[]? corrected = CorrectInvisibleCues(raw);
+        if (corrected != null && raw != null && corrected.Length != raw.Length)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[SubDL-D] {Release} [{Lang}] — invisible cues dropped: {Before} → {After} cue(s)",
+                cand.ReleaseName, cand.Language,
+                Qa.QaGates.ParseSrt(DecodeSrt(raw))?.CueCount ?? 0,
+                Qa.QaGates.ParseSrt(DecodeSrt(corrected))?.CueCount ?? 0);
+        }
+
+        return (corrected, packFile);
+    }
+
+    /// <summary>
+    /// F-M388: drops the cues nobody can read and renumbers what is left. Wraps
+    /// <see cref="ContentHashRegistry.NormalizeSrt"/>, which is also what <c>EncodeCanonical</c> and
+    /// <c>ComputeHash</c> use — one rule, so written bytes, hashed bytes and gated bytes are the same
+    /// bytes. What comes out is always the CANONICAL form — UTF-8 without BOM, LF, no trailing blank
+    /// line — for clean input as well, because the hash describes exactly that form. A clean file
+    /// therefore keeps its cues and its text unchanged; only the byte style follows the canonical
+    /// rule (a trailing newline is dropped by the same trim the upload side has always applied).
+    /// </summary>
+    /// <param name="raw">Payload as fetched.</param>
+    /// <returns>Corrected payload, or null when nothing was fetched.</returns>
+    public static byte[]? CorrectInvisibleCues(byte[]? raw)
+    {
+        if (raw is not { Length: > 0 })
+        {
+            return raw;
+        }
+
+        return System.Text.Encoding.UTF8.GetBytes(ContentHashRegistry.NormalizeSrt(DecodeSrt(raw)));
+    }
+
+    private async Task<(byte[]? Bytes, SubtitleUnpackFile? PackFile)> DownloadCandidateRawAsync(
         SubtitleCandidate cand, int season, int episode, CancellationToken ct)
     {
         // F-M215: a season or range pack must be resolved to the episode we are

@@ -26,6 +26,8 @@ using System;
 using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.SubdlScribe.Api;
+using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubdlScribe.Registry;
 
 namespace PackRetryRun;
 
@@ -134,6 +136,75 @@ internal static class Program
             "a candidate is still counted as rejected after its files were tried");
         Check(pipe.Contains("no usable file left in this archive", StringComparison.Ordinal),
             "and the reject line says the archive was exhausted, not that one file failed");
+
+        // ── 5. F-M388: the download drops invisible cues too ────────────────────
+        // MobLand's real defect: a duplicate line timed 00:00:03,898 → 00:00:03,899, a cue of 1 ms.
+        // On the upload side it is dropped since F-M382; on the download side it used to convict the
+        // file. Both sides now use one rule, and — the operator's condition — the STATE HASH is taken
+        // over the corrected text, so it describes the bytes that end up on disk.
+        Console.WriteLine("5. Invisible cues on the download side (F-M388)");
+        const string dirty =
+            "1\r\n00:00:01,000 --> 00:00:03,000\r\nHello there.\r\n\r\n" +
+            "2\r\n00:00:03,898 --> 00:00:03,899\r\n♪ MTV ♪\r\n\r\n" +
+            "3\r\n00:00:04,000 --> 00:00:06,000\r\nSecond line.\r\n\r\n" +
+            "4\r\n00:00:07,000 --> 00:00:07,098\r\n♪\r\n";
+        byte[] dirtyPayload = System.Text.Encoding.UTF8.GetBytes(dirty); // ♪ is three bytes, one char
+        byte[] dirtyBytes = new byte[dirtyPayload.Length + 3];
+        dirtyBytes[0] = 0xEF; dirtyBytes[1] = 0xBB; dirtyBytes[2] = 0xBF; // BOM, CRLF — the real payload style
+        dirtyPayload.CopyTo(dirtyBytes, 3);
+
+        byte[]? corrected = DownloadPipeline.CorrectInvisibleCues(dirtyBytes);
+        string correctedText = corrected == null ? string.Empty : System.Text.Encoding.UTF8.GetString(corrected);
+        Check(corrected != null && corrected[0] != 0xEF, "the BOM is gone", corrected == null ? "(null)" : corrected[0].ToString());
+        Check(!correctedText.Contains('\r', StringComparison.Ordinal), "line endings are LF");
+        Check(!correctedText.Contains("MTV", StringComparison.Ordinal), "the 1 ms cue is dropped");
+        Check(!correctedText.Contains("00:00:07,098", StringComparison.Ordinal), "and the 98 ms one as well");
+        Check(correctedText.Contains("Hello there.", StringComparison.Ordinal)
+              && correctedText.Contains("Second line.", StringComparison.Ordinal),
+            "the readable cues survive");
+        Check(correctedText.StartsWith("1\n00:00:01,000", StringComparison.Ordinal)
+              && correctedText.Contains("\n2\n00:00:04,000", StringComparison.Ordinal),
+            "and what is left is renumbered 1, 2 …", correctedText.Split('\n').FirstOrDefault() ?? "");
+
+        // The operator's condition, as an assertion: md5 over the CORRECTED bytes is the md5 the
+        // registry stores for the state.
+        string hashOfCorrected = Convert.ToHexString(
+            System.Security.Cryptography.MD5.HashData(corrected!)).ToLowerInvariant();
+        Check(hashOfCorrected == ContentHashRegistry.ComputeHash(dirty),
+            "the state hash describes the corrected file, not the fetched one",
+            hashOfCorrected + " vs " + ContentHashRegistry.ComputeHash(dirty));
+        Check(hashOfCorrected != Convert.ToHexString(
+                System.Security.Cryptography.MD5.HashData(dirtyBytes)).ToLowerInvariant(),
+            "and it is not the hash of the untouched payload");
+
+        // A clean file keeps its cues and its text — only the canonical byte style is applied, the
+        // very form the state hash describes (no trailing blank line, the upload side has always
+        // trimmed it). Nothing is dropped, so nothing shifts.
+        const string clean = "1\n00:00:01,000 --> 00:00:03,000\nHello there.\n";
+        byte[] cleanBytes = System.Text.Encoding.UTF8.GetBytes(clean);
+        string cleanOut = System.Text.Encoding.UTF8.GetString(DownloadPipeline.CorrectInvisibleCues(cleanBytes)!);
+        Check(cleanOut == "1\n00:00:01,000 --> 00:00:03,000\nHello there.",
+            "a file that needs nothing keeps every cue, only the canonical ending is applied", cleanOut);
+        Check(Convert.ToHexString(System.Security.Cryptography.MD5.HashData(
+                  System.Text.Encoding.UTF8.GetBytes(cleanOut))).ToLowerInvariant()
+              == ContentHashRegistry.ComputeHash(clean),
+            "and its state hash is unchanged by the correction");
+        Check(DownloadPipeline.CorrectInvisibleCues(null) == null, "and nothing stays nothing");
+
+        // ── 6. And the correction happens BEFORE the gates and before the write ─
+        Console.WriteLine("6. Order of operations");
+        var wrapper = pipe.IndexOf("DownloadCandidateRawAsync(", StringComparison.Ordinal);
+        var gate = pipe.IndexOf("string? gateFail = QaGateFailure(bytes);", StringComparison.Ordinal);
+        Check(wrapper > 0 && pipe.Contains("byte[]? corrected = CorrectInvisibleCues(raw);", StringComparison.Ordinal),
+            "the fetched payload is corrected in the download itself");
+        Check(gate > 0, "the gates run on the corrected bytes");
+        Check(pipe.Contains("byte[] writeBytes = bytes;", StringComparison.Ordinal)
+              && pipe.Contains("ComputeHash(content)", StringComparison.Ordinal),
+            "the write and the state hash take the same, already corrected bytes");
+        Check(pipe.Contains("siblingBytes = CorrectInvisibleCues(siblingBytes)", StringComparison.Ordinal),
+            "a retried sibling of the archive is corrected as well");
+        Check(pipe.Contains("var hiBytes = CorrectInvisibleCues(", StringComparison.Ordinal),
+            "so is the hearing-impaired file");
 
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
