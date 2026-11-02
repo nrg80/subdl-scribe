@@ -26,7 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
-  v12.1.12.282: One archive cache instead of two — the run-scoped memory layer is gone, a pack stays on disk and serves the season, and the run summary reports a single hit count.
+  v12.1.12.282: One archive cache instead of two — a pack stays on disk and serves the season; kept originals are numbered from 51, and the switches say what they do.
   v12.1.12.278: The hearing-impaired (SDH) subtitle states it in its name — .SDH after the language code —
   in the pack title, in the pack member and in the single upload, instead of only in the hi field.
   v12.1.12.277: Pack members name their season, so SubDL no longer files them under season zero.

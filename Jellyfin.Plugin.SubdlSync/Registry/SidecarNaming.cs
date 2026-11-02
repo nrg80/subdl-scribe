@@ -40,7 +40,7 @@ public static class SidecarNaming
     /// <summary>
     /// Highest slot a CORRECTED sidecar may take.
     /// <para>
-    /// F-M315 (operator order 12.1.12.267): the slots 50–99 are RESERVED for the unsynchronized
+    /// F-M315 (operator order 12.1.12.267): the slots above <see cref="CorrectedSlotMax"/> are RESERVED for the unsynchronized
     /// originals a correction keeps beside its result, so the writer of corrected files must stop
     /// below them. Without the cap the next corrected file of a language whose slots 1–49 are taken
     /// would be handed a name the original already uses, and the correction would overwrite the very
@@ -54,17 +54,22 @@ public static class SidecarNaming
     /// <para>
     /// F-M315: an original is assigned from <see cref="OriginalSlotMin"/> UPWARD, which is what the
     /// operator asked for ("bei 1 und 50 anfangen zu zählen"): corrected files count up from 1,
-    /// originals count up from 50. Both blocks grow in the direction a viewer reads the track list,
+    /// originals count up above them. Both blocks grow in the direction a viewer reads the track list,
     /// and the reserved number on each original tells the two kinds apart without opening anything.
     /// </para>
     /// </summary>
-    public const int OriginalSlotMin = 50;
+    /// <remarks>
+    /// Operator order 02.11.2026 ("unkorrigiert bitte ab 51 nummerieren"): the block starts at 51, so
+    /// slot 50 is no longer handed out. Names already on disk keep their number — the planner only
+    /// hands out FREE slots, so an existing <c>.50.srt</c> is read, listed and never overwritten.
+    /// </remarks>
+    public const int OriginalSlotMin = 51;
 
     /// <summary>Highest slot of the reserved original block.</summary>
     public const int OriginalSlotMax = 99;
 
     /// <summary>
-    /// True when a slot belongs to the reserved ORIGINAL block (50–99).
+    /// True when a slot belongs to the reserved ORIGINAL block (51–99).
     /// <para>
     /// F-M315: the reservation is a property of the number, not of a file's content, so it is a pure
     /// function of the one datum the name carries. Nothing downstream has to hold state to tell an
@@ -114,7 +119,7 @@ public static class SidecarNaming
         // ABOVE "German", i.e. exactly inverted — the kept originals were listed before the
         // corrected files instead of after them. Two digits keep the alphabet and the numbers in
         // the same run: "<base>.<lang>.01.srt" … ".99.srt", corrected slots first (1…49), the
-        // reserved originals after them (50…99), exactly as F-M315 intends.
+        // reserved originals after them (51…99), exactly as F-M315 intends.
         string slotSuffix = "."
             + slot.ToString("D2", System.Globalization.CultureInfo.InvariantCulture);
         return Path.Combine(dir, $"{baseName}.{lang.ToLowerInvariant()}{suffix}{slotSuffix}.srt");

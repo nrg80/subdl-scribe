@@ -2000,7 +2000,7 @@ public sealed class DownloadPipeline : IDisposable
                         // so the fetch the operator asked for would silently DESTROY the subtitle it
                         // was meant to sit beside. `PlanTarget` is the shared planner (F-M315) and
                         // returns the first free corrected slot; it never returns one above
-                        // `CorrectedSlotMax`, so the reserved originals (50–99) stay untouched.
+                        // `CorrectedSlotMax`, so the reserved originals (51–99) stay untouched.
                         var namesHere = SidecarNamesInDirectory(Path.GetDirectoryName(mediaPath) ?? ".");
                         targetPath = namesHere == null
                             ? SidecarNaming.Build(mediaPath, lang, effectiveHi, correctedSlotCount + 1)
@@ -2024,7 +2024,7 @@ public sealed class DownloadPipeline : IDisposable
                             summary.Failed++;
                             ReportOutcome(item, ItemOutcome.RealFailure);
                             LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL-D] SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 50–99; nothing written",
+                                "[SubDL-D] SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 51–99; nothing written",
                                 Path.GetFileName(mediaPath), lang);
                             continue;
                         }
@@ -2053,13 +2053,13 @@ public sealed class DownloadPipeline : IDisposable
                     // Until 07.10.2026 it was kept as a one-entry archive (`<name>.unsynced.zip`),
                     // which the operator could only reach by unpacking it himself. He ordered that
                     // replaced (07.10.2026): the original now lands as a LOOSE sidecar named
-                    // `<base>.<lang>.50.srt` — numbered from 50 upward — which Jellyfin lists as
+                    // `<base>.<lang>.51.srt` — numbered from 51 upward — which Jellyfin lists as
                     // its own selectable track, titled with the number. He also ordered the archive
                     // gone; archives already on disk are left exactly as they are.
                     //
                     // The name is the ONLY difference from a normal sidecar: same language token,
                     // same `.sdh` marker when the corrected file is the variant, no marker of its
-                    // own (it is not forced — F-M315). The reserved block 50–99 keeps it away from
+                    // own (it is not forced — F-M315). The reserved block 51–99 keeps it away from
                     // the corrected files, which stop at slot 49.
                     //
                     // WATCH THE ENCODING. The bytes written are the ORIGINAL TEXT in the canonical
@@ -2105,7 +2105,7 @@ public sealed class DownloadPipeline : IDisposable
                                 // Refusing is the safe direction: an invented name would overwrite
                                 // an original already kept.
                                 LogUtil.PerItem(_config.LogMode, _logger,
-                                    "[SubDL-D] original NOT kept for {File} [{Lang}] — no free slot in the reserved range 50–99",
+                                    "[SubDL-D] original NOT kept for {File} [{Lang}] — no free slot in the reserved range 51–99",
                                     Path.GetFileName(mediaPath), lang);
                             }
                             else
@@ -2363,7 +2363,7 @@ public sealed class DownloadPipeline : IDisposable
                                             // subtitle is not written at all.
                                             summary.RejectedCandidates++;
                                             LogUtil.PerItem(_config.LogMode, _logger,
-                                                "[SubDL-D] HI SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 50–99; nothing written ({Release})",
+                                                "[SubDL-D] HI SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 51–99; nothing written ({Release})",
                                                 Path.GetFileName(mediaPath), lang, hi.ReleaseName);
                                         }
                                         else
@@ -2395,7 +2395,7 @@ public sealed class DownloadPipeline : IDisposable
                                             if (hiOriginalPath == null)
                                             {
                                                 LogUtil.PerItem(_config.LogMode, _logger,
-                                                    "[SubDL-D] HI original NOT kept for {File} [{Lang}] — no free slot in the reserved range 50–99",
+                                                    "[SubDL-D] HI original NOT kept for {File} [{Lang}] — no free slot in the reserved range 51–99",
                                                     Path.GetFileName(mediaPath), lang);
                                             }
                                             else
