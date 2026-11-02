@@ -35,7 +35,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 15 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 26 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
-- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 15 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 16 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 15 requirements
 - [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 45 requirements
 - [16. Non-Goals](#16-non-goals)
@@ -1263,6 +1263,8 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M385 [D] (operator order 02.11.2026):** **A quality-gate switch names its own action, and the two directions do not share a wording.** The upload language gate corrects (F-M375) and is labelled `Correct language (content vs. tag)`; the download gate throws the candidate away and is labelled `Reject wrong language (content vs. tag)`. The statistics row for attempts that never left reads `Uploads: stopped before sending` — "discarded" was read as SubDL throwing a finished upload away.
 
+**F-M398 [P] (Operator-Anordnung 02.11.2026):** **Die Worker-Zeile der Statusseite markiert einen Trockenlauf mit dem Wort `dry`, grau, direkt neben dem Ergebniswort.** Steht der Worker auf `run` (blau), liest sich die Zeile als „run dry"; ein Badge in eigener Spalte verbreiterte die Zeile um rund 50 px und schob den Status auf schmalen Anzeigen aus dem Bild. Asserted by `scripts/tests/gui-structure`.
+
 ## 14. Data Model and Persistence
 
 **F-M38 [B1]:** **Persistent state split by the kind of thing described** (section 14). Embedded tracks live under their video file, keyed by media hash + stream position; sidecars are keyed by normalized content hash; the file's own record carries path, IDs, season/episode and the derived language aggregate. The **hearing-impaired flag belongs to each subtitle datum**, never to the file (F-M282), and **completeness is derived rather than stored** (F-M283) — so the file record carries no download mark and no HI aggregate. Both pipelines read and write the same store.
@@ -1874,6 +1876,22 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T164 (01.11.2026):** The season-pack suite asks the run plan without a library: a packable season is worked first and in episode order, the queued work outside it keeps its order, an empty plan leaves the order untouched, a season that is only partly queued is not the season that aired and is therefore not buffered, and the plan asks the same completeness rule as the season index. Part of the T163 suite's **84 checks.**
 
 **T165 (01.11.2026):** The language-correction suite asks the shipped gate without a library: a lying tag corrects to the detected language, a tag that holds corrects nothing, a relative of the tag is not corrected, text without a confident verdict corrects nothing, the correction only runs behind the language checkbox, no mismatch reject is written any more while rows from older runs stay readable, the corrected language reaches the candidate the run keeps and the retry path, and the GUI description says what is corrected and where it goes. **19 checks.**
+
+**T166 (02.11.2026):** Eine vollständige Staffel ist packbar, egal wie viel davon in der Queue liegt (F-M394). `scripts/tests/seasonpack` prüft, dass der Plan **jede** plattenvollständige Staffel aufnimmt und die alte Queue-Bedingung verschwunden ist — inklusive Negativprüfung auf `if (SeasonPack.IsComplete(entry.Value, have))`.
+
+**T167 (02.11.2026):** Füllmaterial muss hochgeladen sein (F-M395). `scripts/tests/packretry` Abschnitt 11 verlangt eine `uploaded`-Zeile dieser Spur, die eigene Logzeile für „nur aus einem Download bekannt" und die Reihenfolge Beleg → Kandidat.
+
+**T168 (02.11.2026):** Kein zweiter Pack mit denselben Mitgliedern, und tote Pack-Zeilen fallen raus (F-M396). `scripts/tests/packretry` Abschnitt 12: die Prüfung sitzt **vor** der ersten Löschung, `PruneOrphanedPacks` existiert in der Registry und wird vom Database Refresh aufgerufen.
+
+**T169 (02.11.2026):** Eine `.srt` aus SubDL-Herkunft tötet den Pack (F-M397). `scripts/tests/packretry` Abschnitt 13 prüft die inhaltsbasierte Abfrage (`IsSubdlOrigin` über die `downloaded`-Sidecar-Zeile), die Verweigerung des **ganzen** Packs und die Reihenfolge vor jeder Löschung.
+
+**T170 (02.11.2026):** Nur die `packs`-Zeile belegt einen Pack (F-M399). `scripts/tests/packretry` Abschnitt 14 enthält die Negativprüfungen, dass „hat eine SubdlId" nie wieder als „ist gepackt" gilt.
+
+**T171 (02.11.2026):** Die Sprachzeile stellt den Befund fest (F-M400). `scripts/tests/langcorrect` prüft die Formulierung „tagged X, detected Y; uploaded under Y" und dass „the tag lies" nicht zurückkehrt.
+
+**T172 (02.11.2026):** „run dry" und eine Schreibweise für den Modus (F-M401–F-M403). `scripts/tests/gui-structure` prüft, dass `Start` das Trockenlauf-Flag notiert, beide Worker es beim Start mitgeben, der Marker `dry` neben dem Ergebniswort hängt und weder `dry-run={` noch `DRY RUN,` im Code steht.
+
+**T173 (02.11.2026):** Die `packs`-Tabelle hält, was sie verspricht (F-M390). `scripts/tests/storex` legt die Tabelle an, schreibt und liest Zeilen je Staffel/Sprache/SDH, prüft das Ersetzen beim Upsert, das Überleben eines Reopens und das Aufräumen per Serie.
 
 **T163 (01.11.2026):** The season-pack suite asks the arithmetic and the documented upload shape without a network: the aired set drops the E0 entry IMDb reports, completeness is set equality on both sides, the pack hash is order-sensitive and changes with a corrected episode, the name carries no `.zip` because SubDL appends it, and the pack call sends the array of file ids with `is_full_season=true` and the episode range. **84 checks.**
 
