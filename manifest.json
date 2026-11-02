@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.308",
-        "changelog": "v12.1.12.308: the pack questions are asked in cost order — store first (already up? language complete?), release names second, extraction last.",
+        "version": "12.1.12.309",
+        "changelog": "v12.1.12.309: arrival runs upload single only; a refetch or manual run uploads every position single first and then closes the season with the pack, which deletes the singles it absorbs.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.308-dev/Jellyfin.Plugin.SubdlSync_12.1.12.308.zip",
-        "checksum": "2ef9a8132451acab4104de739d0d61c9",
-        "timestamp": "2026-11-02T14:13:06Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.309-dev/Jellyfin.Plugin.SubdlSync_12.1.12.309.zip",
+        "checksum": "e96f3283821430ae7f348ff57cf53bad",
+        "timestamp": "2026-11-02T14:39:26Z"
       }
     ]
   }
