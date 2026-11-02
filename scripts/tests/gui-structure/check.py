@@ -1672,6 +1672,17 @@ def main():
     check("DRY RUN," not in up_src2 and "DRY RUN —" not in disp_src,
           "F-M403: the space-separated variant is gone")
 
+    # ---- F-M401 (Nachtrag): während ein Worker läuft, gilt das LIVE-Flag, nicht die gespeicherte Zeile.
+    try:
+        ctrl_src = open(os.path.join(root_cs, "Api/SubdlStatusController.cs"), encoding="utf-8").read()
+    except OSError as exc:
+        check(False, "F-M401: status controller readable (%s)" % exc)
+        ctrl_src = ""
+    check("DryRun = IsLive(r) ? LiveDryFlag(r) : r.DryRun," in ctrl_src,
+          "F-M401: a running worker reports the live dry flag")
+    check("return cfg.DryRun;" in ctrl_src and "return cfg.DownloadDryRun;" in ctrl_src,
+          "F-M401: upload and download read their own switch")
+
     print(">>> GUI-STRUKTUR %s: %d/%d Pruefungen bestanden"
           % ("OK" if not failed else "FEHLER", len(results) - len(failed), len(results)))
     return 1 if failed else 0

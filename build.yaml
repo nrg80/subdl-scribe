@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.296"
+version: "12.1.12.297"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.297: A running worker reports the live dry flag, so the workers line reads "run dry" while the run is in flight instead of only afterwards.
   v12.1.12.296: One spelling for the mode — "dry" inline in the start lines, "DRY-RUN" as the prefix on event lines; the dry-run=True form is gone.
   v12.1.12.295: The cycle lines in the log say whether the cycle ran dry — "cycle start (..., dry)" and the matching end line.
   v12.1.12.294: A worker in dry mode says so while it runs — the workers line reads "run dry" instead of only turning grey after the run.

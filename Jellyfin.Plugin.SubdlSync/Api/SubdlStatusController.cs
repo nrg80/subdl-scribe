@@ -112,6 +112,35 @@ public class SubdlStatusController : ControllerBase
     /// </para>
     /// </summary>
     /// <returns>One entry per worker with its last run.</returns>
+    /// <summary>F-M401: true when this row describes a run that is in flight right now.</summary>
+    private static bool IsLive(Data.WorkerRunEntity row)
+        => string.Equals(row.Outcome, Registry.WorkerRunRegistry.Outcome.Running, StringComparison.Ordinal);
+
+    /// <summary>
+    /// F-M401: the dry flag of the run that is in flight for this worker, from live configuration.
+    /// Falls back to the stored flag for every worker that has no dry mode of its own.
+    /// </summary>
+    private static bool LiveDryFlag(Data.WorkerRunEntity row)
+    {
+        var cfg = Plugin.Instance?.Configuration;
+        if (cfg == null)
+        {
+            return row.DryRun;
+        }
+
+        if (string.Equals(row.Id, Registry.WorkerRunRegistry.UploadWorkerKey, StringComparison.Ordinal))
+        {
+            return cfg.DryRun;
+        }
+
+        if (string.Equals(row.Id, Registry.WorkerRunRegistry.DownloadWorkerKey, StringComparison.Ordinal))
+        {
+            return cfg.DownloadDryRun;
+        }
+
+        return row.DryRun;
+    }
+
     [HttpGet("WorkerRuns")]
     [AllowAnonymous]
     public IActionResult GetWorkerRuns()
@@ -164,7 +193,12 @@ public class SubdlStatusController : ControllerBase
                 Ended = r.Ended?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
                 r.Outcome,
                 r.Detail,
-                r.DryRun,
+                // F-M401 (operator order 02.11.2026): while a worker runs, the dry flag is the LIVE one.
+                // The stored row is written when the run ENDS ("run" can also be written by the wait cap
+                // of a cycle that is still working), so reading the row alone left "run" without the
+                // marker exactly when the operator was watching. The live configuration is the truth
+                // during a run; the stored flag stays the truth for a finished one.
+                DryRun = IsLive(r) ? LiveDryFlag(r) : r.DryRun,
                 // F-M294: per worker, plus the moment the fire is due so the page can name it.
                 Deferred = pendingFires.ContainsKey(r.Id),
                 DeferUntil = pendingFires.TryGetValue(r.Id, out var due)
