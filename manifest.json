@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.312",
-        "changelog": "v12.1.12.312: a refused season names the three closest languages with their counts and the missing episodes, plus any episode without an uploaded row.",
+        "version": "12.1.12.313",
+        "changelog": "v12.1.12.313: already published uploads can be adopted into the registry (POST /Plugins/SubdlSync/AdoptUploads) so seasons the seeder filled become packable.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.312-dev/Jellyfin.Plugin.SubdlSync_12.1.12.312.zip",
-        "checksum": "0d099ac9dfce9e4eb42f69e8bac896dc",
-        "timestamp": "2026-11-02T18:07:43Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.313-dev/Jellyfin.Plugin.SubdlSync_12.1.12.313.zip",
+        "checksum": "d63d6dfbbd7f771b76203c47d2d45c31",
+        "timestamp": "2026-11-02T18:31:51Z"
       }
     ]
   }
