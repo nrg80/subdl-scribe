@@ -27,7 +27,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 19 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 14 requirements
-- [6. Database Refresh](#6-database-refresh) — 8 requirements
+- [6. Database Refresh](#6-database-refresh) — 9 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
 - [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 5 requirements
 
@@ -832,6 +832,8 @@ The cost is one database page: +4 096 B on the bench store (21 statistic rows), 
 The statistics run as their OWN guarded step. A failure is logged as a warning and does **not** turn a shrunken file into a failed compaction — the file WAS rebuilt at that point, and the failure wording belongs to the rebuild alone.
 
 The rewrite is folded in before the footprint is measured (the journal fold), so the reported "after" describes the settled file instead of a journal holding the rebuilt database. See F-M214.
+
+**F-M404 [P] (Operator-Anordnung 02.11.2026):** **Der Database Refresh räumt auch die Pack-Seite auf: eine `packs`-Zeile, deren `PackId` auf keiner Untertitelzeile mehr steht, wird entfernt und in der Refresh-Summe mitgezählt.** Eine solche Zeile hätte keinen Träger mehr — die Medien wurden neu gehasht, die Dateien weggeräumt oder der Pack ersetzt —, behauptete aber weiter „diese Staffel ist gepackt" und legte sie damit für immer still. Asserted by `scripts/tests/packretry` Abschnitt 12 (T168); die Upload-Seite beschreibt dieselbe Regel in F-M396, die Pack-Politik in §3.3.
 
 ## 7. OSHash Refresh
 
