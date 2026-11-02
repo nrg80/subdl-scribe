@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.299"
+version: "12.1.12.301"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,8 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.301: A season counts as complete only when one release group supplies all its episodes — a staffel split across two groups stays single.
+  v12.1.12.300: The aired episode set comes from TMDb and no longer counts episodes whose air date is in the future — IMDb had answered with the whole series (20 instead of 7).
   v12.1.12.299: The pack loop reports progress, so the watchdog no longer aborts a run that is busy building packs.
   v12.1.12.298: The pack filler reads a file once per run instead of once per language — 37 languages of one season no longer mean 37 full container passes.
   v12.1.12.297: A running worker reports the live dry flag, so the workers line reads "run dry" while the run is in flight instead of only afterwards.

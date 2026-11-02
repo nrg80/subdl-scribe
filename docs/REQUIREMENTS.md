@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.71
-**Status:** Implementation — v12.1.12.299.
+**Status:** Implementation — v12.1.12.301.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 45 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 47 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403
@@ -277,6 +277,10 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 
 **F-M405 [P] (Operator-Anordnung 02.11.2026):** **Der Pack-Filler liest eine Datei einmal je Lauf aus, nicht einmal je Sprache.** Für eine Staffel mit 37 Sprachen waren das 37 volle ffmpeg-Durchläufe über denselben Container — bei acht Folgen 296 Zugriffe, wo acht genügen. Der Filler nutzt jetzt denselben Ein-Pass-Aufruf wie der Einzel-Upload seit F-M5 und hält das Ergebnis je Medienpfad für die Dauer des Laufs. Asserted by `scripts/tests/packretry`.
 **F-M406 [P] (Operator-Anordnung 02.11.2026):** **Die Pack-Schleife meldet Fortschritt, damit der Lauf nicht als Stillstand gilt und abgebrochen wird.** Der `RunWatchdog` bricht einen Lauf nach sechs Minuten ohne Lebenszeichen ab; die Pack-Schleife baute stumm und wurde deshalb nach elf bis zwölf Minuten mitten im Plan gekillt — bei 659 angekündigten Paaren blieben 28 Packs, was wie Unfähigkeit aussah und ein Abbruch war. Sie meldet jetzt jede Folge, die sie ausliest. Asserted by `scripts/tests/packretry`.
+
+**F-M407 [P] (Operator-Anordnung 02.11.2026):** **Die ausgestrahlte Folgenmenge kommt von TMDb, und künftige Folgen zählen nicht mit.** IMDb antwortet auf die Staffel-Abfrage mit der ganzen Serie — für `tt33270224` S1 mit `total: 20` und den Nummern 1 bis 20, wo die Staffel 7 Folgen hat und 4 gelaufen sind —, und dieses eine Zahl entschied über Vollständigkeit: Die Staffel konnte nie vollständig werden und blieb dauerhaft einzeln. TMDb wird jetzt zuerst gefragt (der Staffel-Endpunkt ist je Staffel richtig), IMDb bleibt Rückfall für Titel, die TMDb nicht kennt. Auf Ausstrahlungsdaten kommt es dabei nicht an: eine Staffel ist vollständig, wenn ihre Folgen auf Platte liegen. Asserted by `scripts/tests/seasonpack`.
+
+**F-M408 [P] (Operator-Anordnung 02.11.2026):** **Eine Staffel ist vollständig, wenn alle Folgen aus derselben Release-Gruppe vorliegen.** Ein Pack trägt eine Release, eine Qualität und eine Bildrate; eine Staffel aus zwei Gruppen ist kein Pack. Es gewinnt die Gruppe, die alle ausgestrahlten Folgen stellt, und nur ihre Dateien dürfen mit — bei Cupertino S01 (`-MeGusta` E01/E02, `-ELiTE` E03/E04) deckt keine Gruppe die Staffel, sie bleibt einzeln. Die Folgenmenge selbst kommt von TMDb (F-M407). Asserted by `scripts/tests/seasonpack`.
 
 ## 4. Download Pipeline
 

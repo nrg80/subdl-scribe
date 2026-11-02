@@ -524,6 +524,19 @@ internal static class Program
         Check(!logHole.Any(l => l.Contains("DRY-RUN would upload season pack", StringComparison.Ordinal)),
             "no partial pack is ever sent");
 
+        // ── F-M407: TMDb zuerst ─────────────────────────────────────────────────
+        var seasonIndexSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SeasonEpisodeIndex.cs"));
+        Check(seasonIndexSrc.IndexOf("FromTmdbAsync(tmdbId, tmdbApiKey, season, logger, ct)", StringComparison.Ordinal)
+              < seasonIndexSrc.IndexOf("FromImdbAsync(imdbId, season, logger, ct)", StringComparison.Ordinal),
+              "F-M407: TMDb is asked before IMDb");
+
+        // ── F-M408: Vollstaendigkeit je Release-Gruppe ──────────────────────────
+        var uploadSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        Check(uploadSrc.Contains("SeasonPack.ReleaseGroup(") && uploadSrc.Contains("completeGroup"),
+              "F-M408: the season is completed per release group");
+        Check(uploadSrc.Contains("no release group covers the season"),
+              "F-M408: a season split across groups says so and stays single");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."

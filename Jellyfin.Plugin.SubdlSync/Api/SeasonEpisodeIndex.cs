@@ -62,17 +62,23 @@ public static class SeasonEpisodeIndex
             }
         }
 
-        var fromImdb = await FromImdbAsync(imdbId, season, logger, ct).ConfigureAwait(false)
-                       ?? await FromTmdbAsync(tmdbId, tmdbApiKey, season, logger, ct).ConfigureAwait(false);
+        // F-M407 (operator order 02.11.2026): TMDb answers FIRST. IMDb's public GraphQL endpoint
+        // ignores `filter:{includeSeasons:["1"]}` — asked for season 1 of tt33270224 it answered
+        // `total: 20` with episode numbers 1..20, the whole series, where the season has 7 and 4 of
+        // them have aired. That number decided completeness: the season could never be complete and
+        // stayed single forever. TMDb's season endpoint is per season and correct; IMDb is only the
+        // fallback for titles TMDb has never heard of.
+        var fromTmdb = await FromTmdbAsync(tmdbId, tmdbApiKey, season, logger, ct).ConfigureAwait(false)
+                       ?? await FromImdbAsync(imdbId, season, logger, ct).ConfigureAwait(false);
 
-        if (fromImdb is { Count: > 0 })
+        if (fromTmdb is { Count: > 0 })
         {
             lock (Cache)
             {
-                Cache[key] = fromImdb;
+                Cache[key] = fromTmdb;
             }
 
-            return fromImdb;
+            return fromTmdb;
         }
 
         return null;

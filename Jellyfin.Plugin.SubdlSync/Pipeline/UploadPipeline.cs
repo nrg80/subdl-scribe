@@ -2722,6 +2722,38 @@ public sealed class UploadPipeline : IPackFiller
                 continue;
             }
 
+            // F-M408 (operator order 02.11.2026): "die staffel ist vollstaendig wenn alle episoden der
+            // gleichen release group da sind". Ein Pack traegt eine Release, eine Qualitaet, eine
+            // Bildrate — eine Staffel aus zwei Gruppen ist kein Pack. Es gewinnt die Gruppe, die alle
+            // ausgestrahlten Folgen stellt; nur ihre Dateien duerfen mit.
+            var groupOf = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in itemsOf[entry.Key])
+            {
+                var (_, _, _, groupNumber, groupIsSeries) = ResolveIdsRaw(item);
+                if (!groupIsSeries || groupNumber < 1)
+                {
+                    continue;
+                }
+
+                string group = SeasonPack.ReleaseGroup(item.Path) ?? "?";
+                if (!groupOf.TryGetValue(group, out var groupNumbers))
+                {
+                    groupNumbers = new List<int>();
+                    groupOf[group] = groupNumbers;
+                }
+
+                if (!groupNumbers.Contains(groupNumber))
+                {
+                    groupNumbers.Add(groupNumber);
+                }
+            }
+
+            string? completeGroup = groupOf
+                .Where(g => SeasonPack.IsComplete(aired, g.Value))
+                .Select(g => g.Key)
+                .OrderBy(g => g, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+
             if (SeasonPack.IsComplete(aired, entry.Value))
             {
                 result[entry.Key] = aired;
@@ -2731,11 +2763,24 @@ public sealed class UploadPipeline : IPackFiller
                     "[SubDL] season pack candidate: {Imdb} S{Season} — {Count} of {Aired} episode(s) on disk, season complete.",
                     entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count);
             }
+            else if (completeGroup != null)
+            {
+                result[entry.Key] = aired;
+                _completeSeasonItems[entry.Key] = itemsOf[entry.Key]
+                    .Where(x => string.Equals(
+                        SeasonPack.ReleaseGroup(x.Path) ?? "?", completeGroup,
+                        StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack candidate: {Imdb} S{Season} — release group {Group} supplies all {Aired} episode(s), season complete.",
+                    entry.Key.Item1, entry.Key.Item2, completeGroup, aired.Count);
+            }
             else
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack skipped: {Imdb} S{Season} — {Have} episode(s) on disk against {Aired} aired, stays single.",
+                    "[SubDL] season pack skipped: {Imdb} S{Season} — {Have} episode(s) on disk against {Aired} aired, no release group covers the season, stays single.",
                     entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count);
             }
         }
