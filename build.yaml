@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.283: A season pack is filled with subtitles that are already up instead of falling back to singles, is remembered in its own table so it is never rebuilt, and the quota bar reads API calls.
   v12.1.12.282: One archive fetch serves the season; a refused file gets the next one from the same archive, an unreadable cue is dropped before the hash is taken, and kept originals are numbered from 51.
   v12.1.12.278: The hearing-impaired (SDH) subtitle states it in its name — .SDH after the language code —
   in the pack title, in the pack member and in the single upload, instead of only in the hi field.

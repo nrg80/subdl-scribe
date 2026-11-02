@@ -80,6 +80,7 @@ public sealed class SeasonPackCoordinator
     private readonly Action<string, int> _countUploaded;
     private readonly Action<int> _countFailed;
     private readonly Action<string> _reportDone;
+    private readonly IPackFiller? _filler;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SeasonPackCoordinator"/> class.
@@ -97,6 +98,11 @@ public sealed class SeasonPackCoordinator
     /// <param name="countUploaded">Called with (season label, number uploaded) after a pack.</param>
     /// <param name="countFailed">Called with the number of failed episodes.</param>
     /// <param name="reportDone">Called with an item id whose position is done.</param>
+    /// <param name="filler">
+    /// F-M389: supplies the episodes a buffer does not cover, from subtitles that are already
+    /// uploaded. Null keeps the pre-02.11.2026 behaviour byte for byte: an incomplete buffer goes
+    /// up the single way.
+    /// </param>
     public SeasonPackCoordinator(
         SubdlApiClient api,
         ContentHashRegistry registry,
@@ -106,7 +112,8 @@ public sealed class SeasonPackCoordinator
         ISet<(string ImdbId, int Season)> packable,
         Action<string, int> countUploaded,
         Action<int> countFailed,
-        Action<string> reportDone)
+        Action<string> reportDone,
+        IPackFiller? filler = null)
     {
         _api = api;
         _registry = registry;
@@ -117,6 +124,7 @@ public sealed class SeasonPackCoordinator
         _countUploaded = countUploaded;
         _countFailed = countFailed;
         _reportDone = reportDone;
+        _filler = filler;
     }
 
     /// <summary>True when this season is complete AND fully queued, therefore worth buffering.</summary>
@@ -162,6 +170,13 @@ public sealed class SeasonPackCoordinator
     /// <summary>
     /// Closes the run: every buffer that never got full because an episode was missing, failed a
     /// gate or carried no subtitle for that language goes up the single way.
+    /// <para>
+    /// F-M389 (operator order 02.11.2026): before that, an incomplete buffer is offered the filler.
+    /// An episode whose subtitle is ALREADY on SubDL does not have to be in this run for the season
+    /// to be a pack — it is fetched from the library, gated and proven, and then joins the buffer.
+    /// Only when EVERY missing episode fills is the pack sent; a season that cannot be completed
+    /// stays single, exactly as before, because a partial pack is a false claim.
+    /// </para>
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Task.</returns>
@@ -177,6 +192,11 @@ public sealed class SeasonPackCoordinator
                 continue;
             }
 
+            if (await TryFillAsync(entry.Key, entry.Value, aired, ct).ConfigureAwait(false))
+            {
+                continue;
+            }
+
             LogUtil.Normal(
                 _logger,
                 "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Want} episode(s), the rest stays single.",
@@ -185,11 +205,144 @@ public sealed class SeasonPackCoordinator
         }
     }
 
+    /// <summary>
+    /// F-M389: completes an incomplete buffer from the subtitles that are already uploaded, and
+    /// sends it as a pack when every missing episode arrived.
+    /// <para>
+    /// The buffer always holds at least one NEW candidate — it exists only because something was
+    /// added to it — so a season whose subtitles are all up never reaches this point, and no
+    /// "nothing to send" branch is needed. What the filler adds is filler-only: it is asked per
+    /// missing episode, in episode order, and the first null ends the attempt. Half a season is not
+    /// a pack, and neither is a pack whose one doubtful member was quietly left out.
+    /// </para>
+    /// </summary>
+    /// <param name="key">Buffer key.</param>
+    /// <param name="buffer">The candidates this run collected.</param>
+    /// <param name="aired">Aired episode set of the season.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>True when the buffer went up as a pack; false when the singles path has to do it.</returns>
+    private async Task<bool> TryFillAsync(
+        (string ImdbId, int Season, string Lang, bool Hi) key,
+        List<Candidate> buffer,
+        IReadOnlyList<int> aired,
+        CancellationToken ct)
+    {
+        if (_filler == null)
+        {
+            return false;
+        }
+
+        var missing = SeasonPack.Uncovered(aired, buffer.Select(c => c.Episode));
+        var filled = new List<Candidate>(missing.Count);
+        foreach (int episode in missing)
+        {
+            ct.ThrowIfCancellationRequested();
+            var candidate = await _filler
+                .FillAsync(key.ImdbId, key.Season, episode, key.Lang, key.Hi, ct)
+                .ConfigureAwait(false);
+            if (candidate == null)
+            {
+                // One episode that cannot join is enough: the season goes up as singles. The filler
+                // has named the episode and the reason already, so nothing is guessed here.
+                return false;
+            }
+
+            filled.Add(candidate);
+        }
+
+        if (filled.Count == 0)
+        {
+            return false;
+        }
+
+        LogFilled(key, filled.Count, buffer.Count);
+        await UploadAsync(key, buffer.Concat(filled).ToList(), aired, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// F-M389 (operator order 02.11.2026, revised the same day): packs a season the queue no longer
+    /// touches at all — every episode is up already, so the run has nothing new to send and the pack
+    /// consists of what the filler proves is already there.
+    /// <para>
+    /// The members are re-sent inside the container, which is how SubDL builds a pack; what the rule
+    /// forbids is INVENTING one. Each member therefore comes from <see cref="IPackFiller"/>, which
+    /// runs the single path's gates and demands the content be known. A season that cannot be
+    /// completed from what is up sends nothing at all — there is no single upload to fall back to,
+    /// because those subtitles are already on SubDL (that is why <see cref="UploadAsync"/> is asked
+    /// not to dissolve a refused container into singles here).
+    /// </para>
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="lang">SubDL language code the pack is built for.</param>
+    /// <param name="hi">HI/SDH variant.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Task.</returns>
+    public async Task FillOnlyAsync(string imdbId, int season, string lang, bool hi, CancellationToken ct)
+    {
+        var key = (imdbId, season, lang, hi);
+        if (_filler == null || !_complete.TryGetValue((imdbId, season), out var aired))
+        {
+            return;
+        }
+
+        var group = new List<Candidate>(aired.Count);
+        foreach (int episode in SeasonPack.AiredNumbers(aired))
+        {
+            ct.ThrowIfCancellationRequested();
+            var candidate = await _filler.FillAsync(imdbId, season, episode, lang, hi, ct).ConfigureAwait(false);
+            if (candidate == null)
+            {
+                // Half a season is not a pack, and there is nothing to send the single way: the
+                // episode's subtitle is up already or it never was — either way this run is done.
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: episode {Episode} cannot join from what is already uploaded, nothing is sent.",
+                    imdbId, season, lang, episode);
+                return;
+            }
+
+            group.Add(candidate);
+        }
+
+        // One release, one quality, one frame rate — the check of the buffered path applies here
+        // too, and it is asked BEFORE the upload: a season of mixed sources is not a pack, and
+        // re-sending it as singles would only duplicate what is already up.
+        bool uniform = group.Select(c => c.Quality).Distinct().Count() == 1
+                       && group.Select(c => c.Framerate).Distinct().Count() == 1;
+        if (!uniform || group.Any(c => c.Forced))
+        {
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: the episodes do not share one source, and nothing is re-sent — it is already up.",
+                imdbId, season, lang);
+            return;
+        }
+
+        LogFilled(key, group.Count, 0);
+        await UploadAsync(key, group, aired, ct, uploadSinglesOnRefusal: false).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// F-M389: the one line that says a pack was completed from material that is already uploaded —
+    /// how much came from the registry and how much this run collected.
+    /// </summary>
+    /// <param name="key">Buffer key.</param>
+    /// <param name="filled">Members supplied by the filler.</param>
+    /// <param name="fresh">Members this run collected itself (0 for a fill-only pack).</param>
+    private void LogFilled((string ImdbId, int Season, string Lang, bool Hi) key, int filled, int fresh)
+        => LogUtil.Normal(
+            _logger,
+            "[SubDL] season pack filled — {Imdb} S{Season} [{Lang}]: {Filled} episode(s) from subtitles already uploaded, {New} from this run.",
+            key.ImdbId, key.Season, key.Lang, filled, fresh);
+
     private async Task UploadAsync(
         (string ImdbId, int Season, string Lang, bool Hi) key,
         List<Candidate> group,
         IReadOnlyList<int> aired,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool uploadSinglesOnRefusal = true)
     {
         var ordered = group.OrderBy(c => c.Episode).ToList();
 
@@ -206,7 +359,11 @@ public sealed class SeasonPackCoordinator
                 _logger,
                 "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: the episodes do not share one source, they stay single.",
                 key.ImdbId, key.Season, key.Lang);
-            await UploadSinglesAsync(ordered, ct).ConfigureAwait(false);
+            if (uploadSinglesOnRefusal)
+            {
+                await UploadSinglesAsync(ordered, ct).ConfigureAwait(false);
+            }
+
             return;
         }
 
@@ -264,7 +421,11 @@ public sealed class SeasonPackCoordinator
                     _logger,
                     "[SubDL] season pack refused ({Reason}) — {Imdb} S{Season} [{Lang}] stays single.",
                     result.Reason ?? "skipped", key.ImdbId, key.Season, key.Lang);
-                await UploadSinglesAsync(ordered, ct).ConfigureAwait(false);
+                if (uploadSinglesOnRefusal)
+                {
+                    await UploadSinglesAsync(ordered, ct).ConfigureAwait(false);
+                }
+
                 return;
             }
 
@@ -287,6 +448,18 @@ public sealed class SeasonPackCoordinator
                 subdlId: packId, forced: c.Forced));
             _reportDone(c.ItemId);
         }
+
+        // F-M390: the pack is now a fact in the store, not an inference from the subtitle rows. One row
+        // per season + language + variant, updated in place — it is what stops the fill-only pass from
+        // rebuilding the same pack on every run.
+        _registry.MarkAndFlush(() => _registry.RecordPack(
+            key.ImdbId,
+            key.Season,
+            key.Lang,
+            key.Hi,
+            first.ReleaseName,
+            packId,
+            ordered.Select(x => x.Episode)));
 
         _countUploaded($"{key.ImdbId} S{key.Season} [{key.Lang}]", ordered.Count);
         LogUtil.Normal(

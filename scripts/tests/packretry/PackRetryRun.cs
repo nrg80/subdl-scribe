@@ -206,6 +206,23 @@ internal static class Program
         Check(pipe.Contains("var hiBytes = CorrectInvisibleCues(", StringComparison.Ordinal),
             "so is the hearing-impaired file");
 
+        // ── 7. F-M390: the pack becomes a fact in the store ─────────────────────
+        Console.WriteLine("7. The packs table");
+        var reg = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
+        var coord = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+        Check(reg.Contains("public void RecordPack(", StringComparison.Ordinal), "the registry can record a pack");
+        Check(reg.Contains("public bool HasPack(", StringComparison.Ordinal), "and answer whether one exists");
+        Check(coord.Contains("_registry.RecordPack(", StringComparison.Ordinal), "a successful pack writes its row");
+        Check(coord.Contains("ordered.Select(x => x.Episode)", StringComparison.Ordinal),
+            "the row carries the member episodes");
+        // The planner lives in the UPLOAD pipeline — reading download source here would assert about
+        // a file that never contained the line.
+        var upload = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        Check(upload.Contains("Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi)", StringComparison.Ordinal),
+            "and the fill-only plan skips a season that is already packed");
+        Check(upload.IndexOf("Registry.HasPack(", StringComparison.Ordinal) < upload.IndexOf("already inside a pack, nothing is re-sent", StringComparison.Ordinal),
+            "the check comes before the decision it guards");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

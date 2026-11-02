@@ -1194,6 +1194,88 @@ public sealed class ContentHashRegistry : IDisposable
     /// <returns>True when known.</returns>
     /// F-M17z: any recorded outcome counts as known; a rejected row is as final as an uploaded one,
     /// so a new rejection reason never needs a new state name.
+    /// <summary>
+    /// F-M390: records that a season was packed, in one language and variant, so a LATER run can see
+    /// it without re-deriving anything from the subtitle rows.
+    /// <para>
+    /// The row is written after the pack upload succeeded, keyed by season + language + variant — one
+    /// row per pack, updated in place, never a history. Without it a season whose episodes went up
+    /// individually is a season nobody can tell anything about: the fill-only pass would rebuild the
+    /// same pack on every run, and there is no record of which single uploads the pack absorbed.
+    /// </para>
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <param name="releaseName">Release the pack carries.</param>
+    /// <param name="packId">SubDL id (or the pack name when the answer carried no id).</param>
+    /// <param name="episodes">Episode numbers the pack carries.</param>
+    /// <param name="absorbedIds">SubDL ids of single uploads folded into this pack, when known.</param>
+    public void RecordPack(
+        string imdbId,
+        int season,
+        string language,
+        bool hearingImpaired,
+        string? releaseName,
+        string? packId,
+        IEnumerable<int> episodes,
+        IEnumerable<string>? absorbedIds = null)
+    {
+        if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || string.IsNullOrWhiteSpace(language))
+        {
+            return;
+        }
+
+        string id = SubdlDbContext.PackKey(imdbId, season, language, hearingImpaired);
+        var existing = _db.Packs.FindById(id);
+        _db.Packs.Upsert(new PackEntity
+        {
+            Id = id,
+            ImdbId = imdbId,
+            Season = season,
+            Language = language,
+            HearingImpaired = hearingImpaired,
+            ReleaseName = releaseName,
+            PackId = packId,
+            Episodes = string.Join(",", episodes.OrderBy(e => e).Select(e => e.ToString(System.Globalization.CultureInfo.InvariantCulture))),
+            AbsorbedIds = absorbedIds == null ? existing?.AbsorbedIds : string.Join(",", absorbedIds),
+            Created = existing?.Created ?? DateTime.UtcNow,
+            Updated = DateTime.UtcNow,
+        });
+    }
+
+    /// <summary>
+    /// F-M390: the pack recorded for this season, language and variant, or null when there is none.
+    /// A null means "never packed by us" — it never means "not packed at all", because packs built by
+    /// other uploaders leave no row here.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>The stored row, or null.</returns>
+    public PackEntity? GetPack(string? imdbId, int season, string? language, bool hearingImpaired)
+    {
+        if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || string.IsNullOrWhiteSpace(language))
+        {
+            return null;
+        }
+
+        return _db.Packs.FindById(SubdlDbContext.PackKey(imdbId!, season, language!, hearingImpaired));
+    }
+
+    /// <summary>
+    /// F-M390: true when this season, language and variant already went up as a pack of ours.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>True when a pack row exists.</returns>
+    public bool HasPack(string? imdbId, int season, string? language, bool hearingImpaired)
+        => GetPack(imdbId, season, language, hearingImpaired) != null;
+
     public bool IsContentKnown(string? contentHash)
     {
         if (string.IsNullOrEmpty(contentHash))

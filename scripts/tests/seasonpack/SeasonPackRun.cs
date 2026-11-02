@@ -32,7 +32,10 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Microsoft.Extensions.Logging;
 
 namespace SeasonPackRun;
 
@@ -54,6 +57,96 @@ internal static class Program
     private static string Srt(int episode) =>
         string.Join("\n\n", Enumerable.Range(1, 30).Select(i =>
             $"{i}\n00:00:{i:00},000 --> 00:00:{i:00},800\nEpisode {episode} line {i}\n"));
+
+    /// <summary>One pack member, built without a library: the coordinator only needs name and numbers.</summary>
+    private static SeasonPackCoordinator.Candidate Candidate(int episode) => new(
+        new MediaBrowser.Controller.Entities.TV.Episode { Name = $"Episode {episode}" },
+        $"item-{episode}",
+        "0123456789abcdef0123456789abcdef",
+        "tt1",
+        null,
+        1,
+        episode,
+        "EN",
+        false,
+        false,
+        0,
+        Srt(episode),
+        $"Show.S01E{episode:00}.1080p.WEB.x264-NTb",
+        "web",
+        "23.976",
+        1920,
+        1080,
+        "h264");
+
+    /// <summary>
+    /// The pipeline's filler, replaced: it answers with a candidate or refuses, and it keeps the order
+    /// it was asked in so the harness can assert that only the missing episode is asked for.
+    /// </summary>
+    private sealed class FakeFiller : IPackFiller
+    {
+        private readonly HashSet<int> _refuse;
+        private readonly int _answer;
+
+        public FakeFiller(IEnumerable<int> refuse, int answer)
+        {
+            _refuse = refuse.ToHashSet();
+            _answer = answer;
+        }
+
+        public List<int> Calls { get; } = new();
+
+        public Task<SeasonPackCoordinator.Candidate?> FillAsync(
+            string imdbId, int season, int episode, string lang, bool hearingImpaired, CancellationToken ct)
+        {
+            Calls.Add(episode);
+            if (_refuse.Contains(episode))
+            {
+                return Task.FromResult<SeasonPackCoordinator.Candidate?>(null);
+            }
+
+            return Task.FromResult<SeasonPackCoordinator.Candidate?>(Candidate(_answer > 0 ? _answer : episode));
+        }
+    }
+
+    /// <summary>Captures the Normal lines the coordinator writes, so the harness can read them.</summary>
+    private sealed class ListLogger : ILogger
+    {
+        private readonly List<string> _lines;
+
+        public ListLogger(List<string> lines) => _lines = lines;
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => _lines.Add(formatter(state, exception));
+    }
+
+    /// <summary>
+    /// A coordinator in dry-run mode: it walks the whole pack decision and stops before the transfer, so
+    /// no HTTP client is used and the registry is never asked to write.
+    /// </summary>
+    private static SeasonPackCoordinator NewCoordinator(
+        List<string> log,
+        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
+        ISet<(string ImdbId, int Season)> packable,
+        IPackFiller filler,
+        Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration config)
+        => new(
+            new Jellyfin.Plugin.SubdlScribe.Api.SubdlApiClient(new System.Net.Http.HttpClient()),
+            null!,
+            new ListLogger(log),
+            config,
+            complete,
+            packable,
+            (_, _) => { },
+            _ => { },
+            _ => { },
+            filler);
 
     private static int Main(string[] args)
     {
@@ -323,6 +416,109 @@ internal static class Program
         var index = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SeasonEpisodeIndex.cs"));
         Check(index.Contains("caching.graphql.imdb.com", StringComparison.Ordinal), "IMDb is asked first");
         Check(index.Contains("/tv/{tmdbId}/season/{season}", StringComparison.Ordinal), "TMDB is the fallback");
+
+        // ── 7. F-M389: a pack completed from what is already uploaded ───────────
+        // Operator order 02.11.2026, revised the same day: a season may be FILLED with episodes whose
+        // subtitle is already up — and a season whose episodes are ALL up is a pack of its own.
+        Console.WriteLine("7. Filling a pack");
+        var airedEight = Enumerable.Range(1, 8).ToList();
+        var sevenOfEight = Enumerable.Range(1, 7).ToList();
+        Check(SeasonPack.Uncovered(airedEight, sevenOfEight).SequenceEqual(new[] { 8 }),
+            "seven of eight leaves exactly the eighth to fill");
+        Check(SeasonPack.Uncovered(airedEight, Array.Empty<int>()).Count == 8,
+            "with nothing queued the whole season comes from the filler");
+        Check(SeasonPack.Uncovered(airedEight, airedEight).Count == 0, "a full buffer needs nothing filled");
+        Check(SeasonPack.Uncovered(airedEight, new[] { 1, 2, 3, 5, 6, 7, 9 }).SequenceEqual(new[] { 4, 8 }),
+            "a gap in the middle is filled per episode, and an episode that never aired is no gap");
+
+        var filledSeason = sevenOfEight.Concat(SeasonPack.Uncovered(airedEight, sevenOfEight)).ToList();
+        Check(SeasonPack.IsComplete(airedEight, filledSeason), "seven plus the filled eighth is the season");
+        Check(!SeasonPack.IsComplete(airedEight, sevenOfEight), "without the fill the season stays single");
+        Check(SeasonPack.PackHash(filledSeason.Select(e => Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e))))
+              == SeasonPack.PackHash(Enumerable.Range(1, 8).Select(e => Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e)))),
+            "a filled pack is the same container as a fully collected one — same members, same hash");
+
+        // The rules in the code: a member may only come from a subtitle that passed the gates AND is
+        // known to the registry; nothing is uploaded when one episode cannot join.
+        int fillFrom = pipeline.IndexOf("public async Task<SeasonPackCoordinator.Candidate?> FillAsync", StringComparison.Ordinal);
+        int fillTo = pipeline.IndexOf("private BaseItem? FindSeasonEpisode", StringComparison.Ordinal);
+        string fill = fillFrom >= 0 && fillTo > fillFrom ? pipeline[fillFrom..fillTo] : string.Empty;
+        Check(fill.Length > 0, "the pipeline is the pack filler");
+        Check(fill.Contains("ContentHashRegistry.NormalizeSrt(extracted)", StringComparison.Ordinal),
+            "the candidate is canonicalised before it is gated and hashed");
+        Check(fill.Contains("GateReject(srt, lang, runtimeMs", StringComparison.Ordinal),
+            "the same gates as the single path run on the filler");
+        Check(fill.Contains("Registry.IsContentKnown(contentHash)", StringComparison.Ordinal),
+            "… and only content the registry knows is accepted — that is the 'already uploaded' proof");
+        Check(fill.IndexOf("GateReject(srt", StringComparison.Ordinal) < fill.IndexOf("Registry.IsContentKnown(contentHash)", StringComparison.Ordinal),
+            "the gates run BEFORE the content is trusted");
+        Check(fill.Split("return null;").Length - 1 >= 5, "every refusal leaves the pack without that member");
+        Check(fill.Contains("the text speaks {Detected}", StringComparison.Ordinal),
+            "a lying language tag cannot drag a second language into the container");
+
+        Check(coordinator.Contains("IPackFiller? filler = null", StringComparison.Ordinal),
+            "the filler is optional — without it the old behaviour is untouched");
+        Check(coordinator.Contains("SeasonPack.Uncovered(aired, buffer.Select(c => c.Episode))", StringComparison.Ordinal),
+            "an incomplete buffer asks which episode it lacks");
+        Check(coordinator.Contains("public async Task FillOnlyAsync(", StringComparison.Ordinal),
+            "a season with nothing new in the queue is packed too");
+        Check(coordinator.Contains("uploadSinglesOnRefusal: false", StringComparison.Ordinal),
+            "a fill-only season re-sends nothing when the container is refused");
+        Check(pipeline.Contains("fillOnlySeasons = PlanFillOnlySeasons(completeSeasons, items);", StringComparison.Ordinal),
+            "the run plans those seasons before the loop");
+        Check(pipeline.Contains("nothing new in the queue, the pack is built from what is already uploaded", StringComparison.Ordinal),
+            "and says why it does so");
+        Check(pipeline.Contains("await packCoordinator.FillOnlyAsync(fillImdb, fillSeason, fillLang, fillHi, runCt)", StringComparison.Ordinal),
+            "the fill-only packs go up before the buffers are flushed");
+
+        // ── 8. The coordinator itself, on fakes ─────────────────────────────────
+        // No network, no Jellyfin, no database: the dry run of a pack stops before the upload, and the
+        // registry is never touched on that path.
+        Console.WriteLine("8. Coordinator on fakes");
+        var dryConfig = new Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration { DryRun = true };
+        var complete = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>> { [("tt1", 1)] = airedEight };
+        var packable = new HashSet<(string ImdbId, int Season)> { ("tt1", 1) };
+
+        var fillerOne = new FakeFiller(refuse: Array.Empty<int>(), answer: 8);
+        var logOne = new List<string>();
+        var coordinatorOne = NewCoordinator(logOne, complete, packable, fillerOne, dryConfig);
+        foreach (int e in sevenOfEight)
+        {
+            coordinatorOne.AddAsync(Candidate(e), CancellationToken.None).GetAwaiter().GetResult();
+        }
+
+        coordinatorOne.FlushAsync(CancellationToken.None).GetAwaiter().GetResult();
+        Check(fillerOne.Calls.SequenceEqual(new[] { 8 }), "only the missing episode is asked for, in episode order");
+        Check(logOne.Any(l => l.Contains("season pack filled", StringComparison.Ordinal)
+                              && l.Contains("1 episode(s) from subtitles already uploaded, 7 from this run", StringComparison.Ordinal)),
+            "one line says how many members came from the filler");
+        Check(logOne.Any(l => l.Contains("DRY-RUN would upload season pack", StringComparison.Ordinal)
+                              && l.Contains("8 episode(s)", StringComparison.Ordinal)
+                              && l.Contains("Ef/Ee 1-8", StringComparison.Ordinal)),
+            "seven collected plus one filled is a pack of eight");
+        Check(!logOne.Any(l => l.Contains("season pack skipped", StringComparison.Ordinal)),
+            "the skip line is not reached when the fill succeeds");
+
+        var fillerAll = new FakeFiller(refuse: Array.Empty<int>(), answer: -1);
+        var logAll = new List<string>();
+        var coordinatorAll = NewCoordinator(logAll, complete, packable, fillerAll, dryConfig);
+        coordinatorAll.FillOnlyAsync("tt1", 1, "EN", false, CancellationToken.None).GetAwaiter().GetResult();
+        Check(fillerAll.Calls.Count == 8, "a season with nothing new asks the filler for every aired episode");
+        Check(logAll.Any(l => l.Contains("season pack filled", StringComparison.Ordinal)
+                              && l.Contains("8 episode(s) from subtitles already uploaded, 0 from this run", StringComparison.Ordinal)),
+            "the fill-only pack is made of uploaded content only");
+        Check(logAll.Any(l => l.Contains("DRY-RUN would upload season pack", StringComparison.Ordinal)
+                              && l.Contains("8 episode(s)", StringComparison.Ordinal)),
+            "and it is sent as one pack of eight");
+
+        var fillerHole = new FakeFiller(refuse: new[] { 5 }, answer: -1);
+        var logHole = new List<string>();
+        var coordinatorHole = NewCoordinator(logHole, complete, packable, fillerHole, dryConfig);
+        coordinatorHole.FillOnlyAsync("tt1", 1, "EN", false, CancellationToken.None).GetAwaiter().GetResult();
+        Check(logHole.Any(l => l.Contains("episode 5 cannot join from what is already uploaded, nothing is sent", StringComparison.Ordinal)),
+            "one episode that cannot join stops the pack and names itself");
+        Check(!logHole.Any(l => l.Contains("DRY-RUN would upload season pack", StringComparison.Ordinal)),
+            "no partial pack is ever sent");
 
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0

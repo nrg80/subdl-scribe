@@ -77,6 +77,24 @@ public static partial class SeasonPack
     }
 
     /// <summary>
+    /// F-M389 (operator order 02.11.2026): the aired episodes a buffer does not cover — the ones a
+    /// pack still needs, in episode order.
+    /// <para>
+    /// This is the pack's question turned around. <see cref="IsComplete"/> answers "is the season
+    /// whole"; this answers "which episode is missing", because a season may be filled from the
+    /// subtitles that are already on SubDL instead of being dissolved into singles.
+    /// </para>
+    /// </summary>
+    /// <param name="aired">Aired set.</param>
+    /// <param name="covered">Episode numbers the buffer already holds.</param>
+    /// <returns>The aired numbers nobody covers, ascending; empty when the buffer is the season.</returns>
+    public static IReadOnlyList<int> Uncovered(IEnumerable<int> aired, IEnumerable<int> covered)
+    {
+        var have = covered.ToHashSet();
+        return AiredNumbers(aired).Where(e => !have.Contains(e)).ToList();
+    }
+
+    /// <summary>
     /// The pack name <c>{imdb}.S{ss}.{pack hash}.{LANG}</c> — the <c>name</c> field SubDL uses as
     /// the zip name on download, so the downloaded file reads <c>{imdb}.S{ss}.{hash}.{LANG}.zip</c>.
     /// Same shape as a single upload, except that the hash describes the pack and not one subtitle.
