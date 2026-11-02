@@ -194,6 +194,14 @@ public sealed class UploadPipeline : IPackFiller
     /// <summary>Resolved ffmpeg path used to extract embedded text subtitles.</summary>
     private readonly string _ffmpegPath;
 
+    /// <summary>
+    /// F-M405 (operator order 02.11.2026): the pack filler extracts a file ONCE per run, not once per
+    /// language. Filling a season for 37 languages meant 37 full passes over the same container — for 8
+    /// episodes that is 296 re-reads where 8 do. The map is keyed by media path and lives exactly as
+    /// long as the run.
+    /// </summary>
+    private readonly Dictionary<string, Dictionary<int, string?>> _fillTextCache = new(StringComparer.Ordinal);
+
     /// <summary>Process-static cache so ffmpeg is resolved once per plugin lifetime.</summary>
     private static string? _cachedFfmpegPath;
 
@@ -2827,7 +2835,24 @@ public sealed class UploadPipeline : IPackFiller
             return null;
         }
 
-        string? extracted = await ExtractSingleStreamAsync(mediaPath, subPos, ct).ConfigureAwait(false);
+        // F-M405: one ffmpeg pass per FILE for the whole filler, cached for the run — the same
+        // one-pass shape the single-upload path has used since F-M5. Per-language extraction re-read
+        // the whole container for every language of every pack attempt.
+        string? extracted;
+        if (!_fillTextCache.TryGetValue(mediaPath, out var cachedTexts))
+        {
+            var subtitleStreams = item.GetMediaStreams()
+                ?.Where(s => s.Type == MediaStreamType.Subtitle)
+                .ToList() ?? new List<MediaStream>();
+
+            var positions = Enumerable.Range(0, subtitleStreams.Count).ToList();
+            (cachedTexts, _) = await FfmpegTools
+                .ExtractAllAsync(_ffmpegPath, mediaPath, positions, _logger, _config, ct)
+                .ConfigureAwait(false);
+            _fillTextCache[mediaPath] = cachedTexts;
+        }
+
+        cachedTexts.TryGetValue(subPos, out extracted);
         if (string.IsNullOrWhiteSpace(extracted))
         {
             LogUtil.Normal(

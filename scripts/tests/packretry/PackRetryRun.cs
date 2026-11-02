@@ -288,6 +288,15 @@ internal static class Program
         Check(upload.Contains("Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi)", StringComparison.Ordinal),
             "the packs row is the only proof that a season is packed");
 
+        // ── 15. F-M405: eine Extraktion je Datei, nicht je Sprache ───────────────
+        Console.WriteLine("15. The filler extracts a file once per run");
+        Check(upload.Contains("_fillTextCache"), "the filler keeps a per-run extraction cache");
+        Check(upload.Contains("FfmpegTools") && upload.Contains(".ExtractAllAsync("),
+            "and it uses the one-pass call the single path uses");
+        Check(!upload.Split("public async Task<SeasonPackCoordinator.Candidate?> FillAsync")[1]
+                  .Split("private ")[0].Contains("ExtractSingleStreamAsync"),
+            "the per-stream call is gone from the filler");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

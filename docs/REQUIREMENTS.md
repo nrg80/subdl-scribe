@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.71
-**Status:** Implementation — v12.1.12.297.
+**Status:** Implementation — v12.1.12.298.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 43 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 44 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403
@@ -832,6 +832,8 @@ The cost is one database page: +4 096 B on the bench store (21 statistic rows), 
 The statistics run as their OWN guarded step. A failure is logged as a warning and does **not** turn a shrunken file into a failed compaction — the file WAS rebuilt at that point, and the failure wording belongs to the rebuild alone.
 
 The rewrite is folded in before the footprint is measured (the journal fold), so the reported "after" describes the settled file instead of a journal holding the rebuilt database. See F-M214.
+
+**F-M405 [P] (Operator-Anordnung 02.11.2026):** **Der Pack-Filler liest eine Datei einmal je Lauf aus, nicht einmal je Sprache.** Für eine Staffel mit 37 Sprachen waren das 37 volle ffmpeg-Durchläufe über denselben Container — bei acht Folgen 296 Zugriffe, wo acht genügen. Der Filler nutzt jetzt denselben Ein-Pass-Aufruf wie der Einzel-Upload seit F-M5 und hält das Ergebnis je Medienpfad für die Dauer des Laufs. Asserted by `scripts/tests/packretry`.
 
 **F-M404 [P] (Operator-Anordnung 02.11.2026):** **Der Database Refresh räumt auch die Pack-Seite auf: eine `packs`-Zeile, deren `PackId` auf keiner Untertitelzeile mehr steht, wird entfernt und in der Refresh-Summe mitgezählt.** Eine solche Zeile hätte keinen Träger mehr — die Medien wurden neu gehasht, die Dateien weggeräumt oder der Pack ersetzt —, behauptete aber weiter „diese Staffel ist gepackt" und legte sie damit für immer still. Asserted by `scripts/tests/packretry` Abschnitt 12 (T168); die Upload-Seite beschreibt dieselbe Regel in F-M396, die Pack-Politik in §3.3.
 
