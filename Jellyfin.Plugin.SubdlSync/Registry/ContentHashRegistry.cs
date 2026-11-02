@@ -1246,6 +1246,54 @@ public sealed class ContentHashRegistry : IDisposable
     }
 
     /// <summary>
+    /// F-M396: removes pack rows nothing carries any more.
+    /// <para>
+    /// A pack row whose <c>PackId</c> is no longer written on any subtitle row is a pack without
+    /// members: the media rows were re-hashed, the files were pruned, or the pack was replaced. Left
+    /// alone such a row claims a season is packed forever and quietly disables it — the fill-only plan
+    /// reads it as "already inside a pack" and never looks again. Pruning is therefore not tidying, it
+    /// is what keeps the row honest.
+    /// </para>
+    /// </summary>
+    /// <returns>Number of removed rows.</returns>
+    public int PruneOrphanedPacks()
+    {
+        var packs = _db.Packs.FindAll().ToList();
+        if (packs.Count == 0)
+        {
+            return 0;
+        }
+
+        var carried = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var embed in _db.Embeds.FindAll())
+        {
+            if (!string.IsNullOrEmpty(embed.SubdlId))
+            {
+                carried.Add(embed.SubdlId!);
+            }
+        }
+
+        int removed = 0;
+        foreach (var pack in packs)
+        {
+            if (string.IsNullOrEmpty(pack.PackId) || carried.Contains(pack.PackId!))
+            {
+                continue;
+            }
+
+            _db.Packs.DeleteMany(p => p.Id == pack.Id);
+            removed++;
+        }
+
+        if (removed > 0)
+        {
+            MarkAndFlush(() => { });
+        }
+
+        return removed;
+    }
+
+    /// <summary>
     /// F-M390: the pack recorded for this season, language and variant, or null when there is none.
     /// A null means "never packed by us" — it never means "not packed at all", because packs built by
     /// other uploaders leave no row here.

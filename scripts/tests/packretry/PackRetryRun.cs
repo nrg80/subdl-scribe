@@ -253,6 +253,19 @@ internal static class Program
         Check(proofAt > fillStart && candidateAt > proofAt,
             "the proof is demanded BEFORE a candidate is built");
 
+        // ── 12. F-M396: kein zweiter Pack mit denselben Mitgliedern; tote Pack-Zeilen fallen raus ──
+        Console.WriteLine("12. Pack rows stay honest");
+        Check(coord.Contains("season pack already up with these members", StringComparison.Ordinal),
+            "the buffer path refuses a pack that is already up with the same members");
+        Check(coord.IndexOf("_registry.GetPack(key.ImdbId, key.Season, key.Lang, key.Hi)", StringComparison.Ordinal)
+              < coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
+            "and it decides that BEFORE anything is deleted");
+        var refresh = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlDatabaseRefreshTask.cs"));
+        Check(refresh.Contains("registry.PruneOrphanedPacks()", StringComparison.Ordinal),
+            "the database refresh prunes orphaned pack rows");
+        Check(reg.Contains("public int PruneOrphanedPacks()", StringComparison.Ordinal),
+            "the registry owns that prune");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

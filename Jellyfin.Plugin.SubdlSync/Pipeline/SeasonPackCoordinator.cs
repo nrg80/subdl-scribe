@@ -400,6 +400,28 @@ public sealed class SeasonPackCoordinator
             return;
         }
 
+        // F-M396: a pack that is already up with exactly these members is not sent again. The fill-only
+        // plan has its own guard, but the buffer path had none — so a season whose row says "packed"
+        // could still go up a second time just because something was queued for it. Same members and
+        // same release means there is nothing new in the container; a NEW episode changes the set and
+        // the pack is legitimately sent.
+        var recorded = _registry.GetPack(key.ImdbId, key.Season, key.Lang, key.Hi);
+        if (recorded != null)
+        {
+            string want = string.Join(",", ordered.Select(c => c.Episode).OrderBy(e => e));
+            bool sameMembers = string.Equals(recorded.Episodes, want, StringComparison.Ordinal);
+            bool sameRelease = string.IsNullOrEmpty(recorded.ReleaseName)
+                || string.Equals(recorded.ReleaseName, first.ReleaseName, StringComparison.Ordinal);
+            if (sameMembers && sameRelease)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack already up with these members — {Imdb} S{Season} [{Lang}]: {Members}, nothing is re-sent.",
+                    key.ImdbId, key.Season, key.Lang, want);
+                return;
+            }
+        }
+
         // F-M391 (operator order 02.11.2026): the single uploads this pack absorbs are deleted FIRST.
         // A pack that competes with entries carrying the same content is the case we do not want to
         // find out about on SubDL's side; deleting first makes the pack the only carrier.

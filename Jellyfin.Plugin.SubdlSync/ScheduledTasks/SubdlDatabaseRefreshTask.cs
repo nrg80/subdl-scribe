@@ -168,7 +168,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
 
             progress.Report(20);
 
-            int removedSearch = 0, removedQa = 0, removedOshash = 0;
+            int removedSearch = 0, removedQa = 0, removedOshash = 0, removedPacks = 0;
             int forgottenSidecars = 0, openFiles = 0, forgottenEmbeds = 0, backfilledForced = 0;
             int removedPrunedSubtitles = 0, removedPrunedMedia = 0;
             int removedGonePathSubtitles = 0, removedGonePathMedia = 0;
@@ -233,6 +233,11 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 // ---- Phase 3: oshash cache paths ----
                 var oshash = new Registry.OshashCache(db);
                 removedOshash = oshash.PruneStalePaths(collectRoots(oshash));
+
+                // F-M396: pack rows nobody carries any more. A pack whose id is gone from every subtitle
+                // row (re-hashed media, pruned files, replaced pack) would otherwise keep claiming "this
+                // season is packed" and silently disable that season forever.
+                removedPacks = registry.PruneOrphanedPacks();
 
                 progress.Report(65);
 
@@ -345,7 +350,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                 _logger.LogError(ex, "[SubDL-Refresh] Refresh aborted mid-run — already-flushed parts stay, remainder untouched.");
             }
 
-            int removedTotal = removedSearch + removedQa + removedOshash
+            int removedTotal = removedSearch + removedQa + removedOshash + removedPacks
                                + removedPrunedSubtitles + removedPrunedMedia
                                + removedGonePathSubtitles + removedGonePathMedia;
             int changedTotal = removedTotal + forgottenSidecars + openFiles + forgottenEmbeds + backfilledForced;
