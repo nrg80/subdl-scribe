@@ -311,6 +311,13 @@ internal static class Program
         Check(File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Registry/OshashCache.cs")).Contains("LoggedHits"),
             "F-M411: a cache hit is logged once per file");
 
+        // ── 18. F-M412: der State sagt, ob löschbar ────────────────────────────
+        Console.WriteLine("18. The store says whether a single can be deleted");
+        var coordPackSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+        Check(coordPackSrc.Contains("carry no SubDL id in the store"), "F-M412: a member without a SubDL id is named");
+        Check(coordPackSrc.IndexOf("undeletable", StringComparison.Ordinal)
+              < coordPackSrc.IndexOf("DeletePublishedSubtitleAsync"), "F-M412: the note comes before the pack is sent");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

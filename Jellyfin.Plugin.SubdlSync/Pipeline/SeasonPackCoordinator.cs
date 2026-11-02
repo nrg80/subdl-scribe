@@ -457,6 +457,22 @@ public sealed class SeasonPackCoordinator
             .Where(x => !string.IsNullOrWhiteSpace(x.AbsorbedSingleId))
             .Select(x => (Episode: x.Episode, Id: x.AbsorbedSingleId!))
             .ToList();
+        // F-M412 (operator order 02.11.2026): "da muss stehen ob wir es hochgeladen haben und ob wir
+        // es loeschen koennen". The state answers both: the row says whether we uploaded the single,
+        // and its SubDL id says whether we can delete it. A member without that id is named here, so
+        // a pack never leaves a duplicate behind silently.
+        var undeletable = ordered
+            .Where(x => string.IsNullOrWhiteSpace(x.AbsorbedSingleId))
+            .Select(x => $"S{key.Season:00}E{x.Episode:00}")
+            .ToList();
+        if (undeletable.Count > 0)
+        {
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] season pack {Imdb} S{Season} [{Lang}]: {Count} member(s) carry no SubDL id in the store ({Episodes}) — uploaded by us, but not deletable, they stay beside the pack.",
+                key.ImdbId, key.Season, key.Lang, undeletable.Count, string.Join(", ", undeletable.Take(6)));
+        }
+
         var deletedIds = new List<string>();
         foreach (var single in absorbed)
         {

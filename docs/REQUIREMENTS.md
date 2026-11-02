@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.71
-**Status:** Implementation — v12.1.12.302.
+**Status:** Implementation — v12.1.12.303.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 49 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 50 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403
@@ -285,6 +285,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M410 [P] (Operator-Anordnung 02.11.2026):** **Der Pack-Filler fragt den Medien-Hash einmal je Folge, nicht zweimal.** Beleg-Hash (F-M395) und Kandidaten-Hash waren zwei Aufrufe derselben Abfrage; jede schrieb ihre eigene oshash-Zeile. Asserted by `scripts/tests/packretry`.
 
 **F-M411 [P] (Operator-Anordnung 02.11.2026):** **Ein Cache-Treffer wird einmal je Datei protokolliert, nicht einmal je Spur.** Gemessen: 1341 Trefferzeilen in einem Zyklus, für eine einzelne Folge 215 Mal dieselbe Zeile — der Lauf sah aus, als würde er nur nachschlagen. Asserted by `scripts/tests/packretry`.
+
+**F-M412 [P] (Operator-Anordnung 02.11.2026):** **Der State beantwortet zwei Fragen je Einzelfolge: ob wir sie hochgeladen haben, und ob wir sie löschen können.** Die erste steht im Status der Embed-Zeile (`uploaded`), die zweite in ihrer SubDL-Id — ohne Id gibt es nichts zu löschen. Der Pack nennt deshalb vor dem Absenden jede Mitgliedsfolge ohne Id: `… carries no SubDL id in the store — uploaded by us, but not deletable, they stay beside the pack.` Asserted by `scripts/tests/packretry`.
 
 ## 4. Download Pipeline
 
