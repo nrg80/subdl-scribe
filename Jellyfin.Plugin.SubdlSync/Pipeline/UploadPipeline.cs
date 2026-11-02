@@ -2775,7 +2775,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: not every aired episode carries this language in the store, no pack, they go up as singles.",
+                        "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: not every aired episode carries this language in the store — no pack for it, the single uploads of this run are unaffected.",
                         entry.Key.Item1, entry.Key.Item2, language);
                 }
             }

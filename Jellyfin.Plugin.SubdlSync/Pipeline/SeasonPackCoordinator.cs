@@ -328,7 +328,7 @@ public sealed class SeasonPackCoordinator
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Aired} episode(s) carry this language in the store, no pack, they go up as singles.",
+                    "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Aired} episode(s) carry this language in the store — no pack for it, this pass sends nothing.",
                     imdbId, season, lang, withLanguage.Count, aired.Count);
                 return;
             }

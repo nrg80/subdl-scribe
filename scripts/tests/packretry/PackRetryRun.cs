@@ -343,7 +343,7 @@ internal static class Program
         // ── 22. F-M416: Vollständigkeit je Sprache aus dem State ────────────────
         Console.WriteLine("22. Completeness is decided per language from the store");
         Check(coordPackSrc.Contains("EpisodesWithLanguage(", StringComparison.Ordinal)
-              && coordPackSrc.Contains("no pack, they go up as singles", StringComparison.Ordinal),
+              && coordPackSrc.Contains("no pack for it, this pass sends nothing", StringComparison.Ordinal),
             "F-M416: a language that is not complete on every aired episode forms no pack");
 
         // ── 23. F-M417: Store vor Dateinamen vor Extraktion ─────────────────────
