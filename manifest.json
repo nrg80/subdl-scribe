@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.310",
-        "changelog": "v12.1.12.310: the log line for a language that is not complete on every episode no longer promises single uploads — it says that no pack is built for it and this pass sends nothing.",
+        "version": "12.1.12.311",
+        "changelog": "v12.1.12.311: every single upload names its SubDL id in the log — from the answer or fetched from mySubtitles — and an upload without one warns instead of staying silent.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.310-dev/Jellyfin.Plugin.SubdlSync_12.1.12.310.zip",
-        "checksum": "88869fde359d4c1ee59ec69daa17667e",
-        "timestamp": "2026-11-02T14:49:22Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.311-dev/Jellyfin.Plugin.SubdlSync_12.1.12.311.zip",
+        "checksum": "bbacada707260b8b14fc74608f732473",
+        "timestamp": "2026-11-02T15:15:01Z"
       }
     ]
   }
