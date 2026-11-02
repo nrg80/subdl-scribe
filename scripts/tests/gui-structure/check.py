@@ -193,7 +193,7 @@ def main():
                    "subdlLoadWorkers]"):
         check("refresh covers %s" % loader.rstrip("]"), loader in html)
     # quota covers BOTH the API/search allowance and the download allowance
-    check("quota loader renders the search bar", "renderBar('Search'" in html)
+    check("quota loader renders the API calls bar", "renderBar('API calls'" in html)
     check("quota loader renders the downloads bar", "renderBar('Downloads'" in html)
     # status covers the lights AND the library read/write rows
     check("status loader renders the library read/write rows",

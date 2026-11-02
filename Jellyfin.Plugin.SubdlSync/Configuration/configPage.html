@@ -1391,7 +1391,7 @@ workers.forEach(function (w) {
                         }
                         var lines = [];
                         lines.push('<div style="font-weight:600;">Plan: ' + (res.plan || 'Free') + '</div>');
-                        lines.push(renderBar('Search', res.search.used, res.search.limit, resetLocal(res.search.reset_at)));
+                        lines.push(renderBar('API calls', res.search.used, res.search.limit, resetLocal(res.search.reset_at)));
                         if (res.downloads) {
                             lines.push(renderBar('Downloads', res.downloads.used, res.downloads.limit, resetLocal(res.downloads.reset_at)));
                         }
