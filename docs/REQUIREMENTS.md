@@ -20,6 +20,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 42 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
+ - [3.3 Season Packs — eine Politik für Upload und Download](#33-season-packs-eine-politik-für-upload-und-download) — Querschnitt, zitiert F-M384, F-M387–F-M399, F-M401, F-M402
 - [4. Download Pipeline](#4-download-pipeline) — 53 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 7 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
@@ -250,6 +251,28 @@ It does not run: the login (F-M8), the duplicate pre-check — which a real run 
 The report is one line per stream: `DRY-RUN would upload <neutral name>`, the neutral name being the one a real upload would send (F-M29, F-M30).
 
 A dry run writes no completion mark (F-M88c). It has no retry counter to leave stale any more — that state went with F-M60 (08.10.2026).
+
+### 3.3 Season Packs — eine Politik für Upload und Download
+
+Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er entstehen darf und wie beide Richtungen mit ihm umgehen. Es führt **keine neuen Anforderungen** ein; die normativen Sätze stehen unter den zitierten IDs.
+
+**Was ein Pack ist.** Ein Container für genau **eine Staffel × eine Sprache × eine Variante** (SDH oder Nicht-SDH), gefüllt mit **allen ausgestrahlten Folgen**. 26 Sprachen bedeuten 26 Packs, nicht ein Sammelarchiv. SDH wird nur mit SDH gemischt; Forced-Spuren gehören zur Folge und nie in einen Staffelpack; alle Mitglieder tragen dieselbe Release (F-M389, F-M390).
+
+**Upload — wer packbar ist.** Jede Staffel, die auf Platte vollständig ist. Die Queue bestimmt nur die **Reihenfolge** der Auswahl (frischer Inhalt vor Füllmaterial), nicht die Machbarkeit; eine Staffel mit 7 von 8 queued wird aufgefüllt und gepackt, statt in Einzel-Uploads zu zerfallen (F-M394).
+
+**Upload — woher die Mitglieder kommen dürfen.** Füllmaterial muss von diesem Konto **hochgeladen** worden sein: Beleg ist die `uploaded`-Zeile genau dieser Spur, nicht „Inhalt bekannt" (F-M395). Stammt auch nur eine `.srt` aus SubDL — heruntergeladen oder aus einem geladenen Pack entpackt —, fällt der **ganze** Pack aus (F-M397). Damit schließt sich der Kreis zur Download-Seite: was SubDL herausgegeben hat, geht nicht als neuer Pack zurück.
+
+**Upload — Gates und Rückfall.** Es gelten dieselben Gates wie beim Einzel-Upload (Struktur, Laufzeit, bekannte Inhalte, Mindestumfang, Sprachprüfung). Fällt eine Folge durch, bleibt die Staffel für diese Sprache einzeln; die Folge vergiftet den Pack nicht (F-M387, F-M388).
+
+**Upload — Dublettenschutz.** Ein Pack, der mit denselben Mitgliedern und derselben Release schon oben ist, wird nicht erneut gesendet. Nachweis ist **ausschließlich** die `packs`-Zeile; eine `SubdlId` an den Mitgliedern belegt nichts, weil auch ein Einzel-Upload seine eigene Id schreibt (F-M396, F-M399).
+
+**Upload — Aufsaugen und Löschen.** Einzel-Uploads, die in einen späteren Pack aufgehen, werden **vor** dem Pack bei SubDL gelöscht; ihre IDs bleiben in der `packs`-Zeile. Scheitert der Pack danach, steht das mit den IDs im Log (F-M391).
+
+**Upload — Trockenlauf und Transparenz.** Im Trockenlauf wird weder gelöscht noch hochgeladen noch gebucht; die Zeile sagt „DRY-RUN would upload season pack". Die Worker-Zeile trägt den Vermerk **dry** neben dem Ergebniswort, und die Zykluszeilen im Log tragen ihn ebenfalls (F-M401, F-M402).
+
+**Aufräumen.** Pack-Zeilen, deren `PackId` auf keiner Untertitelzeile mehr steht, entfernt der Database Refresh und zählt sie in seiner Summe — sonst legte eine verschwundene Staffel sich selbst für immer still (F-M396).
+
+**Download — Packs als Quelle.** Ein Pack-Kandidat wird einem gleich guten Einzel-Kandidaten vorgezogen: ein Archiv-Body bedient **alle** Folgen des Packs und kostet eine Quota-Einheit; ein bereits im Platten-Cache liegender Pack steht ganz vorn (F-M384). Beim Entpacken gilt das `hearing_impaired`-Flag **der einzelnen Datei**, nicht das des Pack-Headers (F-M384), und jede entpackte Datei wird als `downloaded` gebucht — genau die Herkunft, die sie später als Pack-Material disqualifiziert.
 
 ## 4. Download Pipeline
 
