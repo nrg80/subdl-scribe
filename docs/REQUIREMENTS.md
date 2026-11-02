@@ -275,6 +275,7 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 
 **Aufräumen.** Pack-Zeilen, deren `PackId` auf keiner Untertitelzeile mehr steht, entfernt der Database Refresh und zählt sie in seiner Summe — sonst legte eine verschwundene Staffel sich selbst für immer still (F-M396).
 
+**F-M405 [P] (Operator-Anordnung 02.11.2026):** **Der Pack-Filler liest eine Datei einmal je Lauf aus, nicht einmal je Sprache.** Für eine Staffel mit 37 Sprachen waren das 37 volle ffmpeg-Durchläufe über denselben Container — bei acht Folgen 296 Zugriffe, wo acht genügen. Der Filler nutzt jetzt denselben Ein-Pass-Aufruf wie der Einzel-Upload seit F-M5 und hält das Ergebnis je Medienpfad für die Dauer des Laufs. Asserted by `scripts/tests/packretry`.
 ## 4. Download Pipeline
 
 **F-M151a [B3] (superseded by F-M283, 02.10.2026):** **Download-side short-circuit — replaced by the derived open-pair question.**
@@ -832,8 +833,6 @@ The cost is one database page: +4 096 B on the bench store (21 statistic rows), 
 The statistics run as their OWN guarded step. A failure is logged as a warning and does **not** turn a shrunken file into a failed compaction — the file WAS rebuilt at that point, and the failure wording belongs to the rebuild alone.
 
 The rewrite is folded in before the footprint is measured (the journal fold), so the reported "after" describes the settled file instead of a journal holding the rebuilt database. See F-M214.
-
-**F-M405 [P] (Operator-Anordnung 02.11.2026):** **Der Pack-Filler liest eine Datei einmal je Lauf aus, nicht einmal je Sprache.** Für eine Staffel mit 37 Sprachen waren das 37 volle ffmpeg-Durchläufe über denselben Container — bei acht Folgen 296 Zugriffe, wo acht genügen. Der Filler nutzt jetzt denselben Ein-Pass-Aufruf wie der Einzel-Upload seit F-M5 und hält das Ergebnis je Medienpfad für die Dauer des Laufs. Asserted by `scripts/tests/packretry`.
 
 **F-M404 [P] (Operator-Anordnung 02.11.2026):** **Der Database Refresh räumt auch die Pack-Seite auf: eine `packs`-Zeile, deren `PackId` auf keiner Untertitelzeile mehr steht, wird entfernt und in der Refresh-Summe mitgezählt.** Eine solche Zeile hätte keinen Träger mehr — die Medien wurden neu gehasht, die Dateien weggeräumt oder der Pack ersetzt —, behauptete aber weiter „diese Staffel ist gepackt" und legte sie damit für immer still. Asserted by `scripts/tests/packretry` Abschnitt 12 (T168); die Upload-Seite beschreibt dieselbe Regel in F-M396, die Pack-Politik in §3.3.
 
