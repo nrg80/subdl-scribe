@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.281",
-        "changelog": "v12.1.12.281: Quality-gate switches say what they do: upload corrects the language, download rejects the candidate, and uploads that never left are no longer called discarded.",
+        "version": "12.1.12.282",
+        "changelog": "v12.1.12.282: One archive fetch serves the season; a refused file gets the next one from the same archive, an unreadable cue is dropped before the hash is taken, and kept originals are numbered from 51.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.281-dev/Jellyfin.Plugin.SubdlSync_12.1.12.281.zip",
-        "checksum": "500b95e0d41f69b12728cb7e11c5f1ed",
-        "timestamp": "2026-11-01T23:46:46Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.282-dev/Jellyfin.Plugin.SubdlSync_12.1.12.282.zip",
+        "checksum": "5b30666d4f5d04e121f1780e2aa26098",
+        "timestamp": "2026-11-02T06:36:59Z"
       }
     ]
   }
