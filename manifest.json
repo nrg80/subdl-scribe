@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.292",
-        "changelog": "v12.1.12.292: Only a packs row proves a pack now — a single upload's own id no longer passes for \"already inside a pack\", which had quietly excluded 98 seasons that were never packed.",
+        "version": "12.1.12.293",
+        "changelog": "v12.1.12.293: The language line in the log states the finding — tagged X, detected Y, uploaded under Y — instead of calling the tag a liar.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.292-dev/Jellyfin.Plugin.SubdlSync_12.1.12.292.zip",
-        "checksum": "5011eb06f2a4ffd8dd2ea98d31f59e9b",
-        "timestamp": "2026-11-02T10:16:54Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.293-dev/Jellyfin.Plugin.SubdlSync_12.1.12.293.zip",
+        "checksum": "28c00e7784499b174814bdf4a60b8815",
+        "timestamp": "2026-11-02T10:42:28Z"
       }
     ]
   }
