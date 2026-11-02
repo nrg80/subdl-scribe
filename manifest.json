@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.309",
-        "changelog": "v12.1.12.309: arrival runs upload single only; a refetch or manual run uploads every position single first and then closes the season with the pack, which deletes the singles it absorbs.",
+        "version": "12.1.12.310",
+        "changelog": "v12.1.12.310: the log line for a language that is not complete on every episode no longer promises single uploads — it says that no pack is built for it and this pass sends nothing.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.309-dev/Jellyfin.Plugin.SubdlSync_12.1.12.309.zip",
-        "checksum": "e96f3283821430ae7f348ff57cf53bad",
-        "timestamp": "2026-11-02T14:39:26Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.310-dev/Jellyfin.Plugin.SubdlSync_12.1.12.310.zip",
+        "checksum": "88869fde359d4c1ee59ec69daa17667e",
+        "timestamp": "2026-11-02T14:49:22Z"
       }
     ]
   }
