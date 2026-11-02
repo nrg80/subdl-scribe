@@ -50,6 +50,11 @@ public sealed class SeasonPackCoordinator
     /// <param name="VideoWidth">Video width in pixels — the file's own word on its resolution class.</param>
     /// <param name="VideoHeight">Video height in pixels — kept for cropped encodes that need it as a fallback.</param>
     /// <param name="VideoCodec">Video codec name from the stream.</param>
+    /// <param name="AbsorbedSingleId">
+    /// F-M391: SubDL id of the single upload this member replaces, when the member came from the
+    /// filler. The single is deleted BEFORE the pack goes up — the operator's order — because a pack
+    /// must not compete with an entry that carries the same content.
+    /// </param>
     public sealed record Candidate(
         BaseItem Item,
         string ItemId,
@@ -68,7 +73,8 @@ public sealed class SeasonPackCoordinator
         string Framerate,
         int? VideoWidth = null,
         int? VideoHeight = null,
-        string? VideoCodec = null);
+        string? VideoCodec = null,
+        string? AbsorbedSingleId = null);
 
     private readonly SubdlApiClient _api;
     private readonly ContentHashRegistry _registry;
@@ -394,6 +400,36 @@ public sealed class SeasonPackCoordinator
             return;
         }
 
+        // F-M391 (operator order 02.11.2026): the single uploads this pack absorbs are deleted FIRST.
+        // A pack that competes with entries carrying the same content is the case we do not want to
+        // find out about on SubDL's side; deleting first makes the pack the only carrier.
+        var absorbed = ordered
+            .Where(x => !string.IsNullOrWhiteSpace(x.AbsorbedSingleId))
+            .Select(x => (Episode: x.Episode, Id: x.AbsorbedSingleId!))
+            .ToList();
+        var deletedIds = new List<string>();
+        foreach (var single in absorbed)
+        {
+            bool gone = await _api.DeletePublishedSubtitleAsync(single.Id, ct).ConfigureAwait(false);
+            if (gone)
+            {
+                deletedIds.Add(single.Id);
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack absorbs the single upload of {Imdb} S{Season}E{Episode} [{Lang}] — id {Id} deleted before the pack.",
+                    key.ImdbId, key.Season, single.Episode, key.Lang, single.Id);
+            }
+            else
+            {
+                // Not fatal: the pack is still the better artefact, and the entry that refused to go
+                // stays visible as a duplicate rather than silently blocking the season.
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack could NOT delete the single upload of {Imdb} S{Season}E{Episode} [{Lang}] — id {Id} stays beside the pack.",
+                    key.ImdbId, key.Season, single.Episode, key.Lang, single.Id);
+            }
+        }
+
         UploadResult result = await _api.UploadSeasonPackAsync(
             files,
             name,
@@ -431,6 +467,15 @@ public sealed class SeasonPackCoordinator
 
             _countFailed(ordered.Count);
             _logger.LogError("[SubDL] SEASON PACK FAILED {Imdb} S{Season} [{Lang}]: {Reason}", key.ImdbId, key.Season, key.Lang, result.Reason);
+            if (deletedIds.Count > 0)
+            {
+                // The singles are gone and the pack did not land. Say it out loud: the next fill-only
+                // pass rebuilds the same pack from the library (the content is still known), and nobody
+                // should have to guess why the episodes vanished from the panel.
+                _logger.LogWarning(
+                    "[SubDL] {Count} single upload(s) of {Imdb} S{Season} [{Lang}] were deleted for a pack that then failed — ids {Ids}. The next run rebuilds the pack from the library.",
+                    deletedIds.Count, key.ImdbId, key.Season, key.Lang, string.Join(",", deletedIds));
+            }
             return;
         }
 
@@ -459,7 +504,8 @@ public sealed class SeasonPackCoordinator
             key.Hi,
             first.ReleaseName,
             packId,
-            ordered.Select(x => x.Episode)));
+            ordered.Select(x => x.Episode),
+            deletedIds.Count > 0 ? deletedIds : null));
 
         _countUploaded($"{key.ImdbId} S{key.Season} [{key.Lang}]", ordered.Count);
         LogUtil.Normal(

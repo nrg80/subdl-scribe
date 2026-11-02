@@ -2754,7 +2754,8 @@ public sealed class UploadPipeline : IPackFiller
     private static SeasonPackCoordinator.Candidate PackCandidate(
         BaseItem item, string mediaHash, string imdbId, string? tmdbId, int season, int episode,
         string lang, bool hearingImpaired, bool forced, int subPos, string srt,
-        string mediaPath, string framerate, int? videoWidth, int? videoHeight, string? videoCodec)
+        string mediaPath, string framerate, int? videoWidth, int? videoHeight, string? videoCodec,
+        string? absorbedSingleId = null)
     => new(
             item,
             item.Id.ToString(),
@@ -2885,9 +2886,15 @@ public sealed class UploadPipeline : IPackFiller
         }
 
         var (width, height, codec) = GetVideoFacts(item);
+        // F-M391: the id of the single upload this member replaces travels with the candidate, so the
+        // coordinator can delete it BEFORE the pack goes up. Empty means "no single to remove" — the
+        // row may be a download, or an upload whose answer carried no id.
+        string? absorbed = Registry.GetEmbeds(mediaHash)
+            .FirstOrDefault(r => r.SubPos == subPos && r.Status == SubtitleStatus.Uploaded)?.SubdlId;
         return PackCandidate(
             item, mediaHash, imdbId, TmdbOfEpisode(item), season, episode, lang, hearingImpaired,
-            forced: false, subPos, srt, mediaPath, GetFramerateCode(item), width, height, codec);
+            forced: false, subPos, srt, mediaPath, GetFramerateCode(item), width, height, codec,
+            absorbedSingleId: absorbed);
     }
 
     /// <summary>

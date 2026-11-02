@@ -664,6 +664,51 @@ public sealed class SubdlApiClient
     /// <see cref="Pipeline.SourceQuality"/> for the value list and the recognition rule.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// F-M391 (operator order 02.11.2026): deletes ONE published subtitle of our own account by its
+    /// SubDL id — the step that makes room for the pack a single is about to be absorbed into.
+    /// <para>
+    /// The order is deliberate and comes from the operator: the duplicate goes FIRST, then the pack is
+    /// built from what is left, so the pack upload never competes with an entry that carries the same
+    /// content. <c>deleteSubtitle</c> is NOT the route for this — measured 02.11.2026, it answers
+    /// <c>{"status": true, "subtitle deleted"}</c> for a published entry and deletes nothing.
+    /// </para>
+    /// </summary>
+    /// <param name="subtitleId">SubDL id of the entry to delete.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>True when SubDL confirmed the deletion.</returns>
+    public async Task<bool> DeletePublishedSubtitleAsync(string subtitleId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subtitleId))
+        {
+            return false;
+        }
+
+        string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");
+        string url = $"{ApiBase}/user/deletePublishedSubtitle?id={Uri.EscapeDataString(subtitleId)}";
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        TraceCall("GET", $"{ApiBase}/user/deletePublishedSubtitle");
+        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        ApiActivity?.Invoke();
+        Trace("GET", "user/deletePublishedSubtitle", (int)resp.StatusCode);
+        if (!resp.IsSuccessStatusCode)
+        {
+            return false;
+        }
+
+        string body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     public async Task<UploadResult> UploadSubtitleAsync(
         string srtContent,
         string subFileName,

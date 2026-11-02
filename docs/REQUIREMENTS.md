@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 33 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 34 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
 - [4. Download Pipeline](#4-download-pipeline) — 53 requirements
@@ -191,6 +191,8 @@ A marker is consumed as a marker and the language token is read from the positio
 **Episode → show resolution:** `GET /find/{imdbId}?external_source=imdb_id` → `tv_episode_results[0].show_id` IS the series TMDB id; `tv_results[0].id` is the series itself when the id was already show-level. The series IMDb then comes from `/tv/{showId}/external_ids`.
 
 **An episode TMDB id cannot be walked up directly:** `/find/{episodeId}?external_source=tmdb_id` returns EMPTY and `/tv/{episodeId}` is 404. Such a value is first PROVEN against a candidate show (F-M202); only when that proof fails is it dropped, and the caller's type-free title search then resolves the show by name.
+
+**F-M391 [U] (Operator-Anordnung 02.11.2026):** **Ein Einzel-Upload, der in einen Pack aufgeht, wird vorher gelöscht — Dublette zuerst, Pack danach.** Ein Pack, der gegen Einträge mit demselben Inhalt antritt, ist genau der Fall, den man nicht auf SubDL's Seite klären will; die Reihenfolge macht den Pack zum einzigen Träger. Gelöscht wird über `GET /user/deletePublishedSubtitle?id=` mit der ID aus der Registry — `deleteSubtitle` ist dafür die falsche Route: gemessen am 02.11.2026 antwortet sie `{status: true, "subtitle deleted"}` und löscht nichts. Die IDs wandern in die `packs`-Zeile (F-M390); scheitert der Pack danach, nennt das Log die gelöschten IDs als Warnung, und der nächste Lauf baut den Pack aus der Bibliothek neu. Asserted by `scripts/tests/packretry`.
 
 **F-M389 [U] (Operator-Anordnung 02.11.2026):** **A season pack may be completed from subtitles that are already uploaded.** An episode missing from the run's queue because its subtitle went up earlier is filled in from the library instead of dissolving the season into single uploads — and a season whose episodes are ALL up already is a pack of its own, with nothing new in the queue. Every member passes the same gates as a single upload and must be known to the registry as uploaded; a never-uploaded or gate-failed text never enters a pack. One release, one quality, one frame rate still hold, and when one episode cannot be filled, nothing is sent. Asserted by `scripts/tests/seasonpack`.
 

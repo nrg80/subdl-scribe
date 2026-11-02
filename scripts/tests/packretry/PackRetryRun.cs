@@ -223,6 +223,22 @@ internal static class Program
         Check(upload.IndexOf("Registry.HasPack(", StringComparison.Ordinal) < upload.IndexOf("already inside a pack, nothing is re-sent", StringComparison.Ordinal),
             "the check comes before the decision it guards");
 
+        // ── 8. F-M391: the duplicate goes first, the pack second ────────────────
+        Console.WriteLine("8. Delete-first absorption");
+        Check(api.Contains("public async Task<bool> DeletePublishedSubtitleAsync(string subtitleId, CancellationToken ct)", StringComparison.Ordinal),
+            "the client can delete one published entry by id");
+        Check(api.Contains("/user/deletePublishedSubtitle?id=", StringComparison.Ordinal),
+            "over the published route — deleteSubtitle answers true and deletes nothing");
+        Check(coord.Contains("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
+            "the coordinator deletes the absorbed single");
+        Check(coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal)
+              < coord.IndexOf("UploadSeasonPackAsync(", StringComparison.Ordinal),
+            "BEFORE it uploads the pack, not after");
+        Check(coord.Contains("deletedIds.Count > 0 ? deletedIds : null", StringComparison.Ordinal),
+            "the deleted ids are recorded on the pack row");
+        Check(upload.Contains("absorbedSingleId: absorbed", StringComparison.Ordinal),
+            "and the filler hands its single's id to the candidate");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."
