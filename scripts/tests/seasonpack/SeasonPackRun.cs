@@ -398,15 +398,19 @@ internal static class Program
         Check(!SeasonPack.IsComplete(new[] { 1, 2, 3 }, new[] { 1, 3 }),
             "a season that is only partly queued is not the season that aired");
         Check(coordinator.Contains("&& _packable.Contains((imdbId!, season))", StringComparison.Ordinal),
-            "a partly queued season is not buffered — it stays single right away");
+            "buffering still asks the plan, which now holds every complete season");
         Check(pipeline.Contains("var packable = PlanSeasons(completeSeasons, items);", StringComparison.Ordinal),
             "the plan is computed before the loop, from the queue");
-        Check(pipeline.Contains("SeasonPack.IsComplete(entry.Value, have)", StringComparison.Ordinal),
-            "the plan asks the same completeness rule as the season index");
+        // F-M394: the plan no longer asks the QUEUE whether a season may be packed — it takes every
+        // season that is complete on disk and lets the fill close the gap. The old rule left a dead
+        // zone between "all queued" and "nothing queued".
+        Check(pipeline.Contains("packable.Add(entry.Key);", StringComparison.Ordinal)
+              && !pipeline.Contains("if (SeasonPack.IsComplete(entry.Value, have))", StringComparison.Ordinal),
+            "the plan makes every complete season packable, queued or not");
         Check(pipeline.Contains("items = OrderForClosure(items, packable);", StringComparison.Ordinal),
             "the run works the plan's seasons first");
-        Check(pipeline.Contains("the rest is already up, stays single", StringComparison.Ordinal),
-            "a partly queued season says why it stays single");
+        Check(pipeline.Contains("the rest is filled from what is already uploaded", StringComparison.Ordinal),
+            "a partly queued season says that the gap is filled, not that it stays single");
         Check(pipeline.Split("await packCoordinator.AddAsync(").Length - 1 >= 2,
             "the dry run hands its candidates to the same buffer as the real run");
         Check(pipeline.Contains("a dry run shows the PACK it would send", StringComparison.Ordinal),

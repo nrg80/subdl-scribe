@@ -3214,27 +3214,18 @@ public sealed class UploadPipeline : IPackFiller
         {
             queued.TryGetValue(entry.Key, out var numbers);
             var have = numbers ?? new List<int>();
-            if (SeasonPack.IsComplete(entry.Value, have))
-            {
-                packable.Add(entry.Key);
-                LogUtil.Normal(
-                    _logger,
-                    "[SubDL] season pack plan: {Imdb} S{Season} — all {Count} episode(s) queued, they go up as one pack.",
-                    entry.Key.Item1, entry.Key.Item2, entry.Value.Count);
-            }
-            else
-            {
-                if (have.Count > 0)
-                {
-                    LogUtil.Normal(
-                        _logger,
-                        "[SubDL] season pack skipped: {Imdb} S{Season} — {Have} of {Count} episode(s) queued, the rest is already up, stays single.",
-                        entry.Key.Item1, entry.Key.Item2, have.Count, entry.Value.Count);
-                }
 
-                // A season with NOTHING queued is no verdict here: it may still be packed from what is
-                // already uploaded (F-M389), and the fill-only plan is what reports that.
-            }
+            // F-M394 (operator order 02.11.2026): every season that is complete ON DISK is packable, no
+            // matter how much of it this run happens to have queued. The old rule — pack only when ALL
+            // episodes are queued, and fall back to singles otherwise — left a dead zone: a season with
+            // 7 of 8 queued was neither packed nor filled, and the queue drained into single uploads.
+            // What is queued goes into the buffer, what is missing is filled from what is already
+            // uploaded; the coordinator decides in one place whether the pack can go up or not.
+            packable.Add(entry.Key);
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] season pack plan: {Imdb} S{Season} — {Have} of {Count} episode(s) queued, the rest is filled from what is already uploaded.",
+                entry.Key.Item1, entry.Key.Item2, have.Count, entry.Value.Count);
         }
 
         return packable;
