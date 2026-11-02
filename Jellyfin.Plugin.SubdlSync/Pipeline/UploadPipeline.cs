@@ -3117,7 +3117,6 @@ public sealed class UploadPipeline : IPackFiller
             }
 
             var seen = new Dictionary<(string Lang, bool Hi), int>();
-            var packed = new Dictionary<(string Lang, bool Hi), int>();
             foreach (var episode in episodes)
             {
                 string? path = episode.Path;
@@ -3135,7 +3134,6 @@ public sealed class UploadPipeline : IPackFiller
                     continue;
                 }
                 var pairs = new HashSet<(string Lang, bool Hi)>();
-                var inPack = new HashSet<(string Lang, bool Hi)>();
                 foreach (var row in Registry.GetEmbeds(mediaHash))
                 {
                     if (row.Status != SubtitleStatus.Uploaded || row.Forced == true)
@@ -3145,12 +3143,6 @@ public sealed class UploadPipeline : IPackFiller
 
                     var pair = (Lang: row.Language, Hi: row.HearingImpaired ?? false);
                     pairs.Add(pair);
-                    if (!string.IsNullOrWhiteSpace(row.SubdlId))
-                    {
-                        // The pack id we wrote for a member is the only trace a container leaves in the
-                        // state we already keep — a season it covers is not sent a second time.
-                        inPack.Add(pair);
-                    }
                 }
 
                 // Counted per EPISODE, not per row: a file may carry two tracks of the same language,
@@ -3160,19 +3152,16 @@ public sealed class UploadPipeline : IPackFiller
                     seen[pair] = seen.GetValueOrDefault(pair) + 1;
                 }
 
-                foreach (var pair in inPack)
-                {
-                    packed[pair] = packed.GetValueOrDefault(pair) + 1;
-                }
             }
 
             foreach (var pair in seen.Where(p => p.Value == episodes.Count))
             {
-                // F-M390: two proofs now, the row and the pack id on the members. The row is the durable
-                // one — it survives a replaced library file, and it is the only thing that stops the
-                // fill-only pass from rebuilding the identical pack on every single run.
-                if (packed.GetValueOrDefault(pair.Key) == episodes.Count
-                    || Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi))
+                // F-M399 (operator doubt 02.11.2026, confirmed): the packs row is the ONLY proof. The
+                // second proof this used to accept — "every episode carries a SubdlId" — was wrong: a
+                // single upload writes its own id there too, so a season whose episodes all went up
+                // alone looked "already packed" and was never packed at all. 98 seasons were reported
+                // as inside a pack that never existed.
+                if (Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi))
                 {
                     LogUtil.Normal(
                         _logger,

@@ -279,6 +279,15 @@ internal static class Program
                  < coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
             "and it refuses BEFORE anything is deleted");
 
+        // ── 14. F-M399: nur die packs-Zeile belegt einen Pack, keine SubdlId an den Mitgliedern ──
+        Console.WriteLine("14. A single upload's id is not a pack");
+        Check(!upload.Contains("packed.GetValueOrDefault(pair.Key) == episodes.Count", StringComparison.Ordinal),
+            "the plan no longer treats 'has a SubdlId' as 'is inside a pack'");
+        Check(!upload.Contains("inPack.Add(pair)", StringComparison.Ordinal),
+            "and the member-id heuristic is gone with it");
+        Check(upload.Contains("Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi)", StringComparison.Ordinal),
+            "the packs row is the only proof that a season is packed");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."
