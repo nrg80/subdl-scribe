@@ -2135,6 +2135,24 @@ public sealed class UploadPipeline : IPackFiller
                     }
                 }
             }
+            // F-M413 (operator order 02.11.2026): "wir brauchen die id zum upload". The upload answer
+            // of a single subtitle carries no id — it says "subtitle sent for review" — so the row
+            // kept NULL and the pack could never delete the single it absorbed. The id does exist:
+            // /user/mySubtitles lists every own upload with its UploadId. It is fetched right here,
+            // per upload, and written into the same row.
+            if (uploadId == null)
+            {
+                uploadId = await ResolveOwnUploadIdAsync(imdbId, season, episode, lang, loosePath, ct)
+                    .ConfigureAwait(false);
+                if (uploadId != null)
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] upload id {Id} taken from mySubtitles for {File} [{Lang}] — without it the single could never be deleted when a pack replaces it.",
+                        uploadId, Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
+                }
+            }
+
             // Metadata describing the file, and the verdict describing this subtitle, are two
             // different facts and get two rows in two areas.
             Registry.MarkAndFlush(() => Registry.PatchMediaMetadata(mediaHash, imdbId, season, episode, sdId, tmdbId));
@@ -2808,6 +2826,50 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="videoHeight">Video height in pixels, when the stream reports one.</param>
     /// <param name="videoCodec">Video codec name from the stream.</param>
     /// <returns>The candidate as the coordinator expects it.</returns>
+    /// <summary>
+    /// F-M413: the upload id of a single subtitle, read back from <c>/user/mySubtitles</c>.
+    /// SubDL answers an upload with "subtitle sent for review" and no id, but the entry appears in
+    /// the account's own list with its <c>UploadId</c> — the only handle <c>deletePublishedSubtitle</c>
+    /// accepts. Matched by the name we uploaded when it is there, otherwise by IMDb id, season,
+    /// episode and language, newest first.
+    /// </summary>
+    private async Task<int?> ResolveOwnUploadIdAsync(
+        string? imdbId, int season, int episode, string lang, string? filePath, CancellationToken ct)
+    {
+        List<OwnSubtitleEntry>? entries;
+        try
+        {
+            entries = await _api.ListMySubtitlesAsync(ct, maxPages: 2).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[SubDL] could not read mySubtitles for the upload id.");
+            return null;
+        }
+
+        if (entries == null || entries.Count == 0)
+        {
+            return null;
+        }
+
+        string file = Path.GetFileName(filePath ?? string.Empty);
+        var exact = entries.FirstOrDefault(e => !string.IsNullOrEmpty(file)
+            && string.Equals(e.Name, file, StringComparison.OrdinalIgnoreCase));
+        exact ??= entries
+            .Where(e => string.Equals(e.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase)
+                        && e.Season == season && e.Episode == episode
+                        && (string.IsNullOrEmpty(e.Language)
+                            || e.Language.StartsWith(lang, StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(e => e.CreatedAt)
+            .FirstOrDefault();
+
+        return exact?.UploadId;
+    }
+
     private static SeasonPackCoordinator.Candidate PackCandidate(
         BaseItem item, string mediaHash, string imdbId, string? tmdbId, int season, int episode,
         string lang, bool hearingImpaired, bool forced, int subPos, string srt,

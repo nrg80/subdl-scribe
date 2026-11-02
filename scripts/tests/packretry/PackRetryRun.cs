@@ -318,6 +318,13 @@ internal static class Program
         Check(coordPackSrc.IndexOf("undeletable", StringComparison.Ordinal)
               < coordPackSrc.IndexOf("DeletePublishedSubtitleAsync"), "F-M412: the note comes before the pack is sent");
 
+        // ── 19. F-M413: die Id kommt aus mySubtitles ────────────────────────────
+        Console.WriteLine("19. The upload id is taken from mySubtitles");
+        Check(upload.Contains("ResolveOwnUploadIdAsync") && upload.Contains("ListMySubtitlesAsync(ct, maxPages: 2)"),
+            "F-M413: a single upload resolves its id right after the upload");
+        Check(upload.Contains("upload id {Id} taken from mySubtitles"),
+            "F-M413: the resolution is logged");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."
