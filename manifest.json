@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.298",
-        "changelog": "v12.1.12.298: The pack filler reads a file once per run instead of once per language — 37 languages of one season no longer mean 37 full container passes.",
+        "version": "12.1.12.299",
+        "changelog": "v12.1.12.299: The pack loop reports progress, so the watchdog no longer aborts a run that is busy building packs.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.298-dev/Jellyfin.Plugin.SubdlSync_12.1.12.298.zip",
-        "checksum": "3a6ec170d69623d64e063167c9f510ab",
-        "timestamp": "2026-11-02T11:41:48Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.299-dev/Jellyfin.Plugin.SubdlSync_12.1.12.299.zip",
+        "checksum": "9239c0bf24bb9cdb331c79c3eb180b41",
+        "timestamp": "2026-11-02T12:01:01Z"
       }
     ]
   }
