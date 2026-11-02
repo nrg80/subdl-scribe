@@ -332,6 +332,19 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool UploadSeasonPacks { get; set; } = true;
 
+    /// <summary>
+    /// F-M392: how many season packs one run may upload — 0 means no limit.
+    /// <para>
+    /// The fill-only pass walks the whole library: every season whose episodes are all uploaded in
+    /// one language becomes a pack, and each of those deletes the single uploads it absorbs. A
+    /// library that was uploaded episode by episode over years is therefore a wave of hundreds of
+    /// packs in a single run. This is the brake: it counts PACKS, not episodes and not languages, and
+    /// it is checked BEFORE anything is deleted, so a stopped run leaves SubDL exactly as it found it.
+    /// Default 0 (no limit) — the brake exists to be set, not to surprise.
+    /// </para>
+    /// </summary>
+    public int MaxPacksPerRun { get; set; }
+
     #endregion
 
     #region Download pipeline ([D], F-M41–M47)

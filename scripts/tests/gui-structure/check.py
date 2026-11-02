@@ -1609,6 +1609,13 @@ def main():
           "one pack instead of one upload per episode. Default: on. An episode that already went up on its own"
           in html)
 
+    # F-M392: the brake for a library-wide pack wave, and it lives under the pack toggle.
+    check("F-M392: the pack budget field exists", 'id="MaxPacksPerRun"' in html)
+    check("F-M392: the field is loaded from the config", "config.MaxPacksPerRun || 0" in html)
+    check("F-M392: and written back on save", "config.MaxPacksPerRun = Math.max(0" in html)
+    check("F-M392: its description says the limit is checked before anything is deleted",
+          "the limit is checked before anything is deleted" in html)
+
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)

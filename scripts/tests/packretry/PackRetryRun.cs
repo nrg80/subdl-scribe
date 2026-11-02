@@ -239,6 +239,15 @@ internal static class Program
         Check(upload.Contains("absorbedSingleId: absorbed", StringComparison.Ordinal),
             "and the filler hands its single's id to the candidate");
 
+        // ── 9. F-M392: the brake comes before the deletions ─────────────────────
+        Console.WriteLine("9. Pack budget per run");
+        Check(coord.Contains("_config.MaxPacksPerRun > 0 && _packsThisRun >= _config.MaxPacksPerRun", StringComparison.Ordinal),
+            "the run counts packs against a budget");
+        Check(coord.IndexOf("_config.MaxPacksPerRun > 0", StringComparison.Ordinal)
+              < coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
+            "and the budget is checked BEFORE the first deletion");
+        Check(coord.Contains("_packsThisRun++;", StringComparison.Ordinal), "a landed pack is counted");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

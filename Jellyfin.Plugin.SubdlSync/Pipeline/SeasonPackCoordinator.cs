@@ -88,6 +88,9 @@ public sealed class SeasonPackCoordinator
     private readonly Action<string> _reportDone;
     private readonly IPackFiller? _filler;
 
+    /// <summary>F-M392: packs uploaded by THIS run — the counter behind <see cref="PluginConfiguration.MaxPacksPerRun"/>.</summary>
+    private int _packsThisRun;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="SeasonPackCoordinator"/> class.
     /// </summary>
@@ -400,6 +403,17 @@ public sealed class SeasonPackCoordinator
             return;
         }
 
+        // F-M392: the brake sits BEFORE the deletions. A run that is stopped by the budget must leave
+        // SubDL untouched — a limit that first deletes and then stops would be worse than no limit.
+        if (_config.MaxPacksPerRun > 0 && _packsThisRun >= _config.MaxPacksPerRun)
+        {
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] season pack budget for this run used up ({Done} of {Limit}) — {Imdb} S{Season} [{Lang}] and everything after it waits for the next run.",
+                _packsThisRun, _config.MaxPacksPerRun, key.ImdbId, key.Season, key.Lang);
+            return;
+        }
+
         // F-M391 (operator order 02.11.2026): the single uploads this pack absorbs are deleted FIRST.
         // A pack that competes with entries carrying the same content is the case we do not want to
         // find out about on SubDL's side; deleting first makes the pack the only carrier.
@@ -507,6 +521,7 @@ public sealed class SeasonPackCoordinator
             ordered.Select(x => x.Episode),
             deletedIds.Count > 0 ? deletedIds : null));
 
+        _packsThisRun++;
         _countUploaded($"{key.ImdbId} S{key.Season} [{key.Lang}]", ordered.Count);
         LogUtil.Normal(
             _logger,
