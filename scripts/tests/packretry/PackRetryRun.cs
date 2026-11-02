@@ -367,6 +367,12 @@ internal static class Program
         Check(coordPackSrc.Contains("no pack id for {Imdb} S{Season}", StringComparison.Ordinal),
             "F-M421: a pack without an id names the fallback to its name");
 
+        // ── 25. F-M422: die Ablehnung nennt Sprache, Zählung und fehlende Folgen ─
+        Console.WriteLine("25. A refused season names its evidence");
+        Check(upload.Contains("Closest: {Closest}", StringComparison.Ordinal)
+              && upload.Contains("no uploaded row at all", StringComparison.Ordinal),
+            "F-M422: a refused season names the closest languages and the episodes without a row");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

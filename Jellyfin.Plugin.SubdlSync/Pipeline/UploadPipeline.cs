@@ -3323,6 +3323,12 @@ public sealed class UploadPipeline : IPackFiller
             }
 
             var seen = new Dictionary<(string Lang, bool Hi), int>();
+            // F-M422 (operator doubt 02.11.2026: "es kann eigentlich nicht sein, dass so wenig durch
+            // die Zuverlässigkeitsprüfung läuft"): the refusal below names which pair came closest and
+            // which episodes it lacks. Without that the line was a verdict with no evidence, and the
+            // difference between "one episode missing", "HI flag split" and "hash changed" was invisible.
+            var pairEpisodes = new Dictionary<(string Lang, bool Hi), SortedSet<int>>();
+            var episodesWithAnyRow = new SortedSet<int>();
             foreach (var episode in episodes)
             {
                 string? path = episode.Path;
@@ -3356,6 +3362,19 @@ public sealed class UploadPipeline : IPackFiller
                 foreach (var pair in pairs)
                 {
                     seen[pair] = seen.GetValueOrDefault(pair) + 1;
+
+                    int number = episode.IndexNumber ?? 0;
+                    if (!pairEpisodes.TryGetValue(pair, out var have))
+                    {
+                        have = new SortedSet<int>();
+                        pairEpisodes[pair] = have;
+                    }
+
+                    if (number > 0)
+                    {
+                        have.Add(number);
+                        episodesWithAnyRow.Add(number);
+                    }
                 }
 
             }
@@ -3385,12 +3404,37 @@ public sealed class UploadPipeline : IPackFiller
 
             if (!seen.Any(p => p.Value == episodes.Count))
             {
-                // Named, not silent: a complete season that cannot even be assembled from what is up
-                // stays as it is, and this is why.
+                // F-M422: the verdict now carries its evidence — which language came closest, how far it
+                // got, and which episodes it is missing. A season whose episodes have no row at all is
+                // named separately: that is a hash/orphan problem, not a coverage problem.
+                var closest = seen
+                    .OrderByDescending(p => p.Value)
+                    .ThenBy(p => p.Key.Lang, StringComparer.Ordinal)
+                    .Take(3)
+                    .Select(p =>
+                    {
+                        var have = pairEpisodes.TryGetValue(p.Key, out var set) ? set : new SortedSet<int>();
+                        var missing = episodes
+                            .Select(e => e.IndexNumber ?? 0)
+                            .Where(n => n > 0 && !have.Contains(n))
+                            .OrderBy(n => n)
+                            .ToList();
+                        return $"[{p.Key.Lang}{(p.Key.Hi ? "/SDH" : string.Empty)}] {p.Value}/{episodes.Count}, missing {string.Join(",", missing)}";
+                    })
+                    .ToList();
+
+                var withoutRow = episodes
+                    .Select(e => e.IndexNumber ?? 0)
+                    .Where(n => n > 0 && !episodesWithAnyRow.Contains(n))
+                    .OrderBy(n => n)
+                    .ToList();
+
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack plan: {Imdb} S{Season} — no language is uploaded for every episode, no pack is built.",
-                    entry.Key.Item1, entry.Key.Item2);
+                    "[SubDL] season pack plan: {Imdb} S{Season} — no language is uploaded for every episode, no pack is built. Closest: {Closest}. Episodes with no uploaded row at all: {WithoutRow}.",
+                    entry.Key.Item1, entry.Key.Item2,
+                    closest.Count == 0 ? "none" : string.Join(" | ", closest),
+                    withoutRow.Count == 0 ? "none" : string.Join(",", withoutRow));
             }
         }
 

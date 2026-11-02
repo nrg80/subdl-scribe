@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.74
-**Status:** Implementation — v12.1.12.311.
+**Version:** 2.75
+**Status:** Implementation — v12.1.12.312.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 58 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 59 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -305,6 +305,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M420 [P] (Operator-Anordnung 02.11.2026):** **In Refetch- und manuellem Lauf gilt: erst Einzelupload, dann Staffelpack.** Für einen Container wird nichts mehr zurückgehalten — `packable` bleibt leer, kein Kandidat landet in einem Puffer, `OrderForClosure` fällt weg; jede Position geht sofort einzeln hoch und schreibt dabei ihre SubDL-Id (F-M413). Der Pack-Plan wird deshalb **nach** der Folgeschleife aus dem Store gerechnet (`PlanPacksFromStore`): packbar ist eine Staffel je Sprache, wenn jede ausgestrahlte Folge eine `uploaded`-Zeile trägt und keine `packs`-Zeile existiert (F-M399). Der Container entsteht dann aus denselben Texten und löscht die Einzel-Uploads, deren Ids er kennt, vorher bei SubDL (F-M391). Vorher gerechnet sah der Plan die Uploads desselben Laufs nicht und die Staffel wartete einen ganzen Zyklus auf ihren Container. Konsequenz: eine komplette Staffel kostet je Lauf Einzel-Uploads **und** Container — gewollt. Asserted by `scripts/tests/seasonpack`.
 
 **F-M421 [P] (Operator-Frage 02.11.2026 „wird die upload id im log gelistet?"):** **Die SubDL-Upload-Id jeder Einzelfolge steht im Log — immer, und mit ihrer Herkunft.** Bisher schwieg der Einzelpfad, wenn die Upload-Antwort die Id schon enthielt oder wenn sie gar nicht zu ermitteln war; geschrieben wurde die Zeile nur nach einem Nachholen aus `/user/mySubtitles`. Jetzt gibt es je Upload genau eine Zeile: `upload id {Id} from the upload answer for {File} [{Lang}]` (Id kam in der Antwort), `upload id {Id} taken from mySubtitles for …` (nachgeholt, F-M413) oder — wenn keine zu bekommen ist — eine Warnung `no upload id for {File} [{Lang}] — this single stays beside a pack that replaces it, because there is no handle to delete it.` Der Pack nennt bei fehlender Id `no pack id for {Imdb} S{Season} [{Lang}] — the pack row carries its name`. Grund: die Id ist der einzige Griff, mit dem ein späterer Pack die Einzelfolge löschen kann; eine stille Lücke ist ein unerklärbarer Rest auf SubDL. Asserted by `scripts/tests/packretry`.
+
+**F-M422 [P] (Operator-Zweifel 02.11.2026 „es kann eigentlich nicht sein, dass so wenig durch die Zuverlässigkeitsprüfung läuft"):** **Die Ablehnung einer Staffel nennt ihre Belege.** Bisher sagte die Zeile nur „no language is uploaded for every episode, no pack is built" — ein Urteil ohne Beweis, aus dem nicht hervorging, ob eine Folge fehlt, ob das `HearingImpaired`-Flag die Sprache in zwei Paare spaltet oder ob ein Medien-Hash nicht mehr passt. Jetzt folgt: `Closest: [EN] 9/10, missing 4 | [DE/SDH] 3/10, missing 4,5,6` (bis zu drei nächstbeste Paare mit Zählung und fehlenden Folgen) und `Episodes with no uploaded row at all: 4,7` (Folgen, zu denen es gar keine `uploaded`-Zeile gibt — das ist ein Hash-/Waisenproblem, kein Abdeckungsproblem). Grund: die Prüfung ist der Flaschenhals zwischen 7.958 hochgeladenen Zeilen und den tatsächlich gebauten Packs; ohne diese Zahlen ist jede Erklärung dafür eine Vermutung.
 
 ## 4. Download Pipeline
 
