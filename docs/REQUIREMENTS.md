@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.71
-**Status:** Implementation — v12.1.12.287.
+**Status:** Implementation — v12.1.12.288.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 35 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 36 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
 - [4. Download Pipeline](#4-download-pipeline) — 53 requirements
@@ -193,6 +193,8 @@ A marker is consumed as a marker and the language token is read from the positio
 **An episode TMDB id cannot be walked up directly:** `/find/{episodeId}?external_source=tmdb_id` returns EMPTY and `/tv/{episodeId}` is 404. Such a value is first PROVEN against a candidate show (F-M202); only when that proof fails is it dropped, and the caller's type-free title search then resolves the show by name.
 
 **F-M391 [U] (Operator-Anordnung 02.11.2026):** **Ein Einzel-Upload, der in einen Pack aufgeht, wird vorher gelöscht — Dublette zuerst, Pack danach.** Ein Pack, der gegen Einträge mit demselben Inhalt antritt, ist genau der Fall, den man nicht auf SubDL's Seite klären will; die Reihenfolge macht den Pack zum einzigen Träger. Gelöscht wird über `GET /user/deletePublishedSubtitle?id=` mit der ID aus der Registry — `deleteSubtitle` ist dafür die falsche Route: gemessen am 02.11.2026 antwortet sie `{status: true, "subtitle deleted"}` und löscht nichts. Die IDs wandern in die `packs`-Zeile (F-M390); scheitert der Pack danach, nennt das Log die gelöschten IDs als Warnung, und der nächste Lauf baut den Pack aus der Bibliothek neu. Asserted by `scripts/tests/packretry`.
+
+**F-M395 [U] (Operator-Anordnung 02.11.2026):** **Aus heruntergeladenen Untertiteln entsteht nie ein Pack.** Füllmaterial muss von diesem Konto **hochgeladen** worden sein; der Beleg ist die Zeile genau dieser Spur mit Status `uploaded`, nicht `IsContentKnown` — das zählt einen Download und einen Reject genauso als bekannt. Ein heruntergeladener Untertitel wieder in einen Pack zu stecken hieße, das, was bei SubDL schon liegt, unter eigenem Namen als neuen Container erneut zu veröffentlichen. Verweigert wird mit eigener Logzeile („only known from a download or a rejection"). Asserted by `scripts/tests/packretry`.
 
 **F-M394 [U] (Operator-Anordnung 02.11.2026):** **Jede auf Platte vollständige Staffel ist packbar — unabhängig davon, wie viel davon in diesem Lauf in der Queue steht; was fehlt, wird aus dem aufgefüllt, was schon hochgeladen ist.** Die alte Regel („Pack nur, wenn alle Folgen queued sind, sonst Einzel-Uploads") ließ eine Sackgasse: eine Staffel mit 7 von 8 queued war weder packbar noch wurde sie aufgefüllt, und die Queue lief als Einzel-Uploads ab — 39 Sprachen einer Folge statt eines Packs. Jetzt entscheidet genau eine Stelle, ob der Pack hochgehen kann: der Koordinator prüft seinen Puffer, füllt die Lücken über den Filler und lädt entweder den vollständigen Pack oder fällt auf Einzel-Uploads zurück. Die Queue bestimmt nur noch die **Reihenfolge** der Auswahl (frischer Inhalt vor Füllmaterial), nicht mehr die Machbarkeit. Asserted by `scripts/tests/seasonpack`.
 

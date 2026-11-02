@@ -2862,15 +2862,23 @@ public sealed class UploadPipeline : IPackFiller
             return null;
         }
 
-        // The proof that this is FILLER and not invention: the registry knows this exact content,
-        // which it only does for text an earlier run dealt with. The gates above are what keeps a
-        // merely REJECTED text out — IsContentKnown counts a reject as known just as much.
+        // F-M395 (operator order 02.11.2026): filler must be text this account UPLOADED — a subtitle
+        // that is only known because it was DOWNLOADED must never be packed back up. Packing a
+        // download would put onto SubDL what is already there, under our name, as a new container.
+        // So the proof is the row of THIS track: uploaded, not merely "content known" (which counts a
+        // download and a reject just the same).
         string contentHash = ContentHashRegistry.ComputeHash(srt);
-        if (!Registry.IsContentKnown(contentHash))
+        string? proofMediaHash = MediaHashFor(mediaPath);
+        var uploadedRow = string.IsNullOrWhiteSpace(proofMediaHash)
+            ? null
+            : Registry.GetEmbeds(proofMediaHash).FirstOrDefault(r => r.SubPos == subPos && r.Status == SubtitleStatus.Uploaded);
+        if (uploadedRow == null)
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — this subtitle was never uploaded before, it does not join the pack.",
+                Registry.IsContentKnown(contentHash)
+                    ? "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — this text is only known from a download or a rejection, it does not join the pack."
+                    : "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — this subtitle was never uploaded before, it does not join the pack.",
                 imdbId, season, episode, lang);
             return null;
         }
@@ -2889,8 +2897,7 @@ public sealed class UploadPipeline : IPackFiller
         // F-M391: the id of the single upload this member replaces travels with the candidate, so the
         // coordinator can delete it BEFORE the pack goes up. Empty means "no single to remove" — the
         // row may be a download, or an upload whose answer carried no id.
-        string? absorbed = Registry.GetEmbeds(mediaHash)
-            .FirstOrDefault(r => r.SubPos == subPos && r.Status == SubtitleStatus.Uploaded)?.SubdlId;
+        string? absorbed = uploadedRow.SubdlId;
         return PackCandidate(
             item, mediaHash, imdbId, TmdbOfEpisode(item), season, episode, lang, hearingImpaired,
             forced: false, subPos, srt, mediaPath, GetFramerateCode(item), width, height, codec,

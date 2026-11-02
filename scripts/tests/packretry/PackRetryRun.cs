@@ -239,6 +239,20 @@ internal static class Program
         Check(upload.Contains("absorbedSingleId: absorbed", StringComparison.Ordinal),
             "and the filler hands its single's id to the candidate");
 
+        // ── 11. F-M395: kein Pack aus heruntergeladenen Subs ────────────────────
+        Console.WriteLine("11. Filler must be uploaded, not downloaded");
+        Check(upload.Contains("r.Status == SubtitleStatus.Uploaded", StringComparison.Ordinal),
+            "the filler asks for an UPLOADED row of this very track");
+        Check(upload.Contains("only known from a download or a rejection", StringComparison.Ordinal),
+            "and says so when the only proof is a download");
+        // Innerhalb von FillAsync vergleichen: "PackCandidate(" steht auch an anderen Aufrufstellen
+        // weiter oben in der Datei, ein globaler IndexOf verglich also Äpfel mit Birnen.
+        int fillStart = upload.IndexOf("public async Task<SeasonPackCoordinator.Candidate?> FillAsync(", StringComparison.Ordinal);
+        int proofAt = fillStart < 0 ? -1 : upload.IndexOf("uploadedRow == null", fillStart, StringComparison.Ordinal);
+        int candidateAt = fillStart < 0 ? -1 : upload.IndexOf("return PackCandidate(", fillStart, StringComparison.Ordinal);
+        Check(proofAt > fillStart && candidateAt > proofAt,
+            "the proof is demanded BEFORE a candidate is built");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."
