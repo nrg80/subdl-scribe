@@ -589,6 +589,14 @@ public sealed class SeasonPackCoordinator
         {
             packId = await ResolveOwnPackIdAsync(releases: PackReleases(ordered, key), key, ct).ConfigureAwait(false)
                      ?? name;
+            if (packId == name)
+            {
+                // F-M421: the pack row then carries the NAME instead of an id — say so, because a pack
+                // without an id cannot be deleted or matched against the account's own list later.
+                _logger.LogWarning(
+                    "[SubDL] no pack id for {Imdb} S{Season} [{Lang}] — the pack row carries its name \"{Name}\" instead of an id.",
+                    key.ImdbId, key.Season, key.Lang, name);
+            }
         }
 
         foreach (var candidate in ordered)

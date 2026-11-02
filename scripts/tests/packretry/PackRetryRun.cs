@@ -355,6 +355,18 @@ internal static class Program
         Check(upload.Contains("not every aired episode carries this language in the store", StringComparison.Ordinal),
             "F-M417: an incomplete language ends before any extraction");
 
+        // ── 24. F-M421: die Upload-Id steht immer im Log ────────────────────────
+        Console.WriteLine("24. Every upload names its SubDL id");
+        Check(upload.Contains("upload id {Id} from the upload answer for", StringComparison.Ordinal),
+            "F-M421: an id that came with the answer is named too, not only a fetched one");
+        Check(upload.Contains("upload id {Id} taken from mySubtitles for", StringComparison.Ordinal),
+            "F-M421: an id fetched from mySubtitles keeps its own line");
+        Check(upload.Contains("no upload id for {File}", StringComparison.Ordinal)
+              && upload.Contains("no handle to delete it", StringComparison.Ordinal),
+            "F-M421: an upload without an id warns instead of staying silent");
+        Check(coordPackSrc.Contains("no pack id for {Imdb} S{Season}", StringComparison.Ordinal),
+            "F-M421: a pack without an id names the fallback to its name");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

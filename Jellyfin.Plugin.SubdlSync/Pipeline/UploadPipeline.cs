@@ -2150,7 +2150,17 @@ public sealed class UploadPipeline : IPackFiller
             // kept NULL and the pack could never delete the single it absorbed. The id does exist:
             // /user/mySubtitles lists every own upload with its UploadId. It is fetched right here,
             // per upload, and written into the same row.
-            if (uploadId == null)
+            if (uploadId != null)
+            {
+                // F-M421 (operator question 02.11.2026: "wird die upload id im log gelistet?"): yes,
+                // in every case. The id is the only handle that can delete this single when a pack
+                // replaces it, so it is named on the upload — not only when it had to be fetched.
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] upload id {Id} from the upload answer for {File} [{Lang}].",
+                    uploadId, Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
+            }
+            else
             {
                 uploadId = await ResolveOwnUploadIdAsync(imdbId, season, episode, lang, releaseName, loosePath, ct)
                     .ConfigureAwait(false);
@@ -2160,6 +2170,14 @@ public sealed class UploadPipeline : IPackFiller
                         _logger,
                         "[SubDL] upload id {Id} taken from mySubtitles for {File} [{Lang}] — without it the single could never be deleted when a pack replaces it.",
                         uploadId, Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
+                }
+                else
+                {
+                    // F-M421: silence was the wrong answer here — the row is written with a NULL id,
+                    // and nobody would ever learn why its pack could not delete the single.
+                    _logger.LogWarning(
+                        "[SubDL] no upload id for {File} [{Lang}] — this single stays beside a pack that replaces it, because there is no handle to delete it.",
+                        Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
                 }
             }
 
