@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.70
-**Status:** Implementation — v12.1.12.282.
+**Version:** 2.71
+**Status:** Implementation — v12.1.12.283.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -9,15 +9,15 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 
 **Zählkonvention der Contents-Zähler.** Ein Abschnittszähler ist die **Anzahl der Definitionszeilen
 in seinem Block, Unterüberschriften eingeschlossen, superseded-Einträge eingeschlossen** — ein
-schlichter Zählwert, der keine Aussage darüber trifft, was noch in Kraft ist. Abschnitt 3 nennt 32
-und hält 32 (mit 3.1 = 8 und 3.2 = 2); Abschnitt 9 nennt 25 und hält 25. Ein Abschnittszähler, der
+schlichter Zählwert, der keine Aussage darüber trifft, was noch in Kraft ist. Abschnitt 3 nennt 33
+und hält 33 (mit 3.1 = 8 und 3.2 = 2); Abschnitt 9 nennt 25 und hält 25. Ein Abschnittszähler, der
 seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 ## Contents
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 33 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
 - [4. Download Pipeline](#4-download-pipeline) — 53 requirements
@@ -191,6 +191,8 @@ A marker is consumed as a marker and the language token is read from the positio
 **Episode → show resolution:** `GET /find/{imdbId}?external_source=imdb_id` → `tv_episode_results[0].show_id` IS the series TMDB id; `tv_results[0].id` is the series itself when the id was already show-level. The series IMDb then comes from `/tv/{showId}/external_ids`.
 
 **An episode TMDB id cannot be walked up directly:** `/find/{episodeId}?external_source=tmdb_id` returns EMPTY and `/tv/{episodeId}` is 404. Such a value is first PROVEN against a candidate show (F-M202); only when that proof fails is it dropped, and the caller's type-free title search then resolves the show by name.
+
+**F-M389 [U] (Operator-Anordnung 02.11.2026):** **A season pack may be completed from subtitles that are already uploaded.** An episode missing from the run's queue because its subtitle went up earlier is filled in from the library instead of dissolving the season into single uploads — and a season whose episodes are ALL up already is a pack of its own, with nothing new in the queue. Every member passes the same gates as a single upload and must be known to the registry as uploaded; a never-uploaded or gate-failed text never enters a pack. One release, one quality, one frame rate still hold, and when one episode cannot be filled, nothing is sent. Asserted by `scripts/tests/seasonpack`.
 
 ### 3.1 Quality Gates — Upload
 
