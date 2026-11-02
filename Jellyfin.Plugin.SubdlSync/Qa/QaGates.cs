@@ -171,7 +171,7 @@ public static class QaGates
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// F-M375: the language a subtitle must be uploaded under when its stream tag lies.
+    /// F-M375: the language a subtitle must be uploaded under when the stream tag does not match the text.
     /// Returns the detected language when the content clearly speaks another language than
     /// the tag claims, and null when the tag holds (or when there is no confident verdict —
     /// the gate stays fail-open, as it always did).

@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.292"
+version: "12.1.12.293"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.293: The language line in the log states the finding — tagged X, detected Y, uploaded under Y — instead of calling the tag a liar.
   v12.1.12.292: Only a packs row proves a pack now — a single upload's own id no longer passes for "already inside a pack", which had quietly excluded 98 seasons that were never packed.
   v12.1.12.291: The workers line marks a dry worker with the single word "dry", right beside the outcome word, so the blue run tag and the marker read as one line.
   v12.1.12.290: A pack is refused outright when any of its members came from SubDL itself — downloaded, or unpacked out of a downloaded pack.

@@ -134,8 +134,15 @@ internal static class LangCorrectRun
             "the candidate the run keeps carries the corrected language");
         Check(pipeline.Contains("lang = correctedLang ?? lang;"),
             "the retry path corrects before it names the upload");
-        Check(pipeline.Contains("[SubDL] CORRECT {File} [{Tag}]"),
-            "a correction is logged with the tag that lied");
+        // F-M400 (operator order 02.11.2026): the log line states the finding — tag, detection,
+        // result — and does not call the tag a liar. The neutral wording is asserted, so it cannot
+        // drift back.
+        Check(pipeline.Contains("[SubDL] LANGUAGE {File} — tagged {Tag}, detected {Lang}"),
+            "the line names tag and detection side by side");
+        Check(!pipeline.Contains("the tag lies"),
+            "and it does not accuse the tag");
+        Check(pipeline.Contains("uploaded under {Lang}"),
+            "the line ends with the language it actually goes up under");
 
         // ── 6. the GUI says so ───────────────────────────────────────────────────
         Console.WriteLine();

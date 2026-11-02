@@ -1281,7 +1281,7 @@ public sealed class UploadPipeline : IPackFiller
                 if (correctedLang != null)
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL] CORRECT {File} [{Tag}] — the tag lies, the text is {Lang}; it goes up as {Lang} (F-M375)",
+                        "[SubDL] LANGUAGE {File} — tagged {Tag}, detected {Lang}; uploaded under {Lang} (F-M375)",
                         Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang, correctedLang, correctedLang);
                     qaSurvivors.Add((cand.IsLoose, cand.Stream, cand.SubPos, cand.LoosePath, correctedLang, cand.Srt, cand.HearingImpaired, cand.Forced));
                     continue;
@@ -1751,7 +1751,7 @@ public sealed class UploadPipeline : IPackFiller
         var stats = Qa.QaGates.ParseSrt(srtContent);
 
         // F-M15 + F-M375 (operator order 01.11.2026): language verification — detected content
-        // language vs. stream tag. A track whose tag lies is not thrown away any more: the
+        // language vs. stream tag. A track whose tag does not match its text is not thrown away any more: the
         // detected language wins and the subtitle goes up under it, which is what the tag
         // should have said in the first place. Only the checkbox decides whether this runs.
         if (_config.QaVerifyLanguage)
