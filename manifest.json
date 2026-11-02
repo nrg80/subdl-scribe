@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.299",
-        "changelog": "v12.1.12.299: The pack loop reports progress, so the watchdog no longer aborts a run that is busy building packs.",
+        "version": "12.1.12.301",
+        "changelog": "v12.1.12.301: A season counts as complete only when one release group supplies all its episodes — a staffel split across two groups stays single.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.299-dev/Jellyfin.Plugin.SubdlSync_12.1.12.299.zip",
-        "checksum": "9239c0bf24bb9cdb331c79c3eb180b41",
-        "timestamp": "2026-11-02T12:01:01Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.301-dev/Jellyfin.Plugin.SubdlSync_12.1.12.301.zip",
+        "checksum": "603f22bcd4a3cb084f55442b83241875",
+        "timestamp": "2026-11-02T12:37:31Z"
       }
     ]
   }
