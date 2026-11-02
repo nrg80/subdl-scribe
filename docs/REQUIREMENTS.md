@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.71
-**Status:** Implementation — v12.1.12.308.
+**Version:** 2.72
+**Status:** Implementation — v12.1.12.309.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,10 +17,10 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 56 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 57 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
- - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403
+ - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
 - [4. Download Pipeline](#4-download-pipeline) — 53 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 7 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
@@ -261,7 +261,9 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 
 **Was ein Pack ist.** Ein Container für genau **eine Staffel × eine Sprache × eine Variante** (SDH oder Nicht-SDH), gefüllt mit **allen ausgestrahlten Folgen**. 26 Sprachen bedeuten 26 Packs, nicht ein Sammelarchiv. SDH wird nur mit SDH gemischt; Forced-Spuren gehören zur Folge und nie in einen Staffelpack; alle Mitglieder tragen dieselbe Release (F-M389, F-M390).
 
-**Wer packbar ist.** Jede Staffel, die auf Platte vollständig ist. Die Queue bestimmt nur die **Reihenfolge** der Auswahl (frischer Inhalt vor Füllmaterial), nicht die Machbarkeit; eine Staffel mit 7 von 8 queued wird aufgefüllt und gepackt, statt in Einzel-Uploads zu zerfallen (F-M394).
+**Wer packbar ist.** Jede Staffel, die auf Platte vollständig ist. Seit F-M420 entscheidet der Einzelpfad über die Reihenfolge im Lauf; die Queue bestimmt nur noch, was überhaupt anfällt. Eine Staffel mit 7 von 8 queued wird aufgefüllt und gepackt, statt in Einzel-Uploads zu zerfallen (F-M394).
+
+**Reihenfolge im Lauf.** Ein **Arrival**-Lauf lädt ausschließlich einzeln hoch und baut keinen Container (F-M418). Ein **Refetch**- oder **manuell** gestarteter Lauf lädt erst jede Position einzeln (mit Id, F-M413) und schließt danach die Staffel mit dem Container ab, der die Einzelnen ablöst (F-M420).
 
 **Woher die Mitglieder kommen dürfen.** Füllmaterial muss von diesem Konto **hochgeladen** worden sein: Beleg ist die `uploaded`-Zeile genau dieser Spur, nicht „Inhalt bekannt" (F-M395). Stammt auch nur eine `.srt` aus SubDL — heruntergeladen oder aus einem geladenen Pack entpackt —, fällt der **ganze** Pack aus (F-M397). Was auf der Download-Seite als `downloaded` gebucht wurde, ist damit dauerhaft kein Pack-Material (§4.4).
 
@@ -269,7 +271,7 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 
 **Dublettenschutz.** Ein Pack, der mit denselben Mitgliedern und derselben Release schon oben ist, wird nicht erneut gesendet. Nachweis ist **ausschließlich** die `packs`-Zeile; eine `SubdlId` an den Mitgliedern belegt nichts, weil auch ein Einzel-Upload seine eigene Id schreibt (F-M396, F-M399).
 
-**Aufsaugen und Löschen.** Einzel-Uploads, die in einen späteren Pack aufgehen, werden **vor** dem Pack bei SubDL gelöscht; ihre IDs bleiben in der `packs`-Zeile. Scheitert der Pack danach, steht das mit den IDs im Log (F-M391).
+**Aufsaugen und Löschen.** Einzel-Uploads, die in einen späteren Pack aufgehen, werden **vor** dem Pack bei SubDL gelöscht; ihre IDs bleiben in der `packs`-Zeile. Scheitert der Pack danach, steht das mit den IDs im Log (F-M391). Gelöscht wird nur, was der State als **eigener** Upload mit Id führt — der Einzelpfad holt die Id nach jedem Upload aus `/user/mySubtitles` und schreibt sie in dieselbe Embed- bzw. Sidecar-Zeile (F-M412, F-M413, F-M414).
 
 **Trockenlauf und Transparenz.** Im Trockenlauf wird weder gelöscht noch hochgeladen noch gebucht; die Zeile sagt `DRY-RUN would upload season pack`. Die Worker-Zeile trägt den Vermerk **dry** neben dem Ergebniswort, die Zykluszeilen im Log ebenfalls `, dry` (F-M401, F-M402, F-M403).
 
@@ -298,7 +300,9 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 
 **F-M417 [P] (Operator-Anordnung 02.11.2026):** **Die Prüfreihenfolge ist: Store, dann Dateinamen, dann Extraktion.** Je Staffel fragt die Planung zuerst `LanguagesInSeason`, dann für jede bekannte Sprache `HasPack` und `EpisodesWithLanguage`; erst wenn mindestens eine Sprache offen und vollständig ist, wird die Release-Gruppe gelesen und die Kandidatenzeile geschrieben. Bleibt nichts übrig, endet die Staffel vor jeder Extraktion („already up as a pack, nothing is extracted" bzw. „not every aired episode carries this language in the store") — vor jeder Extraktion. Damit steht die teuerste Arbeit ganz hinten. Asserted by `scripts/tests/packretry`.
 
-**F-M418 [P] (Operator-Anordnung 02.11.2026):** **Der Fill-only-Weg läuft nur im Refetch-Lauf und beim manuell gestarteten Upload, nie beim Arrival.** Ein Arrival arbeitet seine Zugänge und bleibt bei Einzel-Uploads; ein Staffelpack aus Untertiteln, die schon oben sind, gehört den Vollabdeckungs-Läufen. Technisch: der Cycle-Grund wird bis in die Pipeline durchgereicht (`RunDirectionAsync` → `ExecutePipelineAsync` → `UploadPipeline.FillOnlyPacksAllowed`), wahr für alles außer `event`/`arrival-followup`; beim Arrival wird `PlanFillOnlySeasons` gar nicht erst aufgerufen und eine Zeile protokolliert den Verzicht („fill-only packs skipped — arrival run"). Grund: der Arrival-Lauf hat einen Zugang zum Anlass, nicht die ganze Staffel.
+**F-M418 [P] (Operator-Anordnung 02.11.2026):** **Ein Arrival-Lauf lädt nur einzeln hoch — dort entsteht kein Staffelpack.** Die Frage, welche Staffel vollständig ist, wird im Arrival gar nicht erst gestellt (`CompleteSeasonsAsync` entfällt), jede Position geht über den Einzelpfad; das Log sagt es mit `no season pack this run — an arrival run uploads single only`. Grund: der Arrival-Lauf arbeitet den Zugang, der ihn ausgelöst hat, nicht die Staffel. Technisch reicht der Dispatcher den Cycle-Grund bis in die Pipeline (`RunDirectionAsync` → `ExecutePipelineAsync` → `UploadPipeline.FillOnlyPacksAllowed = !IsArrivalTrigger(reason)`), wahr für alles außer `event` und `arrival-followup`. Asserted by `scripts/tests/seasonpack`.
+
+**F-M420 [P] (Operator-Anordnung 02.11.2026):** **In Refetch- und manuellem Lauf gilt: erst Einzelupload, dann Staffelpack.** Für einen Container wird nichts mehr zurückgehalten — `packable` bleibt leer, kein Kandidat landet in einem Puffer, `OrderForClosure` fällt weg; jede Position geht sofort einzeln hoch und schreibt dabei ihre SubDL-Id (F-M413). Der Pack-Plan wird deshalb **nach** der Folgeschleife aus dem Store gerechnet (`PlanPacksFromStore`): packbar ist eine Staffel je Sprache, wenn jede ausgestrahlte Folge eine `uploaded`-Zeile trägt und keine `packs`-Zeile existiert (F-M399). Der Container entsteht dann aus denselben Texten und löscht die Einzel-Uploads, deren Ids er kennt, vorher bei SubDL (F-M391). Vorher gerechnet sah der Plan die Uploads desselben Laufs nicht und die Staffel wartete einen ganzen Zyklus auf ihren Container. Konsequenz: eine komplette Staffel kostet je Lauf Einzel-Uploads **und** Container — gewollt. Asserted by `scripts/tests/seasonpack`.
 
 ## 4. Download Pipeline
 
@@ -1921,6 +1925,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T172 (02.11.2026):** „run dry" und eine Schreibweise für den Modus (F-M401–F-M403). `scripts/tests/gui-structure` prüft, dass `Start` das Trockenlauf-Flag notiert, beide Worker es beim Start mitgeben, der Marker `dry` neben dem Ergebniswort hängt und weder `dry-run={` noch `DRY RUN,` im Code steht.
 
 **T173 (02.11.2026):** Die `packs`-Tabelle hält, was sie verspricht (F-M390). `scripts/tests/storex` legt die Tabelle an, schreibt und liest Zeilen je Staffel/Sprache/SDH, prüft das Ersetzen beim Upsert, das Überleben eines Reopens und das Aufräumen per Serie.
+
+**T174 (02.11.2026):** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420). `scripts/tests/seasonpack` prüft am Quelltext, dass die `packable`-Menge leer bleibt („nothing is held back for a pack"), dass `items = OrderForClosure(...)` verschwunden ist, dass der Pack-Plan mit `PlanPacksFromStore(completeSeasons)` **nach** der Schleife gerechnet wird, dass die Reihenfolge im Kommentar steht („erst einzelupload, dann staffelpack") und dass der Arrival-Pfad die Zeile `an arrival run uploads single only` setzt. **131 Prüfungen.**
 
 **T163 (01.11.2026):** The season-pack suite asks the arithmetic and the documented upload shape without a network: the aired set drops the E0 entry IMDb reports, completeness is set equality on both sides, the pack hash is order-sensitive and changes with a corrected episode, the name carries no `.zip` because SubDL appends it, and the pack call sends the array of file ids with `is_full_season=true` and the episode range. **84 checks.**
 
