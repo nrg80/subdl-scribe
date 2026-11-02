@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.286",
-        "changelog": "v12.1.12.286: The pack brake and the series allow-list are gone again — a probe knob has no place in the build; the pack path does what the library and the config already say.",
+        "version": "12.1.12.287",
+        "changelog": "v12.1.12.287: One rule for season packs — every complete season is packed, the queue only orders the members and the fill closes the gap; a partly queued season no longer drains into single uploads.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.286-dev/Jellyfin.Plugin.SubdlSync_12.1.12.286.zip",
-        "checksum": "c98a1cd5074dbbe7ba453f8157fc1e36",
-        "timestamp": "2026-11-02T08:55:06Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.287-dev/Jellyfin.Plugin.SubdlSync_12.1.12.287.zip",
+        "checksum": "5b02569e778656a56cfa6d1b461b0311",
+        "timestamp": "2026-11-02T09:21:28Z"
       }
     ]
   }
