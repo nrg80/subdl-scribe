@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.71
-**Status:** Implementation — v12.1.12.285.
+**Status:** Implementation — v12.1.12.286.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 35 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 34 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
 - [4. Download Pipeline](#4-download-pipeline) — 53 requirements
@@ -191,8 +191,6 @@ A marker is consumed as a marker and the language token is read from the positio
 **Episode → show resolution:** `GET /find/{imdbId}?external_source=imdb_id` → `tv_episode_results[0].show_id` IS the series TMDB id; `tv_results[0].id` is the series itself when the id was already show-level. The series IMDb then comes from `/tv/{showId}/external_ids`.
 
 **An episode TMDB id cannot be walked up directly:** `/find/{episodeId}?external_source=tmdb_id` returns EMPTY and `/tv/{episodeId}` is 404. Such a value is first PROVEN against a candidate show (F-M202); only when that proof fails is it dropped, and the caller's type-free title search then resolves the show by name.
-
-**F-M392 [U] (Operator-Anordnung 02.11.2026):** **Ein Lauf baut höchstens `MaxPacksPerRun` Staffelpacks (0 = kein Limit), und die Prüfung steht vor der ersten Löschung.** Der Fill-only-Weg läuft über die ganze Bibliothek: jede Staffel, deren Folgen in einer Sprache vollständig oben sind, wird zum Pack, und jeder Pack löscht die Einzel-Uploads, die er aufsaugt. Eine über Jahre folgenweise hochgeladene Bibliothek ist damit eine Welle aus hunderten Packs in einem Lauf. Die Bremse zählt Packs (nicht Folgen, nicht Sprachen) und greift, bevor irgendetwas gelöscht wird — ein gestoppter Lauf lässt SubDL unverändert. Asserted by `scripts/tests/packretry`.
 
 **F-M391 [U] (Operator-Anordnung 02.11.2026):** **Ein Einzel-Upload, der in einen Pack aufgeht, wird vorher gelöscht — Dublette zuerst, Pack danach.** Ein Pack, der gegen Einträge mit demselben Inhalt antritt, ist genau der Fall, den man nicht auf SubDL's Seite klären will; die Reihenfolge macht den Pack zum einzigen Träger. Gelöscht wird über `GET /user/deletePublishedSubtitle?id=` mit der ID aus der Registry — `deleteSubtitle` ist dafür die falsche Route: gemessen am 02.11.2026 antwortet sie `{status: true, "subtitle deleted"}` und löscht nichts. Die IDs wandern in die `packs`-Zeile (F-M390); scheitert der Pack danach, nennt das Log die gelöschten IDs als Warnung, und der nächste Lauf baut den Pack aus der Bibliothek neu. Asserted by `scripts/tests/packretry`.
 

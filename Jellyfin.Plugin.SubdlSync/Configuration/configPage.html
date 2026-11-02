@@ -415,17 +415,6 @@
                             </label>
                             <div class="fieldDescription">A complete season goes up as one pack instead of one upload per episode. Default: on. An episode that already went up on its own is folded into a later pack, and its single upload is deleted from SubDL first so it is not there twice.</div>
                         </div>
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="MaxPacksPerRun">Season packs per run (0 = no limit)</label>
-                            <input id="MaxPacksPerRun" name="MaxPacksPerRun" type="number" is="emby-input" min="0" max="500" />
-                            <div class="fieldDescription">Brake for a library that was uploaded episode by episode: at most this many packs per run, and the limit is checked before anything is deleted. Default: 0 (no limit).</div>
-                        </div>
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="PackOnlyImdbIds">Season packs only for these IMDb ids (empty = all)</label>
-                            <input id="PackOnlyImdbIds" name="PackOnlyImdbIds" type="text" is="emby-input" />
-                            <div class="fieldDescription">Aims a probe: only the listed series may go up as packs, everything else keeps its single uploads. Comma separated IMDb ids. Default: empty (all series).</div>
-                        </div>
-
                     <h3>Quality gates (before upload)</h3>
                         <div class="fieldDescription">Quality gates for uploads. All on by default.</div>
 
@@ -997,8 +986,6 @@
                         }
                         document.querySelector('#UploadOnArrival').checked = config.UploadOnArrival;
                         document.querySelector('#UploadSeasonPacks').checked = config.UploadSeasonPacks;
-                        document.querySelector('#MaxPacksPerRun').value = config.MaxPacksPerRun || 0;
-                        document.querySelector('#PackOnlyImdbIds').value = config.PackOnlyImdbIds || '';
                         document.querySelector('#UploadEnabled').checked = config.UploadEnabled;
                         document.querySelector('#DryRun').checked = config.DryRun;
                         document.querySelector('#LogMode').value = config.LogMode;
@@ -1621,8 +1608,6 @@ workers.forEach(function (w) {
                         config.FollowUpRoundsUpload = document.querySelector('#FollowUpRoundsUpload').checked;
                         config.UploadOnArrival = document.querySelector('#UploadOnArrival').checked;
                         config.UploadSeasonPacks = document.querySelector('#UploadSeasonPacks').checked;
-                        config.MaxPacksPerRun = Math.max(0, parseInt(document.querySelector('#MaxPacksPerRun').value, 10) || 0);
-                        config.PackOnlyImdbIds = (document.querySelector('#PackOnlyImdbIds').value || '').trim();
                                                 config.UploadEnabled = document.querySelector('#UploadEnabled').checked;
                         config.DryRun = document.querySelector('#DryRun').checked;
                         config.LogMode = document.querySelector('#LogMode').value;

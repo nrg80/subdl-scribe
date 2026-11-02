@@ -239,25 +239,6 @@ internal static class Program
         Check(upload.Contains("absorbedSingleId: absorbed", StringComparison.Ordinal),
             "and the filler hands its single's id to the candidate");
 
-        // ── 9. F-M392: the brake comes before the deletions ─────────────────────
-        Console.WriteLine("9. Pack budget per run");
-        Check(coord.Contains("_config.MaxPacksPerRun > 0 && _packsThisRun >= _config.MaxPacksPerRun", StringComparison.Ordinal),
-            "the run counts packs against a budget");
-        Check(coord.IndexOf("_config.MaxPacksPerRun > 0", StringComparison.Ordinal)
-              < coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
-            "and the budget is checked BEFORE the first deletion");
-        Check(coord.Contains("_packsThisRun++;", StringComparison.Ordinal), "a landed pack is counted");
-
-        // ── 10. F-M393: an allow-list aims the whole pack path ─────────────────
-        Console.WriteLine("10. Pack allow-list");
-        Check(upload.Contains("Where(kv => allowedIds.Contains(kv.Key.ImdbId))", StringComparison.Ordinal),
-            "the allow-list filters the complete seasons");
-        Check(upload.IndexOf("allowedIds.Contains(kv.Key.ImdbId)", StringComparison.Ordinal)
-              < upload.IndexOf("PlanFillOnlySeasons(completeSeasons", StringComparison.Ordinal),
-            "and it filters BEFORE the fill-only plan reads the seasons");
-        Check(upload.Contains("id.StartsWith(\"tt\", StringComparison.OrdinalIgnoreCase)", StringComparison.Ordinal),
-            "only IMDb-shaped tokens are accepted, so a typo narrows instead of widening");
-
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

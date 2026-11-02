@@ -332,29 +332,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool UploadSeasonPacks { get; set; } = true;
 
-    /// <summary>
-    /// F-M392: how many season packs one run may upload — 0 means no limit.
-    /// <para>
-    /// The fill-only pass walks the whole library: every season whose episodes are all uploaded in
-    /// one language becomes a pack, and each of those deletes the single uploads it absorbs. A
-    /// library that was uploaded episode by episode over years is therefore a wave of hundreds of
-    /// packs in a single run. This is the brake: it counts PACKS, not episodes and not languages, and
-    /// it is checked BEFORE anything is deleted, so a stopped run leaves SubDL exactly as it found it.
-    /// Default 0 (no limit) — the brake exists to be set, not to surprise.
-    /// </para>
-    /// </summary>
-    public int MaxPacksPerRun { get; set; }
-
-    /// <summary>
-    /// F-M393: the only series the pack path may touch — empty means all of them.
-    /// <para>
-    /// A probe needs to be aimed: "build the packs for this one season and nothing else". Without an
-    /// allow-list a library-wide wave can only be limited by count, not by subject, and the packs that
-    /// land first are whichever the library happens to enumerate first. Comma, semicolon or space
-    /// separated IMDb ids; entries that are not IMDb ids are ignored. Empty by default.
-    /// </para>
-    /// </summary>
-    public string PackOnlyImdbIds { get; set; } = string.Empty;
 
     #endregion
 

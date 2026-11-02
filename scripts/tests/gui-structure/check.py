@@ -1609,21 +1609,6 @@ def main():
           "one pack instead of one upload per episode. Default: on. An episode that already went up on its own"
           in html)
 
-    # F-M392: the brake for a library-wide pack wave, and it lives under the pack toggle.
-    check("F-M392: the pack budget field exists", 'id="MaxPacksPerRun"' in html)
-    check("F-M392: the field is loaded from the config", "config.MaxPacksPerRun || 0" in html)
-    check("F-M392: and written back on save", "config.MaxPacksPerRun = Math.max(0" in html)
-    check("F-M392: its description says the limit is checked before anything is deleted",
-          "the limit is checked before anything is deleted" in html)
-
-    # F-M393: an allow-list aims a probe — it has to be loadable, savable and described.
-    check("F-M393: the pack allow-list field exists", 'id="PackOnlyImdbIds"' in html)
-    check("F-M393: it is loaded from the config", "config.PackOnlyImdbIds || ''" in html)
-    check("F-M393: and saved trimmed", "config.PackOnlyImdbIds = (document.querySelector('#PackOnlyImdbIds').value || '').trim()" in html)
-    _allow_block = html.split("PackOnlyImdbIds")[1][:700]
-    check("F-M393: the field description carries no concrete series id (a probe id must not live in the build)",
-          re.search(r"tt\d{4,}", _allow_block) is None)
-
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)
