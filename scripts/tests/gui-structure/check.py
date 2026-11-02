@@ -1623,6 +1623,23 @@ def main():
     check(re.search(r"oc\.text \+\s*\n\s*\(w\.DryRun \? '<span class=\"subdl-dryrun\">dry</span>' : ''\)", html) is not None,
           "F-M398: the marker is appended to the outcome text in the same cell, beside the run tag")
 
+    # ---- F-M401 (operator order 02.11.2026): "run dry" — the marker is known when the run starts.
+    root_cs = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))), "Jellyfin.Plugin.SubdlSync")
+    try:
+        reg_src = open(os.path.join(root_cs, "Registry/WorkerRunRegistry.cs"), encoding="utf-8").read()
+        up_src = open(os.path.join(root_cs, "ScheduledTasks/SubdlUploadTask.cs"), encoding="utf-8").read()
+        down_src = open(os.path.join(root_cs, "ScheduledTasks/SubdlDownloadTask.cs"), encoding="utf-8").read()
+    except OSError as exc:
+        check(False, "F-M401: worker sources readable (%s)" % exc)
+        reg_src = up_src = down_src = ""
+    check("bool dryRun = false)" in reg_src and "row.DryRun = dryRun;" in reg_src.split("public void Start(")[1][:1200],
+          "F-M401: Start records the dry flag, so a running dry worker says so")
+    check("dryRun: plugin.Configuration.DryRun" in up_src,
+          "F-M401: the upload worker passes its dry flag when it starts")
+    check("dryRun: plugin.Configuration.DownloadDryRun" in down_src,
+          "F-M401: the download worker passes its dry flag when it starts")
+
     print(">>> GUI-STRUKTUR %s: %d/%d Pruefungen bestanden"
           % ("OK" if not failed else "FEHLER", len(results) - len(failed), len(results)))
     return 1 if failed else 0

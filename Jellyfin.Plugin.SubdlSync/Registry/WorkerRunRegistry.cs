@@ -101,7 +101,18 @@ public sealed class WorkerRunRegistry
     /// <param name="key">Worker task key.</param>
     /// <param name="name">Worker display name.</param>
     /// <param name="detail">Optional start detail.</param>
-    public void Start(string key, string name, string? detail = null)
+    /// <summary>
+    /// F-M401 (operator order 02.11.2026): marks a worker as started — and says right away whether it
+    /// runs dry.
+    /// <para>
+    /// The flag used to be written only on <see cref="Finish(string, string, string, bool)"/>, so a dry
+    /// run carried "run" while it was running and only turned into "dry" once it was over. The line the
+    /// operator reads during a run therefore never said it was a dry run. It is known at the start, so
+    /// it is recorded at the start.
+    /// </para>
+    /// </summary>
+    /// <param name="dryRun">True when this worker was started in dry mode.</param>
+    public void Start(string key, string name, string? detail = null, bool dryRun = false)
     {
         try
         {
@@ -111,7 +122,7 @@ public sealed class WorkerRunRegistry
             row.Ended = null;
             row.Outcome = Outcome.Running;
             row.Detail = detail ?? "running";
-            row.DryRun = false;
+            row.DryRun = dryRun;
             _db.WorkerRuns.Upsert(row);
         }
         catch (Exception ex)
