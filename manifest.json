@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.291",
-        "changelog": "v12.1.12.291: The workers line marks a dry worker with the single word \"dry\", right beside the outcome word, so the blue run tag and the marker read as one line.",
+        "version": "12.1.12.292",
+        "changelog": "v12.1.12.292: Only a packs row proves a pack now — a single upload's own id no longer passes for \"already inside a pack\", which had quietly excluded 98 seasons that were never packed.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.291-dev/Jellyfin.Plugin.SubdlSync_12.1.12.291.zip",
-        "checksum": "e1778f086efa188261d7eebcc21517f0",
-        "timestamp": "2026-11-02T10:02:02Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.292-dev/Jellyfin.Plugin.SubdlSync_12.1.12.292.zip",
+        "checksum": "5011eb06f2a4ffd8dd2ea98d31f59e9b",
+        "timestamp": "2026-11-02T10:16:54Z"
       }
     ]
   }
