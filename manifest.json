@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.301",
-        "changelog": "v12.1.12.301: A season counts as complete only when one release group supplies all its episodes — a staffel split across two groups stays single.",
+        "version": "12.1.12.302",
+        "changelog": "v12.1.12.302: dry carries the same grey as cancel; the filler hashes a file once and the cache logs a hit once per file.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.301-dev/Jellyfin.Plugin.SubdlSync_12.1.12.301.zip",
-        "checksum": "603f22bcd4a3cb084f55442b83241875",
-        "timestamp": "2026-11-02T12:37:31Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.302-dev/Jellyfin.Plugin.SubdlSync_12.1.12.302.zip",
+        "checksum": "dfe157756f0d9cef2d8b1e5a9988a676",
+        "timestamp": "2026-11-02T12:46:46Z"
       }
     ]
   }
