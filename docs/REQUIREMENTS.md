@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.75
-**Status:** Implementation — v12.1.12.312.
+**Version:** 2.76
+**Status:** Implementation — v12.1.12.313.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 59 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 60 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -307,6 +307,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M421 [P] (Operator-Frage 02.11.2026 „wird die upload id im log gelistet?"):** **Die SubDL-Upload-Id jeder Einzelfolge steht im Log — immer, und mit ihrer Herkunft.** Bisher schwieg der Einzelpfad, wenn die Upload-Antwort die Id schon enthielt oder wenn sie gar nicht zu ermitteln war; geschrieben wurde die Zeile nur nach einem Nachholen aus `/user/mySubtitles`. Jetzt gibt es je Upload genau eine Zeile: `upload id {Id} from the upload answer for {File} [{Lang}]` (Id kam in der Antwort), `upload id {Id} taken from mySubtitles for …` (nachgeholt, F-M413) oder — wenn keine zu bekommen ist — eine Warnung `no upload id for {File} [{Lang}] — this single stays beside a pack that replaces it, because there is no handle to delete it.` Der Pack nennt bei fehlender Id `no pack id for {Imdb} S{Season} [{Lang}] — the pack row carries its name`. Grund: die Id ist der einzige Griff, mit dem ein späterer Pack die Einzelfolge löschen kann; eine stille Lücke ist ein unerklärbarer Rest auf SubDL. Asserted by `scripts/tests/packretry`.
 
 **F-M422 [P] (Operator-Zweifel 02.11.2026 „es kann eigentlich nicht sein, dass so wenig durch die Zuverlässigkeitsprüfung läuft"):** **Die Ablehnung einer Staffel nennt ihre Belege.** Bisher sagte die Zeile nur „no language is uploaded for every episode, no pack is built" — ein Urteil ohne Beweis, aus dem nicht hervorging, ob eine Folge fehlt, ob das `HearingImpaired`-Flag die Sprache in zwei Paare spaltet oder ob ein Medien-Hash nicht mehr passt. Jetzt folgt: `Closest: [EN] 9/10, missing 4 | [DE/SDH] 3/10, missing 4,5,6` (bis zu drei nächstbeste Paare mit Zählung und fehlenden Folgen) und `Episodes with no uploaded row at all: 4,7` (Folgen, zu denen es gar keine `uploaded`-Zeile gibt — das ist ein Hash-/Waisenproblem, kein Abdeckungsproblem). Grund: die Prüfung ist der Flaschenhals zwischen 7.958 hochgeladenen Zeilen und den tatsächlich gebauten Packs; ohne diese Zahlen ist jede Erklärung dafür eine Vermutung.
+
+**F-M423 [P] (Operator-Auftrag 02.11.2026 „die vorhandenen SubDL-Einträge einmal in die Liste eintragen"):** **Bereits veröffentlichte Uploads lassen sich in die Registry übernehmen** (`POST /Plugins/SubdlSync/AdoptUploads`). Die Vollständigkeitsprüfung einer Staffel liest ausschließlich `uploaded`-Zeilen dieser Registry — Zeilen, die nur dieses Plugin schreibt. Alles, was ein früherer Seeder unter demselben Konto veröffentlicht hat, ist damit unsichtbar: am 02.11.2026 hatte Person of Interest S1 für **23 von 23** Folgen keine einzige Zeile, obwohl auf SubDL 14 englische Einzel-Einträge lagen, und For All Mankind S1–S5 (je 10 von 10 Folgen) ergab keinen Pack. Der Endpunkt nimmt je Eintrag `{path, subPos, language, subdlId, hearingImpaired}` und schreibt genau die Zeile, die der Uploader geschrieben hätte: `Status = uploaded` mit der Id, die die Einzelfolge später löschbar macht (F-M412). Er lädt nichts hoch, löscht nichts und spricht SubDL nicht an — er trägt nur nach, was dieses Konto ohnehin veröffentlicht hat. Die Antwort zählt `adopted`, `missingFile`, `unreadable`, `missingId`, `badPosition`; die Log-Zeile nennt dieselben Zahlen mit der Dateizahl.
 
 ## 4. Download Pipeline
 

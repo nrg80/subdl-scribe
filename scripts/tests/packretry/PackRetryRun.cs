@@ -373,6 +373,17 @@ internal static class Program
               && upload.Contains("no uploaded row at all", StringComparison.Ordinal),
             "F-M422: a refused season names the closest languages and the episodes without a row");
 
+        // ── 26. F-M423: bereits veröffentlichte Uploads lassen sich in die Registry übernehmen ─
+        Console.WriteLine("26. Published uploads can be adopted into the registry");
+        var adopt = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlAdoptController.cs"));
+        Check(adopt.Contains("AdoptUploads", StringComparison.Ordinal)
+              && adopt.Contains("SubtitleStatus.Uploaded", StringComparison.Ordinal)
+              && adopt.Contains("subdlId: entry.SubdlId", StringComparison.Ordinal),
+            "F-M423: the adoption endpoint writes an uploaded row that carries its SubDL id");
+        Check(adopt.Contains("ComputeMediaHash", StringComparison.Ordinal)
+              && adopt.Contains("File.Exists", StringComparison.Ordinal),
+            "F-M423: adoption resolves the media hash of the file and refuses a path that is gone");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."
