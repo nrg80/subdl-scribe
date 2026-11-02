@@ -20,11 +20,12 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 43 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
- - [3.3 Season Packs — eine Politik für Upload und Download](#33-season-packs-eine-politik-für-upload-und-download) — Querschnitt, zitiert F-M384, F-M387–F-M399, F-M401, F-M402
+ - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403
 - [4. Download Pipeline](#4-download-pipeline) — 53 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 7 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 19 requirements
+ - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 14 requirements
 - [6. Database Refresh](#6-database-refresh) — 8 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -254,27 +255,25 @@ The report is one line per stream: `DRY-RUN would upload <neutral name>`, the ne
 
 A dry run writes no completion mark (F-M88c). It has no retry counter to leave stale any more — that state went with F-M60 (08.10.2026).
 
-### 3.3 Season Packs — eine Politik für Upload und Download
+### 3.3 Season Packs — Upload
 
-Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er entstehen darf und wie beide Richtungen mit ihm umgehen. Es führt **keine neuen Anforderungen** ein; die normativen Sätze stehen unter den zitierten IDs.
+Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entstehen darf und was er nicht enthalten darf. Es führt **keine neuen Anforderungen** ein; die normativen Sätze stehen unter den zitierten IDs.
 
 **Was ein Pack ist.** Ein Container für genau **eine Staffel × eine Sprache × eine Variante** (SDH oder Nicht-SDH), gefüllt mit **allen ausgestrahlten Folgen**. 26 Sprachen bedeuten 26 Packs, nicht ein Sammelarchiv. SDH wird nur mit SDH gemischt; Forced-Spuren gehören zur Folge und nie in einen Staffelpack; alle Mitglieder tragen dieselbe Release (F-M389, F-M390).
 
-**Upload — wer packbar ist.** Jede Staffel, die auf Platte vollständig ist. Die Queue bestimmt nur die **Reihenfolge** der Auswahl (frischer Inhalt vor Füllmaterial), nicht die Machbarkeit; eine Staffel mit 7 von 8 queued wird aufgefüllt und gepackt, statt in Einzel-Uploads zu zerfallen (F-M394).
+**Wer packbar ist.** Jede Staffel, die auf Platte vollständig ist. Die Queue bestimmt nur die **Reihenfolge** der Auswahl (frischer Inhalt vor Füllmaterial), nicht die Machbarkeit; eine Staffel mit 7 von 8 queued wird aufgefüllt und gepackt, statt in Einzel-Uploads zu zerfallen (F-M394).
 
-**Upload — woher die Mitglieder kommen dürfen.** Füllmaterial muss von diesem Konto **hochgeladen** worden sein: Beleg ist die `uploaded`-Zeile genau dieser Spur, nicht „Inhalt bekannt" (F-M395). Stammt auch nur eine `.srt` aus SubDL — heruntergeladen oder aus einem geladenen Pack entpackt —, fällt der **ganze** Pack aus (F-M397). Damit schließt sich der Kreis zur Download-Seite: was SubDL herausgegeben hat, geht nicht als neuer Pack zurück.
+**Woher die Mitglieder kommen dürfen.** Füllmaterial muss von diesem Konto **hochgeladen** worden sein: Beleg ist die `uploaded`-Zeile genau dieser Spur, nicht „Inhalt bekannt" (F-M395). Stammt auch nur eine `.srt` aus SubDL — heruntergeladen oder aus einem geladenen Pack entpackt —, fällt der **ganze** Pack aus (F-M397). Was auf der Download-Seite als `downloaded` gebucht wurde, ist damit dauerhaft kein Pack-Material (§4.4).
 
-**Upload — Gates und Rückfall.** Es gelten dieselben Gates wie beim Einzel-Upload (Struktur, Laufzeit, bekannte Inhalte, Mindestumfang, Sprachprüfung). Fällt eine Folge durch, bleibt die Staffel für diese Sprache einzeln; die Folge vergiftet den Pack nicht (F-M387, F-M388).
+**Gates und Rückfall.** Es gelten dieselben Gates wie beim Einzel-Upload (Struktur, Laufzeit, bekannte Inhalte, Mindestumfang, Sprachprüfung). Fällt eine Folge durch, bleibt die Staffel für diese Sprache einzeln; die Folge vergiftet den Pack nicht (F-M387, F-M388).
 
-**Upload — Dublettenschutz.** Ein Pack, der mit denselben Mitgliedern und derselben Release schon oben ist, wird nicht erneut gesendet. Nachweis ist **ausschließlich** die `packs`-Zeile; eine `SubdlId` an den Mitgliedern belegt nichts, weil auch ein Einzel-Upload seine eigene Id schreibt (F-M396, F-M399).
+**Dublettenschutz.** Ein Pack, der mit denselben Mitgliedern und derselben Release schon oben ist, wird nicht erneut gesendet. Nachweis ist **ausschließlich** die `packs`-Zeile; eine `SubdlId` an den Mitgliedern belegt nichts, weil auch ein Einzel-Upload seine eigene Id schreibt (F-M396, F-M399).
 
-**Upload — Aufsaugen und Löschen.** Einzel-Uploads, die in einen späteren Pack aufgehen, werden **vor** dem Pack bei SubDL gelöscht; ihre IDs bleiben in der `packs`-Zeile. Scheitert der Pack danach, steht das mit den IDs im Log (F-M391).
+**Aufsaugen und Löschen.** Einzel-Uploads, die in einen späteren Pack aufgehen, werden **vor** dem Pack bei SubDL gelöscht; ihre IDs bleiben in der `packs`-Zeile. Scheitert der Pack danach, steht das mit den IDs im Log (F-M391).
 
-**Upload — Trockenlauf und Transparenz.** Im Trockenlauf wird weder gelöscht noch hochgeladen noch gebucht; die Zeile sagt „DRY-RUN would upload season pack". Die Worker-Zeile trägt den Vermerk **dry** neben dem Ergebniswort, und die Zykluszeilen im Log tragen ihn ebenfalls (F-M401, F-M402).
+**Trockenlauf und Transparenz.** Im Trockenlauf wird weder gelöscht noch hochgeladen noch gebucht; die Zeile sagt `DRY-RUN would upload season pack`. Die Worker-Zeile trägt den Vermerk **dry** neben dem Ergebniswort, die Zykluszeilen im Log ebenfalls `, dry` (F-M401, F-M402, F-M403).
 
 **Aufräumen.** Pack-Zeilen, deren `PackId` auf keiner Untertitelzeile mehr steht, entfernt der Database Refresh und zählt sie in seiner Summe — sonst legte eine verschwundene Staffel sich selbst für immer still (F-M396).
-
-**Download — Packs als Quelle.** Ein Pack-Kandidat wird einem gleich guten Einzel-Kandidaten vorgezogen: ein Archiv-Body bedient **alle** Folgen des Packs und kostet eine Quota-Einheit; ein bereits im Platten-Cache liegender Pack steht ganz vorn (F-M384). Beim Entpacken gilt das `hearing_impaired`-Flag **der einzelnen Datei**, nicht das des Pack-Headers (F-M384), und jede entpackte Datei wird als `downloaded` gebucht — genau die Herkunft, die sie später als Pack-Material disqualifiziert.
 
 ## 4. Download Pipeline
 
@@ -728,6 +727,16 @@ The alignment's status is its own readout, in ONE place: a **row of its own** in
 **Deploy (all must hold):** moved cues gain over `DeployZ = 2.0` standard errors (paired, moved cues only); file not worse; largest shift ≥ `MinShiftSec` (§4.3.2).
 
 **Scope:** language-neutral, times only, text byte-for-byte; below-zero clamped to **0**; no audio or speech ⇒ "did not run".
+### 4.4 Season Packs — Download
+
+Dieses Unterkapitel hält fest, was die Download-Seite mit Packs tut und warum das die Upload-Seite bindet. Es führt **keine neuen Anforderungen** ein; die normativen Sätze stehen unter den zitierten IDs.
+
+**Ein Pack ist die günstigere Quelle.** Ein Pack-Kandidat wird einem gleich guten Einzel-Kandidaten vorgezogen: ein Archiv-Body bedient **alle** Folgen des Packs und kostet eine Quota-Einheit; ein bereits im Platten-Cache liegender Pack steht ganz vorn (F-M384). Beim Entpacken gilt das `hearing_impaired`-Flag **der einzelnen Datei**, nicht das des Pack-Headers (F-M384), und jede entpackte Datei wird als `downloaded` gebucht — genau die Herkunft, die sie später als Pack-Material disqualifiziert.
+
+**Was ein Dry Run auf der Download-Seite nie erreicht.** Ein Trockenlauf holt keinen Archiv-Body, entpackt also nichts und schreibt keine Datei — die Zahlen, die er nennt, sind hypothetisch, und er hinterlässt keine `downloaded`-Zeile (F-M334).
+
+**Die eine Richtung, die daraus folgt.** Jede entpackte Datei wird als `downloaded` gebucht, und genau diese Herkunft disqualifiziert sie später als Pack-Material beim Upload: stammt nur eine `.srt` eines Packs aus SubDL, fällt der ganze Pack aus (F-M397).
+
 ## 5. Upload Postprocessing
 
 **F-M287 [B1] (user decision 02.10.2026):** **Everything a run writes that is reachable from a dry run sits behind the dry-run flag — the guard belongs at the WRITE, not at the mode's exit.**
