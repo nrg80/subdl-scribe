@@ -1196,7 +1196,7 @@ def main():
               _open_body != '' and
               disp_src.find("MarkAutoSyncRunning(upload, config)") >= 0 and
               disp_src.find("MarkAutoSyncRunning(upload, config)")
-              < disp_src.find("await ExecutePipelineAsync(upload, config, filter, progress)"),
+              < disp_src.find("await ExecutePipelineAsync(upload, config, filter, progress"),
               "opening it after the await is exactly the old defect: start and finish in one instant")
         check("F-M340: the closing method no longer opens the row",
               "runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey" not in _row_body,

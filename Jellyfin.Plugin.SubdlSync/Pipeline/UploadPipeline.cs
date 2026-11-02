@@ -243,6 +243,14 @@ public sealed class UploadPipeline : IPackFiller
     /// </summary>
     public bool IsArrivalRun { get; set; }
 
+    /// <summary>
+    /// F-M418 (operator order 02.11.2026): true only for the runs that may build a season pack out of
+    /// subtitles that are ALREADY uploaded — the fill-only way. Those runs are the refetch cycle and
+    /// the manual button; an arrival run keeps to single uploads, because it was started for what
+    /// arrived, not for a container assembled from material no arrival touched.
+    /// </summary>
+    public bool FillOnlyPacksAllowed { get; set; } = true;
+
     // ── F-M111: queue-driven operation (user decision 12.09.2026) ───────────
     // Same contract as the download pipeline: QueueFilter restricts the item
     // loop to queued ids; ItemResult reports per-item outcomes for the queue.
@@ -439,51 +447,51 @@ public sealed class UploadPipeline : IPackFiller
             .Select(x => x.Item)
             .ToList();
 
-        // F-M372: which seasons are worth buffering? Asked BEFORE the loop, because the answer is a
-        // property of the season and not of the queue: a season is complete when the episodes the
+        // F-M372: can this season become a pack at all? A season is complete when the episodes the
         // library holds are exactly the episodes that aired (IMDb, TMDB as the fallback). A run that
         // sees only part of a season does not make it incomplete — the folder decides, not the queue.
+        //
+        // F-M420 (operator order 02.11.2026): "refetch und manual: erst einzelupload, dann
+        // staffelpack". Nothing is held back for a pack any more. Every position goes up the SINGLE
+        // way first, and the pack is assembled at the END of the run out of what is in the store by
+        // then — this run's own uploads included — deleting the singles it absorbs (F-M391). An
+        // arrival run builds no pack at all ("on arrival: nur einzelupload"), so it neither asks which
+        // seasons are complete nor extracts anything for a container.
         SeasonPackCoordinator? packCoordinator = null;
-        var fillOnlySeasons = new List<(string ImdbId, int Season, string Lang, bool Hi)>();
-        if (_config.UploadSeasonPacks)
+        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> completeSeasons
+            = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>();
+        if (_config.UploadSeasonPacks && FillOnlyPacksAllowed)
         {
-            var completeSeasons = await CompleteSeasonsAsync(runCt).ConfigureAwait(false);
+            completeSeasons = await CompleteSeasonsAsync(runCt).ConfigureAwait(false);
             if (completeSeasons.Count > 0)
             {
-                // F-M373: a pack needs the WHOLE season in this run. Episodes that are already up
-                // individually cannot join, so a season whose queue covers less than it aired is
-                // worked as singles right away instead of waiting for the end of the run.
-                var packable = PlanSeasons(completeSeasons, items);
+                // An EMPTY packable set on purpose: ShouldBuffer answers no for every season, so no
+                // candidate is parked in a buffer and every one of them is uploaded single right away.
+                // The pack exists only as the closing step, built from the store (F-M420).
+                var packable = new HashSet<(string ImdbId, int Season)>();
 
-                // F-M389 (operator order 02.11.2026, revised the same day): a season the queue has
-                // NOTHING new for is a pack too — all its subtitles are up, so the container is built
-                // entirely from what the filler proves is already there.
-                fillOnlySeasons = PlanFillOnlySeasons(completeSeasons, items);
-
-                if (packable.Count > 0 || fillOnlySeasons.Count > 0)
-                {
-                    packCoordinator = new SeasonPackCoordinator(
-                        _api,
-                        Registry,
-                        _logger,
-                        _config,
-                        completeSeasons,
-                        packable,
-                        (label, count) => { summary.Uploaded += count; },
-                        count => { summary.Failed += count; },
-                        itemId => ItemResult?.Invoke(itemId, ItemOutcome.Done),
-                        // F-M389: an episode that is already up does not have to be queued for the
-                        // season to become a pack — the pipeline itself supplies it.
-                        this,
-                        // F-M406: the pack loop reports progress so the watchdog does not abort it.
-                        watchdog.Heartbeat);
-
-                    if (packable.Count > 0)
-                    {
-                        items = OrderForClosure(items, packable);
-                    }
-                }
+                packCoordinator = new SeasonPackCoordinator(
+                    _api,
+                    Registry,
+                    _logger,
+                    _config,
+                    completeSeasons,
+                    packable,
+                    (label, count) => { summary.Uploaded += count; },
+                    count => { summary.Failed += count; },
+                    itemId => ItemResult?.Invoke(itemId, ItemOutcome.Done),
+                    // F-M389: every member is fetched from the library by the filler, which runs the
+                    // single path's gates and demands the content be known — the pack invents nothing.
+                    this,
+                    // F-M406: the pack loop reports progress so the watchdog does not abort it.
+                    watchdog.Heartbeat);
             }
+        }
+        else if (_config.UploadSeasonPacks)
+        {
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] no season pack this run — an arrival run uploads single only (F-M418/F-M420).");
         }
 
         int idx = 0;
@@ -1628,10 +1636,12 @@ public sealed class UploadPipeline : IPackFiller
         // an incomplete season must not lose the episodes it did have.
         if (packCoordinator != null)
         {
-            // F-M389 (operator order 02.11.2026, revised): seasons the queue has nothing new for are
-            // packed from material that is already uploaded. They are worked before the flush so the
-            // run's own buffers keep their place at the end.
-            foreach (var (fillImdb, fillSeason, fillLang, fillHi) in fillOnlySeasons)
+            // F-M420 (operator order 02.11.2026): the pack is the CLOSING step, and the season is read
+            // from the store as it stands NOW — which is why the plan is made here and not before the
+            // loop. A season whose episodes this run has just uploaded single is exactly the season to
+            // pack; the fill-only path proves each member's text through the same gates as a single
+            // upload and deletes the singles the container absorbs (F-M391).
+            foreach (var (fillImdb, fillSeason, fillLang, fillHi) in PlanPacksFromStore(completeSeasons))
             {
                 await packCoordinator.FillOnlyAsync(fillImdb, fillSeason, fillLang, fillHi, runCt).ConfigureAwait(false);
             }
@@ -3265,13 +3275,13 @@ public sealed class UploadPipeline : IPackFiller
     }
 
     /// <summary>
-    /// F-M389 (operator order 02.11.2026, revised the same day): the seasons a pack may be built for
-    /// although the queue has nothing new for them — every episode is up already.
+    /// F-M420 (operator order 02.11.2026): the seasons a pack may be closed for at the END of a run —
+    /// every episode is up, so a container is what is left to do.
     /// <para>
-    /// "Nothing new" is not the same as "not queued": a season whose files are queued but already
-    /// settled (F-M88c) produces no candidate either, and the buffered path would never see it. The
-    /// test is therefore the run's own: a season that will still put a stream forward is left to the
-    /// buffer, every other complete season is fill-only.
+    /// Asked AFTER the item loop on purpose: at that point this run's own single uploads are in the
+    /// store, which is exactly what makes a season packable ("erst einzelupload, dann staffelpack").
+    /// Asked before the loop instead, a season whose episodes went up minutes earlier looked unpackable
+    /// and waited a whole cycle for its container.
     /// </para>
     /// <para>
     /// The language is not invented: it is the one every episode of the season carries an UPLOADED
@@ -3281,46 +3291,14 @@ public sealed class UploadPipeline : IPackFiller
     /// </para>
     /// </summary>
     /// <param name="complete">Complete seasons with their aired episode set.</param>
-    /// <param name="items">The run's items, before the loop.</param>
-    /// <returns>One entry per (season, language, variant) that a fill-only pack may be attempted for.</returns>
-    private List<(string ImdbId, int Season, string Lang, bool Hi)> PlanFillOnlySeasons(
-        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
-        IReadOnlyList<BaseItem> items)
+    /// <returns>One entry per (season, language, variant) a pack may be attempted for.</returns>
+    private List<(string ImdbId, int Season, string Lang, bool Hi)> PlanPacksFromStore(
+        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete)
     {
         var planned = new List<(string ImdbId, int Season, string Lang, bool Hi)>();
 
-        // Seasons this run will still work: queued, and not already settled file-complete.
-        var willWork = new HashSet<(string ImdbId, int Season)>();
-        foreach (var item in items)
-        {
-            if (QueueFilter != null && !QueueFilter.Contains(item.Id.ToString()))
-            {
-                continue;
-            }
-
-            var (imdb, _, season, episode, isSeries) = ResolveIdsRaw(item);
-            if (!isSeries || string.IsNullOrWhiteSpace(imdb) || season < 1 || episode < 1)
-            {
-                continue;
-            }
-
-            string? path = item.Path;
-            bool settled = !string.IsNullOrWhiteSpace(path)
-                           && Registry.IsSubtitlesUploaded(Registry.GetMediaHash(path));
-            if (!settled)
-            {
-                willWork.Add((imdb!, season));
-            }
-        }
-
         foreach (var entry in complete)
         {
-            if (willWork.Contains(entry.Key))
-            {
-                // The buffered path owns this season; an incomplete buffer there is filled, not replaced.
-                continue;
-            }
-
             if (!_completeSeasonItems.TryGetValue(entry.Key, out var episodes) || episodes.Count == 0)
             {
                 continue;
@@ -3382,7 +3360,7 @@ public sealed class UploadPipeline : IPackFiller
 
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack plan: {Imdb} S{Season} [{Lang}] — nothing new in the queue, the pack is built from what is already uploaded.",
+                    "[SubDL] season pack closing: {Imdb} S{Season} [{Lang}] — every episode is uploaded, the container is built from the store.",
                     entry.Key.Item1, entry.Key.Item2, pair.Key.Lang);
                 planned.Add((entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi));
             }

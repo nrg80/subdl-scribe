@@ -402,16 +402,20 @@ internal static class Program
             "a season that is only partly queued is not the season that aired");
         Check(coordinator.Contains("&& _packable.Contains((imdbId!, season))", StringComparison.Ordinal),
             "buffering still asks the plan, which now holds every complete season");
-        Check(pipeline.Contains("var packable = PlanSeasons(completeSeasons, items);", StringComparison.Ordinal),
-            "the plan is computed before the loop, from the queue");
-        // F-M394: the plan no longer asks the QUEUE whether a season may be packed — it takes every
-        // season that is complete on disk and lets the fill close the gap. The old rule left a dead
-        // zone between "all queued" and "nothing queued".
-        Check(pipeline.Contains("packable.Add(entry.Key);", StringComparison.Ordinal)
-              && !pipeline.Contains("if (SeasonPack.IsComplete(entry.Value, have))", StringComparison.Ordinal),
-            "the plan makes every complete season packable, queued or not");
-        Check(pipeline.Contains("items = OrderForClosure(items, packable);", StringComparison.Ordinal),
-            "the run works the plan's seasons first");
+        // F-M420 (operator order 02.11.2026): "refetch und manual: erst einzelupload, dann
+        // staffelpack". No season is buffered any more — the packable set stays EMPTY, every
+        // position goes up the single way, and the container is planned at the END of the run from
+        // the store (which by then holds this run's own uploads).
+        Check(pipeline.Contains("var packable = new HashSet<(string ImdbId, int Season)>();", StringComparison.Ordinal),
+            "nothing is held back for a pack: the packable set is empty and every position goes single first");
+        Check(!pipeline.Contains("items = OrderForClosure(items, packable);", StringComparison.Ordinal),
+            "the run no longer re-orders the queue around a pack");
+        Check(pipeline.Contains("PlanPacksFromStore(completeSeasons)", StringComparison.Ordinal),
+            "the pack plan is made after the loop, when this run's uploads are in the store");
+        Check(pipeline.Contains("erst einzelupload, dann staffelpack", StringComparison.Ordinal),
+            "and the order is written down where it is enforced");
+        Check(pipeline.Contains("an arrival run uploads single only", StringComparison.Ordinal),
+            "an arrival run builds no pack at all (F-M418)");
         Check(pipeline.Contains("the rest is filled from what is already uploaded", StringComparison.Ordinal),
             "a partly queued season says that the gap is filled, not that it stays single");
         Check(pipeline.Split("await packCoordinator.AddAsync(").Length - 1 >= 2,
@@ -471,9 +475,9 @@ internal static class Program
             "a season with nothing new in the queue is packed too");
         Check(coordinator.Contains("uploadSinglesOnRefusal: false", StringComparison.Ordinal),
             "a fill-only season re-sends nothing when the container is refused");
-        Check(pipeline.Contains("fillOnlySeasons = PlanFillOnlySeasons(completeSeasons, items);", StringComparison.Ordinal),
-            "the run plans those seasons before the loop");
-        Check(pipeline.Contains("nothing new in the queue, the pack is built from what is already uploaded", StringComparison.Ordinal),
+        Check(pipeline.Contains("PlanPacksFromStore(completeSeasons)", StringComparison.Ordinal),
+            "the run plans the closing packs from the store, after the loop");
+        Check(pipeline.Contains("every episode is uploaded, the container is built from the store", StringComparison.Ordinal),
             "and says why it does so");
         Check(pipeline.Contains("await packCoordinator.FillOnlyAsync(fillImdb, fillSeason, fillLang, fillHi, runCt)", StringComparison.Ordinal),
             "the fill-only packs go up before the buffers are flushed");

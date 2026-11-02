@@ -949,7 +949,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             // F-M233: the run is narrowed to the freshly queued arrivals, so leftover
             // queued work of earlier runs is not swept along by an arrival event.
             var scopeIds = scopedOnly ? new System.Collections.Generic.HashSet<string>(fresh, System.StringComparer.OrdinalIgnoreCase) : null;
-            await RunDirectionAsync(upload: upload, scopeIds: scopeIds).ConfigureAwait(false);
+            await RunDirectionAsync(upload: upload, scopeIds: scopeIds, trigger: trigger).ConfigureAwait(false);
         }
         return true;
     }
@@ -1133,7 +1133,7 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// Runs one direction against its queue. Orchestrates setup, execution,
     /// result bookkeeping and cleanup.
     /// </summary>
-    private async Task RunDirectionAsync(bool upload, System.Collections.Generic.HashSet<string>? scopeIds = null)
+    private async Task RunDirectionAsync(bool upload, System.Collections.Generic.HashSet<string>? scopeIds = null, string? trigger = null)
     {
         if (_userStopActive)
         {
@@ -1178,7 +1178,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             MarkAutoSyncRunning(upload, config);
 
             var progress = new Progress<double>();
-            var (upSummary, downSummary) = await ExecutePipelineAsync(upload, config, filter, progress).ConfigureAwait(false);
+            var (upSummary, downSummary) = await ExecutePipelineAsync(upload, config, filter, progress, trigger).ConfigureAwait(false);
             // If this direction was stopped by marker, stop the whole cycle.
             // F-M293 (user decision 03.10.2026): gated on the MARKER, not on StopRequested alone.
             // A shutdown also leaves StopRequested true (the pipeline keeps its partial result and
@@ -1291,13 +1291,17 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// Handles user-stop cancellation and lock-loss recovery scheduling.
     /// </summary>
     private async Task<(Pipeline.RunSummary? up, Pipeline.DownloadRunSummary? down)> ExecutePipelineAsync(
-        bool upload, PluginConfiguration config, System.Collections.Generic.HashSet<string> filter, IProgress<double> progress)
+        bool upload, PluginConfiguration config, System.Collections.Generic.HashSet<string> filter, IProgress<double> progress, string? trigger = null)
     {
         if (upload)
         {
             var bundle = PluginServiceRegistrator.BuildPipeline(_loggerFactory, _libraryManager, _mediaSourceManager, config);
             bundle.Pipeline.QueueFilter = filter;
             bundle.Pipeline.IsArrivalRun = false;
+            // F-M418 (operator order 02.11.2026): the fill-only way — a pack built from subtitles that
+            // are already uploaded — belongs to the full-coverage runs (refetch cycle, manual button).
+            // An arrival run carries only the arrivals it was started for and stays with singles.
+            bundle.Pipeline.FillOnlyPacksAllowed = !IsArrivalTrigger(trigger ?? string.Empty);
             bundle.Pipeline.ItemResult += (id, outcome) => OnUploadItemResult(_uploadQueue, id, outcome);
             _upInFlightDryRun = config.DryRun; // F-M22: the outcome handler consults this per item
             try
