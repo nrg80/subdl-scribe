@@ -1,6 +1,6 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.68
+**Version:** 2.69
 **Status:** Implementation — v12.1.12.282.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
@@ -20,7 +20,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 - [3. Upload Pipeline](#3-upload-pipeline) — 32 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
-- [4. Download Pipeline](#4-download-pipeline) — 51 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 52 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 7 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 19 requirements
@@ -294,6 +294,10 @@ A pack with no entry for this episode is **skipped**, not saved wrong. Non-pack 
 **F-M383 [D] (measured 01.11.2026):** **A pack that lists at least two files is fetched as the whole archive; the episode is then taken from that archive's own listing.** Measured on the test account: one member file costs **one** download unit, and the whole archive costs the same **one** unit — ten episodes of a season therefore cost one unit instead of ten.
 
 The archive body stays in the archive cache on disk (14 days, F-M370/F-M386), so the remaining episodes of the same season are served without another request; the run summary reports them as archive hits. The episode is still chosen by name from `unpack_files` (F-M215), never as "the first .srt": an archive that lacks this episode, and a pack that lists only one file, fall back to the single-file download.
+
+**F-M387 [D] (operator order 02.11.2026):** **A quality gate judges a FILE, not a candidate.** A pack can carry several files for the same episode, and a verdict on the first says nothing about its sibling: before the candidate is given up, the archive that is already on disk is asked for its next file — no request, no download unit — and the gates run again. Only when every matching file failed is the candidate counted as `rejected after fetch` and burned, and the reject line then says that the archive was exhausted rather than that one file failed.
+
+**SDH is matched with SDH only.** A plain request never falls back to an SDH file and an SDH request never to a plain one: the filter compares the file's OWN `hearing_impaired` flag, never the pack header (which is often the opposite of its contents, F-M260). The two are different tracks, and swapping them silently changes what the viewer gets. Asserted by 21 checks in `scripts/tests/packretry`.
 
 **F-M384 [D] (development, 01.11.2026):** **The ranking prefers a season pack over an equally good single file, and a cached pack over one it would still have to fetch.** Two sort keys sit in front of the text score, which itself is unchanged: `2` for a pack that carries this episode and whose archive already sits in the run or disk cache (free), `1` for a pack that carries it but must be fetched, `0` for everything else — a pack without the episode never wins the preference.
 

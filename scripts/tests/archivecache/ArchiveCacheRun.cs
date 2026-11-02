@@ -207,7 +207,12 @@ internal static class Program
             "the ONE lookup goes to disk");
         Check(api.Contains("Trace(\"GET\", fullUrl, 200, \"archive cache hit (disk)\")", StringComparison.Ordinal),
             "a hit is visible without being counted as a download");
-        Check(api.Contains("StoreArchive(key, bytes)", StringComparison.Ordinal), "a fetch fills the cache");
+        // F-M387 moved the fetch into GetArchiveBodyAsync, which every reader shares; the store
+        // happens there, so both the entry download and the sibling retry fill the one cache.
+        Check(api.Contains("StoreArchive(key, fetched)", StringComparison.Ordinal),
+            "a fetch fills the cache (in the shared body reader)");
+        Check(api.Split("GetArchiveBodyAsync(").Length - 1 >= 3,
+            "the entry download and the member retry go through that one reader");
         Check((api.Split("if (bytes.Length <= 4 || bytes[0] != 'P' || bytes[1] != 'K')").Length - 1) >= 2,
             "packs only — the store and the unpacker agree on what a ZIP is");
         Check(api.Contains("archive cache does not hold this entry — refetching", StringComparison.Ordinal),

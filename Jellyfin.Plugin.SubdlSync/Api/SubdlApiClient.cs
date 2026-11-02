@@ -1686,19 +1686,7 @@ public sealed class SubdlApiClient
     /// <returns>Raw subtitle bytes (SRT extracted when ZIP-packaged) or null on failure.</returns>
     public async Task<byte[]?> DownloadSubtitleFileAsync(string dlUrl, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0)
     {
-        string fullUrl;
-        if (dlUrl.StartsWith('/'))
-        {
-            fullUrl = $"https://dl.subdl.com{dlUrl}";
-        }
-        else if (dlUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-        {
-            fullUrl = dlUrl.Replace("://subdl.com", "://dl.subdl.com", StringComparison.OrdinalIgnoreCase);
-        }
-        else
-        {
-            fullUrl = $"https://dl.subdl.com/{dlUrl}";
-        }
+        string fullUrl = NormalizeDlUrl(dlUrl);
 
         // F-M369/F-M370: one quota unit per ARCHIVE, not per entry. SubDL hands out one URL per
         // archive entry, so a season pack that serves ten episodes arrives as ten URLs whose only
@@ -1706,22 +1694,7 @@ public sealed class SubdlApiClient
         // 0p9xSnSU4g/… nine times, BlwZSYtLaU/… seven times — and no cache hit, because the key
         // was the full URL). The key comes from the URL alone, so the cache can answer without a
         // request; the bytes live on disk (F-M386: one layer, not two).
-        string? key = ArchiveKey.FromUrl(fullUrl);
-        byte[]? bytes;
-        bool fromCache;
-
-        if (key != null && _archiveDiskCache.TryGet(key, out byte[]? diskBytes) && diskBytes is { Length: > 0 })
-        {
-            bytes = diskBytes;
-            fromCache = true;
-            Trace("GET", fullUrl, 200, "archive cache hit (disk)");
-        }
-        else
-        {
-            bytes = await FetchArchiveAsync(fullUrl, ct).ConfigureAwait(false);
-            fromCache = false;
-            StoreArchive(key, bytes);
-        }
+        var (bytes, fromCache) = await GetArchiveBodyAsync(fullUrl, ct).ConfigureAwait(false);
 
         if (bytes == null || bytes.Length == 0)
         {
@@ -1736,6 +1709,7 @@ public sealed class SubdlApiClient
             // rejection: fetch for real, refresh both layers, and try once more.
             Trace("GET", fullUrl, 200, "archive cache does not hold this entry — refetching");
             byte[]? fresh = await FetchArchiveAsync(fullUrl, ct).ConfigureAwait(false);
+            string? key = ArchiveKey.FromUrl(fullUrl);
             if (fresh is { Length: > 0 })
             {
                 StoreArchive(key, fresh);
@@ -1744,6 +1718,77 @@ public sealed class SubdlApiClient
         }
 
         return srt;
+    }
+
+    /// <summary>
+    /// Turns a download path or a subdl.com URL into the dl.subdl.com URL the fetcher wants.
+    /// Shared by <see cref="DownloadSubtitleFileAsync"/> and <see cref="ExtractArchiveMemberAsync"/>,
+    /// so the archive key of both paths is derived from the same string.
+    /// </summary>
+    /// <param name="dlUrl">Download path or URL from a search result.</param>
+    /// <returns>Absolute dl.subdl.com URL.</returns>
+    private static string NormalizeDlUrl(string dlUrl)
+    {
+        if (dlUrl.StartsWith('/'))
+        {
+            return $"https://dl.subdl.com{dlUrl}";
+        }
+
+        if (dlUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            return dlUrl.Replace("://subdl.com", "://dl.subdl.com", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return $"https://dl.subdl.com/{dlUrl}";
+    }
+
+    /// <summary>
+    /// F-M386: reads the archive body through the ONE cache — cache hit first, fetch second, store
+    /// last. Both the entry download and the sibling retry of F-M387 go through this, so a second
+    /// file out of an archive that is already on disk costs no request and no quota unit.
+    /// </summary>
+    /// <param name="fullUrl">Absolute dl.subdl.com URL of the archive.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The body, and whether it came from the cache.</returns>
+    private async Task<(byte[]? Body, bool FromCache)> GetArchiveBodyAsync(string fullUrl, CancellationToken ct)
+    {
+        string? key = ArchiveKey.FromUrl(fullUrl);
+        if (key != null && _archiveDiskCache.TryGet(key, out byte[]? diskBytes) && diskBytes is { Length: > 0 })
+        {
+            Trace("GET", fullUrl, 200, "archive cache hit (disk)");
+            return (diskBytes, true);
+        }
+
+        byte[]? fetched = await FetchArchiveAsync(fullUrl, ct).ConfigureAwait(false);
+        StoreArchive(key, fetched);
+        return (fetched, false);
+    }
+
+    /// <summary>
+    /// F-M387 (operator order 02.11.2026): takes ANOTHER file out of an archive that has already
+    /// been fetched — the retry a QA gate needs before the whole candidate is thrown away. A pack
+    /// can carry several files for the same episode, and a gate verdict on one says nothing about
+    /// its sibling. Serving it from the cache is the point: the archive was paid for once.
+    /// </summary>
+    /// <param name="archiveUrl">Download path or URL of the archive (any entry or the .zip).</param>
+    /// <param name="memberName">Entry name as listed in <c>unpack_files</c>.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The named entry's bytes, or null when the archive does not hold it.</returns>
+    public async Task<byte[]?> ExtractArchiveMemberAsync(string? archiveUrl, string? memberName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(archiveUrl) || string.IsNullOrWhiteSpace(memberName))
+        {
+            return null;
+        }
+
+        string fullUrl = NormalizeDlUrl(archiveUrl);
+        var (bytes, _) = await GetArchiveBodyAsync(fullUrl, ct).ConfigureAwait(false);
+        if (bytes is not { Length: > 4 } || bytes[0] != 'P' || bytes[1] != 'K')
+        {
+            return null;
+        }
+
+        return await UnpackAsync(bytes, 0, 0, ct, memberName).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1801,7 +1846,7 @@ public sealed class SubdlApiClient
     /// <param name="zipEpisode">Episode the caller wants (0 when unknown).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The subtitle bytes, or null.</returns>
-    private static async Task<byte[]?> UnpackAsync(byte[] bytes, int zipSeason, int zipEpisode, CancellationToken ct)
+    private static async Task<byte[]?> UnpackAsync(byte[] bytes, int zipSeason, int zipEpisode, CancellationToken ct, string? memberName = null)
     {
         if (bytes.Length <= 4 || bytes[0] != 'P' || bytes[1] != 'K')
         {
@@ -1818,7 +1863,27 @@ public sealed class SubdlApiClient
             // and only fall back to "first .srt" when NOTHING in the archive does —
             // otherwise one episode's subtitle is written next to another episode.
             string? wanted = null;
-            if (zipEpisode > 0)
+            if (!string.IsNullOrWhiteSpace(memberName))
+            {
+                // F-M387: the caller named the file it wants (a sibling of the one a gate refused).
+                // Matching is by ENTRY name only; a name that is not in the archive is a null, never
+                // a guess at another file.
+                foreach (var e in zip.Entries)
+                {
+                    if (string.Equals(e.Name, memberName, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(e.FullName, memberName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        wanted = e.FullName;
+                        break;
+                    }
+                }
+
+                if (wanted == null)
+                {
+                    return null;
+                }
+            }
+            else if (zipEpisode > 0)
             {
                 foreach (var e in zip.Entries)
                 {
@@ -2118,18 +2183,42 @@ public sealed class SubtitleCandidate
     /// <param name="episode">Wanted episode (0 = any).</param>
     /// <returns>The matching file, or null when the pack carries no usable listing.</returns>
     public SubtitleUnpackFile? FindUnpackFile(int season, int episode)
+        => FindUnpackFiles(season, episode).FirstOrDefault();
+
+    /// <summary>
+    /// F-M387: EVERY unpack file that belongs to this season/episode, in listing order — the retry
+    /// list a QA gate walks before the candidate is thrown away. A pack can carry several files for
+    /// the same episode (a plain and an SDH one, two release variants), and a verdict on the first
+    /// says nothing about the second.
+    /// <para>
+    /// The hearing-impaired filter is the operator's rule (02.11.2026: "sdh sollte nur mit sdh gematcht
+    /// werden"): with <paramref name="hearingImpaired"/> set, only files whose own flag equals it are
+    /// returned. A plain request never falls back to an SDH file and vice versa — the two are
+    /// different tracks, and swapping them silently changes what the viewer gets.
+    /// </para>
+    /// </summary>
+    /// <param name="season">Wanted season (0 = any).</param>
+    /// <param name="episode">Wanted episode (0 = any).</param>
+    /// <param name="hearingImpaired">True/False filters on the file's own HI flag; null keeps both.</param>
+    /// <returns>Matching files, best match first; empty when the listing has none.</returns>
+    public List<SubtitleUnpackFile> FindUnpackFiles(int season, int episode, bool? hearingImpaired = null)
     {
+        var found = new List<SubtitleUnpackFile>();
         if (UnpackFiles.Count == 0)
         {
-            return null;
+            return found;
         }
+
+        bool Accepts(SubtitleUnpackFile f)
+            => hearingImpaired == null || f.HearingImpaired == hearingImpaired.Value;
 
         // Exact season+episode first: this is the authoritative match.
         foreach (var f in UnpackFiles)
         {
-            if (f.Episode > 0 && f.Episode == episode && (season <= 0 || f.Season == season))
+            if (f.Episode > 0 && f.Episode == episode && (season <= 0 || f.Season == season) && Accepts(f)
+                && !found.Contains(f))
             {
-                return f;
+                found.Add(f);
             }
         }
 
@@ -2138,9 +2227,9 @@ public sealed class SubtitleCandidate
             // Episode exact, season not reported by the API.
             foreach (var f in UnpackFiles)
             {
-                if (f.Episode == episode && f.Season <= 0)
+                if (f.Episode == episode && f.Season <= 0 && Accepts(f) && !found.Contains(f))
                 {
-                    return f;
+                    found.Add(f);
                 }
             }
 
@@ -2148,14 +2237,14 @@ public sealed class SubtitleCandidate
             // carries no separate season/episode fields but does name the episode).
             foreach (var f in UnpackFiles)
             {
-                if (EpisodeFromFileName(f.Name, season) == episode)
+                if (EpisodeFromFileName(f.Name, season) == episode && Accepts(f) && !found.Contains(f))
                 {
-                    return f;
+                    found.Add(f);
                 }
             }
         }
 
-        return null;
+        return found;
     }
 
     /// <summary>Extracts an episode number from a file name — S01E06, s01.e06, 1x06 and

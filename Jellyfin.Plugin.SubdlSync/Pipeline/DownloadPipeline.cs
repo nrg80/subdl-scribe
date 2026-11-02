@@ -1741,84 +1741,110 @@ public sealed class DownloadPipeline : IDisposable
                 // upload→anything). Slot accounting unchanged.
                 _watchdog?.Heartbeat();
 
-                // Gate 2: language verification (F-M15) — detected content
-                // language vs requested tag; fail-open when CLD2 has no verdict.
-                if (_config.QaDownloadVerifyLanguage)
+                // F-M387 (operator order 02.11.2026): the four content gates are a verdict on a
+                // FILE, not on a candidate. A pack can carry several files for the same episode — a
+                // plain one and an SDH one, two release variants — and a verdict on the first says
+                // nothing about its sibling. So they live in one place here, which lets the same
+                // gates run again on the next file of the SAME archive. That retry costs nothing:
+                // the archive is already on disk (F-M386), only another entry is taken out of it.
+                //
+                // The counters and the burned candidate stay with the CALLER: they belong to the
+                // candidate, and one candidate is burned once, however many of its files failed.
+                string? QaGateFailure(byte[] candidateBytes)
                 {
-                    string? detected = Qa.QaGates.DetectLanguage(DecodeSrt(bytes));
-                    if (detected != null
-                        && !string.Equals(detected, lang, StringComparison.OrdinalIgnoreCase)
-                        && !Qa.QaGates.IsFamilyMatch(lang, detected))
+                    // Gate 2: language verification (F-M15) — detected content
+                    // language vs requested tag; fail-open when CLD2 has no verdict.
+                    if (_config.QaDownloadVerifyLanguage)
                     {
-                        summary.RejectedCandidates++; // F-M286 (QA gate)
-                        qaRejectedReleases.Add(cand.SubdlId); // burned fetch → memorized
-
-                        if (_config.LogMode >= LogLevelMode.Verbose)
+                        string? detected = Qa.QaGates.DetectLanguage(DecodeSrt(candidateBytes));
+                        if (detected != null
+                            && !string.Equals(detected, lang, StringComparison.OrdinalIgnoreCase)
+                            && !Qa.QaGates.IsFamilyMatch(lang, detected))
                         {
-                            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — language reject {Release}: content is {Detected}",
-                                Path.GetFileName(mediaPath), lang, cand.ReleaseName, detected);
+                            return "language " + detected;
                         }
-
-                        continue; // next candidate
                     }
-                }
 
-                // F-M43 Stufe 2 (structure, fixed part): corruption check on the
-                // already-downloaded bytes — free (no extra quota), rejects broken
-                // SRTs (no timings, non-monotonic timestamps, implausible cue
-                // durations) BEFORE they are saved next to the media file.
-                {
-                    var srtStats = Qa.QaGates.ParseSrt(DecodeSrt(bytes));
+                    // F-M43 Stufe 2 (structure, fixed part): corruption check on the
+                    // already-downloaded bytes — free (no extra quota), rejects broken
+                    // SRTs (no timings, non-monotonic timestamps, implausible cue
+                    // durations) BEFORE they are saved next to the media file.
+                    var srtStats = Qa.QaGates.ParseSrt(DecodeSrt(candidateBytes));
                     bool structureOk = srtStats != null
                         && srtStats.Monotonic
                         && srtStats.MinCueMs > 100
                         && srtStats.MaxCueMs < 600_000;
                     if (!structureOk)
                     {
-                        // Burned fetch on a structurally broken file —
-                        // remember the exact download, the run counts as failed.
-                        summary.RejectedCandidates++; // F-M286 (QA gate)
-                        qaRejectedReleases.Add(cand.SubdlId);
+                        return "structure (no valid cues / non-monotonic / implausible duration)";
+                    }
 
-                        if (_config.LogMode >= LogLevelMode.Verbose)
+                    // Gate 1: minimum cue count (≥30, F-M16 threshold) — catches
+                    // valid-but-stub SRTs the structure gate lets through.
+                    if (_config.QaDownloadMinCues && (srtStats == null || srtStats.CueCount < 30))
+                    {
+                        return "min-cues (" + (srtStats?.CueCount ?? 0) + ")";
+                    }
+
+                    // F-M43 Stufe 2 (runtime): cue span vs item runtime
+                    if (!RuntimeMatches(item, candidateBytes, out string? runtimeReason) && runtimeReason != null)
+                    {
+                        return "runtime (" + runtimeReason + ")";
+                    }
+
+                    return null;
+                }
+
+                string? gateFail = QaGateFailure(bytes);
+
+                // F-M387: before the candidate is given up, ask the archive that is already here for
+                // its next file for this episode. SDH is matched with SDH only (operator order
+                // 02.11.2026) — a plain request never takes an SDH file and vice versa.
+                if (gateFail != null && packFile != null && cand.UnpackFiles.Count >= 2)
+                {
+                    foreach (var sibling in cand.FindUnpackFiles(season, episode, effectiveHi))
+                    {
+                        if (string.Equals(sibling.Name, packFile.Name, StringComparison.OrdinalIgnoreCase))
                         {
-                            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — structure reject {Release}: no valid cues/non-monotonic/implausible duration",
-                                Path.GetFileName(mediaPath), lang, cand.ReleaseName);
+                            continue; // the file the gate just refused
                         }
 
-                        continue; // next candidate
+                        byte[]? siblingBytes = await _api
+                            .ExtractArchiveMemberAsync(cand.Url, sibling.Name, ct).ConfigureAwait(false);
+                        if (siblingBytes == null || siblingBytes.Length < 100)
+                        {
+                            continue;
+                        }
+
+                        string? siblingFail = QaGateFailure(siblingBytes);
+                        if (siblingFail != null)
+                        {
+                            gateFail = siblingFail;
+                            continue;
+                        }
+
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — next file of the same archive accepted: {Sibling} (first refused: {First})",
+                            Path.GetFileName(mediaPath), lang, sibling.Name, gateFail);
+                        bytes = siblingBytes;
+                        packFile = sibling;
+                        effectiveHi = sibling.HearingImpaired;
+                        gateFail = null;
+                        break;
                     }
                 }
 
-                // Gate 1: minimum cue count (≥30, F-M16 threshold) — catches
-                // valid-but-stub SRTs the structure gate lets through.
-                var gateStats = Qa.QaGates.ParseSrt(DecodeSrt(bytes)); // Fresh parse (srtStats is scoped to the structure block)
-                if (_config.QaDownloadMinCues && (gateStats == null || gateStats.CueCount < 30))
+                if (gateFail != null)
                 {
-                    summary.RejectedCandidates++; // F-M286 (QA gate)
-                    qaRejectedReleases.Add(cand.SubdlId); // Burned fetch → memorized
+                    // Burned fetch (QA gate): the request was spent and nothing is kept.
+                    summary.RejectedCandidates++; // F-M286 / F-M387
+                    qaRejectedReleases.Add(cand.SubdlId); // burned fetch → memorized
 
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — min-cues reject {Release}: {Count} cues",
-                            Path.GetFileName(mediaPath), lang, cand.ReleaseName, gateStats?.CueCount ?? 0);
-                    }
-
-                    continue; // next candidate
-                }
-
-                // F-M43 Stufe 2 (runtime): cue span vs item runtime
-                if (!RuntimeMatches(item, bytes, out string? runtimeReason) && runtimeReason != null)
-                {
-                    // Burned fetch (stub/broken runtime) —
-                    // remember the exact download, the run counts as failed at its end.
-                    summary.RejectedCandidates++; // F-M286 (QA gate)
-                    qaRejectedReleases.Add(cand.SubdlId);
-
-                    if (_config.LogMode >= LogLevelMode.Verbose)
-                    {
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — runtime reject {Release}: {Reason}",
-                            Path.GetFileName(mediaPath), lang, cand.ReleaseName, runtimeReason);
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — QA reject {Release}: {Reason} (no usable file left in this archive)",
+                            Path.GetFileName(mediaPath), lang, cand.ReleaseName, gateFail);
                     }
 
                     continue; // next candidate
