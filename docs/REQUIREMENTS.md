@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.71
-**Status:** Implementation — v12.1.12.295.
+**Status:** Implementation — v12.1.12.296.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 42 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 43 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — eine Politik für Upload und Download](#33-season-packs-eine-politik-für-upload-und-download) — Querschnitt, zitiert F-M384, F-M387–F-M399, F-M401, F-M402
@@ -194,6 +194,8 @@ A marker is consumed as a marker and the language token is read from the positio
 **An episode TMDB id cannot be walked up directly:** `/find/{episodeId}?external_source=tmdb_id` returns EMPTY and `/tv/{episodeId}` is 404. Such a value is first PROVEN against a candidate show (F-M202); only when that proof fails is it dropped, and the caller's type-free title search then resolves the show by name.
 
 **F-M391 [U] (Operator-Anordnung 02.11.2026):** **Ein Einzel-Upload, der in einen Pack aufgeht, wird vorher gelöscht — Dublette zuerst, Pack danach.** Ein Pack, der gegen Einträge mit demselben Inhalt antritt, ist genau der Fall, den man nicht auf SubDL's Seite klären will; die Reihenfolge macht den Pack zum einzigen Träger. Gelöscht wird über `GET /user/deletePublishedSubtitle?id=` mit der ID aus der Registry — `deleteSubtitle` ist dafür die falsche Route: gemessen am 02.11.2026 antwortet sie `{status: true, "subtitle deleted"}` und löscht nichts. Die IDs wandern in die `packs`-Zeile (F-M390); scheitert der Pack danach, nennt das Log die gelöschten IDs als Warnung, und der nächste Lauf baut den Pack aus der Bibliothek neu. Asserted by `scripts/tests/packretry`.
+
+**F-M403 [P] (Operator-Anordnung 02.11.2026):** **Eine Schreibweise für den Modus: inline klein `dry`, auf Ereigniszeilen als Präfix `DRY-RUN`.** Vorher standen drei Formen nebeneinander — `dry-run=True`, `, dry` und `DRY RUN`/`DRY-RUN`. Jetzt: `upload: started, dry`, `download: started, dry, refetch=…`, `DRY-RUN would have uploaded …`, `DRY-RUN — N item(s) left Queued`, `cycle start (…, dry)`. Asserted by `scripts/tests/gui-structure` (Negativprüfungen auf `dry-run={` und `DRY RUN,`).
 
 **F-M402 [P] (Operator-Anordnung 02.11.2026):** **Auch das Log sagt es: die Zykluszeilen tragen den Trockenlauf-Vermerk.** `cycle start (…, dir UploadOnly, dry)` und die beiden `cycle end`-Zeilen ebenso, gesetzt über einen Helfer (`DrySuffix`) aus `DryRun` bzw. `DownloadDryRun` — damit beantwortet das Log die Frage „war das ein Trockenlauf?" genauso wie die Worker-Zeile. Asserted by `scripts/tests/gui-structure`.
 

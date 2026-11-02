@@ -360,7 +360,9 @@ public sealed class UploadPipeline : IPackFiller
         // critical errors, rate limits, run started/finished.
         // (10.09.2026): moved AFTER CollectItems — FilesSeen was always 0 here,
         // logging "0 items queued" although the scan runs 15 lines later and found 304.
-        LogUtil.Normal(_logger, "[SubDL] upload: started (dry-run={Dry})", _config.DryRun);
+        // F-M403 (operator order 02.11.2026): one spelling for the mode. Inline it is the lowercase
+        // word "dry" (as in the workers line), on an event line it is the prefix "DRY-RUN".
+        LogUtil.Normal(_logger, "[SubDL] upload: started{Dry}", _config.DryRun ? ", dry" : string.Empty);
 
         PipelineStopSignal.ClearStaleMarkers(Plugin.Instance?.DataFolderPath ?? string.Empty);
 
@@ -1629,7 +1631,7 @@ public sealed class UploadPipeline : IPackFiller
 
         if (summary.IsDryRun)
         {
-            LogUtil.Normal(_logger, "[SubDL] upload: finished — lock released. DRY RUN, would have uploaded {N} | {Rejected} rejected, {Skipped} stream(s) skipped",
+            LogUtil.Normal(_logger, "[SubDL] upload: finished — lock released. DRY-RUN would have uploaded {N} | {Rejected} rejected, {Skipped} stream(s) skipped",
                 summary.Uploaded, summary.RejectedCandidates, summary.SkippedStreams);
         }
         else

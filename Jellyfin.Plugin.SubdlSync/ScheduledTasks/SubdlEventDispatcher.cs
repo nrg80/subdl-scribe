@@ -1595,7 +1595,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         if (dryRun)
         {
             LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,
-                "[SubDL-Dispatch] DRY RUN — {Count} item(s) left Queued in the {Queue} queue (F-M22: a dry run removes no work).",
+                "[SubDL-Dispatch] DRY-RUN — {Count} item(s) left Queued in the {Queue} queue (F-M22: a dry run removes no work).",
                 queue.Count(x => x.State == QueueItem.ItemState.Queued), upload ? "upload" : "download");
         }
         else if (removed > 0)

@@ -449,8 +449,8 @@ public sealed class DownloadPipeline : IDisposable
         // run, naming whether it is on. The per-file detail (which audio track, which subtitle it
         // was fitted against) stays at Verbose. F-M24d's "one summary line per direction" is not
         // violated: this is the run START line it already prescribes, carrying one more fact.
-        LogUtil.Normal(_logger, "[SubDL] download: started (dry-run={Dry}, refetch={Refetch}, audio fit={Fit})",
-            _config.DownloadDryRun, _config.RefetchInterval, _config.QaDownloadAutoSync ? "on" : "off");
+        LogUtil.Normal(_logger, "[SubDL] download: started{Dry}, refetch={Refetch}, audio fit={Fit}",
+            _config.DownloadDryRun ? ", dry" : string.Empty, _config.RefetchInterval, _config.QaDownloadAutoSync ? "on" : "off");
 
         PipelineStopSignal.ClearStaleMarkers(Plugin.Instance?.DataFolderPath ?? string.Empty);
 

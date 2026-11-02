@@ -1653,6 +1653,25 @@ def main():
     check('return ", dry";' in disp_src,
           "F-M402: one helper decides the word, so the lines cannot drift apart")
 
+    # ---- F-M403 (operator order 02.11.2026): one spelling for the mode — "dry" inline, "DRY-RUN" on
+    # event lines. No third variant may creep back in.
+    try:
+        up_src2 = open(os.path.join(root_cs, "Pipeline/UploadPipeline.cs"), encoding="utf-8").read()
+        down_src2 = open(os.path.join(root_cs, "Pipeline/DownloadPipeline.cs"), encoding="utf-8").read()
+    except OSError as exc:
+        check(False, "F-M403: pipeline sources readable (%s)" % exc)
+        up_src2 = down_src2 = ""
+    check('"[SubDL] upload: started{Dry}"' in up_src2,
+          "F-M403: the upload start line says ', dry' inline instead of dry-run=True")
+    check('"[SubDL] download: started{Dry}, refetch={Refetch}' in down_src2,
+          "F-M403: the download start line does the same")
+    check("dry-run={" not in up_src2 and "dry-run={" not in down_src2,
+          "F-M403: no dry-run=Key=Value form is left in either pipeline")
+    check("DRY-RUN would have uploaded" in up_src2,
+          "F-M403: the run-end line uses the DRY-RUN prefix")
+    check("DRY RUN," not in up_src2 and "DRY RUN —" not in disp_src,
+          "F-M403: the space-separated variant is gone")
+
     print(">>> GUI-STRUKTUR %s: %d/%d Pruefungen bestanden"
           % ("OK" if not failed else "FEHLER", len(results) - len(failed), len(results)))
     return 1 if failed else 0
