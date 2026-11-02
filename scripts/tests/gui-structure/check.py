@@ -1602,6 +1602,13 @@ def main():
           "var when = d.due ? subdlFmtDayTime(d.due) : '';" in html, "deferral note still time-only")
     check("F-M359: the bare-time helper is no longer wired into the deferral note",
           "var when = d.due ? resetLocal(d.due) : '';" not in html, "resetLocal still used for the note")
+    # F-M391: a pack absorbs singles — the toggle has to say that they are deleted from SubDL.
+    check("F-M391: the season pack toggle notes that absorbed singles are deleted from SubDL",
+          "its single upload is deleted from SubDL first" in html)
+    check("F-M391: the note sits in the season pack description, not somewhere else",
+          "one pack instead of one upload per episode. Default: on. An episode that already went up on its own"
+          in html)
+
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)
