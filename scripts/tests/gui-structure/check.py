@@ -1616,6 +1616,12 @@ def main():
     check("F-M392: its description says the limit is checked before anything is deleted",
           "the limit is checked before anything is deleted" in html)
 
+    # F-M393: an allow-list aims a probe — it has to be loadable, savable and described.
+    check("F-M393: the pack allow-list field exists", 'id="PackOnlyImdbIds"' in html)
+    check("F-M393: it is loaded from the config", "config.PackOnlyImdbIds || ''" in html)
+    check("F-M393: and saved trimmed", "config.PackOnlyImdbIds = (document.querySelector('#PackOnlyImdbIds').value || '').trim()" in html)
+    check("F-M393: its description names the example id", "e.g. tt4378376" in html)
+
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)

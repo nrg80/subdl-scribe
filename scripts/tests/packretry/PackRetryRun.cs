@@ -248,6 +248,16 @@ internal static class Program
             "and the budget is checked BEFORE the first deletion");
         Check(coord.Contains("_packsThisRun++;", StringComparison.Ordinal), "a landed pack is counted");
 
+        // ── 10. F-M393: an allow-list aims the whole pack path ─────────────────
+        Console.WriteLine("10. Pack allow-list");
+        Check(upload.Contains("Where(kv => allowedIds.Contains(kv.Key.ImdbId))", StringComparison.Ordinal),
+            "the allow-list filters the complete seasons");
+        Check(upload.IndexOf("allowedIds.Contains(kv.Key.ImdbId)", StringComparison.Ordinal)
+              < upload.IndexOf("PlanFillOnlySeasons(completeSeasons", StringComparison.Ordinal),
+            "and it filters BEFORE the fill-only plan reads the seasons");
+        Check(upload.Contains("id.StartsWith(\"tt\", StringComparison.OrdinalIgnoreCase)", StringComparison.Ordinal),
+            "only IMDb-shaped tokens are accepted, so a typo narrows instead of widening");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

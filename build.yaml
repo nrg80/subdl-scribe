@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.284"
+version: "12.1.12.285"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.285: A run can be braked (packs per run, checked before anything is deleted) and aimed (pack only for these series), so a library-wide pack wave starts as a probe.
   v12.1.12.284: A single upload that a later season pack absorbs is deleted from SubDL first, the pack keeps its ids on record, and the toggle says so.
   v12.1.12.283: A season pack is filled with subtitles that are already up instead of falling back to singles, is remembered in its own table so it is never rebuilt, and the quota bar reads API calls.
   v12.1.12.282: One archive fetch serves the season; a refused file gets the next one from the same archive, an unreadable cue is dropped before the hash is taken, and kept originals are numbered from 51.

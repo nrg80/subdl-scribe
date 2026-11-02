@@ -437,7 +437,23 @@ public sealed class UploadPipeline : IPackFiller
         var fillOnlySeasons = new List<(string ImdbId, int Season, string Lang, bool Hi)>();
         if (_config.UploadSeasonPacks)
         {
-            var completeSeasons = await CompleteSeasonsAsync(runCt).ConfigureAwait(false);
+            var allCompleteSeasons = await CompleteSeasonsAsync(runCt).ConfigureAwait(false);
+
+            // F-M393: staged rollout. The allow-list narrows the WHOLE pack path — the queue-driven
+            // plan and the fill-only plan both read what is left here, so a probe cannot leak into a
+            // season it was not aimed at.
+            var allowedIds = PackOnlyImdbIds();
+            IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> completeSeasons = allCompleteSeasons;
+            if (allowedIds.Count > 0)
+            {
+                completeSeasons = allCompleteSeasons
+                    .Where(kv => allowedIds.Contains(kv.Key.ImdbId))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season packs restricted to {Count} series by config: {Ids} — {Seasons} of {All} complete season(s) stay in scope.",
+                    allowedIds.Count, string.Join(",", allowedIds), completeSeasons.Count, allCompleteSeasons.Count);
+            }
             if (completeSeasons.Count > 0)
             {
                 // F-M373: a pack needs the WHOLE season in this run. Episodes that are already up
@@ -3066,6 +3082,29 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="complete">Complete seasons with their aired episode set.</param>
     /// <param name="items">The run's items, before the loop.</param>
     /// <returns>One entry per (season, language, variant) that a fill-only pack may be attempted for.</returns>
+    /// <summary>
+    /// F-M393: reads <see cref="PluginConfiguration.PackOnlyImdbIds"/> into a set of IMDb ids.
+    /// Anything that does not look like an IMDb id is dropped: a typo must narrow the run, never
+    /// widen it to "match everything".
+    /// </summary>
+    /// <returns>The allow-list; empty when the config leaves the pack path unrestricted.</returns>
+    private HashSet<string> PackOnlyImdbIds()
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string raw = _config.PackOnlyImdbIds ?? string.Empty;
+        foreach (string part in raw.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string id = part.Trim();
+            if (id.StartsWith("tt", StringComparison.OrdinalIgnoreCase) && id.Length > 2
+                && id.Skip(2).All(char.IsDigit))
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
+    }
+
     private List<(string ImdbId, int Season, string Lang, bool Hi)> PlanFillOnlySeasons(
         IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
         IReadOnlyList<BaseItem> items)

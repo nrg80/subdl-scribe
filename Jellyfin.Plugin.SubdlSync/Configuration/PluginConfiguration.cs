@@ -345,6 +345,17 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public int MaxPacksPerRun { get; set; }
 
+    /// <summary>
+    /// F-M393: the only series the pack path may touch — empty means all of them.
+    /// <para>
+    /// A probe needs to be aimed: "build the packs for this one season and nothing else". Without an
+    /// allow-list a library-wide wave can only be limited by count, not by subject, and the packs that
+    /// land first are whichever the library happens to enumerate first. Comma, semicolon or space
+    /// separated IMDb ids; entries that are not IMDb ids are ignored. Empty by default.
+    /// </para>
+    /// </summary>
+    public string PackOnlyImdbIds { get; set; } = string.Empty;
+
     #endregion
 
     #region Download pipeline ([D], F-M41–M47)
