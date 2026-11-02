@@ -316,6 +316,24 @@ public sealed class SeasonPackCoordinator
             return;
         }
 
+        // F-M416 (operator order 02.11.2026): completeness is a property of the LANGUAGE, and the
+        // state already answers it. A season can be complete for EN and incomplete for DE because
+        // two episodes carry no German track; asking "is every aired episode known with this
+        // language" costs one look into the store and saves the whole extraction when the answer is
+        // no. The remaining episodes still go up — as singles, not as a pack.
+        if (_registry != null)
+        {
+            var withLanguage = _registry.EpisodesWithLanguage(imdbId, season, lang, hi);
+            if (!SeasonPack.IsComplete(aired, withLanguage))
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Aired} episode(s) carry this language in the store, no pack, they go up as singles.",
+                    imdbId, season, lang, withLanguage.Count, aired.Count);
+                return;
+            }
+        }
+
         var group = new List<Candidate>(aired.Count);
         foreach (int episode in SeasonPack.AiredNumbers(aired))
         {

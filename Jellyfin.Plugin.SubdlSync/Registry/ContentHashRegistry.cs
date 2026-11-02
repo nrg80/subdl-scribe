@@ -944,6 +944,45 @@ public sealed class ContentHashRegistry : IDisposable
     /// Lists uploaded embedded tracks, newest verdict first.
     /// </summary>
     /// <returns>Uploaded tracks.</returns>
+    /// <summary>
+    /// F-M416 (operator order 02.11.2026): the episodes of a season the store knows with THIS
+    /// language. Completeness is a property of the language, not of the season — a season can be
+    /// complete for EN and incomplete for DE because two episodes carry no German track. The answer
+    /// comes from the state, so it is available before anything is extracted.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">Language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>The episode numbers, unordered.</returns>
+    public List<int> EpisodesWithLanguage(string? imdbId, int season, string language, bool hearingImpaired)
+    {
+        if (string.IsNullOrWhiteSpace(imdbId))
+        {
+            return new List<int>();
+        }
+
+        var episodes = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var media in _db.Media.Find(m => m.ImdbId == imdbId && m.Season == season))
+        {
+            if (media.Episode is int number && number > 0 && !string.IsNullOrEmpty(media.Id))
+            {
+                episodes[media.Id] = number;
+            }
+        }
+
+        var numbers = new HashSet<int>();
+        foreach (var embed in _db.Embeds.Find(e => e.Language == language && e.HearingImpaired == hearingImpaired))
+        {
+            if (embed.MediaHash != null && episodes.TryGetValue(embed.MediaHash, out int episode))
+            {
+                numbers.Add(episode);
+            }
+        }
+
+        return numbers.OrderBy(x => x).ToList();
+    }
+
     public List<EmbedTrackEntity> GetUploadedEmbeds()
         => _db.Embeds.Find(x => x.Status == SubtitleStatus.Uploaded).ToList();
 

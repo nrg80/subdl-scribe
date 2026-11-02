@@ -340,6 +340,12 @@ internal static class Program
               && fillBody.Contains("nothing is extracted", StringComparison.Ordinal),
             "F-M415: a season already up as a pack is skipped before any extraction");
 
+        // ── 22. F-M416: Vollständigkeit je Sprache aus dem State ────────────────
+        Console.WriteLine("22. Completeness is decided per language from the store");
+        Check(coordPackSrc.Contains("EpisodesWithLanguage(", StringComparison.Ordinal)
+              && coordPackSrc.Contains("no pack, they go up as singles", StringComparison.Ordinal),
+            "F-M416: a language that is not complete on every aired episode forms no pack");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."
