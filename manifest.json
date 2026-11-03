@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.325",
-        "changelog": "v12.1.12.325: the file witness of a season now finds its episodes at pack time (F-M434).",
+        "version": "12.1.12.326",
+        "changelog": "v12.1.12.326: upload rows store the published entry id, not the upload id — packs, singles and movies alike, with the postprocessing remapping open submissions (F-M435).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.325-dev/Jellyfin.Plugin.SubdlSync_12.1.12.325.zip",
-        "checksum": "a5c9b6c66aee1249af17cdb0b2bb61af",
-        "timestamp": "2026-11-03T08:27:02Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.326-dev/Jellyfin.Plugin.SubdlSync_12.1.12.326.zip",
+        "checksum": "44666d138103d93c597d0a4f3823c92c",
+        "timestamp": "2026-11-03T21:29:54Z"
       }
     ]
   }
