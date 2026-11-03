@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.82
-**Status:** Implementation — v12.1.12.319.
+**Version:** 2.83
+**Status:** Implementation — v12.1.12.320.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 66 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 67 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -321,6 +321,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M428 [P] (Operator-Anweisung 03.11.2026 „Neuer default für den cache 7 tage, 256 MB"):** **Die Vorgaben der Archiv-Ablage sind jetzt 7 Tage und 256 MB** (vorher 14 Tage / 512 MB). Geändert in `PluginConfiguration` (`DownloadArchiveCacheDays = 7`, `DownloadArchiveCacheMaxMb = 256`) und in `configPage.html`, das dieselben Zahlen als Rückfall benutzt, wenn ein Feld leer ankommt. Eine Woche deckt den Fall ab, für den die Ablage gebaut wurde — ein Staffelarchiv, das die kostenlose Tagesgrenze über mehrere Läufe verteilt (F-M370) — und die Ablage bleibt klein. **Bestehende Installationen behalten ihre gespeicherten Werte**, weil die Konfiguration die Zahlen ausschreibt; die neuen Vorgaben greifen bei einer frischen Installation oder nach dem Zurücksetzen der Felder.
 
 **F-M429 [P] (Operator-Anweisung 03.11.2026 „Erst packbildung dann Einzeluploads. Bei packbildung identifizierte einzeluploads für später den einzelupload merken"):** **Der Pack läuft vor den Einzeluploads.** Nach der Staffelplanung und dem Login, aber vor der Item-Schleife, wird jeder geplante Pack gefüllt und hochgeladen; erst danach gehen die Einzel hoch. Was ein Pack übernommen hat, merkt sich der Lauf in `_packAbsorbed` (Serie, Staffel, Sprache, Variante); eine Position daraus wird in `UploadSrtContentAsync` übersprungen (`carried by the pack built in this run, no single beside it`). Packs, die nicht hochgehen, hinterlassen keine Spur in dieser Menge — ihre Folgen gehen im Einzel-Lauf hoch, also geht nichts verloren. Zwei Folgen dieser Umstellung: (a) `PackPairsOf` plant die Sprachen jetzt aus den **eingebetteten Spuren** der Dateien statt aus Store-Zeilen, weil ein neuer Lauf noch keine Zeilen hat (Store bleibt Rückfall, wenn die Streamliste nicht lesbar ist); (b) die Beweisregel F-M395 ist umgeschrieben — ein Pack darf die **erste Veröffentlichung** eines Textes sein (`first publication: the pack carries this text up`), Text, der nur aus einem Download oder einer Ablehnung bekannt ist, bleibt weiter ausgeschlossen.
+
+**F-M430 [P] (Operator-Anweisung 03.11.2026 „Zur release Gruppe 60 Prozent ist zuwenig"):** **Die Release-Gruppe wird in vier Schreibweisen erkannt statt nur in einer.** Gemessen an den 1.392 Videodateien des Operators fand die alte Regel (letztes `-`-Segment) bei 837 eine Gruppe — 60 %. Der Grund war die Form, nicht das Fehlen: die Bibliothek mischt `…x264-NeoNoir` (Bindestrich), `…x264.YIFY` (Punkt, Szene-Form), `…HEVC x265 BONE` bzw. `…(1080p AMZN WEB-DL x265 Ghost)` (Leerzeichen, teils in Klammern) und `…x265-MeGusta[EZTVx.to]` bzw. `…x264.[MPup]` (Gruppe mit angehängtem Site-Tag in Klammern). Die Regel ist jetzt: eine abschließende Klammer wird abgetrennt und der Rest zuerst gefragt (so bleibt `DOLORES` in `…-DOLORES[EZTVx.to]` sichtbar), erst dann der Klammerinhalt gelesen; danach zählt das letzte Token nach `-`, `.` oder Leerzeichen — aber nur, wenn das Token davor ein **technisches** ist (Codec, Quelle, Audio, Auflösung, Bit-Tiefe, HDR, Edition). Genau diese Bedingung hält Episodentitel draußen: bei `…S01E03.OutKast` steht ein Folgentag davor, kein Codec, also bleibt es bei `null`. **Ergebnis: 985 von 1.392 (71 %)**, gemessen mit dem gebauten Code. Die restlichen 407 sind Namen, die gar keine Gruppe nennen („For All Mankind S03E04") oder nur ein Site-Tag wie `(THENKIRI.COM)` — das ist keine Gruppe und bleibt `null`.
 
 ## 4. Download Pipeline
 

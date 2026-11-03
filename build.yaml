@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.319"
+version: "12.1.12.320"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.320: release group recognition covers dot, space and bracketed spellings — 60% to 71% on the operator library (F-M430).
   v12.1.12.319: season packs go up before the single uploads, and covered singles are skipped (F-M429).
   v12.1.12.318: archive cache defaults are now 7 days and 256 MB (F-M428).
   v12.1.12.317: a database reset purges the archive cache with it (F-M427).

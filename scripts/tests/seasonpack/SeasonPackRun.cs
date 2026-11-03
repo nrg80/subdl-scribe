@@ -317,6 +317,23 @@ internal static class Program
             "an episode title after the last dash is no group");
         Check(SeasonPack.ReleaseGroup("Show.S01.1080p.WEB.x265-AAC5.1") == null,
             "a technical token with a dot is no group");
+        // F-M430 (operator order 03.11.2026): the four spellings found in the library — and the ones
+        // that must stay null because the name states no group.
+        Check(SeasonPack.ReleaseGroup("Toy.Story.1995.1080p.BRrip.x264.YIFY") == "YIFY",
+            "F-M430: a dot-separated scene group is read (x264.YIFY)");
+        Check(SeasonPack.ReleaseGroup("Too Good to be True 2024 S01E02 1080p WEB-DL HEVC x265 BONE") == "BONE",
+            "F-M430: a space-separated group is read (x265 BONE)");
+        Check(SeasonPack.ReleaseGroup("Mayor of Kingstown (2021) - S04E07 - My Way (1080p AMZN WEB-DL x265 Ghost)") == "Ghost",
+            "F-M430: a group inside a trailing parenthesis is read");
+        Check(SeasonPack.ReleaseGroup("Cunk.on.Britain.s01e01.[MPup]") == "MPup",
+            "F-M430: a bracketed group is read");
+        Check(SeasonPack.ReleaseGroup("Unicorn.Academy.S03E01.1080p.WEB.h264-DOLORES[EZTVx.to]") == "DOLORES",
+            "F-M430: a site tag behind the group does not hide it");
+        Check(SeasonPack.ReleaseGroup("A.Bona.Fide.Killer.S01E12.(THENKIRI.COM)") == null,
+            "F-M430: a bare site tag is not a group");
+        Check(SeasonPack.ReleaseGroup("For All Mankind S03E04") == null
+              && SeasonPack.ReleaseGroup("The Thundermans - S02E12 - Meet the Evilmans") == null,
+            "F-M430: an episode title behind an episode tag stays null — nothing is invented");
         Check(SeasonPack.ReleaseGroup(null) == null && SeasonPack.ReleaseGroup("") == null,
             "no name, no group");
 
