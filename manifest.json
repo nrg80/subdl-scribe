@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.314",
-        "changelog": "v12.1.12.314: an arrival run builds a pack when the episodes it brought are the whole season, and only out of those queued items (F-M424).",
+        "version": "12.1.12.315",
+        "changelog": "v12.1.12.315: the pack rule is the same for every trigger — a pack is built only when this run queued the whole season, and only out of those items (F-M425).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.314-dev/Jellyfin.Plugin.SubdlSync_12.1.12.314.zip",
-        "checksum": "4621ca133d69e4dea451871dc25707ae",
-        "timestamp": "2026-11-03T04:36:30Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.315-dev/Jellyfin.Plugin.SubdlSync_12.1.12.315.zip",
+        "checksum": "d783de7f75ea0dbe3a04249d1fd46726",
+        "timestamp": "2026-11-03T04:46:09Z"
       }
     ]
   }
