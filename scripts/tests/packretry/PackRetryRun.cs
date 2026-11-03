@@ -389,15 +389,30 @@ internal static class Program
         Check(upload.Contains("brought all {Aired} episode(s)", StringComparison.Ordinal)
               && upload.Contains("the queued items are not the whole season", StringComparison.Ordinal),
             "F-M424: arrival compares its queued episodes with the aired set and names both numbers");
-        Check(upload.Contains("onlyArrived", StringComparison.Ordinal)
-              && upload.Contains("IReadOnlySet<int>>? onlyEpisodes = null", StringComparison.Ordinal),
-            "F-M424: the pack plan and the filler are cut to the arrived episodes");
+        Check(upload.Contains("IReadOnlySet<int>>? onlyEpisodes = null", StringComparison.Ordinal),
+            "F-M424: the plan and the filler can be cut to the arrived episodes");
 
         // ── 28. F-M426: eine vollständig gepackte Staffel wird gar nicht erst untersucht ─
         Console.WriteLine("28. A fully packed season is not investigated");
         Check(upload.Contains("HasOpenLanguage(", StringComparison.Ordinal)
               && upload.Contains("every language is already inside a pack, nothing is investigated", StringComparison.Ordinal),
             "F-M426: the pack question is asked before the queued-versus-aired comparison");
+
+        // ── 29. F-M429: Pack zuerst, Einzel danach, übernommene Positionen gemerkt ─
+        Console.WriteLine("29. The pack goes up first, the singles after it");
+        int packPhase = upload.IndexOf("Erst packbildung dann Einzeluploads", StringComparison.Ordinal);
+        int loop = upload.IndexOf("foreach (var item in items)", StringComparison.Ordinal);
+        Check(packPhase > 0 && loop > 0 && packPhase < loop,
+            "F-M429: the pack phase sits textually before the item loop");
+        Check(upload.Contains("_packAbsorbed.Add((packImdb, packSeason, packLang, packHi))", StringComparison.Ordinal),
+            "a pack that went up is remembered with its series, season, language and variant");
+        Check(upload.Contains("carried by the pack built in this run, no single beside it", StringComparison.Ordinal),
+            "a position the pack carries is not uploaded single");
+        Check(upload.Contains("the singles it was meant to carry go up in the single phase", StringComparison.Ordinal),
+            "a pack that did not go up leaves its singles to the single phase");
+        Check(upload.Contains("first publication: the pack carries this text up", StringComparison.Ordinal)
+              && upload.Contains("this text is only known from a download or a rejection", StringComparison.Ordinal),
+            "F-M395 stays intact where it matters: a download never joins a pack, a first publication does");
 
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0

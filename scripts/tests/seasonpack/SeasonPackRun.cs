@@ -410,10 +410,10 @@ internal static class Program
             "nothing is held back for a pack: the packable set is empty and every position goes single first");
         Check(!pipeline.Contains("items = OrderForClosure(items, packable);", StringComparison.Ordinal),
             "the run no longer re-orders the queue around a pack");
-        Check(pipeline.Contains("PlanPacksFromStore(completeSeasons, onlyArrived)", StringComparison.Ordinal),
-            "the pack plan is made after the loop, when this run's uploads are in the store");
-        Check(pipeline.Contains("erst einzelupload, dann staffelpack", StringComparison.Ordinal),
-            "and the order is written down where it is enforced");
+        Check(pipeline.Contains("Erst packbildung dann Einzeluploads", StringComparison.Ordinal),
+            "F-M429: the pack phase runs before the single uploads, stated where it is enforced");
+        Check(pipeline.Contains("PlanPacksFromStore(completeSeasons)", StringComparison.Ordinal),
+            "and the plan is made from the queue, before any single went up");
         Check(pipeline.Contains("brought all {Aired} episode(s)", StringComparison.Ordinal)
               && pipeline.Contains("no queue of this run was a whole season (F-M424/F-M425)", StringComparison.Ordinal),
             "every run packs only when its own queued episodes are the whole season (F-M425)");
@@ -476,12 +476,12 @@ internal static class Program
             "a season with nothing new in the queue is packed too");
         Check(coordinator.Contains("uploadSinglesOnRefusal: false", StringComparison.Ordinal),
             "a fill-only season re-sends nothing when the container is refused");
-        Check(pipeline.Contains("PlanPacksFromStore(completeSeasons, onlyArrived)", StringComparison.Ordinal),
-            "the run plans the closing packs from the store, after the loop");
-        Check(pipeline.Contains("every episode is uploaded, the container is built from the store", StringComparison.Ordinal),
-            "and says why it does so");
-        Check(pipeline.Contains("await packCoordinator.FillOnlyAsync(fillImdb, fillSeason, fillLang, fillHi, runCt)", StringComparison.Ordinal),
-            "the fill-only packs go up before the buffers are flushed");
+        Check(pipeline.Contains("await packCoordinator.FillOnlyAsync(packImdb, packSeason, packLang, packHi, runCt)", StringComparison.Ordinal),
+            "F-M429: the packs go up first, before the item loop and before the buffers are flushed");
+        Check(pipeline.Contains("_packAbsorbed.Add((packImdb, packSeason, packLang, packHi))", StringComparison.Ordinal),
+            "the pairs a pack carried are remembered for the single phase");
+        Check(pipeline.Contains("carried by the pack built in this run, no single beside it", StringComparison.Ordinal),
+            "and a covered position is skipped instead of uploaded single");
 
         // ── 8. The coordinator itself, on fakes ─────────────────────────────────
         // No network, no Jellyfin, no database: the dry run of a pack stops before the upload, and the
