@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.319",
-        "changelog": "v12.1.12.319: season packs go up before the single uploads, and covered singles are skipped (F-M429).",
+        "version": "12.1.12.320",
+        "changelog": "v12.1.12.320: release group recognition covers dot, space and bracketed spellings — 60% to 71% on the operator library (F-M430).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.319-dev/Jellyfin.Plugin.SubdlSync_12.1.12.319.zip",
-        "checksum": "bd7a0812a6abc228310fd4c92e4c529e",
-        "timestamp": "2026-11-03T06:15:20Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.320-dev/Jellyfin.Plugin.SubdlSync_12.1.12.320.zip",
+        "checksum": "ff57034f8ddfc4f1fb592459ad886530",
+        "timestamp": "2026-11-03T06:20:10Z"
       }
     ]
   }
