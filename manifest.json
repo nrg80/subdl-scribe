@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.320",
-        "changelog": "v12.1.12.320: release group recognition covers dot, space and bracketed spellings — 60% to 71% on the operator library (F-M430).",
+        "version": "12.1.12.321",
+        "changelog": "v12.1.12.321: release group also reads bracketed brands, underscore pairs and a second extension (F-M430).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.320-dev/Jellyfin.Plugin.SubdlSync_12.1.12.320.zip",
-        "checksum": "ff57034f8ddfc4f1fb592459ad886530",
-        "timestamp": "2026-11-03T06:20:10Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.321-dev/Jellyfin.Plugin.SubdlSync_12.1.12.321.zip",
+        "checksum": "307c23951f3a85a781416f5dc7097efc",
+        "timestamp": "2026-11-03T06:25:53Z"
       }
     ]
   }
