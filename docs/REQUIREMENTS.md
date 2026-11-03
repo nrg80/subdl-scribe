@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.80
-**Status:** Implementation — v12.1.12.317.
+**Version:** 2.81
+**Status:** Implementation — v12.1.12.318.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 64 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 65 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -317,6 +317,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M426 [P] (Operator-Regel 02.11.2026 „It is only investigated if the sub is not part of a pack already"):** **Eine Staffel, deren Sprachen alle schon in einem Pack liegen, wird nicht untersucht.** Die Frage „sind die eingereihten Folgen die ganze Staffel?" (F-M424/F-M425) wird deshalb erst gestellt, wenn `HasOpenLanguage` sie bejaht: für die eingereihten Folgen wird die Sprache ihrer `uploaded`-Zeilen gegen `HasPack` gehalten; ist jede Sprache bereits in einem Pack, endet die Staffel mit `queue: … every language is already inside a pack, nothing is investigated` — keine Extraktion, keine Plan-Zeile. Eine Staffel ohne jede `uploaded`-Zeile gilt als offen (es ist auch nichts gepackt). Damit entfällt die Menge an Zeilen, die im Lauf vom 02.11. nur meldeten, dass ein Pack schon existiert.
 
 **F-M427 [P] (Operator-Anweisung 03.11.2026 „Cache bei db reset bitte mit purgen"):** **Der DB-Reset löscht die Archiv-Ablage mit.** `scope=all` entfernt jetzt zusätzlich `<Datenordner>/archive-cache` über `ArchiveDiskCache.PurgeDirectory` (alle `*.zip` und liegengebliebene `*.tmp`); die Log-Zeile nennt die Zahl (`status counters zeroed with the database, N cached archive(s) purged`). Grund: ein Reset sagt „alles vergessen" — Archive weiterzuverwahren hieße, dem nächsten Lauf Dateien aus einem Zustand zu servieren, der nirgends mehr existiert. Die Ablage ist plugin-eigen und nicht Teil der Datenbank (F-M370), deshalb der eigene Aufräumschritt; `Trim()` bleibt unverändert für Alter und Größe zuständig. Andere Scopes (`upload`, `download`) lassen den Cache unberührt.
+
+**F-M428 [P] (Operator-Anweisung 03.11.2026 „Neuer default für den cache 7 tage, 256 MB"):** **Die Vorgaben der Archiv-Ablage sind jetzt 7 Tage und 256 MB** (vorher 14 Tage / 512 MB). Geändert in `PluginConfiguration` (`DownloadArchiveCacheDays = 7`, `DownloadArchiveCacheMaxMb = 256`) und in `configPage.html`, das dieselben Zahlen als Rückfall benutzt, wenn ein Feld leer ankommt. Eine Woche deckt den Fall ab, für den die Ablage gebaut wurde — ein Staffelarchiv, das die kostenlose Tagesgrenze über mehrere Läufe verteilt (F-M370) — und die Ablage bleibt klein. **Bestehende Installationen behalten ihre gespeicherten Werte**, weil die Konfiguration die Zahlen ausschreibt; die neuen Vorgaben greifen bei einer frischen Installation oder nach dem Zurücksetzen der Felder.
 
 ## 4. Download Pipeline
 

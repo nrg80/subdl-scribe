@@ -233,10 +233,10 @@ internal static class Program
             "the summary counts the hits");
 
         var cfg = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"));
-        Check(cfg.Contains("public int DownloadArchiveCacheDays { get; set; } = 14;", StringComparison.Ordinal),
-            "the default retention is 14 days");
-        Check(cfg.Contains("public int DownloadArchiveCacheMaxMb { get; set; } = 512;", StringComparison.Ordinal),
-            "the default ceiling is 512 MB");
+        Check(cfg.Contains("public int DownloadArchiveCacheDays { get; set; } = 7;", StringComparison.Ordinal),
+            "the default retention is 7 days (F-M428)");
+        Check(cfg.Contains("public int DownloadArchiveCacheMaxMb { get; set; } = 256;", StringComparison.Ordinal),
+            "the default ceiling is 256 MB (F-M428)");
 
         var page = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"));
         Check(page.Contains("id=\"DownloadArchiveCacheDays\"", StringComparison.Ordinal)
@@ -245,6 +245,9 @@ internal static class Program
         Check(page.Contains("config.DownloadArchiveCacheDays =", StringComparison.Ordinal)
               && page.Contains("config.DownloadArchiveCacheMaxMb =", StringComparison.Ordinal),
             "the config page writes them back, clamped at 0");
+        Check(page.Contains("config.DownloadArchiveCacheDays ?? 7", StringComparison.Ordinal)
+              && page.Contains("config.DownloadArchiveCacheMaxMb ?? 256", StringComparison.Ordinal),
+            "the page falls back to the new defaults, 7 days and 256 MB (F-M428)");
 
         // ── F-M427: der DB-Reset purgt die Ablage mit ──────────────────────────
         Console.WriteLine("Purge with the database reset");

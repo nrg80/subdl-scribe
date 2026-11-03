@@ -1025,8 +1025,8 @@
                         document.querySelector('#UploadContinueAfterLimit').checked = config.UploadContinueAfterLimit;
                         document.querySelector('#DownloadContinueAfterLimit').checked = config.DownloadContinueAfterLimit;
                         document.querySelector('#DownloadDryRun').checked = config.DownloadDryRun;
-                        document.querySelector('#DownloadArchiveCacheDays').value = config.DownloadArchiveCacheDays ?? 14;
-                        document.querySelector('#DownloadArchiveCacheMaxMb').value = config.DownloadArchiveCacheMaxMb ?? 512;
+                        document.querySelector('#DownloadArchiveCacheDays').value = config.DownloadArchiveCacheDays ?? 7;
+                        document.querySelector('#DownloadArchiveCacheMaxMb').value = config.DownloadArchiveCacheMaxMb ?? 256;
 
                         // F-M23 (rework 25.09.2026): the counters live in the database now, so the GUI
                         // asks the plugin API instead of the configuration.

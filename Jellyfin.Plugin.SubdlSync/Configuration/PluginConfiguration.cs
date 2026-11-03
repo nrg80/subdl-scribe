@@ -542,14 +542,18 @@ public class PluginConfiguration : BasePluginConfiguration
     /// 01.11.2026: 51 archive fetches for 45 files, 26 of them on three packs. 0 turns the disk
     /// cache off (user decision 01.11.2026, Download tab).
     /// </summary>
-    public int DownloadArchiveCacheDays { get; set; } = 14;
+    // F-M428 (operator order 03.11.2026): default lowered from 14 days to 7 — a week is enough for a
+    // season pack that the free daily limit spreads over several runs, and the cache cannot grow unbounded.
+    public int DownloadArchiveCacheDays { get; set; } = 7;
 
     /// <summary>
     /// Gets or sets the size ceiling of the archive cache in megabytes (F-M370). When the cache
     /// grows past it the oldest archives are dropped first. 0 turns the disk cache off as well —
     /// either switch at 0 disables it (user decision 01.11.2026: 512 MB default).
     /// </summary>
-    public int DownloadArchiveCacheMaxMb { get; set; } = 512;
+    // F-M428: ceiling lowered from 512 MB to 256 MB. Measured on 02.11.2026: the whole library's packs
+    // fit well below it, so the smaller ceiling costs no extra fetches.
+    public int DownloadArchiveCacheMaxMb { get; set; } = 256;
 
     /// <summary>
     /// (user decision 20.09.2026): override for the ffmpeg executable path used to
