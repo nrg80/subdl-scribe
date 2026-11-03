@@ -1301,7 +1301,6 @@ public sealed class SubdlEventDispatcher : IDisposable
             // F-M418 (operator order 02.11.2026): the fill-only way — a pack built from subtitles that
             // are already uploaded — belongs to the full-coverage runs (refetch cycle, manual button).
             // An arrival run carries only the arrivals it was started for and stays with singles.
-            bundle.Pipeline.FillOnlyPacksAllowed = !IsArrivalTrigger(trigger ?? string.Empty);
             bundle.Pipeline.ItemResult += (id, outcome) => OnUploadItemResult(_uploadQueue, id, outcome);
             _upInFlightDryRun = config.DryRun; // F-M22: the outcome handler consults this per item
             try

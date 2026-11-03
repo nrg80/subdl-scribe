@@ -415,8 +415,8 @@ internal static class Program
         Check(pipeline.Contains("erst einzelupload, dann staffelpack", StringComparison.Ordinal),
             "and the order is written down where it is enforced");
         Check(pipeline.Contains("brought all {Aired} episode(s)", StringComparison.Ordinal)
-              && pipeline.Contains("no arrival brought a whole season (F-M424)", StringComparison.Ordinal),
-            "an arrival run packs only when its own episodes are the whole season (F-M424)");
+              && pipeline.Contains("no queue of this run was a whole season (F-M424/F-M425)", StringComparison.Ordinal),
+            "every run packs only when its own queued episodes are the whole season (F-M425)");
         Check(pipeline.Contains("the rest is filled from what is already uploaded", StringComparison.Ordinal),
             "a partly queued season says that the gap is filled, not that it stays single");
         Check(pipeline.Split("await packCoordinator.AddAsync(").Length - 1 >= 2,

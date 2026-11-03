@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.77
-**Status:** Implementation — v12.1.12.314.
+**Version:** 2.78
+**Status:** Implementation — v12.1.12.315.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 61 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 62 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -310,7 +310,9 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 
 **F-M423 [P] (Operator-Auftrag 02.11.2026 „die vorhandenen SubDL-Einträge einmal in die Liste eintragen"):** **Bereits veröffentlichte Uploads lassen sich in die Registry übernehmen** (`POST /Plugins/SubdlSync/AdoptUploads`). Die Vollständigkeitsprüfung einer Staffel liest ausschließlich `uploaded`-Zeilen dieser Registry — Zeilen, die nur dieses Plugin schreibt. Alles, was ein früherer Seeder unter demselben Konto veröffentlicht hat, ist damit unsichtbar: am 02.11.2026 hatte Person of Interest S1 für **23 von 23** Folgen keine einzige Zeile, obwohl auf SubDL 14 englische Einzel-Einträge lagen, und For All Mankind S1–S5 (je 10 von 10 Folgen) ergab keinen Pack. Der Endpunkt nimmt je Eintrag `{path, subPos, language, subdlId, hearingImpaired}` und schreibt genau die Zeile, die der Uploader geschrieben hätte: `Status = uploaded` mit der Id, die die Einzelfolge später löschbar macht (F-M412). Er lädt nichts hoch, löscht nichts und spricht SubDL nicht an — er trägt nur nach, was dieses Konto ohnehin veröffentlicht hat. Die Antwort zählt `adopted`, `missingFile`, `unreadable`, `missingId`, `badPosition`; die Log-Zeile nennt dieselben Zahlen mit der Dateizahl.
 
-**F-M424 [P] (Operator-Anweisung 02.11.2026 „on arrival to investigate first if the queued items can form a pack. If so pls do, but only with the queued items"):** **Ein Arrival-Lauf prüft, ob seine eigenen Items eine Staffel schließen, und baut dann den Pack ausschließlich aus ihnen.** F-M418 hatte den Arrival-Lauf vollständig aus der Pack-Bildung genommen; diese Anweisung ersetzt das. Ablauf: nach der Item-Schleife wird je (Serie, Staffel) verglichen, ob die **in diesem Lauf eingereihten** Folgen die ausgestrahlte Folgenmenge abdecken. Ja → `season pack closing` aus genau diesen Folgen (`PlanPacksFromStore` bekommt die erlaubte Folgenmenge als Schnitt, `FillOnlyAsync` läuft über dieselbe Menge). Nein → `arrival: … brought {Have} of {Aired} episode(s)`, kein Pack, die Folgen gehen wie bisher einzeln hoch. Der Schnitt ist die eigentliche Zusage: die Bibliothek hält die Staffel meist vollständig, ohne ihn würde der Pack Mitglieder enthalten, die dieser Lauf nie angefasst hat — also Zeilen aus dem Store statt aus der Ankunft. Nicht-Arrival-Läufe (Refetch, Manual, Scheduled) sind unverändert: dort gilt weiter F-M420 (erst Einzelupload, dann Staffelpack aus dem Store).
+**F-M424 [P] (durch F-M425 auf alle Trigger ausgeweitet) (Operator-Anweisung 02.11.2026 „on arrival to investigate first if the queued items can form a pack. If so pls do, but only with the queued items"):** **Ein Arrival-Lauf prüft, ob seine eigenen Items eine Staffel schließen, und baut dann den Pack ausschließlich aus ihnen.** F-M418 hatte den Arrival-Lauf vollständig aus der Pack-Bildung genommen; diese Anweisung ersetzt das. Ablauf: nach der Item-Schleife wird je (Serie, Staffel) verglichen, ob die **in diesem Lauf eingereihten** Folgen die ausgestrahlte Folgenmenge abdecken. Ja → `season pack closing` aus genau diesen Folgen (`PlanPacksFromStore` bekommt die erlaubte Folgenmenge als Schnitt, `FillOnlyAsync` läuft über dieselbe Menge). Nein → `arrival: … brought {Have} of {Aired} episode(s)`, kein Pack, die Folgen gehen wie bisher einzeln hoch. Der Schnitt ist die eigentliche Zusage: die Bibliothek hält die Staffel meist vollständig, ohne ihn würde der Pack Mitglieder enthalten, die dieser Lauf nie angefasst hat — also Zeilen aus dem Store statt aus der Ankunft. Nicht-Arrival-Läufe (Refetch, Manual, Scheduled) sind unverändert: dort gilt weiter F-M420 (erst Einzelupload, dann Staffelpack aus dem Store).
+
+**F-M425 [P] (Operator-Anweisung 02.11.2026 „Same with refetch and manual queue"):** **Die Pack-Regel gilt für jeden Trigger gleich.** Ein Lauf — Ankunft, Refetch, Manual, geplant — stellt dieselbe eine Frage: Sind die in **diesem** Lauf eingereihten Folgen die ganze Staffel? Ja → Pack aus genau diesen Items. Nein → kein Pack, die Folgen gehen einzeln hoch. Damit entfällt der bisherige Fill-only-Weg (`FillOnlyPacksAllowed`, F-M418): er baute Container aus Zeilen, die ein früherer Lauf im Store hinterlassen hatte, ohne dass dieser Lauf eine dieser Folgen angefasst hätte. Die Property ist entfernt, `SubdlEventDispatcher` setzt sie nicht mehr, und der Schnitt (`onlyEpisodes`) wird für jeden Lauf an Plan und Füller übergeben. Die Log-Zeilen heißen jetzt `queue: … brought {Have} of {Aired} episode(s)` bzw. `queue: … brought all {Aired} episode(s)` — der Trigger ist für die Entscheidung ohne Belang.
 
 ## 4. Download Pipeline
 

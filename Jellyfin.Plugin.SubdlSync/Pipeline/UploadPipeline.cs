@@ -243,13 +243,11 @@ public sealed class UploadPipeline : IPackFiller
     /// </summary>
     public bool IsArrivalRun { get; set; }
 
-    /// <summary>
-    /// F-M418 (operator order 02.11.2026): true only for the runs that may build a season pack out of
-    /// subtitles that are ALREADY uploaded — the fill-only way. Those runs are the refetch cycle and
-    /// the manual button; an arrival run keeps to single uploads, because it was started for what
-    /// arrived, not for a container assembled from material no arrival touched.
-    /// </summary>
-    public bool FillOnlyPacksAllowed { get; set; } = true;
+    // F-M425 (operator order 02.11.2026): there is no per-trigger difference left. Every run — arrival,
+    // refetch, manual, scheduled — asks the SAME question: are the episodes this run queued the whole
+    // season? If yes, a pack is built out of those items and nothing else; if no, the run stays a single
+    // uploader. The old fill-only route (a container assembled from what an earlier run had left in the
+    // store) is gone: it produced packs out of material no run had touched.
 
     // ── F-M111: queue-driven operation (user decision 12.09.2026) ───────────
     // Same contract as the download pipeline: QueueFilter restricts the item
@@ -466,7 +464,7 @@ public sealed class UploadPipeline : IPackFiller
         // the whole LIBRARY is complete, only whether the episodes that arrived in THIS run are the
         // whole season. If they are, the pack is built out of exactly those items and nothing else is
         // pulled in from the store; if they are not, the run stays what it was, a single uploader.
-        if (_config.UploadSeasonPacks && !FillOnlyPacksAllowed)
+        if (_config.UploadSeasonPacks)
         {
             completeSeasons = await CompleteSeasonsAsync(runCt).ConfigureAwait(false);
             var queued = QueuedEpisodes(items);
@@ -484,7 +482,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] arrival: {Imdb} S{Season} brought {Have} of {Aired} episode(s) — the queued items are not the whole season, so no pack is built from this arrival.",
+                        "[SubDL] queue: {Imdb} S{Season} brought {Have} of {Aired} episode(s) — the queued items are not the whole season, so no pack is built from this run.",
                         entry.Key.Item1, entry.Key.Item2, have.Count, aired.Count);
                     continue;
                 }
@@ -492,7 +490,7 @@ public sealed class UploadPipeline : IPackFiller
                 arrivalSeasons[entry.Key] = have;
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] arrival: {Imdb} S{Season} brought all {Aired} episode(s) — the pack is built from the queued items of this run only.",
+                    "[SubDL] queue: {Imdb} S{Season} brought all {Aired} episode(s) — the pack is built from the queued items of this run only.",
                     entry.Key.Item1, entry.Key.Item2, aired.Count);
             }
 
@@ -501,7 +499,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] no season pack this run — no arrival brought a whole season (F-M424).");
+                    "[SubDL] no season pack this run — no queue of this run was a whole season (F-M424/F-M425).");
             }
 
             if (completeSeasons.Count > 0)
@@ -1679,13 +1677,12 @@ public sealed class UploadPipeline : IPackFiller
             // F-M424: an arrival run may only use the episodes that arrived in it — the restriction is
             // handed to the plan and to the filler, so a season the library holds in full is never
             // completed from rows this run did not produce.
-            IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlySet<int>>? onlyArrived = null;
-            if (!FillOnlyPacksAllowed)
-            {
-                onlyArrived = completeSeasons.ToDictionary(
-                    e => e.Key,
-                    e => (IReadOnlySet<int>)e.Value.ToHashSet());
-            }
+            // F-M425 (operator order 02.11.2026: "same with refetch and manual queue"): the cut applies to
+            // every trigger. A pack is only ever built out of the episodes this run queued — never out of
+            // store rows an earlier run left behind, whichever trigger started the run.
+            var onlyArrived = completeSeasons.ToDictionary(
+                e => e.Key,
+                e => (IReadOnlySet<int>)e.Value.ToHashSet());
 
             foreach (var (fillImdb, fillSeason, fillLang, fillHi) in PlanPacksFromStore(completeSeasons, onlyArrived))
             {
