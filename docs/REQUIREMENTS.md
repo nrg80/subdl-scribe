@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.86
-**Status:** Implementation — v12.1.12.323.
+**Version:** 2.87
+**Status:** Implementation — v12.1.12.324.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 69 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 70 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -327,6 +327,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M431 [P] (Operator-Anweisung 03.11.2026 „wenn eine sprache durchfällt und eine weitere da ist, diese auch versuchen zu verwenden"):** **Der Pack-Füller versucht jede Spur der gesuchten Sprache, nicht nur die erste.** Bisher nahm `FindFillStream` die erste eingebettete Dialogspur, die zu Sprache und HI-Variante passt; fiel sie durch — Extraktion, Qualitätstor, eine falsche Sprachangabe im Tag, oder Text, der nur aus einem Download bekannt ist —, galt die Folge als nicht packbar, obwohl eine zweite Spur derselben Sprache in derselben Datei lag. Jetzt sammelt `FindFillStreams` alle passenden Positionen (in Dateireihenfolge, aus derselben Aufzählung, aus der auch die Extraktion liest, damit eine Position in beiden Stellen dasselbe bedeutet) und `FillFromPosition` prüft sie einzeln. Der erste Track, der alle Tore besteht, wird das Mitglied; jeder verworfene nennt seinen Grund und reicht weiter (`trying the next track of this language`), ein gelungener Nachrücker wird benannt (`track {Nth} of {Count} joins the pack`). Erst wenn alle Spuren der Sprache scheitern, bleibt die Folge mit `none of the {Count} track(s) of this language qualifies` draußen.
 
 **F-M432 [P] (Operator-Anweisung 03.11.2026 „Bau für filme denselben id grep wie für packs oder Einzelepisoden auch"):** **Die Upload-Id wird auch aus der Veröffentlichungsliste geholt.** Die Id ist der einzige Griff, mit dem ein eigener Eintrag wieder gelöscht werden kann (ersetzt ein Pack eine Einzelfolge), und sie stand bisher nur in `/user/mySubtitles` — einer Liste, die nur noch nicht veröffentlichte Einsendungen führt und deshalb leer ist, sobald SubDL alles freigegeben hat. Ein Film hat zusätzlich keine Staffel und keine Folgennummer, über die sich ein Eintrag wiederfinden ließe, hatte also gar keine Id. Neu liest `ListMyPublishedSubtitlesAsync` die Veröffentlichungsliste (neueste zuerst, seitenweise, wie die API sie liefert); `ResolveOwnUploadIdAsync` und `ResolveOwnPackIdAsync` fragen sie, wenn die Einreichungsliste nichts hergibt, und gleichen über den **Release-Namen** ab — denselben Griff, den Pack und Einzelfolge schon benutzen. Die Log-Zeile nennt die Quelle (`… taken from myPublishedSubtitles for …`). Der Eintragsparser versteht dafür auch die Schreibweisen der Veröffentlichungsliste (`createdAt`, Staffel als `s`).
+
+**F-M433 [P] (Operator-Anweisung 03.11.2026 „wieso geht tracker einzeln hoch?"):** **Der Store entscheidet nicht allein — die Dateien sind der zweite Zeuge.** Die Vollständigkeitsprüfung je Sprache fragte bisher nur den Store, also das, was schon hochgeladen oder beobachtet wurde. Eine Staffel, deren Texte zum **ersten** Mal hochgehen, kennt der Store nicht: er meldete „0 von 13 Folgen tragen diese Sprache", der Pack fiel aus, und die Einzelphase lud jede Folge direkt aus ihrer Datei hoch — genau das Bild „Tracker geht einzeln hoch". Neu fragt der Füller die Dateien: `FileLanguages` nennt die Sprachpaare, die in den Spuren einer Staffel liegen (Spurlisten, keine Extraktion), `FileCarriesLanguage` beantwortet die Frage je Folge. Der Pack-Plan nimmt seine Sprachen jetzt aus **Store und Dateien**, und die Vollständigkeit gilt als gegeben, wenn **entweder** der Store **oder** die Dateien die Sprache in jeder ausgestrahlten Folge zeigen; nur wenn beide sie nicht finden, bleibt es beim Skip (Log nennt dann beide Zahlen). Der Fall, für den F-M416 gedacht war — es gibt überhaupt keine Spur in dieser Sprache — spart weiterhin die Extraktion, weil eine Spurliste nichts kostet.
 
 ## 4. Download Pipeline
 

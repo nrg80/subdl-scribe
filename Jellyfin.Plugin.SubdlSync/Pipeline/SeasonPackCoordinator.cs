@@ -326,11 +326,35 @@ public sealed class SeasonPackCoordinator
             var withLanguage = _registry.EpisodesWithLanguage(imdbId, season, lang, hi);
             if (!SeasonPack.IsComplete(aired, withLanguage))
             {
+                // F-M433 (operator order 03.11.2026, "wieso geht Tracker einzeln hoch?"): the store only
+                // knows what was already uploaded or observed. A season whose texts are going up for the
+                // FIRST time looked like a season without that language — the pack was refused and every
+                // episode went up as a single, straight from its file. So the files are asked before the
+                // pack is dropped; looking at a stream list costs no extraction, which is why F-M416's
+                // saving still holds for the case it was meant for (no track at all).
+                var carried = new HashSet<int>();
+                foreach (int episode in SeasonPack.AiredNumbers(aired))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (_filler.FileCarriesLanguage(imdbId, season, episode, lang, hi))
+                    {
+                        carried.Add(episode);
+                    }
+                }
+
+                if (!SeasonPack.IsComplete(aired, carried))
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Aired} episode(s) carry this language in the store and {Carried} of {Aired} in their own file — no pack for it, this pass sends nothing.",
+                        imdbId, season, lang, withLanguage.Count, aired.Count, carried.Count);
+                    return;
+                }
+
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Aired} episode(s) carry this language in the store — no pack for it, this pass sends nothing.",
-                    imdbId, season, lang, withLanguage.Count, aired.Count);
-                return;
+                    "[SubDL] season pack planned from the files — {Imdb} S{Season} [{Lang}]: the store knows {Have} of {Aired}, but all {Carried} file(s) carry the language themselves (F-M433).",
+                    imdbId, season, lang, withLanguage.Count, aired.Count, carried.Count);
             }
         }
 

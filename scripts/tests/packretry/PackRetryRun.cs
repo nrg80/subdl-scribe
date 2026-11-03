@@ -352,7 +352,7 @@ internal static class Program
         var groupAt = upload.IndexOf("SeasonPack.ReleaseGroup(item.Path)", StringComparison.Ordinal);
         Check(langAt >= 0 && groupAt > langAt,
             "F-M417: languages and packs are looked up before the release group is read");
-        Check(upload.Contains("not every aired episode carries this language in the store", StringComparison.Ordinal),
+        Check(upload.Contains("neither the store nor the files of every aired episode carry this language", StringComparison.Ordinal),
             "F-M417: an incomplete language ends before any extraction");
 
         // ── 24. F-M421: die Upload-Id steht immer im Log ────────────────────────
@@ -424,6 +424,19 @@ internal static class Program
             "and only when every track of that language failed does the episode stay out of the pack");
         Check(upload.Contains("track {Nth} of {Count} joins the pack", StringComparison.Ordinal),
             "a fallback that works is named in the log");
+
+        // ── 31. F-M433: der Store entscheidet nicht allein — die Dateien sind der zweite Zeuge ─
+        Console.WriteLine("31. The files are asked before a pack is dropped");
+        var coordinator = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "SeasonPackCoordinator.cs"));
+        Check(coordinator.Contains("_filler.FileCarriesLanguage(imdbId, season, episode, lang, hi)", StringComparison.Ordinal),
+            "F-M433: a season the store does not know is checked against its files before the pack is dropped");
+        Check(coordinator.Contains("the store knows {Have} of {Aired}, but all {Carried} file(s) carry the language themselves", StringComparison.Ordinal),
+            "and the run log says the plan came from the files");
+        Check(upload.Contains("FileLanguages(entry.Key.Item1, entry.Key.Item2)", StringComparison.Ordinal)
+              && upload.Contains("SeasonCarriesInFiles(entry.Key.Item1, entry.Key.Item2, aired, language, hi)", StringComparison.Ordinal),
+            "F-M433: the plan takes its languages from store AND files, and accepts the files as proof of a whole season");
+        Check(upload.Contains("public IReadOnlyCollection<(string Language, bool HearingImpaired)> FileLanguages", StringComparison.Ordinal),
+            "the filler can name the languages a season's files carry without extracting anything");
 
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0

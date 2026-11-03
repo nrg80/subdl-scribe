@@ -96,6 +96,18 @@ internal static class Program
 
         public List<int> Calls { get; } = new();
 
+        /// <summary>F-M433: what the files of a season say they carry.</summary>
+        public HashSet<(string Language, bool HearingImpaired)> InFiles { get; } = new()
+        {
+            ("EN", false), ("DE", false),
+        };
+
+        public bool FileCarriesLanguage(string imdbId, int season, int episode, string lang, bool hearingImpaired)
+            => InFiles.Contains((lang, hearingImpaired));
+
+        public IReadOnlyCollection<(string Language, bool HearingImpaired)> FileLanguages(string imdbId, int season)
+            => InFiles;
+
         public Task<SeasonPackCoordinator.Candidate?> FillAsync(
             string imdbId, int season, int episode, string lang, bool hearingImpaired, CancellationToken ct)
         {

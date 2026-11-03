@@ -2865,8 +2865,22 @@ public sealed class UploadPipeline : IPackFiller
             // does any of them cover every aired episode? Only then are release groups worth reading,
             // and only then does anything get extracted.
             var known = Registry.LanguagesInSeason(entry.Key.Item1, entry.Key.Item2);
+
+            // F-M433 (operator order 03.11.2026, "wieso geht Tracker einzeln hoch?"): the store names the
+            // languages it has already seen. A season whose texts go up for the FIRST time names none, so
+            // the plan refused the pack and the single phase sent 13 episodes one by one. The files are
+            // asked as well — a stream list costs no extraction — and the pair is planned from them.
+            var pairs = new List<(string Language, bool HearingImpaired)>(known);
+            foreach (var pair in FileLanguages(entry.Key.Item1, entry.Key.Item2))
+            {
+                if (!pairs.Contains(pair))
+                {
+                    pairs.Add(pair);
+                }
+            }
+
             var open = new List<(string Language, bool HearingImpaired)>();
-            foreach (var (language, hi) in known)
+            foreach (var (language, hi) in pairs)
             {
                 if (Registry.HasPack(entry.Key.Item1, entry.Key.Item2, language, hi))
                 {
@@ -2877,7 +2891,11 @@ public sealed class UploadPipeline : IPackFiller
                     continue;
                 }
 
-                if (SeasonPack.IsComplete(aired, Registry.EpisodesWithLanguage(entry.Key.Item1, entry.Key.Item2, language, hi)))
+                // F-M433: the store's count decides nothing on its own — the files are the second witness.
+                bool whole = SeasonPack.IsComplete(
+                    aired, Registry.EpisodesWithLanguage(entry.Key.Item1, entry.Key.Item2, language, hi))
+                    || SeasonCarriesInFiles(entry.Key.Item1, entry.Key.Item2, aired, language, hi);
+                if (whole)
                 {
                     open.Add((language, hi));
                 }
@@ -2885,12 +2903,12 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: not every aired episode carries this language in the store — no pack for it, the single uploads of this run are unaffected.",
+                        "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: neither the store nor the files of every aired episode carry this language — no pack for it, the single uploads of this run are unaffected.",
                         entry.Key.Item1, entry.Key.Item2, language);
                 }
             }
 
-            if (known.Count > 0 && open.Count == 0)
+            if (pairs.Count > 0 && open.Count == 0)
             {
                 continue;
             }
@@ -3141,6 +3159,49 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="hearingImpaired">HI/SDH variant the pack is built for.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The candidate, or null when the episode cannot join the pack.</returns>
+    /// <summary>
+    /// F-M433: do the files of a season carry this language in every aired episode? Cheap — stream lists,
+    /// no extraction. Used where a pack would otherwise be refused on the store's word alone.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="aired">Aired episodes.</param>
+    /// <param name="lang">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>True when every aired episode's file carries the language.</returns>
+    private bool SeasonCarriesInFiles(
+        string imdbId, int season, IEnumerable<int> aired, string lang, bool hearingImpaired)
+    {
+        var carried = new HashSet<int>();
+        foreach (int episode in SeasonPack.AiredNumbers(aired))
+        {
+            if (FileCarriesLanguage(imdbId, season, episode, lang, hearingImpaired))
+            {
+                carried.Add(episode);
+            }
+        }
+
+        return SeasonPack.IsComplete(aired, carried);
+    }
+
+    /// <inheritdoc />
+    public bool FileCarriesLanguage(string imdbId, int season, int episode, string lang, bool hearingImpaired)
+    {
+        BaseItem? item = FindSeasonEpisode(imdbId, season, episode);
+        return item?.Path != null && FindFillStreams(item, lang, hearingImpaired).Count > 0;
+    }
+
+    /// <summary>
+    /// F-M389 (operator order 02.11.2026): one missing episode of a pack, taken from the subtitle
+    /// that is already uploaded for it.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number the buffer does not cover.</param>
+    /// <param name="lang">SubDL language code the pack is built for.</param>
+    /// <param name="hearingImpaired">HI/SDH variant the pack is built for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The candidate, or null when the episode cannot join the pack.</returns>
     public async Task<SeasonPackCoordinator.Candidate?> FillAsync(
         string imdbId, int season, int episode, string lang, bool hearingImpaired, CancellationToken ct)
     {
@@ -3333,6 +3394,79 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="episode">Episode number.</param>
     /// <returns>The episode item, or null.</returns>
     private BaseItem? FindSeasonEpisode(string imdbId, int season, int episode)
+        => SeasonItems(imdbId, season).FirstOrDefault(c => IsSeasonEpisode(c, imdbId, season, episode));
+
+    /// <summary>
+    /// F-M433: the language pairs the FILES of a season carry, read from the stream lists (no extraction).
+    /// <para>
+    /// The store can only name languages it has seen; a season that is about to be uploaded for the first
+    /// time names none. This is the other witness, and the pack plan is allowed to start from it.
+    /// </para>
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <returns>The pairs found in the files of that season.</returns>
+    public IReadOnlyCollection<(string Language, bool HearingImpaired)> FileLanguages(string imdbId, int season)
+    {
+        var pairs = new HashSet<(string Language, bool HearingImpaired)>();
+        foreach (var item in SeasonItems(imdbId, season))
+        {
+            if (item is not Episode episode
+                || (episode.ParentIndexNumber ?? -1) != season
+                || string.IsNullOrWhiteSpace(episode.Path))
+            {
+                continue;
+            }
+
+            string? seriesImdb = null;
+            episode.Series?.ProviderIds?.TryGetValue("Imdb", out seriesImdb);
+            if (!string.Equals(seriesImdb, imdbId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            IReadOnlyList<MediaStream>? streams;
+            try
+            {
+                streams = episode.GetMediaStreams();
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+
+            if (streams == null)
+            {
+                continue;
+            }
+
+            foreach (var stream in streams)
+            {
+                if (stream.Type != MediaStreamType.Subtitle
+                    || stream.IsExternal
+                    || !Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream(stream))
+                {
+                    continue;
+                }
+
+                string? code = LanguageMapper.MapToSubdl(stream.Language);
+                if (!string.IsNullOrWhiteSpace(code))
+                {
+                    pairs.Add((code!, Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream)));
+                }
+            }
+        }
+
+        return pairs;
+    }
+
+    /// <summary>
+    /// F-M433: the episodes of a season, cached per season folder.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <returns>The candidate items of that season.</returns>
+    private List<BaseItem> SeasonItems(string imdbId, int season)
     {
         var key = (imdbId, season);
         if (!_seasonEpisodes.TryGetValue(key, out var episodes))
@@ -3361,7 +3495,7 @@ public sealed class UploadPipeline : IPackFiller
             _seasonEpisodes[key] = episodes;
         }
 
-        return episodes.FirstOrDefault(c => IsSeasonEpisode(c, imdbId, season, episode));
+        return episodes;
     }
 
     /// <summary>

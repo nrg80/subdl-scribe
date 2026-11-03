@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,4 +36,31 @@ public interface IPackFiller
     /// <returns>The candidate, or null when this episode cannot join the pack.</returns>
     Task<SeasonPackCoordinator.Candidate?> FillAsync(
         string imdbId, int season, int episode, string lang, bool hearingImpaired, CancellationToken ct);
+
+    /// <summary>
+    /// F-M433 (operator order 03.11.2026, "wieso geht Tracker einzeln hoch?"): says whether the episode's
+    /// FILE carries an embedded track of this language and variant.
+    /// <para>
+    /// The store only knows what was already uploaded or observed, so a season whose texts are going up
+    /// for the FIRST time is unknown to it — the completeness gate read that as "the language is missing"
+    /// and refused the pack, while the single phase uploaded every episode straight from its file. The
+    /// file is the better witness and looking at the stream list costs no extraction.
+    /// </para>
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="lang">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>True when at least one embedded track of that language and variant exists.</returns>
+    bool FileCarriesLanguage(string imdbId, int season, int episode, string lang, bool hearingImpaired);
+
+    /// <summary>
+    /// F-M433: the language pairs the files of a season carry. The pack plan starts from the store's
+    /// languages; this adds the ones only the files know, so a first-time season can still be a pack.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <returns>The pairs found in the files of that season.</returns>
+    IReadOnlyCollection<(string Language, bool HearingImpaired)> FileLanguages(string imdbId, int season);
 }
