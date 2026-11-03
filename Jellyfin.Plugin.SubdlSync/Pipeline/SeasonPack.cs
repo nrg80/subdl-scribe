@@ -30,6 +30,18 @@ public static partial class SeasonPack
     public readonly record struct RunItem(string Id, string? ImdbId, int Season, int Episode);
 
     /// <summary>
+    /// F-M435 (operator order 03.11.2026, "Log bitte korrigieren"): the language tag the season-pack
+    /// log lines print. "EN" alone named two different things — the SDH text and the non-HI text of
+    /// the same language are separate rows and separate packs, and the log made them look like one.
+    /// Every pack line goes through here so none can print the bare language again.
+    /// </summary>
+    /// <param name="language">Language code as stored, e.g. EN.</param>
+    /// <param name="hearingImpaired">Whether the pack carries the hearing-impaired variant.</param>
+    /// <returns>The tag to print inside the brackets.</returns>
+    public static string LangTag(string language, bool hearingImpaired)
+        => language + (hearingImpaired ? " HI" : " non-HI");
+
+    /// <summary>
     /// F-M373: the order a run works in. A season that goes up as a pack is closed in one go — its
     /// queued episodes run consecutively and in episode order — so the buffer never outlives a
     /// season and no season waits for the end of the run. Everything else keeps the order it had.

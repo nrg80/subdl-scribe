@@ -2898,7 +2898,7 @@ public sealed class UploadPipeline : IPackFiller
                     LogUtil.Normal(
                         _logger,
                         "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: already up as a pack, nothing is extracted.",
-                        entry.Key.Item1, entry.Key.Item2, language);
+                        entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(language, hi));
                     continue;
                 }
 
@@ -2915,7 +2915,7 @@ public sealed class UploadPipeline : IPackFiller
                     LogUtil.Normal(
                         _logger,
                         "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: neither the store nor the files of every aired episode carry this language — no pack for it, the single uploads of this run are unaffected.",
-                        entry.Key.Item1, entry.Key.Item2, language);
+                        entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(language, hi));
                 }
             }
 
@@ -3236,7 +3236,7 @@ public sealed class UploadPipeline : IPackFiller
             LogUtil.Normal(
                 _logger,
                 "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — the episode is not in the library, it does not join the pack.",
-                imdbId, season, episode, lang);
+                imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
             return null;
         }
 
@@ -3252,7 +3252,7 @@ public sealed class UploadPipeline : IPackFiller
             LogUtil.Normal(
                 _logger,
                 "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — no embedded text track for this language and variant, it does not join the pack.",
-                imdbId, season, episode, lang);
+                imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
             return null;
         }
 
@@ -3285,7 +3285,7 @@ public sealed class UploadPipeline : IPackFiller
                     LogUtil.Normal(
                         _logger,
                         "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — track {Nth} of {Count} joins the pack, the tracks before it did not (F-M431).",
-                        imdbId, season, episode, lang, attempt + 1, fillPositions.Count);
+                        imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), attempt + 1, fillPositions.Count);
                 }
 
                 return member;
@@ -3296,14 +3296,14 @@ public sealed class UploadPipeline : IPackFiller
                 LogUtil.Normal(
                     _logger,
                     "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — track {Nth} of {Count} does not qualify ({Reason}), trying the next track of this language (F-M431).",
-                    imdbId, season, episode, lang, attempt + 1, fillPositions.Count, reason);
+                    imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), attempt + 1, fillPositions.Count, reason);
             }
         }
 
         LogUtil.Normal(
             _logger,
             "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — none of the {Count} track(s) of this language qualifies ({Reason}), it does not join the pack.",
-            imdbId, season, episode, lang, fillPositions.Count, reason);
+            imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), fillPositions.Count, reason);
         return null;
     }
 
@@ -3384,7 +3384,7 @@ public sealed class UploadPipeline : IPackFiller
             LogUtil.Normal(
                 _logger,
                 "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — first publication: the pack carries this text up, no single went up before it (F-M429).",
-                imdbId, season, episode, lang);
+                imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
         }
 
         string? mediaHash = proofMediaHash;
@@ -3880,14 +3880,14 @@ public sealed class UploadPipeline : IPackFiller
                     LogUtil.Normal(
                         _logger,
                         "[SubDL] season pack plan: {Imdb} S{Season} [{Lang}] — already inside a pack, nothing is re-sent.",
-                        entry.Key.Item1, entry.Key.Item2, pair.Key.Lang);
+                        entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(pair.Key.Lang, pair.Key.Hi));
                     continue;
                 }
 
                 LogUtil.Normal(
                     _logger,
                     "[SubDL] season pack closing: {Imdb} S{Season} [{Lang}] — every episode is uploaded, the container is built from the store.",
-                    entry.Key.Item1, entry.Key.Item2, pair.Key.Lang);
+                    entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(pair.Key.Lang, pair.Key.Hi));
                 planned.Add((entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi));
             }
 
