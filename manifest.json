@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.313",
-        "changelog": "v12.1.12.313: already published uploads can be adopted into the registry (POST /Plugins/SubdlSync/AdoptUploads) so seasons the seeder filled become packable.",
+        "version": "12.1.12.314",
+        "changelog": "v12.1.12.314: an arrival run builds a pack when the episodes it brought are the whole season, and only out of those queued items (F-M424).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.313-dev/Jellyfin.Plugin.SubdlSync_12.1.12.313.zip",
-        "checksum": "d63d6dfbbd7f771b76203c47d2d45c31",
-        "timestamp": "2026-11-02T18:31:51Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.314-dev/Jellyfin.Plugin.SubdlSync_12.1.12.314.zip",
+        "checksum": "4621ca133d69e4dea451871dc25707ae",
+        "timestamp": "2026-11-03T04:36:30Z"
       }
     ]
   }
