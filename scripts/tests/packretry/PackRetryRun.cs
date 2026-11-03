@@ -393,6 +393,12 @@ internal static class Program
               && upload.Contains("IReadOnlySet<int>>? onlyEpisodes = null", StringComparison.Ordinal),
             "F-M424: the pack plan and the filler are cut to the arrived episodes");
 
+        // ── 28. F-M426: eine vollständig gepackte Staffel wird gar nicht erst untersucht ─
+        Console.WriteLine("28. A fully packed season is not investigated");
+        Check(upload.Contains("HasOpenLanguage(", StringComparison.Ordinal)
+              && upload.Contains("every language is already inside a pack, nothing is investigated", StringComparison.Ordinal),
+            "F-M426: the pack question is asked before the queued-versus-aired comparison");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

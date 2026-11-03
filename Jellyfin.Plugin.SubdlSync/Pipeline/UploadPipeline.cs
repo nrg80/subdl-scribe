@@ -487,6 +487,16 @@ public sealed class UploadPipeline : IPackFiller
                     continue;
                 }
 
+                // F-M426: only investigated when something is still open — a fully packed season is not.
+                if (!HasOpenLanguage(entry.Key, have))
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] queue: {Imdb} S{Season} — every language is already inside a pack, nothing is investigated.",
+                        entry.Key.Item1, entry.Key.Item2);
+                    continue;
+                }
+
                 arrivalSeasons[entry.Key] = have;
                 LogUtil.Normal(
                     _logger,
@@ -3303,6 +3313,68 @@ public sealed class UploadPipeline : IPackFiller
     /// </summary>
     /// <param name="items">The run's items.</param>
     /// <returns>Episode numbers per (series, season).</returns>
+    /// <summary>
+    /// F-M426 (operator rule 02.11.2026: "It is only investigated if the sub is not part of a pack already"):
+    /// answers whether a season still has a language that is NOT inside a pack.
+    /// <para>
+    /// Asked BEFORE the queued-versus-aired comparison, so a season that is fully packed is not
+    /// investigated at all: no hash look beyond this one, no extraction, no plan line. A season whose
+    /// episodes carry no uploaded row yet counts as open — there is nothing packed about it either.
+    /// </para>
+    /// </summary>
+    /// <param name="key">Series and season.</param>
+    /// <param name="episodes">The episode numbers this run queued for that season.</param>
+    /// <returns>True when at least one language still lacks a pack.</returns>
+    private bool HasOpenLanguage((string ImdbId, int Season) key, IReadOnlyCollection<int> episodes)
+    {
+        if (!_completeSeasonItems.TryGetValue(key, out var items) || items.Count == 0)
+        {
+            return true;
+        }
+
+        bool sawRow = false;
+        foreach (var item in items)
+        {
+            int number = item.IndexNumber ?? 0;
+            if (number <= 0 || !episodes.Contains(number))
+            {
+                continue;
+            }
+
+            string? path = item.Path;
+            string? mediaHash;
+            try
+            {
+                mediaHash = string.IsNullOrWhiteSpace(path) ? null : MediaHashFor(path);
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(mediaHash))
+            {
+                continue;
+            }
+
+            foreach (var row in Registry.GetEmbeds(mediaHash))
+            {
+                if (row.Status != SubtitleStatus.Uploaded || row.Forced == true)
+                {
+                    continue;
+                }
+
+                sawRow = true;
+                if (!Registry.HasPack(key.ImdbId, key.Season, row.Language, row.HearingImpaired ?? false))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return !sawRow;
+    }
+
     private Dictionary<(string ImdbId, int Season), List<int>> QueuedEpisodes(IReadOnlyList<BaseItem> items)
     {
         var queued = new Dictionary<(string ImdbId, int Season), List<int>>();

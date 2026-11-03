@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.78
-**Status:** Implementation — v12.1.12.315.
+**Version:** 2.79
+**Status:** Implementation — v12.1.12.316.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 62 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 63 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -313,6 +313,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M424 [P] (durch F-M425 auf alle Trigger ausgeweitet) (Operator-Anweisung 02.11.2026 „on arrival to investigate first if the queued items can form a pack. If so pls do, but only with the queued items"):** **Ein Arrival-Lauf prüft, ob seine eigenen Items eine Staffel schließen, und baut dann den Pack ausschließlich aus ihnen.** F-M418 hatte den Arrival-Lauf vollständig aus der Pack-Bildung genommen; diese Anweisung ersetzt das. Ablauf: nach der Item-Schleife wird je (Serie, Staffel) verglichen, ob die **in diesem Lauf eingereihten** Folgen die ausgestrahlte Folgenmenge abdecken. Ja → `season pack closing` aus genau diesen Folgen (`PlanPacksFromStore` bekommt die erlaubte Folgenmenge als Schnitt, `FillOnlyAsync` läuft über dieselbe Menge). Nein → `arrival: … brought {Have} of {Aired} episode(s)`, kein Pack, die Folgen gehen wie bisher einzeln hoch. Der Schnitt ist die eigentliche Zusage: die Bibliothek hält die Staffel meist vollständig, ohne ihn würde der Pack Mitglieder enthalten, die dieser Lauf nie angefasst hat — also Zeilen aus dem Store statt aus der Ankunft. Nicht-Arrival-Läufe (Refetch, Manual, Scheduled) sind unverändert: dort gilt weiter F-M420 (erst Einzelupload, dann Staffelpack aus dem Store).
 
 **F-M425 [P] (Operator-Anweisung 02.11.2026 „Same with refetch and manual queue"):** **Die Pack-Regel gilt für jeden Trigger gleich.** Ein Lauf — Ankunft, Refetch, Manual, geplant — stellt dieselbe eine Frage: Sind die in **diesem** Lauf eingereihten Folgen die ganze Staffel? Ja → Pack aus genau diesen Items. Nein → kein Pack, die Folgen gehen einzeln hoch. Damit entfällt der bisherige Fill-only-Weg (`FillOnlyPacksAllowed`, F-M418): er baute Container aus Zeilen, die ein früherer Lauf im Store hinterlassen hatte, ohne dass dieser Lauf eine dieser Folgen angefasst hätte. Die Property ist entfernt, `SubdlEventDispatcher` setzt sie nicht mehr, und der Schnitt (`onlyEpisodes`) wird für jeden Lauf an Plan und Füller übergeben. Die Log-Zeilen heißen jetzt `queue: … brought {Have} of {Aired} episode(s)` bzw. `queue: … brought all {Aired} episode(s)` — der Trigger ist für die Entscheidung ohne Belang.
+
+**F-M426 [P] (Operator-Regel 02.11.2026 „It is only investigated if the sub is not part of a pack already"):** **Eine Staffel, deren Sprachen alle schon in einem Pack liegen, wird nicht untersucht.** Die Frage „sind die eingereihten Folgen die ganze Staffel?" (F-M424/F-M425) wird deshalb erst gestellt, wenn `HasOpenLanguage` sie bejaht: für die eingereihten Folgen wird die Sprache ihrer `uploaded`-Zeilen gegen `HasPack` gehalten; ist jede Sprache bereits in einem Pack, endet die Staffel mit `queue: … every language is already inside a pack, nothing is investigated` — keine Extraktion, keine Plan-Zeile. Eine Staffel ohne jede `uploaded`-Zeile gilt als offen (es ist auch nichts gepackt). Damit entfällt die Menge an Zeilen, die im Lauf vom 02.11. nur meldeten, dass ein Pack schon existiert.
 
 ## 4. Download Pipeline
 
