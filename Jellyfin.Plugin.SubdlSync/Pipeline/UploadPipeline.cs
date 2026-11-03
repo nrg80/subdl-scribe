@@ -2841,6 +2841,17 @@ public sealed class UploadPipeline : IPackFiller
             }
         }
 
+        // F-M433: the pack phase runs BEFORE the item loop (F-M429), so the anchors that loop fills are
+        // still empty when a pack asks its files. This scan has already walked every episode of every
+        // season — hand its items over instead of enumerating the library a second time.
+        foreach (var known in itemsOf)
+        {
+            if (!_seasonEpisodes.ContainsKey(known.Key))
+            {
+                _seasonEpisodes[known.Key] = known.Value;
+            }
+        }
+
         LogUtil.Normal(_logger, "[SubDL] season pack: {Count} season(s) with at least two episodes on disk.", present.Count);
         foreach (var entry in present)
         {
@@ -3187,7 +3198,18 @@ public sealed class UploadPipeline : IPackFiller
     /// <inheritdoc />
     public bool FileCarriesLanguage(string imdbId, int season, int episode, string lang, bool hearingImpaired)
     {
-        BaseItem? item = FindSeasonEpisode(imdbId, season, episode);
+        // F-M433: matched through ResolveIdsRaw, not through episode.Series — the series object is often
+        // not loaded when the pack phase asks (it runs before the item loop), and IsSeasonEpisode's
+        // reliance on it made every file answer "no" for a language the files plainly carry.
+        BaseItem? item = SeasonItems(imdbId, season).FirstOrDefault(candidate =>
+        {
+            var (candidateImdb, _, candidateSeason, candidateNumber, isSeries) = ResolveIdsRaw(candidate);
+            return isSeries
+                   && candidateNumber == episode
+                   && candidateSeason == season
+                   && string.Equals(candidateImdb, imdbId, StringComparison.OrdinalIgnoreCase);
+        });
+
         return item?.Path != null && FindFillStreams(item, lang, hearingImpaired).Count > 0;
     }
 
@@ -3237,7 +3259,6 @@ public sealed class UploadPipeline : IPackFiller
         // F-M405: one ffmpeg pass per FILE for the whole filler, cached for the run — the same
         // one-pass shape the single-upload path has used since F-M5. Per-language extraction re-read
         // the whole container for every language of every pack attempt.
-        string? extracted;
         if (!_fillTextCache.TryGetValue(mediaPath, out var cachedTexts))
         {
             var subtitleStreams = item.GetMediaStreams()
@@ -3419,8 +3440,12 @@ public sealed class UploadPipeline : IPackFiller
             }
 
             string? seriesImdb = null;
-            episode.Series?.ProviderIds?.TryGetValue("Imdb", out seriesImdb);
-            if (!string.Equals(seriesImdb, imdbId, StringComparison.OrdinalIgnoreCase))
+            // F-M433: same reason as FileCarriesLanguage — the ids come from ResolveIdsRaw.
+            var (fileImdb, _, fileSeason, fileNumber, fileIsSeries) = ResolveIdsRaw(item);
+            if (!fileIsSeries
+                || fileNumber < 1
+                || fileSeason != season
+                || !string.Equals(fileImdb, imdbId, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

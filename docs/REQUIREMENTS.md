@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.87
-**Status:** Implementation — v12.1.12.324.
+**Version:** 2.88
+**Status:** Implementation — v12.1.12.325.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 70 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 71 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -329,6 +329,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M432 [P] (Operator-Anweisung 03.11.2026 „Bau für filme denselben id grep wie für packs oder Einzelepisoden auch"):** **Die Upload-Id wird auch aus der Veröffentlichungsliste geholt.** Die Id ist der einzige Griff, mit dem ein eigener Eintrag wieder gelöscht werden kann (ersetzt ein Pack eine Einzelfolge), und sie stand bisher nur in `/user/mySubtitles` — einer Liste, die nur noch nicht veröffentlichte Einsendungen führt und deshalb leer ist, sobald SubDL alles freigegeben hat. Ein Film hat zusätzlich keine Staffel und keine Folgennummer, über die sich ein Eintrag wiederfinden ließe, hatte also gar keine Id. Neu liest `ListMyPublishedSubtitlesAsync` die Veröffentlichungsliste (neueste zuerst, seitenweise, wie die API sie liefert); `ResolveOwnUploadIdAsync` und `ResolveOwnPackIdAsync` fragen sie, wenn die Einreichungsliste nichts hergibt, und gleichen über den **Release-Namen** ab — denselben Griff, den Pack und Einzelfolge schon benutzen. Die Log-Zeile nennt die Quelle (`… taken from myPublishedSubtitles for …`). Der Eintragsparser versteht dafür auch die Schreibweisen der Veröffentlichungsliste (`createdAt`, Staffel als `s`).
 
 **F-M433 [P] (Operator-Anweisung 03.11.2026 „wieso geht tracker einzeln hoch?"):** **Der Store entscheidet nicht allein — die Dateien sind der zweite Zeuge.** Die Vollständigkeitsprüfung je Sprache fragte bisher nur den Store, also das, was schon hochgeladen oder beobachtet wurde. Eine Staffel, deren Texte zum **ersten** Mal hochgehen, kennt der Store nicht: er meldete „0 von 13 Folgen tragen diese Sprache", der Pack fiel aus, und die Einzelphase lud jede Folge direkt aus ihrer Datei hoch — genau das Bild „Tracker geht einzeln hoch". Neu fragt der Füller die Dateien: `FileLanguages` nennt die Sprachpaare, die in den Spuren einer Staffel liegen (Spurlisten, keine Extraktion), `FileCarriesLanguage` beantwortet die Frage je Folge. Der Pack-Plan nimmt seine Sprachen jetzt aus **Store und Dateien**, und die Vollständigkeit gilt als gegeben, wenn **entweder** der Store **oder** die Dateien die Sprache in jeder ausgestrahlten Folge zeigen; nur wenn beide sie nicht finden, bleibt es beim Skip (Log nennt dann beide Zahlen). Der Fall, für den F-M416 gedacht war — es gibt überhaupt keine Spur in dieser Sprache — spart weiterhin die Extraktion, weil eine Spurliste nichts kostet.
+
+**F-M434 [P] (Befund 03.11.2026 zur Operator-Anweisung „wieso geht tracker einzeln hoch?"):** **Die Dateien werden zur Pack-Zeit auch gefunden.** F-M433 fragte die Dateien, bekam aber für jede Sprache „nein": die Zuordnung Folge → Datei lief über `episode.Series?.ProviderIds`, und dieses Serienobjekt ist nicht geladen, wenn die Pack-Phase frägt — sie läuft seit F-M429 **vor** der Item-Schleife, die die Staffel-Anker füllt. Belegt an „For All Mankind" S1: die Dateien tragen `eng` (E4 zusätzlich 35 Sprachen), der Lauf meldete trotzdem für **jede** Sprache „weder Store noch Dateien". Zwei Korrekturen: der Vollständigkeits-Scan übergibt seine Episoden-Items an den Füller (`_seasonEpisodes`), und die Zuordnung läuft über `ResolveIdsRaw` (IMDb, Staffel, Folgennummer) statt über das Serienobjekt — in `FileCarriesLanguage` wie in `FileLanguages`. Der Store bleibt der erste Zeuge; die Dateien sind der zweite, der jetzt tatsächlich antwortet.
 
 ## 4. Download Pipeline
 

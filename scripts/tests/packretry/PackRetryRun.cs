@@ -438,6 +438,15 @@ internal static class Program
         Check(upload.Contains("public IReadOnlyCollection<(string Language, bool HearingImpaired)> FileLanguages", StringComparison.Ordinal),
             "the filler can name the languages a season's files carry without extracting anything");
 
+        // ── 32. F-M434: die Episoden einer Staffel werden zur Pack-Zeit wirklich gefunden ─
+        Console.WriteLine("32. The files are reachable when the pack phase asks");
+        Check(upload.Contains("_seasonEpisodes[known.Key] = known.Value;", StringComparison.Ordinal),
+            "F-M434: the completeness scan hands its episode items to the filler — the pack phase runs before the item loop");
+        Check(upload.Contains("matched through ResolveIdsRaw, not through episode.Series", StringComparison.Ordinal),
+            "F-M434: an episode is identified by its ids, not by a series object that may not be loaded");
+        Check(upload.Contains("var (fileImdb, _, fileSeason, fileNumber, fileIsSeries) = ResolveIdsRaw(item);", StringComparison.Ordinal),
+            "F-M434: FileLanguages matches the same way");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."
