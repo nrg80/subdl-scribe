@@ -3007,25 +3007,57 @@ public sealed class UploadPipeline : IPackFiller
             return null;
         }
 
-        if (entries == null || entries.Count == 0)
-        {
-            return null;
-        }
-
         // F-M414 (measured 02.11.2026): mySubtitles reports `name` as the RELEASE name, not the
         // file name we uploaded ("CliffIdProbe.1080p.WEB-DL", not "…srt"), and `lang` as the written
         // language ("Turkish", not "TR"). Both are compared the way the list delivers them.
         string file = Path.GetFileName(filePath ?? string.Empty);
-        var exact = entries.FirstOrDefault(e =>
+        var exact = entries?.FirstOrDefault(e =>
             MatchesRelease(e.Name, releaseName) || MatchesRelease(e.Name, file));
-        exact ??= entries
+        exact ??= entries?
             .Where(e => string.Equals(e.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase)
                         && e.Season == season && e.Episode == episode
                         && SameLanguage(e.Language, lang))
             .OrderByDescending(e => e.CreatedAt)
             .FirstOrDefault();
 
-        return exact?.UploadId;
+        if (exact != null)
+        {
+            return exact.UploadId;
+        }
+
+        // F-M432 (operator order 03.11.2026): the submission list is empty as soon as SubDL has published
+        // everything we sent, so the id was lost for every upload after that — a movie has no season and no
+        // episode to fall back on, so it had no handle at all. The PUBLISHED list carries the same id and is
+        // ordered newest first, which is exactly what a fresh upload needs. Matched the same way a pack is:
+        // by its release name.
+        List<OwnSubtitleEntry>? published;
+        try
+        {
+            published = await _api.ListMyPublishedSubtitlesAsync(ct, maxPages: 2).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[SubDL] could not read myPublishedSubtitles for the upload id.");
+            return null;
+        }
+
+        var byName = published?.FirstOrDefault(e =>
+            MatchesRelease(e.Name, releaseName) || MatchesRelease(e.Name, file)
+            || MatchesRelease(e.Name, Path.GetFileNameWithoutExtension(file)));
+        if (byName != null)
+        {
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] upload id {Id} taken from myPublishedSubtitles for {File} [{Lang}] — the submission list knows nothing, the published list names it (F-M432).",
+                byName.UploadId, file, lang);
+            return byName.UploadId;
+        }
+
+        return null;
     }
 
     /// <summary>F-M414: does the entry's release name carry ours, extension and case aside?</summary>

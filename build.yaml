@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.322"
+version: "12.1.12.323"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.323: upload ids are also read from the published list, so movies and packs keep their delete handle (F-M432).
   v12.1.12.322: the pack filler tries every track of the language, not only the first (F-M431).
   v12.1.12.321: release group also reads bracketed brands, underscore pairs and a second extension (F-M430).
   v12.1.12.320: release group recognition covers dot, space and bracketed spellings — 60% to 71% on the operator library (F-M430).

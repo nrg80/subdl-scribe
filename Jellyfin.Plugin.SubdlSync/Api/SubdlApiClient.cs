@@ -1458,7 +1458,75 @@ public sealed class SubdlApiClient
     /// for forward compatibility, but deduplicate by UploadId and stop at the first page that adds
     /// no new id, so the returned list and the reported totals are truthful.
     /// </summary>
-    /// F-M193: /user/mySubtitles is NOT paginated, so the caller must count DISTINCT upload ids.
+    /// <summary>
+    /// F-M432 (operator order 03.11.2026: "Bau für filme denselben id grep wie für packs oder Einzelepisoden
+    /// auch"): reads the account's PUBLISHED list, newest first.
+    /// <para>
+    /// /user/mySubtitles was the only source of an upload id, and it lists only what is still awaiting
+    /// review — measured on 03.11.2026 it was empty while the account had 8268 published subtitles. The
+    /// published list carries the same id per entry (<c>subtitle.id</c>), 25 per page, newest first, so a
+    /// freshly uploaded subtitle is on page 1. For a movie there is no season or episode to match on, so
+    /// the release name is the only handle — exactly the way a pack is matched.
+    /// </para>
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="maxPages">How many pages to read (25 entries each).</param>
+    /// <returns>The entries, newest first; null when the call fails.</returns>
+    public async Task<List<OwnSubtitleEntry>?> ListMyPublishedSubtitlesAsync(CancellationToken ct, int maxPages = 2)
+    {
+        string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");
+        var result = new List<OwnSubtitleEntry>();
+        for (int page = 1; page <= Math.Max(1, maxPages); page++)
+        {
+            string url = $"{ApiBase}/user/myPublishedSubtitles?page={page}";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            TraceCall("GET", url);
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            ApiActivity?.Invoke();
+            Trace("GET", "user/myPublishedSubtitles", (int)resp.StatusCode, $"page {page}");
+            if (!resp.IsSuccessStatusCode)
+            {
+                return result.Count > 0 ? result : null;
+            }
+
+            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                if (!doc.RootElement.TryGetProperty("subtitles", out var subsEl) || subsEl.ValueKind != JsonValueKind.Array)
+                {
+                    break;
+                }
+
+                int added = 0;
+                foreach (var item in subsEl.EnumerateArray())
+                {
+                    var entry = OwnSubtitleEntry.FromJson(item);
+                    if (entry == null || entry.UploadId <= 0)
+                    {
+                        continue;
+                    }
+
+                    result.Add(entry);
+                    added++;
+                }
+
+                if (added == 0)
+                {
+                    break;
+                }
+            }
+            catch (JsonException)
+            {
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>F-M193: /user/mySubtitles is NOT paginated, so the caller must count DISTINCT upload ids.</summary>
     public async Task<List<OwnSubtitleEntry>?> ListMySubtitlesAsync(CancellationToken ct, int maxPages = 10, Func<OwnSubtitleEntry, bool>? shouldStop = null)
     {
         string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");
@@ -2429,7 +2497,14 @@ public sealed class OwnSubtitleEntry
             e.Language = langEl.GetString() ?? string.Empty;
         }
 
-        if (sub.TryGetProperty("created_at", out var createdEl) && createdEl.ValueKind == JsonValueKind.String)
+        // F-M432: the published list spells it "createdAt", the submission list "created_at".
+        if (!sub.TryGetProperty("created_at", out var createdEl)
+            && !sub.TryGetProperty("createdAt", out createdEl))
+        {
+            createdEl = default;
+        }
+
+        if (createdEl.ValueKind == JsonValueKind.String)
         {
             if (DateTime.TryParse(createdEl.GetString(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var dt))
             {
@@ -2449,6 +2524,11 @@ public sealed class OwnSubtitleEntry
 
         if (sub.TryGetProperty("season", out var seasonEl) && seasonEl.ValueKind == JsonValueKind.Number)
         {
+            e.Season = seasonEl.GetInt32();
+        }
+        else if (sub.TryGetProperty("s", out seasonEl) && seasonEl.ValueKind == JsonValueKind.Number)
+        {
+            // F-M432: the published list reports the season as "s".
             e.Season = seasonEl.GetInt32();
         }
 

@@ -654,28 +654,50 @@ public sealed class SeasonPackCoordinator
             return null;
         }
 
-        if (entries == null || entries.Count == 0)
-        {
-            return null;
-        }
-
-        var byRelease = entries.FirstOrDefault(e => releases.Any(r => MatchesRelease(e.Name, r)));
-        byRelease ??= entries
+        var byRelease = entries?.FirstOrDefault(e => releases.Any(r => MatchesRelease(e.Name, r)));
+        byRelease ??= entries?
             .Where(e => string.Equals(e.ImdbId, key.ImdbId, StringComparison.OrdinalIgnoreCase)
                         && e.Season == key.Season && SameLanguage(e.Language, key.Lang))
             .OrderByDescending(e => e.CreatedAt)
             .FirstOrDefault();
 
-        if (byRelease == null)
+        if (byRelease != null)
+        {
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] pack id {Id} taken from mySubtitles for {Imdb} S{Season} [{Lang}] — without it the pack could never be matched against the account's own list.",
+                byRelease.UploadId, key.ImdbId, key.Season, key.Lang);
+            return byRelease.UploadId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        // F-M432: same fallback as the single path — once SubDL has published everything, the submission
+        // list is empty and the pack id has to come from the published list, matched by its release name.
+        List<OwnSubtitleEntry>? published;
+        try
+        {
+            published = await _api.ListMyPublishedSubtitlesAsync(ct, maxPages: 2).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[SubDL] could not read myPublishedSubtitles for the pack id.");
+            return null;
+        }
+
+        var publishedMatch = published?.FirstOrDefault(e => releases.Any(r => MatchesRelease(e.Name, r)));
+        if (publishedMatch == null)
         {
             return null;
         }
 
         LogUtil.Normal(
             _logger,
-            "[SubDL] pack id {Id} taken from mySubtitles for {Imdb} S{Season} [{Lang}] — without it the pack could never be matched against the account's own list.",
-            byRelease.UploadId, key.ImdbId, key.Season, key.Lang);
-        return byRelease.UploadId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            "[SubDL] pack id {Id} taken from myPublishedSubtitles for {Imdb} S{Season} [{Lang}] — the submission list knows nothing, the published list names it (F-M432).",
+            publishedMatch.UploadId, key.ImdbId, key.Season, key.Lang);
+        return publishedMatch.UploadId.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>F-M414: the entry's release name carries ours, extension and case aside.</summary>

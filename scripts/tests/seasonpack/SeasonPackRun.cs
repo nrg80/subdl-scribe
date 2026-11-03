@@ -571,6 +571,27 @@ internal static class Program
         Check(uploadSrc.Contains("no release group covers the season"),
               "F-M408: a season split across groups says so and stays single");
 
+        // ── F-M432: die Id aus der VERÖFFENTLICHUNGSliste lesen ─────────────────
+        // Wortlaut einer echten Antwort von /user/myPublishedSubtitles (03.11.2026).
+        const string published = """
+        {"movie":{"name":"Stuart Fails to Save the Universe","year":2026,"type":"tv","sd_id":12716930},
+         "subtitle":{"id":3755405,"sd_id":12716930,"n_id":"asBtVj74El","name":"Stuart.Fails.to.Save.the.Universe.S01.1080p.WEB.x265-ELiTE",
+         "file_name":"Stuart.Fails.to.Save.the.Universe.S01.1080p.WEB.x265-ELiTE.zip","lang":"English","createdAt":"2026-11-02T19:22:07.000Z",
+         "status":"downloaded","season":1,"s":1,"episode":0,"is_full_season":true}}
+        """;
+        using (var doc = System.Text.Json.JsonDocument.Parse(published))
+        {
+            var entry = Jellyfin.Plugin.SubdlScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
+            Check(entry != null && entry!.UploadId == 3755405,
+                "F-M432: the published list yields the upload id a delete needs");
+            Check(entry!.Name.Contains("ELiTE", StringComparison.Ordinal) && entry.Language == "English",
+                "F-M432: release name and language are read from the published entry");
+            Check(entry.Season == 1 && entry.Episode == 0,
+                "F-M432: season and episode come from the published entry — 0 for a movie");
+            Check(entry.CreatedAt.Year == 2026,
+                "F-M432: the camelCase createdAt of the published list is understood");
+        }
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
