@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.323",
-        "changelog": "v12.1.12.323: upload ids are also read from the published list, so movies and packs keep their delete handle (F-M432).",
+        "version": "12.1.12.324",
+        "changelog": "v12.1.12.324: the pack plan asks the files, not only the store, so a first-time season becomes a pack (F-M433).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.323-dev/Jellyfin.Plugin.SubdlSync_12.1.12.323.zip",
-        "checksum": "ae45e849ebe8b1bba31dfb252bae095d",
-        "timestamp": "2026-11-03T06:46:33Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.324-dev/Jellyfin.Plugin.SubdlSync_12.1.12.324.zip",
+        "checksum": "7f4ef9c903366107d999914dabfc6c21",
+        "timestamp": "2026-11-03T07:49:55Z"
       }
     ]
   }
