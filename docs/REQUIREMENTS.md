@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.84
-**Status:** Implementation — v12.1.12.321.
+**Version:** 2.85
+**Status:** Implementation — v12.1.12.322.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 67 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 68 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -323,6 +323,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M429 [P] (Operator-Anweisung 03.11.2026 „Erst packbildung dann Einzeluploads. Bei packbildung identifizierte einzeluploads für später den einzelupload merken"):** **Der Pack läuft vor den Einzeluploads.** Nach der Staffelplanung und dem Login, aber vor der Item-Schleife, wird jeder geplante Pack gefüllt und hochgeladen; erst danach gehen die Einzel hoch. Was ein Pack übernommen hat, merkt sich der Lauf in `_packAbsorbed` (Serie, Staffel, Sprache, Variante); eine Position daraus wird in `UploadSrtContentAsync` übersprungen (`carried by the pack built in this run, no single beside it`). Packs, die nicht hochgehen, hinterlassen keine Spur in dieser Menge — ihre Folgen gehen im Einzel-Lauf hoch, also geht nichts verloren. Zwei Folgen dieser Umstellung: (a) `PackPairsOf` plant die Sprachen jetzt aus den **eingebetteten Spuren** der Dateien statt aus Store-Zeilen, weil ein neuer Lauf noch keine Zeilen hat (Store bleibt Rückfall, wenn die Streamliste nicht lesbar ist); (b) die Beweisregel F-M395 ist umgeschrieben — ein Pack darf die **erste Veröffentlichung** eines Textes sein (`first publication: the pack carries this text up`), Text, der nur aus einem Download oder einer Ablehnung bekannt ist, bleibt weiter ausgeschlossen.
 
 **F-M430 [P] (Operator-Anweisung 03.11.2026 „Zur release Gruppe 60 Prozent ist zuwenig"):** **Die Release-Gruppe wird in allen Schreibweisen gelesen, die der Dateiname hergibt.** Die alte Regel nahm nur das letzte `-`-Segment; sie übersah damit drei Formen, die dieselbe Angabe tragen: punktgetrennt (`…x264.YIFY`), leerzeichengetrennt (`…HEVC x265 BONE`, auch in Klammern: `…(1080p AMZN WEB-DL x265 Ghost)`) und mit einem Site-Tag dahinter (`…x265-MeGusta[EZTVx.to]`, `…x264.[MPup]`, `…x264-[YTS.LT]`). Die Regel ist jetzt: eine abschließende Klammer oder Klammergruppe wird abgetrennt und der Rest zuerst gefragt — dadurch bleibt die Gruppe vor dem Site-Tag sichtbar —, erst dann wird der Klammerinhalt gelesen (Marke hinter einer Domain nur bei kurzen Namen, ein langes Wasserzeichen wie `THENKIRI.COM` ist keine Gruppe). Danach zählt das letzte Token nach `-`, `.` oder Leerzeichen, aber **nur wenn das Token davor ein technisches ist** (Codec, Quelle, Audio, Auflösung, Bit-Tiefe, HDR, Edition); ein Segment mit Leerzeichen ist ein Titel. Zusätzlich werden ein Unterstrich-Paar (`…x264-ZoroSenpai_EniaHD` → `ZoroSenpai`) und eine zweite Endung (`…x264-rothebehap.mp4`) aufgelöst. **Nichts wird erfunden:** ein Name ohne Release-Angabe („For All Mankind S03E04") liefert weiter `null`, und ein technisches Token wie `-AAC5.1` bleibt `null`.
+
+**F-M431 [P] (Operator-Anweisung 03.11.2026 „wenn eine sprache durchfällt und eine weitere da ist, diese auch versuchen zu verwenden"):** **Der Pack-Füller versucht jede Spur der gesuchten Sprache, nicht nur die erste.** Bisher nahm `FindFillStream` die erste eingebettete Dialogspur, die zu Sprache und HI-Variante passt; fiel sie durch — Extraktion, Qualitätstor, eine falsche Sprachangabe im Tag, oder Text, der nur aus einem Download bekannt ist —, galt die Folge als nicht packbar, obwohl eine zweite Spur derselben Sprache in derselben Datei lag. Jetzt sammelt `FindFillStreams` alle passenden Positionen (in Dateireihenfolge, aus derselben Aufzählung, aus der auch die Extraktion liest, damit eine Position in beiden Stellen dasselbe bedeutet) und `FillFromPosition` prüft sie einzeln. Der erste Track, der alle Tore besteht, wird das Mitglied; jeder verworfene nennt seinen Grund und reicht weiter (`trying the next track of this language`), ein gelungener Nachrücker wird benannt (`track {Nth} of {Count} joins the pack`). Erst wenn alle Spuren der Sprache scheitern, bleibt die Folge mit `none of the {Count} track(s) of this language qualifies` draußen.
 
 ## 4. Download Pipeline
 

@@ -491,7 +491,7 @@ internal static class Program
         Check(fill.IndexOf("GateReject(srt", StringComparison.Ordinal) < fill.IndexOf("Registry.IsContentKnown(contentHash)", StringComparison.Ordinal),
             "the gates run BEFORE the content is trusted");
         Check(fill.Split("return null;").Length - 1 >= 5, "every refusal leaves the pack without that member");
-        Check(fill.Contains("the text speaks {Detected}", StringComparison.Ordinal),
+        Check(fill.Contains("the text speaks ", StringComparison.Ordinal),
             "a lying language tag cannot drag a second language into the container");
 
         Check(coordinator.Contains("IPackFiller? filler = null", StringComparison.Ordinal),

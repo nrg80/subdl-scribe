@@ -306,7 +306,7 @@ internal static class Program
 
         // ── 17. F-M410/F-M411: ein Hash je Folge, eine Logzeile je Datei ─────────
         Console.WriteLine("17. One hash per episode, one log line per file");
-        var fillPart = upload.Split("public async Task<SeasonPackCoordinator.Candidate?> FillAsync")[1].Split("private ")[0];
+        var fillPart = upload.Split("private SeasonPackCoordinator.Candidate? FillFromPosition(")[1].Split("private ")[0];
         Check(fillPart.Contains("mediaHash = proofMediaHash"), "F-M410: the filler reuses the proof hash");
         Check(File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Registry/OshashCache.cs")).Contains("LoggedHits"),
             "F-M411: a cache hit is logged once per file");
@@ -411,8 +411,19 @@ internal static class Program
         Check(upload.Contains("the singles it was meant to carry go up in the single phase", StringComparison.Ordinal),
             "a pack that did not go up leaves its singles to the single phase");
         Check(upload.Contains("first publication: the pack carries this text up", StringComparison.Ordinal)
-              && upload.Contains("this text is only known from a download or a rejection", StringComparison.Ordinal),
+              && upload.Contains("the text is only known from a download or a rejection", StringComparison.Ordinal),
             "F-M395 stays intact where it matters: a download never joins a pack, a first publication does");
+
+        // ── 30. F-M431: fällt eine Spur durch, wird die nächste derselben Sprache versucht ─
+        Console.WriteLine("30. The next track of the same language is tried");
+        Check(upload.Contains("FindFillStreams(item, lang, hearingImpaired)", StringComparison.Ordinal),
+            "F-M431: the filler collects every track of the language, not just the first");
+        Check(upload.Contains("trying the next track of this language (F-M431)", StringComparison.Ordinal),
+            "a refused track names its reason and hands over to the next one");
+        Check(upload.Contains("none of the {Count} track(s) of this language qualifies", StringComparison.Ordinal),
+            "and only when every track of that language failed does the episode stay out of the pack");
+        Check(upload.Contains("track {Nth} of {Count} joins the pack", StringComparison.Ordinal),
+            "a fallback that works is named in the log");
 
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0

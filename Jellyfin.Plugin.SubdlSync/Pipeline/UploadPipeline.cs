@@ -3125,8 +3125,14 @@ public sealed class UploadPipeline : IPackFiller
             return null;
         }
 
-        int subPos = FindFillStream(item, lang, hearingImpaired);
-        if (subPos < 0)
+        // F-M431 (operator order 03.11.2026: "wenn eine sprache durchfällt und eine weitere da ist, diese
+        // auch versuchen zu verwenden"): a file may carry more than one track of the same language. Until
+        // now only the FIRST one was tried — if it failed (extraction, a quality gate, a lying language
+        // tag, text that is only known from a download), the whole pack died although a second track of
+        // that language sat in the same file. Every track of the language is tried now, in file order,
+        // and the first that passes every gate is the member.
+        var fillPositions = FindFillStreams(item, lang, hearingImpaired);
+        if (fillPositions.Count == 0)
         {
             LogUtil.Normal(
                 _logger,
@@ -3152,13 +3158,64 @@ public sealed class UploadPipeline : IPackFiller
             _fillTextCache[mediaPath] = cachedTexts;
         }
 
-        cachedTexts.TryGetValue(subPos, out extracted);
+        string? reason = null;
+        for (int attempt = 0; attempt < fillPositions.Count; attempt++)
+        {
+            int subPos = fillPositions[attempt];
+            var member = FillFromPosition(
+                item, mediaPath, cachedTexts, subPos, imdbId, season, episode, lang, hearingImpaired, out reason);
+            if (member != null)
+            {
+                if (attempt > 0)
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — track {Nth} of {Count} joins the pack, the tracks before it did not (F-M431).",
+                        imdbId, season, episode, lang, attempt + 1, fillPositions.Count);
+                }
+
+                return member;
+            }
+
+            if (attempt < fillPositions.Count - 1)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — track {Nth} of {Count} does not qualify ({Reason}), trying the next track of this language (F-M431).",
+                    imdbId, season, episode, lang, attempt + 1, fillPositions.Count, reason);
+            }
+        }
+
+        LogUtil.Normal(
+            _logger,
+            "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — none of the {Count} track(s) of this language qualifies ({Reason}), it does not join the pack.",
+            imdbId, season, episode, lang, fillPositions.Count, reason);
+        return null;
+    }
+
+    /// <summary>
+    /// F-M431: one attempt — the text of a single track, put through every gate the pack demands.
+    /// </summary>
+    /// <param name="item">Episode item.</param>
+    /// <param name="mediaPath">Path of the media file.</param>
+    /// <param name="cachedTexts">Extracted texts of the file, by stream position.</param>
+    /// <param name="subPos">Stream position of this attempt.</param>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="lang">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI variant.</param>
+    /// <param name="reason">Why this track was refused, for the run log.</param>
+    /// <returns>The member, or null with <paramref name="reason"/> set.</returns>
+    private SeasonPackCoordinator.Candidate? FillFromPosition(
+        BaseItem item, string mediaPath, Dictionary<int, string?> cachedTexts, int subPos,
+        string imdbId, int season, int episode, string lang, bool hearingImpaired, out string reason)
+    {
+        reason = string.Empty;
+        cachedTexts.TryGetValue(subPos, out string? extracted);
         if (string.IsNullOrWhiteSpace(extracted))
         {
-            LogUtil.Normal(
-                _logger,
-                "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — extraction failed, it does not join the pack.",
-                imdbId, season, episode, lang);
+            reason = "extraction failed";
             return null;
         }
 
@@ -3170,10 +3227,7 @@ public sealed class UploadPipeline : IPackFiller
         string? gate = GateReject(srt, lang, runtimeMs, out string? correctedLang);
         if (gate != null)
         {
-            LogUtil.Normal(
-                _logger,
-                "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — refused by a quality gate ({Reason}), it does not join the pack.",
-                imdbId, season, episode, lang, gate);
+            reason = "quality gate: " + gate;
             return null;
         }
 
@@ -3182,10 +3236,7 @@ public sealed class UploadPipeline : IPackFiller
         // would have to go up under a language this container cannot claim.
         if (correctedLang != null && !string.Equals(correctedLang, lang, StringComparison.OrdinalIgnoreCase))
         {
-            LogUtil.Normal(
-                _logger,
-                "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — the text speaks {Detected}, it does not join the pack.",
-                imdbId, season, episode, lang, correctedLang);
+            reason = "the text speaks " + correctedLang;
             return null;
         }
 
@@ -3212,10 +3263,7 @@ public sealed class UploadPipeline : IPackFiller
         {
             if (Registry.IsContentKnown(contentHash))
             {
-                LogUtil.Normal(
-                    _logger,
-                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — this text is only known from a download or a rejection, it does not join the pack.",
-                    imdbId, season, episode, lang);
+                reason = "the text is only known from a download or a rejection";
                 return null;
             }
 
@@ -3228,10 +3276,7 @@ public sealed class UploadPipeline : IPackFiller
         string? mediaHash = proofMediaHash;
         if (string.IsNullOrWhiteSpace(mediaHash))
         {
-            LogUtil.Normal(
-                _logger,
-                "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — no media hash for the file, it does not join the pack.",
-                imdbId, season, episode, lang);
+            reason = "no media hash for the file";
             return null;
         }
 
@@ -3322,13 +3367,16 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="lang">SubDL language code.</param>
     /// <param name="hearingImpaired">HI/SDH variant.</param>
     /// <returns>The stream position, or -1 when the file carries no such track.</returns>
-    private int FindFillStream(BaseItem item, string lang, bool hearingImpaired)
+    private List<int> FindFillStreams(BaseItem item, string lang, bool hearingImpaired)
     {
+        var positions = new List<int>();
         List<MediaStream> allSubs;
         try
         {
-            allSubs = _mediaSourceManager.GetMediaStreams(item.Id)?
-                .Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal)
+            // F-M431: enumerated exactly the way the extraction reads the file — every subtitle stream of
+            // the item, external ones included — so a position means the same thing in both places.
+            allSubs = item.GetMediaStreams()?
+                .Where(s => s.Type == MediaStreamType.Subtitle)
                 .ToList() ?? new List<MediaStream>();
         }
         catch (Exception ex)
@@ -3336,13 +3384,24 @@ public sealed class UploadPipeline : IPackFiller
             LogUtil.PerItem(_config.LogMode, _logger,
                 "[SubDL] season pack filler: stream list of {File} unavailable ({Msg}).",
                 Path.GetFileName(item.Path ?? item.Name), ex.Message);
-            return -1;
+            return positions;
         }
 
-        return allSubs.FindIndex(s =>
-            Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream(s)
-            && Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(s) == hearingImpaired
-            && string.Equals(LanguageMapper.MapToSubdl(s.Language), lang, StringComparison.OrdinalIgnoreCase));
+        for (int i = 0; i < allSubs.Count; i++)
+        {
+            var stream = allSubs[i];
+            if (stream.IsExternal
+                || !Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream(stream)
+                || Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream) != hearingImpaired
+                || !string.Equals(LanguageMapper.MapToSubdl(stream.Language), lang, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            positions.Add(i);
+        }
+
+        return positions;
     }
 
     /// <summary>
