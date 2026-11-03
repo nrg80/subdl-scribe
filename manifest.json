@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.315",
-        "changelog": "v12.1.12.315: the pack rule is the same for every trigger — a pack is built only when this run queued the whole season, and only out of those items (F-M425).",
+        "version": "12.1.12.316",
+        "changelog": "v12.1.12.316: a season whose languages are all inside a pack is not investigated at all (F-M426).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.315-dev/Jellyfin.Plugin.SubdlSync_12.1.12.315.zip",
-        "checksum": "d783de7f75ea0dbe3a04249d1fd46726",
-        "timestamp": "2026-11-03T04:46:09Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.316-dev/Jellyfin.Plugin.SubdlSync_12.1.12.316.zip",
+        "checksum": "494f7bb0bccaf8f25135e4277fade9a8",
+        "timestamp": "2026-11-03T04:50:48Z"
       }
     ]
   }
