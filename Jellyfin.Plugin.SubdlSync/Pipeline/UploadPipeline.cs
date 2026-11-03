@@ -460,9 +460,50 @@ public sealed class UploadPipeline : IPackFiller
         SeasonPackCoordinator? packCoordinator = null;
         IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> completeSeasons
             = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>();
-        if (_config.UploadSeasonPacks && FillOnlyPacksAllowed)
+        // F-M424 (operator order 02.11.2026): "on arrival to investigate first if the queued items can
+        // form a pack. If so pls do, but only with the queued items." An arrival run therefore asks the
+        // same completeness question — but the answer it needs is narrower: it does not care whether
+        // the whole LIBRARY is complete, only whether the episodes that arrived in THIS run are the
+        // whole season. If they are, the pack is built out of exactly those items and nothing else is
+        // pulled in from the store; if they are not, the run stays what it was, a single uploader.
+        if (_config.UploadSeasonPacks && !FillOnlyPacksAllowed)
         {
             completeSeasons = await CompleteSeasonsAsync(runCt).ConfigureAwait(false);
+            var queued = QueuedEpisodes(items);
+            var arrivalSeasons = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>();
+            foreach (var entry in completeSeasons)
+            {
+                if (!queued.TryGetValue(entry.Key, out var arrived) || arrived.Count == 0)
+                {
+                    continue;
+                }
+
+                var aired = entry.Value;
+                var have = arrived.Where(n => aired.Contains(n)).Distinct().OrderBy(n => n).ToList();
+                if (aired.Count == 0 || have.Count < aired.Count)
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] arrival: {Imdb} S{Season} brought {Have} of {Aired} episode(s) — the queued items are not the whole season, so no pack is built from this arrival.",
+                        entry.Key.Item1, entry.Key.Item2, have.Count, aired.Count);
+                    continue;
+                }
+
+                arrivalSeasons[entry.Key] = have;
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] arrival: {Imdb} S{Season} brought all {Aired} episode(s) — the pack is built from the queued items of this run only.",
+                    entry.Key.Item1, entry.Key.Item2, aired.Count);
+            }
+
+            completeSeasons = arrivalSeasons;
+            if (completeSeasons.Count == 0)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] no season pack this run — no arrival brought a whole season (F-M424).");
+            }
+
             if (completeSeasons.Count > 0)
             {
                 // An EMPTY packable set on purpose: ShouldBuffer answers no for every season, so no
@@ -486,12 +527,6 @@ public sealed class UploadPipeline : IPackFiller
                     // F-M406: the pack loop reports progress so the watchdog does not abort it.
                     watchdog.Heartbeat);
             }
-        }
-        else if (_config.UploadSeasonPacks)
-        {
-            LogUtil.Normal(
-                _logger,
-                "[SubDL] no season pack this run — an arrival run uploads single only (F-M418/F-M420).");
         }
 
         int idx = 0;
@@ -1641,7 +1676,18 @@ public sealed class UploadPipeline : IPackFiller
             // loop. A season whose episodes this run has just uploaded single is exactly the season to
             // pack; the fill-only path proves each member's text through the same gates as a single
             // upload and deletes the singles the container absorbs (F-M391).
-            foreach (var (fillImdb, fillSeason, fillLang, fillHi) in PlanPacksFromStore(completeSeasons))
+            // F-M424: an arrival run may only use the episodes that arrived in it — the restriction is
+            // handed to the plan and to the filler, so a season the library holds in full is never
+            // completed from rows this run did not produce.
+            IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlySet<int>>? onlyArrived = null;
+            if (!FillOnlyPacksAllowed)
+            {
+                onlyArrived = completeSeasons.ToDictionary(
+                    e => e.Key,
+                    e => (IReadOnlySet<int>)e.Value.ToHashSet());
+            }
+
+            foreach (var (fillImdb, fillSeason, fillLang, fillHi) in PlanPacksFromStore(completeSeasons, onlyArrived))
             {
                 await packCoordinator.FillOnlyAsync(fillImdb, fillSeason, fillLang, fillHi, runCt).ConfigureAwait(false);
             }
@@ -3311,13 +3357,25 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="complete">Complete seasons with their aired episode set.</param>
     /// <returns>One entry per (season, language, variant) a pack may be attempted for.</returns>
     private List<(string ImdbId, int Season, string Lang, bool Hi)> PlanPacksFromStore(
-        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete)
+        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
+        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlySet<int>>? onlyEpisodes = null)
     {
         var planned = new List<(string ImdbId, int Season, string Lang, bool Hi)>();
 
         foreach (var entry in complete)
         {
-            if (!_completeSeasonItems.TryGetValue(entry.Key, out var episodes) || episodes.Count == 0)
+            if (!_completeSeasonItems.TryGetValue(entry.Key, out var allEpisodes) || allEpisodes.Count == 0)
+            {
+                continue;
+            }
+
+            // F-M424 (operator order 02.11.2026): an arrival run plans its pack out of the queued items
+            // only. The library holds the whole season, so without this cut the plan would count rows
+            // of episodes that did not arrive — and the pack would carry members this run never touched.
+            var episodes = onlyEpisodes != null && onlyEpisodes.TryGetValue(entry.Key, out var allowed)
+                ? allEpisodes.Where(e => allowed.Contains(e.IndexNumber ?? 0)).ToList()
+                : allEpisodes;
+            if (episodes.Count == 0)
             {
                 continue;
             }

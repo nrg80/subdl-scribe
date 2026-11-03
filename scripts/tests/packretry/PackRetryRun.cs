@@ -384,6 +384,15 @@ internal static class Program
               && adopt.Contains("File.Exists", StringComparison.Ordinal),
             "F-M423: adoption resolves the media hash of the file and refuses a path that is gone");
 
+        // ── 27. F-M424: ein Arrival-Lauf packt nur, wenn seine eigenen Items die Staffel sind ─
+        Console.WriteLine("27. An arrival run packs only what it brought");
+        Check(upload.Contains("brought all {Aired} episode(s)", StringComparison.Ordinal)
+              && upload.Contains("the queued items are not the whole season", StringComparison.Ordinal),
+            "F-M424: arrival compares its queued episodes with the aired set and names both numbers");
+        Check(upload.Contains("onlyArrived", StringComparison.Ordinal)
+              && upload.Contains("IReadOnlySet<int>>? onlyEpisodes = null", StringComparison.Ordinal),
+            "F-M424: the pack plan and the filler are cut to the arrived episodes");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."
