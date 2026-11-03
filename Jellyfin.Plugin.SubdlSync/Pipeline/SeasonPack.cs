@@ -337,23 +337,21 @@ public static partial class SeasonPack
     /// <param name="releaseName">File name without extension, or a release name.</param>
     /// <returns>Group token such as <c>Rapta</c>, or null.</returns>
     /// <remarks>
-    /// F-M430 (operator order 03.11.2026: "60 Prozent ist zuwenig"): measured over the operator's own
-    /// 1392 video files, the old rule — the last <c>-</c>-segment, nothing else — found a group in 837
-    /// of them (60 %). The reason was shape, not absence: the library mixes four spellings of the same
-    /// fact, and three of them carry no dash.
+    /// F-M430 (operator order 03.11.2026: "60 Prozent ist zuwenig"): the old rule — the last
+    /// <c>-</c>-segment and nothing else — read one of the four spellings the library uses. The reason
+    /// for the misses was shape, not absence:
     /// <list type="bullet">
-    /// <item><description><c>…x264-NeoNoir</c> — dash, the old rule.</description></item>
+    /// <item><description><c>…x264-NeoNoir</c> — dash.</description></item>
     /// <item><description><c>…x264.YIFY</c> — dot-separated (scene releases).</description></item>
     /// <item><description><c>…HEVC x265 BONE</c>, <c>…(1080p AMZN WEB-DL x265 Ghost)</c> — space-separated, sometimes inside brackets.</description></item>
-    /// <item><description><c>…x265-MeGusta[EZTVx.to]</c>, <c>…x264.[MPup]</c> — a site tag bracketed behind the group.</description></item>
+    /// <item><description><c>…x265-MeGusta[EZTVx.to]</c>, <c>…x264.[MPup]</c>, <c>…x264-[YTS.LT]</c> — a site tag or a bracketed group behind the group.</description></item>
     /// </list>
-    /// The rule now: strip a trailing bracket or parenthesis (and read inside it when the outside states
-    /// nothing), then take the last token — after <c>-</c>, <c>.</c> or a space — provided the token
-    /// before it is a TECHNICAL token (codec, source, audio, resolution, bit depth, HDR, edition). The
-    /// technical predecessor is what keeps an episode title out: <c>…S01E03.OutKast</c> has an episode
-    /// tag in front of it, not a codec. Measured after the change: 985 of 1392 (71 %); the remaining 407
-    /// are names that state no group at all ("For All Mankind S03E04") or a bare site tag
-    /// ("(THENKIRI.COM)"), which is not a group and stays null.
+    /// The rule now: strip a trailing bracket or parenthesis (and read inside it only when the outside
+    /// states nothing), then take the last token after <c>-</c>, <c>.</c> or a space — provided the token
+    /// before it is a TECHNICAL token (codec, source, audio, resolution, bit depth, HDR, edition). That
+    /// predecessor is what keeps an episode title out: <c>…S01E03.OutKast</c> has an episode tag in front
+    /// of it, not a codec, so the answer stays null. A name that states no release at all states no group
+    /// either — nothing is invented.
     /// </remarks>
     public static string? ReleaseGroup(string? releaseName)
     {
@@ -390,8 +388,8 @@ public static partial class SeasonPack
         int dash = name.LastIndexOf('-');
         if (dash > 0 && dash < name.Length - 1)
         {
-            string tail = name[(dash + 1)..].Trim();
-            if (IsPlainToken(tail))
+            string? tail = ShapeOfTail(name[(dash + 1)..].Trim());
+            if (tail != null)
             {
                 return tail;
             }
@@ -400,7 +398,46 @@ public static partial class SeasonPack
         return LastTokenAfter(name, '.') ?? LastTokenAfter(name, ' ');
     }
 
-    /// <summary>F-M430: the group named inside a bracket the name ends with.</summary>
+    /// <summary>
+    /// F-M430: the group inside the last <c>-</c>-segment. Two shapes beyond the plain token are read
+    /// because the library writes them: <c>…x264-ZoroSenpai_EniaHD</c> (an uploader pair, the group is
+    /// the first half) and <c>…x264-rothebehap.mp4</c> (a second extension left in the name).
+    /// A segment that contains whitespace is a TITLE, not a group — "… - S02E12 - Meet the Evilmans"
+    /// must not yield "Meet".
+    /// </summary>
+    private static string? ShapeOfTail(string tail)
+    {
+        if (IsPlainToken(tail))
+        {
+            return tail;
+        }
+
+        if (tail.Any(char.IsWhiteSpace))
+        {
+            return null;
+        }
+
+        foreach (char separator in new[] { '_', '.' })
+        {
+            int at = tail.IndexOf(separator, StringComparison.Ordinal);
+            if (at <= 0)
+            {
+                continue;
+            }
+
+            string first = tail[..at].Trim();
+            if (IsPlainToken(first) && !IsTechnicalToken(first))
+            {
+                return first;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// F-M430: the group named inside a bracket the name ends with.
+    /// </summary>
     private static string? GroupInside(string inner)
     {
         // "(1080p AMZN WEB-DL x265 Ghost)" — the group sits behind a technical token.
@@ -410,9 +447,27 @@ public static partial class SeasonPack
             return behindTech;
         }
 
-        // "[MPup]" — the bracket is the group itself. A domain in there ("THENKIRI.COM", "YTS.AM") is a
-        // site, not a group, and stays null.
-        return IsPlainToken(inner) ? inner : null;
+        // "[MPup]" — the bracket is the group itself.
+        if (IsPlainToken(inner))
+        {
+            return inner;
+        }
+
+        // "[YTS.AM]", "[YTS.GG - YTS.BZ]" — a brand behind a domain. Length is the divider that keeps a
+        // site watermark out: brands are short ("YTS", "YIFY"), watermarks are not ("THENKIRI.COM").
+        string firstWord = inner.Split(new[] { ' ', '-' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim()
+            ?? string.Empty;
+        int dot = firstWord.IndexOf('.', StringComparison.Ordinal);
+        if (dot > 0)
+        {
+            string brand = firstWord[..dot];
+            if (IsPlainToken(brand) && !IsTechnicalToken(brand) && brand.Length <= 5)
+            {
+                return brand;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>F-M430: last token after a separator, when the token before it is technical.</summary>

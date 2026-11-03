@@ -330,7 +330,16 @@ internal static class Program
         Check(SeasonPack.ReleaseGroup("Unicorn.Academy.S03E01.1080p.WEB.h264-DOLORES[EZTVx.to]") == "DOLORES",
             "F-M430: a site tag behind the group does not hide it");
         Check(SeasonPack.ReleaseGroup("A.Bona.Fide.Killer.S01E12.(THENKIRI.COM)") == null,
-            "F-M430: a bare site tag is not a group");
+            "F-M430: a long site watermark is not a group");
+        Check(SeasonPack.ReleaseGroup("Toy.Story.4.2019.1080p.BluRay.x264-[YTS.LT]") == "YTS"
+              && SeasonPack.ReleaseGroup("Forgotten.Island.2026.1080p.WEBRip.x264.AAC5.1-[YTS.GG - YTS.BZ]") == "YTS",
+            "F-M430: a short brand behind a domain inside the bracket is the group");
+        Check(SeasonPack.ReleaseGroup("Pressure.2026.1080p.BluRay.x264-ZoroSenpai_EniaHD") == "ZoroSenpai",
+            "F-M430: an uploader pair separated by an underscore yields the group");
+        Check(SeasonPack.ReleaseGroup("The Odyssey 2026.720p.WEB-DL.AAC.x264-rothebehap.mp4") == "rothebehap",
+            "F-M430: a second extension left in the name does not hide the group");
+        Check(SeasonPack.ReleaseGroup("The Thundermans - S02E12 - Meet the Evilmans") == null,
+            "F-M430: a dash segment with spaces is a title, never a group");
         Check(SeasonPack.ReleaseGroup("For All Mankind S03E04") == null
               && SeasonPack.ReleaseGroup("The Thundermans - S02E12 - Meet the Evilmans") == null,
             "F-M430: an episode title behind an episode tag stays null — nothing is invented");
