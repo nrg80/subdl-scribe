@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.316",
-        "changelog": "v12.1.12.316: a season whose languages are all inside a pack is not investigated at all (F-M426).",
+        "version": "12.1.12.317",
+        "changelog": "v12.1.12.317: a database reset purges the archive cache with it (F-M427).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.316-dev/Jellyfin.Plugin.SubdlSync_12.1.12.316.zip",
-        "checksum": "494f7bb0bccaf8f25135e4277fade9a8",
-        "timestamp": "2026-11-03T04:50:48Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.317-dev/Jellyfin.Plugin.SubdlSync_12.1.12.317.zip",
+        "checksum": "0d0a656b017ea19b7a4697dc31c47fa2",
+        "timestamp": "2026-11-03T06:01:43Z"
       }
     ]
   }
