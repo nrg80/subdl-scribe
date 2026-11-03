@@ -1503,7 +1503,7 @@ public sealed class SubdlApiClient
                 foreach (var item in subsEl.EnumerateArray())
                 {
                     var entry = OwnSubtitleEntry.FromJson(item);
-                    if (entry == null || entry.UploadId <= 0)
+                    if (entry == null || entry.HandleId <= 0)
                     {
                         continue;
                     }
@@ -2414,6 +2414,18 @@ public sealed class OwnSubtitleEntry
     /// <summary>Internal upload id; pass to /user/deleteSubtitle?id={UploadId}.</summary>
     public int UploadId { get; set; }
 
+    /// <summary>
+    /// F-M435 (operator order 03.11.2026): the id of the PUBLISHED entry, taken from
+    /// <c>subtitle.id</c> of <c>/user/myPublishedSubtitles</c>. That is the id
+    /// <c>/user/deletePublishedSubtitle?id=…</c> expects — the two numbers live in different
+    /// ranges (measured: entry 3758706 against upload 380828 for the same pack), so the upload id
+    /// is the wrong handle as soon as the entry is published. Stays 0 while the entry is pending.
+    /// </summary>
+    public int EntryId { get; set; }
+
+    /// <summary>The handle to store and delete with: the published entry id when it is known, else the upload id.</summary>
+    public int HandleId => EntryId > 0 ? EntryId : UploadId;
+
     /// <summary>Subtitle n_id.</summary>
     public string NId { get; set; } = string.Empty;
 
@@ -2456,9 +2468,34 @@ public sealed class OwnSubtitleEntry
         }
 
         var e = new OwnSubtitleEntry();
+
+        // F-M435: the published list carries TWO ids per entry — `id` is the entry id that
+        // /user/deletePublishedSubtitle expects, `subtitles_uploaded_id` is the internal upload id.
+        // The submission list (`mySubtitles`) has no published entry and reports its upload id as
+        // `id`, so `id` fills both and the upload id overwrites when it is reported separately.
         if (sub.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number)
         {
-            e.UploadId = idEl.GetInt32();
+            e.EntryId = idEl.GetInt32();
+            e.UploadId = e.EntryId;
+        }
+
+        if (sub.TryGetProperty("subtitles_uploaded_id", out var uploadedIdEl))
+        {
+            int reportedUploadId = 0;
+            if (uploadedIdEl.ValueKind == JsonValueKind.Number)
+            {
+                reportedUploadId = uploadedIdEl.GetInt32();
+            }
+            else if (uploadedIdEl.ValueKind == JsonValueKind.String
+                     && int.TryParse(uploadedIdEl.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int parsedUploadId))
+            {
+                reportedUploadId = parsedUploadId;
+            }
+
+            if (reportedUploadId > 0)
+            {
+                e.UploadId = reportedUploadId;
+            }
         }
 
         if (sub.TryGetProperty("n_id", out var nIdEl) && nIdEl.ValueKind == JsonValueKind.String)

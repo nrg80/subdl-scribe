@@ -1320,6 +1320,55 @@ public sealed class ContentHashRegistry : IDisposable
     }
 
     /// <summary>
+    /// F-M435 (operator order 03.11.2026): moves a stored handle from the upload id to the id of the
+    /// published entry.
+    /// <para>
+    /// An entry that is still awaiting review at upload time only has an upload id, so the row is
+    /// written with it. Once SubDL publishes the entry, the delete route expects the entry id
+    /// (<c>/user/deletePublishedSubtitle?id=…</c>) — the two numbers live in different ranges
+    /// (measured: entry 3758706 against upload 380828). Without this pass the row keeps a handle that
+    /// names nothing. Matching is by the id the account itself reports, never by guesswork.
+    /// </para>
+    /// </summary>
+    /// <param name="uploadId">The stored upload id.</param>
+    /// <param name="entryId">The published entry id the account reports for the same upload.</param>
+    /// <returns>Number of rewritten rows.</returns>
+    public int RemapSubdlId(string uploadId, string entryId)
+    {
+        if (string.IsNullOrWhiteSpace(uploadId) || string.IsNullOrWhiteSpace(entryId)
+            || string.Equals(uploadId, entryId, StringComparison.Ordinal))
+        {
+            return 0;
+        }
+
+        int changed = 0;
+
+        foreach (var row in _db.Embeds.FindAll().Where(x => string.Equals(x.SubdlId, uploadId, StringComparison.Ordinal)).ToList())
+        {
+            row.SubdlId = entryId;
+            _db.Embeds.Upsert(row);
+            changed++;
+        }
+
+        foreach (var row in _db.Sidecars.FindAll().Where(x => string.Equals(x.SubdlId, uploadId, StringComparison.Ordinal)).ToList())
+        {
+            row.SubdlId = entryId;
+            _db.Sidecars.Upsert(row);
+            changed++;
+        }
+
+        foreach (var row in _db.Packs.FindAll().Where(x => string.Equals(x.PackId, uploadId, StringComparison.Ordinal)).ToList())
+        {
+            row.PackId = entryId;
+            row.Updated = DateTime.UtcNow;
+            _db.Packs.Upsert(row);
+            changed++;
+        }
+
+        return changed;
+    }
+
+    /// <summary>
     /// F-M397 (operator order 02.11.2026): true when this exact text once CAME FROM SubDL — a sidecar
     /// that this account downloaded, including a member unpacked out of a downloaded season pack.
     /// <para>

@@ -604,6 +604,54 @@ internal static class Program
                 "F-M432: the camelCase createdAt of the published list is understood");
         }
 
+        // ── F-M435: die EINTRAGS-Id, nicht die Upload-Id ────────────────────────
+        // Wortlaut einer echten Antwort von /user/myPublishedSubtitles (03.11.2026): derselbe
+        // Eintrag trägt zwei Nummernkreise — `id` ist die Eintrags-Id (die der Löschaufruf
+        // erwartet), `subtitles_uploaded_id` die interne Upload-Id.
+        const string publishedWithBoth = """
+        {"movie":{"name":"Crystal Lake","year":2026,"type":"tv","sd_id":1300275},
+         "subtitle":{"id":3758706,"sd_id":1300275,"subtitles_uploaded_id":380828,"n_id":"xP0ZaRg3nR",
+         "name":"Crystal.Lake.S01.1080p.WEB.x265-NeoNoir","file_name":"Crystal.Lake.S01.1080p.WEB.x265-NeoNoir.zip",
+         "lang":"English","createdAt":"2026-11-03T21:14:06.000Z","status":"downloaded","season":1,"s":1,"episode":0,
+         "ef":1,"ee":8,"is_full_season":null}}
+        """;
+        using (var doc = System.Text.Json.JsonDocument.Parse(publishedWithBoth))
+        {
+            var entry = Jellyfin.Plugin.SubdlScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
+            Check(entry != null && entry!.EntryId == 3758706,
+                "F-M435: the published entry carries its own entry id");
+            Check(entry!.UploadId == 380828,
+                "F-M435: the internal upload id is read from subtitles_uploaded_id, not from id");
+            Check(entry.HandleId == 3758706,
+                "F-M435: the handle to store and delete with is the ENTRY id");
+        }
+
+        // Eine offene Einreichung hat noch keine Eintrags-Id — dort bleibt die Upload-Id der Griff.
+        const string pending = """
+        {"subtitle":{"id":380865,"name":"Foundation.S02.1080p.WEB.AV1","lang":"Malay","created_at":"2026-11-03T20:10:00.000Z"}}
+        """;
+        using (var doc = System.Text.Json.JsonDocument.Parse(pending))
+        {
+            var entry = Jellyfin.Plugin.SubdlScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
+            Check(entry != null && entry!.EntryId == 380865 && entry.UploadId == 380865,
+                "F-M435: a submission reports its upload id as id — both fields agree");
+            Check(entry!.HandleId == 380865,
+                "F-M435: without a published entry the upload id stays the handle");
+        }
+
+        Check(uploadSrc.Contains("publishedEntry.EntryId") && uploadSrc.Contains("registry.RemapSubdlId("),
+            "F-M435: postprocessing moves stored handles to the published entry id");
+        var registrySrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
+        Check(registrySrc.Contains("public int RemapSubdlId(string uploadId, string entryId)"),
+            "F-M435: the registry can rewrite a stored handle");
+        Check(registrySrc.Contains("x.PackId, uploadId") && registrySrc.Contains("x.SubdlId, uploadId"),
+            "F-M435: subtitle rows AND pack rows are rewritten");
+        var coordinatorSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+        Check(coordinatorSrc.Contains("pack entry id {Id} taken from myPublishedSubtitles"),
+            "F-M435: a pack stores the entry id when the published list names it");
+        Check(uploadSrc.Contains("entry id {Id} taken from myPublishedSubtitles"),
+            "F-M435: a single and a movie store the entry id the same way");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."

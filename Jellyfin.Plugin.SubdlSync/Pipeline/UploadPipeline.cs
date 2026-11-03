@@ -3051,7 +3051,7 @@ public sealed class UploadPipeline : IPackFiller
 
         if (exact != null)
         {
-            return exact.UploadId;
+            return exact.HandleId;
         }
 
         // F-M432 (operator order 03.11.2026): the submission list is empty as soon as SubDL has published
@@ -3079,11 +3079,13 @@ public sealed class UploadPipeline : IPackFiller
             || MatchesRelease(e.Name, Path.GetFileNameWithoutExtension(file)));
         if (byName != null)
         {
+            // F-M435: the published list names BOTH numbers — take the entry id, because that is what
+            // /user/deletePublishedSubtitle expects; the upload id would miss the entry it belongs to.
             LogUtil.Normal(
                 _logger,
-                "[SubDL] upload id {Id} taken from myPublishedSubtitles for {File} [{Lang}] — the submission list knows nothing, the published list names it (F-M432).",
-                byName.UploadId, file, lang);
-            return byName.UploadId;
+                "[SubDL] entry id {Id} taken from myPublishedSubtitles for {File} [{Lang}] (upload id {UploadId}) — the submission list knows nothing, the published list names it (F-M432/F-M435).",
+                byName.HandleId, file, lang, byName.UploadId);
+            return byName.HandleId;
         }
 
         return null;
@@ -4245,6 +4247,42 @@ public sealed class UploadPipeline : IPackFiller
             var rejectedEntries = allMySubtitles
                 .Where(o => string.Equals(o.Status, "rejected", StringComparison.OrdinalIgnoreCase))
                 .ToList();
+
+            // F-M435 (operator order 03.11.2026): an entry that was still awaiting review when it was
+            // uploaded is stored with its upload id. Once SubDL publishes it, the delete route needs the
+            // entry id — and the published list names both numbers for the same entry, so the stored
+            // handle is moved over here instead of waiting for the next resolution to guess.
+            int remappedHandles = 0;
+            try
+            {
+                await limiter.PauseAsync(ct).ConfigureAwait(false);
+                var publishedEntries = await api.ListMyPublishedSubtitlesAsync(ct, maxPages: maxPages).ConfigureAwait(false);
+                foreach (var publishedEntry in publishedEntries ?? new List<OwnSubtitleEntry>())
+                {
+                    if (publishedEntry.EntryId <= 0 || publishedEntry.UploadId <= 0
+                        || publishedEntry.EntryId == publishedEntry.UploadId)
+                    {
+                        continue;
+                    }
+
+                    remappedHandles += registry.RemapSubdlId(
+                        publishedEntry.UploadId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        publishedEntry.EntryId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning("[SubDL] Upload postprocessing could not read myPublishedSubtitles: {Msg}", ex.Message);
+            }
+
+            if (remappedHandles > 0)
+            {
+                LogUtil.Normal(logger, "[SubDL] Upload postprocessing: {Count} stored handle(s) moved to their published entry id (F-M435).", remappedHandles);
+            }
 
             LogUtil.Normal(logger, "[SubDL] Upload postprocessing: fetched {Total} mySubtitles entries, {Rejected} rejected to clean up.", allMySubtitles.Count, rejectedEntries.Count);
 

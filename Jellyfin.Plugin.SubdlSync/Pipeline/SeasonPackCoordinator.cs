@@ -690,8 +690,8 @@ public sealed class SeasonPackCoordinator
             LogUtil.Normal(
                 _logger,
                 "[SubDL] pack id {Id} taken from mySubtitles for {Imdb} S{Season} [{Lang}] — without it the pack could never be matched against the account's own list.",
-                byRelease.UploadId, key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi));
-            return byRelease.UploadId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                byRelease.HandleId, key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi));
+            return byRelease.HandleId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         // F-M432: same fallback as the single path — once SubDL has published everything, the submission
@@ -717,11 +717,13 @@ public sealed class SeasonPackCoordinator
             return null;
         }
 
+        // F-M435: the published list carries the entry id next to the upload id — the entry id is the
+        // one /user/deletePublishedSubtitle takes, so that is what the pack row is written with.
         LogUtil.Normal(
             _logger,
-            "[SubDL] pack id {Id} taken from myPublishedSubtitles for {Imdb} S{Season} [{Lang}] — the submission list knows nothing, the published list names it (F-M432).",
-            publishedMatch.UploadId, key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi));
-        return publishedMatch.UploadId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            "[SubDL] pack entry id {Id} taken from myPublishedSubtitles for {Imdb} S{Season} [{Lang}] (upload id {UploadId}) — the submission list knows nothing, the published list names it (F-M432/F-M435).",
+            publishedMatch.HandleId, key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), publishedMatch.UploadId);
+        return publishedMatch.HandleId.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>F-M414: the entry's release name carries ours, extension and case aside.</summary>
