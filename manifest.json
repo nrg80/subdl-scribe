@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.324",
-        "changelog": "v12.1.12.324: the pack plan asks the files, not only the store, so a first-time season becomes a pack (F-M433).",
+        "version": "12.1.12.325",
+        "changelog": "v12.1.12.325: the file witness of a season now finds its episodes at pack time (F-M434).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.324-dev/Jellyfin.Plugin.SubdlSync_12.1.12.324.zip",
-        "checksum": "7f4ef9c903366107d999914dabfc6c21",
-        "timestamp": "2026-11-03T07:49:55Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.325-dev/Jellyfin.Plugin.SubdlSync_12.1.12.325.zip",
+        "checksum": "a5c9b6c66aee1249af17cdb0b2bb61af",
+        "timestamp": "2026-11-03T08:27:02Z"
       }
     ]
   }
