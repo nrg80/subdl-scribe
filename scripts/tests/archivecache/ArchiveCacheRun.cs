@@ -246,6 +246,20 @@ internal static class Program
               && page.Contains("config.DownloadArchiveCacheMaxMb =", StringComparison.Ordinal),
             "the config page writes them back, clamped at 0");
 
+        // ── F-M427: der DB-Reset purgt die Ablage mit ──────────────────────────
+        Console.WriteLine("Purge with the database reset");
+        var purgeDir = Path.Combine(Path.GetTempPath(), "archivecache-purge-" + Guid.NewGuid().ToString("N")[..8]);
+        var purgeCache = new ArchiveDiskCache();
+        purgeCache.Configure(purgeDir, 14, 512);
+        purgeCache.Put("4711-815", Zip(2048));
+        int before = Directory.GetFiles(InCache(purgeDir), "*.zip").Length;
+        int purged = ArchiveDiskCache.PurgeDirectory(purgeDir);
+        int after = Directory.GetFiles(InCache(purgeDir), "*.zip").Length;
+        Check(before == 1, "one archive sits in the cache");
+        Check(purged == before, "the purge reports what it removed");
+        Check(after == 0, "and the folder is empty afterwards");
+        Check(ArchiveDiskCache.PurgeDirectory(purgeDir) == 0, "a second purge removes nothing and throws nothing");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"archivecache: {_checks} checks, all green."

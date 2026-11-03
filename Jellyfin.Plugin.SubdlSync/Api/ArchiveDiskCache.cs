@@ -32,6 +32,60 @@ public sealed class ArchiveDiskCache
     private int _ttlDays;
     private long _maxBytes;
 
+    /// <summary>
+    /// F-M427 (operator order 03.11.2026: "Cache bei db reset bitte mit purgen"): removes every archive
+    /// this cache wrote, and nothing else.
+    /// <para>
+    /// Static and folder-based on purpose: a reset must be able to purge without a live instance, and the
+    /// directory is the plugin's own (`&lt;data folder&gt;/archive-cache`), so no path is passed in from a
+    /// caller that might get it wrong. Leftovers under <c>.tmp</c> go with it — an interrupted store
+    /// leaves one behind.
+    /// </para>
+    /// </summary>
+    /// <param name="dataFolder">The plugin's data folder.</param>
+    /// <returns>Number of archives removed.</returns>
+    public static int PurgeDirectory(string dataFolder)
+    {
+        string dir = Path.Combine(dataFolder, "archive-cache");
+        if (!System.IO.Directory.Exists(dir))
+        {
+            return 0;
+        }
+
+        int removed = 0;
+        foreach (string path in System.IO.Directory.EnumerateFiles(dir, "*.zip"))
+        {
+            try
+            {
+                File.Delete(path);
+                removed++;
+            }
+            catch (IOException)
+            {
+                // Leave it: the count in the log says what really went.
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        foreach (string path in System.IO.Directory.EnumerateFiles(dir, "*.tmp"))
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return removed;
+    }
+
     /// <summary>Gets the number of lookups answered from disk since <see cref="Reset"/>.</summary>
     public int Hits { get; private set; }
 

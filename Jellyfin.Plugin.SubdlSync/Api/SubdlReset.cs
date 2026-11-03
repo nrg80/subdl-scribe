@@ -106,6 +106,11 @@ public class SubdlReset : ControllerBase
                     }
                 }
 
+                // F-M427 (operator order 03.11.2026): the archive cache goes with the database. A reset
+                // says "forget everything"; keeping hundreds of megabytes of fetched archives behind
+                // would mean the next run serves files from a state that no longer exists anywhere.
+                int purgedArchives = ArchiveDiskCache.PurgeDirectory(dataDir);
+
                 Plugin.Instance.RecreateDbContext();
 
                 // The counters live in the data file now, so the whole-scope reset zeroes them as
@@ -113,7 +118,10 @@ public class SubdlReset : ControllerBase
                 // from before the reset while the database it describes is empty — the exact drift
                 // the move out of the configuration XML was meant to remove.
                 Plugin.Instance.ResetStatusStats();
-                LogUtil.Normal(_logger, "[SubDL] Reset \"all\": status counters zeroed with the database.");
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] Reset \"all\": status counters zeroed with the database, {Count} cached archive(s) purged.",
+                    purgedArchives);
             }
             else if (scope.Equals("upload", StringComparison.OrdinalIgnoreCase))
             {
