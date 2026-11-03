@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.321",
-        "changelog": "v12.1.12.321: release group also reads bracketed brands, underscore pairs and a second extension (F-M430).",
+        "version": "12.1.12.322",
+        "changelog": "v12.1.12.322: the pack filler tries every track of the language, not only the first (F-M431).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.321-dev/Jellyfin.Plugin.SubdlSync_12.1.12.321.zip",
-        "checksum": "307c23951f3a85a781416f5dc7097efc",
-        "timestamp": "2026-11-03T06:25:53Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.322-dev/Jellyfin.Plugin.SubdlSync_12.1.12.322.zip",
+        "checksum": "894f6fae45a2b84556dd3093db8d375e",
+        "timestamp": "2026-11-03T06:29:42Z"
       }
     ]
   }
