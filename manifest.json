@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.318",
-        "changelog": "v12.1.12.318: archive cache defaults are now 7 days and 256 MB (F-M428).",
+        "version": "12.1.12.319",
+        "changelog": "v12.1.12.319: season packs go up before the single uploads, and covered singles are skipped (F-M429).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.318-dev/Jellyfin.Plugin.SubdlSync_12.1.12.318.zip",
-        "checksum": "788e062fdb24adf8f211095db7f84f69",
-        "timestamp": "2026-11-03T06:04:47Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.319-dev/Jellyfin.Plugin.SubdlSync_12.1.12.319.zip",
+        "checksum": "bd7a0812a6abc228310fd4c92e4c529e",
+        "timestamp": "2026-11-03T06:15:20Z"
       }
     ]
   }
