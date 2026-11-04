@@ -1502,6 +1502,23 @@ public sealed class ContentHashRegistry : IDisposable
     /// </summary>
     /// <param name="contentHash">Content hash.</param>
     /// <returns>True when an uploaded row for this content exists.</returns>
+    /// <summary>
+    /// F-M440: the uploaded row of a text, found by its CONTENT instead of by stream position — a pack
+    /// fill that reads the text from the store has no position at hand, and the proof (plus the id of
+    /// the single the pack replaces) hangs on this row.
+    /// </summary>
+    /// <param name="contentHash">Content hash of the canonical text.</param>
+    /// <returns>The uploaded embedded row, or null.</returns>
+    public EmbedTrackEntity? UploadedEmbedByContentHash(string? contentHash)
+    {
+        if (string.IsNullOrEmpty(contentHash))
+        {
+            return null;
+        }
+
+        return _db.Embeds.FindAll().FirstOrDefault(x => x.ContentHash == contentHash && x.Status == SubtitleStatus.Uploaded);
+    }
+
     public bool IsContentUploaded(string? contentHash)
     {
         if (string.IsNullOrEmpty(contentHash))

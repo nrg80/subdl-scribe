@@ -652,6 +652,23 @@ internal static class Program
         Check(uploadSrc.Contains("entry id {Id} taken from myPublishedSubtitles"),
             "F-M435: a single and a movie store the entry id the same way");
 
+        // ── F-M440: der Fill nimmt den schon hochgeladenen Text, nicht das ganze MKV ─────────────
+        int storeLookup = uploadSrc.IndexOf("_ownTexts.TryGet(imdbId, season, episode, lang, hearingImpaired", StringComparison.Ordinal);
+        int extraction = uploadSrc.IndexOf("ExtractAllAsync(_ffmpegPath, mediaPath, missing", StringComparison.Ordinal);
+        Check(storeLookup > 0 && extraction > storeLookup,
+            "F-M440: the fill asks the stored text before it extracts anything");
+        Check(!uploadSrc.Contains("var positions = Enumerable.Range(0, subtitleStreams.Count).ToList();"),
+            "F-M440: the fill no longer extracts every subtitle track of the container");
+        Check(uploadSrc.Contains("var missing = fillPositions.Where(p => !cachedTexts.ContainsKey(p)).ToList();"),
+            "F-M440: only the positions the fill asks for are extracted");
+        Check(uploadSrc.Contains("_ownTexts.Put(imdbId, season, episode, lang, hearingImpaired, srtContent);"),
+            "F-M440: a successful upload stores its text for later fills");
+        Check(uploadSrc.Contains("FillFromText(") && uploadSrc.Contains("Registry.UploadedEmbedByContentHash(contentHash)"),
+            "F-M440: the stored text is proved by its content hash, not by a stream position");
+        var resetSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlReset.cs"));
+        Check(resetSrc.Contains("OwnTextStore.PurgeDirectory(dataDir)"),
+            "F-M440: the database reset purges the stored texts too");
+
         // ── F-M437: der Nachlauf blättert bis zum Wasserzeichen, nicht fünf Seiten ──────────────
         Check(api.Contains("Func<OwnSubtitleEntry, bool>? shouldStop = null")
               && api.Contains("if (shouldStop != null && shouldStop(result[result.Count - 1]))"),
