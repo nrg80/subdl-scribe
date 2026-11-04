@@ -669,6 +669,23 @@ internal static class Program
         Check(resetSrc.Contains("OwnTextStore.PurgeDirectory(dataDir)"),
             "F-M440: the database reset purges the stored texts too");
 
+        // Wer räumt weg: der Löschhaken im Pack-Bau und der tägliche Durchlauf im Nachlauf.
+        var packSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+        Check(packSrc.Contains("_ownTexts.Remove(key.ImdbId, key.Season, single.Episode, key.Lang, single.HearingImpaired)"),
+            "F-M440: absorbing a single drops the text of the deleted entry");
+        Check(uploadSrc.Contains("new Api.OwnTextStore().Sweep(")
+                && uploadSrc.Contains("registry.HasUploadedText(k.ImdbId, k.Season, k.Episode, k.Language, k.HearingImpaired)"),
+            "F-M440: the daily postprocessing sweeps the store by what is still uploaded");
+        Check(uploadSrc.Contains("walked {Pages} page(s)") && uploadSrc.IndexOf("new Api.OwnTextStore().Sweep(") > uploadSrc.IndexOf("walked {Pages} page(s)"),
+            "F-M440: the sweep rides on the daily task, no schedule of its own");
+        var storeSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/OwnTextStore.cs"));
+        Check(storeSrc.Contains("DefaultMaxTotalBytes = 2048L * 1024 * 1024"),
+            "F-M440: the size cap is a 2 GB runaway guard, not the working budget");
+        Check(storeSrc.Contains("File.SetLastWriteTimeUtc(path, DateTime.UtcNow);"),
+            "F-M440: a fill that reads a text marks it as still needed");
+        Check(storeSrc.Contains("tt1234567_s01e02_de_hi.srt.gz"),
+            "F-M440: the file name carries the key, so the sweep needs no index");
+
         // ── F-M437: der Nachlauf blättert bis zum Wasserzeichen, nicht fünf Seiten ──────────────
         Check(api.Contains("Func<OwnSubtitleEntry, bool>? shouldStop = null")
               && api.Contains("if (shouldStop != null && shouldStop(result[result.Count - 1]))"),

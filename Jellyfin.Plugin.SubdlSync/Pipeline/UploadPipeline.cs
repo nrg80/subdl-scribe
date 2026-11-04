@@ -4414,6 +4414,27 @@ public sealed class UploadPipeline : IPackFiller
                 "[SubDL] Upload postprocessing: walked {Pages} page(s) down to the watermark, {Count} stored handle(s) moved to their published entry id (F-M435/F-M437).",
                 pagesWalked, remappedHandles);
 
+            // F-M440: the daily housekeeping for the stored own texts — it runs HERE because this task
+            // already fires once a day, so the store needs no schedule of its own. Purely local: no
+            // API call, one directory listing.
+            try
+            {
+                int purgedTexts = new Api.OwnTextStore().Sweep(
+                    k => registry.HasUploadedText(k.ImdbId, k.Season, k.Episode, k.Language, k.HearingImpaired),
+                    TimeSpan.FromDays(cfg.OwnTextsMaxUnusedDays));
+                if (purgedTexts > 0)
+                {
+                    LogUtil.Normal(
+                        logger,
+                        "[SubDL] Upload postprocessing: {Count} stored text(s) dropped — their entry is no longer uploaded, or nothing read them for {Days} day(s) (F-M440).",
+                        purgedTexts, cfg.OwnTextsMaxUnusedDays);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                logger.LogDebug(ex, "[SubDL] Upload postprocessing: stored-text sweep skipped.");
+            }
+
             LogUtil.Normal(logger, "[SubDL] Upload postprocessing: fetched {Total} mySubtitles entries, {Rejected} rejected to clean up.", allMySubtitles.Count, rejectedEntries.Count);
 
             int matchedDeleted = 0, unmatchedDeleted = 0, failedToDelete = 0;

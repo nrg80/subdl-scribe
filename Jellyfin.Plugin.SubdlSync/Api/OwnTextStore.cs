@@ -19,6 +19,17 @@ using System.Text;
 namespace Jellyfin.Plugin.SubdlScribe.Api;
 
 /// <summary>
+/// F-M440: what a stored text belongs to — series, episode, language and HI variant.
+/// </summary>
+/// <param name="ImdbId">Series IMDb id.</param>
+/// <param name="Season">Season number.</param>
+/// <param name="Episode">Episode number.</param>
+/// <param name="Language">SubDL language code.</param>
+/// <param name="HearingImpaired">HI/SDH variant.</param>
+public readonly record struct OwnTextKey(
+    string ImdbId, int Season, int Episode, string Language, bool HearingImpaired);
+
+/// <summary>
 /// F-M440 (operator 04.11.2026, "wir waren mit dem pack fill eigentlich anders verblieben"): the text
 /// this account has ALREADY uploaded, kept on disk so a pack fill does not read it out of the media
 /// file again.
@@ -37,8 +48,12 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 /// </summary>
 public sealed class OwnTextStore
 {
-    /// <summary>Ceiling for the whole store; beyond it the oldest entries go.</summary>
-    private const long MaxTotalBytes = 256L * 1024 * 1024;
+    /// <summary>
+    /// Runaway guard only, not the working budget: measured on real files a canonical text is ~16 KB
+    /// gzipped, so 6.266 uploaded texts are ~100 MB and 20.000 are ~320 MB. The default leaves that
+    /// room; the value is a setting, and 0 means no ceiling at all.
+    /// </summary>
+    private const long DefaultMaxTotalBytes = 2048L * 1024 * 1024;
 
     /// <summary>Folder below the plugin data folder.</summary>
     private const string FolderName = "own-texts";
@@ -54,6 +69,14 @@ public sealed class OwnTextStore
     /// <c>&lt;plugin data folder&gt;/own-texts</c> on every call.
     /// </param>
     public OwnTextStore(string? directory = null) => _directory = directory;
+
+    /// <summary>Ceiling in bytes from the plugin configuration; 0 means unlimited.</summary>
+    /// <returns>Ceiling in bytes.</returns>
+    private long Ceiling()
+    {
+        int megabytes = Plugin.Instance?.Configuration?.OwnTextsMaxMegabytes ?? 0;
+        return megabytes <= 0 ? DefaultMaxTotalBytes : megabytes * 1024L * 1024L;
+    }
 
     private string? Directory
     {
@@ -104,7 +127,7 @@ public sealed class OwnTextStore
             lock (_sync)
             {
                 System.IO.Directory.CreateDirectory(dir);
-                string target = Path.Combine(dir, FileNameFor(Key(imdbId!, season, episode, language!, hearingImpaired)));
+                string target = Path.Combine(dir, FileNameFor(imdbId!, season, episode, language!, hearingImpaired));
                 string tmp = target + ".tmp";
                 using (var file = File.Create(tmp))
                 using (var gzip = new GZipStream(file, CompressionLevel.SmallestSize))
@@ -145,7 +168,7 @@ public sealed class OwnTextStore
             return false;
         }
 
-        string path = Path.Combine(dir, FileNameFor(Key(imdbId!, season, episode, language!, hearingImpaired)));
+        string path = Path.Combine(dir, FileNameFor(imdbId!, season, episode, language!, hearingImpaired));
         if (!File.Exists(path))
         {
             return false;
@@ -157,6 +180,19 @@ public sealed class OwnTextStore
             using var gzip = new GZipStream(file, CompressionMode.Decompress);
             using var reader = new StreamReader(gzip, Encoding.UTF8);
             srt = reader.ReadToEnd();
+
+            // A fill that found the text here is the proof it is still needed — the sweep reads the
+            // last-write time as "last used" and leaves a text alone while packs keep taking it.
+            try
+            {
+                File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Not fatal: the sweep then sees the older time and may drop a text that is in use,
+                // which costs one extraction later.
+            }
+
             return !string.IsNullOrWhiteSpace(srt);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
@@ -196,13 +232,177 @@ public sealed class OwnTextStore
         return removed;
     }
 
-    private static string Key(string imdbId, int season, int episode, string language, bool hearingImpaired)
-        => $"{imdbId}|{season}|{episode}|{language}|{(hearingImpaired ? "hi" : "plain")}";
-
-    private static string FileNameFor(string key)
+    /// <summary>
+    /// A stored text is named after what it holds — <c>tt1234567_s01e02_de_hi.srt.gz</c> — so the sweep
+    /// can read the key off the file without an index. A hash would have been smaller and unreadable.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="language">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>The file name.</returns>
+    /// <summary>Drops one stored text — called where its published entry is deleted or absorbed.</summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="language">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>True when a text was removed.</returns>
+    public bool Remove(string? imdbId, int season, int episode, string? language, bool hearingImpaired)
     {
-        byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes(key));
-        return Convert.ToHexString(digest, 0, 16).ToLowerInvariant() + ".srt.gz";
+        if (string.IsNullOrWhiteSpace(imdbId) || string.IsNullOrWhiteSpace(language))
+        {
+            return false;
+        }
+
+        string? dir = Directory;
+        if (dir == null)
+        {
+            return false;
+        }
+
+        string path = Path.Combine(dir, FileNameFor(imdbId!, season, episode, language!, hearingImpaired));
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+
+            File.Delete(path);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Täglicher Aufräumlauf: a stored text goes when its episode no longer has an uploaded entry for
+    /// that language, or when nothing has read it for <paramref name="maxUnusedAge"/>. Nothing else
+    /// removes it — the reset takes everything, the size cap is only a runaway guard.
+    /// </summary>
+    /// <param name="stillUploaded">Answers whether the episode still carries an uploaded entry for this language.</param>
+    /// <param name="maxUnusedAge">How long a text may sit unread before it goes.</param>
+    /// <returns>Number of texts removed.</returns>
+    public int Sweep(Func<OwnTextKey, bool> stillUploaded, TimeSpan maxUnusedAge)
+    {
+        string? dir = Directory;
+        if (dir == null || !System.IO.Directory.Exists(dir))
+        {
+            return 0;
+        }
+
+        DateTime cutoff = DateTime.UtcNow - maxUnusedAge;
+        int removed = 0;
+
+        // A half-written Put leaves a .tmp behind; a day of grace and it goes.
+        foreach (string tmp in System.IO.Directory.EnumerateFiles(dir, "*.tmp"))
+        {
+            try
+            {
+                if (File.GetLastWriteTimeUtc(tmp) < DateTime.UtcNow.AddDays(-1))
+                {
+                    File.Delete(tmp);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Next sweep tries again.
+            }
+        }
+
+        foreach (string path in System.IO.Directory.EnumerateFiles(dir, "*.srt.gz").ToList())
+        {
+            string name = Path.GetFileName(path);
+            bool drop;
+            if (!TryParseName(name, out var key))
+            {
+                // Not one of ours (stray temp file): remove it.
+                drop = true;
+            }
+            else
+            {
+                DateTime lastUsed = File.GetLastWriteTimeUtc(path);
+                drop = lastUsed < cutoff || !stillUploaded(key);
+            }
+
+            if (!drop)
+            {
+                continue;
+            }
+
+            try
+            {
+                File.Delete(path);
+                removed++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Next sweep tries again.
+            }
+        }
+
+        return removed;
+    }
+
+    private static string FileNameFor(string imdbId, int season, int episode, string language, bool hearingImpaired)
+    {
+        var safe = new StringBuilder(language.Length);
+        foreach (char c in language)
+        {
+            safe.Append(char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : '-');
+        }
+
+        return $"{imdbId}_s{season:00}e{episode:00}_{safe}{(hearingImpaired ? "_hi" : string.Empty)}.srt.gz";
+    }
+
+    /// <summary>Reads a key back out of a store file name.</summary>
+    /// <param name="fileName">File name only.</param>
+    /// <param name="key">The parsed key.</param>
+    /// <returns>True when the name follows the store's pattern.</returns>
+    private static bool TryParseName(string fileName, out OwnTextKey key)
+    {
+        key = default;
+        const string Suffix = ".srt.gz";
+        if (!fileName.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string stem = fileName[..^Suffix.Length];
+        bool hi = stem.EndsWith("_hi", StringComparison.Ordinal);
+        if (hi)
+        {
+            stem = stem[..^3];
+        }
+
+        int langAt = stem.LastIndexOf('_');
+        if (langAt <= 0 || langAt + 1 >= stem.Length)
+        {
+            return false;
+        }
+
+        string language = stem[(langAt + 1)..];
+        string head = stem[..langAt];
+        int epAt = head.LastIndexOf('e');
+        int sAt = head.LastIndexOf('s');
+        if (sAt <= 0 || epAt <= sAt + 1 || epAt + 1 >= head.Length)
+        {
+            return false;
+        }
+
+        string imdbId = head[..sAt];
+        if (!int.TryParse(head[(sAt + 1)..epAt], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int season)
+            || !int.TryParse(head[(epAt + 1)..], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int episode))
+        {
+            return false;
+        }
+
+        key = new OwnTextKey(imdbId, season, episode, language, hi);
+        return true;
     }
 
     /// <summary>Oldest-first eviction once the store is over its ceiling.</summary>
@@ -218,14 +418,15 @@ public sealed class OwnTextStore
             total += info.Length;
         }
 
-        if (total <= MaxTotalBytes)
+        long ceiling = Ceiling();
+        if (ceiling <= 0 || total <= ceiling)
         {
             return;
         }
 
         foreach (var info in files.OrderBy(f => f.LastWriteTimeUtc))
         {
-            if (total <= MaxTotalBytes)
+            if (total <= ceiling)
             {
                 break;
             }
