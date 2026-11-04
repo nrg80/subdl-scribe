@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.328",
-        "changelog": "v12.1.12.328: the postprocessing pages down to its own watermark and runs daily, so a published entry gets its entry id within a day instead of waiting for a weekly pass (F-M437).",
+        "version": "12.1.12.329",
+        "changelog": "v12.1.12.329: the page ceiling of the postprocessing walk rises to 20000 so a large backlog is reachable in one catch-up run; the run itself stays watermark-bound (F-M437).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.328-dev/Jellyfin.Plugin.SubdlSync_12.1.12.328.zip",
-        "checksum": "62e1c07a3c89a7973cafb4aa8238fc3e",
-        "timestamp": "2026-11-04T13:56:21Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.329-dev/Jellyfin.Plugin.SubdlSync_12.1.12.329.zip",
+        "checksum": "17bb1d7e594862660b6b64a538da70ae",
+        "timestamp": "2026-11-04T16:15:44Z"
       }
     ]
   }
