@@ -4191,7 +4191,7 @@ public sealed class UploadPipeline : IPackFiller
             _postprocessingLastResult = "running";
 
             int maxRuntimeMinutes = Math.Clamp(cfg.PostprocessMaxRuntimeMinutes, 1, 30);
-            int maxPages = Math.Clamp(cfg.PostprocessMaxPages, 1, 400);
+            int maxPages = Math.Clamp(cfg.PostprocessMaxPages, 1, 20000);
             using var runCts = new CancellationTokenSource(TimeSpan.FromMinutes(maxRuntimeMinutes));
             var ct = runCts.Token;
 

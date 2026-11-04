@@ -620,7 +620,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// stops at <see cref="PostprocessWatermarkUtc"/>; this value only bounds a catch-up run after a
     /// long gap, so it must be large enough to reach the bottom of a big list (25 entries per page).
     /// </summary>
-    public int PostprocessMaxPages { get; set; } = 200;
+    public int PostprocessMaxPages { get; set; } = 20000;
 
     /// <summary>
     /// F-M437: the newest <c>createdAt</c> the last pass has already walked, stored as the account

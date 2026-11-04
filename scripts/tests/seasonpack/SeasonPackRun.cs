@@ -660,7 +660,7 @@ internal static class Program
             "F-M437: the pass stores how far it read");
         Check(uploadSrc.Contains("e.CreatedAt.ToUniversalTime() < watermark"),
             "F-M437: the walk stops at entries older than the last pass");
-        Check(uploadSrc.Contains("Math.Clamp(cfg.PostprocessMaxPages, 1, 400)"),
+        Check(uploadSrc.Contains("Math.Clamp(cfg.PostprocessMaxPages, 1, 20000)"),
             "F-M437: the page limit is a ceiling for a catch-up run, not the daily depth");
         var cfgSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"));
         Check(cfgSrc.Contains("UploadPostprocessInterval { get; set; } = UpdateInterval.Daily"),

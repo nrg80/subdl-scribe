@@ -345,7 +345,10 @@
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
                             </select>
-                            <div class="fieldDescription">How often rejected uploads are resolved against /user/mySubtitles. Scheduled run is inhibited if upload is disabled. Default: Weekly.</div>
+                            <!-- F-M437 (operator 04.11.2026 "Max pages 200 ist zu wenig. 20000 eher"): the page limit is a
+                                 ceiling for a catch-up run, NOT the depth of a normal run — the pass stops at
+                                 the watermark of the last one. Default: Daily. -->
+                            <div class="fieldDescription">How often stored upload ids are moved to their published entry id and rejected uploads are resolved. A run pages down only until it reaches the entries the last run saw, so it costs a few pages; the page limit (20000) only bounds a catch-up after a pause. Scheduled run is inhibited if upload is disabled. Default: Daily.</div>
                             <!-- Operator order 08.10.2026: the third refresh job gets its manual button too
                                  ("Knopf für upload Postprocessing habe ich dann vergessen. Auch manual dann statt never").
                                  It starts the TASK, like the two refresh buttons above — NOT the job's own
@@ -991,7 +994,7 @@
                         document.querySelector('#LogMode').value = config.LogMode;
                         document.querySelector('#OshashRefresh').value = config.OshashRefresh || 'Monthly';
         document.querySelector('#PruneMode').value = config.PruneMode || 'Weekly';
-        document.querySelector('#UploadPostprocessInterval').value = config.UploadPostprocessInterval || 'Weekly';
+        document.querySelector('#UploadPostprocessInterval').value = config.UploadPostprocessInterval || 'Daily';
                         document.querySelector('#QaValidateSrt').checked = config.QaValidateSrt;
                         document.querySelector('#QaCheckSync').checked = config.QaCheckSync;
                         document.querySelector('#QaVerifyLanguage').checked = config.QaVerifyLanguage;
