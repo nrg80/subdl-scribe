@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.92
-**Status:** Implementation — v12.1.12.329.
+**Version:** 2.93
+**Status:** Implementation — v12.1.12.330.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 74 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 75 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -337,6 +337,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M436 [P] (Operator-Anweisung 04.11.2026 „wenn deferred der letzte Status ist, sollte das in der Ampel auch so stehen"):** **Ein offener Fire ist der letzte Zustand — Ampel und Text sagen dasselbe.** Steht für einen Worker ein Fire aus, dann zeigt seine Zeile `defer` in Gelb, unabhängig vom Ergebnis des abgelaufenen Laufs; nur ein laufender (`run`) bleibt unangetastet. War der letzte Lauf **fehlgeschlagen**, nennt die Zeile unter der Liste zuerst den Fehlschlag samt Ursache (`last run failed: <Detail>`) und danach den nächsten Versuch (`— next attempt <Tag Zeit>`); „deferred" ist nur der Rückfall ohne eigene Ursache. Rot „fail" wäre an dieser Stelle falsch: der Worker ist nicht kaputt, er wartet auf seinen nächsten Anlauf. **Die Fehlschlag-Zeile bleibt stehen, bis der nächste Lauf erfolgreich war** — sie hängt nicht am offenen Fire, denn die Zeile der Workers-Liste nennt nur das Wort, nie die Ursache. Ein gesunder Worker ohne Fire sagt nichts.
 
 **F-M437 [P] (Operator-Entscheidung 04.11.2026 „adaptiv schauen wieviel offen ist und soviel Seiten ziehen"):** **Der Nachlauf blättert bis zum Wasserzeichen, nicht bis zu einer festen Seitenzahl — und er läuft täglich.** Die Veröffentlichungsliste kommt neueste zuerst; der Lauf merkt sich in `PostprocessWatermarkUtc` das jüngste `createdAt`, das er gesehen hat, und endet, sobald eine Seite ältere Einträge erreicht. Im Normalbetrieb sind das wenige Seiten; nach einer Pause holt derselbe Lauf auf, bis er das Wasserzeichen erreicht. `PostprocessMaxPages` ist nur noch der Deckel für so einen Aufholauf, nicht die Tiefe des Laufs — Standard **20.000** Seiten, damit auch ein Rückstand von hunderttausenden Einträgen in einem Lauf erreichbar bleibt; gebremst wird so ein Aufholauf durch das Laufzeitlimit, nicht durch die Seitenzahl. Der Takt steht auf **täglich** (`UploadPostprocessInterval`), weil eine Eintrags-Id erst mit der Freigabe existiert und ein frischer Upload sie sonst bis zu einer Woche nicht bekommt. Das Wasserzeichen wird über den partiellen Schreiber (`SavePluginState`) abgelegt, damit ein leerer Speicher keine Benutzereinstellungen überschreiben kann.
+
+**F-M438 [P] (Befund 04.11.2026, Prod-Neustart):** **Ein plugin-eigenes Feld, das in der Konfigurationsdatei noch nicht gesetzt ist, wird so geschrieben, dass Jellyfin es beim nächsten Laden auch liest.** Der partielle Schreiber (F-M201) setzte bisher nur den Elementtext. Zwei Fälle gingen dabei verloren, beide gemessen: ein `Nullable<DateTime>` steht in der Datei nicht etwa gar nicht da, sondern als `<PostprocessWatermarkUtc xsi:nil="true" />` — der Text wurde gesetzt, das `xsi:nil` blieb, und der nächste Ladevorgang las wieder `null`; ein Feld, das die Datei überhaupt nicht kennt (Konfiguration einer älteren Version), wurde ans Dokumentende gehängt, und Jellyfins Serializer liest Elemente in **Deklarationsreihenfolge** — alles hinter einem später deklarierten Element wird ignoriert. Beides sah wie ein erfolgreiches Speichern aus und war nach genau einem Neustart weg. Der Schreiber entfernt deshalb `xsi:nil` beim Setzen und fügt ein unbekanntes Feld vor dem ersten Element ein, das die Konfiguration **nach** ihm deklariert. Der Test `scripts/tests/statefile` hält beide Fälle fest, inklusive der alten Schreibweise als Gegenprobe.
 
 ## 4. Download Pipeline
 
