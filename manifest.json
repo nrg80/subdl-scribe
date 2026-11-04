@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.329",
-        "changelog": "v12.1.12.329: the page ceiling of the postprocessing walk rises to 20000 so a large backlog is reachable in one catch-up run; the run itself stays watermark-bound (F-M437).",
+        "version": "12.1.12.330",
+        "changelog": "v12.1.12.330: a plugin-owned field that is new to the configuration file survives a restart — the partial writer clears xsi:nil and inserts at the declared position (F-M438).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.329-dev/Jellyfin.Plugin.SubdlSync_12.1.12.329.zip",
-        "checksum": "17bb1d7e594862660b6b64a538da70ae",
-        "timestamp": "2026-11-04T16:15:44Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.330-dev/Jellyfin.Plugin.SubdlSync_12.1.12.330.zip",
+        "checksum": "8235c7d41bcd597879e809a99caad63a",
+        "timestamp": "2026-11-04T16:23:18Z"
       }
     ]
   }
