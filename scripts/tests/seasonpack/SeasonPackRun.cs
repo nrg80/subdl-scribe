@@ -652,6 +652,22 @@ internal static class Program
         Check(uploadSrc.Contains("entry id {Id} taken from myPublishedSubtitles"),
             "F-M435: a single and a movie store the entry id the same way");
 
+        // ── F-M437: der Nachlauf blättert bis zum Wasserzeichen, nicht fünf Seiten ──────────────
+        Check(api.Contains("Func<OwnSubtitleEntry, bool>? shouldStop = null")
+              && api.Contains("if (shouldStop != null && shouldStop(result[result.Count - 1]))"),
+            "F-M437: the published list can be walked down to a watermark");
+        Check(uploadSrc.Contains("cfg.PostprocessWatermarkUtc") && uploadSrc.Contains("plugin.SavePluginState();"),
+            "F-M437: the pass stores how far it read");
+        Check(uploadSrc.Contains("e.CreatedAt.ToUniversalTime() < watermark"),
+            "F-M437: the walk stops at entries older than the last pass");
+        Check(uploadSrc.Contains("Math.Clamp(cfg.PostprocessMaxPages, 1, 400)"),
+            "F-M437: the page limit is a ceiling for a catch-up run, not the daily depth");
+        var cfgSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"));
+        Check(cfgSrc.Contains("UploadPostprocessInterval { get; set; } = UpdateInterval.Daily"),
+            "F-M437: postprocessing runs daily by default");
+        Check(cfgSrc.Contains("public DateTime? PostprocessWatermarkUtc { get; set; }"),
+            "F-M437: the watermark is configuration state");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."

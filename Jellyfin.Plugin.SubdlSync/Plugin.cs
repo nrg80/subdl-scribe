@@ -226,7 +226,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     private static readonly string[] PluginOwnedFields =
     [
         "RandomDailyTime", "RandomWeeklyTime", "RandomMonthlyTime", "RandomMonthlyDay",
-        "RandomPruneTime", "RandomOshashTime", "RandomPostprocessTime",
+        "RandomPruneTime", "RandomOshashTime", "RandomPostprocessTime", "PostprocessWatermarkUtc",
         "StatusUploaded", "StatusDownloaded", "StatusStatsSinceUtc"
     ];
 
@@ -267,6 +267,10 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             mine["StatusUploaded"] = cfg.StatusUploaded.ToString(CultureInfo.InvariantCulture);
             mine["StatusDownloaded"] = cfg.StatusDownloaded.ToString(CultureInfo.InvariantCulture);
             mine["StatusStatsSinceUtc"] = cfg.StatusStatsSinceUtc?.ToUniversalTime()
+                .ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", CultureInfo.InvariantCulture);
+            // F-M437: the postprocessing watermark is plugin state like the anchors — written through the
+            // same partial writer so an empty in-memory configuration can never erase user settings.
+            mine["PostprocessWatermarkUtc"] = cfg.PostprocessWatermarkUtc?.ToUniversalTime()
                 .ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", CultureInfo.InvariantCulture);
 
             PatchPluginStateFile(path, mine);

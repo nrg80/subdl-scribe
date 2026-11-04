@@ -4191,7 +4191,7 @@ public sealed class UploadPipeline : IPackFiller
             _postprocessingLastResult = "running";
 
             int maxRuntimeMinutes = Math.Clamp(cfg.PostprocessMaxRuntimeMinutes, 1, 30);
-            int maxPages = Math.Clamp(cfg.PostprocessMaxPages, 1, 20);
+            int maxPages = Math.Clamp(cfg.PostprocessMaxPages, 1, 400);
             using var runCts = new CancellationTokenSource(TimeSpan.FromMinutes(maxRuntimeMinutes));
             var ct = runCts.Token;
 
@@ -4253,12 +4253,31 @@ public sealed class UploadPipeline : IPackFiller
             // entry id — and the published list names both numbers for the same entry, so the stored
             // handle is moved over here instead of waiting for the next resolution to guess.
             int remappedHandles = 0;
+            int pagesWalked = 0;
+            DateTime watermark = cfg.PostprocessWatermarkUtc?.ToUniversalTime() ?? DateTime.MinValue;
+            DateTime newestSeen = DateTime.MinValue;
             try
             {
                 await limiter.PauseAsync(ct).ConfigureAwait(false);
-                var publishedEntries = await api.ListMyPublishedSubtitlesAsync(ct, maxPages: maxPages).ConfigureAwait(false);
+                // F-M437 (operator decision 04.11.2026): walk down only until the entries are older than
+                // the last pass reached. The list is newest first, so this is where the work of the last
+                // days sits; a pass after a pause keeps going until the watermark and catches up on its
+                // own. maxPages stays as the ceiling of that walk, not as its length.
+                var publishedEntries = await api.ListMyPublishedSubtitlesAsync(
+                    ct,
+                    maxPages: maxPages,
+                    shouldStop: e => watermark != DateTime.MinValue
+                                     && e.CreatedAt != default
+                                     && e.CreatedAt.ToUniversalTime() < watermark,
+                    pageRead: n => pagesWalked = n).ConfigureAwait(false);
                 foreach (var publishedEntry in publishedEntries ?? new List<OwnSubtitleEntry>())
                 {
+                    if (publishedEntry.CreatedAt != default
+                        && publishedEntry.CreatedAt.ToUniversalTime() > newestSeen)
+                    {
+                        newestSeen = publishedEntry.CreatedAt.ToUniversalTime();
+                    }
+
                     if (publishedEntry.EntryId <= 0 || publishedEntry.UploadId <= 0
                         || publishedEntry.EntryId == publishedEntry.UploadId)
                     {
@@ -4279,10 +4298,18 @@ public sealed class UploadPipeline : IPackFiller
                 logger.LogWarning("[SubDL] Upload postprocessing could not read myPublishedSubtitles: {Msg}", ex.Message);
             }
 
-            if (remappedHandles > 0)
+            // F-M437: the watermark is the newest createdAt this pass saw — stored through the partial
+            // writer, so the next pass starts where this one ended instead of re-reading the whole list.
+            if (newestSeen > watermark)
             {
-                LogUtil.Normal(logger, "[SubDL] Upload postprocessing: {Count} stored handle(s) moved to their published entry id (F-M435).", remappedHandles);
+                cfg.PostprocessWatermarkUtc = newestSeen;
+                plugin.SavePluginState();
             }
+
+            LogUtil.Normal(
+                logger,
+                "[SubDL] Upload postprocessing: walked {Pages} page(s) down to the watermark, {Count} stored handle(s) moved to their published entry id (F-M435/F-M437).",
+                pagesWalked, remappedHandles);
 
             LogUtil.Normal(logger, "[SubDL] Upload postprocessing: fetched {Total} mySubtitles entries, {Rejected} rejected to clean up.", allMySubtitles.Count, rejectedEntries.Count);
 

@@ -599,7 +599,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// happening. The dice anchor is a day+time either way, so Weekly uses the stored value as-is.
     /// </para>
     /// </summary>
-    public UpdateInterval UploadPostprocessInterval { get; set; } = UpdateInterval.Weekly;
+    public UpdateInterval UploadPostprocessInterval { get; set; } = UpdateInterval.Daily;
 
     /// <summary>
     /// F-M176: diced postprocessing anchor, "D HH:mm" (D=1..7 Mon..Sun). Empty = not diced yet.
@@ -615,7 +615,20 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>
     /// F-M176: max mySubtitles pages fetched per postprocessing run. Default 5.
     /// </summary>
-    public int PostprocessMaxPages { get; set; } = 5;
+    /// <summary>
+    /// F-M437 (operator decision 04.11.2026): the CEILING of the page walk, not its length. The walk
+    /// stops at <see cref="PostprocessWatermarkUtc"/>; this value only bounds a catch-up run after a
+    /// long gap, so it must be large enough to reach the bottom of a big list (25 entries per page).
+    /// </summary>
+    public int PostprocessMaxPages { get; set; } = 200;
+
+    /// <summary>
+    /// F-M437: the newest <c>createdAt</c> the last pass has already walked, stored as the account
+    /// reported it. The next pass pages down only until it reaches entries older than this, so a
+    /// daily pass costs a handful of pages instead of the whole list — and a pass after a pause
+    /// catches up by itself.
+    /// </summary>
+    public DateTime? PostprocessWatermarkUtc { get; set; }
 
     /// <summary>
     /// F-M176: max runtime in minutes for one postprocessing run. Safety kill-switch.

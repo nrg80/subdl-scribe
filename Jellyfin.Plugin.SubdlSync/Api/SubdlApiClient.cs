@@ -1472,12 +1472,30 @@ public sealed class SubdlApiClient
     /// <param name="ct">Cancellation token.</param>
     /// <param name="maxPages">How many pages to read (25 entries each).</param>
     /// <returns>The entries, newest first; null when the call fails.</returns>
-    public async Task<List<OwnSubtitleEntry>?> ListMyPublishedSubtitlesAsync(CancellationToken ct, int maxPages = 2)
+    /// <summary>
+    /// F-M437 (operator decision 04.11.2026): the walk is WATERMARKED, not fixed. The list comes newest
+    /// first, so a caller that knows how far it read last time stops as soon as a page has reached
+    /// older entries — a daily pass then costs a handful of pages instead of the whole account.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="maxPages">Ceiling for one walk (a catch-up run after a pause needs more pages).</param>
+    /// <param name="shouldStop">
+    /// Called with the OLDEST entry of each page after it was added; true ends the walk before the next
+    /// page is requested.
+    /// </param>
+    /// <param name="pageRead">Reports each page number actually fetched, so the caller can log the depth.</param>
+    /// <returns>The entries read, newest first; null when the first call failed.</returns>
+    public async Task<List<OwnSubtitleEntry>?> ListMyPublishedSubtitlesAsync(
+        CancellationToken ct,
+        int maxPages = 2,
+        Func<OwnSubtitleEntry, bool>? shouldStop = null,
+        Action<int>? pageRead = null)
     {
         string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");
         var result = new List<OwnSubtitleEntry>();
         for (int page = 1; page <= Math.Max(1, maxPages); page++)
         {
+            pageRead?.Invoke(page);
             string url = $"{ApiBase}/user/myPublishedSubtitles?page={page}";
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -1513,6 +1531,11 @@ public sealed class SubdlApiClient
                 }
 
                 if (added == 0)
+                {
+                    break;
+                }
+
+                if (shouldStop != null && shouldStop(result[result.Count - 1]))
                 {
                     break;
                 }
