@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.326",
-        "changelog": "v12.1.12.326: upload rows store the published entry id, not the upload id — packs, singles and movies alike, with the postprocessing remapping open submissions (F-M435).",
+        "version": "12.1.12.328",
+        "changelog": "v12.1.12.328: the postprocessing pages down to its own watermark and runs daily, so a published entry gets its entry id within a day instead of waiting for a weekly pass (F-M437).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.326-dev/Jellyfin.Plugin.SubdlSync_12.1.12.326.zip",
-        "checksum": "44666d138103d93c597d0a4f3823c92c",
-        "timestamp": "2026-11-03T21:29:54Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.328-dev/Jellyfin.Plugin.SubdlSync_12.1.12.328.zip",
+        "checksum": "62e1c07a3c89a7973cafb4aa8238fc3e",
+        "timestamp": "2026-11-04T13:56:21Z"
       }
     ]
   }
