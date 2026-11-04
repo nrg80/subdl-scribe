@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.89
-**Status:** Implementation — v12.1.12.326.
+**Version:** 2.90
+**Status:** Implementation — v12.1.12.327.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 72 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 73 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -333,6 +333,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M434 [P] (Befund 03.11.2026 zur Operator-Anweisung „wieso geht tracker einzeln hoch?"):** **Die Dateien werden zur Pack-Zeit auch gefunden.** F-M433 fragte die Dateien, bekam aber für jede Sprache „nein": die Zuordnung Folge → Datei lief über `episode.Series?.ProviderIds`, und dieses Serienobjekt ist nicht geladen, wenn die Pack-Phase frägt — sie läuft seit F-M429 **vor** der Item-Schleife, die die Staffel-Anker füllt. Belegt an „For All Mankind" S1: die Dateien tragen `eng` (E4 zusätzlich 35 Sprachen), der Lauf meldete trotzdem für **jede** Sprache „weder Store noch Dateien". Zwei Korrekturen: der Vollständigkeits-Scan übergibt seine Episoden-Items an den Füller (`_seasonEpisodes`), und die Zuordnung läuft über `ResolveIdsRaw` (IMDb, Staffel, Folgennummer) statt über das Serienobjekt — in `FileCarriesLanguage` wie in `FileLanguages`. Der Store bleibt der erste Zeuge; die Dateien sind der zweite, der jetzt tatsächlich antwortet.
 
 **F-M435 [P] (Operator-Anweisung 03.11.2026 „das plugin auf eintragsid für seasonpack, Einzelepisoden und movies umstellen"):** **Gespeichert wird die Eintrags-Id, nicht die Upload-Id.** Die Veröffentlichungsliste führt je Eintrag zwei Nummern: `id` ist die Id des veröffentlichten Eintrags, `subtitles_uploaded_id` die interne Upload-Id. Der Löschaufruf `/user/deletePublishedSubtitle` nimmt die Eintrags-Id; beide Nummern liegen in verschiedenen Bereichen, eine Zeile mit der Upload-Id benennt nach der Freigabe also nichts mehr. Der Eintragsparser trennt sie (`EntryId`, `UploadId`) und bietet mit `HandleId` den Griff an, der zu speichern ist: die Eintrags-Id, sobald ein veröffentlichter Eintrag sie nennt, sonst die Upload-Id einer noch offenen Einsendung. Staffelpack, Einzelfolge und Film speichern über `HandleId`; die Log-Zeile nennt beide Nummern (`entry id … (upload id …)`). Weil eine Einsendung zum Upload-Zeitpunkt meist noch offen ist, zieht die Nachbereitung die Eintrags-Id nach: sie liest die Veröffentlichungsliste, bildet Upload-Id → Eintrags-Id und schreibt die gespeicherten Griffe in `embeds`, `sidecars` und `packs` um (`RemapSubdlId`), gemeldet als `stored handle(s) moved to their published entry id`.
+
+**F-M436 [P] (Operator-Anweisung 04.11.2026 „wenn deferred der letzte Status ist, sollte das in der Ampel auch so stehen"):** **Ein offener Fire ist der letzte Zustand — Ampel und Text sagen dasselbe.** Steht für einen Worker ein Fire aus, dann zeigt seine Zeile `defer` in Gelb, unabhängig vom Ergebnis des abgelaufenen Laufs; nur ein laufender (`run`) bleibt unangetastet. War der letzte Lauf **fehlgeschlagen**, nennt die Zeile unter der Liste zuerst den Fehlschlag samt Ursache (`last run failed: <Detail>`) und danach den nächsten Versuch (`— next attempt <Tag Zeit>`); „deferred" ist nur der Rückfall ohne eigene Ursache. Rot „fail" wäre an dieser Stelle falsch: der Worker ist nicht kaputt, er wartet auf seinen nächsten Anlauf. **Die Fehlschlag-Zeile bleibt stehen, bis der nächste Lauf erfolgreich war** — sie hängt nicht am offenen Fire, denn die Zeile der Workers-Liste nennt nur das Wort, nie die Ursache. Ein gesunder Worker ohne Fire sagt nichts.
 
 ## 4. Download Pipeline
 
