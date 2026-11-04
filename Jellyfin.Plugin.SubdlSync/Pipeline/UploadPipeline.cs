@@ -109,8 +109,12 @@ public class RunSummary
 /// <summary>
 /// Core upload pipeline (B1): discovery → skip filters → text-sub extraction →
 /// dedup → IMDB resolution → upload. QA gates are B2 (F-M13–M17), not in this version.
+/// <para>
+/// F-M389: it is also the pack filler — a season whose missing episode is already uploaded is
+/// completed from the library instead of being dissolved into single uploads.
+/// </para>
 /// </summary>
-public sealed class UploadPipeline
+public sealed class UploadPipeline : IPackFiller
 {
         /// <summary>
         /// Current postprocessing state for monitoring /Plugins/SubdlSync/PostprocessStatus.
@@ -163,12 +167,48 @@ public sealed class UploadPipeline
     private readonly PluginConfiguration _config;
     private readonly GlobalRateLimiter _limiter;
 
+    /// <summary>
+    /// F-M389: one item per (series IMDb id, season) that this run worked — the way into a season
+    /// whose episodes are NOT all in the queue. Jellyfin stores the SERIES id on the series, never
+    /// on the episode, so the season is found through an episode rather than by a provider query.
+    /// </summary>
+    private readonly Dictionary<(string ImdbId, int Season), BaseItem> _seasonAnchors = new();
+
+    /// <summary>
+    /// F-M389: the episode children of a season, per (series IMDb id, season), read once for all
+    /// fills of that season. A filler call costs a library walk; eight of them must not cost eight.
+    /// </summary>
+    private readonly Dictionary<(string ImdbId, int Season), List<BaseItem>> _seasonEpisodes = new();
+
+    /// <summary>
+    /// F-M389: the episode items of every COMPLETE season found at run start. The fill-only plan needs
+    /// them (a season the queue no longer touches has no anchor at all) and the season index already
+    /// walked the library once — a second walk for the same answer would be waste.
+    /// </summary>
+    private readonly Dictionary<(string ImdbId, int Season), List<BaseItem>> _completeSeasonItems = new();
+
+    /// <summary>
+    /// F-M429 (operator order 03.11.2026: "Bei packbildung identifizierte einzeluploads für später den
+    /// einzelupload merken"): the (series, season, language, variant) pairs a pack of THIS run actually
+    /// carried. A single position covered by such a pair is skipped later in the run — the pack is the
+    /// only carrier. Positions whose pack failed are absent, so their single goes up as usual.
+    /// </summary>
+    private readonly HashSet<(string ImdbId, int Season, string Lang, bool Hi)> _packAbsorbed = new();
+
     /// <summary>F-M88c/d: central OSHash cache (oshash-cache.json in the plugin data dir).</summary>
     /// Always use the current Plugin.Instance cache so a DB reset is respected.<
     private Registry.OshashCache OshashCache => Plugin.Instance?.SharedOshashCache ?? throw new InvalidOperationException("Plugin not initialized");
 
     /// <summary>Resolved ffmpeg path used to extract embedded text subtitles.</summary>
     private readonly string _ffmpegPath;
+
+    /// <summary>
+    /// F-M405 (operator order 02.11.2026): the pack filler extracts a file ONCE per run, not once per
+    /// language. Filling a season for 37 languages meant 37 full passes over the same container — for 8
+    /// episodes that is 296 re-reads where 8 do. The map is keyed by media path and lives exactly as
+    /// long as the run.
+    /// </summary>
+    private readonly Dictionary<string, Dictionary<int, string?>> _fillTextCache = new(StringComparer.Ordinal);
 
     /// <summary>Process-static cache so ffmpeg is resolved once per plugin lifetime.</summary>
     private static string? _cachedFfmpegPath;
@@ -210,6 +250,12 @@ public sealed class UploadPipeline
     /// request quota was fine). Scheduled tasks (IsArrivalRun=false) keep the wait.
     /// </summary>
     public bool IsArrivalRun { get; set; }
+
+    // F-M425 (operator order 02.11.2026): there is no per-trigger difference left. Every run — arrival,
+    // refetch, manual, scheduled — asks the SAME question: are the episodes this run queued the whole
+    // season? If yes, a pack is built out of those items and nothing else; if no, the run stays a single
+    // uploader. The old fill-only route (a container assembled from what an earlier run had left in the
+    // store) is gone: it produced packs out of material no run had touched.
 
     // ── F-M111: queue-driven operation (user decision 12.09.2026) ───────────
     // Same contract as the download pipeline: QueueFilter restricts the item
@@ -336,7 +382,9 @@ public sealed class UploadPipeline
         // critical errors, rate limits, run started/finished.
         // (10.09.2026): moved AFTER CollectItems — FilesSeen was always 0 here,
         // logging "0 items queued" although the scan runs 15 lines later and found 304.
-        LogUtil.Normal(_logger, "[SubDL] upload: started (dry-run={Dry})", _config.DryRun);
+        // F-M403 (operator order 02.11.2026): one spelling for the mode. Inline it is the lowercase
+        // word "dry" (as in the workers line), on an event line it is the prefix "DRY-RUN".
+        LogUtil.Normal(_logger, "[SubDL] upload: started{Dry}", _config.DryRun ? ", dry" : string.Empty);
 
         PipelineStopSignal.ClearStaleMarkers(Plugin.Instance?.DataFolderPath ?? string.Empty);
 
@@ -364,6 +412,13 @@ public sealed class UploadPipeline
         // The 1-min metadata grace lives in the ARRIVAL WATCHER (once per
         // event, before the download run which fires first) — not here. Scheduled
         // runs never get one. No-id items still have the per-item 15-min ladder.
+
+        // F-M389: one run, one view of the seasons it works. A fresh pipeline is built per run, but
+        // an anchor must never outlive the selection it was read under.
+        _seasonAnchors.Clear();
+        _seasonEpisodes.Clear();
+        _completeSeasonItems.Clear();
+        _packAbsorbed.Clear(); // F-M429: the memory of this run's packs, not the previous run's
 
         var items = CollectItems(_config.SelectedLibraries);
         summary.FilesSeen = items.Count; // (not logged — stats-free log)
@@ -398,6 +453,98 @@ public sealed class UploadPipeline
             .ThenBy(x => x.Pos)
             .Select(x => x.Item)
             .ToList();
+
+        // F-M372: can this season become a pack at all? A season is complete when the episodes the
+        // library holds are exactly the episodes that aired (IMDb, TMDB as the fallback). A run that
+        // sees only part of a season does not make it incomplete — the folder decides, not the queue.
+        //
+        // F-M420 (operator order 02.11.2026): "refetch und manual: erst einzelupload, dann
+        // staffelpack". Nothing is held back for a pack any more. Every position goes up the SINGLE
+        // way first, and the pack is assembled at the END of the run out of what is in the store by
+        // then — this run's own uploads included — deleting the singles it absorbs (F-M391). An
+        // arrival run builds no pack at all ("on arrival: nur einzelupload"), so it neither asks which
+        // seasons are complete nor extracts anything for a container.
+        SeasonPackCoordinator? packCoordinator = null;
+        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> completeSeasons
+            = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>();
+        // F-M424 (operator order 02.11.2026): "on arrival to investigate first if the queued items can
+        // form a pack. If so pls do, but only with the queued items." An arrival run therefore asks the
+        // same completeness question — but the answer it needs is narrower: it does not care whether
+        // the whole LIBRARY is complete, only whether the episodes that arrived in THIS run are the
+        // whole season. If they are, the pack is built out of exactly those items and nothing else is
+        // pulled in from the store; if they are not, the run stays what it was, a single uploader.
+        if (_config.UploadSeasonPacks)
+        {
+            completeSeasons = await CompleteSeasonsAsync(runCt).ConfigureAwait(false);
+            var queued = QueuedEpisodes(items);
+            var arrivalSeasons = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>();
+            foreach (var entry in completeSeasons)
+            {
+                if (!queued.TryGetValue(entry.Key, out var arrived) || arrived.Count == 0)
+                {
+                    continue;
+                }
+
+                var aired = entry.Value;
+                var have = arrived.Where(n => aired.Contains(n)).Distinct().OrderBy(n => n).ToList();
+                if (aired.Count == 0 || have.Count < aired.Count)
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] queue: {Imdb} S{Season} brought {Have} of {Aired} episode(s) — the queued items are not the whole season, so no pack is built from this run.",
+                        entry.Key.Item1, entry.Key.Item2, have.Count, aired.Count);
+                    continue;
+                }
+
+                // F-M426: only investigated when something is still open — a fully packed season is not.
+                if (!HasOpenLanguage(entry.Key, have))
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] queue: {Imdb} S{Season} — every language is already inside a pack, nothing is investigated.",
+                        entry.Key.Item1, entry.Key.Item2);
+                    continue;
+                }
+
+                arrivalSeasons[entry.Key] = have;
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] queue: {Imdb} S{Season} brought all {Aired} episode(s) — the pack is built from the queued items of this run only.",
+                    entry.Key.Item1, entry.Key.Item2, aired.Count);
+            }
+
+            completeSeasons = arrivalSeasons;
+            if (completeSeasons.Count == 0)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] no season pack this run — no queue of this run was a whole season (F-M424/F-M425).");
+            }
+
+            if (completeSeasons.Count > 0)
+            {
+                // An EMPTY packable set on purpose: ShouldBuffer answers no for every season, so no
+                // candidate is parked in a buffer and every one of them is uploaded single right away.
+                // The pack exists only as the closing step, built from the store (F-M420).
+                var packable = new HashSet<(string ImdbId, int Season)>();
+
+                packCoordinator = new SeasonPackCoordinator(
+                    _api,
+                    Registry,
+                    _logger,
+                    _config,
+                    completeSeasons,
+                    packable,
+                    (label, count) => { summary.Uploaded += count; },
+                    count => { summary.Failed += count; },
+                    itemId => ItemResult?.Invoke(itemId, ItemOutcome.Done),
+                    // F-M389: every member is fetched from the library by the filler, which runs the
+                    // single path's gates and demands the content be known — the pack invents nothing.
+                    this,
+                    // F-M406: the pack loop reports progress so the watchdog does not abort it.
+                    watchdog.Heartbeat);
+            }
+        }
 
         int idx = 0;
 
@@ -435,6 +582,38 @@ public sealed class UploadPipeline
         // mySubtitles reads from — own uploads are included in the search results and
         // a release match skips them. No extra 8000-item fetch needed; also F-M17f's
         // blanket (imdb, episode, lang) skip would block desired second releases.
+
+        // F-M429 (operator order 03.11.2026): "Erst packbildung dann Einzeluploads. Bei packbildung
+        // identifizierte einzeluploads für später den einzelupload merken."
+        //
+        // The pack is built and sent FIRST, out of the queued episodes of this run. Only afterwards do
+        // the single uploads run — and they skip every position a pack of this run already carries,
+        // because a second copy beside the container is exactly the duplicate F-M391 deletes again.
+        // A pack that fails leaves its positions OUT of the set, so those singles go up in the normal
+        // single phase: nothing is lost, the plan is remembered instead of assumed.
+        if (packCoordinator != null && completeSeasons.Count > 0)
+        {
+            foreach (var (packImdb, packSeason, packLang, packHi) in PlanPacksFromStore(completeSeasons))
+            {
+                await packCoordinator.FillOnlyAsync(packImdb, packSeason, packLang, packHi, runCt).ConfigureAwait(false);
+                if (Registry.HasPack(packImdb, packSeason, packLang, packHi))
+                {
+                    _packAbsorbed.Add((packImdb, packSeason, packLang, packHi));
+                }
+                else
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] pack did not go up for {Imdb} S{Season} [{Lang}] — the singles it was meant to carry go up in the single phase (F-M429).",
+                        packImdb, packSeason, packLang);
+                }
+            }
+
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] pack phase done — {Count} language(s) are carried by packs of this run; their singles are skipped, everything else goes up single.",
+                _packAbsorbed.Count);
+        }
 
         foreach (var item in items)
         {
@@ -1162,7 +1341,7 @@ public sealed class UploadPipeline
             {
                 runCt.ThrowIfCancellationRequested();
                 watchdog.Heartbeat();
-                string? qaReject = ScreenContentQa(cand.Srt, cand.Lang, runtimeMs, out string contentHash);
+                string? qaReject = ScreenContentQa(cand.Srt, cand.Lang, runtimeMs, out string contentHash, out string? correctedLang);
                 if (qaReject != null)
                 {
                     // F-M298: `duplicate-content` says "this text is already known" — and IsContentKnown
@@ -1203,6 +1382,15 @@ public sealed class UploadPipeline
                     continue;
                 }
 
+                if (correctedLang != null)
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL] LANGUAGE {File} — tagged {Tag}, detected {Lang}; uploaded under {Lang} (F-M375)",
+                        Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang, correctedLang, correctedLang);
+                    qaSurvivors.Add((cand.IsLoose, cand.Stream, cand.SubPos, cand.LoosePath, correctedLang, cand.Srt, cand.HearingImpaired, cand.Forced));
+                    continue;
+                }
+
                 qaSurvivors.Add(cand);
             }
 
@@ -1218,12 +1406,42 @@ public sealed class UploadPipeline
             // Language so doubles can be matched per stream.
             // F-M184 (23.09.2026): the dry run no longer probes SubDL for duplicates —
             // it reports what WOULD be uploaded, without spending a search call.
+            // F-M373: the frame rate is what decides whether the episodes share one source, so the
+            // plan needs it in the dry run too — looked up once per item, as in phase 3.
+            string itemFramerate = GetFramerateCode(item);
+
+            // F-M376: what the file itself says about its resolution and codec — the only release
+            // facts a pack has when the file names carry no release at all. One lookup per item.
+            (int? itemVideoWidth, int? itemVideoHeight, string? itemVideoCodec) = GetVideoFacts(item);
+
+            // F-M389: keep ONE item per (series, season) of this run. It is the way into the season's
+            // episode children when a pack has to be filled from subtitles that are already up —
+            // Jellyfin carries the series id on the series, not on the episode, so no query for
+            // "all episodes of tt…" exists to ask for here.
+            if (isSeries && !string.IsNullOrWhiteSpace(imdbId) && season > 0)
+            {
+                _seasonAnchors.TryAdd((imdbId!, season), item);
+            }
+
             if (_config.DryRun)
             {
             foreach (var cand in qaSurvivors)
             {
+                // F-M372/F-M373: a dry run shows the PACK it would send, not eight singles — the
+                // plan is part of what the run decides, so it has to be visible without uploading.
+                if (packCoordinator != null && !cand.IsLoose && !cand.Forced
+                    && packCoordinator.ShouldBuffer(imdbId, season))
+                {
+                    await packCoordinator.AddAsync(
+                        PackCandidate(item, mediaHash!, imdbId!, tmdbIdRaw, season, episode,
+                            cand.Lang, cand.HearingImpaired, cand.Forced, cand.SubPos, cand.Srt,
+                            mediaPath, itemFramerate, itemVideoWidth, itemVideoHeight, itemVideoCodec),
+                        runCt).ConfigureAwait(false);
+                    continue;
+                }
+
                 string neutralName = BuildNeutralName(
-                    isSeries, imdbId!, season, episode, cand.Lang, ContentHashRegistry.ComputeHash(cand.Srt));
+                    isSeries, imdbId!, season, episode, cand.Lang, ContentHashRegistry.ComputeHash(cand.Srt), cand.HearingImpaired);
                 LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] DRY-RUN would upload {Name}", neutralName);
             }
 
@@ -1250,8 +1468,8 @@ public sealed class UploadPipeline
             // pipeline uploads what the queue hands it; QA gates stay as the
             // upload action's own quality step.
             // F-M350: the frame rate is a property of the VIDEO, so it is looked up once per item and
-            // handed to every candidate below — not once per uploadable track.
-            string itemFramerate = GetFramerateCode(item);
+            // handed to every candidate below — not once per uploadable track. (Computed above the
+            // dry-run gate since F-M373 — the pack decision needs it there as well.)
 
             foreach (var cand in qaSurvivors)
             {
@@ -1308,6 +1526,20 @@ public sealed class UploadPipeline
                 // counts no calls of its own and cannot refuse one. SubDL alone decides (daily
                 // counters, answered below by the 429/QuotaStopDecision path).
                 // The upload→upload transfer pause (F-M26) sits at the end of this loop, unchanged.
+
+                // F-M372: a candidate of a complete season waits for its siblings instead of going
+                // up alone. Loose sidecars and forced tracks never join a pack — the first has no
+                // place in the season's container, the second is not the season's subtitle.
+                if (packCoordinator != null && !cand.IsLoose && !cand.Forced
+                    && packCoordinator.ShouldBuffer(imdbId, season))
+                {
+                    await packCoordinator.AddAsync(
+                        PackCandidate(item, mediaHash!, imdbId!, tmdbIdRaw, season, episode,
+                            cand.Lang, cand.HearingImpaired, cand.Forced, cand.SubPos, cand.Srt,
+                            mediaPath, itemFramerate, itemVideoWidth, itemVideoHeight, itemVideoCodec),
+                        runCt).ConfigureAwait(false);
+                    continue;
+                }
 
                 var result = await UploadSrtContentAsync(
                     cand.IsLoose ? cand.LoosePath : null,
@@ -1484,9 +1716,20 @@ public sealed class UploadPipeline
         // per-item SKIP lines remain the Verbose detail.
         // F-M247: a dry run uploaded nothing, so its number is labelled hypothetical —
         // "N uploaded" would be a claim the run cannot back.
+        // F-M372: every buffer that never filled goes up the single way before the run is closed —
+        // an incomplete season must not lose the episodes it did have.
+        if (packCoordinator != null)
+        {
+            // F-M429 (operator order 03.11.2026: "Erst packbildung dann Einzeluploads"): the pack phase
+            // now runs BEFORE the item loop — see the block above the loop. What stays here is the
+            // flush: nothing is buffered any more (the packable set is empty), so it is the safety net
+            // that makes sure no held-back candidate is lost when a run ends.
+            await packCoordinator.FlushAsync(runCt).ConfigureAwait(false);
+        }
+
         if (summary.IsDryRun)
         {
-            LogUtil.Normal(_logger, "[SubDL] upload: finished — lock released. DRY RUN, would have uploaded {N} | {Rejected} rejected, {Skipped} stream(s) skipped",
+            LogUtil.Normal(_logger, "[SubDL] upload: finished — lock released. DRY-RUN would have uploaded {N} | {Rejected} rejected, {Skipped} stream(s) skipped",
                 summary.Uploaded, summary.RejectedCandidates, summary.SkippedStreams);
         }
         else
@@ -1552,9 +1795,51 @@ public sealed class UploadPipeline
     /// (or null when the content passes) plus the computed content hash.
     /// </summary>
 
-    private string? ScreenContentQa(string srtContent, string lang, long runtimeMs, out string contentHash)
+    private string? ScreenContentQa(string srtContent, string lang, long runtimeMs, out string contentHash, out string? correctedLang)
     {
+        correctedLang = null;
         contentHash = ContentHashRegistry.ComputeHash(srtContent);
+
+        string? gate = GateReject(srtContent, lang, runtimeMs, out correctedLang);
+        if (gate != null)
+        {
+            return gate;
+        }
+
+        // F-M17x: server-side duplicate verdict learned from previous runs
+        if (Registry.IsRemoteDuplicate(contentHash))
+        {
+            return "duplicate-remote";
+        }
+
+        // F-M17c: content-hash dedup
+        if (Registry.IsContentKnown(contentHash))
+        {
+            return "duplicate-content";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// F-M389: the gates of 3.1 alone — size floor, cue count, SRT structure, sync — without the
+    /// duplicate verdicts that <see cref="ScreenContentQa"/> adds on top.
+    /// <para>
+    /// The pack filler needs exactly this half. It asks the registry itself, and there "known" is the
+    /// ANSWER the pack depends on ("this text was uploaded before"), not a refusal — a filler that
+    /// went through <see cref="ScreenContentQa"/> would condemn every candidate it is supposed to
+    /// find. The gates are shared rather than copied so a filler can never carry a track into a pack
+    /// that the single path would have thrown away.
+    /// </para>
+    /// </summary>
+    /// <param name="srtContent">Canonical subtitle text.</param>
+    /// <param name="lang">Language the text is offered as.</param>
+    /// <param name="runtimeMs">Item runtime in milliseconds (0 when unknown).</param>
+    /// <param name="correctedLang">Language the content actually speaks, when a confident verdict differs from the tag.</param>
+    /// <returns>The reject reason, or null when the text passes.</returns>
+    private string? GateReject(string srtContent, string lang, long runtimeMs, out string? correctedLang)
+    {
+        correctedLang = null;
 
         // B1 simple size gate (full QA is B2/F-M13–M16)
         if (srtContent.Length < 2048)
@@ -1565,17 +1850,15 @@ public sealed class UploadPipeline
         // ---- B2 QA gates (F-M13–M16), each opt-in via config checkbox ----
         var stats = Qa.QaGates.ParseSrt(srtContent);
 
-        // F-M15: language verification — detected content language vs. stream tag
+        // F-M15 + F-M375 (operator order 01.11.2026): language verification — detected content
+        // language vs. stream tag. A track whose tag does not match its text is not thrown away any more: the
+        // detected language wins and the subtitle goes up under it, which is what the tag
+        // should have said in the first place. Only the checkbox decides whether this runs.
         if (_config.QaVerifyLanguage)
         {
-            string? detected = Qa.QaGates.DetectLanguage(srtContent);
-            if (detected != null && !string.Equals(detected, lang, StringComparison.OrdinalIgnoreCase)
-                && !Qa.QaGates.IsFamilyMatch(lang, detected))
-            {
-                return $"qa-lang-mismatch (tag {lang}, content {detected})";
-            }
+            correctedLang = Qa.QaGates.CorrectedLanguage(lang, srtContent);
 
-            // detected == null → no confident verdict → gate stays silent (fail-open)
+            // null → tag holds, or no confident verdict → nothing to correct (fail-open)
         }
 
         // F-M16: minimum cue count (≥30) — beyond the hard 2 KB size floor
@@ -1617,18 +1900,6 @@ public sealed class UploadPipeline
             }
         }
 
-        // F-M17x: server-side duplicate verdict learned from previous runs
-        if (Registry.IsRemoteDuplicate(contentHash))
-        {
-            return "duplicate-remote";
-        }
-
-        // F-M17c: content-hash dedup
-        if (Registry.IsContentKnown(contentHash))
-        {
-            return "duplicate-content";
-        }
-
         return null;
     }
 
@@ -1662,7 +1933,8 @@ public sealed class UploadPipeline
         if (reason.StartsWith("qa-lang-mismatch", StringComparison.Ordinal))
         {
             // "qa-lang-mismatch (tag SK, content IT)" → readable form
-            return string.Concat("quality gate: subtitle language does not match its tag (", reason.AsSpan("qa-lang-mismatch ".Length), ")");
+            // F-M375: no reject of this kind is written any more; rows from older runs stay readable.
+            return string.Concat("quality gate: subtitle language did not match its tag (", reason.AsSpan("qa-lang-mismatch ".Length), ")");
         }
 
         return reason switch
@@ -1747,11 +2019,37 @@ public sealed class UploadPipeline
         }
     }
 
+    /// <summary>
+    /// F-M376: resolution and codec of the item's video, read from the stream. A missing or throwing
+    /// stream costs the release name a token, never the upload.
+    /// </summary>
+    /// <param name="item">Media item.</param>
+    /// <returns>Height in pixels and codec name, both nullable.</returns>
+    private (int? Width, int? Height, string? Codec) GetVideoFacts(BaseItem item)
+    {
+        try
+        {
+            var video = _mediaSourceManager.GetMediaStreams(item.Id)?
+                .FirstOrDefault(s => s.Type == MediaStreamType.Video);
+            if (video == null)
+            {
+                return (null, null, null);
+            }
+
+            // F-M380: the width decides the resolution token; the height is cropped on many encodes.
+            return (video.Width, video.Height, video.Codec);
+        }
+        catch
+        {
+            return (null, null, null);
+        }
+    }
+
     private static string BuildNeutralName(
-        bool isSeries, string imdbId, int season, int episode, string lang, string contentHash)
+        bool isSeries, string imdbId, int season, int episode, string lang, string contentHash, bool hi = false)
         => isSeries
-            ? $"{imdbId}.S{season:00}E{episode:00}.{contentHash}.{lang}.srt"
-            : $"{imdbId}.{contentHash}.{lang}.srt";
+            ? $"{imdbId}.S{season:00}E{episode:00}.{contentHash}.{lang}{SeasonPack.HiMarker(hi)}.srt"
+            : $"{imdbId}.{contentHash}.{lang}{SeasonPack.HiMarker(hi)}.srt";
 
     /// <summary>
     /// F-M71:
@@ -1817,6 +2115,20 @@ public sealed class UploadPipeline
         bool forced = false,
         string framerate = SubdlFramerate.Unknown)
     {
+        // F-M429 (operator order 03.11.2026): a position a pack of this run already carries is not
+        // uploaded single. The pack is the only carrier — a second copy beside it would be the very
+        // duplicate the pack deletes again (F-M391). Positions of a pack that failed are not in the
+        // set and reach this line as usual.
+        if (isSeries && season > 0 && _packAbsorbed.Contains((imdbId, season, lang.ToUpperInvariant(), hearingImpaired)))
+        {
+            LogUtil.PerItem(
+                _config.LogMode,
+                _logger,
+                "[SubDL] SKIP {File} [{Lang}] — carried by the pack built in this run, no single beside it (F-M429).",
+                Path.GetFileName(mediaPath), lang);
+            return UploadResult.Skipped("pack-carries-it");
+        }
+
         // F-M48: loose file — read from disk
         if (srtContent == null && loosePath != null)
         {
@@ -1853,17 +2165,20 @@ public sealed class UploadPipeline
             // incremented in the phase-1 precheck (the normal path, where the run
             // summary is in scope); counting this safety net as well would report
             // one rejection twice. This branch only runs for a direct/retry call.
-            string? qaReject = ScreenContentQa(srtContent, lang, runtimeMs, out _);
+            string? qaReject = ScreenContentQa(srtContent, lang, runtimeMs, out _, out string? correctedLang);
             if (qaReject != null)
             {
                 return UploadResult.Skipped(qaReject);
             }
+
+            // F-M375: the retry path corrects the same way the phase-1 precheck does.
+            lang = correctedLang ?? lang;
         }
 
 
         // F-M29/F-M30: neutral filename, no user-identifying data; the content hash keeps two uploads
         // of the same item and language apart without identifying anybody (full MD5, order 17.10.2026)
-        string neutralName = BuildNeutralName(isSeries, imdbId, season, episode, lang, contentHashEarly);
+        string neutralName = BuildNeutralName(isSeries, imdbId, season, episode, lang, contentHashEarly, hearingImpaired);
 
         string releaseName = Path.GetFileNameWithoutExtension(mediaPath);
 
@@ -1922,6 +2237,42 @@ public sealed class UploadPipeline
                     }
                 }
             }
+            // F-M413 (operator order 02.11.2026): "wir brauchen die id zum upload". The upload answer
+            // of a single subtitle carries no id — it says "subtitle sent for review" — so the row
+            // kept NULL and the pack could never delete the single it absorbed. The id does exist:
+            // /user/mySubtitles lists every own upload with its UploadId. It is fetched right here,
+            // per upload, and written into the same row.
+            if (uploadId != null)
+            {
+                // F-M421 (operator question 02.11.2026: "wird die upload id im log gelistet?"): yes,
+                // in every case. The id is the only handle that can delete this single when a pack
+                // replaces it, so it is named on the upload — not only when it had to be fetched.
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] upload id {Id} from the upload answer for {File} [{Lang}].",
+                    uploadId, Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
+            }
+            else
+            {
+                uploadId = await ResolveOwnUploadIdAsync(imdbId, season, episode, lang, releaseName, loosePath, ct)
+                    .ConfigureAwait(false);
+                if (uploadId != null)
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] upload id {Id} taken from mySubtitles for {File} [{Lang}] — without it the single could never be deleted when a pack replaces it.",
+                        uploadId, Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
+                }
+                else
+                {
+                    // F-M421: silence was the wrong answer here — the row is written with a NULL id,
+                    // and nobody would ever learn why its pack could not delete the single.
+                    _logger.LogWarning(
+                        "[SubDL] no upload id for {File} [{Lang}] — this single stays beside a pack that replaces it, because there is no handle to delete it.",
+                        Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
+                }
+            }
+
             // Metadata describing the file, and the verdict describing this subtitle, are two
             // different facts and get two rows in two areas.
             Registry.MarkAndFlush(() => Registry.PatchMediaMetadata(mediaHash, imdbId, season, episode, sdId, tmdbId));
@@ -2429,6 +2780,1224 @@ public sealed class UploadPipeline
     /// F-M9/F-M28 raw ID resolution from JF metadata ONLY (no TMDB calls — the key
     /// is spent only after the metadata wait, user decision 08.09.2026).
     /// </summary>
+    /// <summary>
+    /// F-M372: the seasons whose episodes on disk are exactly the episodes that aired, with the
+    /// aired episode set. Only these are worth buffering into a pack.
+    /// <para>
+    /// Two questions, two sources: what we hold comes from the library (every Episode item of the
+    /// season, deduplicated by episode number — a two-part file carries one number), what aired
+    /// comes from <see cref="SeasonEpisodeIndex"/>. A season nobody can answer for is not packed.
+    /// </para>
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Complete seasons keyed by (imdb id, season).</returns>
+    private async Task<Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>> CompleteSeasonsAsync(CancellationToken ct)
+    {
+        var result = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>();
+
+        // The same collection the run itself uses (path scope, not library name — F-M189), so the
+        // seasons judged here are the seasons this run can actually see.
+        List<BaseItem> episodes;
+        try
+        {
+            episodes = CollectItems(_config.SelectedLibraries);
+        }
+        catch (Exception ex)
+        {
+            LogUtil.Normal(_logger, "[SubDL] season pack: library query failed ({Msg}) — no season is packed this run.", ex.Message);
+            return result;
+        }
+
+        var present = new Dictionary<(string ImdbId, int Season), List<int>>();
+        var tmdbOf = new Dictionary<(string ImdbId, int Season), string?>();
+        // F-M389: the items themselves, one per episode number — a fill-only pack has to reach the
+        // files the queue no longer hands it.
+        var itemsOf = new Dictionary<(string ImdbId, int Season), List<BaseItem>>();
+        foreach (var episode in episodes)
+        {
+            var (imdb, tmdb, season, number, isSeries) = ResolveIdsRaw(episode);
+            if (!isSeries || string.IsNullOrWhiteSpace(imdb) || season < 1 || number < 1)
+            {
+                continue;
+            }
+
+            var key = (imdb!, season);
+            if (!present.TryGetValue(key, out var numbers))
+            {
+                numbers = new List<int>();
+                present[key] = numbers;
+                itemsOf[key] = new List<BaseItem>();
+            }
+
+            if (!numbers.Contains(number))
+            {
+                numbers.Add(number);
+                itemsOf[key].Add(episode);
+            }
+
+            if (!tmdbOf.ContainsKey(key) && !string.IsNullOrWhiteSpace(tmdb))
+            {
+                tmdbOf[key] = tmdb;
+            }
+        }
+
+        // F-M433: the pack phase runs BEFORE the item loop (F-M429), so the anchors that loop fills are
+        // still empty when a pack asks its files. This scan has already walked every episode of every
+        // season — hand its items over instead of enumerating the library a second time.
+        foreach (var known in itemsOf)
+        {
+            if (!_seasonEpisodes.ContainsKey(known.Key))
+            {
+                _seasonEpisodes[known.Key] = known.Value;
+            }
+        }
+
+        LogUtil.Normal(_logger, "[SubDL] season pack: {Count} season(s) with at least two episodes on disk.", present.Count);
+        foreach (var entry in present)
+        {
+            if (entry.Value.Count < 2)
+            {
+                continue;
+            }
+
+            tmdbOf.TryGetValue(entry.Key, out string? tmdbId);
+            var aired = await SeasonEpisodeIndex.AiredAsync(entry.Key.Item1, entry.Key.Item2, tmdbId, _config.TmdbApiKey, _logger, ct).ConfigureAwait(false);
+            if (aired == null)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack skipped: {Imdb} S{Season} — no episode count (IMDb and TMDB both silent), stays single.",
+                    entry.Key.Item1, entry.Key.Item2);
+                continue;
+            }
+
+            // F-M417 (operator order 02.11.2026): the cheap questions come first — the store, not the
+            // release names. Is the season already up as a pack for the languages the store knows, and
+            // does any of them cover every aired episode? Only then are release groups worth reading,
+            // and only then does anything get extracted.
+            var known = Registry.LanguagesInSeason(entry.Key.Item1, entry.Key.Item2);
+
+            // F-M433 (operator order 03.11.2026, "wieso geht Tracker einzeln hoch?"): the store names the
+            // languages it has already seen. A season whose texts go up for the FIRST time names none, so
+            // the plan refused the pack and the single phase sent 13 episodes one by one. The files are
+            // asked as well — a stream list costs no extraction — and the pair is planned from them.
+            var pairs = new List<(string Language, bool HearingImpaired)>(known);
+            foreach (var pair in FileLanguages(entry.Key.Item1, entry.Key.Item2))
+            {
+                if (!pairs.Contains(pair))
+                {
+                    pairs.Add(pair);
+                }
+            }
+
+            var open = new List<(string Language, bool HearingImpaired)>();
+            foreach (var (language, hi) in pairs)
+            {
+                if (Registry.HasPack(entry.Key.Item1, entry.Key.Item2, language, hi))
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: already up as a pack, nothing is extracted.",
+                        entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(language, hi));
+                    continue;
+                }
+
+                // F-M433: the store's count decides nothing on its own — the files are the second witness.
+                bool whole = SeasonPack.IsComplete(
+                    aired, Registry.EpisodesWithLanguage(entry.Key.Item1, entry.Key.Item2, language, hi))
+                    || SeasonCarriesInFiles(entry.Key.Item1, entry.Key.Item2, aired, language, hi);
+                if (whole)
+                {
+                    open.Add((language, hi));
+                }
+                else
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: neither the store nor the files of every aired episode carry this language — no pack for it, the single uploads of this run are unaffected.",
+                        entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(language, hi));
+                }
+            }
+
+            if (pairs.Count > 0 && open.Count == 0)
+            {
+                continue;
+            }
+
+            // F-M408 (operator order 02.11.2026): "die staffel ist vollstaendig wenn alle episoden der
+            // gleichen release group da sind". Ein Pack traegt eine Release, eine Qualitaet, eine
+            // Bildrate — eine Staffel aus zwei Gruppen ist kein Pack. Es gewinnt die Gruppe, die alle
+            // ausgestrahlten Folgen stellt; nur ihre Dateien duerfen mit.
+            var groupOf = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in itemsOf[entry.Key])
+            {
+                var (_, _, _, groupNumber, groupIsSeries) = ResolveIdsRaw(item);
+                if (!groupIsSeries || groupNumber < 1)
+                {
+                    continue;
+                }
+
+                string group = SeasonPack.ReleaseGroup(item.Path) ?? "?";
+                if (!groupOf.TryGetValue(group, out var groupNumbers))
+                {
+                    groupNumbers = new List<int>();
+                    groupOf[group] = groupNumbers;
+                }
+
+                if (!groupNumbers.Contains(groupNumber))
+                {
+                    groupNumbers.Add(groupNumber);
+                }
+            }
+
+            string? completeGroup = groupOf
+                .Where(g => SeasonPack.IsComplete(aired, g.Value))
+                .Select(g => g.Key)
+                .OrderBy(g => g, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+
+            if (SeasonPack.IsComplete(aired, entry.Value))
+            {
+                result[entry.Key] = aired;
+                _completeSeasonItems[entry.Key] = itemsOf[entry.Key];
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack candidate: {Imdb} S{Season} — {Count} of {Aired} episode(s) on disk, season complete.",
+                    entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count);
+            }
+            else if (completeGroup != null)
+            {
+                result[entry.Key] = aired;
+                _completeSeasonItems[entry.Key] = itemsOf[entry.Key]
+                    .Where(x => string.Equals(
+                        SeasonPack.ReleaseGroup(x.Path) ?? "?", completeGroup,
+                        StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack candidate: {Imdb} S{Season} — release group {Group} supplies all {Aired} episode(s), season complete.",
+                    entry.Key.Item1, entry.Key.Item2, completeGroup, aired.Count);
+            }
+            else
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack skipped: {Imdb} S{Season} — {Have} episode(s) on disk against {Aired} aired, no release group covers the season, stays single.",
+                    entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The coordinator's view of one candidate — used wherever a pack may take it, so the single
+    /// path and the dry run hand over exactly the same thing.
+    /// </summary>
+    /// <param name="item">Media item.</param>
+    /// <param name="mediaHash">Media hash.</param>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="tmdbId">TMDB id as it was read.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="lang">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <param name="forced">Forced flag.</param>
+    /// <param name="subPos">Stream position of the source track.</param>
+    /// <param name="srt">Canonical subtitle text.</param>
+    /// <param name="mediaPath">Path of the media file.</param>
+    /// <param name="framerate">Frame rate code of the video.</param>
+    /// <param name="videoHeight">Video height in pixels, when the stream reports one.</param>
+    /// <param name="videoCodec">Video codec name from the stream.</param>
+    /// <returns>The candidate as the coordinator expects it.</returns>
+    /// <summary>
+    /// F-M413: the upload id of a single subtitle, read back from <c>/user/mySubtitles</c>.
+    /// SubDL answers an upload with "subtitle sent for review" and no id, but the entry appears in
+    /// the account's own list with its <c>UploadId</c> — the only handle <c>deletePublishedSubtitle</c>
+    /// accepts. Matched by the name we uploaded when it is there, otherwise by IMDb id, season,
+    /// episode and language, newest first.
+    /// </summary>
+    private async Task<int?> ResolveOwnUploadIdAsync(
+        string? imdbId, int season, int episode, string lang, string? releaseName, string? filePath,
+        CancellationToken ct)
+    {
+        List<OwnSubtitleEntry>? entries;
+        try
+        {
+            entries = await _api.ListMySubtitlesAsync(ct, maxPages: 2).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[SubDL] could not read mySubtitles for the upload id.");
+            return null;
+        }
+
+        // F-M414 (measured 02.11.2026): mySubtitles reports `name` as the RELEASE name, not the
+        // file name we uploaded ("CliffIdProbe.1080p.WEB-DL", not "…srt"), and `lang` as the written
+        // language ("Turkish", not "TR"). Both are compared the way the list delivers them.
+        string file = Path.GetFileName(filePath ?? string.Empty);
+        var exact = entries?.FirstOrDefault(e =>
+            MatchesRelease(e.Name, releaseName) || MatchesRelease(e.Name, file));
+        exact ??= entries?
+            .Where(e => string.Equals(e.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase)
+                        && e.Season == season && e.Episode == episode
+                        && SameLanguage(e.Language, lang))
+            .OrderByDescending(e => e.CreatedAt)
+            .FirstOrDefault();
+
+        if (exact != null)
+        {
+            return exact.HandleId;
+        }
+
+        // F-M432 (operator order 03.11.2026): the submission list is empty as soon as SubDL has published
+        // everything we sent, so the id was lost for every upload after that — a movie has no season and no
+        // episode to fall back on, so it had no handle at all. The PUBLISHED list carries the same id and is
+        // ordered newest first, which is exactly what a fresh upload needs. Matched the same way a pack is:
+        // by its release name.
+        List<OwnSubtitleEntry>? published;
+        try
+        {
+            published = await _api.ListMyPublishedSubtitlesAsync(ct, maxPages: 2).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[SubDL] could not read myPublishedSubtitles for the upload id.");
+            return null;
+        }
+
+        var byName = published?.FirstOrDefault(e =>
+            MatchesRelease(e.Name, releaseName) || MatchesRelease(e.Name, file)
+            || MatchesRelease(e.Name, Path.GetFileNameWithoutExtension(file)));
+        if (byName != null)
+        {
+            // F-M435: the published list names BOTH numbers — take the entry id, because that is what
+            // /user/deletePublishedSubtitle expects; the upload id would miss the entry it belongs to.
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] entry id {Id} taken from myPublishedSubtitles for {File} [{Lang}] (upload id {UploadId}) — the submission list knows nothing, the published list names it (F-M432/F-M435).",
+                byName.HandleId, file, lang, byName.UploadId);
+            return byName.HandleId;
+        }
+
+        return null;
+    }
+
+    /// <summary>F-M414: does the entry's release name carry ours, extension and case aside?</summary>
+    private static bool MatchesRelease(string? entryName, string? ours)
+    {
+        if (string.IsNullOrWhiteSpace(entryName) || string.IsNullOrWhiteSpace(ours))
+        {
+            return false;
+        }
+
+        string a = Path.GetFileNameWithoutExtension(entryName.Trim());
+        string b = Path.GetFileNameWithoutExtension(ours.Trim());
+        return string.Equals(a, b, StringComparison.OrdinalIgnoreCase)
+               || a.Contains(b, StringComparison.OrdinalIgnoreCase)
+               || b.Contains(a, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>F-M414: "Turkish" and "TR" are the same language; both spellings come over the wire.</summary>
+    private static bool SameLanguage(string? entryLanguage, string? ours)
+    {
+        if (string.IsNullOrWhiteSpace(entryLanguage) || string.IsNullOrWhiteSpace(ours))
+        {
+            return true;
+        }
+
+        if (string.Equals(entryLanguage, ours, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string? mapped = LanguageMapper.MapToSubdlName(entryLanguage);
+        return string.Equals(mapped, ours, StringComparison.OrdinalIgnoreCase)
+               || entryLanguage.StartsWith(ours, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static SeasonPackCoordinator.Candidate PackCandidate(
+        BaseItem item, string mediaHash, string imdbId, string? tmdbId, int season, int episode,
+        string lang, bool hearingImpaired, bool forced, int subPos, string srt,
+        string mediaPath, string framerate, int? videoWidth, int? videoHeight, string? videoCodec,
+        string? absorbedSingleId = null)
+    => new(
+            item,
+            item.Id.ToString(),
+            mediaHash,
+            imdbId,
+            tmdbId,
+            season,
+            episode,
+            lang,
+            hearingImpaired,
+            forced,
+            subPos,
+            srt,
+            Path.GetFileNameWithoutExtension(mediaPath),
+            SourceQuality.Detect(null, mediaPath),
+            framerate,
+            videoWidth,
+            videoHeight,
+            videoCodec);
+
+    /// <summary>
+    /// F-M389 (operator order 02.11.2026): one missing episode of a pack, taken from the subtitle
+    /// that is already uploaded for it.
+    /// <para>
+    /// The order is the guarantee. The episode is resolved from the library, the text is extracted
+    /// from its own file, canonicalised, and then put through the SAME gates as a normal upload; only
+    /// a text that survives them AND is known to the registry — the proof that it went up before —
+    /// becomes a candidate. Everything else returns null, which makes the coordinator send nothing
+    /// rather than a pack with a hole in it.
+    /// </para>
+    /// <para>
+    /// It is deliberately not <see cref="ScreenContentQa"/>: that method's duplicate verdict is
+    /// exactly what this one has to confirm, so it calls the gate half
+    /// (<see cref="GateReject"/>) and asks the registry itself.
+    /// </para>
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number the buffer does not cover.</param>
+    /// <param name="lang">SubDL language code the pack is built for.</param>
+    /// <param name="hearingImpaired">HI/SDH variant the pack is built for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The candidate, or null when the episode cannot join the pack.</returns>
+    /// <summary>
+    /// F-M433: do the files of a season carry this language in every aired episode? Cheap — stream lists,
+    /// no extraction. Used where a pack would otherwise be refused on the store's word alone.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="aired">Aired episodes.</param>
+    /// <param name="lang">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>True when every aired episode's file carries the language.</returns>
+    private bool SeasonCarriesInFiles(
+        string imdbId, int season, IEnumerable<int> aired, string lang, bool hearingImpaired)
+    {
+        var carried = new HashSet<int>();
+        foreach (int episode in SeasonPack.AiredNumbers(aired))
+        {
+            if (FileCarriesLanguage(imdbId, season, episode, lang, hearingImpaired))
+            {
+                carried.Add(episode);
+            }
+        }
+
+        return SeasonPack.IsComplete(aired, carried);
+    }
+
+    /// <inheritdoc />
+    public bool FileCarriesLanguage(string imdbId, int season, int episode, string lang, bool hearingImpaired)
+    {
+        // F-M433: matched through ResolveIdsRaw, not through episode.Series — the series object is often
+        // not loaded when the pack phase asks (it runs before the item loop), and IsSeasonEpisode's
+        // reliance on it made every file answer "no" for a language the files plainly carry.
+        BaseItem? item = SeasonItems(imdbId, season).FirstOrDefault(candidate =>
+        {
+            var (candidateImdb, _, candidateSeason, candidateNumber, isSeries) = ResolveIdsRaw(candidate);
+            return isSeries
+                   && candidateNumber == episode
+                   && candidateSeason == season
+                   && string.Equals(candidateImdb, imdbId, StringComparison.OrdinalIgnoreCase);
+        });
+
+        return item?.Path != null && FindFillStreams(item, lang, hearingImpaired).Count > 0;
+    }
+
+    /// <summary>
+    /// F-M389 (operator order 02.11.2026): one missing episode of a pack, taken from the subtitle
+    /// that is already uploaded for it.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number the buffer does not cover.</param>
+    /// <param name="lang">SubDL language code the pack is built for.</param>
+    /// <param name="hearingImpaired">HI/SDH variant the pack is built for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The candidate, or null when the episode cannot join the pack.</returns>
+    public async Task<SeasonPackCoordinator.Candidate?> FillAsync(
+        string imdbId, int season, int episode, string lang, bool hearingImpaired, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        BaseItem? item = FindSeasonEpisode(imdbId, season, episode);
+        string? mediaPath = item?.Path;
+        if (item == null || string.IsNullOrWhiteSpace(mediaPath))
+        {
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — the episode is not in the library, it does not join the pack.",
+                imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
+            return null;
+        }
+
+        // F-M431 (operator order 03.11.2026: "wenn eine sprache durchfällt und eine weitere da ist, diese
+        // auch versuchen zu verwenden"): a file may carry more than one track of the same language. Until
+        // now only the FIRST one was tried — if it failed (extraction, a quality gate, a lying language
+        // tag, text that is only known from a download), the whole pack died although a second track of
+        // that language sat in the same file. Every track of the language is tried now, in file order,
+        // and the first that passes every gate is the member.
+        var fillPositions = FindFillStreams(item, lang, hearingImpaired);
+        if (fillPositions.Count == 0)
+        {
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — no embedded text track for this language and variant, it does not join the pack.",
+                imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
+            return null;
+        }
+
+        // F-M405: one ffmpeg pass per FILE for the whole filler, cached for the run — the same
+        // one-pass shape the single-upload path has used since F-M5. Per-language extraction re-read
+        // the whole container for every language of every pack attempt.
+        if (!_fillTextCache.TryGetValue(mediaPath, out var cachedTexts))
+        {
+            var subtitleStreams = item.GetMediaStreams()
+                ?.Where(s => s.Type == MediaStreamType.Subtitle)
+                .ToList() ?? new List<MediaStream>();
+
+            var positions = Enumerable.Range(0, subtitleStreams.Count).ToList();
+            (cachedTexts, _) = await FfmpegTools
+                .ExtractAllAsync(_ffmpegPath, mediaPath, positions, _logger, _config, ct)
+                .ConfigureAwait(false);
+            _fillTextCache[mediaPath] = cachedTexts;
+        }
+
+        string? reason = null;
+        for (int attempt = 0; attempt < fillPositions.Count; attempt++)
+        {
+            int subPos = fillPositions[attempt];
+            var member = FillFromPosition(
+                item, mediaPath, cachedTexts, subPos, imdbId, season, episode, lang, hearingImpaired, out reason);
+            if (member != null)
+            {
+                if (attempt > 0)
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — track {Nth} of {Count} joins the pack, the tracks before it did not (F-M431).",
+                        imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), attempt + 1, fillPositions.Count);
+                }
+
+                return member;
+            }
+
+            if (attempt < fillPositions.Count - 1)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — track {Nth} of {Count} does not qualify ({Reason}), trying the next track of this language (F-M431).",
+                    imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), attempt + 1, fillPositions.Count, reason);
+            }
+        }
+
+        LogUtil.Normal(
+            _logger,
+            "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — none of the {Count} track(s) of this language qualifies ({Reason}), it does not join the pack.",
+            imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), fillPositions.Count, reason);
+        return null;
+    }
+
+    /// <summary>
+    /// F-M431: one attempt — the text of a single track, put through every gate the pack demands.
+    /// </summary>
+    /// <param name="item">Episode item.</param>
+    /// <param name="mediaPath">Path of the media file.</param>
+    /// <param name="cachedTexts">Extracted texts of the file, by stream position.</param>
+    /// <param name="subPos">Stream position of this attempt.</param>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="lang">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI variant.</param>
+    /// <param name="reason">Why this track was refused, for the run log.</param>
+    /// <returns>The member, or null with <paramref name="reason"/> set.</returns>
+    private SeasonPackCoordinator.Candidate? FillFromPosition(
+        BaseItem item, string mediaPath, Dictionary<int, string?> cachedTexts, int subPos,
+        string imdbId, int season, int episode, string lang, bool hearingImpaired, out string reason)
+    {
+        reason = string.Empty;
+        cachedTexts.TryGetValue(subPos, out string? extracted);
+        if (string.IsNullOrWhiteSpace(extracted))
+        {
+            reason = "extraction failed";
+            return null;
+        }
+
+        // F-M185: the same canonical form the single path uploads and hashes — a filler that skipped
+        // this would hash its own bytes and prove nothing about the one that went up.
+        string srt = ContentHashRegistry.NormalizeSrt(extracted);
+
+        long runtimeMs = (item.RunTimeTicks ?? 0) / 10_000;
+        string? gate = GateReject(srt, lang, runtimeMs, out string? correctedLang);
+        if (gate != null)
+        {
+            reason = "quality gate: " + gate;
+            return null;
+        }
+
+        // F-M375 on the fill path: the single upload corrects a lying tag and sends the text under the
+        // detected language. A pack is ONE language, so here a correction is a refusal — the episode
+        // would have to go up under a language this container cannot claim.
+        if (correctedLang != null && !string.Equals(correctedLang, lang, StringComparison.OrdinalIgnoreCase))
+        {
+            reason = "the text speaks " + correctedLang;
+            return null;
+        }
+
+        // F-M395 (operator order 02.11.2026): filler must be text this account UPLOADED — a subtitle
+        // that is only known because it was DOWNLOADED must never be packed back up. Packing a
+        // download would put onto SubDL what is already there, under our name, as a new container.
+        // So the proof is the row of THIS track: uploaded, not merely "content known" (which counts a
+        // download and a reject just the same).
+        string contentHash = ContentHashRegistry.ComputeHash(srt);
+        // F-M410 (operator order 02.11.2026): one hash look per file. The proof and the candidate
+        // both asked MediaHashFor and each call wrote its own oshash line — two lines per file for
+        // one answer.
+        string? proofMediaHash = MediaHashFor(mediaPath);
+        var uploadedRow = string.IsNullOrWhiteSpace(proofMediaHash)
+            ? null
+            : Registry.GetEmbeds(proofMediaHash).FirstOrDefault(r => r.SubPos == subPos && r.Status == SubtitleStatus.Uploaded);
+
+        // F-M429 (operator order 03.11.2026: "Erst packbildung dann Einzeluploads"): the pack runs BEFORE
+        // the single uploads, so for a new episode it is the FIRST publication of this text. The old proof
+        // ("the row must say uploaded") would forbid exactly that and no arrival could ever pack.
+        // The protection F-M395 exists for stays: text that is only known from a DOWNLOAD or a rejection
+        // never joins a pack — it would be pushed onto SubDL under our name as a new container.
+        if (uploadedRow == null)
+        {
+            if (Registry.IsContentKnown(contentHash))
+            {
+                reason = "the text is only known from a download or a rejection";
+                return null;
+            }
+
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — first publication: the pack carries this text up, no single went up before it (F-M429).",
+                imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
+        }
+
+        string? mediaHash = proofMediaHash;
+        if (string.IsNullOrWhiteSpace(mediaHash))
+        {
+            reason = "no media hash for the file";
+            return null;
+        }
+
+        var (width, height, codec) = GetVideoFacts(item);
+        // F-M391: the id of the single upload this member replaces travels with the candidate, so the
+        // coordinator can delete it BEFORE the pack goes up. Empty means "no single to remove" — the
+        // row may be a download, or an upload whose answer carried no id.
+        string? absorbed = uploadedRow?.SubdlId;
+        return PackCandidate(
+            item, mediaHash, imdbId, TmdbOfEpisode(item), season, episode, lang, hearingImpaired,
+            forced: false, subPos, srt, mediaPath, GetFramerateCode(item), width, height, codec,
+            absorbedSingleId: absorbed);
+    }
+
+    /// <summary>
+    /// F-M389: the episode item of a season, as the library holds it. The season is entered through
+    /// an item this run already worked (its season folder lists the siblings); the run's own
+    /// collection is the fallback when no such anchor exists or the folder cannot be read.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <returns>The episode item, or null.</returns>
+    private BaseItem? FindSeasonEpisode(string imdbId, int season, int episode)
+        => SeasonItems(imdbId, season).FirstOrDefault(c => IsSeasonEpisode(c, imdbId, season, episode));
+
+    /// <summary>
+    /// F-M433: the language pairs the FILES of a season carry, read from the stream lists (no extraction).
+    /// <para>
+    /// The store can only name languages it has seen; a season that is about to be uploaded for the first
+    /// time names none. This is the other witness, and the pack plan is allowed to start from it.
+    /// </para>
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <returns>The pairs found in the files of that season.</returns>
+    public IReadOnlyCollection<(string Language, bool HearingImpaired)> FileLanguages(string imdbId, int season)
+    {
+        var pairs = new HashSet<(string Language, bool HearingImpaired)>();
+        foreach (var item in SeasonItems(imdbId, season))
+        {
+            if (item is not Episode episode
+                || (episode.ParentIndexNumber ?? -1) != season
+                || string.IsNullOrWhiteSpace(episode.Path))
+            {
+                continue;
+            }
+
+            string? seriesImdb = null;
+            // F-M433: same reason as FileCarriesLanguage — the ids come from ResolveIdsRaw.
+            var (fileImdb, _, fileSeason, fileNumber, fileIsSeries) = ResolveIdsRaw(item);
+            if (!fileIsSeries
+                || fileNumber < 1
+                || fileSeason != season
+                || !string.Equals(fileImdb, imdbId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            IReadOnlyList<MediaStream>? streams;
+            try
+            {
+                streams = episode.GetMediaStreams();
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+
+            if (streams == null)
+            {
+                continue;
+            }
+
+            foreach (var stream in streams)
+            {
+                if (stream.Type != MediaStreamType.Subtitle
+                    || stream.IsExternal
+                    || !Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream(stream))
+                {
+                    continue;
+                }
+
+                string? code = LanguageMapper.MapToSubdl(stream.Language);
+                if (!string.IsNullOrWhiteSpace(code))
+                {
+                    pairs.Add((code!, Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream)));
+                }
+            }
+        }
+
+        return pairs;
+    }
+
+    /// <summary>
+    /// F-M433: the episodes of a season, cached per season folder.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <returns>The candidate items of that season.</returns>
+    private List<BaseItem> SeasonItems(string imdbId, int season)
+    {
+        var key = (imdbId, season);
+        if (!_seasonEpisodes.TryGetValue(key, out var episodes))
+        {
+            episodes = new List<BaseItem>();
+            if (_seasonAnchors.TryGetValue(key, out var anchor) && anchor.GetParent() is Folder seasonFolder)
+            {
+                try
+                {
+                    episodes.AddRange(seasonFolder.GetChildren(null, false));
+                }
+                catch (Exception ex)
+                {
+                    // A season folder that cannot be read costs the pack, never the run.
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL] season pack filler: reading the season folder of {Imdb} S{Season} failed ({Msg}) — falling back to the library.",
+                        imdbId, season, ex.Message);
+                }
+            }
+
+            if (episodes.Count == 0)
+            {
+                episodes.AddRange(CollectItems(_config.SelectedLibraries));
+            }
+
+            _seasonEpisodes[key] = episodes;
+        }
+
+        return episodes;
+    }
+
+    /// <summary>
+    /// F-M389: does this library item stand for the episode the pack needs? Series id, season and
+    /// episode number all have to agree — the filler may only ever use the episode it was asked for.
+    /// </summary>
+    /// <param name="candidate">Library item.</param>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <returns>True when the item is that episode.</returns>
+    private static bool IsSeasonEpisode(BaseItem candidate, string imdbId, int season, int episode)
+    {
+        if (candidate is not Episode ep
+            || (ep.IndexNumber ?? -1) != episode
+            || (ep.ParentIndexNumber ?? -1) != season)
+        {
+            return false;
+        }
+
+        string? seriesImdb = null;
+        ep.Series?.ProviderIds?.TryGetValue("Imdb", out seriesImdb);
+        return string.Equals(seriesImdb, imdbId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// F-M389: the ffmpeg position of the embedded track that carries this language and variant.
+    /// <para>
+    /// The position is taken against the UNFILTERED subtitle list, exactly as the item loop does it —
+    /// ffmpeg's <c>0:s:N</c> counts bitmap and forced tracks too, and searching a filtered list maps
+    /// onto the wrong stream.
+    /// </para>
+    /// </summary>
+    /// <param name="item">Episode item.</param>
+    /// <param name="lang">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>The stream position, or -1 when the file carries no such track.</returns>
+    private List<int> FindFillStreams(BaseItem item, string lang, bool hearingImpaired)
+    {
+        var positions = new List<int>();
+        List<MediaStream> allSubs;
+        try
+        {
+            // F-M431: enumerated exactly the way the extraction reads the file — every subtitle stream of
+            // the item, external ones included — so a position means the same thing in both places.
+            allSubs = item.GetMediaStreams()?
+                .Where(s => s.Type == MediaStreamType.Subtitle)
+                .ToList() ?? new List<MediaStream>();
+        }
+        catch (Exception ex)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[SubDL] season pack filler: stream list of {File} unavailable ({Msg}).",
+                Path.GetFileName(item.Path ?? item.Name), ex.Message);
+            return positions;
+        }
+
+        for (int i = 0; i < allSubs.Count; i++)
+        {
+            var stream = allSubs[i];
+            if (stream.IsExternal
+                || !Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream(stream)
+                || Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream) != hearingImpaired
+                || !string.Equals(LanguageMapper.MapToSubdl(stream.Language), lang, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            positions.Add(i);
+        }
+
+        return positions;
+    }
+
+    /// <summary>
+    /// F-M389: the series TMDB id of an episode, read the way the run reads it (F-M9/F-M28) — from the
+    /// SERIES, never from the episode.
+    /// </summary>
+    /// <param name="item">Media item.</param>
+    /// <returns>The series TMDB id, or null.</returns>
+    private static string? TmdbOfEpisode(BaseItem item)
+    {
+        string? tmdb = null;
+        (item as Episode)?.Series?.ProviderIds?.TryGetValue("Tmdb", out tmdb);
+        return string.IsNullOrWhiteSpace(tmdb) ? null : tmdb;
+    }
+
+    /// <summary>
+    /// F-M389: which episodes of which season the queue hands this run — the input both pack plans
+    /// read. A queued item is one this run will work (the queue filter of F-M111 applies).
+    /// </summary>
+    /// <param name="items">The run's items.</param>
+    /// <returns>Episode numbers per (series, season).</returns>
+    /// <summary>
+    /// F-M426 (operator rule 02.11.2026: "It is only investigated if the sub is not part of a pack already"):
+    /// answers whether a season still has a language that is NOT inside a pack.
+    /// <para>
+    /// Asked BEFORE the queued-versus-aired comparison, so a season that is fully packed is not
+    /// investigated at all: no hash look beyond this one, no extraction, no plan line. A season whose
+    /// episodes carry no uploaded row yet counts as open — there is nothing packed about it either.
+    /// </para>
+    /// </summary>
+    /// <param name="key">Series and season.</param>
+    /// <param name="episodes">The episode numbers this run queued for that season.</param>
+    /// <returns>True when at least one language still lacks a pack.</returns>
+    private bool HasOpenLanguage((string ImdbId, int Season) key, IReadOnlyCollection<int> episodes)
+    {
+        if (!_completeSeasonItems.TryGetValue(key, out var items) || items.Count == 0)
+        {
+            return true;
+        }
+
+        bool sawRow = false;
+        foreach (var item in items)
+        {
+            int number = item.IndexNumber ?? 0;
+            if (number <= 0 || !episodes.Contains(number))
+            {
+                continue;
+            }
+
+            string? path = item.Path;
+            string? mediaHash;
+            try
+            {
+                mediaHash = string.IsNullOrWhiteSpace(path) ? null : MediaHashFor(path);
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(mediaHash))
+            {
+                continue;
+            }
+
+            foreach (var row in Registry.GetEmbeds(mediaHash))
+            {
+                if (row.Status != SubtitleStatus.Uploaded || row.Forced == true)
+                {
+                    continue;
+                }
+
+                sawRow = true;
+                if (!Registry.HasPack(key.ImdbId, key.Season, row.Language, row.HearingImpaired ?? false))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return !sawRow;
+    }
+
+    private Dictionary<(string ImdbId, int Season), List<int>> QueuedEpisodes(IReadOnlyList<BaseItem> items)
+    {
+        var queued = new Dictionary<(string ImdbId, int Season), List<int>>();
+        foreach (var item in items)
+        {
+            if (QueueFilter != null && !QueueFilter.Contains(item.Id.ToString()))
+            {
+                continue;
+            }
+
+            var (imdb, _, season, episode, isSeries) = ResolveIdsRaw(item);
+            if (!isSeries || string.IsNullOrWhiteSpace(imdb) || season < 1 || episode < 1)
+            {
+                continue;
+            }
+
+            var key = (imdb!, season);
+            if (!queued.TryGetValue(key, out var numbers))
+            {
+                numbers = new List<int>();
+                queued[key] = numbers;
+            }
+
+            if (!numbers.Contains(episode))
+            {
+                numbers.Add(episode);
+            }
+        }
+
+        return queued;
+    }
+
+    /// <summary>
+    /// F-M420 (operator order 02.11.2026): the seasons a pack may be closed for at the END of a run —
+    /// every episode is up, so a container is what is left to do.
+    /// <para>
+    /// Asked AFTER the item loop on purpose: at that point this run's own single uploads are in the
+    /// store, which is exactly what makes a season packable ("erst einzelupload, dann staffelpack").
+    /// Asked before the loop instead, a season whose episodes went up minutes earlier looked unpackable
+    /// and waited a whole cycle for its container.
+    /// </para>
+    /// <para>
+    /// The language is not invented: it is the one every episode of the season carries an UPLOADED
+    /// row for, read from the registry per file. A season that is already a pack is left alone — its
+    /// rows then carry the pack id — because sending the same container again every run is not a
+    /// pack, it is a loop.
+    /// </para>
+    /// </summary>
+    /// <param name="complete">Complete seasons with their aired episode set.</param>
+    /// <returns>One entry per (season, language, variant) a pack may be attempted for.</returns>
+    /// <summary>
+    /// F-M429: the language/variant pairs a pack can be built from — the embedded dialogue tracks of the
+    /// file. Used because the pack runs before the singles now: a new episode has no store row when the
+    /// plan is made, but its file already states every language it can deliver.
+    /// </summary>
+    /// <param name="episode">Episode item.</param>
+    /// <param name="mediaHash">Media hash, for the store fallback.</param>
+    /// <returns>The pairs the file offers.</returns>
+    private HashSet<(string Lang, bool Hi)> PackPairsOf(BaseItem episode, string? mediaHash)
+    {
+        var pairs = new HashSet<(string Lang, bool Hi)>();
+        try
+        {
+            var streams = _mediaSourceManager.GetMediaStreams(episode.Id)
+                ?.Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal)
+                .ToList();
+            if (streams != null)
+            {
+                foreach (var stream in streams)
+                {
+                    if (!Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream(stream))
+                    {
+                        continue;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(stream.Language))
+                    {
+                        continue;
+                    }
+
+                    string? mapped = LanguageMapper.MapToSubdl(stream.Language);
+                    if (string.IsNullOrWhiteSpace(mapped))
+                    {
+                        continue;
+                    }
+
+                    pairs.Add((
+                        mapped.ToUpperInvariant(),
+                        Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream)));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[SubDL] season pack plan: the stream list of {File} is unavailable ({Msg}) — falling back to the store for its languages.",
+                Path.GetFileName(episode.Path ?? episode.Name), ex.Message);
+        }
+
+        if (pairs.Count > 0)
+        {
+            return pairs;
+        }
+
+        foreach (var row in Registry.GetEmbeds(mediaHash))
+        {
+            if (row.Status != SubtitleStatus.Uploaded || row.Forced == true)
+            {
+                continue;
+            }
+
+            pairs.Add((row.Language, row.HearingImpaired ?? false));
+        }
+
+        return pairs;
+    }
+
+    private List<(string ImdbId, int Season, string Lang, bool Hi)> PlanPacksFromStore(
+        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
+        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlySet<int>>? onlyEpisodes = null)
+    {
+        var planned = new List<(string ImdbId, int Season, string Lang, bool Hi)>();
+
+        foreach (var entry in complete)
+        {
+            if (!_completeSeasonItems.TryGetValue(entry.Key, out var allEpisodes) || allEpisodes.Count == 0)
+            {
+                continue;
+            }
+
+            // F-M424 (operator order 02.11.2026): an arrival run plans its pack out of the queued items
+            // only. The library holds the whole season, so without this cut the plan would count rows
+            // of episodes that did not arrive — and the pack would carry members this run never touched.
+            var episodes = onlyEpisodes != null && onlyEpisodes.TryGetValue(entry.Key, out var allowed)
+                ? allEpisodes.Where(e => allowed.Contains(e.IndexNumber ?? 0)).ToList()
+                : allEpisodes;
+            if (episodes.Count == 0)
+            {
+                continue;
+            }
+
+            var seen = new Dictionary<(string Lang, bool Hi), int>();
+            // F-M422 (operator doubt 02.11.2026: "es kann eigentlich nicht sein, dass so wenig durch
+            // die Zuverlässigkeitsprüfung läuft"): the refusal below names which pair came closest and
+            // which episodes it lacks. Without that the line was a verdict with no evidence, and the
+            // difference between "one episode missing", "HI flag split" and "hash changed" was invisible.
+            var pairEpisodes = new Dictionary<(string Lang, bool Hi), SortedSet<int>>();
+            var episodesWithAnyRow = new SortedSet<int>();
+            foreach (var episode in episodes)
+            {
+                string? path = episode.Path;
+                string? mediaHash;
+                try
+                {
+                    mediaHash = string.IsNullOrWhiteSpace(path) ? null : MediaHashFor(path);
+                }
+                catch (Exception ex)
+                {
+                    // A file that cannot be hashed contributes no language — the season is not planned.
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL] season pack plan: {File} could not be hashed ({Msg}) — no fill-only pack for {Imdb} S{Season}.",
+                        Path.GetFileName(path ?? episode.Name), ex.Message, entry.Key.Item1, entry.Key.Item2);
+                    continue;
+                }
+                // F-M429 (operator order 03.11.2026): the pack is now planned BEFORE the singles, so the
+                // store says nothing about this run's episodes yet. What a pack can carry is what the
+                // FILE carries: its embedded dialogue tracks. The store rows stay the fallback for the
+                // case where the stream list cannot be read.
+                var pairs = PackPairsOf(episode, mediaHash);
+
+                // Counted per EPISODE, not per row: a file may carry two tracks of the same language,
+                // and the question is whether every episode has one, not how many.
+                foreach (var pair in pairs)
+                {
+                    seen[pair] = seen.GetValueOrDefault(pair) + 1;
+
+                    int number = episode.IndexNumber ?? 0;
+                    if (!pairEpisodes.TryGetValue(pair, out var have))
+                    {
+                        have = new SortedSet<int>();
+                        pairEpisodes[pair] = have;
+                    }
+
+                    if (number > 0)
+                    {
+                        have.Add(number);
+                        episodesWithAnyRow.Add(number);
+                    }
+                }
+
+            }
+
+            foreach (var pair in seen.Where(p => p.Value == episodes.Count))
+            {
+                // F-M399 (operator doubt 02.11.2026, confirmed): the packs row is the ONLY proof. The
+                // second proof this used to accept — "every episode carries a SubdlId" — was wrong: a
+                // single upload writes its own id there too, so a season whose episodes all went up
+                // alone looked "already packed" and was never packed at all. 98 seasons were reported
+                // as inside a pack that never existed.
+                if (Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi))
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] season pack plan: {Imdb} S{Season} [{Lang}] — already inside a pack, nothing is re-sent.",
+                        entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(pair.Key.Lang, pair.Key.Hi));
+                    continue;
+                }
+
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack closing: {Imdb} S{Season} [{Lang}] — every episode is uploaded, the container is built from the store.",
+                    entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(pair.Key.Lang, pair.Key.Hi));
+                planned.Add((entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi));
+            }
+
+            if (!seen.Any(p => p.Value == episodes.Count))
+            {
+                // F-M422: the verdict now carries its evidence — which language came closest, how far it
+                // got, and which episodes it is missing. A season whose episodes have no row at all is
+                // named separately: that is a hash/orphan problem, not a coverage problem.
+                var closest = seen
+                    .OrderByDescending(p => p.Value)
+                    .ThenBy(p => p.Key.Lang, StringComparer.Ordinal)
+                    .Take(3)
+                    .Select(p =>
+                    {
+                        var have = pairEpisodes.TryGetValue(p.Key, out var set) ? set : new SortedSet<int>();
+                        var missing = episodes
+                            .Select(e => e.IndexNumber ?? 0)
+                            .Where(n => n > 0 && !have.Contains(n))
+                            .OrderBy(n => n)
+                            .ToList();
+                        return $"[{p.Key.Lang}{(p.Key.Hi ? "/SDH" : string.Empty)}] {p.Value}/{episodes.Count}, missing {string.Join(",", missing)}";
+                    })
+                    .ToList();
+
+                var withoutRow = episodes
+                    .Select(e => e.IndexNumber ?? 0)
+                    .Where(n => n > 0 && !episodesWithAnyRow.Contains(n))
+                    .OrderBy(n => n)
+                    .ToList();
+
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack plan: {Imdb} S{Season} — no language is uploaded for every episode, no pack is built. Closest: {Closest}. Episodes with no uploaded row at all: {WithoutRow}.",
+                    entry.Key.Item1, entry.Key.Item2,
+                    closest.Count == 0 ? "none" : string.Join(" | ", closest),
+                    withoutRow.Count == 0 ? "none" : string.Join(",", withoutRow));
+            }
+        }
+
+        return planned;
+    }
+
+    /// <summary>
+    /// F-M373: which complete seasons can still become a pack in THIS run — only those whose queued
+    /// episodes are exactly the season that aired. A season that is only partly queued is already
+    /// partly up, so it is worked as singles right away rather than buffered to the end of the run.
+    /// </summary>
+    /// <param name="complete">Complete seasons with their aired episode set.</param>
+    /// <param name="items">The run's items, before the loop.</param>
+    /// <returns>The seasons that may still form a pack.</returns>
+    private ISet<(string ImdbId, int Season)> PlanSeasons(
+        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
+        IReadOnlyList<BaseItem> items)
+    {
+        var queued = QueuedEpisodes(items);
+
+        var packable = new HashSet<(string ImdbId, int Season)>();
+        foreach (var entry in complete)
+        {
+            queued.TryGetValue(entry.Key, out var numbers);
+            var have = numbers ?? new List<int>();
+
+            // F-M394 (operator order 02.11.2026): every season that is complete ON DISK is packable, no
+            // matter how much of it this run happens to have queued. The old rule — pack only when ALL
+            // episodes are queued, and fall back to singles otherwise — left a dead zone: a season with
+            // 7 of 8 queued was neither packed nor filled, and the queue drained into single uploads.
+            // What is queued goes into the buffer, what is missing is filled from what is already
+            // uploaded; the coordinator decides in one place whether the pack can go up or not.
+            packable.Add(entry.Key);
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] season pack plan: {Imdb} S{Season} — {Have} of {Count} episode(s) queued, the rest is filled from what is already uploaded.",
+                entry.Key.Item1, entry.Key.Item2, have.Count, entry.Value.Count);
+        }
+
+        return packable;
+    }
+
+    /// <summary>
+    /// F-M373: works the packable seasons first and consecutively, so a season closes in one go and
+    /// no buffer outlives it. Everything else keeps the order the queue gave it.
+    /// </summary>
+    /// <param name="items">The run's items.</param>
+    /// <param name="packable">Seasons that may form a pack.</param>
+    /// <returns>The items in working order.</returns>
+    private List<BaseItem> OrderForClosure(
+        List<BaseItem> items, ISet<(string ImdbId, int Season)> packable)
+    {
+        var run = new List<SeasonPack.RunItem>(items.Count);
+        foreach (var item in items)
+        {
+            var (imdb, _, season, episode, isSeries) = ResolveIdsRaw(item);
+            run.Add(new SeasonPack.RunItem(item.Id.ToString(), isSeries ? imdb : null, season, episode));
+        }
+
+        var rank = new Dictionary<string, int>(StringComparer.Ordinal);
+        var order = SeasonPack.ClosureOrder(run, packable);
+        for (int i = 0; i < order.Count; i++)
+        {
+            rank[order[i]] = i;
+        }
+
+        // Stable: items outside the plan keep their relative order behind the planned seasons.
+        return items
+            .OrderBy(i => rank.TryGetValue(i.Id.ToString(), out var r) ? r : int.MaxValue)
+            .ToList();
+    }
+
     private static (string? ImdbId, string? TmdbId, int Season, int Episode, bool IsSeries) ResolveIdsRaw(BaseItem item)
     {
         switch (item)
@@ -2622,7 +4191,7 @@ public sealed class UploadPipeline
             _postprocessingLastResult = "running";
 
             int maxRuntimeMinutes = Math.Clamp(cfg.PostprocessMaxRuntimeMinutes, 1, 30);
-            int maxPages = Math.Clamp(cfg.PostprocessMaxPages, 1, 20);
+            int maxPages = Math.Clamp(cfg.PostprocessMaxPages, 1, 20000);
             using var runCts = new CancellationTokenSource(TimeSpan.FromMinutes(maxRuntimeMinutes));
             var ct = runCts.Token;
 
@@ -2678,6 +4247,69 @@ public sealed class UploadPipeline
             var rejectedEntries = allMySubtitles
                 .Where(o => string.Equals(o.Status, "rejected", StringComparison.OrdinalIgnoreCase))
                 .ToList();
+
+            // F-M435 (operator order 03.11.2026): an entry that was still awaiting review when it was
+            // uploaded is stored with its upload id. Once SubDL publishes it, the delete route needs the
+            // entry id — and the published list names both numbers for the same entry, so the stored
+            // handle is moved over here instead of waiting for the next resolution to guess.
+            int remappedHandles = 0;
+            int pagesWalked = 0;
+            DateTime watermark = cfg.PostprocessWatermarkUtc?.ToUniversalTime() ?? DateTime.MinValue;
+            DateTime newestSeen = DateTime.MinValue;
+            try
+            {
+                await limiter.PauseAsync(ct).ConfigureAwait(false);
+                // F-M437 (operator decision 04.11.2026): walk down only until the entries are older than
+                // the last pass reached. The list is newest first, so this is where the work of the last
+                // days sits; a pass after a pause keeps going until the watermark and catches up on its
+                // own. maxPages stays as the ceiling of that walk, not as its length.
+                var publishedEntries = await api.ListMyPublishedSubtitlesAsync(
+                    ct,
+                    maxPages: maxPages,
+                    shouldStop: e => watermark != DateTime.MinValue
+                                     && e.CreatedAt != default
+                                     && e.CreatedAt.ToUniversalTime() < watermark,
+                    pageRead: n => pagesWalked = n).ConfigureAwait(false);
+                foreach (var publishedEntry in publishedEntries ?? new List<OwnSubtitleEntry>())
+                {
+                    if (publishedEntry.CreatedAt != default
+                        && publishedEntry.CreatedAt.ToUniversalTime() > newestSeen)
+                    {
+                        newestSeen = publishedEntry.CreatedAt.ToUniversalTime();
+                    }
+
+                    if (publishedEntry.EntryId <= 0 || publishedEntry.UploadId <= 0
+                        || publishedEntry.EntryId == publishedEntry.UploadId)
+                    {
+                        continue;
+                    }
+
+                    remappedHandles += registry.RemapSubdlId(
+                        publishedEntry.UploadId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        publishedEntry.EntryId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning("[SubDL] Upload postprocessing could not read myPublishedSubtitles: {Msg}", ex.Message);
+            }
+
+            // F-M437: the watermark is the newest createdAt this pass saw — stored through the partial
+            // writer, so the next pass starts where this one ended instead of re-reading the whole list.
+            if (newestSeen > watermark)
+            {
+                cfg.PostprocessWatermarkUtc = newestSeen;
+                plugin.SavePluginState();
+            }
+
+            LogUtil.Normal(
+                logger,
+                "[SubDL] Upload postprocessing: walked {Pages} page(s) down to the watermark, {Count} stored handle(s) moved to their published entry id (F-M435/F-M437).",
+                pagesWalked, remappedHandles);
 
             LogUtil.Normal(logger, "[SubDL] Upload postprocessing: fetched {Total} mySubtitles entries, {Rejected} rejected to clean up.", allMySubtitles.Count, rejectedEntries.Count);
 

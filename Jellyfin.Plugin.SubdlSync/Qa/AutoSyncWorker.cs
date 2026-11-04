@@ -85,7 +85,7 @@ public static class AutoSyncWorker
     /// F-M323: what the worker hands back.
     /// <para>
     /// <see cref="Corrected"/> is the subtitles' TEXT — the worker does not write it, because the
-    /// file's slot (01 upward) and its reserved copy (99 downward) are the download run's decision
+    /// file's slot (01 upward) and its reserved copy (50 upward) are the download run's decision
     /// (F-M317), and so is the encoding of the artifact.
     /// </para>
     /// </summary>

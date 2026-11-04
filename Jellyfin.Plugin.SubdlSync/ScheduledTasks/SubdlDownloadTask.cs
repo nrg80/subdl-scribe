@@ -222,5 +222,5 @@ public class SubdlDownloadTask : IScheduledTask
 
     /// <summary>Marks the start of this worker's run, so the recorded time is the run's beginning.</summary>
     private void RecordWorkerStart(Plugin plugin)
-        => plugin.WorkerRuns.Start(Registry.WorkerRunRegistry.DownloadWorkerKey, Name);
+        => plugin.WorkerRuns.Start(Registry.WorkerRunRegistry.DownloadWorkerKey, Name, dryRun: plugin.Configuration.DownloadDryRun);
 }

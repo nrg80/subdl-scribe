@@ -798,8 +798,8 @@ public static class AutoSyncRun
         var none = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         string? kept = SidecarNaming.PlanOriginalTarget(media, "EN", false, none);
-        bool nameOk = kept != null && System.IO.Path.GetFileName(kept) == $"{baseName}.en.99.srt";
-        Check("the first original takes slot 99", nameOk, kept ?? "(null)");
+        bool nameOk = kept != null && System.IO.Path.GetFileName(kept) == $"{baseName}.en.51.srt";
+        Check("the first original takes slot 51", nameOk, kept ?? "(null)");
         f += nameOk ? 0 : 1;
 
         // The listing pattern is baseName + "*.srt". The original MUST match it: that match is the
@@ -817,12 +817,12 @@ public static class AutoSyncRun
             parsed == null ? "(not parsed)" : $"{parsed.Value.Lang} hi={parsed.Value.HearingImpaired} forced={parsed.Value.Forced}");
         f += parsedOk ? 0 : 1;
 
-        // Numbering runs DOWNWARD and stops at 90. 99, 98, 97 … never 100, never 89.
-        var taken99 = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            { $"{baseName}.en.99.srt" };
-        string? second = SidecarNaming.PlanOriginalTarget(media, "EN", false, taken99);
-        bool secondOk = second != null && System.IO.Path.GetFileName(second) == $"{baseName}.en.98.srt";
-        Check("with 99 taken the next original takes 98", secondOk, second ?? "(null)");
+        // Numbering runs UPWARD and stops at 99. 51, 52, 53 … never 100, never 49.
+        var takenFirst = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { $"{baseName}.en.51.srt" };
+        string? second = SidecarNaming.PlanOriginalTarget(media, "EN", false, takenFirst);
+        bool secondOk = second != null && System.IO.Path.GetFileName(second) == $"{baseName}.en.52.srt";
+        Check("with 51 taken the next original takes 52", secondOk, second ?? "(null)");
         f += secondOk ? 0 : 1;
 
         // Every reserved slot taken → no name at all. Inventing one would overwrite an original.
@@ -833,10 +833,10 @@ public static class AutoSyncRun
         }
 
         string? overflow = SidecarNaming.PlanOriginalTarget(media, "EN", false, allTen);
-        Check("all ten reserved slots taken → no name (never an overwrite)", overflow == null, overflow ?? "(null)");
+        Check("every reserved slot taken → no name (never an overwrite)", overflow == null, overflow ?? "(null)");
         f += overflow == null ? 0 : 1;
 
-        // The reserved block never collides with a corrected file: the corrected writer stops at 89.
+        // The reserved block never collides with a corrected file: the corrected writer stops at 49.
         string? highestCorrected = null;
         var allCorrected = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int s = 1; s <= SidecarNaming.CorrectedSlotMax; s++)
@@ -853,9 +853,11 @@ public static class AutoSyncRun
         Check("every corrected slot taken → slot 1, never a reserved one", below, fallbackName);
         f += below ? 0 : 1;
 
-        bool block = SidecarNaming.IsOriginalSlot(90) && SidecarNaming.IsOriginalSlot(99)
-                     && !SidecarNaming.IsOriginalSlot(89) && !SidecarNaming.IsOriginalSlot(1);
-        Check("the reserved block is exactly 90–99", block, "90..99");
+        // Operator order 02.11.2026: the block starts at 51, so 50 is NOT a reserved slot any more.
+        bool block = SidecarNaming.IsOriginalSlot(51) && SidecarNaming.IsOriginalSlot(99)
+                     && !SidecarNaming.IsOriginalSlot(50) && !SidecarNaming.IsOriginalSlot(49)
+                     && !SidecarNaming.IsOriginalSlot(1);
+        Check("the reserved block is exactly 51–99", block, "51..99");
         f += block ? 0 : 1;
 
         // ── [5b] the slot is two digits, and the slot IS the track order (F-M316) ────────────
@@ -1277,19 +1279,21 @@ public static class AutoSyncRun
         // The two ranges, as the pipeline composes them.
         string firstAligned = System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 1));
         string secondAligned = System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 2));
-        string firstUnprocessed = System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 99));
-        string secondUnprocessed = System.IO.Path.GetFileName(SidecarNaming.Build(media, "EN", false, 98));
+        string firstUnprocessed = System.IO.Path.GetFileName(
+            SidecarNaming.Build(media, "EN", false, SidecarNaming.OriginalSlotMin));
+        string secondUnprocessed = System.IO.Path.GetFileName(
+            SidecarNaming.Build(media, "EN", false, SidecarNaming.OriginalSlotMin + 1));
 
         Check("an aligned file starts at 01", firstAligned == $"{baseName}.en.01.srt", firstAligned);
         Check("the next aligned file takes 02", secondAligned == $"{baseName}.en.02.srt", secondAligned);
-        Check("an unprocessed file lands in the reserved block at 99",
-            firstUnprocessed == $"{baseName}.en.99.srt", firstUnprocessed);
-        Check("numbering runs DOWNWARD from 99",
-            secondUnprocessed == $"{baseName}.en.98.srt", secondUnprocessed);
+        Check("an unprocessed file lands in the reserved block at 51",
+            firstUnprocessed == $"{baseName}.en.51.srt", firstUnprocessed);
+        Check("numbering runs UPWARD from 51",
+            secondUnprocessed == $"{baseName}.en.52.srt", secondUnprocessed);
         f += firstAligned == $"{baseName}.en.01.srt" ? 0 : 1;
         f += secondAligned == $"{baseName}.en.02.srt" ? 0 : 1;
-        f += firstUnprocessed == $"{baseName}.en.99.srt" ? 0 : 1;
-        f += secondUnprocessed == $"{baseName}.en.98.srt" ? 0 : 1;
+        f += firstUnprocessed == $"{baseName}.en.51.srt" ? 0 : 1;
+        f += secondUnprocessed == $"{baseName}.en.52.srt" ? 0 : 1;
 
         // An unprocessed file IS the original, so it is written ONCE — the reserved-slot write that
         // runs AFTER a correction must be skipped on this path. The skip is the existing
@@ -1335,7 +1339,7 @@ public static class AutoSyncRun
 
         // Exhaustion is counted, never silent — this is the one path where a fetched subtitle is not
         // written at all.
-        bool refusalCounted = src.Contains("not aligned and no free slot in the reserved range 90–99",
+        bool refusalCounted = src.Contains("not aligned and no free slot in the reserved range 51–99",
                                           StringComparison.Ordinal);
         Check("a refused write is logged with its own line, not swallowed", refusalCounted,
             refusalCounted ? "refusal is reported" : "silent refusal");

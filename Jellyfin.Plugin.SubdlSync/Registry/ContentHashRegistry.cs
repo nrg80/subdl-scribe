@@ -85,8 +85,83 @@ public sealed class ContentHashRegistry : IDisposable
         string normalized = srtContent
             .Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace('\r', '\n');
-        return normalized.TrimEnd();
+        return DropInvisibleCues(normalized).TrimEnd();
     }
+
+    /// <summary>
+    /// The shortest cue worth keeping: one that is on screen for at least a tenth of a second
+    /// (a frame at 25 fps is 40 ms, so a 1 ms cue is never seen).
+    /// </summary>
+    public const long MinVisibleCueMs = 100;
+
+    private static readonly System.Text.RegularExpressions.Regex CueTiming = new(
+        @"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// Drops cues that are too short to be seen and renumbers the rest (operator decision
+    /// 01.11.2026). One 1 ms cue (a doubled <c>♪ MTV ♪</c> line at 3.898 s) made the whole file fail
+    /// <c>qa-invalid-srt</c> — measured on MobLand S01E02 — and thereby cost the ENTIRE season pack:
+    /// 9 of 10 episodes were left, so every episode went up as a single and E02 not at all. Nobody
+    /// watching is bothered by such a cue, the rule that judged it cost far more than the cue.
+    /// </summary>
+    /// <param name="normalized">LF-normalised SRT text.</param>
+    /// <returns>The same text when nothing was dropped, otherwise the text without those cues.</returns>
+    private static string DropInvisibleCues(string normalized)
+    {
+        if (normalized.IndexOf("-->", StringComparison.Ordinal) < 0)
+        {
+            return normalized;
+        }
+
+        string[] blocks = normalized.Split("\n\n", StringSplitOptions.RemoveEmptyEntries);
+        var kept = new List<string>(blocks.Length);
+        int dropped = 0;
+        foreach (string block in blocks)
+        {
+            string[] lines = block.Split('\n');
+            int timing = Array.FindIndex(lines, l => l.Contains("-->", StringComparison.Ordinal));
+            if (timing < 0)
+            {
+                kept.Add(block);
+                continue;
+            }
+
+            var m = CueTiming.Match(lines[timing]);
+            if (!m.Success)
+            {
+                kept.Add(block);
+                continue;
+            }
+
+            long span = CueMs(m, 5) - CueMs(m, 1);
+            if (span <= MinVisibleCueMs)
+            {
+                dropped++;
+                continue;
+            }
+
+            if (timing > 0)
+            {
+                lines[timing - 1] = (kept.Count + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            kept.Add(string.Join('\n', lines));
+        }
+
+        if (dropped == 0)
+        {
+            return normalized;
+        }
+
+        return string.Join("\n\n", kept) + "\n";
+    }
+
+    private static long CueMs(System.Text.RegularExpressions.Match m, int firstGroup)
+        => ((long.Parse(m.Groups[firstGroup].Value, System.Globalization.CultureInfo.InvariantCulture) * 3600)
+            + (long.Parse(m.Groups[firstGroup + 1].Value, System.Globalization.CultureInfo.InvariantCulture) * 60)
+            + long.Parse(m.Groups[firstGroup + 2].Value, System.Globalization.CultureInfo.InvariantCulture)) * 1000
+            + long.Parse(m.Groups[firstGroup + 3].Value, System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// MD5 of the normalized content, in SubDL's own format: the hash of exactly the bytes that get
@@ -869,6 +944,80 @@ public sealed class ContentHashRegistry : IDisposable
     /// Lists uploaded embedded tracks, newest verdict first.
     /// </summary>
     /// <returns>Uploaded tracks.</returns>
+    /// <summary>
+    /// F-M416 (operator order 02.11.2026): the episodes of a season the store knows with THIS
+    /// language. Completeness is a property of the language, not of the season — a season can be
+    /// complete for EN and incomplete for DE because two episodes carry no German track. The answer
+    /// comes from the state, so it is available before anything is extracted.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">Language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>The episode numbers, unordered.</returns>
+    /// <summary>
+    /// F-M417: the languages the store knows for a season — the input the plan needs to ask the
+    /// cheap questions first (pack already up? language complete?) before it looks at release names.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <returns>Language and HI variant, unordered.</returns>
+    public List<(string Language, bool HearingImpaired)> LanguagesInSeason(string? imdbId, int season)
+    {
+        if (string.IsNullOrWhiteSpace(imdbId))
+        {
+            return new List<(string, bool)>();
+        }
+
+        var episodes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var media in _db.Media.Find(m => m.ImdbId == imdbId && m.Season == season))
+        {
+            if (!string.IsNullOrEmpty(media.Id))
+            {
+                episodes.Add(media.Id);
+            }
+        }
+
+        var seen = new HashSet<(string, bool)>();
+        foreach (var embed in _db.Embeds.Find(e => true))
+        {
+            if (embed.MediaHash != null && episodes.Contains(embed.MediaHash) && !string.IsNullOrEmpty(embed.Language))
+            {
+                seen.Add((embed.Language, embed.HearingImpaired ?? false));
+            }
+        }
+
+        return seen.ToList();
+    }
+
+    public List<int> EpisodesWithLanguage(string? imdbId, int season, string language, bool hearingImpaired)
+    {
+        if (string.IsNullOrWhiteSpace(imdbId))
+        {
+            return new List<int>();
+        }
+
+        var episodes = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var media in _db.Media.Find(m => m.ImdbId == imdbId && m.Season == season))
+        {
+            if (media.Episode is int number && number > 0 && !string.IsNullOrEmpty(media.Id))
+            {
+                episodes[media.Id] = number;
+            }
+        }
+
+        var numbers = new HashSet<int>();
+        foreach (var embed in _db.Embeds.Find(e => e.Language == language && e.HearingImpaired == hearingImpaired))
+        {
+            if (embed.MediaHash != null && episodes.TryGetValue(embed.MediaHash, out int episode))
+            {
+                numbers.Add(episode);
+            }
+        }
+
+        return numbers.OrderBy(x => x).ToList();
+    }
+
     public List<EmbedTrackEntity> GetUploadedEmbeds()
         => _db.Embeds.Find(x => x.Status == SubtitleStatus.Uploaded).ToList();
 
@@ -1119,6 +1268,206 @@ public sealed class ContentHashRegistry : IDisposable
     /// <returns>True when known.</returns>
     /// F-M17z: any recorded outcome counts as known; a rejected row is as final as an uploaded one,
     /// so a new rejection reason never needs a new state name.
+    /// <summary>
+    /// F-M390: records that a season was packed, in one language and variant, so a LATER run can see
+    /// it without re-deriving anything from the subtitle rows.
+    /// <para>
+    /// The row is written after the pack upload succeeded, keyed by season + language + variant — one
+    /// row per pack, updated in place, never a history. Without it a season whose episodes went up
+    /// individually is a season nobody can tell anything about: the fill-only pass would rebuild the
+    /// same pack on every run, and there is no record of which single uploads the pack absorbed.
+    /// </para>
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <param name="releaseName">Release the pack carries.</param>
+    /// <param name="packId">SubDL id (or the pack name when the answer carried no id).</param>
+    /// <param name="episodes">Episode numbers the pack carries.</param>
+    /// <param name="absorbedIds">SubDL ids of single uploads folded into this pack, when known.</param>
+    public void RecordPack(
+        string imdbId,
+        int season,
+        string language,
+        bool hearingImpaired,
+        string? releaseName,
+        string? packId,
+        IEnumerable<int> episodes,
+        IEnumerable<string>? absorbedIds = null)
+    {
+        if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || string.IsNullOrWhiteSpace(language))
+        {
+            return;
+        }
+
+        string id = SubdlDbContext.PackKey(imdbId, season, language, hearingImpaired);
+        var existing = _db.Packs.FindById(id);
+        _db.Packs.Upsert(new PackEntity
+        {
+            Id = id,
+            ImdbId = imdbId,
+            Season = season,
+            Language = language,
+            HearingImpaired = hearingImpaired,
+            ReleaseName = releaseName,
+            PackId = packId,
+            Episodes = string.Join(",", episodes.OrderBy(e => e).Select(e => e.ToString(System.Globalization.CultureInfo.InvariantCulture))),
+            AbsorbedIds = absorbedIds == null ? existing?.AbsorbedIds : string.Join(",", absorbedIds),
+            Created = existing?.Created ?? DateTime.UtcNow,
+            Updated = DateTime.UtcNow,
+        });
+    }
+
+    /// <summary>
+    /// F-M435 (operator order 03.11.2026): moves a stored handle from the upload id to the id of the
+    /// published entry.
+    /// <para>
+    /// An entry that is still awaiting review at upload time only has an upload id, so the row is
+    /// written with it. Once SubDL publishes the entry, the delete route expects the entry id
+    /// (<c>/user/deletePublishedSubtitle?id=…</c>) — the two numbers live in different ranges
+    /// (measured: entry 3758706 against upload 380828). Without this pass the row keeps a handle that
+    /// names nothing. Matching is by the id the account itself reports, never by guesswork.
+    /// </para>
+    /// </summary>
+    /// <param name="uploadId">The stored upload id.</param>
+    /// <param name="entryId">The published entry id the account reports for the same upload.</param>
+    /// <returns>Number of rewritten rows.</returns>
+    public int RemapSubdlId(string uploadId, string entryId)
+    {
+        if (string.IsNullOrWhiteSpace(uploadId) || string.IsNullOrWhiteSpace(entryId)
+            || string.Equals(uploadId, entryId, StringComparison.Ordinal))
+        {
+            return 0;
+        }
+
+        int changed = 0;
+
+        foreach (var row in _db.Embeds.FindAll().Where(x => string.Equals(x.SubdlId, uploadId, StringComparison.Ordinal)).ToList())
+        {
+            row.SubdlId = entryId;
+            _db.Embeds.Upsert(row);
+            changed++;
+        }
+
+        foreach (var row in _db.Sidecars.FindAll().Where(x => string.Equals(x.SubdlId, uploadId, StringComparison.Ordinal)).ToList())
+        {
+            row.SubdlId = entryId;
+            _db.Sidecars.Upsert(row);
+            changed++;
+        }
+
+        foreach (var row in _db.Packs.FindAll().Where(x => string.Equals(x.PackId, uploadId, StringComparison.Ordinal)).ToList())
+        {
+            row.PackId = entryId;
+            row.Updated = DateTime.UtcNow;
+            _db.Packs.Upsert(row);
+            changed++;
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// F-M397 (operator order 02.11.2026): true when this exact text once CAME FROM SubDL — a sidecar
+    /// that this account downloaded, including a member unpacked out of a downloaded season pack.
+    /// <para>
+    /// Such text must never end up in a pack: it would send back to SubDL what SubDL itself handed out,
+    /// under our name, as a new container. The check is content-based on purpose — the file may have
+    /// been renamed, moved or re-attached since, and the hash is what actually travels.
+    /// </para>
+    /// </summary>
+    public bool IsSubdlOrigin(string? contentHash)
+    {
+        if (string.IsNullOrEmpty(contentHash))
+        {
+            return false;
+        }
+
+        return _db.Sidecars.FindAll()
+            .Any(x => string.Equals(x.ContentHash, contentHash, StringComparison.Ordinal)
+                      && string.Equals(x.Status, SubtitleStatus.Downloaded, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// F-M396: removes pack rows nothing carries any more.
+    /// <para>
+    /// A pack row whose <c>PackId</c> is no longer written on any subtitle row is a pack without
+    /// members: the media rows were re-hashed, the files were pruned, or the pack was replaced. Left
+    /// alone such a row claims a season is packed forever and quietly disables it — the fill-only plan
+    /// reads it as "already inside a pack" and never looks again. Pruning is therefore not tidying, it
+    /// is what keeps the row honest.
+    /// </para>
+    /// </summary>
+    /// <returns>Number of removed rows.</returns>
+    public int PruneOrphanedPacks()
+    {
+        var packs = _db.Packs.FindAll().ToList();
+        if (packs.Count == 0)
+        {
+            return 0;
+        }
+
+        var carried = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var embed in _db.Embeds.FindAll())
+        {
+            if (!string.IsNullOrEmpty(embed.SubdlId))
+            {
+                carried.Add(embed.SubdlId!);
+            }
+        }
+
+        int removed = 0;
+        foreach (var pack in packs)
+        {
+            if (string.IsNullOrEmpty(pack.PackId) || carried.Contains(pack.PackId!))
+            {
+                continue;
+            }
+
+            _db.Packs.DeleteMany(p => p.Id == pack.Id);
+            removed++;
+        }
+
+        if (removed > 0)
+        {
+            MarkAndFlush(() => { });
+        }
+
+        return removed;
+    }
+
+    /// <summary>
+    /// F-M390: the pack recorded for this season, language and variant, or null when there is none.
+    /// A null means "never packed by us" — it never means "not packed at all", because packs built by
+    /// other uploaders leave no row here.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>The stored row, or null.</returns>
+    public PackEntity? GetPack(string? imdbId, int season, string? language, bool hearingImpaired)
+    {
+        if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || string.IsNullOrWhiteSpace(language))
+        {
+            return null;
+        }
+
+        return _db.Packs.FindById(SubdlDbContext.PackKey(imdbId!, season, language!, hearingImpaired));
+    }
+
+    /// <summary>
+    /// F-M390: true when this season, language and variant already went up as a pack of ours.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <returns>True when a pack row exists.</returns>
+    public bool HasPack(string? imdbId, int season, string? language, bool hearingImpaired)
+        => GetPack(imdbId, season, language, hearingImpaired) != null;
+
     public bool IsContentKnown(string? contentHash)
     {
         if (string.IsNullOrEmpty(contentHash))

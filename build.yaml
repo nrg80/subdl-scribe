@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.264"
+version: "12.1.12.330"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,70 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.330: a plugin-owned field that is new to the configuration file survives a restart — the partial writer clears xsi:nil and inserts at the declared position (F-M438).
+  v12.1.12.329: the page ceiling of the postprocessing walk rises to 20000 so a large backlog is reachable in one catch-up run; the run itself stays watermark-bound (F-M437).
+  v12.1.12.328: the postprocessing pages down to its own watermark and runs daily, so a published entry gets its entry id within a day instead of waiting for a weekly pass (F-M437).
+  v12.1.12.327: a worker whose last run failed keeps saying so on the deferral line, instead of reading as a plain deferral (F-M436).
+  v12.1.12.326: upload rows store the published entry id, not the upload id — packs, singles and movies alike, with the postprocessing remapping open submissions (F-M435).
+  v12.1.12.325: the file witness of a season now finds its episodes at pack time (F-M434).
+  v12.1.12.324: the pack plan asks the files, not only the store, so a first-time season becomes a pack (F-M433).
+  v12.1.12.323: upload ids are also read from the published list, so movies and packs keep their delete handle (F-M432).
+  v12.1.12.322: the pack filler tries every track of the language, not only the first (F-M431).
+  v12.1.12.321: release group also reads bracketed brands, underscore pairs and a second extension (F-M430).
+  v12.1.12.320: release group recognition covers dot, space and bracketed spellings — 60% to 71% on the operator library (F-M430).
+  v12.1.12.319: season packs go up before the single uploads, and covered singles are skipped (F-M429).
+  v12.1.12.318: archive cache defaults are now 7 days and 256 MB (F-M428).
+  v12.1.12.317: a database reset purges the archive cache with it (F-M427).
+  v12.1.12.316: a season whose languages are all inside a pack is not investigated at all (F-M426).
+  v12.1.12.315: the pack rule is the same for every trigger — a pack is built only when this run queued the whole season, and only out of those items (F-M425).
+  v12.1.12.314: an arrival run builds a pack when the episodes it brought are the whole season, and only out of those queued items (F-M424).
+  v12.1.12.313: already published uploads can be adopted into the registry (POST /Plugins/SubdlSync/AdoptUploads) so seasons the seeder filled become packable.
+  v12.1.12.312: a refused season names the three closest languages with their counts and the missing episodes, plus any episode without an uploaded row.
+  v12.1.12.311: every single upload names its SubDL id in the log — from the answer or fetched from mySubtitles — and an upload without one warns instead of staying silent.
+  v12.1.12.310: the log line for a language that is not complete on every episode no longer promises single uploads — it says that no pack is built for it and this pass sends nothing.
+  v12.1.12.309: arrival runs upload single only; a refetch or manual run uploads every position single first and then closes the season with the pack, which deletes the singles it absorbs.
+  v12.1.12.308: the pack questions are asked in cost order — store first (already up? language complete?), release names second, extraction last.
+  v12.1.12.307: completeness is decided per language from the store, before any extraction — an incomplete language goes up as singles.
+  v12.1.12.306: a season already up as a pack is skipped before the extraction, not after it.
+  v12.1.12.305: a pack resolves its SubDL id from mySubtitles the same way a single does — matched by release name, language by its written name.
+  v12.1.12.304: a single upload resolves its SubDL id from mySubtitles right after the upload — without it a pack can never delete the single it replaces.
+  v12.1.12.303: a pack names every member whose single upload carries no SubDL id in the store — uploaded by us, but not deletable.
+  v12.1.12.302: dry carries the same grey as cancel; the filler hashes a file once and the cache logs a hit once per file.
+  v12.1.12.301: A season counts as complete only when one release group supplies all its episodes — a staffel split across two groups stays single.
+  v12.1.12.300: The aired episode set comes from TMDb and no longer counts episodes whose air date is in the future — IMDb had answered with the whole series (20 instead of 7).
+  v12.1.12.299: The pack loop reports progress, so the watchdog no longer aborts a run that is busy building packs.
+  v12.1.12.298: The pack filler reads a file once per run instead of once per language — 37 languages of one season no longer mean 37 full container passes.
+  v12.1.12.297: A running worker reports the live dry flag, so the workers line reads "run dry" while the run is in flight instead of only afterwards.
+  v12.1.12.296: One spelling for the mode — "dry" inline in the start lines, "DRY-RUN" as the prefix on event lines; the dry-run=True form is gone.
+  v12.1.12.295: The cycle lines in the log say whether the cycle ran dry — "cycle start (..., dry)" and the matching end line.
+  v12.1.12.294: A worker in dry mode says so while it runs — the workers line reads "run dry" instead of only turning grey after the run.
+  v12.1.12.293: The language line in the log states the finding — tagged X, detected Y, uploaded under Y — instead of calling the tag a liar.
+  v12.1.12.292: Only a packs row proves a pack now — a single upload's own id no longer passes for "already inside a pack", which had quietly excluded 98 seasons that were never packed.
+  v12.1.12.291: The workers line marks a dry worker with the single word "dry", right beside the outcome word, so the blue run tag and the marker read as one line.
+  v12.1.12.290: A pack is refused outright when any of its members came from SubDL itself — downloaded, or unpacked out of a downloaded pack.
+  v12.1.12.289: A pack already up with the same members is not sent twice, and the database refresh drops pack rows nothing carries any more instead of disabling a season forever.
+  v12.1.12.288: A pack is never built from a subtitle that was only downloaded — the filler demands an uploaded row of that very track, so a download cannot be published back under our name.
+  v12.1.12.287: One rule for season packs — every complete season is packed, the queue only orders the members and the fill closes the gap; a partly queued season no longer drains into single uploads.
+  v12.1.12.286: The pack brake and the series allow-list are gone again — a probe knob has no place in the build; the pack path does what the library and the config already say.
+  v12.1.12.285: A run can be braked (packs per run, checked before anything is deleted) and aimed (pack only for these series), so a library-wide pack wave starts as a probe.
+  v12.1.12.284: A single upload that a later season pack absorbs is deleted from SubDL first, the pack keeps its ids on record, and the toggle says so.
+  v12.1.12.283: A season pack is filled with subtitles that are already up instead of falling back to singles, is remembered in its own table so it is never rebuilt, and the quota bar reads API calls.
+  v12.1.12.282: One archive fetch serves the season; a refused file gets the next one from the same archive, an unreadable cue is dropped before the hash is taken, and kept originals are numbered from 51.
+  v12.1.12.278: The hearing-impaired (SDH) subtitle states it in its name — .SDH after the language code —
+  in the pack title, in the pack member and in the single upload, instead of only in the hi field.
+  v12.1.12.277: Pack members name their season, so SubDL no longer files them under season zero.
+  v12.1.12.276: Pack members name no season, which is what SubDL filed as a single episode.
+  v12.1.12.275: A season pack states no episode range, which is what made SubDL file it as episode one.
+  v12.1.12.274: A lying language tag is corrected on upload, and a pack without a release in its names is named after the file's own resolution, source and codec.
+  v12.1.12.273: A pack names a release only when every episode comes from that one release.
+  v12.1.12.272: A pack carries the season form of the release names, so it is titled like a season.
+  v12.1.12.271: A season pack is titled by its first release, so that entry names the season (F-M374).
+  v12.1.12.270: The arrival debounce window defaults to two minutes instead of one.
+  v12.1.12.269: A dry run names the season pack it would send instead of one line per episode.
+  v12.1.12.268: A season pack is planned before the run: only a season whose queued episodes are the whole aired season is packed, and its episodes are worked consecutively so the pack closes in one go.
+  v12.1.12.267: Corrected subtitles take slots 01 to 49 and kept originals 50 to 99, both counting up from the bottom of their block.
+  v12.1.12.266: Season packs are on by default and the switch sits directly above the upload gates.
+  v12.1.12.265: A season whose episodes are all present and pass the checks goes up as one pack instead of one subtitle per episode.
   v12.1.12.264: A file that already carries a Norwegian subtitle is no longer given a second one, whichever written form the existing subtitle uses.
   v12.1.12.263: Subtitle packs are cached per archive rather than per download URL and stay on
     disk for 14 days, so a season pack is not fetched again for every episode.

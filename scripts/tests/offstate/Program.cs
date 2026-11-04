@@ -151,6 +151,34 @@ Check("off outranks manual per direction (else-if, not two words)",
 Check("the off notes are appended AFTER the deferral notes", page.IndexOf("localLines.push(t)") > page.IndexOf("var localLines = deferred.map"));
 Check("no off-case was added to the outcome words", !page.Contains("case 'off': return"));
 
+// --- F-M436 (operator order 04.11.2026): "deferred überschreib fail nicht" --------------------
+// Ein offener Fire auf einem kaputten Worker darf nicht als bloße Vertagung gelesen werden.
+Check("the deferral note carries a BROKEN worker's outcome, not just 'deferred'",
+    quota.Contains("Outcome.Failed") && quota.Contains("\"last run failed\""));
+Check("the broken worker's own cause travels with it",
+    quota.Contains("string.IsNullOrWhiteSpace(row!.Detail) ? string.Empty : \": \" + row.Detail.Trim()"));
+Check("a deferred row still passes its detail through unchanged",
+    quota.Contains("reason = row!.Detail ?? string.Empty;"));
+Check("a failure keeps its note WITHOUT a pending fire (no early return)",
+    !quota.Contains("if (fires.Count == 0)")
+    && quota.Contains("if (!hasFire && !isFailed)"));
+Check("a healthy worker with no fire says nothing",
+    quota.Contains("if (!hasFire && !isFailed)") && quota.Contains("due = hasFire"));
+// Die Regel hängt am Worker, nicht an einer Richtung: Download, Seeder, Auto-Sync und die drei
+// Wartungs-Worker laufen durch dieselbe Schleife.
+var noteStart = quota.IndexOf("private static object LocalRateLimitState()");
+var noteEnd = noteStart < 0 ? -1 : quota.IndexOf("private static", noteStart + 10);
+var noteBody = noteEnd > noteStart ? quota.Substring(noteStart, noteEnd - noteStart) : string.Empty;
+Check("the failure note runs over EVERY worker — no upload-only special case",
+    noteBody.Contains("WorkerRunRegistry.KnownWorkers")
+    && !noteBody.Contains("UploadWorkerKey") && !noteBody.Contains("DownloadWorkerKey"));
+Check("the note still appends the due moment after the reason",
+    page.Contains("return d.name + ': ' + reason + (when ? ' — next attempt ' + when : '');"));
+Check("a pending fire turns the LAMP to defer for every outcome",
+    page.Contains("if (w.Deferred && wo !== 'run')"));
+Check("a failed row is no longer exempt from the deferral lamp",
+    !page.Contains("wo !== 'failed' && wo !== 'run'"));
+
 Console.WriteLine();
 Console.WriteLine(f == 0 ? ">>> OFFSTATE OK" : $">>> OFFSTATE {f} FAILURE(S)");
 return f == 0 ? 0 : 1;

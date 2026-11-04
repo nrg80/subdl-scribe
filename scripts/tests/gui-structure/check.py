@@ -193,7 +193,7 @@ def main():
                    "subdlLoadWorkers]"):
         check("refresh covers %s" % loader.rstrip("]"), loader in html)
     # quota covers BOTH the API/search allowance and the download allowance
-    check("quota loader renders the search bar", "renderBar('Search'" in html)
+    check("quota loader renders the API calls bar", "renderBar('API calls'" in html)
     check("quota loader renders the downloads bar", "renderBar('Downloads'" in html)
     # status covers the lights AND the library read/write rows
     check("status loader renders the library read/write rows",
@@ -430,8 +430,11 @@ def main():
     # Asserted because the wording was copied from the download row and reads as plausible: nothing
     # breaks, the number is right, only the sentence is false. Also asserted positively, so a rename
     # to something else has to be a deliberate act rather than a silent drift.
-    check("the upload row says discarded before transfer, not fetched",
-          "Uploads: discarded before transfer" in order,
+    # 02.11.2026 (operator): the word "discarded" read as "SubDL threw an upload away" — the row
+    # counts attempts that never left, so it now says "stopped before sending". The point of the
+    # assertion stays the same: no upload row may claim a fetch, and a rename has to be deliberate.
+    check("the upload row says stopped before sending, not fetched",
+          "Uploads: stopped before sending" in order,
           "row missing or reverted: %s" % [o for o in order if o.startswith("Uploads:")])
     check("and no upload row claims a fetch",
           not any(o.startswith("Uploads:") and "fetch" in o for o in order),
@@ -1193,7 +1196,7 @@ def main():
               _open_body != '' and
               disp_src.find("MarkAutoSyncRunning(upload, config)") >= 0 and
               disp_src.find("MarkAutoSyncRunning(upload, config)")
-              < disp_src.find("await ExecutePipelineAsync(upload, config, filter, progress)"),
+              < disp_src.find("await ExecutePipelineAsync(upload, config, filter, progress"),
               "opening it after the await is exactly the old defect: start and finish in one instant")
         check("F-M340: the closing method no longer opens the row",
               "runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey" not in _row_body,
@@ -1599,6 +1602,13 @@ def main():
           "var when = d.due ? subdlFmtDayTime(d.due) : '';" in html, "deferral note still time-only")
     check("F-M359: the bare-time helper is no longer wired into the deferral note",
           "var when = d.due ? resetLocal(d.due) : '';" not in html, "resetLocal still used for the note")
+    # F-M391: a pack absorbs singles — the toggle has to say that they are deleted from SubDL.
+    check("F-M391: the season pack toggle notes that absorbed singles are deleted from SubDL",
+          "its single upload is deleted from SubDL first" in html)
+    check("F-M391: the note sits in the season pack description, not somewhere else",
+          "one pack instead of one upload per episode. Default: on. An episode that already went up on its own"
+          in html)
+
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)
@@ -1606,6 +1616,78 @@ def main():
             line += "  (%s)" % detail
         print(line)
     print()
+    # ---- F-M398 (operator order 02.11.2026): in the workers line a dry worker is marked with the
+    # single word "dry", standing right beside the outcome word — the blue "run" tag while it runs.
+    check(html.count('subdl-dryrun\">dry<') == 1,
+          "F-M398: the workers line marks a dry worker with the word 'dry', not 'dry run'")
+    check(re.search(r"oc\.text \+\s*\n\s*\(w\.DryRun \? '<span class=\"subdl-dryrun\">dry</span>' : ''\)", html) is not None,
+          "F-M398: the marker is appended to the outcome text in the same cell, beside the run tag")
+
+    # ---- F-M401 (operator order 02.11.2026): "run dry" — the marker is known when the run starts.
+    root_cs = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))), "Jellyfin.Plugin.SubdlSync")
+    try:
+        reg_src = open(os.path.join(root_cs, "Registry/WorkerRunRegistry.cs"), encoding="utf-8").read()
+        up_src = open(os.path.join(root_cs, "ScheduledTasks/SubdlUploadTask.cs"), encoding="utf-8").read()
+        down_src = open(os.path.join(root_cs, "ScheduledTasks/SubdlDownloadTask.cs"), encoding="utf-8").read()
+    except OSError as exc:
+        check(False, "F-M401: worker sources readable (%s)" % exc)
+        reg_src = up_src = down_src = ""
+    check("bool dryRun = false)" in reg_src and "row.DryRun = dryRun;" in reg_src.split("public void Start(")[1][:1200],
+          "F-M401: Start records the dry flag, so a running dry worker says so")
+    check("dryRun: plugin.Configuration.DryRun" in up_src,
+          "F-M401: the upload worker passes its dry flag when it starts")
+    check("dryRun: plugin.Configuration.DownloadDryRun" in down_src,
+          "F-M401: the download worker passes its dry flag when it starts")
+
+    # ---- F-M402 (operator order 02.11.2026): the cycle line in the log carries the same marker.
+    try:
+        disp_src = open(os.path.join(root_cs, "ScheduledTasks/SubdlEventDispatcher.cs"), encoding="utf-8").read()
+    except OSError as exc:
+        check(False, "F-M402: dispatcher source readable (%s)" % exc)
+        disp_src = ""
+    check("cycle start ({Trigger}, dir {Dir}{Dry})." in disp_src,
+          "F-M402: the cycle start line carries the dry marker")
+    check(disp_src.count("cycle end ({Trigger}, dir {Dir}{Dry})") == 2,
+          "F-M402: and so do both cycle end lines")
+    check('return ", dry";' in disp_src,
+          "F-M402: one helper decides the word, so the lines cannot drift apart")
+
+    # ---- F-M403 (operator order 02.11.2026): one spelling for the mode — "dry" inline, "DRY-RUN" on
+    # event lines. No third variant may creep back in.
+    try:
+        up_src2 = open(os.path.join(root_cs, "Pipeline/UploadPipeline.cs"), encoding="utf-8").read()
+        down_src2 = open(os.path.join(root_cs, "Pipeline/DownloadPipeline.cs"), encoding="utf-8").read()
+    except OSError as exc:
+        check(False, "F-M403: pipeline sources readable (%s)" % exc)
+        up_src2 = down_src2 = ""
+    check('"[SubDL] upload: started{Dry}"' in up_src2,
+          "F-M403: the upload start line says ', dry' inline instead of dry-run=True")
+    check('"[SubDL] download: started{Dry}, refetch={Refetch}' in down_src2,
+          "F-M403: the download start line does the same")
+    check("dry-run={" not in up_src2 and "dry-run={" not in down_src2,
+          "F-M403: no dry-run=Key=Value form is left in either pipeline")
+    check("DRY-RUN would have uploaded" in up_src2,
+          "F-M403: the run-end line uses the DRY-RUN prefix")
+    check("DRY RUN," not in up_src2 and "DRY RUN —" not in disp_src,
+          "F-M403: the space-separated variant is gone")
+
+    # ---- F-M401 (Nachtrag): während ein Worker läuft, gilt das LIVE-Flag, nicht die gespeicherte Zeile.
+    try:
+        ctrl_src = open(os.path.join(root_cs, "Api/SubdlStatusController.cs"), encoding="utf-8").read()
+    except OSError as exc:
+        check(False, "F-M401: status controller readable (%s)" % exc)
+        ctrl_src = ""
+    check("DryRun = IsLive(r) ? LiveDryFlag(r) : r.DryRun," in ctrl_src,
+          "F-M401: a running worker reports the live dry flag")
+    check("return cfg.DryRun;" in ctrl_src and "return cfg.DownloadDryRun;" in ctrl_src,
+          "F-M401: upload and download read their own switch")
+
+    # ---- F-M409: dry traegt das Grau von cancel.
+    page_src = open(os.path.join(root_cs, "Configuration/configPage.html"), encoding="utf-8").read()
+    check(".subdl-dryrun { color: #767676;" in page_src,
+          "F-M409: the dry marker uses the same grey as cancel")
+
     print(">>> GUI-STRUKTUR %s: %d/%d Pruefungen bestanden"
           % ("OK" if not failed else "FEHLER", len(results) - len(failed), len(results)))
     return 1 if failed else 0

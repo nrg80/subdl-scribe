@@ -226,7 +226,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     private static readonly string[] PluginOwnedFields =
     [
         "RandomDailyTime", "RandomWeeklyTime", "RandomMonthlyTime", "RandomMonthlyDay",
-        "RandomPruneTime", "RandomOshashTime", "RandomPostprocessTime",
+        "RandomPruneTime", "RandomOshashTime", "RandomPostprocessTime", "PostprocessWatermarkUtc",
         "StatusUploaded", "StatusDownloaded", "StatusStatsSinceUtc"
     ];
 
@@ -268,8 +268,12 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             mine["StatusDownloaded"] = cfg.StatusDownloaded.ToString(CultureInfo.InvariantCulture);
             mine["StatusStatsSinceUtc"] = cfg.StatusStatsSinceUtc?.ToUniversalTime()
                 .ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", CultureInfo.InvariantCulture);
+            // F-M437: the postprocessing watermark is plugin state like the anchors — written through the
+            // same partial writer so an empty in-memory configuration can never erase user settings.
+            mine["PostprocessWatermarkUtc"] = cfg.PostprocessWatermarkUtc?.ToUniversalTime()
+                .ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", CultureInfo.InvariantCulture);
 
-            PatchPluginStateFile(path, mine);
+            PatchPluginStateFile(path, mine, ConfigurationElementOrder);
         }
         catch (Exception ex)
         {
@@ -279,14 +283,74 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     }
 
     /// <summary>
+    /// The order Jellyfin's XML serializer expects the configuration elements in — the declaration order
+    /// of the properties. Only used to place a field that is new to an existing file (F-M438).
+    /// </summary>
+    private static readonly string[] ConfigurationElementOrder = typeof(Configuration.PluginConfiguration)
+        .GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+        .Select(p => p.Name)
+        .ToArray();
+
+    /// <summary>
+    /// The element a missing field has to be inserted BEFORE: the first element of the document that the
+    /// configuration declares after this field. Null when the field is the last one declared, or when the
+    /// order is unknown — then appending is correct.
+    /// </summary>
+    private static XElement? FindInsertionAnchor(XElement root, string field, IReadOnlyList<string>? order)
+    {
+        if (order == null)
+        {
+            return null;
+        }
+
+        int mine = -1;
+        for (int i = 0; i < order.Count; i++)
+        {
+            if (string.Equals(order[i], field, StringComparison.Ordinal))
+            {
+                mine = i;
+                break;
+            }
+        }
+
+        if (mine < 0)
+        {
+            return null;
+        }
+
+        foreach (var candidate in root.Elements())
+        {
+            for (int i = mine + 1; i < order.Count; i++)
+            {
+                if (string.Equals(order[i], candidate.Name.LocalName, StringComparison.Ordinal))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Replaces the given fields inside the configuration file, leaving every other element
     /// exactly as it is on disk. Writes to a temp file and renames, so an interrupted write
     /// cannot replace a valid file with a partial one.
     /// </summary>
     /// <param name="path">Path of the plugin configuration file.</param>
     /// <param name="fields">Field name to value. Null values are skipped, not written as empty.</param>
+    /// <param name="order">
+    /// F-M438 (measured 04.11.2026): the declaration order of the configuration properties. Jellyfin's
+    /// XML serializer matches elements in the order the class declares them, so an element that does not
+    /// exist yet has to be INSERTED at its declared position. Appending it to the end of the document —
+    /// which is what this writer did — puts it after later members and the value is silently ignored on
+    /// the next load: exactly one restart, then the field reads as unset again.
+    /// </param>
     /// <returns>True when the file was written.</returns>
-    public static bool PatchPluginStateFile(string path, IReadOnlyDictionary<string, string?> fields)
+    public static bool PatchPluginStateFile(
+        string path,
+        IReadOnlyDictionary<string, string?> fields,
+        IReadOnlyList<string>? order = null)
     {
         // Missing file: write only the plugin's own fields. Seeding a full document from the
         // in-memory object would be the very overwrite this class exists to prevent.
@@ -308,13 +372,25 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             }
 
             var el = root.Element(kv.Key);
-            if (el == null)
+            if (el != null)
             {
-                root.Add(new XElement(kv.Key, kv.Value));
+                // F-M438 (measured 04.11.2026): a nullable value type is serialised as an element with
+                // xsi:nil="true", not left out. Setting the text alone leaves that attribute in place and
+                // the next load reads null again — the field looked saved and was gone after a restart.
+                el.Attribute(XName.Get("nil", "http://www.w3.org/2001/XMLSchema-instance"))?.Remove();
+                el.Value = kv.Value;
+                continue;
+            }
+
+            var fresh = new XElement(root.Name.Namespace + kv.Key, kv.Value);
+            var anchor = FindInsertionAnchor(root, kv.Key, order);
+            if (anchor != null)
+            {
+                anchor.AddBeforeSelf(fresh);
             }
             else
             {
-                el.Value = kv.Value;
+                root.Add(fresh);
             }
         }
 

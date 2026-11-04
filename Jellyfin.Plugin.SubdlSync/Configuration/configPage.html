@@ -245,7 +245,7 @@
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="DownloadQaRetryLimit">Auto-Sync attempts and max. download/search limit</label>
                             <input id="DownloadQaRetryLimit" name="DownloadQaRetryLimit" type="number" is="emby-input" min="0" max="20" />
-                            <div class="fieldDescription">How many candidates per language are searched, and how many the downloader may pull for a file before it gives up. With Auto-Sync on, each candidate is fitted and the walk repeats until a correction proves itself. With Auto-Sync off, the candidates are pulled through the active quality gates and kept untouched at index 99 downward. 0 = no limit. Default: 3.</div>
+                            <div class="fieldDescription">How many candidates per language are searched, and how many the downloader may pull for a file before it gives up. With Auto-Sync on, each candidate is fitted and the walk repeats until a correction proves itself. With Auto-Sync off, the candidates are pulled through the active quality gates and kept untouched at index 51 upward. 0 = no limit. Default: 3.</div>
                         </div>
 
 <h3>Skip filters (upload + download)</h3>
@@ -345,7 +345,10 @@
                                 <option value="Weekly">Weekly</option>
                                 <option value="Monthly">Monthly</option>
                             </select>
-                            <div class="fieldDescription">How often rejected uploads are resolved against /user/mySubtitles. Scheduled run is inhibited if upload is disabled. Default: Weekly.</div>
+                            <!-- F-M437 (operator 04.11.2026 "Max pages 200 ist zu wenig. 20000 eher"): the page limit is a
+                                 ceiling for a catch-up run, NOT the depth of a normal run — the pass stops at
+                                 the watermark of the last one. Default: Daily. -->
+                            <div class="fieldDescription">How often stored upload ids are moved to their published entry id and rejected uploads are resolved. A run pages down only until it reaches the entries the last run saw, so it costs a few pages; the page limit (20000) only bounds a catch-up after a pause. Scheduled run is inhibited if upload is disabled. Default: Daily.</div>
                             <!-- Operator order 08.10.2026: the third refresh job gets its manual button too
                                  ("Knopf für upload Postprocessing habe ich dann vergessen. Auch manual dann statt never").
                                  It starts the TASK, like the two refresh buttons above — NOT the job's own
@@ -408,15 +411,22 @@
                         </label>
                         <div class="fieldDescription">Further runs while new files keep arriving. Default: on.</div>
                         </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="UploadSeasonPacks" name="UploadSeasonPacks" type="checkbox" is="emby-checkbox" />
+                                <span>Upload season packs</span>
+                            </label>
+                            <div class="fieldDescription">A complete season goes up as one pack instead of one upload per episode. Default: on. An episode that already went up on its own is folded into a later pack, and its single upload is deleted from SubDL first so it is not there twice.</div>
+                        </div>
                     <h3>Quality gates (before upload)</h3>
                         <div class="fieldDescription">Quality gates for uploads. All on by default.</div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaVerifyLanguage" name="QaVerifyLanguage" type="checkbox" is="emby-checkbox" />
-                                <span>Verify language (content vs. tag)</span>
+                                <span>Correct language (content vs. tag)</span>
                             </label>
-                            <div class="fieldDescription">Rejects uploads with wrong language tag. Default: on.</div>
+                            <div class="fieldDescription">Corrects a subtitle whose content speaks another language than its tag claims — it is uploaded under the detected language. Default: on.</div>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
@@ -487,7 +497,7 @@
                                 <input id="QaDownloadAutoSync" name="QaDownloadAutoSync" type="checkbox" is="emby-checkbox" />
                                 <span>Automatically synchronize subtitle to spoken track</span>
                             </label>
-                            <div class="fieldDescription">Aligns a fetched subtitle segment-wise on a spoken track. A file the alignment finds nothing wrong with is kept as the best version: it takes index 01 upward, together with a copy of it from index 99 downward. A file that could not be aligned — or that is out of sync beyond repair — is kept from index 99 downward as well. Default: on.</div>
+                            <div class="fieldDescription">Aligns a fetched subtitle segment-wise on a spoken track. A file the alignment finds nothing wrong with is kept as the best version: it takes index 01 upward, together with a copy of it from index 51 upward. A file that could not be aligned — or that is out of sync beyond repair — is kept from index 51 upward as well. Default: on.</div>
                         </div>
 
                         
@@ -516,9 +526,9 @@
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="QaDownloadVerifyLanguage" name="QaDownloadVerifyLanguage" type="checkbox" is="emby-checkbox" />
-                                <span>Verify language (content vs. tag)</span>
+                                <span>Reject wrong language (content vs. tag)</span>
                             </label>
-                            <div class="fieldDescription">Rejects uploads with wrong language tag. Default: on.</div>
+                            <div class="fieldDescription">A candidate whose content speaks another language than its tag claims is discarded and the next candidate is tried. Default: on.</div>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
@@ -598,7 +608,7 @@
         .subdl-outcome { font-weight: 600; }
         /* Dry-run note: plain grey text beside the result word, NOT a badge and NOT its own
            column. It must not inherit the result colour (that stays the outcome's own colour). */
-        .subdl-dryrun { color: #9a9a9a; margin-left: 0.5em; }
+        .subdl-dryrun { color: #767676; margin-left: 0.25em; }
         /* Workers section only: ONE worker = ONE line, never wrapped.
            Four columns, in this order: light, name, time, result -- ALL left-aligned, so every
            value starts at the same x and the block reads as a plain list rather than a centred
@@ -955,7 +965,7 @@
                         document.querySelector('#FollowUpRoundsDownload').checked = (config.FollowUpRoundsDownload !== false);
                         document.querySelector('#FollowUpRoundsUpload').checked = (config.FollowUpRoundsUpload !== false);
                         document.querySelector('#DownloadQaRetryLimit').value = (function () { var v = parseInt(config.DownloadQaRetryLimit); return isNaN(v) ? 3 : v; })();
-                        document.querySelector('#ArrivalDebounceMinutes').value = (function () { var v = parseInt(config.ArrivalDebounceMinutes); return isNaN(v) ? 1 : v; })();                                                document.querySelector('#RefetchInterval').value = config.RefetchInterval;
+                        document.querySelector('#ArrivalDebounceMinutes').value = (function () { var v = parseInt(config.ArrivalDebounceMinutes); return isNaN(v) ? 2 : v; })();                                                document.querySelector('#RefetchInterval').value = config.RefetchInterval;
                         document.querySelector('#JobSpacingMinutes').value = (function () { var v = parseInt(config.JobSpacingMinutes); return isNaN(v) ? 15 : v; })();
 
                         var rsi = document.querySelector('#RandomScheduleInfo');
@@ -978,12 +988,13 @@
                             rsi.textContent = txt;
                         }
                         document.querySelector('#UploadOnArrival').checked = config.UploadOnArrival;
+                        document.querySelector('#UploadSeasonPacks').checked = config.UploadSeasonPacks;
                         document.querySelector('#UploadEnabled').checked = config.UploadEnabled;
                         document.querySelector('#DryRun').checked = config.DryRun;
                         document.querySelector('#LogMode').value = config.LogMode;
                         document.querySelector('#OshashRefresh').value = config.OshashRefresh || 'Monthly';
         document.querySelector('#PruneMode').value = config.PruneMode || 'Weekly';
-        document.querySelector('#UploadPostprocessInterval').value = config.UploadPostprocessInterval || 'Weekly';
+        document.querySelector('#UploadPostprocessInterval').value = config.UploadPostprocessInterval || 'Daily';
                         document.querySelector('#QaValidateSrt').checked = config.QaValidateSrt;
                         document.querySelector('#QaCheckSync').checked = config.QaCheckSync;
                         document.querySelector('#QaVerifyLanguage').checked = config.QaVerifyLanguage;
@@ -1017,8 +1028,8 @@
                         document.querySelector('#UploadContinueAfterLimit').checked = config.UploadContinueAfterLimit;
                         document.querySelector('#DownloadContinueAfterLimit').checked = config.DownloadContinueAfterLimit;
                         document.querySelector('#DownloadDryRun').checked = config.DownloadDryRun;
-                        document.querySelector('#DownloadArchiveCacheDays').value = config.DownloadArchiveCacheDays ?? 14;
-                        document.querySelector('#DownloadArchiveCacheMaxMb').value = config.DownloadArchiveCacheMaxMb ?? 512;
+                        document.querySelector('#DownloadArchiveCacheDays').value = config.DownloadArchiveCacheDays ?? 7;
+                        document.querySelector('#DownloadArchiveCacheMaxMb').value = config.DownloadArchiveCacheMaxMb ?? 256;
 
                         // F-M23 (rework 25.09.2026): the counters live in the database now, so the GUI
                         // asks the plugin API instead of the configuration.
@@ -1055,7 +1066,7 @@
                                 ['Subtitles uploaded', s.Uploaded || 0, true],
                                 ['Downloads: rejected after being fetched', s.RejectedDownload || 0],
                                 ['Downloads: Auto-Sync', s.FittedToAudio || 0],
-                                ['Uploads: discarded before transfer', s.RejectedUpload || 0],
+                                ['Uploads: stopped before sending', s.RejectedUpload || 0],
                                 ['Media files: language codes added', s.LanguageCodesAllocated || 0],
                                 ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0]
                             ];
@@ -1141,36 +1152,32 @@
                             list.innerHTML = '';
 workers.forEach(function (w) {
                                 var oc = subdlWorkerOutcome(w.Outcome);
-                                // F-M292/F-M294 (user decision 03.10.2026): a pending deferred fire turns a
-                                // GREEN row YELLOW for ANY worker -- the fire is work the run could not do,
-                                // so green would claim the worker is finished while work is still owed.
-                                // Only green is overridden: a red (broken) or grey (never/disabled) row is
-                                // a stronger and different statement, and a running one is live.
-                                // F-M294 (user correction 03.10.2026): a pending fire IS the deferral, so it
-                                // decides the word for every worker whose row does not claim something
-                                // stronger. Both `ok` and `cancelled` claim "nothing is owed", and a pending
-                                // fire proves otherwise -- measured on prod: the download sat on a yellow
-                                // "cancel" while its 04:37 fire was waiting, and "cancel" was the wrong word
-                                // for a direction that is scheduled to resume. Only `failed` (something is
-                                // broken) and `run` (live) are left alone: both are stronger statements.
+                                // F-M436 (operator order 04.11.2026 "wenn deferred der letzte Status ist,
+                                // sollte das in der Ampel auch so stehen"): a pending fire IS the worker's
+                                // last state — the run it belongs to is over and the retry is what happens
+                                // next. So the light says `defer` (yellow) for EVERY outcome, including a
+                                // failed run: red "fail" would claim the worker is broken right now while
+                                // it is really waiting for its next attempt. The reason rides on the line
+                                // below the list (`last run failed: …  — next attempt …`), which is where
+                                // the cause belongs. Only `run` stays untouched — a live run is the
+                                // stronger and newer statement.
                                 var wo = (w.Outcome || '').toLowerCase();
-                                if (w.Deferred && wo !== 'failed' && wo !== 'run') {
+                                if (w.Deferred && wo !== 'run') {
                                     oc = subdlWorkerOutcome('deferred');
                                 }
                                 var when = w.Started ? subdlFmtDateTime(w.Started) : '\u2014';
                                 var row = document.createElement('div');
                                 row.className = 'subdl-status-row';
-                                // FOUR cells, one per column: light, name, time, result. The dry-run note
-                                // is grey text INSIDE the result cell (not a separate badge/cell) --
-                                // a badge in its own column widened the line by ~50px and pushed the
-                                // status off the right edge on a narrow phone. Inside the result cell it
-                                // costs nothing extra in column alignment, because the cell is already
-                                // sized by its own content.
+                                // FOUR cells, one per column: light, name, time, result. The dry marker
+                                // is the single word 'dry' in grey INSIDE the result cell, right beside
+                                // the outcome word (the blue 'run' tag while a worker is running) -- a
+                                // badge in its own column widened the line by ~50px and pushed the
+                                // status off the right edge on a narrow phone.
                                 row.innerHTML = '<span class="subdl-light" style="background:' + oc.color + ';"></span>' +
                                     '<span class="subdl-label">' + (w.Name || '?') + '</span>' +
                                     '<span class="subdl-when">' + when + '</span>' +
                                     '<span class="subdl-outcome" style="color:' + oc.color + ';">' + oc.text +
-                                    (w.DryRun ? '<span class="subdl-dryrun">dry run</span>' : '') + '</span>';
+                                    (w.DryRun ? '<span class="subdl-dryrun">dry</span>' : '') + '</span>';
                                 list.appendChild(row);
                             });
                         };
@@ -1382,7 +1389,7 @@ workers.forEach(function (w) {
                         }
                         var lines = [];
                         lines.push('<div style="font-weight:600;">Plan: ' + (res.plan || 'Free') + '</div>');
-                        lines.push(renderBar('Search', res.search.used, res.search.limit, resetLocal(res.search.reset_at)));
+                        lines.push(renderBar('API calls', res.search.used, res.search.limit, resetLocal(res.search.reset_at)));
                         if (res.downloads) {
                             lines.push(renderBar('Downloads', res.downloads.used, res.downloads.limit, resetLocal(res.downloads.reset_at)));
                         }
@@ -1589,7 +1596,7 @@ workers.forEach(function (w) {
                         config.TmdbApiKey = tmdbKey;
                         var uph = parseInt(document.querySelector('#UploadsPerHour').value) || 400;
                         config.DownloadQaRetryLimit = (function () { var v = parseInt(document.querySelector('#DownloadQaRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
-                        config.ArrivalDebounceMinutes = (function () { var v = parseInt(document.querySelector('#ArrivalDebounceMinutes').value, 10); return isNaN(v) ? 1 : Math.min(120, Math.max(1, v)); })();                                                config.RefetchInterval = document.querySelector('#RefetchInterval').value;
+                        config.ArrivalDebounceMinutes = (function () { var v = parseInt(document.querySelector('#ArrivalDebounceMinutes').value, 10); return isNaN(v) ? 2 : Math.min(120, Math.max(1, v)); })();                                                config.RefetchInterval = document.querySelector('#RefetchInterval').value;
                         config.JobSpacingMinutes = (function () { var v = parseInt(document.querySelector('#JobSpacingMinutes').value, 10); return isNaN(v) ? 15 : Math.min(120, Math.max(5, v)); })();
 
                         config.UploadsPerHour = Math.min(500, Math.max(100, uph)); // Rate 100..500 (F-M20)
@@ -1599,6 +1606,7 @@ workers.forEach(function (w) {
                         config.FollowUpRoundsDownload = document.querySelector('#FollowUpRoundsDownload').checked;
                         config.FollowUpRoundsUpload = document.querySelector('#FollowUpRoundsUpload').checked;
                         config.UploadOnArrival = document.querySelector('#UploadOnArrival').checked;
+                        config.UploadSeasonPacks = document.querySelector('#UploadSeasonPacks').checked;
                                                 config.UploadEnabled = document.querySelector('#UploadEnabled').checked;
                         config.DryRun = document.querySelector('#DryRun').checked;
                         config.LogMode = document.querySelector('#LogMode').value;

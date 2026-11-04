@@ -99,7 +99,7 @@ public sealed class SubdlDbContext : IDisposable
     // document store, named subdl-scribe.sqlite (F-M326). An older build opening this file finds no
     // document header and reports a broken store; the marker is what makes that loud instead of
     // silent. The old file is imported once on first start and kept as a .bak (F-M327).
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
@@ -121,6 +121,7 @@ public sealed class SubdlDbContext : IDisposable
 
         _db = new SubdlSqliteContext(_dbPath);
         _db.Database.EnsureCreated();
+        EnsurePacksTable();
         _db.ConfigurePragmas();
 
         Meta = new SubdlSet<MetaEntity>(_db, e => e.Id);
@@ -133,6 +134,7 @@ public sealed class SubdlDbContext : IDisposable
         Runs = new SubdlSet<PipelineRunEntity>(_db, e => e.Id.ToString(CultureInfo.InvariantCulture));
         StatusStats = new SubdlSet<StatusStatsEntity>(_db, e => e.Id);
         WorkerRuns = new SubdlSet<WorkerRunEntity>(_db, e => e.Id);
+        Packs = new SubdlSet<PackEntity>(_db, e => e.Id);
 
         CheckSchemaVersion();
     }
@@ -172,6 +174,13 @@ public sealed class SubdlDbContext : IDisposable
     /// a history). Read by the configuration page's "Workers" section — see <see cref="WorkerRunEntity"/>.
     /// </summary>
     public SubdlSet<WorkerRunEntity> WorkerRuns { get; }
+
+    /// <summary>
+    /// Area 7: the season packs this plugin published, keyed by "&lt;imdb&gt;|S&lt;season&gt;|&lt;lang&gt;|&lt;hi|plain&gt;".
+    /// One row per pack, never a history — it answers "was this season already packed in this
+    /// language, and with which members" — see <see cref="PackEntity"/>.
+    /// </summary>
+    public SubdlSet<PackEntity> Packs { get; }
 
     /// <summary>
     /// True when the data file was written by a NEWER plugin build than this one. Callers must not
@@ -220,6 +229,42 @@ public sealed class SubdlDbContext : IDisposable
         {
             // A broken compatibility check must never stop the plugin from starting.
             _logger?.LogWarning("[SubDL] schema version check failed (continuing): {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// F-M390: creates the <c>packs</c> table on a data file that predates it.
+    /// <para>
+    /// <c>EnsureCreated</c> only builds a schema when the FILE is new, so a store written by an
+    /// earlier build keeps its old tables and every query against the new one would throw. The
+    /// statement is <c>IF NOT EXISTS</c>, so a fresh file (where EnsureCreated already built the
+    /// table) and a second start are both no-ops; a failure is logged and swallowed, because a
+    /// missing pack table must not stop the plugin from starting.
+    /// </para>
+    /// </summary>
+    private void EnsurePacksTable()
+    {
+        try
+        {
+            _db.Database.ExecuteSqlRaw(
+                "CREATE TABLE IF NOT EXISTS packs ("
+                + "Id TEXT NOT NULL PRIMARY KEY, "
+                + "ImdbId TEXT NOT NULL DEFAULT '', "
+                + "Season INTEGER NOT NULL DEFAULT 0, "
+                + "Language TEXT NOT NULL DEFAULT '', "
+                + "HearingImpaired INTEGER NULL, "
+                + "ReleaseName TEXT NULL, "
+                + "PackId TEXT NULL, "
+                + "Episodes TEXT NOT NULL DEFAULT '', "
+                + "AbsorbedIds TEXT NULL, "
+                + "Created TEXT NOT NULL DEFAULT '', "
+                + "Updated TEXT NOT NULL DEFAULT '');");
+            _db.Database.ExecuteSqlRaw("CREATE INDEX IF NOT EXISTS IX_packs_ImdbId ON packs (ImdbId);");
+            _db.Database.ExecuteSqlRaw("CREATE INDEX IF NOT EXISTS IX_packs_Season ON packs (Season);");
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("[SubDL] could not create the packs table (continuing): {Msg}", ex.Message);
         }
     }
 
@@ -526,6 +571,24 @@ public sealed class SubdlDbContext : IDisposable
     public static string EmbedKey(string mediaHash, int subPos) => mediaHash + "|" + subPos;
 
     /// <summary>
+    /// F-M390: builds the primary key of a season pack — one pack per season, language and variant.
+    /// <para>
+    /// The variant is part of the key because a plain pack and an SDH pack of the same season are two
+    /// different containers on SubDL, and SubDL carries the HI flag as a single field. Without it the
+    /// second pack would overwrite the first one's row and the plugin would believe it had published
+    /// something it never sent.
+    /// </para>
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant flag.</param>
+    /// <returns>The composite key.</returns>
+    public static string PackKey(string imdbId, int season, string language, bool hearingImpaired)
+        => imdbId + "|S" + season.ToString(System.Globalization.CultureInfo.InvariantCulture)
+           + "|" + language + "|" + (hearingImpaired ? "hi" : "plain");
+
+    /// <summary>
     /// Builds the primary key of a rejected download candidate.
     /// </summary>
     /// <param name="itemId">Jellyfin item id.</param>
@@ -709,6 +772,9 @@ public sealed class SubdlSqliteContext : DbContext
     /// <summary>Area 6: the last run of each worker.</summary>
     public DbSet<WorkerRunEntity> WorkerRunRows => Set<WorkerRunEntity>();
 
+    /// <summary>The published season packs — one row per season, language and variant (F-M390).</summary>
+    public DbSet<PackEntity> PackRows => Set<PackEntity>();
+
     /// <summary>
     /// Sets the pragmas this store runs with. Called once per context, right after the schema exists.
     /// <para>
@@ -879,6 +945,14 @@ public sealed class SubdlSqliteContext : DbContext
         {
             e.ToTable("worker_runs");
             e.HasKey(x => x.Id);
+        });
+
+        modelBuilder.Entity<PackEntity>(e =>
+        {
+            e.ToTable("packs");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ImdbId);
+            e.HasIndex(x => x.Season);
         });
     }
 }

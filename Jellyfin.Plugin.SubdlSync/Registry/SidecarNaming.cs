@@ -40,31 +40,36 @@ public static class SidecarNaming
     /// <summary>
     /// Highest slot a CORRECTED sidecar may take.
     /// <para>
-    /// F-M315 (operator order 07.10.2026): the slots 90–99 are RESERVED for the unsynchronized
+    /// F-M315 (operator order 12.1.12.267): the slots above <see cref="CorrectedSlotMax"/> are RESERVED for the unsynchronized
     /// originals a correction keeps beside its result, so the writer of corrected files must stop
-    /// below them. Without the cap the next corrected file of a language whose slots 1–89 are taken
+    /// below them. Without the cap the next corrected file of a language whose slots 1–49 are taken
     /// would be handed a name the original already uses, and the correction would overwrite the very
     /// file it exists to preserve.
     /// </para>
     /// </summary>
-    public const int CorrectedSlotMax = 89;
+    public const int CorrectedSlotMax = 49;
 
     /// <summary>
     /// Lowest and highest slot of the reserved ORIGINAL block.
     /// <para>
-    /// F-M315: an original is assigned from <see cref="OriginalSlotMax"/> DOWNWARD, which is what the
-    /// operator asked for ("90 bis 99 als Block von 99 abwärts"). Numbering the originals from the top
-    /// keeps them away from the corrected slots growing up from 1, and a viewer sees the reserved
-    /// number in the track list, so the two kinds of file are told apart without opening anything.
+    /// F-M315: an original is assigned from <see cref="OriginalSlotMin"/> UPWARD, which is what the
+    /// operator asked for ("bei 1 und 50 anfangen zu zählen"): corrected files count up from 1,
+    /// originals count up above them. Both blocks grow in the direction a viewer reads the track list,
+    /// and the reserved number on each original tells the two kinds apart without opening anything.
     /// </para>
     /// </summary>
-    public const int OriginalSlotMin = 90;
+    /// <remarks>
+    /// Operator order 02.11.2026 ("unkorrigiert bitte ab 51 nummerieren"): the block starts at 51, so
+    /// slot 50 is no longer handed out. Names already on disk keep their number — the planner only
+    /// hands out FREE slots, so an existing <c>.50.srt</c> is read, listed and never overwritten.
+    /// </remarks>
+    public const int OriginalSlotMin = 51;
 
     /// <summary>Highest slot of the reserved original block.</summary>
     public const int OriginalSlotMax = 99;
 
     /// <summary>
-    /// True when a slot belongs to the reserved ORIGINAL block (90–99).
+    /// True when a slot belongs to the reserved ORIGINAL block (51–99).
     /// <para>
     /// F-M315: the reservation is a property of the number, not of a file's content, so it is a pure
     /// function of the one datum the name carries. Nothing downstream has to hold state to tell an
@@ -113,8 +118,8 @@ public static class SidecarNaming
         // Measured on prod 08.10.2026 (BCS S01E05, six sidecars): the menu offered "99 – German"
         // ABOVE "German", i.e. exactly inverted — the kept originals were listed before the
         // corrected files instead of after them. Two digits keep the alphabet and the numbers in
-        // the same run: "<base>.<lang>.01.srt" … ".99.srt", corrected slots first (1…89), the
-        // reserved originals last (90…99), exactly as F-M315 intends.
+        // the same run: "<base>.<lang>.01.srt" … ".99.srt", corrected slots first (1…49), the
+        // reserved originals after them (51…99), exactly as F-M315 intends.
         string slotSuffix = "."
             + slot.ToString("D2", System.Globalization.CultureInfo.InvariantCulture);
         return Path.Combine(dir, $"{baseName}.{lang.ToLowerInvariant()}{suffix}{slotSuffix}.srt");
@@ -159,7 +164,7 @@ public static class SidecarNaming
             }
         }
 
-        // Every corrected slot taken (89 files of one language beside one media file). Return slot 1
+        // Every corrected slot taken (49 files of one language beside one media file). Return slot 1
         // so the caller's own existence check refuses the move — never a name that would
         // overwrite one of them.
         return Build(mediaPath, lang, hearingImpaired, 1);
@@ -170,8 +175,8 @@ public static class SidecarNaming
     /// <para>
     /// F-M315 (operator order 07.10.2026): the original is a normal sidecar — same language, same
     /// hearing-impaired flag, no marker of its own — that differs only in the SLOT it occupies. It is
-    /// numbered from <see cref="OriginalSlotMax"/> DOWNWARD and takes the first free number, so up to
-    /// ten originals of one language can sit beside one media file. Jellyfin lists each as its own
+    /// numbered from <see cref="OriginalSlotMin"/> UPWARD and takes the first free number, so up to
+    /// fifty originals of one language can sit beside one media file. Jellyfin lists each as its own
     /// selectable track titled with that number, which is what lets the operator pick the untouched
     /// version in the player.
     /// </para>
@@ -182,7 +187,7 @@ public static class SidecarNaming
     /// </para>
     /// <para>
     /// There is no "already exists, overwrite anyway" fallback here. When all ten reserved slots are
-    /// taken the caller's own existence check refuses the write — ten uncorrected versions of one
+    /// taken the caller's own existence check refuses the write — fifty uncorrected versions of one
     /// language beside one media file is not a case to invent a name for.
     /// </para>
     /// </summary>
@@ -194,7 +199,7 @@ public static class SidecarNaming
     public static string? PlanOriginalTarget(string mediaPath, string lang, bool hearingImpaired,
                                              System.Collections.Generic.ISet<string>? existingNames)
     {
-        for (int slot = OriginalSlotMax; slot >= OriginalSlotMin; slot--)
+        for (int slot = OriginalSlotMin; slot <= OriginalSlotMax; slot++)
         {
             string candidate = Build(mediaPath, lang, hearingImpaired, slot);
             if (existingNames == null || !existingNames.Contains(Path.GetFileName(candidate)))

@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.264",
-        "changelog": "v12.1.12.264: A file that already carries a Norwegian subtitle is no longer given a second one, whichever written form the existing subtitle uses.",
+        "version": "12.1.12.329",
+        "changelog": "v12.1.12.329: the page ceiling of the postprocessing walk rises to 20000 so a large backlog is reachable in one catch-up run; the run itself stays watermark-bound (F-M437).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.264/Jellyfin.Plugin.SubdlSync_12.1.12.264.zip",
-        "checksum": "7bb4943a4fecb14087e3590e26c4f582",
-        "timestamp": "2026-11-01T12:49:24Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.329-dev/Jellyfin.Plugin.SubdlSync_12.1.12.329.zip",
+        "checksum": "17bb1d7e594862660b6b64a538da70ae",
+        "timestamp": "2026-11-04T16:15:44Z"
       }
     ]
   }

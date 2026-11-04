@@ -186,5 +186,5 @@ public class SubdlUploadTask : IScheduledTask
 
     /// <summary>Marks the start of this worker's run, so the recorded time is the run's beginning.</summary>
     private void RecordWorkerStart(Plugin plugin)
-        => plugin.WorkerRuns.Start(Registry.WorkerRunRegistry.UploadWorkerKey, Name);
+        => plugin.WorkerRuns.Start(Registry.WorkerRunRegistry.UploadWorkerKey, Name, dryRun: plugin.Configuration.DryRun);
 }

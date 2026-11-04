@@ -155,12 +155,10 @@ public class SubdlQuota : ControllerBase
             }
 
             var fires = coord.GetPendingFires();
-            if (fires.Count == 0)
-            {
-                // Nothing pending: no deferral note. A deferral whose fire is gone is over — the worker
-                // already ran again, and a stale row must not paint a line for it.
-                return new { deferred = entries, notes = offEntries };
-            }
+
+            // F-M436: an empty fire list no longer ends the pass — a worker whose last run failed keeps
+            // its note until it runs ok again, fire or no fire. The loop below simply finds nothing to
+            // say for a healthy worker, so the old early return is gone on purpose.
 
             var registry = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns;
 
@@ -168,18 +166,38 @@ public class SubdlQuota : ControllerBase
             // lamps above it. A worker with a fire but no known name still appears — under its key.
             foreach (var worker in Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.KnownWorkers)
             {
-                if (!fires.TryGetValue(worker.Key, out var due))
+                var hasFire = fires.TryGetValue(worker.Key, out var due);
+                var row = registry?.Get(worker.Key);
+                var outcome = row?.Outcome ?? string.Empty;
+                var isFailed = string.Equals(
+                    outcome,
+                    Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Failed,
+                    StringComparison.Ordinal);
+
+                // F-M436 (operator decision 04.11.2026): a failure keeps its voice until the worker's
+                // NEXT run succeeds — not only while a retry happens to be pending. The row's own red
+                // lamp says "failed" (or yellow "defer" while a fire waits) but it never carries the
+                // cause, so without this the reason vanishes the moment the fire is consumed.
+                // A worker with nothing to report stays silent: no fire and no failure, no entry.
+                if (!hasFire && !isFailed)
                 {
                     continue;
                 }
 
                 var reason = string.Empty;
-                var row = registry?.Get(worker.Key);
-                if (row != null && string.Equals(row.Outcome,
-                        Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Deferred,
-                        StringComparison.Ordinal))
+                if (isFailed)
                 {
-                    reason = row.Detail ?? string.Empty;
+                    // The failure outranks the deferral: the cause is what the reader needs, and the
+                    // next attempt is appended after it.
+                    reason = "last run failed"
+                        + (string.IsNullOrWhiteSpace(row!.Detail) ? string.Empty : ": " + row.Detail.Trim());
+                }
+                else if (string.Equals(
+                             outcome,
+                             Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Deferred,
+                             StringComparison.Ordinal))
+                {
+                    reason = row!.Detail ?? string.Empty;
                 }
 
                 entries.Add(new
@@ -187,7 +205,9 @@ public class SubdlQuota : ControllerBase
                     name = worker.Name,
                     key = worker.Key,
                     reason,
-                    due = due.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+                    due = hasFire
+                        ? due.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+                        : string.Empty
                 });
             }
         }

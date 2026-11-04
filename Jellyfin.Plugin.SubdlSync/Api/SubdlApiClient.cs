@@ -36,13 +36,13 @@ public sealed class SubdlApiClient
     private const string ApiBase = "https://api.subdl.com";
     private readonly HttpClient _http;
 
-    // F-M369: one quota unit per archive instead of per extraction — see RunArchiveCache.
-    // Empty outside a download run; the pipeline clears it at start and in its finally.
-    private readonly RunArchiveCache _archiveCache = new();
-
-    // F-M370: archives that outlive the run — a season pack serves one episode per run, and the
-    // daily limit is 50 downloads, so the same pack is asked for again on the next day. Disabled
-    // until the pipeline configures it (days and megabytes, either at 0 = off).
+    // F-M369/F-M386 (operator order 02.11.2026: "nur noch den Platten-Cache"): ONE archive cache,
+    // and it is the disk cache. It answers inside a run as well — the pack is fetched once and
+    // every further episode of it is a read from disk — so the run-scoped layer that used to sit
+    // in front of it was removed rather than kept alongside. Two layers meant two code paths and
+    // a summary line whose second number was always 0 in practice.
+    // Disabled until the pipeline configures it (days and megabytes, either at 0 = off); while
+    // it is off nothing is cached, not even within a run.
     private readonly ArchiveDiskCache _archiveDiskCache = new();
     private string? _token;
     private DateTime _tokenObtained;
@@ -55,12 +55,6 @@ public sealed class SubdlApiClient
     {
         _http = http;
     }
-
-    /// <summary>
-    /// Gets the run-scoped archive cache (F-M369). The download pipeline empties it at run
-    /// start and in the run's finally block; outside a run it holds nothing.
-    /// </summary>
-    public RunArchiveCache ArchiveCache => _archiveCache;
 
     /// <summary>
     /// Gets the disk cache (F-M370). The download pipeline points it at the plugin's data folder
@@ -670,6 +664,51 @@ public sealed class SubdlApiClient
     /// <see cref="Pipeline.SourceQuality"/> for the value list and the recognition rule.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// F-M391 (operator order 02.11.2026): deletes ONE published subtitle of our own account by its
+    /// SubDL id — the step that makes room for the pack a single is about to be absorbed into.
+    /// <para>
+    /// The order is deliberate and comes from the operator: the duplicate goes FIRST, then the pack is
+    /// built from what is left, so the pack upload never competes with an entry that carries the same
+    /// content. <c>deleteSubtitle</c> is NOT the route for this — measured 02.11.2026, it answers
+    /// <c>{"status": true, "subtitle deleted"}</c> for a published entry and deletes nothing.
+    /// </para>
+    /// </summary>
+    /// <param name="subtitleId">SubDL id of the entry to delete.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>True when SubDL confirmed the deletion.</returns>
+    public async Task<bool> DeletePublishedSubtitleAsync(string subtitleId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subtitleId))
+        {
+            return false;
+        }
+
+        string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");
+        string url = $"{ApiBase}/user/deletePublishedSubtitle?id={Uri.EscapeDataString(subtitleId)}";
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        TraceCall("GET", $"{ApiBase}/user/deletePublishedSubtitle");
+        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        ApiActivity?.Invoke();
+        Trace("GET", "user/deletePublishedSubtitle", (int)resp.StatusCode);
+        if (!resp.IsSuccessStatusCode)
+        {
+            return false;
+        }
+
+        string body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     public async Task<UploadResult> UploadSubtitleAsync(
         string srtContent,
         string subFileName,
@@ -893,6 +932,248 @@ public sealed class SubdlApiClient
         }
 
         return UploadResult.Success(responseDoc);
+    }
+
+    /// <summary>
+    /// F-M372: the three-step upload for a whole season — one object on SubDL's side instead of one
+    /// per episode.
+    /// <para>
+    /// The Upload API documents the shape: <c>uploadSingleSubtitle</c> takes ONE file per call,
+    /// <c>uploadSubtitle</c> then takes the <b>array</b> <c>file_n_ids</c>, and for packed
+    /// multi-file uploads the <c>name</c> field becomes the zip name on download. The container is
+    /// therefore built by SubDL, never by us; what we send is the files plus the claim
+    /// <c>is_full_season=true</c> and the episode range in <c>ef</c>/<c>ee</c>.
+    /// </para>
+    /// </summary>
+    /// <param name="files">Episode files, ascending: the name each subtitle carries and its text.</param>
+    /// <param name="packName">Pack name (<see cref="Pipeline.SeasonPack.Name"/>) — SubDL appends .zip.</param>
+    /// <param name="subdlLanguage">SubDL language code (one pack = one language).</param>
+    /// <param name="releaseNames">Release names of the season's episodes — the array SubDL stores is exactly why a pack can carry them all.</param>
+    /// <param name="quality">Documented quality code (F-M344).</param>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="tmdbId">TMDB id when known.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episodeFrom">First episode in the pack.</param>
+    /// <param name="episodeTo">Last episode in the pack.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="hearingImpaired">HI/SDH variant — a pack never mixes both sides.</param>
+    /// <param name="framerate">Documented frame rate code (F-M350).</param>
+    /// <returns>Success with the raw response attached; the caller reads the pack id from it.</returns>
+    public async Task<UploadResult> UploadSeasonPackAsync(
+        IReadOnlyList<(string FileName, string Srt)> files,
+        string packName,
+        string subdlLanguage,
+        IReadOnlyList<string> releaseNames,
+        string quality,
+        string? imdbId,
+        string? tmdbId,
+        int season,
+        int episodeFrom,
+        int episodeTo,
+        CancellationToken ct,
+        bool hearingImpaired = false,
+        string framerate = Pipeline.SubdlFramerate.Unknown)
+    {
+        string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");
+        if (string.IsNullOrWhiteSpace(imdbId))
+        {
+            return UploadResult.Skipped("no-imdb");
+        }
+
+        if (files.Count == 0)
+        {
+            return UploadResult.Failed("pack-file-refused: no files");
+        }
+
+        // Step 1: getNId — once for the whole pack, it is the upload session, not a file.
+        using var nReq = new HttpRequestMessage(HttpMethod.Get, $"{ApiBase}/user/getNId");
+        nReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        TraceCall("GET", $"{ApiBase}/user/getNId");
+        using var nResp = await _http.SendAsync(nReq, ct).ConfigureAwait(false);
+        ApiActivity?.Invoke();
+        Trace("GET", "user/getNId", (int)nResp.StatusCode);
+        string nBody = await nResp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        string? nId = null;
+        try
+        {
+            using var nd = JsonDocument.Parse(nBody);
+            if (nd.RootElement.TryGetProperty("n_id", out var nIdEl))
+            {
+                nId = nIdEl.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        if (string.IsNullOrWhiteSpace(nId))
+        {
+            return UploadResult.Failed($"getNId failed: {Trim(nBody)}");
+        }
+
+        // Step 2: one uploadSingleSubtitle per episode. Built MANUALLY for the same reason the
+        // single path does it: SubDL rejects MultipartFormDataContent output.
+        var fileNIds = new List<string>(files.Count);
+        foreach (var file in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            string? fileNId = await UploadSingleFileAsync(token, nId, file.FileName, file.Srt, ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(fileNId))
+            {
+                // A refused file must not cost the season its subtitles — the caller falls back.
+                return UploadResult.Failed($"pack-file-refused: {file.FileName}");
+            }
+
+            fileNIds.Add(fileNId);
+        }
+
+        // Step 3: complete the upload as ONE pack.
+        var meta = new Dictionary<string, string>
+        {
+            ["file_n_ids"] = JsonSerializer.Serialize(fileNIds),
+            ["n_id"] = nId,
+            ["type"] = "tv",
+            ["name"] = packName,
+            ["lang"] = subdlLanguage,
+            ["quality"] = quality,
+            ["production_type"] = "0",
+            ["releases"] = JsonSerializer.Serialize(releaseNames),
+            ["framerate"] = framerate,
+            ["comment"] = string.Empty,
+            ["season"] = season.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["hi"] = hearingImpaired ? "true" : "false",
+            ["is_full_season"] = "true"
+
+            // F-M377 (measured 01.11.2026): NO `ef`/`ee` here. SubDL files a full-season upload by
+            // these two fields when they are present — our packs came back as `episode: 1,
+            // episode_from: 1, episode_end: 10, full_season: false`, i.e. single episode 1 with a
+            // range note, while a real full-season entry (ClassicLover's Foundation packs) carries
+            // `episode: null, episode_from: null, episode_end: 0, full_season: true`. The file set
+            // IS the range; stating it again is what broke the pack.
+        };
+        if (!string.IsNullOrWhiteSpace(imdbId))
+        {
+            meta["imdb_id"] = imdbId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(tmdbId))
+        {
+            meta["tmdb_id"] = tmdbId;
+        }
+
+        using var metaReq = new HttpRequestMessage(HttpMethod.Post, $"{ApiBase}/user/uploadSubtitle")
+        {
+            Content = new FormUrlEncodedContent(meta)
+        };
+        metaReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        TraceCall("POST", $"{ApiBase}/user/uploadSubtitle");
+        using var metaResp = await _http.SendAsync(metaReq, ct).ConfigureAwait(false);
+        ApiActivity?.Invoke();
+        Trace("POST", "user/uploadSubtitle", (int)metaResp.StatusCode);
+        string metaBody = await metaResp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+        if ((int)metaResp.StatusCode == 429)
+        {
+            Classify429(metaResp, metaBody);
+            return UploadResult.Failed("rate-limited");
+        }
+
+        bool ok;
+        try
+        {
+            using var md = JsonDocument.Parse(metaBody);
+            ok = md.RootElement.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.True;
+            if (!ok && md.RootElement.TryGetProperty("message", out var msgEl) && msgEl.ValueKind == JsonValueKind.String)
+            {
+                string msg = msgEl.GetString() ?? string.Empty;
+                if (msg.Contains("500 subtitles per hour", StringComparison.OrdinalIgnoreCase)
+                    || (msg.Contains("limit", StringComparison.OrdinalIgnoreCase) && msg.Contains("hour", StringComparison.OrdinalIgnoreCase)))
+                {
+                    // Not a failure — the season stays due and the run stops cleanly (F-M72).
+                    HourlyUploadCapHit = true;
+                    return UploadResult.Skipped("upload-hourly-cap");
+                }
+
+                if (msg.Contains("already exist", StringComparison.OrdinalIgnoreCase)
+                    || msg.Contains("duplicate", StringComparison.OrdinalIgnoreCase))
+                {
+                    return UploadResult.Skipped("duplicate-content");
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            ok = false;
+        }
+
+        if (!ok)
+        {
+            return UploadResult.Failed($"pack-metadata failed: {Trim(metaBody)}");
+        }
+
+        System.Text.Json.JsonDocument? responseDoc = null;
+        try
+        {
+            responseDoc = System.Text.Json.JsonDocument.Parse(metaBody);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            responseDoc = null;
+        }
+
+        return UploadResult.Success(responseDoc);
+    }
+
+    /// <summary>
+    /// Step 2 of the upload for one file: returns the <c>file_n_id</c> SubDL assigns, or null when
+    /// the file was refused.
+    /// </summary>
+    private async Task<string?> UploadSingleFileAsync(string token, string nId, string fileName, string content, CancellationToken ct)
+    {
+        var boundary = "----Boundary" + Guid.NewGuid().ToString("N");
+        var sb = new System.Text.StringBuilder();
+        sb.Append("--").Append(boundary).Append("\r\n");
+        sb.Append("Content-Disposition: form-data; name=\"n_id\"\r\n\r\n");
+        sb.Append(nId).Append("\r\n");
+        sb.Append("--").Append(boundary).Append("\r\n");
+        sb.Append("Content-Disposition: form-data; name=\"subtitle\"; filename=\"").Append(fileName).Append("\"\r\n");
+        sb.Append("Content-Type: application/octet-stream\r\n\r\n");
+        byte[] head = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+        byte[] payload = System.Text.Encoding.UTF8.GetBytes(content);
+        byte[] tail = System.Text.Encoding.UTF8.GetBytes($"\r\n--{boundary}--\r\n");
+        byte[] body = new byte[head.Length + payload.Length + tail.Length];
+        head.CopyTo(body, 0);
+        payload.CopyTo(body, head.Length);
+        tail.CopyTo(body, head.Length + payload.Length);
+
+        using var upReq = new HttpRequestMessage(HttpMethod.Post, $"{ApiBase}/user/uploadSingleSubtitle")
+        {
+            Content = new ByteArrayContent(body)
+        };
+        upReq.Content.Headers.ContentType = new MediaTypeHeaderValue("multipart/form-data")
+        {
+            Parameters = { new System.Net.Http.Headers.NameValueHeaderValue("boundary", $"\"{boundary}\"") }
+        };
+        upReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        TraceCall("POST", $"{ApiBase}/user/uploadSingleSubtitle");
+        using var upResp = await _http.SendAsync(upReq, ct).ConfigureAwait(false);
+        ApiActivity?.Invoke();
+        Trace("POST", "user/uploadSingleSubtitle", (int)upResp.StatusCode);
+        string upBody = await upResp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using var ud = JsonDocument.Parse(upBody);
+            if (ud.RootElement.TryGetProperty("file", out var fileEl) && fileEl.ValueKind == JsonValueKind.Object
+                && fileEl.TryGetProperty("file_n_id", out var fni))
+            {
+                return fni.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return null;
     }
 
     private static string Trim(string s) => s.Length <= 200 ? s : s[..200];
@@ -1177,7 +1458,98 @@ public sealed class SubdlApiClient
     /// for forward compatibility, but deduplicate by UploadId and stop at the first page that adds
     /// no new id, so the returned list and the reported totals are truthful.
     /// </summary>
-    /// F-M193: /user/mySubtitles is NOT paginated, so the caller must count DISTINCT upload ids.
+    /// <summary>
+    /// F-M432 (operator order 03.11.2026: "Bau für filme denselben id grep wie für packs oder Einzelepisoden
+    /// auch"): reads the account's PUBLISHED list, newest first.
+    /// <para>
+    /// /user/mySubtitles was the only source of an upload id, and it lists only what is still awaiting
+    /// review — measured on 03.11.2026 it was empty while the account had 8268 published subtitles. The
+    /// published list carries the same id per entry (<c>subtitle.id</c>), 25 per page, newest first, so a
+    /// freshly uploaded subtitle is on page 1. For a movie there is no season or episode to match on, so
+    /// the release name is the only handle — exactly the way a pack is matched.
+    /// </para>
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="maxPages">How many pages to read (25 entries each).</param>
+    /// <returns>The entries, newest first; null when the call fails.</returns>
+    /// <summary>
+    /// F-M437 (operator decision 04.11.2026): the walk is WATERMARKED, not fixed. The list comes newest
+    /// first, so a caller that knows how far it read last time stops as soon as a page has reached
+    /// older entries — a daily pass then costs a handful of pages instead of the whole account.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="maxPages">Ceiling for one walk (a catch-up run after a pause needs more pages).</param>
+    /// <param name="shouldStop">
+    /// Called with the OLDEST entry of each page after it was added; true ends the walk before the next
+    /// page is requested.
+    /// </param>
+    /// <param name="pageRead">Reports each page number actually fetched, so the caller can log the depth.</param>
+    /// <returns>The entries read, newest first; null when the first call failed.</returns>
+    public async Task<List<OwnSubtitleEntry>?> ListMyPublishedSubtitlesAsync(
+        CancellationToken ct,
+        int maxPages = 2,
+        Func<OwnSubtitleEntry, bool>? shouldStop = null,
+        Action<int>? pageRead = null)
+    {
+        string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");
+        var result = new List<OwnSubtitleEntry>();
+        for (int page = 1; page <= Math.Max(1, maxPages); page++)
+        {
+            pageRead?.Invoke(page);
+            string url = $"{ApiBase}/user/myPublishedSubtitles?page={page}";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            TraceCall("GET", url);
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            ApiActivity?.Invoke();
+            Trace("GET", "user/myPublishedSubtitles", (int)resp.StatusCode, $"page {page}");
+            if (!resp.IsSuccessStatusCode)
+            {
+                return result.Count > 0 ? result : null;
+            }
+
+            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                if (!doc.RootElement.TryGetProperty("subtitles", out var subsEl) || subsEl.ValueKind != JsonValueKind.Array)
+                {
+                    break;
+                }
+
+                int added = 0;
+                foreach (var item in subsEl.EnumerateArray())
+                {
+                    var entry = OwnSubtitleEntry.FromJson(item);
+                    if (entry == null || entry.HandleId <= 0)
+                    {
+                        continue;
+                    }
+
+                    result.Add(entry);
+                    added++;
+                }
+
+                if (added == 0)
+                {
+                    break;
+                }
+
+                if (shouldStop != null && shouldStop(result[result.Count - 1]))
+                {
+                    break;
+                }
+            }
+            catch (JsonException)
+            {
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>F-M193: /user/mySubtitles is NOT paginated, so the caller must count DISTINCT upload ids.</summary>
     public async Task<List<OwnSubtitleEntry>?> ListMySubtitlesAsync(CancellationToken ct, int maxPages = 10, Func<OwnSubtitleEntry, bool>? shouldStop = null)
     {
         string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");
@@ -1450,48 +1822,15 @@ public sealed class SubdlApiClient
     /// <returns>Raw subtitle bytes (SRT extracted when ZIP-packaged) or null on failure.</returns>
     public async Task<byte[]?> DownloadSubtitleFileAsync(string dlUrl, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0)
     {
-        string fullUrl;
-        if (dlUrl.StartsWith('/'))
-        {
-            fullUrl = $"https://dl.subdl.com{dlUrl}";
-        }
-        else if (dlUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-        {
-            fullUrl = dlUrl.Replace("://subdl.com", "://dl.subdl.com", StringComparison.OrdinalIgnoreCase);
-        }
-        else
-        {
-            fullUrl = $"https://dl.subdl.com/{dlUrl}";
-        }
+        string fullUrl = NormalizeDlUrl(dlUrl);
 
         // F-M369/F-M370: one quota unit per ARCHIVE, not per entry. SubDL hands out one URL per
         // archive entry, so a season pack that serves ten episodes arrives as ten URLs whose only
         // common part is the archive segment (measured 01.11.2026: Xhfe8mD1w5/… ten times,
         // 0p9xSnSU4g/… nine times, BlwZSYtLaU/… seven times — and no cache hit, because the key
-        // was the full URL). The key comes from the URL alone, so a cache can answer without a
-        // request; the bytes live in a run-scoped layer and, when switched on, on disk.
-        string? key = ArchiveKey.FromUrl(fullUrl);
-        byte[]? bytes;
-        bool fromCache;
-
-        if (key != null && _archiveCache.TryGet(key, out byte[]? runBytes) && runBytes is { Length: > 0 })
-        {
-            bytes = runBytes;
-            fromCache = true;
-            Trace("GET", fullUrl, 200, "archive cache hit (run)");
-        }
-        else if (key != null && _archiveDiskCache.TryGet(key, out byte[]? diskBytes) && diskBytes is { Length: > 0 })
-        {
-            bytes = diskBytes;
-            fromCache = true;
-            Trace("GET", fullUrl, 200, "archive cache hit (disk)");
-        }
-        else
-        {
-            bytes = await FetchArchiveAsync(fullUrl, ct).ConfigureAwait(false);
-            fromCache = false;
-            StoreArchive(key, bytes);
-        }
+        // was the full URL). The key comes from the URL alone, so the cache can answer without a
+        // request; the bytes live on disk (F-M386: one layer, not two).
+        var (bytes, fromCache) = await GetArchiveBodyAsync(fullUrl, ct).ConfigureAwait(false);
 
         if (bytes == null || bytes.Length == 0)
         {
@@ -1506,6 +1845,7 @@ public sealed class SubdlApiClient
             // rejection: fetch for real, refresh both layers, and try once more.
             Trace("GET", fullUrl, 200, "archive cache does not hold this entry — refetching");
             byte[]? fresh = await FetchArchiveAsync(fullUrl, ct).ConfigureAwait(false);
+            string? key = ArchiveKey.FromUrl(fullUrl);
             if (fresh is { Length: > 0 })
             {
                 StoreArchive(key, fresh);
@@ -1514,6 +1854,77 @@ public sealed class SubdlApiClient
         }
 
         return srt;
+    }
+
+    /// <summary>
+    /// Turns a download path or a subdl.com URL into the dl.subdl.com URL the fetcher wants.
+    /// Shared by <see cref="DownloadSubtitleFileAsync"/> and <see cref="ExtractArchiveMemberAsync"/>,
+    /// so the archive key of both paths is derived from the same string.
+    /// </summary>
+    /// <param name="dlUrl">Download path or URL from a search result.</param>
+    /// <returns>Absolute dl.subdl.com URL.</returns>
+    private static string NormalizeDlUrl(string dlUrl)
+    {
+        if (dlUrl.StartsWith('/'))
+        {
+            return $"https://dl.subdl.com{dlUrl}";
+        }
+
+        if (dlUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            return dlUrl.Replace("://subdl.com", "://dl.subdl.com", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return $"https://dl.subdl.com/{dlUrl}";
+    }
+
+    /// <summary>
+    /// F-M386: reads the archive body through the ONE cache — cache hit first, fetch second, store
+    /// last. Both the entry download and the sibling retry of F-M387 go through this, so a second
+    /// file out of an archive that is already on disk costs no request and no quota unit.
+    /// </summary>
+    /// <param name="fullUrl">Absolute dl.subdl.com URL of the archive.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The body, and whether it came from the cache.</returns>
+    private async Task<(byte[]? Body, bool FromCache)> GetArchiveBodyAsync(string fullUrl, CancellationToken ct)
+    {
+        string? key = ArchiveKey.FromUrl(fullUrl);
+        if (key != null && _archiveDiskCache.TryGet(key, out byte[]? diskBytes) && diskBytes is { Length: > 0 })
+        {
+            Trace("GET", fullUrl, 200, "archive cache hit (disk)");
+            return (diskBytes, true);
+        }
+
+        byte[]? fetched = await FetchArchiveAsync(fullUrl, ct).ConfigureAwait(false);
+        StoreArchive(key, fetched);
+        return (fetched, false);
+    }
+
+    /// <summary>
+    /// F-M387 (operator order 02.11.2026): takes ANOTHER file out of an archive that has already
+    /// been fetched — the retry a QA gate needs before the whole candidate is thrown away. A pack
+    /// can carry several files for the same episode, and a gate verdict on one says nothing about
+    /// its sibling. Serving it from the cache is the point: the archive was paid for once.
+    /// </summary>
+    /// <param name="archiveUrl">Download path or URL of the archive (any entry or the .zip).</param>
+    /// <param name="memberName">Entry name as listed in <c>unpack_files</c>.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The named entry's bytes, or null when the archive does not hold it.</returns>
+    public async Task<byte[]?> ExtractArchiveMemberAsync(string? archiveUrl, string? memberName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(archiveUrl) || string.IsNullOrWhiteSpace(memberName))
+        {
+            return null;
+        }
+
+        string fullUrl = NormalizeDlUrl(archiveUrl);
+        var (bytes, _) = await GetArchiveBodyAsync(fullUrl, ct).ConfigureAwait(false);
+        if (bytes is not { Length: > 4 } || bytes[0] != 'P' || bytes[1] != 'K')
+        {
+            return null;
+        }
+
+        return await UnpackAsync(bytes, 0, 0, ct, memberName).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1538,8 +1949,27 @@ public sealed class SubdlApiClient
             return;
         }
 
-        _archiveCache.Put(key, bytes);
         _archiveDiskCache.Put(key, bytes);
+    }
+
+    /// <summary>
+    /// F-M384: whether the archive behind this download URL already sits in the cache — asking
+    /// costs no request, and a hit costs no download unit. The download side uses
+    /// it to prefer a season pack it has paid for already over a single file it would have to
+    /// fetch (measured 01.11.2026: one archive fetch, then nine cache hits for the same season,
+    /// at 1 download unit for all ten episodes).
+    /// </summary>
+    /// <param name="dlUrl">Download path or URL from a search result.</param>
+    /// <returns>True when the body is cached.</returns>
+    public bool IsArchiveCached(string? dlUrl)
+    {
+        string? key = ArchiveKey.FromUrl(dlUrl);
+        if (key == null)
+        {
+            return false;
+        }
+
+        return _archiveDiskCache.TryGet(key, out byte[]? diskBytes) && diskBytes is { Length: > 0 };
     }
 
     /// <summary>
@@ -1552,7 +1982,7 @@ public sealed class SubdlApiClient
     /// <param name="zipEpisode">Episode the caller wants (0 when unknown).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The subtitle bytes, or null.</returns>
-    private static async Task<byte[]?> UnpackAsync(byte[] bytes, int zipSeason, int zipEpisode, CancellationToken ct)
+    private static async Task<byte[]?> UnpackAsync(byte[] bytes, int zipSeason, int zipEpisode, CancellationToken ct, string? memberName = null)
     {
         if (bytes.Length <= 4 || bytes[0] != 'P' || bytes[1] != 'K')
         {
@@ -1569,7 +1999,27 @@ public sealed class SubdlApiClient
             // and only fall back to "first .srt" when NOTHING in the archive does —
             // otherwise one episode's subtitle is written next to another episode.
             string? wanted = null;
-            if (zipEpisode > 0)
+            if (!string.IsNullOrWhiteSpace(memberName))
+            {
+                // F-M387: the caller named the file it wants (a sibling of the one a gate refused).
+                // Matching is by ENTRY name only; a name that is not in the archive is a null, never
+                // a guess at another file.
+                foreach (var e in zip.Entries)
+                {
+                    if (string.Equals(e.Name, memberName, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(e.FullName, memberName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        wanted = e.FullName;
+                        break;
+                    }
+                }
+
+                if (wanted == null)
+                {
+                    return null;
+                }
+            }
+            else if (zipEpisode > 0)
             {
                 foreach (var e in zip.Entries)
                 {
@@ -1869,18 +2319,42 @@ public sealed class SubtitleCandidate
     /// <param name="episode">Wanted episode (0 = any).</param>
     /// <returns>The matching file, or null when the pack carries no usable listing.</returns>
     public SubtitleUnpackFile? FindUnpackFile(int season, int episode)
+        => FindUnpackFiles(season, episode).FirstOrDefault();
+
+    /// <summary>
+    /// F-M387: EVERY unpack file that belongs to this season/episode, in listing order — the retry
+    /// list a QA gate walks before the candidate is thrown away. A pack can carry several files for
+    /// the same episode (a plain and an SDH one, two release variants), and a verdict on the first
+    /// says nothing about the second.
+    /// <para>
+    /// The hearing-impaired filter is the operator's rule (02.11.2026: "sdh sollte nur mit sdh gematcht
+    /// werden"): with <paramref name="hearingImpaired"/> set, only files whose own flag equals it are
+    /// returned. A plain request never falls back to an SDH file and vice versa — the two are
+    /// different tracks, and swapping them silently changes what the viewer gets.
+    /// </para>
+    /// </summary>
+    /// <param name="season">Wanted season (0 = any).</param>
+    /// <param name="episode">Wanted episode (0 = any).</param>
+    /// <param name="hearingImpaired">True/False filters on the file's own HI flag; null keeps both.</param>
+    /// <returns>Matching files, best match first; empty when the listing has none.</returns>
+    public List<SubtitleUnpackFile> FindUnpackFiles(int season, int episode, bool? hearingImpaired = null)
     {
+        var found = new List<SubtitleUnpackFile>();
         if (UnpackFiles.Count == 0)
         {
-            return null;
+            return found;
         }
+
+        bool Accepts(SubtitleUnpackFile f)
+            => hearingImpaired == null || f.HearingImpaired == hearingImpaired.Value;
 
         // Exact season+episode first: this is the authoritative match.
         foreach (var f in UnpackFiles)
         {
-            if (f.Episode > 0 && f.Episode == episode && (season <= 0 || f.Season == season))
+            if (f.Episode > 0 && f.Episode == episode && (season <= 0 || f.Season == season) && Accepts(f)
+                && !found.Contains(f))
             {
-                return f;
+                found.Add(f);
             }
         }
 
@@ -1889,9 +2363,9 @@ public sealed class SubtitleCandidate
             // Episode exact, season not reported by the API.
             foreach (var f in UnpackFiles)
             {
-                if (f.Episode == episode && f.Season <= 0)
+                if (f.Episode == episode && f.Season <= 0 && Accepts(f) && !found.Contains(f))
                 {
-                    return f;
+                    found.Add(f);
                 }
             }
 
@@ -1899,14 +2373,14 @@ public sealed class SubtitleCandidate
             // carries no separate season/episode fields but does name the episode).
             foreach (var f in UnpackFiles)
             {
-                if (EpisodeFromFileName(f.Name, season) == episode)
+                if (EpisodeFromFileName(f.Name, season) == episode && Accepts(f) && !found.Contains(f))
                 {
-                    return f;
+                    found.Add(f);
                 }
             }
         }
 
-        return null;
+        return found;
     }
 
     /// <summary>Extracts an episode number from a file name — S01E06, s01.e06, 1x06 and
@@ -1963,6 +2437,18 @@ public sealed class OwnSubtitleEntry
     /// <summary>Internal upload id; pass to /user/deleteSubtitle?id={UploadId}.</summary>
     public int UploadId { get; set; }
 
+    /// <summary>
+    /// F-M435 (operator order 03.11.2026): the id of the PUBLISHED entry, taken from
+    /// <c>subtitle.id</c> of <c>/user/myPublishedSubtitles</c>. That is the id
+    /// <c>/user/deletePublishedSubtitle?id=…</c> expects — the two numbers live in different
+    /// ranges (measured: entry 3758706 against upload 380828 for the same pack), so the upload id
+    /// is the wrong handle as soon as the entry is published. Stays 0 while the entry is pending.
+    /// </summary>
+    public int EntryId { get; set; }
+
+    /// <summary>The handle to store and delete with: the published entry id when it is known, else the upload id.</summary>
+    public int HandleId => EntryId > 0 ? EntryId : UploadId;
+
     /// <summary>Subtitle n_id.</summary>
     public string NId { get; set; } = string.Empty;
 
@@ -2005,9 +2491,34 @@ public sealed class OwnSubtitleEntry
         }
 
         var e = new OwnSubtitleEntry();
+
+        // F-M435: the published list carries TWO ids per entry — `id` is the entry id that
+        // /user/deletePublishedSubtitle expects, `subtitles_uploaded_id` is the internal upload id.
+        // The submission list (`mySubtitles`) has no published entry and reports its upload id as
+        // `id`, so `id` fills both and the upload id overwrites when it is reported separately.
         if (sub.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number)
         {
-            e.UploadId = idEl.GetInt32();
+            e.EntryId = idEl.GetInt32();
+            e.UploadId = e.EntryId;
+        }
+
+        if (sub.TryGetProperty("subtitles_uploaded_id", out var uploadedIdEl))
+        {
+            int reportedUploadId = 0;
+            if (uploadedIdEl.ValueKind == JsonValueKind.Number)
+            {
+                reportedUploadId = uploadedIdEl.GetInt32();
+            }
+            else if (uploadedIdEl.ValueKind == JsonValueKind.String
+                     && int.TryParse(uploadedIdEl.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int parsedUploadId))
+            {
+                reportedUploadId = parsedUploadId;
+            }
+
+            if (reportedUploadId > 0)
+            {
+                e.UploadId = reportedUploadId;
+            }
         }
 
         if (sub.TryGetProperty("n_id", out var nIdEl) && nIdEl.ValueKind == JsonValueKind.String)
@@ -2046,7 +2557,14 @@ public sealed class OwnSubtitleEntry
             e.Language = langEl.GetString() ?? string.Empty;
         }
 
-        if (sub.TryGetProperty("created_at", out var createdEl) && createdEl.ValueKind == JsonValueKind.String)
+        // F-M432: the published list spells it "createdAt", the submission list "created_at".
+        if (!sub.TryGetProperty("created_at", out var createdEl)
+            && !sub.TryGetProperty("createdAt", out createdEl))
+        {
+            createdEl = default;
+        }
+
+        if (createdEl.ValueKind == JsonValueKind.String)
         {
             if (DateTime.TryParse(createdEl.GetString(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var dt))
             {
@@ -2066,6 +2584,11 @@ public sealed class OwnSubtitleEntry
 
         if (sub.TryGetProperty("season", out var seasonEl) && seasonEl.ValueKind == JsonValueKind.Number)
         {
+            e.Season = seasonEl.GetInt32();
+        }
+        else if (sub.TryGetProperty("s", out seasonEl) && seasonEl.ValueKind == JsonValueKind.Number)
+        {
+            // F-M432: the published list reports the season as "s".
             e.Season = seasonEl.GetInt32();
         }
 

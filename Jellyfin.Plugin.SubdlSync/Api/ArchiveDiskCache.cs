@@ -17,16 +17,74 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 /// <para>
 /// Two switches, both in the Download tab: <c>days</c> (0 = off) and <c>megabytes</c>
 /// (0 = off). Either at 0 disables the whole thing. The ceiling is enforced oldest-first, and
-/// only <c>.zip</c> bodies under <see cref="RunArchiveCache.DefaultMaxEntryBytes"/> are stored,
+/// only <c>.zip</c> bodies under <see cref="MaxEntryBytes"/> are stored,
 /// so a runaway upstream cannot fill the volume.
 /// </para>
 /// </summary>
 public sealed class ArchiveDiskCache
 {
+    /// <summary>Ceiling per archive: bodies above this are not written (F-M386: own constant,
+    /// it used to be borrowed from the removed run cache).</summary>
+    private const int MaxEntryBytes = 16 * 1024 * 1024;
+
     private readonly object _sync = new();
     private string? _directory;
     private int _ttlDays;
     private long _maxBytes;
+
+    /// <summary>
+    /// F-M427 (operator order 03.11.2026: "Cache bei db reset bitte mit purgen"): removes every archive
+    /// this cache wrote, and nothing else.
+    /// <para>
+    /// Static and folder-based on purpose: a reset must be able to purge without a live instance, and the
+    /// directory is the plugin's own (`&lt;data folder&gt;/archive-cache`), so no path is passed in from a
+    /// caller that might get it wrong. Leftovers under <c>.tmp</c> go with it — an interrupted store
+    /// leaves one behind.
+    /// </para>
+    /// </summary>
+    /// <param name="dataFolder">The plugin's data folder.</param>
+    /// <returns>Number of archives removed.</returns>
+    public static int PurgeDirectory(string dataFolder)
+    {
+        string dir = Path.Combine(dataFolder, "archive-cache");
+        if (!System.IO.Directory.Exists(dir))
+        {
+            return 0;
+        }
+
+        int removed = 0;
+        foreach (string path in System.IO.Directory.EnumerateFiles(dir, "*.zip"))
+        {
+            try
+            {
+                File.Delete(path);
+                removed++;
+            }
+            catch (IOException)
+            {
+                // Leave it: the count in the log says what really went.
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        foreach (string path in System.IO.Directory.EnumerateFiles(dir, "*.tmp"))
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return removed;
+    }
 
     /// <summary>Gets the number of lookups answered from disk since <see cref="Reset"/>.</summary>
     public int Hits { get; private set; }
@@ -153,8 +211,8 @@ public sealed class ArchiveDiskCache
     }
 
     /// <summary>
-    /// Stores an archive. Bodies that are not ZIPs, or that exceed the run cache's per-archive
-    /// ceiling, are not written — a disk cache must not become a dump.
+    /// Stores an archive. Bodies that are not ZIPs, or that exceed the per-archive ceiling, are
+    /// not written — a cache must not become a dump.
     /// </summary>
     /// <param name="key">Archive key.</param>
     /// <param name="bytes">Archive body.</param>
@@ -165,7 +223,7 @@ public sealed class ArchiveDiskCache
             return;
         }
 
-        if (bytes.Length > RunArchiveCache.DefaultMaxEntryBytes)
+        if (bytes.Length > MaxEntryBytes)
         {
             return;
         }

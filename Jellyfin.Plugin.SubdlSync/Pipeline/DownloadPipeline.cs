@@ -367,7 +367,6 @@ public sealed class DownloadPipeline : IDisposable
         // must not receive them. Set here, at the source, so a later counter cannot forget it.
         summary.IsDryRun = _config.DownloadDryRun;
         _dailyLimitWaits = 0; // F-M49: fresh per run
-        _api.ArchiveCache.Reset(); // F-M369: an archive serves the whole run, never the next one
 
         // F-M370: point the disk cache at this plugin's data folder and apply the two switches.
         // Either at 0 leaves it off; the trim happens before the first request so a run never
@@ -450,8 +449,8 @@ public sealed class DownloadPipeline : IDisposable
         // run, naming whether it is on. The per-file detail (which audio track, which subtitle it
         // was fitted against) stays at Verbose. F-M24d's "one summary line per direction" is not
         // violated: this is the run START line it already prescribes, carrying one more fact.
-        LogUtil.Normal(_logger, "[SubDL] download: started (dry-run={Dry}, refetch={Refetch}, audio fit={Fit})",
-            _config.DownloadDryRun, _config.RefetchInterval, _config.QaDownloadAutoSync ? "on" : "off");
+        LogUtil.Normal(_logger, "[SubDL] download: started{Dry}, refetch={Refetch}, audio fit={Fit}",
+            _config.DownloadDryRun ? ", dry" : string.Empty, _config.RefetchInterval, _config.QaDownloadAutoSync ? "on" : "off");
 
         PipelineStopSignal.ClearStaleMarkers(Plugin.Instance?.DataFolderPath ?? string.Empty);
 
@@ -577,7 +576,7 @@ public sealed class DownloadPipeline : IDisposable
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
         LogUtil.Normal(_logger, 
-            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {Rejected} rejected after fetch | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s) ({DiskHits} from disk)",
+            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {Rejected} rejected after fetch | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
             summary.Downloaded,
             summary.FittedToAudio,
             (summary.FitMsTotal / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
@@ -593,7 +592,6 @@ public sealed class DownloadPipeline : IDisposable
             summary.Failed,
             idx,
             queuedTotal,
-            _api.ArchiveCache.Hits + _api.ArchiveDiskCache.Hits,
             _api.ArchiveDiskCache.Hits);
         return summary;
         }
@@ -627,7 +625,6 @@ public sealed class DownloadPipeline : IDisposable
 
             // F-M369: the archive cache is run-scoped — release its memory with the run so a
             // finished run leaves nothing behind on the Pi.
-            _api.ArchiveCache.Reset();
 
             // F-M23: keep the partial summary even when the run is cancelled — the caller
             // reads StopRequested and the counters include the work that did land.
@@ -1490,9 +1487,16 @@ public sealed class DownloadPipeline : IDisposable
             // HI filtering happens here any more. The old filter had to strip HI out of a mixed
             // response, which meant the regular ranking silently depended on how many HI releases
             // SubDL happened to return.
+            // F-M384 (measured 01.11.2026): one archive fetch serves every episode of the pack, so a
+            // pack candidate beats an equally good single — and a pack whose archive is ALREADY
+            // cached beats both, because it costs no download unit at all. The preference is a sort
+            // key in front of the text score, not a change to it: a pack only wins when it carries
+            // this episode (PackPreference returns 0 otherwise), and the text similarity still
+            // decides between two packs.
             var ranked = langCands
-                .Select(c => (Cand: c, Score: Score(c, videoBase)))
-                .OrderByDescending(x => x.Score)
+                .Select(c => (Cand: c, Score: Score(c, videoBase), Pack: PackPreference(c, season, episode)))
+                .OrderByDescending(x => x.Pack)
+                .ThenByDescending(x => x.Score)
                 .ToList();
 
             // Skip candidates already QA-rejected in earlier runs —
@@ -1560,7 +1564,7 @@ public sealed class DownloadPipeline : IDisposable
             int refusalsThisRun = 0;
             int correctedSaved = 0;
             bool correctionHuntAbandoned = false;
-            foreach (var (cand, _) in ranked)
+            foreach (var (cand, _, _) in ranked)
             {
                 // THE walk's limit (F-M318/F-M331): the configured correction attempts are spent —
                 // give up on this language for this run. Sits BEFORE the fetch on purpose: breaking
@@ -1737,84 +1741,113 @@ public sealed class DownloadPipeline : IDisposable
                 // upload→anything). Slot accounting unchanged.
                 _watchdog?.Heartbeat();
 
-                // Gate 2: language verification (F-M15) — detected content
-                // language vs requested tag; fail-open when CLD2 has no verdict.
-                if (_config.QaDownloadVerifyLanguage)
+                // F-M387 (operator order 02.11.2026): the four content gates are a verdict on a
+                // FILE, not on a candidate. A pack can carry several files for the same episode — a
+                // plain one and an SDH one, two release variants — and a verdict on the first says
+                // nothing about its sibling. So they live in one place here, which lets the same
+                // gates run again on the next file of the SAME archive. That retry costs nothing:
+                // the archive is already on disk (F-M386), only another entry is taken out of it.
+                //
+                // The counters and the burned candidate stay with the CALLER: they belong to the
+                // candidate, and one candidate is burned once, however many of its files failed.
+                string? QaGateFailure(byte[] candidateBytes)
                 {
-                    string? detected = Qa.QaGates.DetectLanguage(DecodeSrt(bytes));
-                    if (detected != null
-                        && !string.Equals(detected, lang, StringComparison.OrdinalIgnoreCase)
-                        && !Qa.QaGates.IsFamilyMatch(lang, detected))
+                    // Gate 2: language verification (F-M15) — detected content
+                    // language vs requested tag; fail-open when CLD2 has no verdict.
+                    if (_config.QaDownloadVerifyLanguage)
                     {
-                        summary.RejectedCandidates++; // F-M286 (QA gate)
-                        qaRejectedReleases.Add(cand.SubdlId); // burned fetch → memorized
-
-                        if (_config.LogMode >= LogLevelMode.Verbose)
+                        string? detected = Qa.QaGates.DetectLanguage(DecodeSrt(candidateBytes));
+                        if (detected != null
+                            && !string.Equals(detected, lang, StringComparison.OrdinalIgnoreCase)
+                            && !Qa.QaGates.IsFamilyMatch(lang, detected))
                         {
-                            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — language reject {Release}: content is {Detected}",
-                                Path.GetFileName(mediaPath), lang, cand.ReleaseName, detected);
+                            return "language " + detected;
                         }
-
-                        continue; // next candidate
                     }
-                }
 
-                // F-M43 Stufe 2 (structure, fixed part): corruption check on the
-                // already-downloaded bytes — free (no extra quota), rejects broken
-                // SRTs (no timings, non-monotonic timestamps, implausible cue
-                // durations) BEFORE they are saved next to the media file.
-                {
-                    var srtStats = Qa.QaGates.ParseSrt(DecodeSrt(bytes));
+                    // F-M43 Stufe 2 (structure, fixed part): corruption check on the
+                    // already-downloaded bytes — free (no extra quota), rejects broken
+                    // SRTs (no timings, non-monotonic timestamps, implausible cue
+                    // durations) BEFORE they are saved next to the media file.
+                    var srtStats = Qa.QaGates.ParseSrt(DecodeSrt(candidateBytes));
                     bool structureOk = srtStats != null
                         && srtStats.Monotonic
                         && srtStats.MinCueMs > 100
                         && srtStats.MaxCueMs < 600_000;
                     if (!structureOk)
                     {
-                        // Burned fetch on a structurally broken file —
-                        // remember the exact download, the run counts as failed.
-                        summary.RejectedCandidates++; // F-M286 (QA gate)
-                        qaRejectedReleases.Add(cand.SubdlId);
+                        return "structure (no valid cues / non-monotonic / implausible duration)";
+                    }
 
-                        if (_config.LogMode >= LogLevelMode.Verbose)
+                    // Gate 1: minimum cue count (≥30, F-M16 threshold) — catches
+                    // valid-but-stub SRTs the structure gate lets through.
+                    if (_config.QaDownloadMinCues && (srtStats == null || srtStats.CueCount < 30))
+                    {
+                        return "min-cues (" + (srtStats?.CueCount ?? 0) + ")";
+                    }
+
+                    // F-M43 Stufe 2 (runtime): cue span vs item runtime
+                    if (!RuntimeMatches(item, candidateBytes, out string? runtimeReason) && runtimeReason != null)
+                    {
+                        return "runtime (" + runtimeReason + ")";
+                    }
+
+                    return null;
+                }
+
+                string? gateFail = QaGateFailure(bytes);
+
+                // F-M387: before the candidate is given up, ask the archive that is already here for
+                // its next file for this episode. SDH is matched with SDH only (operator order
+                // 02.11.2026) — a plain request never takes an SDH file and vice versa.
+                if (gateFail != null && packFile != null && cand.UnpackFiles.Count >= 2)
+                {
+                    foreach (var sibling in cand.FindUnpackFiles(season, episode, effectiveHi))
+                    {
+                        if (string.Equals(sibling.Name, packFile.Name, StringComparison.OrdinalIgnoreCase))
                         {
-                            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — structure reject {Release}: no valid cues/non-monotonic/implausible duration",
-                                Path.GetFileName(mediaPath), lang, cand.ReleaseName);
+                            continue; // the file the gate just refused
                         }
 
-                        continue; // next candidate
+                        byte[]? siblingBytes = await _api
+                            .ExtractArchiveMemberAsync(cand.Url, sibling.Name, ct).ConfigureAwait(false);
+                        if (siblingBytes == null || siblingBytes.Length < 100)
+                        {
+                            continue;
+                        }
+
+                        // F-M388: the same correction the fetched candidate got — a gate must judge
+                        // the file as it would be written, not as the archive happened to store it.
+                        siblingBytes = CorrectInvisibleCues(siblingBytes) ?? siblingBytes;
+                        string? siblingFail = QaGateFailure(siblingBytes);
+                        if (siblingFail != null)
+                        {
+                            gateFail = siblingFail;
+                            continue;
+                        }
+
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — next file of the same archive accepted: {Sibling} (first refused: {First})",
+                            Path.GetFileName(mediaPath), lang, sibling.Name, gateFail);
+                        bytes = siblingBytes;
+                        packFile = sibling;
+                        effectiveHi = sibling.HearingImpaired;
+                        gateFail = null;
+                        break;
                     }
                 }
 
-                // Gate 1: minimum cue count (≥30, F-M16 threshold) — catches
-                // valid-but-stub SRTs the structure gate lets through.
-                var gateStats = Qa.QaGates.ParseSrt(DecodeSrt(bytes)); // Fresh parse (srtStats is scoped to the structure block)
-                if (_config.QaDownloadMinCues && (gateStats == null || gateStats.CueCount < 30))
+                if (gateFail != null)
                 {
-                    summary.RejectedCandidates++; // F-M286 (QA gate)
-                    qaRejectedReleases.Add(cand.SubdlId); // Burned fetch → memorized
+                    // Burned fetch (QA gate): the request was spent and nothing is kept.
+                    summary.RejectedCandidates++; // F-M286 / F-M387
+                    qaRejectedReleases.Add(cand.SubdlId); // burned fetch → memorized
 
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — min-cues reject {Release}: {Count} cues",
-                            Path.GetFileName(mediaPath), lang, cand.ReleaseName, gateStats?.CueCount ?? 0);
-                    }
-
-                    continue; // next candidate
-                }
-
-                // F-M43 Stufe 2 (runtime): cue span vs item runtime
-                if (!RuntimeMatches(item, bytes, out string? runtimeReason) && runtimeReason != null)
-                {
-                    // Burned fetch (stub/broken runtime) —
-                    // remember the exact download, the run counts as failed at its end.
-                    summary.RejectedCandidates++; // F-M286 (QA gate)
-                    qaRejectedReleases.Add(cand.SubdlId);
-
-                    if (_config.LogMode >= LogLevelMode.Verbose)
-                    {
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — runtime reject {Release}: {Reason}",
-                            Path.GetFileName(mediaPath), lang, cand.ReleaseName, runtimeReason);
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — QA reject {Release}: {Reason} (no usable file left in this archive)",
+                            Path.GetFileName(mediaPath), lang, cand.ReleaseName, gateFail);
                     }
 
                     continue; // next candidate
@@ -1866,6 +1899,8 @@ public sealed class DownloadPipeline : IDisposable
                 // same fit with one segment, so the constant and the staircase cases cannot
                 // disagree. The fit applies its own deploy rule (a correction must PROVE
                 // itself against the audio), so a refusal here is a measurement, not a policy.
+                // F-M388: these are the CORRECTED bytes (invisible cues dropped, renumbered), so the
+                // file on disk, the hash computed just below and the text the gates saw are one artefact.
                 byte[] writeBytes = bytes;
                 string content = DecodeSrt(bytes);
                 string? unsyncPayload = null;
@@ -1996,7 +2031,7 @@ public sealed class DownloadPipeline : IDisposable
                         // so the fetch the operator asked for would silently DESTROY the subtitle it
                         // was meant to sit beside. `PlanTarget` is the shared planner (F-M315) and
                         // returns the first free corrected slot; it never returns one above
-                        // `CorrectedSlotMax`, so the reserved originals (90–99) stay untouched.
+                        // `CorrectedSlotMax`, so the reserved originals (51–99) stay untouched.
                         var namesHere = SidecarNamesInDirectory(Path.GetDirectoryName(mediaPath) ?? ".");
                         targetPath = namesHere == null
                             ? SidecarNaming.Build(mediaPath, lang, effectiveHi, correctedSlotCount + 1)
@@ -2020,7 +2055,7 @@ public sealed class DownloadPipeline : IDisposable
                             summary.Failed++;
                             ReportOutcome(item, ItemOutcome.RealFailure);
                             LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL-D] SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 90–99; nothing written",
+                                "[SubDL-D] SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 51–99; nothing written",
                                 Path.GetFileName(mediaPath), lang);
                             continue;
                         }
@@ -2049,14 +2084,14 @@ public sealed class DownloadPipeline : IDisposable
                     // Until 07.10.2026 it was kept as a one-entry archive (`<name>.unsynced.zip`),
                     // which the operator could only reach by unpacking it himself. He ordered that
                     // replaced (07.10.2026): the original now lands as a LOOSE sidecar named
-                    // `<base>.<lang>.99.srt` — numbered from 99 downward — which Jellyfin lists as
+                    // `<base>.<lang>.51.srt` — numbered from 51 upward — which Jellyfin lists as
                     // its own selectable track, titled with the number. He also ordered the archive
                     // gone; archives already on disk are left exactly as they are.
                     //
                     // The name is the ONLY difference from a normal sidecar: same language token,
                     // same `.sdh` marker when the corrected file is the variant, no marker of its
-                    // own (it is not forced — F-M315). The reserved block 90–99 keeps it away from
-                    // the corrected files, which stop at slot 89.
+                    // own (it is not forced — F-M315). The reserved block 51–99 keeps it away from
+                    // the corrected files, which stop at slot 49.
                     //
                     // WATCH THE ENCODING. The bytes written are the ORIGINAL TEXT in the canonical
                     // form (F-M296: UTF-8, no BOM, LF), NOT the payload as fetched. Byte fidelity
@@ -2101,7 +2136,7 @@ public sealed class DownloadPipeline : IDisposable
                                 // Refusing is the safe direction: an invented name would overwrite
                                 // an original already kept.
                                 LogUtil.PerItem(_config.LogMode, _logger,
-                                    "[SubDL-D] original NOT kept for {File} [{Lang}] — no free slot in the reserved range 90–99",
+                                    "[SubDL-D] original NOT kept for {File} [{Lang}] — no free slot in the reserved range 51–99",
                                     Path.GetFileName(mediaPath), lang);
                             }
                             else
@@ -2250,7 +2285,8 @@ public sealed class DownloadPipeline : IDisposable
                             // gaps contain an alignment — this one the main track's, the next one the
                             // HI track's. Floor 0.
                             await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
-                            var hiBytes = await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false);
+                            var hiBytes = CorrectInvisibleCues(
+                                await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false));
                             var hiStats = hiBytes != null && hiBytes.Length >= 100 ? Qa.QaGates.ParseSrt(DecodeSrt(hiBytes)) : null;
                             bool hiStructureOk = hiStats != null
                                 && hiStats.Monotonic
@@ -2359,7 +2395,7 @@ public sealed class DownloadPipeline : IDisposable
                                             // subtitle is not written at all.
                                             summary.RejectedCandidates++;
                                             LogUtil.PerItem(_config.LogMode, _logger,
-                                                "[SubDL-D] HI SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 90–99; nothing written ({Release})",
+                                                "[SubDL-D] HI SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 51–99; nothing written ({Release})",
                                                 Path.GetFileName(mediaPath), lang, hi.ReleaseName);
                                         }
                                         else
@@ -2391,7 +2427,7 @@ public sealed class DownloadPipeline : IDisposable
                                             if (hiOriginalPath == null)
                                             {
                                                 LogUtil.PerItem(_config.LogMode, _logger,
-                                                    "[SubDL-D] HI original NOT kept for {File} [{Lang}] — no free slot in the reserved range 90–99",
+                                                    "[SubDL-D] HI original NOT kept for {File} [{Lang}] — no free slot in the reserved range 51–99",
                                                     Path.GetFileName(mediaPath), lang);
                                             }
                                             else
@@ -2827,7 +2863,62 @@ public sealed class DownloadPipeline : IDisposable
     /// <param name="episode">Wanted episode (0 = none).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The bytes, and the source they came from (null source = the candidate as a whole).</returns>
+    /// <summary>
+    /// F-M388 (operator order 02.11.2026): every candidate leaves here with its invisible cues
+    /// already gone. A cue that is on screen for a millimetre of time is dropped and the file is
+    /// renumbered — the same rule the upload side has had since F-M382 — instead of the file being
+    /// convicted by a gate for carrying one.
+    /// <para>
+    /// It happens HERE, before the gates and long before the write, because the state hash must
+    /// describe the file that gets written. <c>writeBytes</c> starts as these very bytes and
+    /// <c>ComputeHash</c> describes the normalized text; if the correction came later, the hash would
+    /// describe a file that exists nowhere on disk.
+    /// </para>
+    /// </summary>
+    /// <param name="cand">Candidate being fetched (only for the log line).</param>
+    /// <param name="season">Wanted season.</param>
+    /// <param name="episode">Wanted episode.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The fetched payload, corrected.</returns>
     private async Task<(byte[]? Bytes, SubtitleUnpackFile? PackFile)> DownloadCandidateAsync(
+        SubtitleCandidate cand, int season, int episode, CancellationToken ct)
+    {
+        var (raw, packFile) = await DownloadCandidateRawAsync(cand, season, episode, ct).ConfigureAwait(false);
+        byte[]? corrected = CorrectInvisibleCues(raw);
+        if (corrected != null && raw != null && corrected.Length != raw.Length)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[SubDL-D] {Release} [{Lang}] — invisible cues dropped: {Before} → {After} cue(s)",
+                cand.ReleaseName, cand.Language,
+                Qa.QaGates.ParseSrt(DecodeSrt(raw))?.CueCount ?? 0,
+                Qa.QaGates.ParseSrt(DecodeSrt(corrected))?.CueCount ?? 0);
+        }
+
+        return (corrected, packFile);
+    }
+
+    /// <summary>
+    /// F-M388: drops the cues nobody can read and renumbers what is left. Wraps
+    /// <see cref="ContentHashRegistry.NormalizeSrt"/>, which is also what <c>EncodeCanonical</c> and
+    /// <c>ComputeHash</c> use — one rule, so written bytes, hashed bytes and gated bytes are the same
+    /// bytes. What comes out is always the CANONICAL form — UTF-8 without BOM, LF, no trailing blank
+    /// line — for clean input as well, because the hash describes exactly that form. A clean file
+    /// therefore keeps its cues and its text unchanged; only the byte style follows the canonical
+    /// rule (a trailing newline is dropped by the same trim the upload side has always applied).
+    /// </summary>
+    /// <param name="raw">Payload as fetched.</param>
+    /// <returns>Corrected payload, or null when nothing was fetched.</returns>
+    public static byte[]? CorrectInvisibleCues(byte[]? raw)
+    {
+        if (raw is not { Length: > 0 })
+        {
+            return raw;
+        }
+
+        return System.Text.Encoding.UTF8.GetBytes(ContentHashRegistry.NormalizeSrt(DecodeSrt(raw)));
+    }
+
+    private async Task<(byte[]? Bytes, SubtitleUnpackFile? PackFile)> DownloadCandidateRawAsync(
         SubtitleCandidate cand, int season, int episode, CancellationToken ct)
     {
         // F-M215: a season or range pack must be resolved to the episode we are
@@ -2846,6 +2937,38 @@ public sealed class DownloadPipeline : IDisposable
                     LogUtil.Detail(_config.LogMode, _logger, 
                         "[SubDL-D] unpack pick S{Season}E{Episode} from pack {Release} → {File} (HI={Hi})",
                         season, episode, cand.ReleaseName, want.Name, want.HearingImpaired);
+                }
+
+                // F-M383 (measured 01.11.2026 on rosetestdev, /api/v2/me before and after each
+                // fetch): a single archive ENTRY costs one download unit, and the whole ARCHIVE
+                // costs one unit too — 58,376 B for one episode and 196,283 B for all ten. Ten
+                // single fetches therefore spend ten of the fifty daily units on a season that
+                // one archive fetch serves completely. The archive is fetched through
+                // DownloadSubtitleFileAsync, so the run cache and the disk cache (F-M369/F-M370)
+                // answer every further episode of the same pack without a request; UnpackAsync
+                // then takes the entry that names OUR episode, never "the first .srt".
+                bool archiveUrl = cand.Url.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                    || cand.Url.Contains(".zip?", StringComparison.OrdinalIgnoreCase);
+                if (cand.UnpackFiles.Count >= 2 && archiveUrl)
+                {
+                    byte[]? whole = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode).ConfigureAwait(false);
+                    if (whole is { Length: > 0 })
+                    {
+                        // Info, not Detail: this line marks every episode that is served from the
+                        // ARCHIVE instead of its own member URL — once per pack the archive is
+                        // fetched, every further episode of the same pack is a cache hit (the run
+                        // summary names the split: "N archive hit(s) (M from disk)").
+                        _logger.LogInformation(
+                            "[SubDL] pack served whole — {N} file(s) per archive fetch: {Release}",
+                            cand.UnpackFiles.Count, cand.ReleaseName);
+                        return (whole, want);
+                    }
+
+                    // The archive did not resolve to our episode (F-M215): fall through to the
+                    // single member URL rather than saving the wrong text.
+                    _logger.LogWarning(
+                        "[SubDL-D] pack {Release} did not resolve S{Season}E{Episode} from the archive — trying the single file.",
+                        cand.ReleaseName, season, episode);
                 }
 
                 var packBytes = await _api.DownloadSubtitleFileAsync(want.Url, ct).ConfigureAwait(false);
@@ -2880,6 +3003,31 @@ public sealed class DownloadPipeline : IDisposable
 
         var fallback = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode).ConfigureAwait(false);
         return (fallback, null);
+    }
+
+    /// <summary>
+    /// F-M384: how much a candidate is worth as an ARCHIVE. <c>2</c> when the pack carries this
+    /// episode and its archive is already cached (free), <c>1</c> when it carries the episode but
+    /// must be fetched (one unit for the whole season), <c>0</c> for anything else — including a
+    /// pack that does not contain the episode, which the download path would refuse anyway.
+    /// </summary>
+    /// <param name="c">Candidate from the search.</param>
+    /// <param name="season">Wanted season (0 = unknown).</param>
+    /// <param name="episode">Wanted episode (0 = unknown).</param>
+    /// <returns>Preference rank, higher wins.</returns>
+    private long PackPreference(SubtitleCandidate c, int season, int episode)
+    {
+        if (c.UnpackFiles.Count < 2 || (season <= 0 && episode <= 0))
+        {
+            return 0;
+        }
+
+        if (c.FindUnpackFile(season, episode) == null)
+        {
+            return 0;
+        }
+
+        return _api.IsArchiveCached(c.Url) ? 2 : 1;
     }
 
     private long Score(SubtitleCandidate c, string videoBase)

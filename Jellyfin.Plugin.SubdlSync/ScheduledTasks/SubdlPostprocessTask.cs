@@ -37,7 +37,7 @@ public class SubdlPostprocessTask : IScheduledTask
 
     public string Key => "SubDLPostprocessTask";
 
-    public string Description => "Cleans up rejected SubDL dashboard entries (max 5 pages per run).";
+    public string Description => "Moves stored upload ids to the published entry ids and cleans up rejected entries; pages down to the last pass's watermark.";
 
     // F-M227: every task this plugin schedules reports ONE category, so the dashboard shows one
     // group instead of splitting the plugin's work.

@@ -332,6 +332,66 @@ int statsAfter = StatsRows();
 Console.WriteLine("   query statistics: " + statsAfter + " index row(s)");
 Check(statsAfter > 0, "the compaction refreshed the query statistics", statsAfter + " row(s) in sqlite_stat1");
 
+// ---------------------------------------------------------------------------------------------
+// F-M390: the packs area. One row per season + language + variant, keyed so it can never
+// duplicate, and readable across a reopen — that row IS the fact "this season is already packed",
+// which is why a season whose episodes all went up individually can be looked at again at all.
+// ---------------------------------------------------------------------------------------------
+using (var db = new SubdlDbContext(workdir, null))
+{
+    db.Packs.Upsert(new PackEntity
+    {
+        Id = SubdlDbContext.PackKey("tt26545992", 1, "EN", false),
+        ImdbId = "tt26545992",
+        Season = 1,
+        Language = "EN",
+        HearingImpaired = false,
+        ReleaseName = "Lanterns.S01.1080p.WEBRip.10bit",
+        PackId = "tt26545992.S01.abc123.EN",
+        Episodes = "1,2,3,4,5,6,7,8",
+        AbsorbedIds = "3753826,3753825",
+    });
+
+    Check(db.Packs.Count() == 1, "the pack row is stored", db.Packs.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
+    var row = db.Packs.FindById(SubdlDbContext.PackKey("tt26545992", 1, "EN", false));
+    Check(row != null && row.Episodes == "1,2,3,4,5,6,7,8", "the row carries its member episodes", row?.Episodes ?? "(null)");
+    Check(row != null && row.AbsorbedIds == "3753826,3753825", "and the single uploads it absorbed", row?.AbsorbedIds ?? "(null)");
+
+    // Keyed by season + language + variant: the HI variant is a DIFFERENT pack of the same season.
+    Check(SubdlDbContext.PackKey("tt26545992", 1, "EN", false) != SubdlDbContext.PackKey("tt26545992", 1, "EN", true),
+        "the hearing-impaired variant has its own key");
+    Check(SubdlDbContext.PackKey("tt26545992", 1, "EN", false) != SubdlDbContext.PackKey("tt26545992", 1, "DE", false),
+        "and so has each language");
+
+    // An upsert on the same key UPDATE the row instead of adding a second one — the table stores
+    // the state, never a history.
+    db.Packs.Upsert(new PackEntity
+    {
+        Id = SubdlDbContext.PackKey("tt26545992", 1, "EN", false),
+        ImdbId = "tt26545992",
+        Season = 1,
+        Language = "EN",
+        HearingImpaired = false,
+        PackId = "tt26545992.S01.def456.EN",
+        Episodes = "1,2,3,4,5,6,7,8",
+    });
+    Check(db.Packs.Count() == 1, "a second write for the same season replaces, never duplicates",
+        db.Packs.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
+    Check(db.Packs.FindById(SubdlDbContext.PackKey("tt26545992", 1, "EN", false))?.PackId == "tt26545992.S01.def456.EN",
+        "and the newer pack id wins");
+}
+
+// Reopened: the fact survives a restart, which is the whole point (a pack built in one run must not
+// be rebuilt by the next).
+using (var db = new SubdlDbContext(workdir, null))
+{
+    Check(db.Packs.FindById(SubdlDbContext.PackKey("tt26545992", 1, "EN", false)) != null,
+        "the pack row is still there after a reopen");
+    db.Packs.DeleteMany(x => x.ImdbId == "tt26545992");
+    Check(db.Packs.Count() == 0, "and deleting by series empties it again",
+        db.Packs.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
+}
+
 Console.WriteLine();
 Console.WriteLine("=== " + (failures == 0 ? "STORE OK" : failures + " FAILURE(S)") + " ===");
 return failures == 0 ? 0 : 1;

@@ -324,6 +324,15 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool UploadEnabled { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether F-M372 is on: a season that is complete (every aired
+    /// episode, asked at IMDb) and clean on every gate goes up as ONE season pack instead of one
+    /// upload per episode. Anything else — an incomplete season, a failed gate, a loose sidecar —
+    /// stays a single upload. On by default.
+    /// </summary>
+    public bool UploadSeasonPacks { get; set; } = true;
+
+
     #endregion
 
     #region Download pipeline ([D], F-M41–M47)
@@ -498,11 +507,10 @@ public class PluginConfiguration : BasePluginConfiguration
     /// how long the arrival watcher waits after the first event before running
     /// the cycle (download first, then upload), so that files arriving together
     /// (season import, NAS sync) are processed in ONE cycle.
-    /// (user decision 11.09.2026): default back to 5 (10 was too sluggish).
-    /// (user decision 08.10.2026): default 1 — a full import is complete well inside
-    /// this window, so the cycle starts sooner without splitting one season drop.
+    /// (user decision 02.11.2026): default back to 5 — the shorter windows split a
+    /// slow NAS import into several cycles, and the operator prefers one pass.
     /// </summary>
-    public int ArrivalDebounceMinutes { get; set; } = 1;
+    public int ArrivalDebounceMinutes { get; set; } = 5;
 
     /// <summary>
     /// (user decision 14.09.2026): when a due job (anchor fire, recovery
@@ -534,14 +542,18 @@ public class PluginConfiguration : BasePluginConfiguration
     /// 01.11.2026: 51 archive fetches for 45 files, 26 of them on three packs. 0 turns the disk
     /// cache off (user decision 01.11.2026, Download tab).
     /// </summary>
-    public int DownloadArchiveCacheDays { get; set; } = 14;
+    // F-M428 (operator order 03.11.2026): default lowered from 14 days to 7 — a week is enough for a
+    // season pack that the free daily limit spreads over several runs, and the cache cannot grow unbounded.
+    public int DownloadArchiveCacheDays { get; set; } = 7;
 
     /// <summary>
     /// Gets or sets the size ceiling of the archive cache in megabytes (F-M370). When the cache
     /// grows past it the oldest archives are dropped first. 0 turns the disk cache off as well —
     /// either switch at 0 disables it (user decision 01.11.2026: 512 MB default).
     /// </summary>
-    public int DownloadArchiveCacheMaxMb { get; set; } = 512;
+    // F-M428: ceiling lowered from 512 MB to 256 MB. Measured on 02.11.2026: the whole library's packs
+    // fit well below it, so the smaller ceiling costs no extra fetches.
+    public int DownloadArchiveCacheMaxMb { get; set; } = 256;
 
     /// <summary>
     /// (user decision 20.09.2026): override for the ffmpeg executable path used to
@@ -587,7 +599,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// happening. The dice anchor is a day+time either way, so Weekly uses the stored value as-is.
     /// </para>
     /// </summary>
-    public UpdateInterval UploadPostprocessInterval { get; set; } = UpdateInterval.Weekly;
+    public UpdateInterval UploadPostprocessInterval { get; set; } = UpdateInterval.Daily;
 
     /// <summary>
     /// F-M176: diced postprocessing anchor, "D HH:mm" (D=1..7 Mon..Sun). Empty = not diced yet.
@@ -603,7 +615,20 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>
     /// F-M176: max mySubtitles pages fetched per postprocessing run. Default 5.
     /// </summary>
-    public int PostprocessMaxPages { get; set; } = 5;
+    /// <summary>
+    /// F-M437 (operator decision 04.11.2026): the CEILING of the page walk, not its length. The walk
+    /// stops at <see cref="PostprocessWatermarkUtc"/>; this value only bounds a catch-up run after a
+    /// long gap, so it must be large enough to reach the bottom of a big list (25 entries per page).
+    /// </summary>
+    public int PostprocessMaxPages { get; set; } = 20000;
+
+    /// <summary>
+    /// F-M437: the newest <c>createdAt</c> the last pass has already walked, stored as the account
+    /// reported it. The next pass pages down only until it reaches entries older than this, so a
+    /// daily pass costs a handful of pages instead of the whole list — and a pass after a pause
+    /// catches up by itself.
+    /// </summary>
+    public DateTime? PostprocessWatermarkUtc { get; set; }
 
     /// <summary>
     /// F-M176: max runtime in minutes for one postprocessing run. Safety kill-switch.

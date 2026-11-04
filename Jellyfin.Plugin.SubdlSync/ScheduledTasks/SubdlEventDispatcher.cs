@@ -34,7 +34,7 @@ namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
 /// <summary>
 /// (user decision 14.09.2026): the EXECUTION engine ("EventTrigger").
 /// Three event sources feed one cycle machine:
-///   1. Library change (ItemAdded) → on-arrival gates (F-M55) → 5-min debounce
+///   1. Library change (ItemAdded) → on-arrival gates (F-M55) → arrival debounce (F-M1a)
 ///      (NOT reset by further events, user decision 12.09.2026) → cycle scoped
 ///      to the directions that want on-arrival.
 ///   2. Refetch tick (from the scheduler coordinator / scheduled tasks) → cycle.
@@ -121,6 +121,28 @@ public sealed class SubdlEventDispatcher : IDisposable
     // outcome handler (OnItemResult / ApplyOutcomeUpload) fires DURING the pipeline and used to
     // mark items `Done` for a run that only described them. The run's own summary is not available
     // yet at that moment, so the flag is set before the pipeline starts and cleared in `finally`.
+    /// <summary>
+    /// F-M402: ", dry" when either direction is in dry mode, empty otherwise — appended to the cycle
+    /// lines so a log reader never has to guess whether the numbers describe real work.
+    /// </summary>
+    private static string DrySuffix()
+    {
+        try
+        {
+            var c = Plugin.Instance?.Configuration;
+            if (c != null && (c.DryRun || c.DownloadDryRun))
+            {
+                return ", dry";
+            }
+        }
+        catch (Exception)
+        {
+            // A log suffix must never be the reason a cycle fails.
+        }
+
+        return string.Empty;
+    }
+
     private volatile bool _upInFlightDryRun;
     private volatile bool _downInFlightDryRun;
 
@@ -236,9 +258,9 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
     }
 
-    /// <summary>Debounce window (minutes, config-driven, default 1).</summary>
+    /// <summary>Debounce window (minutes, config-driven, default 5).</summary>
     private static TimeSpan DebounceWindow => TimeSpan.FromMinutes(
-        Plugin.Instance?.Configuration.ArrivalDebounceMinutes is int m && m > 0 ? Math.Clamp(m, 1, 120) : 1);
+        Plugin.Instance?.Configuration.ArrivalDebounceMinutes is int m && m > 0 ? Math.Clamp(m, 1, 120) : 2);
 
     // ────────────────────────────────────────────────────────────────────────
     //  EVENT SOURCE 1: library changes
@@ -748,7 +770,9 @@ public sealed class SubdlEventDispatcher : IDisposable
         lock (_lock) { _userStopActive = false; }
         try { _stopCts.Dispose(); } catch { }
         _stopCts = new CancellationTokenSource();
-        LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle start ({Trigger}, dir {Dir}).", trigger, initialDirection);
+        // F-M402 (operator order 02.11.2026): the cycle line says whether this cycle runs dry — the
+        // log has to answer "was that a dry run?" the same way the workers line does.
+        LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle start ({Trigger}, dir {Dir}{Dry}).", trigger, initialDirection, DrySuffix());
 
         CycleDirection dir;
         lock (_lock)
@@ -787,11 +811,11 @@ public sealed class SubdlEventDispatcher : IDisposable
     {
         if (_userStopActive)
         {
-            LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle end ({Trigger}, dir {Dir}) — user stop.", trigger, dir);
+            LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle end ({Trigger}, dir {Dir}{Dry}) — user stop.", trigger, dir, DrySuffix());
         }
         else
         {
-            LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle end ({Trigger}, dir {Dir}).", trigger, dir);
+            LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle end ({Trigger}, dir {Dir}{Dry}).", trigger, dir, DrySuffix());
         }
     }
 
@@ -925,7 +949,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             // F-M233: the run is narrowed to the freshly queued arrivals, so leftover
             // queued work of earlier runs is not swept along by an arrival event.
             var scopeIds = scopedOnly ? new System.Collections.Generic.HashSet<string>(fresh, System.StringComparer.OrdinalIgnoreCase) : null;
-            await RunDirectionAsync(upload: upload, scopeIds: scopeIds).ConfigureAwait(false);
+            await RunDirectionAsync(upload: upload, scopeIds: scopeIds, trigger: trigger).ConfigureAwait(false);
         }
         return true;
     }
@@ -1109,7 +1133,7 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// Runs one direction against its queue. Orchestrates setup, execution,
     /// result bookkeeping and cleanup.
     /// </summary>
-    private async Task RunDirectionAsync(bool upload, System.Collections.Generic.HashSet<string>? scopeIds = null)
+    private async Task RunDirectionAsync(bool upload, System.Collections.Generic.HashSet<string>? scopeIds = null, string? trigger = null)
     {
         if (_userStopActive)
         {
@@ -1154,7 +1178,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             MarkAutoSyncRunning(upload, config);
 
             var progress = new Progress<double>();
-            var (upSummary, downSummary) = await ExecutePipelineAsync(upload, config, filter, progress).ConfigureAwait(false);
+            var (upSummary, downSummary) = await ExecutePipelineAsync(upload, config, filter, progress, trigger).ConfigureAwait(false);
             // If this direction was stopped by marker, stop the whole cycle.
             // F-M293 (user decision 03.10.2026): gated on the MARKER, not on StopRequested alone.
             // A shutdown also leaves StopRequested true (the pipeline keeps its partial result and
@@ -1267,13 +1291,16 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// Handles user-stop cancellation and lock-loss recovery scheduling.
     /// </summary>
     private async Task<(Pipeline.RunSummary? up, Pipeline.DownloadRunSummary? down)> ExecutePipelineAsync(
-        bool upload, PluginConfiguration config, System.Collections.Generic.HashSet<string> filter, IProgress<double> progress)
+        bool upload, PluginConfiguration config, System.Collections.Generic.HashSet<string> filter, IProgress<double> progress, string? trigger = null)
     {
         if (upload)
         {
             var bundle = PluginServiceRegistrator.BuildPipeline(_loggerFactory, _libraryManager, _mediaSourceManager, config);
             bundle.Pipeline.QueueFilter = filter;
             bundle.Pipeline.IsArrivalRun = false;
+            // F-M418 (operator order 02.11.2026): the fill-only way — a pack built from subtitles that
+            // are already uploaded — belongs to the full-coverage runs (refetch cycle, manual button).
+            // An arrival run carries only the arrivals it was started for and stays with singles.
             bundle.Pipeline.ItemResult += (id, outcome) => OnUploadItemResult(_uploadQueue, id, outcome);
             _upInFlightDryRun = config.DryRun; // F-M22: the outcome handler consults this per item
             try
@@ -1571,7 +1598,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         if (dryRun)
         {
             LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,
-                "[SubDL-Dispatch] DRY RUN — {Count} item(s) left Queued in the {Queue} queue (F-M22: a dry run removes no work).",
+                "[SubDL-Dispatch] DRY-RUN — {Count} item(s) left Queued in the {Queue} queue (F-M22: a dry run removes no work).",
                 queue.Count(x => x.State == QueueItem.ItemState.Queued), upload ? "upload" : "download");
         }
         else if (removed > 0)

@@ -624,3 +624,65 @@ public class WorkerRunEntity
     /// </summary>
     public bool DryRun { get; set; }
 }
+
+/// <summary>
+/// F-M390 (operator order 02.11.2026): one row per season pack this plugin published, keyed by the
+/// season it covers — "&lt;imdb&gt;|S&lt;season&gt;|&lt;lang&gt;|&lt;hi|plain&gt;".
+/// <para>
+/// WHY IT EXISTS: a pack could only ever be built while every episode of the season was still in the
+/// run's upload queue. Once the episodes had gone up individually the season could never become a
+/// pack again, because nothing persisted the fact that it had been attempted — a later run would
+/// either repeat the same pack forever or never try again. The row is that fact: it says which
+/// season, in which language and variant, was packed, under which release, with which members, and
+/// which single uploads it absorbed.
+/// </para>
+/// <para>
+/// The absorbed ids are kept deliberately. Folding singles into a pack means deleting them from
+/// SubDL, and a deletion with no record is a deletion nobody can audit or undo; with the ids on the
+/// row the plugin can name what it removed and put it back when a pack upload fails after them.
+/// </para>
+/// </summary>
+public class PackEntity
+{
+    /// <summary>Primary key: "&lt;imdb&gt;|S&lt;season&gt;|&lt;lang&gt;|&lt;hi|plain&gt;" — one pack per season and language.</summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Series IMDb id the pack was built for.</summary>
+    public string ImdbId { get; set; } = string.Empty;
+
+    /// <summary>Season number.</summary>
+    public int Season { get; set; }
+
+    /// <summary>SubDL language code of the pack.</summary>
+    public string Language { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Hearing-impaired variant of the pack: <c>true</c>/<c>false</c> are statements, <c>null</c> is a
+    /// row that does not say (same three-valued convention as <see cref="SubtitleState.HearingImpaired"/>).
+    /// </summary>
+    public bool? HearingImpaired { get; set; }
+
+    /// <summary>Release name the pack carries — one release for the whole season, never a mixture.</summary>
+    public string? ReleaseName { get; set; }
+
+    /// <summary>
+    /// SubDL's own id for the pack when the upload answered with one, else the pack NAME — which is
+    /// unique per season and content and is what the postprocessing pass can match against.
+    /// </summary>
+    public string? PackId { get; set; }
+
+    /// <summary>Episode numbers the pack carries, comma separated and ascending ("1,2,3").</summary>
+    public string Episodes { get; set; } = string.Empty;
+
+    /// <summary>
+    /// SubDL ids of the single uploads that were folded into this pack and deleted afterwards, comma
+    /// separated. Empty when the pack was built from fresh uploads only.
+    /// </summary>
+    public string? AbsorbedIds { get; set; }
+
+    /// <summary>When the row was first written (UTC).</summary>
+    public DateTime Created { get; set; } = DateTime.UtcNow;
+
+    /// <summary>When the row last changed (UTC).</summary>
+    public DateTime Updated { get; set; } = DateTime.UtcNow;
+}
