@@ -115,8 +115,10 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     private DateTime _refetchDeferredUntil = DateTime.MinValue;
     private string? _lastPruneMarker; // Dedup for the weekly database refresh job
     private string? _lastOshashMarker; // F-M119: dedup for the weekly oshash-refresh job
-    private string? _lastPostprocessMarker; // F-M176: dedup for postprocessing job
-    private DateTime _postprocessDeferredUntil = DateTime.MinValue; // F-M176: lock-busy deferral
+    // F-M445 (operator decision 02.11.2026): there is no fixed anchor and no marker any more. The
+    // postprocessing is ARMED — one timestamp, overwritten by every finished upload run ("the last
+    // order wins"). MinValue means nothing is armed, i.e. no upload run is waiting to be resolved.
+    private DateTime _postprocessArmUtc = DateTime.MinValue;
     // (user decision 14.09.2026): when the anchor fire defers on a busy
     // lock, back off JobSpacingMinutes instead of probing every 30 s — and the
     // reschedule is NOT bound to the 30-min anchor window anymore.
@@ -340,9 +342,49 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     }
 
     /// <summary>
-    /// F-M176: one-shot re-fire for postprocessing (rate-limit or lock-busy). The next
-    /// attempt is spaced by JobSpacingMinutes and still respects the diced anchor.
+    /// F-M445 (operator decision 02.11.2026, "mit jedem neuen upload run einen bestehenden
+    /// Postprocessing-Termin stornieren und auf Laufende + 30 Minuten terminieren"): arms the upload
+    /// postprocessing <see cref="PluginConfiguration.UploadPostprocessDelayMinutes"/> minutes after the
+    /// run that just ended. **The last order wins** — an already armed moment is cancelled and replaced,
+    /// never added to, so a cycle that ends at 12:30 pushes the fire to 13:00 and the one armed for
+    /// 12:45 is gone. <see cref="DateTime.MinValue"/> stays the "nothing armed" marker.
     /// </summary>
+    /// <param name="reason">Where the order came from (run end, rate-limit, lock-busy) — for the log.</param>
+    public void ArmUploadPostprocessing(string reason)
+    {
+        var delay = Plugin.Instance?.Configuration.UploadPostprocessDelayMinutes ?? 30;
+        if (delay < 1)
+        {
+            delay = 1;
+        }
+
+        ArmUploadPostprocessingAt(DateTime.UtcNow.AddMinutes(delay), reason);
+    }
+
+    /// <summary>
+    /// F-M445: arms the upload postprocessing for an explicit moment. Same "last order wins" rule as
+    /// <see cref="ArmUploadPostprocessing"/> — the previous moment is replaced, not compared.
+    /// </summary>
+    /// <param name="fireAtUtc">The moment (UTC) the postprocessing is due.</param>
+    /// <param name="reason">Where the order came from — for the log.</param>
+    public void ArmUploadPostprocessingAt(DateTime fireAtUtc, string reason)
+    {
+        var previous = _postprocessArmUtc;
+        _postprocessArmUtc = fireAtUtc;
+        _stateDirty = true;
+        ResetReschedule("postprocess");
+        LogUtil.Normal(
+            _logger,
+            previous == DateTime.MinValue
+                ? "[SubDL] Upload postprocessing armed for {FireAt:yyyy-MM-dd HH:mm} UTC — {Reason} (F-M445)."
+                : "[SubDL] Upload postprocessing re-armed for {FireAt:yyyy-MM-dd HH:mm} UTC — {Reason}; the order for {Previous:yyyy-MM-dd HH:mm} UTC is cancelled, the last one wins (F-M445).",
+            fireAtUtc, reason, previous);
+    }
+
+    /// <summary>
+    /// F-M176, kept for its callers: a rate-limit or lock-busy re-fire that must respect the spacing.
+    /// </summary>
+    /// <param name="fireAtUtc">The moment (UTC) the next attempt is due.</param>
     public void SchedulePostprocessFire(DateTime fireAtUtc)
     {
         if (!TryCountReschedule("postprocess", "lock-busy/rate-limit"))
@@ -350,12 +392,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             return;
         }
 
-        if (_postprocessDeferredUntil == DateTime.MinValue || fireAtUtc < _postprocessDeferredUntil)
-        {
-            _postprocessDeferredUntil = fireAtUtc;
-            _stateDirty = true;
-            LogUtil.Normal(_logger, "[SubDL] Postprocessing re-fire scheduled at {FireAt:yyyy-MM-dd HH:mm} UTC.", fireAtUtc);
-        }
+        ArmUploadPostprocessingAt(fireAtUtc, "lock-busy/rate-limit re-fire");
     }
 
     public void ScheduleRefreshFire(DateTime fireAtUtc)
@@ -447,7 +484,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         // A torn read would at worst name a moment one tick off, never a wrong worker.
         var down = _recoveryFireDownloadUtc;
         var up = _recoveryFireUploadUtc;
-        var post = _postprocessDeferredUntil;
+        var post = _postprocessArmUtc;
         var prune = _pruneDeferredUntil;
         var oshash = _oshashDeferredUntil;
 
@@ -896,53 +933,35 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             }
         }
 
-        // F-M176: upload postprocessing schedule — independent from upload pipeline.
-        // Respects the global run lock (defers by JobSpacingMinutes). Off/Never disables it;
-        // Daily/Weekly/Monthly resolve their own anchor so each interval actually works.
+        // F-M445 (operator decision 02.11.2026): the fixed postprocessing anchor is GONE — no interval,
+        // no diced day+time, no minimum spacing. One armed moment decides, and every finished upload run
+        // re-arms it ("the last order wins"). Upload switched off means nothing is armed at all: the
+        // postprocessing resolves rejected uploads, work that only exists while the direction is on
+        // (F-M291).
+        if (config.UploadEnabled && _postprocessArmUtc != DateTime.MinValue)
         {
-            var ppInterval = config.UploadPostprocessInterval;
-            // F-M291: postprocessing resolves REJECTED UPLOADS against /user/mySubtitles — work that only
-            // exists because the upload direction is on. With upload switched off the anchor is not even
-            // armed: the task used to keep firing on its own schedule, call SubDL and write a row, for a
-            // direction the user had switched off (the same shape as F-M290 for the seeder).
-            if (config.UploadEnabled
-                && ppInterval is not (UpdateInterval.Never or UpdateInterval.Manual or UpdateInterval.OnArrival))
+            if (nowUtc >= _postprocessArmUtc)
             {
-                var ppAnchor = ppInterval switch
+                if (!IsTaskRegistered<SubdlPostprocessTask>())
                 {
-                    UpdateInterval.Daily => ParseHhMmFromWeeklySpec(config.RandomPostprocessTime, now),
-                    UpdateInterval.Weekly => IsWeeklyDaySpec(config.RandomPostprocessTime, now)
-                        ? ParseWeeklySpec(config.RandomPostprocessTime, now)
-                        : null,
-                    UpdateInterval.Monthly => now.Day == config.RandomMonthlyDay
-                        ? ParseHhMm(config.RandomMonthlyTime, now)
-                        : null,
-                    _ => null
-                };
+                    // F-M212: task not registered yet — keep the order, try again next tick.
+                    return;
+                }
 
-                if (ppAnchor.HasValue)
+                if (!Pipeline.PipelineRunLock.IsFree(_logger))
                 {
-                    var ppMarker = ppAnchor?.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture);
-                    // F-M368: same split as the refresh and OSHash blocks.
-                    var ppDeferPending = _postprocessDeferredUntil != DateTime.MinValue;
-                    bool ppDue = AnchorJobGate.IsDue(
-                        now, ppAnchor, cadenceDue: true, _lastPostprocessMarker, ppMarker, ppDeferPending);
-
-                    if (ppDue && AnchorJobGate.DeferralElapsed(nowUtc, _postprocessDeferredUntil))
-                    {
-                        if (!IsTaskRegistered<SubdlPostprocessTask>())
-                        {
-                            return; // F-M212: task not registered yet — marker not consumed, retried next tick
-                        }
-
-                        _lastPostprocessMarker = ppMarker;
-                        _stateDirty = true;
-                        _postprocessDeferredUntil = DateTime.MinValue;
+                    // Busy lock: push the order forward by the job spacing instead of probing every tick.
+                    ArmUploadPostprocessingAt(nowUtc.AddMinutes(config.JobSpacingMinutes), "run lock busy");
+                }
+                else
+                {
+                    _postprocessArmUtc = DateTime.MinValue;
                     _stateDirty = true;
-                        ResetReschedule("postprocess"); // fired — clear the 16x counter
-                        LogUtil.Normal(_logger, "[SubDL] Postprocessing fire at {Anchor:yyyy-MM-dd HH:mm} local ({Interval}).", (DateTime)ppAnchor, ppInterval);
-                        _taskManager.QueueScheduledTask<SubdlPostprocessTask>(new TaskOptions());
-                    }
+                    ResetReschedule("postprocess");
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] Upload postprocessing fires now — armed 30-minute rhythm after the last upload run (F-M445).");
+                    _taskManager.QueueScheduledTask<SubdlPostprocessTask>(new TaskOptions());
                 }
             }
         }
@@ -1396,15 +1415,17 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             var payload = string.Format(
                 CultureInfo.InvariantCulture,
                 "{{\"refresh\":\"{0}\",\"oshash\":\"{1}\",\"postprocess\":\"{2}\",\"fired\":\"{3}\","
+                // F-M445: "postprocessDefer" keeps its field name — it now carries the ARMED moment
+                // rather than a lock-busy deferral, so an existing state file keeps working.
                 + "\"catchup\":{4},\"refreshDefer\":\"{5}\",\"oshashDefer\":\"{6}\",\"postprocessDefer\":\"{7}\",\"refetchDefer\":\"{8}\"}}",
                 _lastPruneMarker ?? string.Empty,
                 _lastOshashMarker ?? string.Empty,
-                _lastPostprocessMarker ?? string.Empty,
+                string.Empty, // F-M445: no postprocessing marker any more — the armed moment decides
                 _lastFiredMarker ?? string.Empty,
                 _catchUpFired ? "true" : "false",
                 _pruneDeferredUntil.ToString("O", CultureInfo.InvariantCulture),
                 _oshashDeferredUntil.ToString("O", CultureInfo.InvariantCulture),
-                _postprocessDeferredUntil.ToString("O", CultureInfo.InvariantCulture),
+                _postprocessArmUtc.ToString("O", CultureInfo.InvariantCulture),
                 _refetchDeferredUntil.ToString("O", CultureInfo.InvariantCulture));
             File.WriteAllText(Path.Combine(_configDirectory, SchedulerStateFile), payload);
             _stateDirty = false;
@@ -1456,11 +1477,6 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 _lastOshashMarker = o;
             }
 
-            if (fields.TryGetValue("postprocess", out var p) && !string.IsNullOrWhiteSpace(p))
-            {
-                _lastPostprocessMarker = p;
-            }
-
             if (fields.TryGetValue("fired", out var f) && !string.IsNullOrWhiteSpace(f))
             {
                 _lastFiredMarker = f;
@@ -1474,14 +1490,17 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
 
             _pruneDeferredUntil = ParseInstant(fields, "refreshDefer");
             _oshashDeferredUntil = ParseInstant(fields, "oshashDefer");
-            _postprocessDeferredUntil = ParseInstant(fields, "postprocessDefer");
+            // F-M445: the armed moment survives a restart — an upload run that finished before the
+            // restart still gets its postprocessing.
+            var armed = ParseInstant(fields, "postprocessDefer");
+            _postprocessArmUtc = armed == DateTime.MinValue ? DateTime.MinValue : AnchorJobGate.NormalizeDeadline(armed);
             _refetchDeferredUntil = ParseInstant(fields, "refetchDefer");
 
             LogUtil.Normal(_logger,
-                "[SubDL] Scheduler state restored from disk: refresh {Refresh}, oshash {Oshash}, postprocessing {Pp}, refetch slot {Fired}, catch-up {CatchUp}.",
+                "[SubDL] Scheduler state restored from disk: refresh {Refresh}, oshash {Oshash}, postprocessing armed for {Pp}, refetch slot {Fired}, catch-up {CatchUp}.",
                 _lastPruneMarker ?? "-",
                 _lastOshashMarker ?? "-",
-                _lastPostprocessMarker ?? "-",
+                _postprocessArmUtc == DateTime.MinValue ? "-" : _postprocessArmUtc.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
                 _lastFiredMarker ?? "-",
                 _catchUpFired);
         }

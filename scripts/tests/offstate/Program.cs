@@ -22,7 +22,6 @@ static PluginConfiguration Ready()
     c.UploadEnabled = true;
     c.SelectedLibraries = new System.Collections.Generic.List<string> { "Movies" };
     c.DownloadLanguages = "EN, DE";
-    c.UploadPostprocessInterval = UpdateInterval.Weekly;
     return c;
 }
 
@@ -46,9 +45,8 @@ Check("upload IGNORES the download language list — it has none", !WorkerOffSta
 
 // --- postprocessing: bound to upload, not to libraries ----------------------
 Check("postprocessing off when upload is off", Off(PP, c => c.UploadEnabled = false));
-Check("postprocessing off on Manual", Off(PP, c => c.UploadPostprocessInterval = UpdateInterval.Manual));
-Check("postprocessing off on Never", Off(PP, c => c.UploadPostprocessInterval = UpdateInterval.Never));
-Check("postprocessing off on OnArrival", Off(PP, c => c.UploadPostprocessInterval = UpdateInterval.OnArrival));
+// F-M445: there is no cadence left — the worker is off exactly when the upload direction is off.
+Check("postprocessing is never off while upload runs", !Off(PP, _ => { }));
 Check("postprocessing stays ON when no library is selected — it reads /user/mySubtitles",
     !WorkerOffState.Applies(PP, Mutate(c => c.SelectedLibraries.Clear())));
 
@@ -90,20 +88,14 @@ Check("database refresh NOT manual on Weekly/Monthly/Yearly",
 Check("oshash refresh manual on OshashRefreshMode.Manual", WorkerOffState.IsManualOnly(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Manual)));
 Check("oshash refresh manual on the legacy OshashRefreshMode.Never", WorkerOffState.IsManualOnly(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Never)));
 Check("oshash refresh NOT manual on Monthly", !WorkerOffState.IsManualOnly(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Monthly)));
-Check("postprocessing is manual on a Manual cadence", WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Manual)));
-Check("postprocessing is manual on the legacy Never", WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Never)));
-Check("postprocessing OnArrival is an automatism, NOT manual",
-    !WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.OnArrival)));
-Check("postprocessing OnArrival arms no clock (the gate still refuses the anchor)",
-    WorkerOffState.Applies(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.OnArrival)));
-Check("a weekly postprocessing is neither off nor manual",
-    !WorkerOffState.Applies(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Weekly))
-    && !WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Weekly)));
+// F-M445: no cadence means nothing to call "manual" either — the order comes from the upload run.
+Check("postprocessing is never reported as manual", !WorkerOffState.IsManualOnly(PP, Mutate(_ => { })));
+Check("postprocessing is never reported off while upload is on", !WorkerOffState.Applies(PP, Mutate(_ => { })));
 Check("a manual worker is NEVER reported as off (manual runs still work)",
     !WorkerOffState.Applies(DB, Mutate(c => c.PruneMode = PruneMode.Manual))
     && !WorkerOffState.Applies(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Manual)));
-Check("postprocessing is off in the gate when upload is off (the gate itself is unchanged)",
-    WorkerOffState.Applies(PP, Mutate(c => { c.UploadEnabled = false; c.UploadPostprocessInterval = UpdateInterval.Manual; })));
+Check("postprocessing is off in the gate when upload is off (F-M445: the switch is all that is left)",
+    WorkerOffState.Applies(PP, Mutate(c => c.UploadEnabled = false)));
 
 // --- the language parse matches the download pipeline's ---------------------
 var parsed = WorkerOffState.ParseTargetLanguages(" en, de ,EN,,");
@@ -191,7 +183,6 @@ static PluginConfiguration Mutate(Action<PluginConfiguration> mutate)
     c.DownloadEnabled = true; c.UploadEnabled = true;
     c.SelectedLibraries = new System.Collections.Generic.List<string> { "Movies" };
     c.DownloadLanguages = "EN, DE";
-    c.UploadPostprocessInterval = UpdateInterval.Weekly;
     mutate(c);
     return c;
 }

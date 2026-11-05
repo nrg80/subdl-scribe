@@ -338,17 +338,14 @@
                         </div>
 
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="UploadPostprocessInterval">Upload postprocessing interval</label>
-                            <select is="emby-select" id="UploadPostprocessInterval" name="UploadPostprocessInterval" class="emby-select-withcolor emby-select">
-                                <option value="Manual">Manual</option>
-                                <option value="Daily">Daily</option>
-                                <option value="Weekly">Weekly</option>
-                                <option value="Monthly">Monthly</option>
-                            </select>
-                            <!-- F-M437 (operator 04.11.2026 "Max pages 200 ist zu wenig. 20000 eher"): the page limit is a
-                                 ceiling for a catch-up run, NOT the depth of a normal run — the pass stops at
-                                 the watermark of the last one. Default: Daily. -->
-                            <div class="fieldDescription">How often stored upload ids are moved to their published entry id and rejected uploads are resolved. A run pages down only until it reaches the entries the last run saw, so it costs a few pages; the page limit (20000) only bounds a catch-up after a pause. Scheduled run is inhibited if upload is disabled. Default: Daily.</div>
+                            <label class="inputLabel inputLabelUnfocused" for="UploadPostprocessDelayMinutes">Upload postprocessing delay (minutes)</label>
+                            <input is="emby-input" type="number" id="UploadPostprocessDelayMinutes" name="UploadPostprocessDelayMinutes" min="1" max="1440" step="1" />
+                            <!-- F-M445 (operator decision 02.11.2026): no fixed anchor any more. Every finished
+                                 upload run arms the postprocessing for "run end + these minutes", and the LAST order
+                                 wins — a later run cancels the earlier one. F-M437 (operator 04.11.2026 "Max pages 200
+                                 ist zu wenig. 20000 eher"): the page limit is a ceiling for a catch-up run, NOT the
+                                 depth of a normal run — the pass stops at the watermark of the last one. Default: 30. -->
+                            <div class="fieldDescription">Minutes after the last upload run until stored upload ids are moved to their published entry id and rejected uploads are resolved. There is no fixed schedule: every finished upload run arms this timer, and the last order wins (a later run cancels the earlier one). A run pages down only until it reaches the entries the last run saw, so it costs a few pages; the page limit (20000) only bounds a catch-up after a pause. Nothing is armed while upload is disabled. Default: 30.</div>
                             <!-- Operator order 08.10.2026: the third refresh job gets its manual button too
                                  ("Knopf für upload Postprocessing habe ich dann vergessen. Auch manual dann statt never").
                                  It starts the TASK, like the two refresh buttons above — NOT the job's own
@@ -994,7 +991,7 @@
                         document.querySelector('#LogMode').value = config.LogMode;
                         document.querySelector('#OshashRefresh').value = config.OshashRefresh || 'Monthly';
         document.querySelector('#PruneMode').value = config.PruneMode || 'Weekly';
-        document.querySelector('#UploadPostprocessInterval').value = config.UploadPostprocessInterval || 'Daily';
+        document.querySelector('#UploadPostprocessDelayMinutes').value = config.UploadPostprocessDelayMinutes ?? 30;
                         document.querySelector('#QaValidateSrt').checked = config.QaValidateSrt;
                         document.querySelector('#QaCheckSync').checked = config.QaCheckSync;
                         document.querySelector('#QaVerifyLanguage').checked = config.QaVerifyLanguage;
@@ -1612,7 +1609,7 @@ workers.forEach(function (w) {
                         config.LogMode = document.querySelector('#LogMode').value;
                         config.OshashRefresh = document.querySelector('#OshashRefresh').value;
         config.PruneMode = document.querySelector('#PruneMode').value;
-        config.UploadPostprocessInterval = document.querySelector('#UploadPostprocessInterval').value;
+        config.UploadPostprocessDelayMinutes = parseInt(document.querySelector('#UploadPostprocessDelayMinutes').value, 10) || 30;
                         config.QaValidateSrt = document.querySelector('#QaValidateSrt').checked;
                         config.QaCheckSync = document.querySelector('#QaCheckSync').checked;
                         config.QaVerifyLanguage = document.querySelector('#QaVerifyLanguage').checked;

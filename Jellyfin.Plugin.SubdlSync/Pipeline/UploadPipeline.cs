@@ -1770,6 +1770,16 @@ public sealed class UploadPipeline : IPackFiller
                 _logger.LogDebug("[SubDL] upload: {Count} working file(s) of this run removed.", workFiles);
             }
 
+            // F-M445 (operator decision 02.11.2026): the end of every upload run re-arms the upload
+            // postprocessing, and the last order wins — a run that ends later cancels the earlier
+            // order. This is what makes the handle remap (upload id -> entry id) land on the same
+            // day the pack was built instead of the next morning.
+            if (!summary.StopRequested)
+            {
+                ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ArmUploadPostprocessing(
+                    $"upload run ended ({summary.Uploaded} uploaded)");
+            }
+
             PipelineRunLock.Release(_logger, "upload");
         }
     }
