@@ -171,6 +171,22 @@ Check("a pending fire turns the LAMP to defer for every outcome",
 Check("a failed row is no longer exempt from the deferral lamp",
     !page.Contains("wo !== 'failed' && wo !== 'run'"));
 
+// --- F-M447 (operator order 05.11.2026): "für das upload Postprocessing im worker status bitte
+// nicht defer sondern schedule verwenden. Der erste lauf ist planmäßig" -------------------------
+// Die Seite setzt fuer eine leere Begruendung das Wort "deferred" ein. Beim Postprocessing ist das
+// falsch: jeder beendete Upload-Lauf terminiert den Auftrag genau einmal, und dieser erste Lauf ist
+// planmaessig — nichts wurde vertagt. Geprueft wird das Paar: das Wort steht da, UND es haengt am
+// Postprocessing-Worker, nicht an allen.
+Check("the postprocessing note says `schedule` instead of the default `deferred`",
+    quota.Contains("reason = \"schedule\";"),
+    "an armed order that runs on plan is not a deferral");
+Check("the `schedule` word is gated on the postprocessing worker",
+    quota.Contains("string.Equals(worker.Key, Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey"),
+    "the other workers keep their real deferrals");
+Check("a failed postprocessing row still speaks before the word",
+    quota.Contains("if (string.IsNullOrEmpty(reason)"),
+    "the failure cause (F-M436) outranks any word about the order");
+
 Console.WriteLine();
 Console.WriteLine(f == 0 ? ">>> OFFSTATE OK" : $">>> OFFSTATE {f} FAILURE(S)");
 return f == 0 ? 0 : 1;

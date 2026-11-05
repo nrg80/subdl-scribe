@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.100
-**Status:** Implementation — v12.1.12.338.
+**Version:** 2.101
+**Status:** Implementation — v12.1.12.339.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 82 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 83 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -353,6 +353,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M445 [P] (Betreiber 02.11.2026):** **Der feste Anker des Upload-Nachlaufs entfällt — jeder beendete Upload-Lauf terminiert ihn neu, und der letzte Auftrag gewinnt.** Es gibt kein Intervall, keinen gewürfelten Tag-plus-Uhrzeit-Anker und keinen Mindestabstand mehr; ein noch offener Termin wird **storniert und ersetzt**, nicht addiert. Endet Upload 1 um 12:15, steht der Nachlauf auf 12:45; endet Upload 2 um 12:30, wird auf 13:00 umterminiert. **Der Termin wird beim Start eines Upload-Laufs storniert** — ein Auftrag aus einem früheren Lauf würde gegen einen Zustand feuern, den dieser Lauf gerade ändert — und am Laufende neu gesetzt. **Ein Nutzerstopp storniert den terminierten Postprocessing-Lauf** (Betreiber 02.11.2026: „Nutzerstopp terminiert auch den terminierten run vom Postprocessing") — Stop heißt Stop; der nächste reguläre Upload-Lauf terminiert wieder. Vorlaufzeit einstellbar (`UploadPostprocessDelayMinutes`, **0–1440**, Default 30), **0 = inaktiv**: kein Termin, und ein offener wird storniert. Der Termin überlebt einen Neustart; bei ausgeschaltetem Upload wird nichts terminiert (F-M291). **Die Statusseite nennt ihn in einer eigenen Zeile unter den Workern** („Postprocessing due …"); die Zeile verschwindet, sobald der Lauf startet. Bewusst nicht an der Worker-Ampel: da jeder Upload-Lauf terminiert, stünde sie dauerhaft auf Gelb und sagte nichts mehr. Grund für alles: der Handle-Remap Upload-Id → Eintrags-Id und das Wegräumen abgelehnter Uploads hingen am Tagesanker und liefen erst am nächsten Morgen — ein am selben Tag gebautes Pack löschte seine Einzeluploads noch mit der Upload-Id, die `deletePublishedSubtitle` nicht kennt (F-M435).
 
 **F-M446 [P] (Betreiber 05.11.2026 „Verhalten soll wie früher sein"):** **Ein Arrival-Lauf ist im Pipeline-Kern als solcher erkennbar.** Das Flag `IsArrivalRun` stand seit der Umstellung auf den Queue-Scope als Literal `false` in beiden Richtungen — der Scope (`QueueFilter` = nur die frisch eingetroffenen Ids, F-M233) trug die Einschränkung, das Flag sagte keiner Richtung mehr, dass sie ein Arrival-Lauf ist. Damit galten die beiden Arrival-Ausnahmen nie: ein Arrival-Lauf, der auf das Tageslimit (429) trifft, wartet **nicht** aus, sondern stoppt sauber und überlässt das Warten dem geplanten Lauf — sonst blockiert er den Run-Lock für Stunden (F-M65, Nutzerentscheidung 09.09.2026 Option B). Das Flag wird jetzt aus dem Scope abgeleitet (`arrivalScoped: scopeIds != null`), in beiden Richtungen gleich. Die Scoping-Regel selbst bleibt: **Arrival lädt nur die Arrivals, Manual und Refetch die ganze Warteschlange.**
+
+**F-M447 [P] (Betreiber 05.11.2026 „für das upload Postprocessing im worker status bitte nicht defer sondern schedule verwenden. Der erste lauf ist planmäßig"):** **Der terminierte Postprocessing-Auftrag heißt `schedule`, nicht `deferred`.** Die Statuszeile setzt für eine leere Begründung das Wort `deferred` ein. Beim Postprocessing ist das falsch: jeder beendete Upload-Lauf terminiert den Auftrag genau einmal, und dieser erste Lauf ist planmäßig — nichts wurde vertagt, kein Lauf ist gescheitert, kein Kontingent war aufgebraucht. Die Zeile lautet damit „Upl. Postproc.: schedule — next attempt <Tag Zeit>". Das Wort gilt **nur** für diesen Worker; alle anderen behalten ihre echten Vertagungen. Eine gescheiterte Postprocessing-Zeile behält Vorrang: „last run failed: …" steht vor dem Wort (F-M436).
 
 ## 4. Download Pipeline
 
