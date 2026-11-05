@@ -328,6 +328,12 @@ public sealed class UploadPipeline : IPackFiller
     {
         var summary = new RunSummary();
 
+        // F-M445 (operator order 02.11.2026, "bestehende Aufträge bereits beim Upload-Start stornieren"):
+        // an order left over from an earlier run is dropped the moment THIS run starts. It would fire
+        // against state this run is about to change, and the run's own end sets the new moment — so the
+        // order is cancelled here and armed again in the finally below.
+        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.CancelUploadPostprocessing("upload run started");
+
         // F-M247: record that this run was a dry run. It does the searching and the QA, so its
         // summary fills up with numbers, but it writes nothing to SubDL — the statistics must
         // not receive them. Set here, at the source, so a later counter cannot forget it.
@@ -1774,7 +1780,16 @@ public sealed class UploadPipeline : IPackFiller
             // postprocessing, and the last order wins — a run that ends later cancels the earlier
             // order. This is what makes the handle remap (upload id -> entry id) land on the same
             // day the pack was built instead of the next morning.
-            if (!summary.StopRequested)
+            //
+            // A USER STOP cancels the order instead (operator order 02.11.2026: "Nutzerstopp terminiert
+            // auch den terminierten run vom Postprocessing") — stop means stop, the scheduled run goes
+            // with the run it belonged to. The next regular upload run arms it again.
+            if (summary.StopRequested)
+            {
+                ScheduledTasks.SubdlSchedulerCoordinator.Instance?.CancelUploadPostprocessing(
+                    $"upload run stopped by the user ({summary.Uploaded} uploaded)");
+            }
+            else
             {
                 ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ArmUploadPostprocessing(
                     $"upload run ended ({summary.Uploaded} uploaded)");

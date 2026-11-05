@@ -591,7 +591,8 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>
     /// F-M445 (Betreiber-Entscheidung 02.11.2026): Vorlaufzeit des Upload-Nachlaufs nach dem Ende
-    /// eines Upload-Laufs, in Minuten. **Es gibt keinen festen Anker mehr** — jeder beendete
+    /// eines Upload-Laufs, in Minuten. **0 schaltet den Nachlauf ab** — dann wird nie ein Termin
+    /// gesetzt. Gültig sind 0..1440. **Es gibt keinen festen Anker mehr** — jeder beendete
     /// Upload-Lauf terminiert den Nachlauf neu auf „Laufende + diese Minuten", und der **letzte
     /// Auftrag gewinnt**: ein noch offener Termin wird überschrieben, nicht addiert. Läuft also
     /// Upload 1 um 12:15 aus, steht der Nachlauf auf 12:45; endet Upload 2 um 12:30, bleibt es bei
@@ -604,7 +605,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <c>deletePublishedSubtitle</c> nicht kennt (F-M435: 3758706 = Eintrag, 380828 = Upload).
     /// </para>
     /// </summary>
-    public int UploadPostprocessDelayMinutes { get; set; } = 30;
+    public int UploadPostprocessDelayMinutes { get; set; } = 30; // 0 = inaktiv, Bereich 0..1440
 
     /// <summary>
     /// F-M176: max mySubtitles pages fetched per postprocessing run. Default 5.

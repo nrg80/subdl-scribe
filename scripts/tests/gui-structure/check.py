@@ -1504,9 +1504,11 @@ def main():
     # naming it in the sentence was noise, and the operator asked for it twice on other labels too.
     # Asserted as a PAIR so a re-added suffix is caught as well as a lost rule: the binding sentence
     # is what the page must keep, the pointer at the button is what it must not grow back.
-    check("the description names the inhibited scheduled run",
-          "Nothing is armed while upload is disabled" in html,
-          "the page must say which of the two paths is bound")
+    # F-M445 (operator order 02.11.2026): the delay field carries the "0 = inactive" meaning, and the
+    # page states it — that replaced the sentence about the upload switch (the gate is asserted above).
+    check("the description names the off value of the delay",
+          "0 = inactive" in html,
+          "a field whose zero means 'off' must say so, or 0 reads like 'immediately'")
     # ── F-M445: fester Anker weg, Termin kommt vom Upload-Lauf, letzter Auftrag gewinnt ──
     check("the postprocessing interval menu is gone from the page",
           'id="UploadPostprocessInterval"' not in html,
@@ -1516,8 +1518,14 @@ def main():
           "the operator sets how long after the last upload run the postprocessing fires")
     check("the delay field is loaded and saved",
           "config.UploadPostprocessDelayMinutes ?? 30" in html
-          and "config.UploadPostprocessDelayMinutes = parseInt(" in html,
+          and "config.UploadPostprocessDelayMinutes = isNaN(ppDelay)" in html,
           "a field that is not wired is decoration")
+    check("a stored 0 survives the save path",
+          "isNaN(ppDelay) ? 30 : Math.max(0, Math.min(1440, ppDelay))" in html,
+          "`|| 30` would turn an inactive postprocessing back on at every save")
+    check("the delay field allows 0",
+          'id="UploadPostprocessDelayMinutes"' in html and 'min="0"' in html and 'max="1440"' in html,
+          "operator order: 0 to 1440 minutes")
     _ppcfg = read_source("Configuration", "PluginConfiguration.cs")
     check("the delay defaults to 30 minutes",
           "public int UploadPostprocessDelayMinutes { get; set; } = 30;" in _ppcfg,

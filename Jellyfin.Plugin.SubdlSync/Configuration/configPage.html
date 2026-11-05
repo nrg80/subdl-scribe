@@ -148,6 +148,10 @@
                         <h3>Workers</h3>
                         <div class="fieldDescription" id="WorkersLine" style="margin-bottom:0.25em;">&mdash;</div>
                         <div id="WorkerRunList"></div>
+                        <!-- F-M445 (operator order 02.11.2026 "eine logzeile unter die worker schreiben wann ein
+                             postprocessing ansteht. Zeile entfällt wenn gestartet"): one line, filled from
+                             PostprocessDue; empty and invisible while no order is armed. -->
+                        <div class="fieldDescription" id="PostprocessDueLine" style="margin-top:0.25em; display:none;"></div>
                         <!-- The LOCAL deferral line (F-M288): sits under the last worker light, in the
                              page's normal text colour. Empty while nothing is deferred, so it costs no
                              space. It is NOT part of the quota box — those bars describe the server's
@@ -339,13 +343,12 @@
 
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="UploadPostprocessDelayMinutes">Upload postprocessing delay (minutes)</label>
-                            <input is="emby-input" type="number" id="UploadPostprocessDelayMinutes" name="UploadPostprocessDelayMinutes" min="1" max="1440" step="1" />
-                            <!-- F-M445 (operator decision 02.11.2026): no fixed anchor any more. Every finished
-                                 upload run arms the postprocessing for "run end + these minutes", and the LAST order
-                                 wins — a later run cancels the earlier one. F-M437 (operator 04.11.2026 "Max pages 200
-                                 ist zu wenig. 20000 eher"): the page limit is a ceiling for a catch-up run, NOT the
-                                 depth of a normal run — the pass stops at the watermark of the last one. Default: 30. -->
-                            <div class="fieldDescription">Minutes after the last upload run until stored upload ids are moved to their published entry id and rejected uploads are resolved. There is no fixed schedule: every finished upload run arms this timer, and the last order wins (a later run cancels the earlier one). A run pages down only until it reaches the entries the last run saw, so it costs a few pages; the page limit (20000) only bounds a catch-up after a pause. Nothing is armed while upload is disabled. Default: 30.</div>
+                            <input is="emby-input" type="number" id="UploadPostprocessDelayMinutes" name="UploadPostprocessDelayMinutes" min="0" max="1440" step="1" />
+                            <!-- F-M445 (operator decision 02.11.2026): no fixed anchor. Each finished upload run
+                                 arms the postprocessing for "run end + these minutes"; the last order wins.
+                                 0 = inactive. F-M437 (operator 04.11.2026 "Max pages 200 ist zu wenig"): the page
+                                 limit is a catch-up ceiling, a normal run stops at the watermark. -->
+                            <div class="fieldDescription">Minutes after an upload run until upload ids are moved to their published entry id and rejected uploads are resolved. Every run re-arms it, the last order wins. 0 = inactive. Runs pages down to the last watermark; the page limit only bounds a catch-up. Default: 30.</div>
                             <!-- Operator order 08.10.2026: the third refresh job gets its manual button too
                                  ("Knopf für upload Postprocessing habe ich dann vergessen. Auch manual dann statt never").
                                  It starts the TASK, like the two refresh buttons above — NOT the job's own
@@ -1146,6 +1149,14 @@
                             if (line) {
                                 line.textContent = 'The last run of each worker.';
                             }
+                            var ppLine = document.querySelector('#PostprocessDueLine');
+                            if (ppLine) {
+                                // F-M445: the armed postprocessing order, in the same words as the rest of
+                                // the page. No order means no line — it vanishes the moment the run starts.
+                                var ppWhen = d && d.PostprocessDue ? subdlFmtDateTime(d.PostprocessDue) : '';
+                                ppLine.textContent = ppWhen ? 'Postprocessing due ' + ppWhen + '.' : '';
+                                ppLine.style.display = ppWhen ? '' : 'none';
+                            }
                             list.innerHTML = '';
 workers.forEach(function (w) {
                                 var oc = subdlWorkerOutcome(w.Outcome);
@@ -1609,7 +1620,9 @@ workers.forEach(function (w) {
                         config.LogMode = document.querySelector('#LogMode').value;
                         config.OshashRefresh = document.querySelector('#OshashRefresh').value;
         config.PruneMode = document.querySelector('#PruneMode').value;
-        config.UploadPostprocessDelayMinutes = parseInt(document.querySelector('#UploadPostprocessDelayMinutes').value, 10) || 30;
+        // F-M445: 0 is a MEANING (inactive), so it must survive the parse — a bare `|| 30` would turn it back on.
+        var ppDelay = parseInt(document.querySelector('#UploadPostprocessDelayMinutes').value, 10);
+        config.UploadPostprocessDelayMinutes = isNaN(ppDelay) ? 30 : Math.max(0, Math.min(1440, ppDelay));
                         config.QaValidateSrt = document.querySelector('#QaValidateSrt').checked;
                         config.QaCheckSync = document.querySelector('#QaCheckSync').checked;
                         config.QaVerifyLanguage = document.querySelector('#QaVerifyLanguage').checked;

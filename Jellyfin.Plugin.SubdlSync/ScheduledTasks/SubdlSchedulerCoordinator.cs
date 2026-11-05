@@ -353,9 +353,17 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     public void ArmUploadPostprocessing(string reason)
     {
         var delay = Plugin.Instance?.Configuration.UploadPostprocessDelayMinutes ?? 30;
-        if (delay < 1)
+        if (delay > 1440)
         {
-            delay = 1;
+            delay = 1440;
+        }
+
+        // F-M445 (operator order 02.11.2026, "0 inaktiv"): a zero delay disables the postprocessing —
+        // no order is armed at all, and an order that is still open is cancelled.
+        if (delay <= 0)
+        {
+            CancelUploadPostprocessing($"delay is 0 — the postprocessing is inactive ({reason})");
+            return;
         }
 
         ArmUploadPostprocessingAt(DateTime.UtcNow.AddMinutes(delay), reason);
@@ -380,6 +388,36 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 : "[SubDL] Upload postprocessing re-armed for {FireAt:yyyy-MM-dd HH:mm} UTC — {Reason}; the order for {Previous:yyyy-MM-dd HH:mm} UTC is cancelled, the last one wins (F-M445).",
             fireAtUtc, reason, previous);
     }
+
+    /// <summary>
+    /// F-M445 (operator order 02.11.2026): cancels an open postprocessing order. The order is cancelled
+    /// when an upload run STARTS — while the run works, its own end will set the new moment, and a
+    /// leftover order from an earlier run must not fire against a half-written state.
+    /// </summary>
+    /// <param name="reason">Why the order is dropped — for the log.</param>
+    public void CancelUploadPostprocessing(string reason)
+    {
+        if (_postprocessArmUtc == DateTime.MinValue)
+        {
+            return;
+        }
+
+        var cancelled = _postprocessArmUtc;
+        _postprocessArmUtc = DateTime.MinValue;
+        _stateDirty = true;
+        LogUtil.Normal(
+            _logger,
+            "[SubDL] Upload postprocessing cancelled — the order for {Cancelled:yyyy-MM-dd HH:mm} UTC is dropped: {Reason} (F-M445).",
+            cancelled, reason);
+    }
+
+    /// <summary>
+    /// F-M445: the moment the upload postprocessing is due, or null when none is armed. The status page
+    /// prints it on its own line under the workers, and the line disappears as soon as it fires.
+    /// </summary>
+    /// <returns>The armed moment (UTC), or null.</returns>
+    public DateTime? GetUploadPostprocessDue()
+        => _postprocessArmUtc == DateTime.MinValue ? null : _postprocessArmUtc;
 
     /// <summary>
     /// F-M176, kept for its callers: a rate-limit or lock-busy re-fire that must respect the spacing.
