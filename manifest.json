@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.331",
-        "changelog": "v12.1.12.331: the pack fill takes the subtitle that is already uploaded instead of extracting every track of the file — no more ~900 MB held per run (F-M440).",
+        "version": "12.1.12.332",
+        "changelog": "v12.1.12.332: the pack fill keeps its texts in the run's working directory instead of a persistent store — gone when the run ends (F-M440/F-M441).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.331-dev/Jellyfin.Plugin.SubdlSync_12.1.12.331.zip",
-        "checksum": "a7ccf8420fff610ae44a87ca5ae2dc78",
-        "timestamp": "2026-11-04T20:27:31Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.332-dev/Jellyfin.Plugin.SubdlSync_12.1.12.332.zip",
+        "checksum": "3a527ab74917c168030284c8d47a5a65",
+        "timestamp": "2026-11-05T03:16:48Z"
       }
     ]
   }
