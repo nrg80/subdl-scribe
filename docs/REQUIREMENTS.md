@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.96
-**Status:** Implementation — v12.1.12.332.
+**Version:** 2.97
+**Status:** Implementation — v12.1.12.333.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 77 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 80 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -343,6 +343,12 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M440 [P] (Betreiber-Korrektur 04.11.2026):** **Ein Pack-Fill nimmt den Untertitel, der bereits hochgeladen ist — er extrahiert die Datei nicht erneut für jede Sprache.** Der Text einer Folge, die schon als Einzelupload draußen ist, wird beim Pack-Bau aus der Datei gelesen (der einzige Ort, an dem er noch liegt, denn der Store hält nur Hashes, Status und SubDL-Ids) und dann im **Arbeitsordner des Laufs** abgelegt. Ein zweiter Pack, der dieselbe Folge braucht, liest sie von dort statt ffmpeg erneut zu rufen — und **nur die tatsächlich gefragten Spuren**, nie alle Spuren des Containers.
 
 **F-M441 [P] (Betreiber 04.11.2026 „Kein dauerhafter store"):** **Die Untertitel liegen für die Dauer eines Laufs auf Platte, danach nicht mehr.** Der Arbeitsordner ist `<Temp>/subdl-scribe/run-<Zeitstempel>-<Id>`, eine Datei je Folge/Sprache/Variante/Spur (`tt1234567_s01e02_de_hi_p2.srt`). Am Laufende wird er gelöscht; was ein abgebrochener Lauf hinterlässt, räumt der Start des nächsten Laufs weg (älter als zwei Tage). Es gibt **keinen dauerhaften Text-Store**, keinen Deckel und keinen Aufräum-Task. Reihenfolge je Staffel: **erst Pack bauen und hochladen, dann die aufgenommenen Einzeluploads per Eintrags-Id bei SubDL löschen** — die Löschung bleibt wie beauftragt **vor** dem Pack-Upload (F-M391) —, zuletzt die Folgen, die im Pack nicht unterkamen, einzeln hochladen.
+
+**F-M442 [P] (Betreiber 04.11.2026 „Verbesserungsvorschläge 1 bis 4"):** **Gleichheit der Quelle wird VOR der ersten Extraktion geprüft, und die Skip-Zeile sagt, was wirklich passiert.** Qualität steht in Pfad und Dateiname, die Framerate in der Stream-Liste — beides ohne ffmpeg lesbar. Weichen Qualitätsstufen oder Framerates über die ausgestrahlten Folgen ab, wird die Staffel abgelehnt, ohne eine einzige Datei zu extrahieren; die Zeile nennt die abweichenden Folgen (`S01E04 (ATVP.WEB-DL/23,809)`). Statt „nothing is re-sent — it is already up" steht der tatsächliche Zustand: sind alle Folgen oben, wird nichts erneut gesendet; sonst gehen die fehlenden danach als Einzeluploads hoch.
+
+**F-M443 [P] (Betreiber 04.11.2026):** **Ein bereits abgelehnter Track wird nicht erneut extrahiert.** Der Fill fragt vor dem ffmpeg-Aufruf den Ablehnungsspeicher je (Datei-Hash, Spur) — denselben, den der Einzelupload-Pfad seit F-M68 benutzt. Sind alle Spuren einer Sprache abgelehnt, entfällt die Extraktion ganz.
+
+**F-M444 [P] (Betreiber 04.11.2026):** **Liegt eine Folge in der Bibliothek mehrfach (zweite Fassung), bekommt jede Datei einen eigenen Versuch.** Bisher entschied `FirstOrDefault`; fiel diese Datei durch ein Gate, starb das Pack, obwohl eine zweite Fassung derselben Folge die Sprache ebenfalls trug. Die Dateien werden in Bibliotheksreihenfolge probiert; die Zeile nennt, welche Fassung gewonnen hat bzw. warum die vorige durchfiel.
 
 ## 4. Download Pipeline
 

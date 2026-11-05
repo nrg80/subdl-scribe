@@ -321,9 +321,18 @@ public sealed class SeasonPackCoordinator
         // two episodes carry no German track; asking "is every aired episode known with this
         // language" costs one look into the store and saves the whole extraction when the answer is
         // no. The remaining episodes still go up — as singles, not as a pack.
+        // F-M442: what counts is what is REALLY up — the skip messages used to say "nothing is re-sent —
+        // it is already up" even for a season whose singles had never been uploaded.
+        var upNow = _registry != null
+            ? _registry.EpisodesWithLanguage(imdbId, season, lang, hi)
+            : new List<int>();
+        string stateSentence = upNow.Count >= aired.Count
+            ? $"all {aired.Count} episode(s) are already up as singles, nothing is re-sent"
+            : $"{upNow.Count} of {aired.Count} episode(s) are up, the remaining {aired.Count - upNow.Count} go up as singles after this pass";
+
         if (_registry != null)
         {
-            var withLanguage = _registry.EpisodesWithLanguage(imdbId, season, lang, hi);
+            var withLanguage = upNow;
             if (!SeasonPack.IsComplete(aired, withLanguage))
             {
                 // F-M433 (operator order 03.11.2026, "wieso geht Tracker einzeln hoch?"): the store only
@@ -358,6 +367,43 @@ public sealed class SeasonPackCoordinator
             }
         }
 
+        // F-M442 (operator 04.11.2026, "Verbesserungsvorschläge 1 bis 4"): quality and frame rate are
+        // readable from the path and the stream list — the uniformity check runs BEFORE the first
+        // extraction instead of after all of them. Measured 04.11.2026: a season with 7x 23,976 and
+        // 3x 23,809 fps had every one of its ten files extracted and was refused afterwards.
+        var spread = new List<(int Episode, string? Quality, string? Framerate)>(aired.Count);
+        foreach (int episode in SeasonPack.AiredNumbers(aired))
+        {
+            var (quality, framerate) = _filler.SourceFacts(imdbId, season, episode);
+            if (string.IsNullOrWhiteSpace(quality) || string.IsNullOrWhiteSpace(framerate))
+            {
+                spread.Clear();
+                break;
+            }
+
+            spread.Add((episode, quality, framerate));
+        }
+
+        if (spread.Count == aired.Count)
+        {
+            var qualities = spread.Select(x => x.Quality!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var framerates = spread.Select(x => x.Framerate!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (qualities.Count > 1 || framerates.Count > 1)
+            {
+                var deviating = spread
+                    .Where(x => !string.Equals(x.Quality, qualities[0], StringComparison.OrdinalIgnoreCase)
+                             || !string.Equals(x.Framerate, framerates[0], StringComparison.OrdinalIgnoreCase))
+                    .Select(x => $"S{key.season:00}E{x.Episode:00} ({x.Quality}/{x.Framerate})")
+                    .ToList();
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack skipped before any extraction — {Imdb} S{Season} [{Lang}]: {QualityCount} quality level(s) and {FramerateCount} frame rate(s) across {Aired} episode(s); {Deviating} carries another source, and {State} (F-M442).",
+                    key.imdbId, key.season, key.lang, qualities.Count, framerates.Count, aired.Count,
+                    string.Join(", ", deviating.Take(6)), stateSentence);
+                return;
+            }
+        }
+
         var group = new List<Candidate>(aired.Count);
         foreach (int episode in SeasonPack.AiredNumbers(aired))
         {
@@ -370,8 +416,8 @@ public sealed class SeasonPackCoordinator
                 // episode's subtitle is up already or it never was — either way this run is done.
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: episode {Episode} cannot join from what is already uploaded, nothing is sent.",
-                    imdbId, season, SeasonPack.LangTag(lang, hi), episode);
+                    "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: episode {Episode} cannot join, and {State} (F-M442).",
+                    imdbId, season, SeasonPack.LangTag(lang, hi), episode, stateSentence);
                 return;
             }
 
@@ -387,8 +433,8 @@ public sealed class SeasonPackCoordinator
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: the episodes do not share one source, and nothing is re-sent — it is already up.",
-                imdbId, season, SeasonPack.LangTag(lang, hi));
+                "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: the episodes do not share one source, and {State} (F-M442).",
+                imdbId, season, SeasonPack.LangTag(lang, hi), stateSentence);
             return;
         }
 

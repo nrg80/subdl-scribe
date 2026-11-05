@@ -3248,9 +3248,14 @@ public sealed class UploadPipeline : IPackFiller
     {
         ct.ThrowIfCancellationRequested();
 
-        BaseItem? item = FindSeasonEpisode(imdbId, season, episode);
-        string? mediaPath = item?.Path;
-        if (item == null || string.IsNullOrWhiteSpace(mediaPath))
+        // F-M444 (operator 04.11.2026, "Verbesserungsvorschläge 1 bis 4"): an episode can sit in the
+        // library more than once — a second release of the same episode. Until now FirstOrDefault
+        // decided, so a file that failed a gate killed the pack although another file of the SAME
+        // episode carried the language too. Every file is tried now, in library order.
+        var files = FindSeasonEpisodeItems(imdbId, season, episode)
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Path))
+            .ToList();
+        if (files.Count == 0)
         {
             LogUtil.Normal(
                 _logger,
@@ -3258,6 +3263,53 @@ public sealed class UploadPipeline : IPackFiller
                 imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
             return null;
         }
+
+        for (int index = 0; index < files.Count; index++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (member, why) = await FillFromFileAsync(
+                files[index], imdbId, season, episode, lang, hearingImpaired, ct).ConfigureAwait(false);
+            if (member != null)
+            {
+                if (index > 0)
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — file {Nth} of {Count} joins the pack, the file(s) before it did not (F-M444).",
+                        imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), index + 1, files.Count);
+                }
+
+                return member;
+            }
+
+            if (index < files.Count - 1)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — file {Nth} of {Count} does not qualify ({Reason}), trying the next file of this episode (F-M444).",
+                    imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), index + 1, files.Count, why);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// F-M444: one file of an episode, put through the whole filler. Split out of
+    /// <see cref="FillAsync"/> so that a second file of the same episode gets a full attempt of its own.
+    /// </summary>
+    /// <param name="item">Episode item (one file).</param>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="lang">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI variant.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The member (or null) and the reason the file was refused.</returns>
+    private async Task<(SeasonPackCoordinator.Candidate? Member, string Reason)> FillFromFileAsync(
+        BaseItem item, string imdbId, int season, int episode, string lang, bool hearingImpaired, CancellationToken ct)
+    {
+        string mediaPath = item.Path!;
 
         // F-M431 (operator order 03.11.2026: "wenn eine sprache durchfällt und eine weitere da ist, diese
         // auch versuchen zu verwenden"): a file may carry more than one track of the same language. Until
@@ -3272,10 +3324,39 @@ public sealed class UploadPipeline : IPackFiller
                 _logger,
                 "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — no embedded text track for this language and variant, it does not join the pack.",
                 imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
-            return null;
+            return (null, "no embedded text track for this language and variant");
         }
 
         string? reason = null;
+
+        // F-M443 (operator 04.11.2026, "Verbesserungsvorschläge"): a track whose verdict is already in
+        // the store is not extracted again. The single path has asked EmbedRejectedReason before doing
+        // any work since F-M68; the fill did not, so every run pulled a stream it had already refused
+        // out of the container once more.
+        string? fillMediaHash = MediaHashFor(mediaPath);
+        if (!string.IsNullOrWhiteSpace(fillMediaHash))
+        {
+            var alreadyRefused = fillPositions
+                .Where(position => Registry.EmbedRejectedReason(fillMediaHash, position) != null)
+                .ToList();
+            if (alreadyRefused.Count > 0)
+            {
+                fillPositions = fillPositions.Where(position => !alreadyRefused.Contains(position)).ToList();
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — {Count} track(s) are already refused in the store, not extracted again (F-M443).",
+                    imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), alreadyRefused.Count);
+            }
+
+            if (fillPositions.Count == 0)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — every track of this language is already refused in the store, nothing is extracted (F-M443).",
+                    imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
+                return (null, "every track of this language is already refused in the store");
+            }
+        }
 
         // F-M441 (operator 04.11.2026, "kein dauerhafter store"): the member's text comes out of the
         // file, and it is written to the RUN's working directory — not held in memory for the whole
@@ -3328,7 +3409,7 @@ public sealed class UploadPipeline : IPackFiller
                         imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), attempt + 1, fillPositions.Count);
                 }
 
-                return member;
+                return (member, string.Empty);
             }
 
             if (attempt < fillPositions.Count - 1)
@@ -3344,7 +3425,7 @@ public sealed class UploadPipeline : IPackFiller
             _logger,
             "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — none of the {Count} track(s) of this language qualifies ({Reason}), it does not join the pack.",
             imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), fillPositions.Count, reason);
-        return null;
+        return (null, reason);
     }
 
     /// <summary>
@@ -3456,6 +3537,46 @@ public sealed class UploadPipeline : IPackFiller
     /// <returns>The episode item, or null.</returns>
     private BaseItem? FindSeasonEpisode(string imdbId, int season, int episode)
         => SeasonItems(imdbId, season).FirstOrDefault(c => IsSeasonEpisode(c, imdbId, season, episode));
+
+    /// <summary>
+    /// F-M444: every file of one episode, in library order — an episode may exist twice (a second
+    /// release), and the first file is no longer the only one that gets a chance.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <returns>The items that carry this episode.</returns>
+    private List<BaseItem> FindSeasonEpisodeItems(string imdbId, int season, int episode)
+        => SeasonItems(imdbId, season)
+            .Where(candidate => IsSeasonEpisode(candidate, imdbId, season, episode))
+            .ToList();
+
+    /// <summary>
+    /// F-M442 (operator 04.11.2026, "Verbesserungsvorschläge"): the source facts of an aired episode,
+    /// read WITHOUT extracting anything. Quality comes from the path and the file name, the frame rate
+    /// from the stream list — both were checked only after every member had been pulled out of its
+    /// container, which cost ten extractions for the mixed-source season measured on 04.11.2026.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <returns>Quality and frame rate, null where the library cannot answer.</returns>
+    public (string? Quality, string? Framerate) SourceFacts(string imdbId, int season, int episode)
+    {
+        foreach (var item in FindSeasonEpisodeItems(imdbId, season, episode))
+        {
+            string? path = item.Path;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+
+            string loosePath = Path.GetFileNameWithoutExtension(path);
+            return (SourceQuality.Detect(loosePath, path), GetFramerateCode(item));
+        }
+
+        return (null, null);
+    }
 
     /// <summary>
     /// F-M433: the language pairs the FILES of a season carry, read from the stream lists (no extraction).

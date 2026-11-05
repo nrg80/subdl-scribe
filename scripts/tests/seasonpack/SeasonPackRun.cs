@@ -105,6 +105,13 @@ internal static class Program
         public bool FileCarriesLanguage(string imdbId, int season, int episode, string lang, bool hearingImpaired)
             => InFiles.Contains((lang, hearingImpaired));
 
+        /// <summary>F-M442: what the library says about quality and frame rate, per episode.</summary>
+        public Func<int, (string? Quality, string? Framerate)> Source { get; set; }
+            = _ => ("1080p.WEB-DL", "23,976");
+
+        public (string? Quality, string? Framerate) SourceFacts(string imdbId, int season, int episode)
+            => Source(episode);
+
         public IReadOnlyCollection<(string Language, bool HearingImpaired)> FileLanguages(string imdbId, int season)
             => InFiles;
 
@@ -565,10 +572,34 @@ internal static class Program
         var logHole = new List<string>();
         var coordinatorHole = NewCoordinator(logHole, complete, packable, fillerHole, dryConfig);
         coordinatorHole.FillOnlyAsync("tt1", 1, "EN", false, CancellationToken.None).GetAwaiter().GetResult();
-        Check(logHole.Any(l => l.Contains("episode 5 cannot join from what is already uploaded, nothing is sent", StringComparison.Ordinal)),
+        Check(logHole.Any(l => l.Contains("episode 5 cannot join, and ", StringComparison.Ordinal)),
             "one episode that cannot join stops the pack and names itself");
         Check(!logHole.Any(l => l.Contains("DRY-RUN would upload season pack", StringComparison.Ordinal)),
             "no partial pack is ever sent");
+
+        // ── F-M442: gemischte Quellen fallen VOR der ersten Extraktion auf ──────
+        var fillerMixed = new FakeFiller(refuse: Array.Empty<int>(), answer: -1)
+        {
+            Source = episode => episode == 4 ? ("ATVP.WEB-DL", "23,809") : ("1080p.WEB-DL", "23,976"),
+        };
+        var logMixed = new List<string>();
+        var coordinatorMixed = NewCoordinator(logMixed, complete, packable, fillerMixed, dryConfig);
+        coordinatorMixed.FillOnlyAsync("tt1", 1, "EN", false, CancellationToken.None).GetAwaiter().GetResult();
+        Check(fillerMixed.Calls.Count == 0,
+            "F-M442: a mixed-source season is refused before the first extraction");
+        Check(logMixed.Any(l => l.Contains("skipped before any extraction", StringComparison.Ordinal)
+                                && l.Contains("S01E04", StringComparison.Ordinal)),
+            "F-M442: the line names the episode that carries another source");
+        Check(logMixed.Any(l => l.Contains("go up as singles after this pass", StringComparison.Ordinal)
+                                || l.Contains("already up as singles", StringComparison.Ordinal)),
+            "F-M442: the skip line states what really happens to the episodes instead of claiming they are up");
+
+        // Gleichmaessige Quellen kommen weiterhin bis zum Fill durch.
+        var fillerEven = new FakeFiller(refuse: Array.Empty<int>(), answer: -1);
+        var logEven = new List<string>();
+        var coordinatorEven = NewCoordinator(logEven, complete, packable, fillerEven, dryConfig);
+        coordinatorEven.FillOnlyAsync("tt1", 1, "EN", false, CancellationToken.None).GetAwaiter().GetResult();
+        Check(fillerEven.Calls.Count == 8, "F-M442: one quality and one frame rate across the season still packs");
 
         // ── F-M407: TMDb zuerst ─────────────────────────────────────────────────
         var seasonIndexSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SeasonEpisodeIndex.cs"));
@@ -651,6 +682,18 @@ internal static class Program
             "F-M435: a pack stores the entry id when the published list names it");
         Check(uploadSrc.Contains("entry id {Id} taken from myPublishedSubtitles"),
             "F-M435: a single and a movie store the entry id the same way");
+
+        // ── F-M442/F-M443/F-M444: die drei Vorabprüfungen und die zweite Fassung ──
+        Check(uploadSrc.Contains("public (string? Quality, string? Framerate) SourceFacts("),
+            "F-M442: quality and frame rate are readable without extracting anything");
+        Check(uploadSrc.Contains("Registry.EmbedRejectedReason(fillMediaHash, position)"),
+            "F-M443: the fill asks the reject store before it extracts");
+        Check(uploadSrc.Contains("every track of this language is already refused in the store, nothing is extracted"),
+            "F-M443: a language whose tracks are all refused costs no extraction at all");
+        Check(uploadSrc.Contains("FindSeasonEpisodeItems(") && uploadSrc.Contains("trying the next file of this episode"),
+            "F-M444: a second file of the same episode gets an attempt of its own");
+        Check(coordinatorSrc.Contains("go up as singles after this pass"),
+            "F-M442: the skip messages carry the real state of the season, not a guess");
 
         // ── F-M441: der Fill arbeitet über Dateien im Lauf-Ordner, nicht über den Speicher ────────
         Check(uploadSrc.Contains("_workFiles.TryRead(imdbId, season, episode, lang, hearingImpaired, position, out string? onDisk)"),
