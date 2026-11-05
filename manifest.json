@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.332",
-        "changelog": "v12.1.12.332: the pack fill keeps its texts in the run's working directory instead of a persistent store — gone when the run ends (F-M440/F-M441).",
+        "version": "12.1.12.337",
+        "changelog": "v12.1.12.337: the settings description no longer explains the re-arming — one sentence, one fact.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.332-dev/Jellyfin.Plugin.SubdlSync_12.1.12.332.zip",
-        "checksum": "3a527ab74917c168030284c8d47a5a65",
-        "timestamp": "2026-11-05T03:16:48Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.337-dev/Jellyfin.Plugin.SubdlSync_12.1.12.337.zip",
+        "checksum": "5d7ffa00b1761c9b52bf1f431378f8d8",
+        "timestamp": "2026-11-05T04:33:01Z"
       }
     ]
   }
