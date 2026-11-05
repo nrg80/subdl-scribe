@@ -346,9 +346,9 @@
                             <input is="emby-input" type="number" id="UploadPostprocessDelayMinutes" name="UploadPostprocessDelayMinutes" min="0" max="1440" step="1" />
                             <!-- F-M445 (operator decision 02.11.2026): no fixed anchor. Each finished upload run
                                  arms the postprocessing for "run end + these minutes"; the last order wins.
-                                 0 = inactive. F-M437 (operator 04.11.2026 "Max pages 200 ist zu wenig"): the page
-                                 limit is a catch-up ceiling, a normal run stops at the watermark. -->
-                            <div class="fieldDescription">Minutes after an upload run until upload ids are moved to their published entry id and rejected uploads are resolved. Every run re-arms it, the last order wins. 0 = inactive. Runs pages down to the last watermark; the page limit only bounds a catch-up. Default: 30.</div>
+                                 0 = inactive. (Operator order 02.11.2026: the watermark hint left the page — it is
+                                 internal state, not a setting.) -->
+                            <div class="fieldDescription">Minutes after an upload run until upload ids are moved to their published entry id and rejected uploads are resolved. Every run re-arms it, the last order wins. 0 = inactive. Default: 30.</div>
                             <!-- Operator order 08.10.2026: the third refresh job gets its manual button too
                                  ("Knopf für upload Postprocessing habe ich dann vergessen. Auch manual dann statt never").
                                  It starts the TASK, like the two refresh buttons above — NOT the job's own
