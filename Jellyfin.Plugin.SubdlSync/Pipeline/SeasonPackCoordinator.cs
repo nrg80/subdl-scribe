@@ -79,7 +79,6 @@ public sealed class SeasonPackCoordinator
 
     private readonly SubdlApiClient _api;
     private readonly ContentHashRegistry _registry;
-    private readonly Api.OwnTextStore _ownTexts = new();
     private readonly ILogger _logger;
     private readonly PluginConfiguration _config;
     private readonly IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> _complete;
@@ -511,7 +510,7 @@ public sealed class SeasonPackCoordinator
         // find out about on SubDL's side; deleting first makes the pack the only carrier.
         var absorbed = ordered
             .Where(x => !string.IsNullOrWhiteSpace(x.AbsorbedSingleId))
-            .Select(x => (Episode: x.Episode, Id: x.AbsorbedSingleId!, x.HearingImpaired))
+            .Select(x => (Episode: x.Episode, Id: x.AbsorbedSingleId!))
             .ToList();
         // F-M412 (operator order 02.11.2026): "da muss stehen ob wir es hochgeladen haben und ob wir
         // es loeschen koennen". The state answers both: the row says whether we uploaded the single,
@@ -536,10 +535,6 @@ public sealed class SeasonPackCoordinator
             if (gone)
             {
                 deletedIds.Add(single.Id);
-
-                // F-M440: the single is gone from SubDL, so its stored text goes with it — the pack
-                // carries that episode now, a later fill must not resurrect the deleted entry.
-                _ownTexts.Remove(key.ImdbId, key.Season, single.Episode, key.Lang, single.HearingImpaired);
                 LogUtil.Normal(
                     _logger,
                     "[SubDL] season pack absorbs the single upload of {Imdb} S{Season}E{Episode} [{Lang}] — id {Id} deleted before the pack.",

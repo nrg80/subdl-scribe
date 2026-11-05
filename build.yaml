@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.331"
+version: "12.1.12.332"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.332: the pack fill keeps its texts in the run's working directory instead of a persistent store — gone when the run ends (F-M440/F-M441).
   v12.1.12.331: the pack fill takes the subtitle that is already uploaded instead of extracting every track of the file — no more ~900 MB held per run (F-M440).
   v12.1.12.330: a plugin-owned field that is new to the configuration file survives a restart — the partial writer clears xsi:nil and inserts at the declared position (F-M438).
   v12.1.12.329: the page ceiling of the postprocessing walk rises to 20000 so a large backlog is reachable in one catch-up run; the run itself stays watermark-bound (F-M437).

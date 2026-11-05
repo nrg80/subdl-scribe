@@ -9,7 +9,7 @@
   implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   See the GNU General Public License for more details.
 
-  Store-free: exercises the own-text store on a temp directory —
+  Store-free: exercises the run's working directory on a temp folder —
   no HTTP, no database, no Jellyfin instance.
 -->
 <Project Sdk="Microsoft.NET.Sdk">
@@ -18,8 +18,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>owntextrun</AssemblyName>
-    <RootNamespace>OwnTextRun</RootNamespace>
+    <AssemblyName>workfilesrun</AssemblyName>
+    <RootNamespace>WorkFilesRun</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
     <NoWarn>$(NoWarn);CA1305;CA1307;CA1862</NoWarn>
     <JellyfinDir Condition="'$(JellyfinDir)' == ''">/opt/data/jf-test/jellyfin</JellyfinDir>

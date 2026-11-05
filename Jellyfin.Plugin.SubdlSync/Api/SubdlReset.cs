@@ -111,9 +111,6 @@ public class SubdlReset : ControllerBase
                 // would mean the next run serves files from a state that no longer exists anywhere.
                 int purgedArchives = ArchiveDiskCache.PurgeDirectory(dataDir);
 
-                // F-M440: the stored own texts go with it for the same reason — the registry rows that
-                // make them reachable are deleted here, so keeping the texts would leave orphaned state.
-                int purgedOwnTexts = OwnTextStore.PurgeDirectory(dataDir);
 
                 Plugin.Instance.RecreateDbContext();
 
@@ -124,8 +121,8 @@ public class SubdlReset : ControllerBase
                 Plugin.Instance.ResetStatusStats();
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] Reset \"all\": status counters zeroed with the database, {Count} cached archive(s) and {Texts} stored text(s) purged.",
-                    purgedArchives, purgedOwnTexts);
+                    "[SubDL] Reset \"all\": status counters zeroed with the database, {Count} cached archive(s) purged.",
+                    purgedArchives);
             }
             else if (scope.Equals("upload", StringComparison.OrdinalIgnoreCase))
             {

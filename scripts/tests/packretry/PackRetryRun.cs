@@ -290,7 +290,8 @@ internal static class Program
 
         // ── 15. F-M405: eine Extraktion je Datei, nicht je Sprache ───────────────
         Console.WriteLine("15. The filler extracts a file once per run");
-        Check(upload.Contains("_fillTextCache"), "the filler keeps a per-run extraction cache");
+        Check(upload.Contains("_workFiles.TryRead(") && upload.Contains("_workFiles.Write("),
+            "the filler keeps a per-run extraction cache — on disk, in the run's working directory (F-M441)");
         Check(upload.Contains("FfmpegTools") && upload.Contains(".ExtractAllAsync("),
             "and it uses the one-pass call the single path uses");
         Check(!upload.Split("public async Task<SeasonPackCoordinator.Candidate?> FillAsync")[1]

@@ -652,60 +652,31 @@ internal static class Program
         Check(uploadSrc.Contains("entry id {Id} taken from myPublishedSubtitles"),
             "F-M435: a single and a movie store the entry id the same way");
 
-        // ── F-M440: der Fill nimmt den schon hochgeladenen Text, nicht das ganze MKV ─────────────
-        int storeLookup = uploadSrc.IndexOf("_ownTexts.TryGet(imdbId, season, episode, lang, hearingImpaired", StringComparison.Ordinal);
-        int extraction = uploadSrc.IndexOf("ExtractAllAsync(_ffmpegPath, mediaPath, missing", StringComparison.Ordinal);
-        Check(storeLookup > 0 && extraction > storeLookup,
-            "F-M440: the fill asks the stored text before it extracts anything");
-        Check(!uploadSrc.Contains("var positions = Enumerable.Range(0, subtitleStreams.Count).ToList();"),
-            "F-M440: the fill no longer extracts every subtitle track of the container");
-        Check(uploadSrc.Contains("var missing = fillPositions.Where(p => !cachedTexts.ContainsKey(p)).ToList();"),
-            "F-M440: only the positions the fill asks for are extracted");
-        Check(uploadSrc.Contains("_ownTexts.Put(imdbId, season, episode, lang, hearingImpaired, srtContent);"),
-            "F-M440: a successful upload stores its text for later fills");
-        Check(uploadSrc.Contains("FillFromText(") && uploadSrc.Contains("Registry.UploadedEmbedByContentHash(contentHash)"),
-            "F-M440: the stored text is proved by its content hash, not by a stream position");
-        var resetSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlReset.cs"));
-        Check(resetSrc.Contains("OwnTextStore.PurgeDirectory(dataDir)"),
-            "F-M440: the database reset purges the stored texts too");
+        // ── F-M441: der Fill arbeitet über Dateien im Lauf-Ordner, nicht über den Speicher ────────
+        Check(uploadSrc.Contains("_workFiles.TryRead(imdbId, season, episode, lang, hearingImpaired, position, out string? onDisk)"),
+            "F-M441: the fill reads a text this run already extracted off the disk");
+        Check(uploadSrc.Contains("_workFiles.Write(imdbId, season, episode, lang, hearingImpaired, pair.Key, pair.Value!)"),
+            "F-M441: an extracted text is written to the run's working directory");
+        Check(!uploadSrc.Contains("_fillTextCache") && !uploadSrc.Contains("_ownTexts"),
+            "F-M441: no in-memory text cache and no persistent store");
+        Check(!uploadSrc.Contains("Enumerable.Range(0, subtitleStreams.Count)"),
+            "F-M441: the fill never extracts every subtitle track of the container");
+        Check(uploadSrc.Contains("Api.RunWorkFiles.PurgeStale(null, TimeSpan.FromDays(2))"),
+            "F-M441: the start of a run sweeps what a killed run left behind");
+        Check(uploadSrc.Contains("_workFiles.Purge()"),
+            "F-M441: the run removes its own working files when it ends");
+        Check(!File.Exists(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/OwnTextStore.cs")),
+            "F-M441: there is no persistent text store in the tree");
+        var coordinatorSrc2 = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+        Check(!coordinatorSrc2.Contains("_ownTexts"),
+            "F-M441: the pack coordinator carries no store either");
+        Check(coordinatorSrc2.Contains("DeletePublishedSubtitleAsync(single.Id")
+                && coordinatorSrc2.IndexOf("DeletePublishedSubtitleAsync(single.Id") < coordinatorSrc2.IndexOf("await _api.UploadSeasonPackAsync"),
+            "F-M391 stays as ordered: the absorbed singles are deleted BEFORE the pack goes up");
 
-        // Wer räumt weg: der Löschhaken im Pack-Bau und der tägliche Durchlauf im Nachlauf.
-        var packSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
-        Check(packSrc.Contains("_ownTexts.Remove(key.ImdbId, key.Season, single.Episode, key.Lang, single.HearingImpaired)"),
-            "F-M440: absorbing a single drops the text of the deleted entry");
-        Check(uploadSrc.Contains("new Api.OwnTextStore().Sweep(")
-                && uploadSrc.Contains("registry.HasUploadedText(k.ImdbId, k.Season, k.Episode, k.Language, k.HearingImpaired)"),
-            "F-M440: the daily postprocessing sweeps the store by what is still uploaded");
-        Check(uploadSrc.Contains("walked {Pages} page(s)") && uploadSrc.IndexOf("new Api.OwnTextStore().Sweep(") > uploadSrc.IndexOf("walked {Pages} page(s)"),
-            "F-M440: the sweep rides on the daily task, no schedule of its own");
-        var storeSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/OwnTextStore.cs"));
-        Check(storeSrc.Contains("DefaultMaxTotalBytes = 2048L * 1024 * 1024"),
-            "F-M440: the size cap is a 2 GB runaway guard, not the working budget");
-        Check(storeSrc.Contains("File.SetLastWriteTimeUtc(path, DateTime.UtcNow);"),
-            "F-M440: a fill that reads a text marks it as still needed");
-        Check(storeSrc.Contains("tt1234567_s01e02_de_hi.srt.gz"),
-            "F-M440: the file name carries the key, so the sweep needs no index");
-
-        // ── F-M437: der Nachlauf blättert bis zum Wasserzeichen, nicht fünf Seiten ──────────────
-        Check(api.Contains("Func<OwnSubtitleEntry, bool>? shouldStop = null")
-              && api.Contains("if (shouldStop != null && shouldStop(result[result.Count - 1]))"),
-            "F-M437: the published list can be walked down to a watermark");
-        Check(uploadSrc.Contains("cfg.PostprocessWatermarkUtc") && uploadSrc.Contains("plugin.SavePluginState();"),
-            "F-M437: the pass stores how far it read");
-        Check(uploadSrc.Contains("e.CreatedAt.ToUniversalTime() < watermark"),
-            "F-M437: the walk stops at entries older than the last pass");
-        Check(uploadSrc.Contains("Math.Clamp(cfg.PostprocessMaxPages, 1, 20000)"),
-            "F-M437: the page limit is a ceiling for a catch-up run, not the daily depth");
-        var cfgSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"));
-        Check(cfgSrc.Contains("UploadPostprocessInterval { get; set; } = UpdateInterval.Daily"),
-            "F-M437: postprocessing runs daily by default");
-        Check(cfgSrc.Contains("public DateTime? PostprocessWatermarkUtc { get; set; }"),
-            "F-M437: the watermark is configuration state");
-
-        Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
-            : $"seasonpack: {_checks} checks, {Failures.Count} FAILED.");
+            : $"seasonpack: {_checks} checks, {Failures.Count} failed.");
         return Failures.Count == 0 ? 0 : 1;
     }
 }

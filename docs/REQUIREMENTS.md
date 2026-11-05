@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.95
-**Status:** Implementation — v12.1.12.331.
+**Version:** 2.96
+**Status:** Implementation — v12.1.12.332.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
 `/opt/data/SubDL-Scribe-Methodik/METHODIK.md`, nach Kapiteln sortiert und mit der Requirement-Nummer
@@ -17,7 +17,7 @@ seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 76 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 77 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
@@ -340,8 +340,9 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 
 **F-M438 [P] (Befund 04.11.2026, Prod-Neustart):** **Ein plugin-eigenes Feld, das in der Konfigurationsdatei noch nicht gesetzt ist, wird so geschrieben, dass Jellyfin es beim nächsten Laden auch liest.** Der partielle Schreiber (F-M201) setzte bisher nur den Elementtext. Zwei Fälle gingen dabei verloren, beide gemessen: ein `Nullable<DateTime>` steht in der Datei nicht etwa gar nicht da, sondern als `<PostprocessWatermarkUtc xsi:nil="true" />` — der Text wurde gesetzt, das `xsi:nil` blieb, und der nächste Ladevorgang las wieder `null`; ein Feld, das die Datei überhaupt nicht kennt (Konfiguration einer älteren Version), wurde ans Dokumentende gehängt, und Jellyfins Serializer liest Elemente in **Deklarationsreihenfolge** — alles hinter einem später deklarierten Element wird ignoriert. Beides sah wie ein erfolgreiches Speichern aus und war nach genau einem Neustart weg. Der Schreiber entfernt deshalb `xsi:nil` beim Setzen und fügt ein unbekanntes Feld vor dem ersten Element ein, das die Konfiguration **nach** ihm deklariert. Der Test `scripts/tests/statefile` hält beide Fälle fest, inklusive der alten Schreibweise als Gegenprobe.
 
-**F-M440 [P] (Betreiber-Korrektur 04.11.2026 „wir waren mit dem pack fill eigentlich anders verblieben"):** **Ein Pack-Fill nimmt den Untertitel, der bereits hochgeladen ist — nicht eine neue Extraktion aus der Datei.** F-M389 sagte das schon, die Umsetzung tat das Gegenteil: sie las mit ffmpeg **alle** Untertitelspuren des Containers und hielt sie für den ganzen Lauf im Speicher — auf Prod am 04.11.2026 gemessen 689 Folgen-Dateien über 55 Staffeln, rund 21.000 Texte und geschätzt 900 MB, dazu ein ffmpeg-Lauf pro Datei. Der Text ist beim Upload bekannt, also wird er dort abgelegt (gzip, wenige KB je Folge, `<Datenordner>/own-texts`, Deckel 256 MB, älteste zuerst) und der Fill liest ihn von dort. Beweis und zu ersetzender Einzelupload hängen dabei am **Inhalts-Hash** statt an einer Stream-Position. Ein Fehltreffer fällt auf die Datei zurück — und dann werden nur noch die **tatsächlich gefragten** Positionen extrahiert. Ein Datenbank-Reset purgiert den Speicher mit (F-M427).
-**Aufgeräumt wird an drei Stellen:** sofort beim Löschen oder Aufnehmen eines Eintrags (dessen Text geht mit), täglich im bestehenden Nachlauf (lokale Durchsicht, kein API-Call: weg, was keine `Uploaded`-Zeile mehr deckt oder seit `OwnTextsMaxUnusedDays` = 90 Tagen nicht gelesen wurde — ein Fill, der den Text liest, setzt den Zeitstempel und hält ihn damit am Leben), und beim Reset. Der Dateiname trägt den Schlüssel (`tt1234567_s01e02_de_hi.srt.gz`), damit der Durchlauf ohne Index arbeiten kann. Der Deckel `OwnTextsMaxMegabytes` (Default 2048, 0 = unbegrenzt) ist nur ein Notausgang: gemessen an echten Dateien ist ein Text ~16 KB gzippt, 6.266 hochgeladene Texte sind also ~100 MB.
+**F-M440 [P] (Betreiber-Korrektur 04.11.2026):** **Ein Pack-Fill nimmt den Untertitel, der bereits hochgeladen ist — er extrahiert die Datei nicht erneut für jede Sprache.** Der Text einer Folge, die schon als Einzelupload draußen ist, wird beim Pack-Bau aus der Datei gelesen (der einzige Ort, an dem er noch liegt, denn der Store hält nur Hashes, Status und SubDL-Ids) und dann im **Arbeitsordner des Laufs** abgelegt. Ein zweiter Pack, der dieselbe Folge braucht, liest sie von dort statt ffmpeg erneut zu rufen — und **nur die tatsächlich gefragten Spuren**, nie alle Spuren des Containers.
+
+**F-M441 [P] (Betreiber 04.11.2026 „Kein dauerhafter store"):** **Die Untertitel liegen für die Dauer eines Laufs auf Platte, danach nicht mehr.** Der Arbeitsordner ist `<Temp>/subdl-scribe/run-<Zeitstempel>-<Id>`, eine Datei je Folge/Sprache/Variante/Spur (`tt1234567_s01e02_de_hi_p2.srt`). Am Laufende wird er gelöscht; was ein abgebrochener Lauf hinterlässt, räumt der Start des nächsten Laufs weg (älter als zwei Tage). Es gibt **keinen dauerhaften Text-Store**, keinen Deckel und keinen Aufräum-Task. Reihenfolge je Staffel: **erst Pack bauen und hochladen, dann die aufgenommenen Einzeluploads per Eintrags-Id bei SubDL löschen** — die Löschung bleibt wie beauftragt **vor** dem Pack-Upload (F-M391) —, zuletzt die Folgen, die im Pack nicht unterkamen, einzeln hochladen.
 
 ## 4. Download Pipeline
 

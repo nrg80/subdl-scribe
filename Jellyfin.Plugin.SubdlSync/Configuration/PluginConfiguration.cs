@@ -623,19 +623,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public int PostprocessMaxPages { get; set; } = 20000;
 
     /// <summary>
-    /// F-M440: ceiling for the stored own texts in megabytes, 0 = unlimited. A canonical subtitle is
-    /// ~16 KB gzipped, so the default of 2048 MB holds far more than the whole library needs; the
-    /// value is a runaway guard and the daily sweep does the actual housekeeping.
-    /// </summary>
-    public int OwnTextsMaxMegabytes { get; set; } = 2048;
-
-    /// <summary>
-    /// F-M440: how long a stored own text may sit unread before the daily sweep drops it. A text that
-    /// no longer backs an uploaded entry goes regardless of age.
-    /// </summary>
-    public int OwnTextsMaxUnusedDays { get; set; } = 90;
-
-    /// <summary>
     /// F-M437: the newest <c>createdAt</c> the last pass has already walked, stored as the account
     /// reported it. The next pass pages down only until it reaches entries older than this, so a
     /// daily pass costs a handful of pages instead of the whole list — and a pass after a pause

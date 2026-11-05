@@ -1509,50 +1509,6 @@ public sealed class ContentHashRegistry : IDisposable
     /// </summary>
     /// <param name="contentHash">Content hash of the canonical text.</param>
     /// <returns>The uploaded embedded row, or null.</returns>
-    /// <summary>
-    /// F-M440: does this episode still carry an uploaded entry for this language? The daily sweep asks
-    /// it before it drops a stored text, so a text outlives nothing it could still be needed for.
-    /// </summary>
-    /// <param name="imdbId">Series IMDb id.</param>
-    /// <param name="season">Season number.</param>
-    /// <param name="episode">Episode number.</param>
-    /// <param name="language">SubDL language code.</param>
-    /// <param name="hearingImpaired">HI/SDH variant.</param>
-    /// <returns>True when an uploaded embedded row exists.</returns>
-    public bool HasUploadedText(string? imdbId, int season, int episode, string? language, bool hearingImpaired)
-    {
-        if (string.IsNullOrWhiteSpace(imdbId) || string.IsNullOrWhiteSpace(language))
-        {
-            return false;
-        }
-
-        var mediaIds = _db.Media.FindAll()
-            .Where(m => m.IsSeries && m.Season == season && m.Episode == episode
-                && string.Equals(m.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase))
-            .Select(m => m.Id)
-            .ToHashSet(StringComparer.Ordinal);
-        if (mediaIds.Count == 0)
-        {
-            return false;
-        }
-
-        return _db.Embeds.FindAll().Any(e =>
-            mediaIds.Contains(e.MediaHash)
-            && string.Equals(e.Language, language, StringComparison.OrdinalIgnoreCase)
-            && (e.HearingImpaired ?? false) == hearingImpaired
-            && e.Status == SubtitleStatus.Uploaded);
-    }
-
-    public EmbedTrackEntity? UploadedEmbedByContentHash(string? contentHash)
-    {
-        if (string.IsNullOrEmpty(contentHash))
-        {
-            return null;
-        }
-
-        return _db.Embeds.FindAll().FirstOrDefault(x => x.ContentHash == contentHash && x.Status == SubtitleStatus.Uploaded);
-    }
-
     public bool IsContentUploaded(string? contentHash)
     {
         if (string.IsNullOrEmpty(contentHash))

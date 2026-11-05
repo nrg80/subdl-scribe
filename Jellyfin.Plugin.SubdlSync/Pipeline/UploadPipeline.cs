@@ -208,10 +208,8 @@ public sealed class UploadPipeline : IPackFiller
     /// episodes that is 296 re-reads where 8 do. The map is keyed by media path and lives exactly as
     /// long as the run.
     /// </summary>
-    // F-M440: positions actually requested for a file — not every track the container happens to carry.
-    private readonly Dictionary<string, Dictionary<int, string?>> _fillTextCache = new(StringComparer.Ordinal);
-
-    private readonly Api.OwnTextStore _ownTexts = new();
+    // F-M441: the extracted texts of this run live on disk, one file per episode/language/track.
+    private readonly Api.RunWorkFiles _workFiles = new();
 
     /// <summary>Process-static cache so ffmpeg is resolved once per plugin lifetime.</summary>
     private static string? _cachedFfmpegPath;
@@ -351,6 +349,14 @@ public sealed class UploadPipeline : IPackFiller
 
         try
         {
+        // F-M441: a run that was killed leaves its working directory behind — swept here, so a crash
+        // costs temp disk until the next start and never longer.
+        int sweptDirs = Api.RunWorkFiles.PurgeStale(null, TimeSpan.FromDays(2));
+        if (sweptDirs > 0)
+        {
+            LogUtil.Normal(_logger, "[SubDL] upload: {Count} left-over working directorie(s) of an earlier run removed.", sweptDirs);
+        }
+
         var skipFilter = new SkipFilter(_config.EffectiveSkipDirPatterns, _config.EffectiveSkipFilePatterns);
 
         // F-M19/F-M203: no partial operation. Without all four credentials the run cannot
@@ -1757,6 +1763,13 @@ public sealed class UploadPipeline : IPackFiller
         }
         finally
         {
+            // F-M441: the run's working files are its own business — the run ends, they go.
+            int workFiles = _workFiles.Purge();
+            if (workFiles > 0)
+            {
+                _logger.LogDebug("[SubDL] upload: {Count} working file(s) of this run removed.", workFiles);
+            }
+
             PipelineRunLock.Release(_logger, "upload");
         }
     }
@@ -2295,12 +2308,6 @@ public sealed class UploadPipeline : IPackFiller
                 }
             });
 
-            // F-M440: the text is up, so remember it — a later pack fill takes it from here instead of
-            // reading all subtitle tracks of the file again (F-M389, "aus dem bereits hochgeladenen").
-            if (loosePath == null)
-            {
-                _ownTexts.Put(imdbId, season, episode, lang, hearingImpaired, srtContent);
-            }
         }
         else if (result.Reason == "duplicate-content")
         {
@@ -3270,40 +3277,27 @@ public sealed class UploadPipeline : IPackFiller
 
         string? reason = null;
 
-        // F-M440 (operator 04.11.2026, "wir waren mit dem pack fill eigentlich anders verblieben"):
-        // the text that is already up is read from OUR store first. F-M389 asked for exactly this and
-        // the implementation extracted the container instead — all tracks of the file, held for the
-        // whole run (prod 04.11.2026: 689 files, ~21.000 texts, ~900 MB, one ffmpeg pass each).
-        if (_ownTexts.TryGet(imdbId, season, episode, lang, hearingImpaired, out string? storedText)
-            && !string.IsNullOrWhiteSpace(storedText))
+        // F-M441 (operator 04.11.2026, "kein dauerhafter store"): the member's text comes out of the
+        // file, and it is written to the RUN's working directory — not held in memory for the whole
+        // run and not kept past it. Reading every subtitle track of every touched file into one
+        // dictionary is what made a run grow into the hundreds of megabytes (prod 04.11.2026: 689
+        // files, ~21.000 texts, ~900 MB); a second pack that asks for the same file reads its text
+        // back off the disk instead of calling ffmpeg again.
+        var cachedTexts = new Dictionary<int, string?>();
+        var missing = new List<int>();
+        foreach (int position in fillPositions)
         {
-            var fromStore = FillFromText(
-                item, mediaPath, storedText!, imdbId, season, episode, lang, hearingImpaired, out reason);
-            if (fromStore != null)
+            if (_workFiles.TryRead(imdbId, season, episode, lang, hearingImpaired, position, out string? onDisk)
+                && !string.IsNullOrWhiteSpace(onDisk))
             {
-                LogUtil.Normal(
-                    _logger,
-                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — taken from the text this account already uploaded, no extraction (F-M440).",
-                    imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
-                return fromStore;
+                cachedTexts[position] = onDisk;
             }
-
-            LogUtil.Normal(
-                _logger,
-                "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — the stored text does not qualify ({Reason}), the file decides (F-M440).",
-                imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), reason);
+            else
+            {
+                missing.Add(position);
+            }
         }
 
-        // F-M405/F-M440: one ffmpeg pass per FILE — but only for the positions the fill actually asks
-        // for. Extracting every subtitle track of the container was what made the run grow into the
-        // hundreds of megabytes; the cache now holds the requested tracks and nothing else.
-        if (!_fillTextCache.TryGetValue(mediaPath, out var cachedTexts))
-        {
-            cachedTexts = new Dictionary<int, string?>();
-            _fillTextCache[mediaPath] = cachedTexts;
-        }
-
-        var missing = fillPositions.Where(p => !cachedTexts.ContainsKey(p)).ToList();
         if (missing.Count > 0)
         {
             var (extracted, _) = await FfmpegTools
@@ -3312,6 +3306,10 @@ public sealed class UploadPipeline : IPackFiller
             foreach (var pair in extracted)
             {
                 cachedTexts[pair.Key] = pair.Value;
+                if (!string.IsNullOrWhiteSpace(pair.Value))
+                {
+                    _workFiles.Write(imdbId, season, episode, lang, hearingImpaired, pair.Key, pair.Value!);
+                }
             }
         }
 
@@ -3347,69 +3345,6 @@ public sealed class UploadPipeline : IPackFiller
             "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — none of the {Count} track(s) of this language qualifies ({Reason}), it does not join the pack.",
             imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), fillPositions.Count, reason);
         return null;
-    }
-
-    /// <summary>
-    /// F-M440: one attempt from a text that is already in hand — the same gates as
-    /// <see cref="FillFromPosition"/>, but the proof and the replaced single are found through the
-    /// CONTENT hash instead of a stream position, because a stored text carries no position.
-    /// </summary>
-    /// <param name="item">Episode item.</param>
-    /// <param name="mediaPath">Path of the media file.</param>
-    /// <param name="text">The text this account already uploaded.</param>
-    /// <param name="imdbId">Series IMDb id.</param>
-    /// <param name="season">Season number.</param>
-    /// <param name="episode">Episode number.</param>
-    /// <param name="lang">SubDL language code.</param>
-    /// <param name="hearingImpaired">HI variant.</param>
-    /// <param name="reason">Why the text was refused, for the run log.</param>
-    /// <returns>The member, or null with <paramref name="reason"/> set.</returns>
-    private SeasonPackCoordinator.Candidate? FillFromText(
-        BaseItem item, string mediaPath, string text, string imdbId, int season, int episode,
-        string lang, bool hearingImpaired, out string reason)
-    {
-        reason = string.Empty;
-        string srt = ContentHashRegistry.NormalizeSrt(text);
-        if (string.IsNullOrWhiteSpace(srt))
-        {
-            reason = "the stored text is empty";
-            return null;
-        }
-
-        long runtimeMs = (item.RunTimeTicks ?? 0) / 10_000;
-        string? gate = GateReject(srt, lang, runtimeMs, out string? correctedLang);
-        if (gate != null)
-        {
-            reason = "quality gate: " + gate;
-            return null;
-        }
-
-        if (correctedLang != null && !string.Equals(correctedLang, lang, StringComparison.OrdinalIgnoreCase))
-        {
-            reason = "the text speaks " + correctedLang;
-            return null;
-        }
-
-        string contentHash = ContentHashRegistry.ComputeHash(srt);
-        var uploadedRow = Registry.UploadedEmbedByContentHash(contentHash);
-        if (uploadedRow == null && Registry.IsContentKnown(contentHash))
-        {
-            reason = "the text is only known from a download or a rejection";
-            return null;
-        }
-
-        string? mediaHash = MediaHashFor(mediaPath);
-        if (string.IsNullOrWhiteSpace(mediaHash))
-        {
-            reason = "no media hash for the file";
-            return null;
-        }
-
-        var (width, height, codec) = GetVideoFacts(item);
-        return PackCandidate(
-            item, mediaHash, imdbId, TmdbOfEpisode(item), season, episode, lang, hearingImpaired,
-            forced: false, uploadedRow?.SubPos ?? 0, srt, mediaPath, GetFramerateCode(item), width, height, codec,
-            absorbedSingleId: uploadedRow?.SubdlId);
     }
 
     /// <summary>
@@ -4414,26 +4349,6 @@ public sealed class UploadPipeline : IPackFiller
                 "[SubDL] Upload postprocessing: walked {Pages} page(s) down to the watermark, {Count} stored handle(s) moved to their published entry id (F-M435/F-M437).",
                 pagesWalked, remappedHandles);
 
-            // F-M440: the daily housekeeping for the stored own texts — it runs HERE because this task
-            // already fires once a day, so the store needs no schedule of its own. Purely local: no
-            // API call, one directory listing.
-            try
-            {
-                int purgedTexts = new Api.OwnTextStore().Sweep(
-                    k => registry.HasUploadedText(k.ImdbId, k.Season, k.Episode, k.Language, k.HearingImpaired),
-                    TimeSpan.FromDays(cfg.OwnTextsMaxUnusedDays));
-                if (purgedTexts > 0)
-                {
-                    LogUtil.Normal(
-                        logger,
-                        "[SubDL] Upload postprocessing: {Count} stored text(s) dropped — their entry is no longer uploaded, or nothing read them for {Days} day(s) (F-M440).",
-                        purgedTexts, cfg.OwnTextsMaxUnusedDays);
-                }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                logger.LogDebug(ex, "[SubDL] Upload postprocessing: stored-text sweep skipped.");
-            }
 
             LogUtil.Normal(logger, "[SubDL] Upload postprocessing: fetched {Total} mySubtitles entries, {Rejected} rejected to clean up.", allMySubtitles.Count, rejectedEntries.Count);
 
