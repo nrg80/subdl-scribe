@@ -208,7 +208,8 @@ public sealed class UploadPipeline : IPackFiller
     /// episodes that is 296 re-reads where 8 do. The map is keyed by media path and lives exactly as
     /// long as the run.
     /// </summary>
-    private readonly Dictionary<string, Dictionary<int, string?>> _fillTextCache = new(StringComparer.Ordinal);
+    // F-M441: the extracted texts of this run live on disk, one file per episode/language/track.
+    private readonly Api.RunWorkFiles _workFiles = new();
 
     /// <summary>Process-static cache so ffmpeg is resolved once per plugin lifetime.</summary>
     private static string? _cachedFfmpegPath;
@@ -327,6 +328,12 @@ public sealed class UploadPipeline : IPackFiller
     {
         var summary = new RunSummary();
 
+        // F-M445 (operator order 02.11.2026, "bestehende Aufträge bereits beim Upload-Start stornieren"):
+        // an order left over from an earlier run is dropped the moment THIS run starts. It would fire
+        // against state this run is about to change, and the run's own end sets the new moment — so the
+        // order is cancelled here and armed again in the finally below.
+        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.CancelUploadPostprocessing("upload run started");
+
         // F-M247: record that this run was a dry run. It does the searching and the QA, so its
         // summary fills up with numbers, but it writes nothing to SubDL — the statistics must
         // not receive them. Set here, at the source, so a later counter cannot forget it.
@@ -348,6 +355,14 @@ public sealed class UploadPipeline : IPackFiller
 
         try
         {
+        // F-M441: a run that was killed leaves its working directory behind — swept here, so a crash
+        // costs temp disk until the next start and never longer.
+        int sweptDirs = Api.RunWorkFiles.PurgeStale(null, TimeSpan.FromDays(2));
+        if (sweptDirs > 0)
+        {
+            LogUtil.Normal(_logger, "[SubDL] upload: {Count} left-over working directorie(s) of an earlier run removed.", sweptDirs);
+        }
+
         var skipFilter = new SkipFilter(_config.EffectiveSkipDirPatterns, _config.EffectiveSkipFilePatterns);
 
         // F-M19/F-M203: no partial operation. Without all four credentials the run cannot
@@ -462,8 +477,8 @@ public sealed class UploadPipeline : IPackFiller
         // staffelpack". Nothing is held back for a pack any more. Every position goes up the SINGLE
         // way first, and the pack is assembled at the END of the run out of what is in the store by
         // then — this run's own uploads included — deleting the singles it absorbs (F-M391). An
-        // arrival run builds no pack at all ("on arrival: nur einzelupload"), so it neither asks which
-        // seasons are complete nor extracts anything for a container.
+        // arrival run never builds a LIBRARY pack: it carries only its own arrivals, so a pack can only
+        // come from those items and nothing else (F-M424, below).
         SeasonPackCoordinator? packCoordinator = null;
         IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> completeSeasons
             = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>();
@@ -1754,6 +1769,32 @@ public sealed class UploadPipeline : IPackFiller
         }
         finally
         {
+            // F-M441: the run's working files are its own business — the run ends, they go.
+            int workFiles = _workFiles.Purge();
+            if (workFiles > 0)
+            {
+                _logger.LogDebug("[SubDL] upload: {Count} working file(s) of this run removed.", workFiles);
+            }
+
+            // F-M445 (operator decision 02.11.2026): the end of every upload run re-arms the upload
+            // postprocessing, and the last order wins — a run that ends later cancels the earlier
+            // order. This is what makes the handle remap (upload id -> entry id) land on the same
+            // day the pack was built instead of the next morning.
+            //
+            // A USER STOP cancels the order instead (operator order 02.11.2026: "Nutzerstopp terminiert
+            // auch den terminierten run vom Postprocessing") — stop means stop, the scheduled run goes
+            // with the run it belonged to. The next regular upload run arms it again.
+            if (summary.StopRequested)
+            {
+                ScheduledTasks.SubdlSchedulerCoordinator.Instance?.CancelUploadPostprocessing(
+                    $"upload run stopped by the user ({summary.Uploaded} uploaded)");
+            }
+            else
+            {
+                ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ArmUploadPostprocessing(
+                    $"upload run ended ({summary.Uploaded} uploaded)");
+            }
+
             PipelineRunLock.Release(_logger, "upload");
         }
     }
@@ -2291,6 +2332,7 @@ public sealed class UploadPipeline : IPackFiller
                         subdlId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 }
             });
+
         }
         else if (result.Reason == "duplicate-content")
         {
@@ -3231,9 +3273,14 @@ public sealed class UploadPipeline : IPackFiller
     {
         ct.ThrowIfCancellationRequested();
 
-        BaseItem? item = FindSeasonEpisode(imdbId, season, episode);
-        string? mediaPath = item?.Path;
-        if (item == null || string.IsNullOrWhiteSpace(mediaPath))
+        // F-M444 (operator 04.11.2026, "Verbesserungsvorschläge 1 bis 4"): an episode can sit in the
+        // library more than once — a second release of the same episode. Until now FirstOrDefault
+        // decided, so a file that failed a gate killed the pack although another file of the SAME
+        // episode carried the language too. Every file is tried now, in library order.
+        var files = FindSeasonEpisodeItems(imdbId, season, episode)
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Path))
+            .ToList();
+        if (files.Count == 0)
         {
             LogUtil.Normal(
                 _logger,
@@ -3241,6 +3288,53 @@ public sealed class UploadPipeline : IPackFiller
                 imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
             return null;
         }
+
+        for (int index = 0; index < files.Count; index++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (member, why) = await FillFromFileAsync(
+                files[index], imdbId, season, episode, lang, hearingImpaired, ct).ConfigureAwait(false);
+            if (member != null)
+            {
+                if (index > 0)
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — file {Nth} of {Count} joins the pack, the file(s) before it did not (F-M444).",
+                        imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), index + 1, files.Count);
+                }
+
+                return member;
+            }
+
+            if (index < files.Count - 1)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — file {Nth} of {Count} does not qualify ({Reason}), trying the next file of this episode (F-M444).",
+                    imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), index + 1, files.Count, why);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// F-M444: one file of an episode, put through the whole filler. Split out of
+    /// <see cref="FillAsync"/> so that a second file of the same episode gets a full attempt of its own.
+    /// </summary>
+    /// <param name="item">Episode item (one file).</param>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="lang">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI variant.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The member (or null) and the reason the file was refused.</returns>
+    private async Task<(SeasonPackCoordinator.Candidate? Member, string Reason)> FillFromFileAsync(
+        BaseItem item, string imdbId, int season, int episode, string lang, bool hearingImpaired, CancellationToken ct)
+    {
+        string mediaPath = item.Path!;
 
         // F-M431 (operator order 03.11.2026: "wenn eine sprache durchfällt und eine weitere da ist, diese
         // auch versuchen zu verwenden"): a file may carry more than one track of the same language. Until
@@ -3255,26 +3349,76 @@ public sealed class UploadPipeline : IPackFiller
                 _logger,
                 "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — no embedded text track for this language and variant, it does not join the pack.",
                 imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
-            return null;
-        }
-
-        // F-M405: one ffmpeg pass per FILE for the whole filler, cached for the run — the same
-        // one-pass shape the single-upload path has used since F-M5. Per-language extraction re-read
-        // the whole container for every language of every pack attempt.
-        if (!_fillTextCache.TryGetValue(mediaPath, out var cachedTexts))
-        {
-            var subtitleStreams = item.GetMediaStreams()
-                ?.Where(s => s.Type == MediaStreamType.Subtitle)
-                .ToList() ?? new List<MediaStream>();
-
-            var positions = Enumerable.Range(0, subtitleStreams.Count).ToList();
-            (cachedTexts, _) = await FfmpegTools
-                .ExtractAllAsync(_ffmpegPath, mediaPath, positions, _logger, _config, ct)
-                .ConfigureAwait(false);
-            _fillTextCache[mediaPath] = cachedTexts;
+            return (null, "no embedded text track for this language and variant");
         }
 
         string? reason = null;
+
+        // F-M443 (operator 04.11.2026, "Verbesserungsvorschläge"): a track whose verdict is already in
+        // the store is not extracted again. The single path has asked EmbedRejectedReason before doing
+        // any work since F-M68; the fill did not, so every run pulled a stream it had already refused
+        // out of the container once more.
+        string? fillMediaHash = MediaHashFor(mediaPath);
+        if (!string.IsNullOrWhiteSpace(fillMediaHash))
+        {
+            var alreadyRefused = fillPositions
+                .Where(position => Registry.EmbedRejectedReason(fillMediaHash, position) != null)
+                .ToList();
+            if (alreadyRefused.Count > 0)
+            {
+                fillPositions = fillPositions.Where(position => !alreadyRefused.Contains(position)).ToList();
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — {Count} track(s) are already refused in the store, not extracted again (F-M443).",
+                    imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), alreadyRefused.Count);
+            }
+
+            if (fillPositions.Count == 0)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — every track of this language is already refused in the store, nothing is extracted (F-M443).",
+                    imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
+                return (null, "every track of this language is already refused in the store");
+            }
+        }
+
+        // F-M441 (operator 04.11.2026, "kein dauerhafter store"): the member's text comes out of the
+        // file, and it is written to the RUN's working directory — not held in memory for the whole
+        // run and not kept past it. Reading every subtitle track of every touched file into one
+        // dictionary is what made a run grow into the hundreds of megabytes (prod 04.11.2026: 689
+        // files, ~21.000 texts, ~900 MB); a second pack that asks for the same file reads its text
+        // back off the disk instead of calling ffmpeg again.
+        var cachedTexts = new Dictionary<int, string?>();
+        var missing = new List<int>();
+        foreach (int position in fillPositions)
+        {
+            if (_workFiles.TryRead(imdbId, season, episode, lang, hearingImpaired, position, out string? onDisk)
+                && !string.IsNullOrWhiteSpace(onDisk))
+            {
+                cachedTexts[position] = onDisk;
+            }
+            else
+            {
+                missing.Add(position);
+            }
+        }
+
+        if (missing.Count > 0)
+        {
+            var (extracted, _) = await FfmpegTools
+                .ExtractAllAsync(_ffmpegPath, mediaPath, missing, _logger, _config, ct)
+                .ConfigureAwait(false);
+            foreach (var pair in extracted)
+            {
+                cachedTexts[pair.Key] = pair.Value;
+                if (!string.IsNullOrWhiteSpace(pair.Value))
+                {
+                    _workFiles.Write(imdbId, season, episode, lang, hearingImpaired, pair.Key, pair.Value!);
+                }
+            }
+        }
+
         for (int attempt = 0; attempt < fillPositions.Count; attempt++)
         {
             int subPos = fillPositions[attempt];
@@ -3290,7 +3434,7 @@ public sealed class UploadPipeline : IPackFiller
                         imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), attempt + 1, fillPositions.Count);
                 }
 
-                return member;
+                return (member, string.Empty);
             }
 
             if (attempt < fillPositions.Count - 1)
@@ -3306,7 +3450,7 @@ public sealed class UploadPipeline : IPackFiller
             _logger,
             "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — none of the {Count} track(s) of this language qualifies ({Reason}), it does not join the pack.",
             imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), fillPositions.Count, reason);
-        return null;
+        return (null, reason);
     }
 
     /// <summary>
@@ -3418,6 +3562,46 @@ public sealed class UploadPipeline : IPackFiller
     /// <returns>The episode item, or null.</returns>
     private BaseItem? FindSeasonEpisode(string imdbId, int season, int episode)
         => SeasonItems(imdbId, season).FirstOrDefault(c => IsSeasonEpisode(c, imdbId, season, episode));
+
+    /// <summary>
+    /// F-M444: every file of one episode, in library order — an episode may exist twice (a second
+    /// release), and the first file is no longer the only one that gets a chance.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <returns>The items that carry this episode.</returns>
+    private List<BaseItem> FindSeasonEpisodeItems(string imdbId, int season, int episode)
+        => SeasonItems(imdbId, season)
+            .Where(candidate => IsSeasonEpisode(candidate, imdbId, season, episode))
+            .ToList();
+
+    /// <summary>
+    /// F-M442 (operator 04.11.2026, "Verbesserungsvorschläge"): the source facts of an aired episode,
+    /// read WITHOUT extracting anything. Quality comes from the path and the file name, the frame rate
+    /// from the stream list — both were checked only after every member had been pulled out of its
+    /// container, which cost ten extractions for the mixed-source season measured on 04.11.2026.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <returns>Quality and frame rate, null where the library cannot answer.</returns>
+    public (string? Quality, string? Framerate) SourceFacts(string imdbId, int season, int episode)
+    {
+        foreach (var item in FindSeasonEpisodeItems(imdbId, season, episode))
+        {
+            string? path = item.Path;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+
+            string loosePath = Path.GetFileNameWithoutExtension(path);
+            return (SourceQuality.Detect(loosePath, path), GetFramerateCode(item));
+        }
+
+        return (null, null);
+    }
 
     /// <summary>
     /// F-M433: the language pairs the FILES of a season carry, read from the stream lists (no extraction).
@@ -4310,6 +4494,7 @@ public sealed class UploadPipeline : IPackFiller
                 logger,
                 "[SubDL] Upload postprocessing: walked {Pages} page(s) down to the watermark, {Count} stored handle(s) moved to their published entry id (F-M435/F-M437).",
                 pagesWalked, remappedHandles);
+
 
             LogUtil.Normal(logger, "[SubDL] Upload postprocessing: fetched {Total} mySubtitles entries, {Rejected} rejected to clean up.", allMySubtitles.Count, rejectedEntries.Count);
 

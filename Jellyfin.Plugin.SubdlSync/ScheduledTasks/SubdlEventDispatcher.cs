@@ -1178,7 +1178,8 @@ public sealed class SubdlEventDispatcher : IDisposable
             MarkAutoSyncRunning(upload, config);
 
             var progress = new Progress<double>();
-            var (upSummary, downSummary) = await ExecutePipelineAsync(upload, config, filter, progress, trigger).ConfigureAwait(false);
+            // F-M446: the scope IS the arrival statement — it hands the flags to the pipeline.
+            var (upSummary, downSummary) = await ExecutePipelineAsync(upload, config, filter, progress, trigger, scopeIds != null).ConfigureAwait(false);
             // If this direction was stopped by marker, stop the whole cycle.
             // F-M293 (user decision 03.10.2026): gated on the MARKER, not on StopRequested alone.
             // A shutdown also leaves StopRequested true (the pipeline keeps its partial result and
@@ -1291,13 +1292,18 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// Handles user-stop cancellation and lock-loss recovery scheduling.
     /// </summary>
     private async Task<(Pipeline.RunSummary? up, Pipeline.DownloadRunSummary? down)> ExecutePipelineAsync(
-        bool upload, PluginConfiguration config, System.Collections.Generic.HashSet<string> filter, IProgress<double> progress, string? trigger = null)
+        bool upload, PluginConfiguration config, System.Collections.Generic.HashSet<string> filter, IProgress<double> progress, string? trigger = null, bool arrivalScoped = false)
     {
         if (upload)
         {
             var bundle = PluginServiceRegistrator.BuildPipeline(_loggerFactory, _libraryManager, _mediaSourceManager, config);
             bundle.Pipeline.QueueFilter = filter;
-            bundle.Pipeline.IsArrivalRun = false;
+            // F-M446 (operator order 05.11.2026, "Verhalten soll wie früher sein"): an arrival run is
+            // recognised by its SCOPE, not by a literal. The flag had been hardcoded to false since the
+            // scoping moved to QueueFilter, so both arrival exemptions — no waiting out the daily limit
+            // (F-M65/section 4) — never applied: an arrival run that hit a 429 waited like a scheduled
+            // one and held the run lock while doing it.
+            bundle.Pipeline.IsArrivalRun = arrivalScoped;
             // F-M418 (operator order 02.11.2026): the fill-only way — a pack built from subtitles that
             // are already uploaded — belongs to the full-coverage runs (refetch cycle, manual button).
             // An arrival run carries only the arrivals it was started for and stays with singles.
@@ -1332,7 +1338,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             var bundle = PluginServiceRegistrator.BuildDownloadPipeline(_loggerFactory, _libraryManager, _mediaSourceManager, config);
             bundle.Pipeline.QueueFilter = filter;
-            bundle.Pipeline.IsArrivalRun = false;
+            bundle.Pipeline.IsArrivalRun = arrivalScoped; // F-M446: same rule for the download leg
             bundle.Pipeline.ItemResult += (id, outcome) => OnItemResult(_downloadQueue, id, outcome);
             _downInFlightDryRun = config.DownloadDryRun; // F-M22: the outcome handler consults this per item
             try

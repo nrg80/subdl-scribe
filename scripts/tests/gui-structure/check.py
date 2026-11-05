@@ -1315,7 +1315,9 @@ def main():
     #       a dropped name either throws or silently falls back to a cadence nobody chose,
     #   (d) the load path reads a stored Never as Manual, so the menu shows the value the file means
     #       instead of showing nothing at all.
-    for cfg_id in ("PruneMode", "OshashRefresh", "UploadPostprocessInterval"):
+    # F-M445: the postprocessing interval menu is GONE — it has no cadence of its own any more, it is
+    # armed by every finished upload run. Only the two maintenance menus are left.
+    for cfg_id in ("PruneMode", "OshashRefresh"):
         # Scoped to THIS select's own option list. A page-wide search is wrong twice over: the page
         # carries tab buttons AND a cycle-interval menu that legitimately uses value="Manual"
         # (measured — the page-wide version went RED on a correct file). Bound the block by the
@@ -1343,8 +1345,7 @@ def main():
 
     _plugin = read_source("Plugin.cs")
     for _field, _legacy, _current in [("PruneMode", "PruneMode.Never", "PruneMode.Manual"),
-                                      ("OshashRefresh", "OshashRefreshMode.Never", "OshashRefreshMode.Manual"),
-                                      ("UploadPostprocessInterval", "UpdateInterval.Never", "UpdateInterval.Manual")]:
+                                      ("OshashRefresh", "OshashRefreshMode.Never", "OshashRefreshMode.Manual")]:
         check(f"the load path reads a stored {_field} Never as Manual",
               f"c.{_field} == {_legacy}" in _plugin and f"c.{_field} = {_current}" in _plugin,
               "without it an existing choice keeps its old spelling and the menu shows neither")
@@ -1493,17 +1494,54 @@ def main():
               gate.search(task) is None,
               "the dashboard's run button reaches the work through this task")
         # ...and the AUTOMATIC path must still be bound, or the removal took the rule with it.
+        # F-M445: the automatic path is bound to the upload switch AND to the armed moment — there is
+        # no cadence left to test against.
         check("the automatic path is still bound to the upload switch",
-              "config.UploadEnabled\n                && ppInterval is not (UpdateInterval.Never" in sched,
+              "config.UploadEnabled && _postprocessArmUtc != DateTime.MinValue" in sched,
               "removing the rule entirely would let the schedule run with upload off")
     # The description names the BOUND half and only that. Operator order 08.10.2026: the trailing
     # "the button below always runs" had to go — the button sits directly beneath this line, so
     # naming it in the sentence was noise, and the operator asked for it twice on other labels too.
     # Asserted as a PAIR so a re-added suffix is caught as well as a lost rule: the binding sentence
     # is what the page must keep, the pointer at the button is what it must not grow back.
-    check("the description names the inhibited scheduled run",
-          "Scheduled run is inhibited if upload is disabled" in html,
-          "the page must say which of the two paths is bound")
+    # F-M445 (operator order 02.11.2026): the delay field carries the "0 = inactive" meaning, and the
+    # page states it — that replaced the sentence about the upload switch (the gate is asserted above).
+    check("the description names the off value of the delay",
+          "0 = inactive" in html,
+          "a field whose zero means 'off' must say so, or 0 reads like 'immediately'")
+    # ── F-M445: fester Anker weg, Termin kommt vom Upload-Lauf, letzter Auftrag gewinnt ──
+    check("the postprocessing interval menu is gone from the page",
+          'id="UploadPostprocessInterval"' not in html,
+          "there is no fixed anchor any more — a leftover menu would edit a field nobody reads")
+    check("the page offers the postprocessing delay in minutes",
+          'id="UploadPostprocessDelayMinutes"' in html and "min=\"1\"" in html and "max=\"1440\"" in html,
+          "the operator sets how long after the last upload run the postprocessing fires")
+    check("the delay field is loaded and saved",
+          "config.UploadPostprocessDelayMinutes ?? 30" in html
+          and "config.UploadPostprocessDelayMinutes = isNaN(ppDelay)" in html,
+          "a field that is not wired is decoration")
+    check("a stored 0 survives the save path",
+          "isNaN(ppDelay) ? 30 : Math.max(0, Math.min(1440, ppDelay))" in html,
+          "`|| 30` would turn an inactive postprocessing back on at every save")
+    check("the delay field allows 0",
+          'id="UploadPostprocessDelayMinutes"' in html and 'min="0"' in html and 'max="1440"' in html,
+          "operator order: 0 to 1440 minutes")
+    _ppcfg = read_source("Configuration", "PluginConfiguration.cs")
+    check("the delay defaults to 30 minutes",
+          "public int UploadPostprocessDelayMinutes { get; set; } = 30;" in _ppcfg,
+          "the operator named 30 minutes")
+    check("no fixed anchor is left in the scheduler",
+          "RandomPostprocessTime" not in sched and "UploadPostprocessInterval" not in sched,
+          "the diced day+time belonged to the anchor that was removed")
+    check("the last order wins",
+          "the last one wins" in sched and "_postprocessArmUtc = fireAtUtc;" in sched,
+          "a later upload run must CANCEL the earlier order, not add to it")
+    check("every finished upload run arms the postprocessing",
+          "ArmUploadPostprocessing(" in read_source("Pipeline", "UploadPipeline.cs"),
+          "the order comes from the run, nobody else sets it")
+    check("the armed moment survives a restart",
+          "_postprocessArmUtc.ToString(\"O\"" in sched and "ParseInstant(fields, \"postprocessDefer\")" in sched,
+          "a run that finished before a restart still gets its postprocessing")
     check("the description does not point at the button below it",
           "the button below always runs" not in html,
           "the button sits directly under the line; naming it again is the noise the operator removed")

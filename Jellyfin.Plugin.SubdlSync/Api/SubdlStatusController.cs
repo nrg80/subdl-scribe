@@ -183,8 +183,29 @@ public class SubdlStatusController : ControllerBase
         // endpoint does not carry it either — it rides on the deferral status line, which the quota
         // answer feeds (SubdlQuotaService.LocalRateLimitState → `local.off`). The outcome, the detail and
         // a pending fire here stay exactly as they are, so a run never disappears behind a switch.
+        // F-M445 (operator order 02.11.2026, "eine logzeile unter die worker schreiben wann ein
+        // postprocessing ansteht. Zeile entfällt wenn gestartet"): the armed moment is reported on its
+        // OWN field. It deliberately does NOT ride on the worker row: every finished upload run arms it,
+        // so the row would sit on yellow "defer" permanently and the light would stop meaning anything.
+        DateTime? postprocessDue = null;
+        try
+        {
+            postprocessDue = Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSchedulerCoordinator.Instance?
+                .GetUploadPostprocessDue();
+        }
+        catch
+        {
+            // Plugin not fully started — no line then, the workers keep their own colours.
+        }
+
+        // F-M445: the postprocessing keeps its own line, so its worker row must NOT be repainted as
+        // "defer" — every upload run arms the order, and a permanently yellow light says nothing.
+        var workerFires = new System.Collections.Generic.Dictionary<string, DateTime>(pendingFires, StringComparer.Ordinal);
+        workerFires.Remove("SubDLPostprocessTask");
+
         return Ok(new
         {
+            PostprocessDue = postprocessDue?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
             Workers = rows.Select(r => new
             {
                 r.Id,
@@ -200,8 +221,8 @@ public class SubdlStatusController : ControllerBase
                 // during a run; the stored flag stays the truth for a finished one.
                 DryRun = IsLive(r) ? LiveDryFlag(r) : r.DryRun,
                 // F-M294: per worker, plus the moment the fire is due so the page can name it.
-                Deferred = pendingFires.ContainsKey(r.Id),
-                DeferUntil = pendingFires.TryGetValue(r.Id, out var due)
+                Deferred = workerFires.ContainsKey(r.Id),
+                DeferUntil = workerFires.TryGetValue(r.Id, out var due)
                     ? due.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
                     : null
             }),

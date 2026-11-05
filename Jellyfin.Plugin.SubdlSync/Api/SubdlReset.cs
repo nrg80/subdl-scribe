@@ -111,6 +111,7 @@ public class SubdlReset : ControllerBase
                 // would mean the next run serves files from a state that no longer exists anywhere.
                 int purgedArchives = ArchiveDiskCache.PurgeDirectory(dataDir);
 
+
                 Plugin.Instance.RecreateDbContext();
 
                 // The counters live in the data file now, so the whole-scope reset zeroes them as

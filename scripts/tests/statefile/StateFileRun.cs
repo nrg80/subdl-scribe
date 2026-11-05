@@ -52,6 +52,24 @@ internal static class Program
         return path;
     }
 
+    /// <summary>Walks up from the test binary until the plugin project directory is found.</summary>
+    private static string FindPluginRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null)
+        {
+            var candidate = Path.Combine(dir.FullName, "Jellyfin.Plugin.SubdlSync", "Pipeline", "UploadPipeline.cs");
+            if (File.Exists(candidate))
+            {
+                return Path.Combine(dir.FullName, "Jellyfin.Plugin.SubdlSync");
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new DirectoryNotFoundException("plugin root not found");
+    }
+
     private static int Main()
     {
         string dir = Path.Combine(Path.GetTempPath(), "statefile-" + Guid.NewGuid().ToString("N"));
@@ -134,6 +152,50 @@ internal static class Program
             }, Order);
             Check(Load(nullPath).PostprocessWatermarkUtc == null,
                 "F-M438: a null value leaves the field unset instead of writing it");
+
+            // 6) F-M445: der Nachlauf hat keinen festen Anker mehr — ein Termin, letzter Auftrag gewinnt.
+            string root = FindPluginRoot();
+            string sched = File.ReadAllText(Path.Combine(root, "ScheduledTasks", "SubdlSchedulerCoordinator.cs"));
+            string upload = File.ReadAllText(Path.Combine(root, "Pipeline", "UploadPipeline.cs"));
+            string cfg = File.ReadAllText(Path.Combine(root, "Configuration", "PluginConfiguration.cs"));
+            Check(sched.Contains("_postprocessArmUtc = fireAtUtc;", StringComparison.Ordinal),
+                "F-M445: arming replaces the moment instead of comparing against it (last order wins)");
+            Check(!sched.Contains("_postprocessDeferredUntil", StringComparison.Ordinal),
+                "F-M445: the old lock-busy deferral field is gone — it only delayed a due anchor");
+            Check(sched.Contains("config.UploadEnabled && _postprocessArmUtc != DateTime.MinValue", StringComparison.Ordinal),
+                "F-M445: the fire needs upload enabled and an armed moment, nothing else");
+            Check(!sched.Contains("RandomPostprocessTime", StringComparison.Ordinal)
+                  && !sched.Contains("UploadPostprocessInterval", StringComparison.Ordinal)
+                  && !sched.Contains("PostprocessMinSpacingHours", StringComparison.Ordinal),
+                "F-M445: no fixed anchor, no diced day+time, no minimum spacing left in the scheduler");
+            Check(upload.Contains("ArmUploadPostprocessing(", StringComparison.Ordinal)
+                  && upload.Contains("if (summary.StopRequested)", StringComparison.Ordinal),
+                "F-M445: a normal run end arms it, a user stop goes the other way");
+            Check(cfg.Contains("public int UploadPostprocessDelayMinutes { get; set; } = 30;", StringComparison.Ordinal),
+                "F-M445: the delay is 30 minutes by default");
+            Check(sched.Contains("if (delay <= 0)", StringComparison.Ordinal)
+                  && sched.Contains("delay is 0 — the postprocessing is inactive", StringComparison.Ordinal),
+                "F-M445: delay 0 is inactive — nothing is armed, and an open order is cancelled");
+            Check(sched.Contains("if (delay > 1440)", StringComparison.Ordinal),
+                "F-M445: the range is capped at 1440 minutes");
+            Check(sched.Contains("public void CancelUploadPostprocessing(", StringComparison.Ordinal)
+                  && upload.Contains("CancelUploadPostprocessing(\"upload run started\")", StringComparison.Ordinal),
+                "F-M445: an open order is cancelled when the upload run starts");
+            Check(upload.Contains("CancelUploadPostprocessing(\n                    $\"upload run stopped by the user", StringComparison.Ordinal),
+                "F-M445: a user stop CANCELS the scheduled postprocessing run (operator order 02.11.2026)");
+            Check(sched.Contains("public DateTime? GetUploadPostprocessDue()", StringComparison.Ordinal),
+                "F-M445: the armed moment is readable for the status line");
+            string ctrl = File.ReadAllText(Path.Combine(root, "Api", "SubdlStatusController.cs"));
+            Check(ctrl.Contains("PostprocessDue = postprocessDue?", StringComparison.Ordinal)
+                  && ctrl.Contains("workerFires.Remove(\"SubDLPostprocessTask\")", StringComparison.Ordinal),
+                "F-M445: the moment rides on its own field — the worker row is not painted yellow forever");
+            string page = File.ReadAllText(Path.Combine(root, "Configuration", "configPage.html"));
+            Check(page.Contains("id=\"PostprocessDueLine\"", StringComparison.Ordinal)
+                  && page.Contains("ppLine.style.display = ppWhen ? '' : 'none'", StringComparison.Ordinal),
+                "F-M445: one line under the workers, gone once the run starts");
+            Check(sched.Contains("_postprocessArmUtc.ToString(\"O\", CultureInfo.InvariantCulture)", StringComparison.Ordinal)
+                  && sched.Contains("ParseInstant(fields, \"postprocessDefer\")", StringComparison.Ordinal),
+                "F-M445: the armed moment is persisted under the old field name and read back");
 
             Console.WriteLine($"statefile: {_checks} checks, {(_failed == 0 ? "all green" : _failed + " failed")}.");
             return _failed == 0 ? 0 : 1;

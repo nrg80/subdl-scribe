@@ -590,27 +590,22 @@ public class PluginConfiguration : BasePluginConfiguration
     #endregion
 
     /// <summary>
-    /// F-M176 (user decision 21.09.2026): cadence for the upload postprocessing task.
-    /// Independent from the upload pipeline. Manual disables it entirely.
+    /// F-M445 (Betreiber-Entscheidung 02.11.2026): Vorlaufzeit des Upload-Nachlaufs nach dem Ende
+    /// eines Upload-Laufs, in Minuten. **0 schaltet den Nachlauf ab** — dann wird nie ein Termin
+    /// gesetzt. Gültig sind 0..1440. **Es gibt keinen festen Anker mehr** — jeder beendete
+    /// Upload-Lauf terminiert den Nachlauf neu auf „Laufende + diese Minuten", und der **letzte
+    /// Auftrag gewinnt**: ein noch offener Termin wird überschrieben, nicht addiert. Läuft also
+    /// Upload 1 um 12:15 aus, steht der Nachlauf auf 12:45; endet Upload 2 um 12:30, bleibt es bei
+    /// 12:45 (12:30 + 30 = 13:00 wird NICHT addiert, sondern der bestehende Auftrag storniert und
+    /// neu terminiert — der letzte Lauf bestimmt den Termin).
     /// <para>
-    /// Default changed to Weekly on 10.10.2026 (operator order). Rejected-upload rows are a slow
-    /// trickle, and every run costs a /user/mySubtitles read: a daily sweep mostly re-read the same
-    /// pages to find nothing, while a weekly one still resolves a rejection within days of it
-    /// happening. The dice anchor is a day+time either way, so Weekly uses the stored value as-is.
+    /// Der Grund: der Handle-Remap Upload-Id → Eintrags-Id und das Wegräumen abgelehnter Uploads
+    /// hingen vorher am Tagesanker und liefen damit erst am nächsten Morgen — ein Pack, das am
+    /// selben Tag gebaut wurde, löschte seine Einzeluploads noch mit der Upload-Id, die
+    /// <c>deletePublishedSubtitle</c> nicht kennt (F-M435: 3758706 = Eintrag, 380828 = Upload).
     /// </para>
     /// </summary>
-    public UpdateInterval UploadPostprocessInterval { get; set; } = UpdateInterval.Daily;
-
-    /// <summary>
-    /// F-M176: diced postprocessing anchor, "D HH:mm" (D=1..7 Mon..Sun). Empty = not diced yet.
-    /// </summary>
-    public string RandomPostprocessTime { get; set; } = string.Empty;
-
-    /// <summary>
-    /// F-M176: minimum spacing in hours between two postprocessing runs. Prevents storms
-    /// when the scheduler fires close to an event. Default 1 hour.
-    /// </summary>
-    public int PostprocessMinSpacingHours { get; set; } = 1;
+    public int UploadPostprocessDelayMinutes { get; set; } = 30; // 0 = inaktiv, Bereich 0..1440
 
     /// <summary>
     /// F-M176: max mySubtitles pages fetched per postprocessing run. Default 5.

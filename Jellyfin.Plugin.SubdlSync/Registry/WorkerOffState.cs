@@ -63,11 +63,10 @@ public static class WorkerOffState
 
         if (string.Equals(workerKey, PostprocessWorkerKey, StringComparison.Ordinal))
         {
-            // The gate is "no automatic fire", and OnArrival arms no clock either — it runs on arrivals
-            // only. That is an automatism (so the status line says nothing), but it is not a scheduled
-            // anchor, so the gate still covers it.
-            return !config.UploadEnabled
-                || config.UploadPostprocessInterval is UpdateInterval.Never or UpdateInterval.Manual or UpdateInterval.OnArrival;
+            // F-M445 (operator decision 02.11.2026): the postprocessing has no cadence of its own any
+            // more — it is armed by every finished upload run. It is therefore exactly as far "off" as
+            // the upload direction is: no uploads means nothing to resolve.
+            return !config.UploadEnabled;
         }
 
         return false;
@@ -99,14 +98,8 @@ public static class WorkerOffState
             return config.RefetchInterval is UpdateInterval.Never or UpdateInterval.Manual;
         }
 
-        if (string.Equals(workerKey, PostprocessWorkerKey, StringComparison.Ordinal))
-        {
-            // OnArrival is an automatism too (operator: "On arrival ist auch ein Automatismus und kein
-            // manuell") — an arrival starts it, so it carries no "manual" note. Only Never/Manual are manual.
-            // The scheduler's time-anchor gate (Applies) still refuses OnArrival: it arms no clock, but the
-            // worker is not idle.
-            return config.UploadPostprocessInterval is UpdateInterval.Never or UpdateInterval.Manual;
-        }
+        // F-M445: the postprocessing has no cadence left to be "manual" — it fires when an upload run
+        // arms it, and the dashboard button always works (F-M291).
 
         if (string.Equals(workerKey, DatabaseWorkerKey, StringComparison.Ordinal))
         {

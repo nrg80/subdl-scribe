@@ -22,7 +22,6 @@ static PluginConfiguration Ready()
     c.UploadEnabled = true;
     c.SelectedLibraries = new System.Collections.Generic.List<string> { "Movies" };
     c.DownloadLanguages = "EN, DE";
-    c.UploadPostprocessInterval = UpdateInterval.Weekly;
     return c;
 }
 
@@ -46,9 +45,8 @@ Check("upload IGNORES the download language list — it has none", !WorkerOffSta
 
 // --- postprocessing: bound to upload, not to libraries ----------------------
 Check("postprocessing off when upload is off", Off(PP, c => c.UploadEnabled = false));
-Check("postprocessing off on Manual", Off(PP, c => c.UploadPostprocessInterval = UpdateInterval.Manual));
-Check("postprocessing off on Never", Off(PP, c => c.UploadPostprocessInterval = UpdateInterval.Never));
-Check("postprocessing off on OnArrival", Off(PP, c => c.UploadPostprocessInterval = UpdateInterval.OnArrival));
+// F-M445: there is no cadence left — the worker is off exactly when the upload direction is off.
+Check("postprocessing is never off while upload runs", !Off(PP, _ => { }));
 Check("postprocessing stays ON when no library is selected — it reads /user/mySubtitles",
     !WorkerOffState.Applies(PP, Mutate(c => c.SelectedLibraries.Clear())));
 
@@ -90,20 +88,14 @@ Check("database refresh NOT manual on Weekly/Monthly/Yearly",
 Check("oshash refresh manual on OshashRefreshMode.Manual", WorkerOffState.IsManualOnly(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Manual)));
 Check("oshash refresh manual on the legacy OshashRefreshMode.Never", WorkerOffState.IsManualOnly(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Never)));
 Check("oshash refresh NOT manual on Monthly", !WorkerOffState.IsManualOnly(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Monthly)));
-Check("postprocessing is manual on a Manual cadence", WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Manual)));
-Check("postprocessing is manual on the legacy Never", WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Never)));
-Check("postprocessing OnArrival is an automatism, NOT manual",
-    !WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.OnArrival)));
-Check("postprocessing OnArrival arms no clock (the gate still refuses the anchor)",
-    WorkerOffState.Applies(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.OnArrival)));
-Check("a weekly postprocessing is neither off nor manual",
-    !WorkerOffState.Applies(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Weekly))
-    && !WorkerOffState.IsManualOnly(PP, Mutate(c => c.UploadPostprocessInterval = UpdateInterval.Weekly)));
+// F-M445: no cadence means nothing to call "manual" either — the order comes from the upload run.
+Check("postprocessing is never reported as manual", !WorkerOffState.IsManualOnly(PP, Mutate(_ => { })));
+Check("postprocessing is never reported off while upload is on", !WorkerOffState.Applies(PP, Mutate(_ => { })));
 Check("a manual worker is NEVER reported as off (manual runs still work)",
     !WorkerOffState.Applies(DB, Mutate(c => c.PruneMode = PruneMode.Manual))
     && !WorkerOffState.Applies(OS, Mutate(c => c.OshashRefresh = OshashRefreshMode.Manual)));
-Check("postprocessing is off in the gate when upload is off (the gate itself is unchanged)",
-    WorkerOffState.Applies(PP, Mutate(c => { c.UploadEnabled = false; c.UploadPostprocessInterval = UpdateInterval.Manual; })));
+Check("postprocessing is off in the gate when upload is off (F-M445: the switch is all that is left)",
+    WorkerOffState.Applies(PP, Mutate(c => c.UploadEnabled = false)));
 
 // --- the language parse matches the download pipeline's ---------------------
 var parsed = WorkerOffState.ParseTargetLanguages(" en, de ,EN,,");
@@ -179,6 +171,22 @@ Check("a pending fire turns the LAMP to defer for every outcome",
 Check("a failed row is no longer exempt from the deferral lamp",
     !page.Contains("wo !== 'failed' && wo !== 'run'"));
 
+// --- F-M447 (operator order 05.11.2026): "für das upload Postprocessing im worker status bitte
+// nicht defer sondern schedule verwenden. Der erste lauf ist planmäßig" -------------------------
+// Die Seite setzt fuer eine leere Begruendung das Wort "deferred" ein. Beim Postprocessing ist das
+// falsch: jeder beendete Upload-Lauf terminiert den Auftrag genau einmal, und dieser erste Lauf ist
+// planmaessig — nichts wurde vertagt. Geprueft wird das Paar: das Wort steht da, UND es haengt am
+// Postprocessing-Worker, nicht an allen.
+Check("the postprocessing note says `schedule` instead of the default `deferred`",
+    quota.Contains("reason = \"schedule\";"),
+    "an armed order that runs on plan is not a deferral");
+Check("the `schedule` word is gated on the postprocessing worker",
+    quota.Contains("string.Equals(worker.Key, Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey"),
+    "the other workers keep their real deferrals");
+Check("a failed postprocessing row still speaks before the word",
+    quota.Contains("if (string.IsNullOrEmpty(reason)"),
+    "the failure cause (F-M436) outranks any word about the order");
+
 Console.WriteLine();
 Console.WriteLine(f == 0 ? ">>> OFFSTATE OK" : $">>> OFFSTATE {f} FAILURE(S)");
 return f == 0 ? 0 : 1;
@@ -191,7 +199,6 @@ static PluginConfiguration Mutate(Action<PluginConfiguration> mutate)
     c.DownloadEnabled = true; c.UploadEnabled = true;
     c.SelectedLibraries = new System.Collections.Generic.List<string> { "Movies" };
     c.DownloadLanguages = "EN, DE";
-    c.UploadPostprocessInterval = UpdateInterval.Weekly;
     mutate(c);
     return c;
 }

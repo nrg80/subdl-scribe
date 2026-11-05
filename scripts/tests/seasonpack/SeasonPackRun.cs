@@ -105,6 +105,13 @@ internal static class Program
         public bool FileCarriesLanguage(string imdbId, int season, int episode, string lang, bool hearingImpaired)
             => InFiles.Contains((lang, hearingImpaired));
 
+        /// <summary>F-M442: what the library says about quality and frame rate, per episode.</summary>
+        public Func<int, (string? Quality, string? Framerate)> Source { get; set; }
+            = _ => ("1080p.WEB-DL", "23,976");
+
+        public (string? Quality, string? Framerate) SourceFacts(string imdbId, int season, int episode)
+            => Source(episode);
+
         public IReadOnlyCollection<(string Language, bool HearingImpaired)> FileLanguages(string imdbId, int season)
             => InFiles;
 
@@ -565,10 +572,34 @@ internal static class Program
         var logHole = new List<string>();
         var coordinatorHole = NewCoordinator(logHole, complete, packable, fillerHole, dryConfig);
         coordinatorHole.FillOnlyAsync("tt1", 1, "EN", false, CancellationToken.None).GetAwaiter().GetResult();
-        Check(logHole.Any(l => l.Contains("episode 5 cannot join from what is already uploaded, nothing is sent", StringComparison.Ordinal)),
+        Check(logHole.Any(l => l.Contains("episode 5 cannot join, and ", StringComparison.Ordinal)),
             "one episode that cannot join stops the pack and names itself");
         Check(!logHole.Any(l => l.Contains("DRY-RUN would upload season pack", StringComparison.Ordinal)),
             "no partial pack is ever sent");
+
+        // ── F-M442: gemischte Quellen fallen VOR der ersten Extraktion auf ──────
+        var fillerMixed = new FakeFiller(refuse: Array.Empty<int>(), answer: -1)
+        {
+            Source = episode => episode == 4 ? ("ATVP.WEB-DL", "23,809") : ("1080p.WEB-DL", "23,976"),
+        };
+        var logMixed = new List<string>();
+        var coordinatorMixed = NewCoordinator(logMixed, complete, packable, fillerMixed, dryConfig);
+        coordinatorMixed.FillOnlyAsync("tt1", 1, "EN", false, CancellationToken.None).GetAwaiter().GetResult();
+        Check(fillerMixed.Calls.Count == 0,
+            "F-M442: a mixed-source season is refused before the first extraction");
+        Check(logMixed.Any(l => l.Contains("skipped before any extraction", StringComparison.Ordinal)
+                                && l.Contains("S01E04", StringComparison.Ordinal)),
+            "F-M442: the line names the episode that carries another source");
+        Check(logMixed.Any(l => l.Contains("go up as singles after this pass", StringComparison.Ordinal)
+                                || l.Contains("already up as singles", StringComparison.Ordinal)),
+            "F-M442: the skip line states what really happens to the episodes instead of claiming they are up");
+
+        // Gleichmaessige Quellen kommen weiterhin bis zum Fill durch.
+        var fillerEven = new FakeFiller(refuse: Array.Empty<int>(), answer: -1);
+        var logEven = new List<string>();
+        var coordinatorEven = NewCoordinator(logEven, complete, packable, fillerEven, dryConfig);
+        coordinatorEven.FillOnlyAsync("tt1", 1, "EN", false, CancellationToken.None).GetAwaiter().GetResult();
+        Check(fillerEven.Calls.Count == 8, "F-M442: one quality and one frame rate across the season still packs");
 
         // ── F-M407: TMDb zuerst ─────────────────────────────────────────────────
         var seasonIndexSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SeasonEpisodeIndex.cs"));
@@ -652,26 +683,43 @@ internal static class Program
         Check(uploadSrc.Contains("entry id {Id} taken from myPublishedSubtitles"),
             "F-M435: a single and a movie store the entry id the same way");
 
-        // ── F-M437: der Nachlauf blättert bis zum Wasserzeichen, nicht fünf Seiten ──────────────
-        Check(api.Contains("Func<OwnSubtitleEntry, bool>? shouldStop = null")
-              && api.Contains("if (shouldStop != null && shouldStop(result[result.Count - 1]))"),
-            "F-M437: the published list can be walked down to a watermark");
-        Check(uploadSrc.Contains("cfg.PostprocessWatermarkUtc") && uploadSrc.Contains("plugin.SavePluginState();"),
-            "F-M437: the pass stores how far it read");
-        Check(uploadSrc.Contains("e.CreatedAt.ToUniversalTime() < watermark"),
-            "F-M437: the walk stops at entries older than the last pass");
-        Check(uploadSrc.Contains("Math.Clamp(cfg.PostprocessMaxPages, 1, 20000)"),
-            "F-M437: the page limit is a ceiling for a catch-up run, not the daily depth");
-        var cfgSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"));
-        Check(cfgSrc.Contains("UploadPostprocessInterval { get; set; } = UpdateInterval.Daily"),
-            "F-M437: postprocessing runs daily by default");
-        Check(cfgSrc.Contains("public DateTime? PostprocessWatermarkUtc { get; set; }"),
-            "F-M437: the watermark is configuration state");
+        // ── F-M442/F-M443/F-M444: die drei Vorabprüfungen und die zweite Fassung ──
+        Check(uploadSrc.Contains("public (string? Quality, string? Framerate) SourceFacts("),
+            "F-M442: quality and frame rate are readable without extracting anything");
+        Check(uploadSrc.Contains("Registry.EmbedRejectedReason(fillMediaHash, position)"),
+            "F-M443: the fill asks the reject store before it extracts");
+        Check(uploadSrc.Contains("every track of this language is already refused in the store, nothing is extracted"),
+            "F-M443: a language whose tracks are all refused costs no extraction at all");
+        Check(uploadSrc.Contains("FindSeasonEpisodeItems(") && uploadSrc.Contains("trying the next file of this episode"),
+            "F-M444: a second file of the same episode gets an attempt of its own");
+        Check(coordinatorSrc.Contains("go up as singles after this pass"),
+            "F-M442: the skip messages carry the real state of the season, not a guess");
 
-        Console.WriteLine();
+        // ── F-M441: der Fill arbeitet über Dateien im Lauf-Ordner, nicht über den Speicher ────────
+        Check(uploadSrc.Contains("_workFiles.TryRead(imdbId, season, episode, lang, hearingImpaired, position, out string? onDisk)"),
+            "F-M441: the fill reads a text this run already extracted off the disk");
+        Check(uploadSrc.Contains("_workFiles.Write(imdbId, season, episode, lang, hearingImpaired, pair.Key, pair.Value!)"),
+            "F-M441: an extracted text is written to the run's working directory");
+        Check(!uploadSrc.Contains("_fillTextCache") && !uploadSrc.Contains("_ownTexts"),
+            "F-M441: no in-memory text cache and no persistent store");
+        Check(!uploadSrc.Contains("Enumerable.Range(0, subtitleStreams.Count)"),
+            "F-M441: the fill never extracts every subtitle track of the container");
+        Check(uploadSrc.Contains("Api.RunWorkFiles.PurgeStale(null, TimeSpan.FromDays(2))"),
+            "F-M441: the start of a run sweeps what a killed run left behind");
+        Check(uploadSrc.Contains("_workFiles.Purge()"),
+            "F-M441: the run removes its own working files when it ends");
+        Check(!File.Exists(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/OwnTextStore.cs")),
+            "F-M441: there is no persistent text store in the tree");
+        var coordinatorSrc2 = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+        Check(!coordinatorSrc2.Contains("_ownTexts"),
+            "F-M441: the pack coordinator carries no store either");
+        Check(coordinatorSrc2.Contains("DeletePublishedSubtitleAsync(single.Id")
+                && coordinatorSrc2.IndexOf("DeletePublishedSubtitleAsync(single.Id") < coordinatorSrc2.IndexOf("await _api.UploadSeasonPackAsync"),
+            "F-M391 stays as ordered: the absorbed singles are deleted BEFORE the pack goes up");
+
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
-            : $"seasonpack: {_checks} checks, {Failures.Count} FAILED.");
+            : $"seasonpack: {_checks} checks, {Failures.Count} failed.");
         return Failures.Count == 0 ? 0 : 1;
     }
 }

@@ -179,12 +179,6 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             changed = true;
         }
 
-        if (string.IsNullOrWhiteSpace(c.RandomPostprocessTime))
-        {
-            c.RandomPostprocessTime = $"{Random.Shared.Next(1, 8)} {Random.Shared.Next(0, 24):D2}:{Random.Shared.Next(0, 60):D2}";
-            changed = true;
-        }
-
         // F-M210a (operator order 10.10.2026): "Never / manual für alle 3 jobs zu manual auflösen".
         // The three cadence menus had two spellings for ONE setting — the label read Manual while the
         // stored value was Never — because the value had been frozen to avoid resetting a choice
@@ -206,11 +200,6 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             c.OshashRefresh = OshashRefreshMode.Manual;
         }
 
-        if (c.UploadPostprocessInterval == UpdateInterval.Never)
-        {
-            c.UploadPostprocessInterval = UpdateInterval.Manual;
-        }
-
         if (changed)
         {
             SavePluginState();
@@ -226,7 +215,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     private static readonly string[] PluginOwnedFields =
     [
         "RandomDailyTime", "RandomWeeklyTime", "RandomMonthlyTime", "RandomMonthlyDay",
-        "RandomPruneTime", "RandomOshashTime", "RandomPostprocessTime", "PostprocessWatermarkUtc",
+        "RandomPruneTime", "RandomOshashTime", "PostprocessWatermarkUtc",
         "StatusUploaded", "StatusDownloaded", "StatusStatsSinceUtc"
     ];
 
@@ -263,7 +252,6 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             mine["RandomMonthlyDay"] = cfg.RandomMonthlyDay.ToString(CultureInfo.InvariantCulture);
             mine["RandomPruneTime"] = cfg.RandomPruneTime;
             mine["RandomOshashTime"] = cfg.RandomOshashTime;
-            mine["RandomPostprocessTime"] = cfg.RandomPostprocessTime;
             mine["StatusUploaded"] = cfg.StatusUploaded.ToString(CultureInfo.InvariantCulture);
             mine["StatusDownloaded"] = cfg.StatusDownloaded.ToString(CultureInfo.InvariantCulture);
             mine["StatusStatsSinceUtc"] = cfg.StatusStatsSinceUtc?.ToUniversalTime()

@@ -38,6 +38,17 @@ public interface IPackFiller
         string imdbId, int season, int episode, string lang, bool hearingImpaired, CancellationToken ct);
 
     /// <summary>
+    /// F-M442 (operator 04.11.2026): the source facts of an aired episode — quality and frame rate,
+    /// read WITHOUT extracting anything. The coordinator asks them before the first fill, so a season
+    /// of mixed sources is refused without pulling a single text out of a container.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <returns>Quality and frame rate, null where the library cannot answer.</returns>
+    (string? Quality, string? Framerate) SourceFacts(string imdbId, int season, int episode);
+
+    /// <summary>
     /// F-M433 (operator order 03.11.2026, "wieso geht Tracker einzeln hoch?"): says whether the episode's
     /// FILE carries an embedded track of this language and variant.
     /// <para>

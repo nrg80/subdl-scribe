@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.330"
+version: "12.1.12.339"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,15 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.339: the armed postprocessing order is reported as `schedule`, not `deferred` — its first run happens on plan (F-M447).
+  v12.1.12.338: an arrival run is recognisable inside the pipelines again — the flag derives from the queue scope, so the arrival exemption from the daily-limit wait applies as before (F-M446).
+  v12.1.12.337: the settings description no longer explains the re-arming — one sentence, one fact.
+  v12.1.12.336: the watermark hint left the settings page — it is internal state, not a setting.
+  v12.1.12.335: postprocessing delay 0-1440 with 0 = inactive; a user stop and a run start both re-arm/cancel; the status page names the due moment on its own line under the workers.
+  v12.1.12.334: the upload postprocessing has no fixed anchor any more — every finished upload run arms it 30 minutes out, and the last order wins (F-M445).
+  v12.1.12.333: three preflight checks in the pack fill — mixed sources and already-refused tracks are refused before any extraction, and a second file of the same episode gets its own attempt (F-M442/F-M443/F-M444).
+  v12.1.12.332: the pack fill keeps its texts in the run's working directory instead of a persistent store — gone when the run ends (F-M440/F-M441).
+  v12.1.12.331: the pack fill takes the subtitle that is already uploaded instead of extracting every track of the file — no more ~900 MB held per run (F-M440).
   v12.1.12.330: a plugin-owned field that is new to the configuration file survives a restart — the partial writer clears xsi:nil and inserts at the declared position (F-M438).
   v12.1.12.329: the page ceiling of the postprocessing walk rises to 20000 so a large backlog is reachable in one catch-up run; the run itself stays watermark-bound (F-M437).
   v12.1.12.328: the postprocessing pages down to its own watermark and runs daily, so a published entry gets its entry id within a day instead of waiting for a weekly pass (F-M437).

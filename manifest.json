@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.264",
-        "changelog": "v12.1.12.264: A file that already carries a Norwegian subtitle is no longer given a second one, whichever written form the existing subtitle uses.",
+        "version": "12.1.12.339",
+        "changelog": "v12.1.12.339: the armed postprocessing order is reported as `schedule`, not `deferred` — its first run happens on plan (F-M447).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.264/Jellyfin.Plugin.SubdlSync_12.1.12.264.zip",
-        "checksum": "7bb4943a4fecb14087e3590e26c4f582",
-        "timestamp": "2026-11-01T12:49:28Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.339-dev/Jellyfin.Plugin.SubdlSync_12.1.12.339.zip",
+        "checksum": "b33025bb439a2c50ffbfe891e9115b98",
+        "timestamp": "2026-11-05T09:25:59Z"
       }
     ]
   }
