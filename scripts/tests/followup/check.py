@@ -117,6 +117,23 @@ def main():
           re.search(r"if \(!followUpDown && !followUpUp\)\s*\{\s*return;", body) is not None,
           "early return kept")
 
+    # F-M446 (operator order 05.11.2026, "Verhalten soll wie früher sein"): the arrival run must be
+    # RECOGNISABLE inside the pipeline. The flag had been a literal `false` for both legs since the
+    # scoping moved to QueueFilter, which killed the arrival exemptions in both pipelines without a
+    # single log line saying so. Asserted as a PAIR: derived from the scope, and no literal left.
+    check("the arrival flag comes from the run's scope (upload leg)",
+          "Pipeline.IsArrivalRun = arrivalScoped;" in src,
+          "a literal false makes every arrival run look scheduled")
+    check("the arrival flag is set for the download leg too",
+          src.count("Pipeline.IsArrivalRun = arrivalScoped") == 2,
+          "both directions read the same flag — one leg forgetting it is the same bug half-fixed")
+    check("no literal false is assigned to the arrival flag",
+          "IsArrivalRun = false" not in src,
+          "the literal was the defect: it looked deliberate and was never true")
+    check("the scope decides, not the trigger name",
+          re.search(r"ExecutePipelineAsync\(upload, config, filter, progress, trigger, scopeIds != null\)", src) is not None,
+          "the queue scope IS the arrival statement (F-M233) — a trigger string can drift")
+
     return report()
 
 
@@ -128,6 +145,7 @@ def report():
         if detail:
             line += " — %s" % detail
         print(line)
+
     print()
     if passed == total:
         print(">>> FOLLOW-UP OK: %d/%d Pruefungen bestanden" % (passed, total))

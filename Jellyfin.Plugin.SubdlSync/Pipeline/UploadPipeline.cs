@@ -477,8 +477,8 @@ public sealed class UploadPipeline : IPackFiller
         // staffelpack". Nothing is held back for a pack any more. Every position goes up the SINGLE
         // way first, and the pack is assembled at the END of the run out of what is in the store by
         // then — this run's own uploads included — deleting the singles it absorbs (F-M391). An
-        // arrival run builds no pack at all ("on arrival: nur einzelupload"), so it neither asks which
-        // seasons are complete nor extracts anything for a container.
+        // arrival run never builds a LIBRARY pack: it carries only its own arrivals, so a pack can only
+        // come from those items and nothing else (F-M424, below).
         SeasonPackCoordinator? packCoordinator = null;
         IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> completeSeasons
             = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>();
