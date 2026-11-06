@@ -41,6 +41,15 @@ DEFAULT = os.path.join(
 results = []
 
 
+def _read(path):
+    """Source text of a file the dispatcher's rules depend on; empty when absent."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
 def check(name, ok, detail=""):
     results.append((name, bool(ok), detail))
 
@@ -133,6 +142,47 @@ def main():
     check("the scope decides, not the trigger name",
           re.search(r"ExecutePipelineAsync\(upload, config, filter, progress, trigger, scopeIds != null\)", src) is not None,
           "the queue scope IS the arrival statement (F-M233) — a trigger string can drift")
+
+    # --- F-M448 (operator order 05.11.2026): "defer 15 min (aus gui) wenn der seeder auf einen
+    # laufenden bib scan trifft". A library scan creates the item first and attaches its media streams
+    # with the analysis that follows it; a seed that scans in that window reads an EMPTY stream list,
+    # IsUploadTodo answers "nothing to do" and the arrival is dropped. The gate must therefore sit
+    # BEFORE the scan, must leave queues/arrival list untouched, and must be switchable off.
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(path))))
+    plugin = os.path.join(root, "Jellyfin.Plugin.SubdlSync")
+    config = _read(os.path.join(plugin, "Configuration", "PluginConfiguration.cs"))
+    page = _read(os.path.join(plugin, "Configuration", "configPage.html"))
+    coord = _read(os.path.join(plugin, "ScheduledTasks", "SubdlSchedulerCoordinator.cs"))
+
+    check("the seed waits for a running library scan (F-M448)",
+          "TryDeferForLibraryScan(config, reason, dir)" in src,
+          "the gate is called on the seed path")
+    check("the deferral happens before the scan, not after it",
+          src.index("TryDeferForLibraryScan(config, reason, dir)") < src.index("_seeder.Scan(config"),
+          "a gate after the scan would defer nothing")
+    check("the scan probe is one method for the whole plugin",
+          "IsLibraryScanRunning()" in src and "public bool IsLibraryScanRunning()" in coord,
+          "dispatcher asks, coordinator owns the TaskManager")
+    check("the wait reuses the existing job spacing — no second knob",
+          "int minutes = config.JobSpacingMinutes;" in src
+          and "ScanDeferMinutes" not in src and "ScanDeferMinutes" not in config and "ScanDeferMinutes" not in page,
+          "operator order 05.11.2026: the 15-minute spacing setting already exists")
+    check("a nonsensical spacing never waits",
+          "if (minutes <= 0)" in src,
+          "guard only — the GUI floor is 5 minutes")
+    check("the retry is re-armed, so the arrival is not lost",
+          "_scanDeferTimer.Change(TimeSpan.FromMinutes(minutes)" in src,
+          "one-shot timer — a later trigger moves the retry further out")
+    check("a deferred seed neither scanned nor failed",
+          'library scan running — retry in {0} min' in src,
+          "grey row: the work is pending, not switched off")
+    check("the scan gate does not drain the during-cycle list",
+          src.index("_pendingDuringCycleIds = null") > src.index("_seeder.Scan(config"),
+          "only a REAL scan may consume the arrivals")
+    check("the spacing setting is the documented 15-minute default",
+          "public int JobSpacingMinutes { get; set; } = 15;" in config
+          and 'id="JobSpacingMinutes"' in page,
+          "the field the operator already uses carries the wait")
 
     return report()
 

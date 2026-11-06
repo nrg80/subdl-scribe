@@ -63,6 +63,10 @@ public sealed class SubdlEventDispatcher : IDisposable
     // reset the countdown (user decision 12.09.2026).
     private Timer? _debounceTimer;
     private bool _timerArmed;
+
+    // F-M448 (operator order 05.11.2026): a seed that meets a running library scan waits instead of
+    // scanning. One-shot timer — a second trigger simply moves the retry further out.
+    private Timer? _scanDeferTimer;
     private readonly object _lock = new();
 
     // F-M111 (user decision 12.09.2026): event-scoped seeding — the dispatcher
@@ -903,6 +907,46 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// <summary>
     /// Seed + run helper used by round 1 and follow-up rounds.
     /// </summary>
+    /// <summary>
+    /// F-M448: waits when a library scan is running. Returns true when the seed must not scan now.
+    /// <para>
+    /// The scan is what creates the item; its media streams arrive with the analysis that follows it.
+    /// Scanning in that window reads an empty stream list and the arrival is lost (measured: MobLand
+    /// S02E08 and Best.Medicine S02E06 both wrote a media row with no languages and were never queued).
+    /// </para>
+    /// <para>
+    /// Waits the EXISTING job spacing (operator order 05.11.2026: "kein neues gui feld, das job
+    /// respacing interval default 15 min haben wir bereits") — one knob for "the thing I was waiting
+    /// for is still busy", not a second one that could disagree with it.
+    /// </para>
+    /// </summary>
+    private bool TryDeferForLibraryScan(PluginConfiguration config, string reason, CycleDirection dir)
+    {
+        int minutes = config.JobSpacingMinutes;
+        if (minutes <= 0)
+        {
+            return false;
+        }
+
+        if (SubdlSchedulerCoordinator.Instance?.IsLibraryScanRunning() != true)
+        {
+            return false;
+        }
+
+        LogUtil.Normal(_logger, "[SubDL-Seed] library scan running — seed deferred {Min} min ({Reason}, dir {Dir}).", minutes, reason, dir);
+        // GREY: the seed did not scan and did not fail — it waited for a scan it cannot see into.
+        RecordSeeder(Registry.WorkerRunRegistry.Outcome.Deferred,
+            string.Format(System.Globalization.CultureInfo.InvariantCulture, "library scan running — retry in {0} min", minutes));
+
+        lock (_lock)
+        {
+            _scanDeferTimer ??= new Timer(_ => _ = TimerFiredAsync(), null, Timeout.Infinite, Timeout.Infinite);
+            _scanDeferTimer.Change(TimeSpan.FromMinutes(minutes), Timeout.InfiniteTimeSpan);
+        }
+
+        return true;
+    }
+
     private async Task<bool> SeedAndMaybeRunAsync(string trigger, System.Collections.Generic.ISet<string>? onlyLibs, PluginConfiguration config, bool upload, bool scopedOnly, bool precheck = false, System.Collections.Generic.ISet<string>? onlyItems = null)
     {
         if (_userStopActive)
@@ -2210,6 +2254,16 @@ public sealed class SubdlEventDispatcher : IDisposable
                 LogUtil.Detail(_logger, "[SubDL-Seed] pre-check: changed {Newest:HH:mm:ss} — full scan ({Reason}).", newest.ToLocalTime(), reason);
             }
 
+            // F-M448 (operator order 05.11.2026): "defer 15 min (aus gui) wenn der seeder auf einen
+            // laufenden bib scan trifft" — waited in job-spacing steps, the setting that already
+            // exists. The deferral happens BEFORE the scan and returns without touching the queues, the
+            // scan stamps or the during-cycle list: the arrival stays remembered, the retry finds the
+            // finished scan.
+            if (TryDeferForLibraryScan(config, reason, dir))
+            {
+                return false;
+            }
+
             DateTime scanStartedUtc = DateTime.UtcNow;
             LogUtil.Detail(_logger, "[SubDL-Seed] start ({Reason}, dir {Dir}).", reason, dir);
             _lastSeedNewIdsUp.Clear();
@@ -2491,6 +2545,7 @@ public sealed class SubdlEventDispatcher : IDisposable
     {
         _libraryManager.ItemAdded -= OnItemAdded;
         _debounceTimer?.Dispose();
+        _scanDeferTimer?.Dispose();
         _cts.Cancel();
         _cts.Dispose();
         if (Instance == this)

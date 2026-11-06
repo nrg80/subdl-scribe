@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.339"
+version: "12.1.12.340"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.340: a seed that meets a running library scan waits `ScanDeferMinutes` (default 15) instead of reading an empty stream list (F-M448).
   v12.1.12.339: the armed postprocessing order is reported as `schedule`, not `deferred` — its first run happens on plan (F-M447).
   v12.1.12.338: an arrival run is recognisable inside the pipelines again — the flag derives from the queue scope, so the arrival exemption from the daily-limit wait applies as before (F-M446).
   v12.1.12.337: the settings description no longer explains the re-arming — one sentence, one fact.

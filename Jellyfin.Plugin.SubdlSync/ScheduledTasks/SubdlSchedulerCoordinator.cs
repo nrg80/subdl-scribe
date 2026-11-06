@@ -773,6 +773,27 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     /// the next 30-s tick retries it. Same guard class as the F-M65 recovery
     /// fires, which had it for download/upload only (F-M212).
     /// </summary>
+    /// <summary>
+    /// F-M448: true while Jellyfin is building or validating a library (or refreshing the metadata of
+    /// freshly imported items). A scan creates the item first and attaches its media streams when its
+    /// analysis runs — a seed that looks in between finds an item with no stream list at all.
+    /// </summary>
+    public bool IsLibraryScanRunning()
+    {
+        try
+        {
+            return _taskManager.ScheduledTasks.Any(t =>
+                t.State == MediaBrowser.Model.Tasks.TaskState.Running
+                && (string.Equals(t.ScheduledTask.Key, "RefreshLibrary", System.StringComparison.Ordinal)
+                    || string.Equals(t.ScheduledTask.Key, "RefreshMediaMetadata", System.StringComparison.Ordinal)));
+        }
+        catch
+        {
+            // A throwing probe must never stop a seed — it only costs the deferral.
+            return false;
+        }
+    }
+
     private bool IsTaskRegistered<T>()
         where T : IScheduledTask =>
         _taskManager.ScheduledTasks.Any(t => t.ScheduledTask is T);
