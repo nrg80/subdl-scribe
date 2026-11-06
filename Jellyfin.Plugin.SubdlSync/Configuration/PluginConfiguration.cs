@@ -141,7 +141,6 @@ public enum LogLevelMode
 /// <summary>
 /// Plugin configuration for SubDL Scribe (F-M18 – F-M22, F-M24a-c, F-M28-F-M30, F-M34/M35).
 /// </summary>
-    // Removed requirements (no longer implemented): F-M17, F-M17b, F-M17e, F-M24, F-M24c, F-M31, F-M32, F-M33
     
 public class PluginConfiguration : BasePluginConfiguration
 {

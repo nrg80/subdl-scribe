@@ -1,43 +1,38 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.102
+**Version:** 2.103
 **Status:** Implementation — v12.1.12.340.
 
-**Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in
-`/optdie Methodik-Ablage`, nach Kapiteln sortiert und mit der Requirement-Nummer
+**Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
 
-**Zählkonvention der Contents-Zähler.** Ein Abschnittszähler ist die **Anzahl der Definitionszeilen
-in seinem Block, Unterüberschriften eingeschlossen, superseded-Einträge eingeschlossen** — ein
-schlichter Zählwert, der keine Aussage darüber trifft, was noch in Kraft ist. Abschnitt 3 nennt 33
-und hält 33 (mit 3.1 = 8 und 3.2 = 2); Abschnitt 9 nennt 25 und hält 25. Ein Abschnittszähler, der
-seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
+**Zählkonvention der Contents-Zähler.** Ein Abschnittszähler ist die **Anzahl der Definitionszeilen in seinem Block, Unterüberschriften eingeschlossen, zurückgezogene Einträge eingeschlossen** — ein schlichter Zählwert, der keine Aussage darüber trifft, was in Kraft ist. Ein Abschnittszähler, der seine Unterabschnitte ausnimmt, ist nicht die Konvention. Geprüft von T115.
 
 ## Contents
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
-- [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 12 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 84 requirements
- - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 8 requirements
+- [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 13 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 92 requirements
+ - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 53 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 59 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 7 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
- - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 19 requirements
+ - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 14 requirements
 - [6. Database Refresh](#6-database-refresh) — 9 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
 - [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 5 requirements
 
-- [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 27 requirements
-- [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 15 requirements
-- [11. Content Registry and Identity](#11-content-registry-and-identity) — 26 requirements
+- [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 32 requirements
+- [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 22 requirements
+- [11. Content Registry and Identity](#11-content-registry-and-identity) — 27 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 17 requirements
-- [14. Data Model and Persistence](#14-data-model-and-persistence) — 15 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 45 requirements
+- [14. Data Model and Persistence](#14-data-model-and-persistence) — 17 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 48 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -108,6 +103,7 @@ Content is the key, not the path, and the hash is the uploader's own function. T
 
 **F-M111:** **Queue-driven operation:** both pipelines run only over items the seeder placed in the in-memory queue. Runs are atomic per direction and serialized by a global run lock.
 
+**F-M188:** **Ohne gewählte Bibliothek startet der Seeder nicht.** Die Prüfung liegt vor dem Lauf-Lock, vor dem Durchgang über die Änderungsstempel und vor jedem Datenbankzugriff; dieselbe Bedingung steht zusätzlich im Scan selbst.
 ## 3. Upload Pipeline
 
 **F-M2 [B1]:** Manually triggerable scheduled task (dashboard "Scheduled Tasks") for a full library rebuild
@@ -216,6 +212,13 @@ A marker is consumed as a marker and the language token is read from the positio
 
 **F-M389 [U]:** **A season pack may be completed from subtitles that are already uploaded.** An episode missing from the run's queue because its subtitle went up earlier is filled in from the library instead of dissolving the season into single uploads — and a season whose episodes are ALL up already is a pack of its own, with nothing new in the queue. Every member passes the same gates as a single upload and must be known to the registry as uploaded; a never-uploaded or gate-failed text never enters a pack. One release, one quality, one frame rate still hold, and when one episode cannot be filled, nothing is sent.
 
+**F-M68:** **Der Ablehnungsspeicher ist dauerhaft und je (Datei-Inhalts-Hash, Spur) geschlüsselt.** Eine Spur, die die Qualitätsprüfung abgelehnt hat oder als Dublette ausschied, wird nicht erneut extrahiert; Einzel- und Pack-Weg lesen denselben Speicher.
+
+**F-M69:** **Ein Medium kostet eine Suche, nicht eine Suche je Spur.** Der Upload arbeitet dreistufig: erst werden alle Spuren und losen Untertitel lokal geprüft (Extraktion, Qualität, Dubletten), dann fragt eine Suche mit kommagetrennter Sprachliste alle offenen Sprachen, dann geht hoch, was auf SubDL fehlt.
+
+**F-M71:** **Eine SDH-Variante geht mit gesetztem SDH-Kennzeichen hoch.** Das Kennzeichen ist `sdh`; `hi` ist keine Marke, sondern der Sprachcode für Hindi. Beide Richtungen lesen die SDH-Angabe aus denselben zwei Quellen: dem Sprachen-Flag zuerst, dem Spurtitel als Rückfall.
+
+**F-M85:** **Die Spurenauswahl trägt den Optional-Marker.** Ein Spuren-Index, der nicht existiert, bricht die Extraktion damit nicht ab und liefert keine doppelte Spur; der Aufrufer wiederholt die leeren Spuren einzeln und verbucht eine, die leer bleibt, als echten Fehlschlag.
 ### 3.1 Quality Gates — Upload
 
 The upload chain, in the order the code applies it. Each switchable gate names its own switch and default.
@@ -226,7 +229,9 @@ The upload chain, in the order the code applies it. Each switchable gate names i
 
 **F-M14 [B2]:** **Sync plausibility (switchable, default on):** cue span vs. media runtime (+5 min tolerance; all cues concentrated in <10 % of runtime = reject)
 
-**F-M15 [B2]:** **Language verification (switchable in each direction, default on):** detected language of the content (bundled n-gram classifier) vs. stream tag; undetectable content passes (fail-open). **F-M375:** **On upload a lying tag is corrected, not rejected.** A track whose text speaks another language than its tag claims is uploaded under the detected language — the tag is what is wrong, not the subtitle — and the correction is logged with the tag that lied. A tag that names a relative of the detected language (the Norwegian written forms, Czech vs. Slovak, the Serbo-Croatian block) is no lie and is left alone. In the download direction the same check keeps rejecting: there the file is saved under its tag, so a corrected language would leave a mislabelled file on disk.
+**F-M15 [B2]:** **Language verification (switchable in each direction, default on):** detected language of the content (bundled n-gram classifier) vs. stream tag; undetectable content passes (fail-open).
+
+**F-M375:** **On upload a lying tag is corrected, not rejected.** A track whose text speaks another language than its tag claims is uploaded under the detected language — the tag is what is wrong, not the subtitle — and the correction is logged with the tag that lied. A tag that names a relative of the detected language (the Norwegian written forms, Czech vs. Slovak, the Serbo-Croatian block) is no lie and is left alone. In the download direction the same check keeps rejecting: there the file is saved under its tag, so a corrected language would leave a mislabelled file on disk.
 
 **F-M142:** **A pair already uploaded in this run is recorded as rejected, never as uploaded.** A stream whose (media content hash, language, hearing-impaired) pair is already up is skipped, and its position is recorded with the reason `duplicate-self-echo`. It is not marked `uploaded`. The hearing-impaired variant has its own key space, so a normal upload never blocks an SDH variant.
 
@@ -358,6 +363,11 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 
 **F-M448 [P]:** **Ein Seed-Lauf, der auf einen laufenden Bibliotheks-Scan trifft, wird vertagt statt ausgeführt.** Maß der Vertagung ist der Job-Abstand (Default **15 min**, einstellbar **5–120 min**). Wartelisten, Scan-Zeitstempel und die Merkliste der während des Laufs eingetroffenen Items (F-M233) bleiben unverändert; nach Ablauf der Wartezeit wird der Lauf erneut angestoßen. Die Statuszeile führt die Wartezeit als `deferred` mit „library scan running — retry in <N> min". Als laufend gelten Bibliotheks-Scan und Medien-Aktualisierung.
 
+**F-M379:** **Der Pack-Name trägt die SDH-Variante.** Ein SDH-Pack nennt sie im Namen, weil nur der Name in Archiv, Mitgliedsdatei und Eintragstitel sichtbar ist.
+
+**F-M380:** **Die Breite entscheidet das Auflösungs-Token, nicht die Höhe.** Ein beschnittenes Bild bleibt 1080p, auch wenn die Höhe unter der Schwelle der nächsten Stufe liegt.
+
+**F-M381:** **Ein Serienname ist noch kein Release-Name.** Die im Dateisystem unzulässigen Zeichen werden aus dem Seriennamen entfernt, damit keines in den Archivnamen wandert.
 ## 4. Download Pipeline
 
 **F-M151a [B3]:** **Download-side short-circuit — replaced by the derived open-pair question.**
@@ -394,7 +404,7 @@ The HI block of the download loop is guarded by the *effective* flag, not the ca
 
 **F-M319 [D]:** **A language receives exactly ONE corrected file. The "best subtitles to keep per language" setting is REMOVED.**
 
-Zurückgezogen: F-M242 (Regel in F-M319).
+**F-M242:** Zurückgezogen — die Regel steht in F-M319.
 
 **The rule.** The candidate walk ends at the first candidate whose correction proves itself against the audio. An **unprocessed** file does not end it: it is a fallback, kept so the repeat costs no content (F-M317/F-M318).
 
@@ -442,6 +452,13 @@ Between two packs the text similarity still decides, and a matching release grou
 
 **F-M183:** **Legible download run reporting:** the download run counts **queued** items as the denominator of its abort line; the progress counter runs over every item of the selected libraries. At run end one compact aggregate line (saved, no candidates, language not available, skipped with reasons, failed, processed/queued), so a run that searched and saved nothing is distinguishable from a run that did nothing without raising the log mode.
 
+**F-M52:** **Eine unvollständige Suche gilt nicht als erledigt.** Liefert die Suche kein Ergebnis (Rate-Limit, Serverfehler, verweigerter Zugriff), bricht der Lauf ab; das Item und alle folgenden bleiben fällig, statt mit leeren Ergebnissen als erledigt zu gelten.
+
+**F-M89:** **Ein nicht beschreibbares Zielverzeichnis überspringt die Datei und bricht den Lauf nicht ab.** Der Grund steht je Datei im Log.
+
+**F-M93d:** **Für die Übereinstimmung zählt nur die Kennung, die tatsächlich gesendet wurde.** Filtert SubDL serverseitig auf eine Kennung, ist dessen eigene Zweitkennung bedeutungslos und darf keinen passenden Kandidaten aussortieren.
+
+**F-M382:** **Eine Untertitelzeile unter der Sichtbarkeitsschwelle wird verworfen, nicht als Beweis gegen die Datei verwendet.** Das gilt in beiden Richtungen und geschieht vor den Prüfungen und vor dem Schreiben, damit der Zustands-Hash die tatsächlich geschriebene Datei beschreibt.
 ### 4.1 Quality Gates — Download
 
 The download chain runs against each candidate in score order, before the file is saved. F-M15 and F-M16 are the two gates both directions share.
@@ -500,6 +517,7 @@ when it moves (F-M300).**
 The feature has two halves that must not be confused: **which** track the audio is read from, and
 **whether** the file is then moved. Both were measured against this library before either was built.
 
+**F-M297:** **Als Referenz für die Korrektur wird eine Tonspur derselben Sprache bevorzugt.** Das unveränderte Original bleibt in beiden Fällen erhalten.
 #### 4.3.1 Method — the audio track is chosen by LANGUAGE, not by stream order
 
 **Rule.** Priority: **(1)** a track whose language equals the subtitle's language, **(2)** an English
@@ -1087,8 +1105,17 @@ The User-Agent is built from the assembly version — `SubDL-Scribe/<version> (+
 
 **F-M344 [D]:** **The upload reports the SOURCE quality of the subtitle, read from the file name; das feste Literal `web` wird nicht gesendet.** subdl.com/api-doc lists exactly five values for the upload field `quality` — `web` (Web release, streaming, WEB-DL), `bluray`, `dvd`, `hdtv`, `cam` — and the metadata step sent `web` for every file since the first upload implementation (F-M8), with no requirement behind it. It was wrong for every non-streaming file: the Dinosaurs `480p DVD x265 Panda` episodes went to SubDL as WEB, and so does every BluRay or HDTV file. The field is the release's quality tag in SubDL's lists and what its own filters read, so a wrong value mislabels the upload for everyone who filters by quality. Auf der Live-Seite: unsere eigenen Uploads, als `web` gesendet, tragen das Tag `webdl` — the label differs from the value, the value is accepted.
 
-The value is read from the NAME, and the subtitle's OWN name wins over the container's: a sidecar states where THAT subtitle came from, while the file next to it may be a different release of the same film; an embedded track has no own name, so the media file is read. The LAST source word in the name decides, and words are matched as WHOLE TOKENS — a release name puts its title first and its source after it, so `The.DVD.Club.2019.1080p.BluRay.x264` is a BluRay and the disc word belongs to the title, and a substring rule would read the CAM inside an ordinary word as a camera recording. Compact forms are consulted only when no token matched and only against distinctive strings (`BLURAY`, `BDRIP`, `DVDRIP`, `HDTV` …), for spellings whose separators swallow the word (`Blu-Ray`). **The asymmetry decides the tables:** a missed BluRay falls back to `web`, which is the behaviour that shipped before, while a false BluRay mislabels a streaming release — so the fallback is cheap and the false positive is not. The value is a REQUIRED parameter of the upload call, with no default, so no call site can silently keep the literal; `SourceQuality.Allowed` carries the documented five and the assertion reads it. **F-M350 [D]:** **The upload reports the FRAME RATE CODE of the item's video; das feste Literal `0` wird nicht gesendet.** The metadata step sent `framerate=0` — SubDL's "default/unknown" — although the rate is already read for the download-side FPS gate (F-M43 stage 1). The codes are SubDL's, not invented: measured on the live search API across 120 entries, code `2` always arrives with `fps: 23.976` and code `0` always with `fps: null`, and the numeric table is the one the download side already parses (`0` unknown, `2` = 23.976, `3` = 25, `4` = 29.97, `5` = 24, `7` = 30). The rate comes from the item's primary video stream (average first, real second); the **nearest** table entry wins, because 23.976 sits only 0.024 from 24 — a fixed epsilon would have to be smaller than that and would then reject the float noise of real container values. Anything further than 0.05 away, and every rate outside the table (48, 50, 59.94, 60), stays `0`, which is what shipped before, so an unusual rate cannot become a wrong claim. **Fallback:** neither field is trustworthy alone — in einer Bibliothek tragen 27 Dateien einen falschen Durchschnitt (`1000`, which a container reports for one frame in one millisecond) with a correct real rate, 18 a good average with a real rate 0.05+ off (`29.9166`), and 11 map to a DIFFERENT code from both. The average is taken first and the real rate only when the average does not map: **98.0 % of the library then reports a code, against 96.8 % on the average alone and 97.3 % on the real rate alone.** The average goes first because it is the playback rate (frames divided by duration — a file with every second frame dropped reports 12.6 against a real 25) and because the download gate (F-M43 stage 1) reads the same order, so a file gets the same rate in the gate and in the upload; on the 11 conflicts that is a consistency choice, not a truth claim. The lookup runs **once per ITEM**, before the candidate loop — the rate is a property of the video, so an item with four uploadable tracks must not read it four times. **`production_type` deliberately stays `0`:** SubDL documents no value list for it and the search API does not return the field at all, so a guessed enum would be a claim without evidence. See F-M8, F-M325.
+The value is read from the NAME, and the subtitle's OWN name wins over the container's: a sidecar states where THAT subtitle came from, while the file next to it may be a different release of the same film; an embedded track has no own name, so the media file is read. The LAST source word in the name decides, and words are matched as WHOLE TOKENS — a release name puts its title first and its source after it, so `The.DVD.Club.2019.1080p.BluRay.x264` is a BluRay and the disc word belongs to the title, and a substring rule would read the CAM inside an ordinary word as a camera recording. Compact forms are consulted only when no token matched and only against distinctive strings (`BLURAY`, `BDRIP`, `DVDRIP`, `HDTV` …), for spellings whose separators swallow the word (`Blu-Ray`). **The asymmetry decides the tables:** a missed BluRay falls back to `web`, which is the behaviour that shipped before, while a false BluRay mislabels a streaming release — so the fallback is cheap and the false positive is not. The value is a REQUIRED parameter of the upload call, with no default, so no call site can silently keep the literal; `SourceQuality.Allowed` carries the documented five and the assertion reads it.
 
+**F-M350 [D]:** **The upload reports the FRAME RATE CODE of the item's video; das feste Literal `0` wird nicht gesendet.** The metadata step sent `framerate=0` — SubDL's "default/unknown" — although the rate is already read for the download-side FPS gate (F-M43 stage 1). The codes are SubDL's, not invented: measured on the live search API across 120 entries, code `2` always arrives with `fps: 23.976` and code `0` always with `fps: null`, and the numeric table is the one the download side already parses (`0` unknown, `2` = 23.976, `3` = 25, `4` = 29.97, `5` = 24, `7` = 30). The rate comes from the item's primary video stream (average first, real second); the **nearest** table entry wins, because 23.976 sits only 0.024 from 24 — a fixed epsilon would have to be smaller than that and would then reject the float noise of real container values. Anything further than 0.05 away, and every rate outside the table (48, 50, 59.94, 60), stays `0`, which is what shipped before, so an unusual rate cannot become a wrong claim. **Fallback:** neither field is trustworthy alone — in einer Bibliothek tragen 27 Dateien einen falschen Durchschnitt (`1000`, which a container reports for one frame in one millisecond) with a correct real rate, 18 a good average with a real rate 0.05+ off (`29.9166`), and 11 map to a DIFFERENT code from both. The average is taken first and the real rate only when the average does not map: **98.0 % of the library then reports a code, against 96.8 % on the average alone and 97.3 % on the real rate alone.** The average goes first because it is the playback rate (frames divided by duration — a file with every second frame dropped reports 12.6 against a real 25) and because the download gate (F-M43 stage 1) reads the same order, so a file gets the same rate in the gate and in the upload; on the 11 conflicts that is a consistency choice, not a truth claim. The lookup runs **once per ITEM**, before the candidate loop — the rate is a property of the video, so an item with four uploadable tracks must not read it four times. **`production_type` deliberately stays `0`:** SubDL documents no value list for it and the search API does not return the field at all, so a guessed enum would be a claim without evidence. See F-M8, F-M325.
+
+**F-M17a:** **Die Suche ist auf die eine Folge eingegrenzt.** Staffel und Folgennummer gehen mit; ohne sie füllt ein Staffelpack die Seitengrenze und verdeckt passende Releases auf späteren Seiten.
+
+**F-M17d:** **Ein Suchfehler blockiert das Item nicht.** Was die Suche liefert, gilt; ein Fehler führt zum offenen Ergebnis, nicht zum Ausschluss.
+
+**F-M17f:** **Zurückgezogen — es gibt keine Abfrage der eigenen Veröffentlichungsliste vor der Suche.**
+
+**F-M190b:** **Fehlt die IMDb-Kennung in der Detailantwort einer Serie, wird sie über die externen Kennungen derselben Id geholt.** Die Detailantwort führt sie für Serien leer; ohne den zweiten Aufruf hätte jede Serienfolge als „ohne IMDb" gegolten und wäre nie hochgegangen.
 ## 10. Scheduler, Quota and Timing
 
 **F-M20 [B1]:** Configurable pacing — a transfer rate (**default 400/h**) and a pause between API calls (**0.1–10 s, default 0.5 s**) — **and no local call limit of any kind**. A configured pause replaces the rate-derived one; the two are not compared. The range is the server's own fastest allowed rate at the floor (SubDL allows 600 req/min = 0.1 s) and a slow, polite pace at the top; it never permits an unpaused burst. The GUI range and the limiter clamp are identical (0.1–10), so a value entered in the page is the value the limiter uses. The rate is clamped to **1–2000**. **The plugin enforces no quota of its own.** No code path counts API calls and no run is stopped for making "too many" calls. **Only SubDL stops a run**: on a real HTTP 429 the server's own counters are read and the quota decision decides between a short respacing and a day-long stop (F-M238). The limiter now only spaces calls; it cannot refuse one.
@@ -1155,6 +1182,19 @@ The marker counts the CLAIM, not the outcome: a run that fails after being queue
 
 **F-M204:** **A running cycle is never widened and a trigger is never merged into it.** Any overlap between scheduled upload and download is answered by a **reschedule**: `ScheduleRecoveryFireAt(direction, now + JobSpacingMinutes)` for the direction not covered by the running cycle; the dispatcher logs `rescheduled +N min — cycle already running` and returns `false`. When the fire comes due, the coordinator's tick re-checks the lock check and defers again if still busy. The per-direction latch exists for the fresh-cycle case only.
 
+**F-M67:** **Eine Überlastung des Dienstes bekommt ein kurzes Erholungsfenster.** Ein vorübergehend besetzter Dienst endet den Lauf sauber und terminiert ein nahes Feuern; ein Kontingent-Problem ist es nicht.
+
+**F-M70:** **Die Seite zeigt das Kontingent des Kontos, ohne den Schlüssel auszuliefern.** Die Abfrage läuft serverseitig, wird kurz zwischengespeichert und bei geändertem Schlüssel verworfen.
+
+**F-M72:** **Die Stundenobergrenze des Uploads ist kein Fehler.** Meldet SubDL die Grenze, bleibt das Item fällig, der Lauf endet und ein späterer Lauf fährt mit frischem Stundenbudget; die Marke wird zum Laufbeginn zurückgesetzt.
+
+**F-M81z:** **Ein durch das Tageskontingent beendeter Lauf ist ein sauberer Stopp, kein Fehlschlag.** Je Richtung wird der offene Termin gespeichert und ist abfragbar.
+
+**F-M117:** **Trifft ein Feuern auf einen laufenden Lauf, wird es vertagt.** Der neue Termin steht im Log; die Marke bleibt ungesetzt, damit der Zeitplan es erneut versucht.
+
+**F-M146:** **Wird eine Richtung vom globalen Lauf-Lock übersprungen, terminiert sie sich selbst neu.** Der neue Termin steht als Warnung im Log.
+
+**F-M149:** **In der ersten Runde geht der Download vor dem Upload.**
 ## 11. Content Registry and Identity
 
 **F-M17z [B2]:** **Upload dedup respects the stored outcome:** a stored verdict — uploaded, or rejected with any reason — counts as "known"; an observation row does not.
@@ -1251,6 +1291,7 @@ Sie beantwortet die HI-Frage mit SPRACHEN und trägt die Variante als `:hi` toke
 
 **F-M39 [B2]:** **No double work across directions:** every subtitle the system uploads or downloads is registered under its normalized content hash, so a subtitle that already arrived from either direction is neither fetched nor sent again. The two directions answer it at different points: the **upload** side asks the content-known check on the candidate itself, right before sending. The **download** side does not ask it during the fetch of a regular candidate — the seeder asks it before the item enters the queue and keeps a file out whose sidecar content is already known. The hearing-impaired variant does ask it during the fetch. The download records the hash it saved.
 
+**F-M249b:** **Die Datumsregel braucht Text nach dem Datum.** Ein Datum am Namensende ist kein Datum, sondern ein Titelbestandteil.
 ## 12. Library Scope and Skip Filters
 
 **F-M213:** **The library selection is a hard gate for every trigger and BOTH directions. Every report names only what was SELECTED.**
@@ -1357,6 +1398,10 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 **F-M38 [B1]:** **Persistent state split by the kind of thing described** (section 14). Embedded tracks live under their video file, keyed by media hash + stream position; sidecars are keyed by normalized content hash; the file's own record carries path, IDs, season/episode and the derived language aggregate. The **hearing-impaired flag belongs to each subtitle datum**, never to the file (F-M282), and **completeness is derived rather than stored** (F-M283) — so the file record carries no download mark and no HI aggregate. Both pipelines read and write the same store.
 
 The plugin keeps its state in **one database file**, grouped into **five clearly separated areas**, each keyed by the thing it actually describes. The areas share a lifetime and are written by the same lock, but they are not mixed.
+
+**F-M194:** **Die fachlichen Schlüssel sind die Primärschlüssel.** Es gibt keine automatisch vergebene Id; ein Upsert einer scheinbar neuen Zeile kann damit keine zweite Zeile erzeugen.
+
+**F-M327:** **Ein Bestandsformat wird einmal beim Start übernommen, vor dem Öffnen des Stores, und bleibt als Sicherung liegen.** Der Übernahmepfad liest das alte Format als einziger und löscht nichts.
 #### 14.0 Area 0 — Compatibility record (`meta`)
 **F-M195:** exactly **one** row (`_id = "db"`) describing the file itself: the schema version (integer, raised by hand whenever the stored shape changes), the plugin version that wrote it last, the Jellyfin version, and a timestamp.
 
@@ -1486,7 +1531,7 @@ The run's DONE line reports what the alignment cost: `N fitted to audio (Xs)`. S
 
 **F-M309 [B1]:** **The audio fit is logged on two levels: WHETHER at Normal, WHAT AGAINST at Verbose.** At Normal, in the lines F-M24d prescribes: the run START line names the switch — `audio fit=on|off` — the run DONE line carries the counter — `N fitted to audio` (F-M286). At Verbose, the per-file detail to REPRODUCE a fit: `fit reads audio track {Pos} of {N} ({Reason}); subtitle {Release}` — the track actually READ, gated on the fit switch. Verdict lines: `auto-sync corrected …` / `not applied: …` at Verbose (F-M24a), one branch each; den Zweig `ffmpeg not available` gibt es nicht, a missing ffmpeg reported once per run at Warning. See F-M24a, F-M286, F-M307.
 
->**F-M314 [D]:** **The sidecar rename is gated by the SAME switch as the container write — `Allocate missing language codes` — und nicht durch das Auflösen unbestimmter Sprachcodes.** Default changes ON→OFF, because `Allocate missing language codes` is off by default (F-M261). The gate only gates: the file is left as it is, the 2 KB floor and the "no confident verdict" exit unchanged.
+**F-M314 [D]:** **The sidecar rename is gated by the SAME switch as the container write — `Allocate missing language codes` — und nicht durch das Auflösen unbestimmter Sprachcodes.** Default changes ON→OFF, because `Allocate missing language codes` is off by default (F-M261). The gate only gates: the file is left as it is, the 2 KB floor and the "no confident verdict" exit unchanged.
 
 **F-M313 [B1]:** **The statistics row counts the LOOSE subtitle files the seeder renamed so their name carries the language, in its own row.**
 
@@ -1660,6 +1705,9 @@ The line under the Workers list names, per worker and in list order, its stored 
 
 **F-M339 [D]:** **Every number in an Auto-Sync log line is written culture-invariantly.** An interpolated number follows the host's locale, so the same code printed `t = +8,62` on one day and `t = +8.62` on the next, and the operator parses these lines. **The SRT timestamp formatter keeps its comma** — that is the file format, not a display choice.
 
+**F-M292:** **Ein Worker mit offenem Termin ist gelb, unabhängig davon, welcher Worker es ist.** Die gespeicherte Zeile beschreibt den vergangenen Lauf, der offene Termin beschreibt, was noch aussteht.
+
+**F-M341:** **Jede Zahl in der Korrekturzeile trägt einen Dezimalpunkt, unabhängig von der Sprache des Hosts.** Werkzeuge lesen diese Zeile; ein Komma bricht den Leser.
 ## 16. Non-Goals
 
 - N-1: Standalone downloader app or separate downloader plugin — integrated in SubDL Scribe.
@@ -1986,6 +2034,7 @@ fix and is exactly the fingerprint F-M29 forbids).
 
 **T160:** A deferred anchor job comes back, and deadlines are read in the clock they were written in (F-M368).
 
+**F-M301:** **Das Lastenheft wird geprüft wie der Code.** Ein Abschnitt, der eine Regel verliert, wird rot, und keine andere Prüfung fängt das auf.
 ## 20. References
 
 - Plugin template: github.com/jellyfin/jellyfin-plugin-template
