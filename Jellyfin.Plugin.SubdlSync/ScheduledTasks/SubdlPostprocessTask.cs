@@ -24,6 +24,7 @@ namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
 /// F-M176: scheduled cleanup of rejected SubDL dashboard entries. Runs independently
 /// on its own diced anchor. The pipeline method itself holds the global run lock.
 /// </summary>
+// F-M332: der Knopf der Seite startet diese Aufgabe (nicht den Job-Endpunkt) — nur sie schreibt die dauerhafte Statuszeile.
 public class SubdlPostprocessTask : IScheduledTask
 {
     private readonly ILogger<SubdlPostprocessTask> _logger;

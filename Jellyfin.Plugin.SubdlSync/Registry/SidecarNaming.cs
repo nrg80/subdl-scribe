@@ -554,6 +554,7 @@ public static class SidecarNaming
     /// </summary>
     /// <param name="stream">Media stream.</param>
     /// <returns>True when the stream is a hearing-impaired subtitle track.</returns>
+    // F-M240: die SDH-Variante ist ein eigenes Untertitel-Datum — Vollständigkeit wird aus den Spuren abgeleitet, nicht als Marke geführt.
     public static bool IsHearingImpairedStream(MediaStream stream)
     {
         if (stream.IsHearingImpaired == true)

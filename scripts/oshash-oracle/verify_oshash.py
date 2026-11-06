@@ -29,6 +29,7 @@ different hash from what other OpenSubtitles clients compute.
 Exit 0 = every comparison matched.
 """
 
+# F-M279: der OSHash-WERT wird gegen ein unabhaengiges Orakel geprueft, nicht gegen sich selbst (Testpflicht, kein Laufzeitverhalten).
 import os
 import subprocess
 import sys

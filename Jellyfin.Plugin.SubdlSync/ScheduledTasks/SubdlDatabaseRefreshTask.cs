@@ -52,6 +52,7 @@ namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
 /// - No TTL/age-based pruning here by design (decided 11.09.2026): age proves nothing about item
 ///   existence; the existence checks above are the truth source.
 /// </summary>
+// F-M274/F-M275: fester Schrittlauf in EINEM Lauf unter dem globalen Lock, gearbeitet wird auf einem Schnappschuss des Caches, entschieden je Eintrag am Fingerabdruck der Datei.
 public class SubdlDatabaseRefreshTask : IScheduledTask
 {
     private readonly ILibraryManager _libraryManager;

@@ -50,6 +50,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Qa;
 /// measured here rather than at each call site (F-M310).
 /// </para>
 /// </summary>
+// F-M305: der Echtmaterial-Score wird gegen die TONSPUR genommen, nie gegen eine Untertitelzeile.
 public static class AutoSyncWorker
 {
     /// <summary>The name of this worker as the GUI lists it.</summary>

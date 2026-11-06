@@ -447,6 +447,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </para>
     /// Default: true.
     /// </summary>
+    /// <summary>F-M303: Korrektur ist EIN Abschnitt mit EINEM Schalter — kein Zwischenkopf, die Beschreibung gehört an den Schalter.</summary>
     public bool QaDownloadAutoSync { get; set; } = true;
 
     /// <summary>

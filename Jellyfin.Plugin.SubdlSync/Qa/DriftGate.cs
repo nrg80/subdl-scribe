@@ -215,6 +215,7 @@ public static class DriftGate
     }
 
     /// <summary>
+    /// F-M360: gefittet wird nur auf Dialogzeilen; Musik, Klammer-Lautlabels und nackte Großbuchstaben-Lautwörter werden nicht bewertet, aber mitverschoben.
     /// Whether a subtitle line carries spoken dialogue, i.e. whether the offset fit
     /// may score on it. Music lines (<c>♪</c>/<c>♫</c>), bracketed sound labels
     /// (<c>[door slams]</c>, <c>{phone rings}</c>) and bare capitalised sound words

@@ -365,6 +365,7 @@ public sealed class DownloadPipeline : IDisposable
         // F-M247: record that this run was a dry run. It searches, ranks and runs the QA gates,
         // so its summary fills up with numbers, but it saves nothing to disk — the statistics
         // must not receive them. Set here, at the source, so a later counter cannot forget it.
+        // F-M277: der Download-Trockenlauf läuft Suche und Auswahl und stoppt vor dem Holen — das Suchkontingent IST verbraucht.
         summary.IsDryRun = _config.DownloadDryRun;
         _dailyLimitWaits = 0; // F-M49: fresh per run
 

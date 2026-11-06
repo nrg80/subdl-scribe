@@ -1076,6 +1076,7 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// <param name="upSummary">Upload run summary, when the upload leg produced one.</param>
     /// <param name="downSummary">Download run summary, when the download leg produced one.</param>
     /// <returns>Short detail text for the direction's row.</returns>
+    // F-M328: jede Worker-Zeile meldet nur ihr eigenes Ergebnis und borgt sich keinen Satz vom Nachbarn.
     private static string DescribeDirectionRun(bool upload, Pipeline.RunSummary? upSummary, Pipeline.DownloadRunSummary? downSummary, bool dryRun)
     {
         // F-M336 (operator finding 09.10.2026, live on the test bench): this row claimed work the
@@ -1977,6 +1978,7 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// </para>
     /// </summary>
     /// <param name="upload">Direction whose run is starting.</param>
+    // F-M289: die Richtungszeile schreibt, wer den Zyklus besitzt — im Arrival der Dispatcher, nicht die wartende Aufgabe.
     private static void MarkDirectionRunning(bool upload)
     {
         var runs = Plugin.Instance?.WorkerRuns;

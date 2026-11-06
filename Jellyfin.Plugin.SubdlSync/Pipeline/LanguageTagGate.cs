@@ -107,6 +107,7 @@ public sealed class LanguageTagGate
     /// which is exactly what F-M22 forbids. Detection still runs in a dry run — the run's value is
     /// reporting what it WOULD do — so this gates the WRITE only, never the resolution.
     /// </remarks>
+    // F-M276: der Upload-Trockenlauf geht den Entscheidungspfad bis vor den Transfer und verbraucht keinen API-Aufruf.
     public bool DryRunActive => _config.DryRun || _config.DownloadDryRun;
 
     /// <summary>

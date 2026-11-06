@@ -1400,6 +1400,7 @@ public sealed class ContentHashRegistry : IDisposable
     /// </para>
     /// </summary>
     /// <returns>Number of removed rows.</returns>
+    /// <summary>F-M404: der Database Refresh räumt auch die Pack-Seite auf — Zeilen ohne Träger fallen raus und zählen in der Summe mit.</summary>
     public int PruneOrphanedPacks()
     {
         var packs = _db.Packs.FindAll().ToList();
