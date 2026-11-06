@@ -26,14 +26,14 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 /// The match runs on the uploader name of the API response, not on the release name and not on the
 /// entry title: the account is the one stable carrier, while a machine-translated release can be
 /// named anything. Spacing, dots, hyphens and underscores are removed before the comparison, so
-/// "Sub AI", "sub_ai", "Sub.AI" and "SubAI" all land on the same key; the comparison is EQUALITY,
+/// "SUBDL AI", "subdl_ai" and "SubDL.AI" all land on the same key; the comparison is EQUALITY,
 /// so a different account whose name merely starts the same way keeps its candidates.
 /// </para>
 /// </summary>
 public static class AiTranslatedSubs
 {
     /// <summary>Normalised uploader key of the machine-translation account.</summary>
-    private const string Account = "subai";
+    private const string Account = "subdlai";
 
     /// <summary>
     /// Whether an uploader name belongs to the machine-translation account.

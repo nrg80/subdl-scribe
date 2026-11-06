@@ -447,7 +447,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Default: true.
     /// </summary>
     /// <summary>
-    /// F-M449: whether subtitles uploaded by the machine-translation account (Sub AI) may be
+    /// F-M449: whether subtitles uploaded by the machine-translation account (SUBDL AI) may
     /// downloaded. Off by default — the switch is applied to the SEARCH RESULT, so such a candidate
     /// neither enters the ranking nor costs a download unit.
     /// </summary>

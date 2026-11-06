@@ -496,7 +496,7 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 
 **F-M46 [D]:** **Overall selection:** one best candidate per (item, language) by combined score from F-M43–F-M45 — the best CORRECTED one where a correction can be proven (F-M318/F-M319). No candidate passing → the language counts as "not available".
 
-**F-M449 [D]:** **Maschinenübersetzte Untertitel sind standardmäßig aus.** Ein Untertitel des Übersetzungs-Kontos (Sub AI) wird nur geladen, wenn der Schalter `Allow AI translated subs (SUB AI)` gesetzt ist. Der Ausschluss greift am Suchergebnis: ein solcher Kandidat kommt weder in die Rangfolge noch kostet er eine Download-Einheit, und die SDH-Variante folgt derselben Regel. Erkannt wird das Konto am Uploader-Namen; Abstände, Punkte, Bindestriche und Unterstriche entfallen vor dem Vergleich, andere Namen bleiben unberührt. Die Laufsumme nennt die verworfene Zahl.
+**F-M449 [D]:** **Maschinenübersetzte Untertitel sind standardmäßig aus.** Ein Untertitel des Übersetzungs-Kontos (SUBDL AI) wird nur geladen, wenn der Schalter `Allow AI translated subs (SUBDL AI)` gesetzt ist. Der Ausschluss greift am Suchergebnis: ein solcher Kandidat kommt weder in die Rangfolge noch kostet er eine Download-Einheit, und die SDH-Variante folgt derselben Regel. Erkannt wird das Konto am Uploader-Namen; Abstände, Punkte, Bindestriche und Unterstriche entfallen vor dem Vergleich, andere Namen bleiben unberührt. Die Laufsumme nennt die verworfene Zahl.
 
 ### 4.2 Dry Run — Download
 

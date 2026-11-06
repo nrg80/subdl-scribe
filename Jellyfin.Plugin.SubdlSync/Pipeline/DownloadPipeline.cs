@@ -1476,7 +1476,7 @@ public sealed class DownloadPipeline : IDisposable
             if (droppedAi > 0)
             {
                 summary.AiUploaderFiltered += droppedAi;
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] {File} — {N} candidate(s) from the AI translation account dropped (switch \"Allow AI translated subs\" off)", Path.GetFileName(mediaPath), droppedAi);
+                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] {File} — {N} candidate(s) from the AI translation account dropped (switch \"Allow AI translated subs (SUBDL AI)\" off)", Path.GetFileName(mediaPath), droppedAi);
             }
         }
 

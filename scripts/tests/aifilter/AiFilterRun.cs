@@ -67,14 +67,14 @@ internal static class AiFilterRun
         string plugin = Path.Combine(root, "Jellyfin.Plugin.SubdlSync");
 
         // --- 1. the key -------------------------------------------------------
-        Check(AiTranslatedSubs.IsAiUploader("Sub AI"), "the spaced name is the account");
-        Check(AiTranslatedSubs.IsAiUploader("sub_ai"), "the underscored name is the account");
-        Check(AiTranslatedSubs.IsAiUploader("Sub.AI"), "the dotted name is the account");
-        Check(AiTranslatedSubs.IsAiUploader("SubAI"), "the joined name is the account");
-        Check(AiTranslatedSubs.IsAiUploader("SUB-AI "), "case, hyphen and padding do not matter");
+        Check(AiTranslatedSubs.IsAiUploader("SUBDL AI"), "the spaced name is the account");
+        Check(AiTranslatedSubs.IsAiUploader("subdl_ai"), "the underscored name is the account");
+        Check(AiTranslatedSubs.IsAiUploader("SubDL.AI"), "the dotted name is the account");
+        Check(AiTranslatedSubs.IsAiUploader("SUBDLAI"), "the joined name is the account");
+        Check(AiTranslatedSubs.IsAiUploader("subdl-ai "), "case, hyphen and padding do not matter");
 
         // --- 2. no false positive --------------------------------------------
-        Check(!AiTranslatedSubs.IsAiUploader("Subaix"), "a name that merely starts the same way is NOT the account");
+        Check(!AiTranslatedSubs.IsAiUploader("subdlmaker"), "a neighbouring account is NOT the AI account");
         Check(!AiTranslatedSubs.IsAiUploader("DrMohamed"), "an ordinary uploader keeps its candidates");
         Check(!AiTranslatedSubs.IsAiUploader(null) && !AiTranslatedSubs.IsAiUploader("   "), "an absent name is not the account");
 
@@ -82,9 +82,9 @@ internal static class AiFilterRun
         var pool = new List<SubtitleCandidate>
         {
             new() { Author = "DrMohamed", Language = "EN" },
-            new() { Author = "Sub AI", Language = "DE" },
+            new() { Author = "SUBDL AI", Language = "DE" },
             new() { Author = "saxec", Language = "EN" },
-            new() { Author = "sub_ai", Language = "FR" },
+            new() { Author = "subdl_ai", Language = "FR" },
         };
         int dropped = AiTranslatedSubs.Remove(pool);
         Check(dropped == 2, $"both machine-translated candidates are removed (dropped {dropped})");
@@ -124,7 +124,7 @@ internal static class AiFilterRun
         Check(switchAt > 0, "the page carries the switch");
         Check(gateAt > 0 && switchAt > gateAt,
             "the switch sits inside the download quality-gate block");
-        Check(page.Contains("Allow AI translated subs (SUB AI)", StringComparison.Ordinal),
+        Check(page.Contains("Allow AI translated subs (SUBDL AI)", StringComparison.Ordinal),
             "the label names the account");
         string tail = switchAt > 0 ? page.Substring(switchAt, Math.Min(600, page.Length - switchAt)) : string.Empty;
         Check(tail.Contains("Default: off", StringComparison.Ordinal),

@@ -26,7 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
-  v12.1.12.341: machine-translated subtitles (uploader "Sub AI") stay out of the download unless the switch `Allow AI translated subs (SUB AI)` is set — the exclusion happens on the search result, before ranking and before a download unit is spent (F-M449).
+  v12.1.12.341: machine-translated subtitles (uploader "SUBDL AI") stay out of the download unless the switch `Allow AI translated subs (SUBDL AI)` is set — the exclusion happens on the search result, before ranking and before a download unit is spent (F-M449).
   v12.1.12.340: a seed that meets a running library scan waits the job spacing (default 15 min) instead of reading an empty stream list (F-M448).
   v12.1.12.339: the armed postprocessing order is reported as `schedule`, not `deferred` — its first run happens on plan (F-M447).
   v12.1.12.338: an arrival run is recognisable inside the pipelines again — the flag derives from the queue scope, so the arrival exemption from the daily-limit wait applies as before (F-M446).
