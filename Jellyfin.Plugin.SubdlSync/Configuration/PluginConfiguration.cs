@@ -446,6 +446,13 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </para>
     /// Default: true.
     /// </summary>
+    /// <summary>
+    /// F-M449: whether subtitles uploaded by the machine-translation account (Sub AI) may be
+    /// downloaded. Off by default — the switch is applied to the SEARCH RESULT, so such a candidate
+    /// neither enters the ranking nor costs a download unit.
+    /// </summary>
+    public bool AllowAiTranslatedSubs { get; set; } = false;
+
     /// <summary>F-M303: Korrektur ist EIN Abschnitt mit EINEM Schalter — kein Zwischenkopf, die Beschreibung gehört an den Schalter.</summary>
     public bool QaDownloadAutoSync { get; set; } = true;
 

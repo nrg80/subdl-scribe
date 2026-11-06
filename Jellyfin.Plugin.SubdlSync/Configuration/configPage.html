@@ -545,6 +545,14 @@
                             <div class="fieldDescription">Max. cue span vs. runtime in seconds. 0 = off. Default: 600.</div>
                         </div>
 
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="AllowAiTranslatedSubs" name="AllowAiTranslatedSubs" type="checkbox" is="emby-checkbox" />
+                                <span>Allow AI translated subs (SUB AI)</span>
+                            </label>
+                            <div class="fieldDescription">Candidates from the machine-translation account are dropped at the search result while this is off. Default: off.</div>
+                        </div>
+
 
                         
                         
@@ -1022,6 +1030,7 @@
                         document.querySelector('#QaDownloadMinCues').checked = config.QaDownloadMinCues;
                         document.querySelector('#QaDownloadVerifyLanguage').checked = config.QaDownloadVerifyLanguage;
                         document.querySelector('#QaDownloadAutoSync').checked = config.QaDownloadAutoSync !== false;
+                        document.querySelector('#AllowAiTranslatedSubs').checked = config.AllowAiTranslatedSubs === true;
                         document.querySelector('#DownloadScoreWeightGroup').value = config.DownloadScoreWeightGroup;
                         document.querySelector('#DownloadScoreWeightToken').value = config.DownloadScoreWeightToken;
                         document.querySelector('#DownloadScoreWeightDownload').value = config.DownloadScoreWeightDownload;
@@ -1641,6 +1650,7 @@ workers.forEach(function (w) {
                         config.QaDownloadMinCues = document.querySelector('#QaDownloadMinCues').checked;
                         config.QaDownloadVerifyLanguage = document.querySelector('#QaDownloadVerifyLanguage').checked;
                         config.QaDownloadAutoSync = document.querySelector('#QaDownloadAutoSync').checked;
+                        config.AllowAiTranslatedSubs = document.querySelector('#AllowAiTranslatedSubs').checked;
                         config.DownloadScoreWeightGroup = parseInt(document.querySelector('#DownloadScoreWeightGroup').value) || 1000;
                         config.DownloadScoreWeightToken = parseInt(document.querySelector('#DownloadScoreWeightToken').value) || 10;
                         config.DownloadScoreWeightDownload = parseInt(document.querySelector('#DownloadScoreWeightDownload').value, 10); if (isNaN(config.DownloadScoreWeightDownload)) { config.DownloadScoreWeightDownload = 1; }
