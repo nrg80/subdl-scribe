@@ -539,18 +539,18 @@
                             <div class="fieldDescription">Rejects files with too few cues. Default: on.</div>
                         </div>
 
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="DownloadRuntimeToleranceSec">Runtime tolerance (seconds)</label>
-                            <input id="DownloadRuntimeToleranceSec" name="DownloadRuntimeToleranceSec" type="number" is="emby-input" min="0" max="1800" />
-                            <div class="fieldDescription">Max. cue span vs. runtime in seconds. 0 = off. Default: 600.</div>
-                        </div>
-
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="AllowAiTranslatedSubs" name="AllowAiTranslatedSubs" type="checkbox" is="emby-checkbox" />
                                 <span>Allow AI translated subs (SUBDL AI)</span>
                             </label>
                             <div class="fieldDescription">Candidates from the machine-translation account are dropped at the search result while this is off. Default: off.</div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadRuntimeToleranceSec">Runtime tolerance (seconds)</label>
+                            <input id="DownloadRuntimeToleranceSec" name="DownloadRuntimeToleranceSec" type="number" is="emby-input" min="0" max="1800" />
+                            <div class="fieldDescription">Max. cue span vs. runtime in seconds. 0 = off. Default: 600.</div>
                         </div>
 
 

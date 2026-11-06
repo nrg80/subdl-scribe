@@ -126,6 +126,9 @@ internal static class AiFilterRun
             "the switch sits inside the download quality-gate block");
         Check(page.Contains("Allow AI translated subs (SUBDL AI)", StringComparison.Ordinal),
             "the label names the account");
+        int runtimeAt = page.IndexOf("Runtime tolerance (seconds)", StringComparison.Ordinal);
+        Check(switchAt > 0 && runtimeAt > switchAt,
+            "the switch sits ABOVE the runtime tolerance field, which stays the last one");
         string tail = switchAt > 0 ? page.Substring(switchAt, Math.Min(600, page.Length - switchAt)) : string.Empty;
         Check(tail.Contains("Default: off", StringComparison.Ordinal),
             "the description states the default");
