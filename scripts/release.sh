@@ -224,7 +224,7 @@ ZIP="$ROOT/out/Jellyfin.Plugin.SubdlSync_${VER}.zip"
 say "Test suites"
 JFDIR="${JF_TEST_DIR:-/opt/data/jf-test/jellyfin}"
 if [[ -d "$JFDIR" ]]; then
-    for suite in anchorgate forcedtitle langcorrect archivecache seasonpack; do
+    for suite in anchorgate forcedtitle langcorrect archivecache seasonpack aifilter; do
         OUT="$(DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 /opt/data/.dotnet/dotnet run \
             --project "scripts/tests/$suite/$suite.csproj" -- "$ROOT" 2>&1 | tail -2)"
         echo "$OUT"

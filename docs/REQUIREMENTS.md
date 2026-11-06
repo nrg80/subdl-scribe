@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.103
-**Status:** Implementation — v12.1.12.340.
+**Version:** 2.104
+**Status:** Implementation — v12.1.12.342.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,8 +16,8 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 59 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 7 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 60 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 8 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397
@@ -495,6 +495,8 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 **An unreadable counter is NOT a verdict.** A failed quota read returns null and the cycle proceeds as before — the usual fail-closed posture is deliberately not taken here.
 
 **F-M46 [D]:** **Overall selection:** one best candidate per (item, language) by combined score from F-M43–F-M45 — the best CORRECTED one where a correction can be proven (F-M318/F-M319). No candidate passing → the language counts as "not available".
+
+**F-M449 [D]:** **Maschinenübersetzte Untertitel sind standardmäßig aus.** Ein Untertitel des Übersetzungs-Kontos (SUBDL AI) wird nur geladen, wenn der Schalter `Allow AI translated subs (SUBDL AI)` gesetzt ist. Der Ausschluss greift am Suchergebnis: ein solcher Kandidat kommt weder in die Rangfolge noch kostet er eine Download-Einheit, und die SDH-Variante folgt derselben Regel. Erkannt wird das Konto am Uploader-Namen; Abstände, Punkte, Bindestriche und Unterstriche entfallen vor dem Vergleich, andere Namen bleiben unberührt. Die Laufsumme nennt die verworfene Zahl.
 
 ### 4.2 Dry Run — Download
 
@@ -2029,6 +2031,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T173:** Die `packs`-Tabelle hält, was sie verspricht (F-M390).
 
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
+
+**T175:** Der Account-Filter der Download-Suche — Kontokennung, kein Fehlgriff auf fremde Uploader, Ausschluss vor der Rangfolge und der Schalter samt seiner Beschriftung (F-M449).
 
 **T163:** The season-pack suite asks the arithmetic and the documented upload shape without a network: the aired set drops the E0 entry IMDb reports, completeness is set equality on both sides, the pack hash is order-sensitive and changes with a corrected episode, the name carries no `.zip` because SubDL appends it, and the pack call sends the array of file ids with `is_full_season=true` and the episode range. **84 checks.**
 

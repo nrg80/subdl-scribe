@@ -79,6 +79,13 @@ public class DownloadRunSummary
     // F-M24d: skip-reason counters for the aggregate log lines (one line per reason
     // class at run end, Normal mode too — not 284 per-item lines).
 
+    /// <summary>
+    /// F-M449: candidates dropped because they come from the machine-translation account while
+    /// the switch `Allow AI translated subs` is off. Counted per CANDIDATE at the search result —
+    /// before ranking, before any download unit is spent.
+    /// </summary>
+    public int AiUploaderFiltered { get; set; }
+
     /// <summary>Gets or sets the count of items skipped because SubDL had no candidates at all.</summary>
     public int SkippedNoCandidates { get; set; }
 
@@ -577,12 +584,13 @@ public sealed class DownloadPipeline : IDisposable
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
         LogUtil.Normal(_logger, 
-            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {Rejected} rejected after fetch | {NoCand} no candidates | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
+            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {Rejected} rejected after fetch | {NoCand} no candidates | {Ai} AI uploader filtered | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
             summary.Downloaded,
             summary.FittedToAudio,
             (summary.FitMsTotal / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
             summary.RejectedCandidates,
             summary.SkippedNoCandidates,
+            summary.AiUploaderFiltered,
             summary.NotAvailable,
             summary.SkippedItems,
             summary.SkippedNotDue,
@@ -1453,6 +1461,22 @@ public sealed class DownloadPipeline : IDisposable
             if (!string.IsNullOrWhiteSpace(resolvedTmdb))
             {
                 summary.IdTmdbOk++;
+            }
+        }
+
+        // F-M449: machine-translated uploads leave the pool HERE — on the search result, before the
+        // ranking picks a best candidate and before any download unit is spent. The switch that
+        // allows them back is `Allow AI translated subs` (off by default). HI candidates come from
+        // the same account and are filtered with the same rule, so an item cannot get its SDH
+        // variant from a source its regular variant was denied.
+        if (!_config.AllowAiTranslatedSubs)
+        {
+            int droppedAi = AiTranslatedSubs.Remove(candidates);
+            droppedAi += AiTranslatedSubs.Remove(hiCandidates);
+            if (droppedAi > 0)
+            {
+                summary.AiUploaderFiltered += droppedAi;
+                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] {File} — {N} candidate(s) from the AI translation account dropped (switch \"Allow AI translated subs (SUBDL AI)\" off)", Path.GetFileName(mediaPath), droppedAi);
             }
         }
 

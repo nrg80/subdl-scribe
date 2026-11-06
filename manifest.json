@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.340",
-        "changelog": "v12.1.12.340: a seed that meets a running library scan waits `ScanDeferMinutes` (default 15) instead of reading an empty stream list (F-M448).",
+        "version": "12.1.12.342",
+        "changelog": "v12.1.12.342: the AI filter switch sits one row higher in the download quality gates, so the runtime tolerance stays the last field (F-M449).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.340/Jellyfin.Plugin.SubdlSync_12.1.12.340.zip",
-        "checksum": "7ed7efd81fd50acae7916f026bb2de26",
-        "timestamp": "2026-11-06T03:40:41Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.342-dev/Jellyfin.Plugin.SubdlSync_12.1.12.342.zip",
+        "checksum": "78423dcd93230864b0668d9dd2be11ed",
+        "timestamp": "2026-11-06T13:39:16Z"
       }
     ]
   }
