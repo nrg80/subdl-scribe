@@ -453,6 +453,13 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool AllowAiTranslatedSubs { get; set; } = false;
 
+    /// <summary>
+    /// F-M450: report a subtitle that failed twice (download delivered no data, or the file did not
+    /// pass the content gates) to SubDL, using its own report form. On by default; one report per
+    /// subtitle and defect, ever, and only after the second failed attempt.
+    /// </summary>
+    public bool ReportBrokenSubtitles { get; set; } = true;
+
     /// <summary>F-M303: Korrektur ist EIN Abschnitt mit EINEM Schalter — kein Zwischenkopf, die Beschreibung gehört an den Schalter.</summary>
     public bool QaDownloadAutoSync { get; set; } = true;
 

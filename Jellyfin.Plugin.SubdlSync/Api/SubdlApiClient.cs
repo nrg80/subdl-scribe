@@ -45,6 +45,9 @@ public sealed class SubdlApiClient
     // it is off nothing is cached, not even within a run.
     private readonly ArchiveDiskCache _archiveDiskCache = new();
     private string? _token;
+
+    /// <summary>F-M450: account name from the login answer, used to sign automated reports.</summary>
+    public string AccountName { get; private set; } = string.Empty;
     private DateTime _tokenObtained;
 
     /// <summary>
@@ -646,6 +649,15 @@ public sealed class SubdlApiClient
 
         _token = root.GetProperty("token").GetString();
         _tokenObtained = DateTime.UtcNow;
+
+        // F-M450: the account NAME (not the login mail) is what an automated report signs itself
+        // with — "account midevildynasty". It is read here because the login is the only answer
+        // that carries it, and a report must never spell out the owner's address.
+        if (root.TryGetProperty("userData", out var ud) && ud.ValueKind == JsonValueKind.Object
+            && ud.TryGetProperty("name", out var un) && un.ValueKind == JsonValueKind.String)
+        {
+            AccountName = un.GetString() ?? string.Empty;
+        }
         LogInfo("SubDL login OK");
         return _token!;
         }
@@ -706,6 +718,69 @@ public sealed class SubdlApiClient
         catch (JsonException)
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// F-M450: files one report about a subtitle on SubDL. The endpoint is the site's own report
+    /// form (POST /report, Bearer from the login the upload path already performs); it is not part
+    /// of the documented API, so every answer is read defensively: only <c>success:true</c> counts,
+    /// a 429 is reported back as "deferred" so the caller can keep the row for the next run, and
+    /// anything else is a plain failure that must not be retried in a loop.
+    /// </summary>
+    /// <param name="nId">Subtitle report id ("Nj3hP7BQDw").</param>
+    /// <param name="category">One of the four SubDL categories.</param>
+    /// <param name="comment">Comment text.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Accepted, deferred (rate limited) or failed.</returns>
+    public async Task<SubdlReportOutcome> ReportBrokenSubtitleAsync(string nId, string category, string comment, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(nId) || string.IsNullOrWhiteSpace(category))
+        {
+            return SubdlReportOutcome.Failed;
+        }
+
+        // Downloads run on the api key alone; a report needs the session the upload path opens.
+        string token = _token ?? await LoginAsync(ct).ConfigureAwait(false);
+        var payload = new Dictionary<string, object?>
+        {
+            ["targetType"] = "subtitle",
+            ["nId"] = nId,
+            ["reason"] = category,
+            ["comment"] = comment
+        };
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{ApiBase}/report")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json")
+        };
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        TraceCall("POST", $"{ApiBase}/report");
+        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        ApiActivity?.Invoke();
+        Trace("POST", "report", (int)resp.StatusCode);
+
+        if ((int)resp.StatusCode == 429)
+        {
+            return SubdlReportOutcome.Deferred;
+        }
+
+        if (!resp.IsSuccessStatusCode)
+        {
+            return SubdlReportOutcome.Failed;
+        }
+
+        string body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.TryGetProperty("success", out var ok) && ok.ValueKind == JsonValueKind.True
+                ? SubdlReportOutcome.Accepted
+                : SubdlReportOutcome.Failed;
+        }
+        catch (JsonException)
+        {
+            return SubdlReportOutcome.Failed;
         }
     }
 
@@ -2249,6 +2324,20 @@ public sealed class SubtitleCandidate
             c.Author = au.GetString() ?? string.Empty; // Uploader
         }
 
+        // F-M450: the search answers the subtitle's report id only as a page path
+        // ("subtitlePage": "/s/info/Nj3hP7BQDw"). It is the ONLY handle the report endpoint
+        // accepts for a subtitle, so it is kept — without it a broken package cannot be reported
+        // at all, and the value is gone once the walk has discarded the candidate.
+        if (el.TryGetProperty("subtitlePage", out var sp) && sp.ValueKind == JsonValueKind.String)
+        {
+            string page = sp.GetString() ?? string.Empty;
+            int slash = page.LastIndexOf('/');
+            if (slash >= 0 && slash + 1 < page.Length)
+            {
+                c.NId = page[(slash + 1)..];
+            }
+        }
+
         // F-M215: unpack_files — the per-file list of a season or range pack.
         // Present only when the search ran with unpack=1. Each entry addresses one
         // single episode file and carries its own season/episode, so a pack can be
@@ -2426,6 +2515,19 @@ public sealed class SubtitleCandidate
 
         return 0;
     }
+}
+
+/// <summary>F-M450: what came of one report to SubDL.</summary>
+public enum SubdlReportOutcome
+{
+    /// <summary>SubDL confirmed the report.</summary>
+    Accepted,
+
+    /// <summary>Rate limited — the row stays unreported and is taken up by the next run.</summary>
+    Deferred,
+
+    /// <summary>Not accepted; no retry.</summary>
+    Failed
 }
 
 /// <summary>

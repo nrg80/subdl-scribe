@@ -86,6 +86,18 @@ public class DownloadRunSummary
     /// </summary>
     public int AiUploaderFiltered { get; set; }
 
+    /// <summary>
+    /// F-M450: reports this run filed with SubDL about a subtitle that failed twice (naked finding,
+    /// no measurement history). Only counted when SubDL answered success:true.
+    /// </summary>
+    public int Reported { get; set; }
+
+    /// <summary>
+    /// F-M450: reports that SubDL did not take — rate limited (429) or refused. The rows stay
+    /// unreported, so the next run picks them up again; nothing is lost and nothing is re-sent twice.
+    /// </summary>
+    public int ReportsDeferred { get; set; }
+
     /// <summary>Gets or sets the count of items skipped because SubDL had no candidates at all.</summary>
     public int SkippedNoCandidates { get; set; }
 
@@ -584,13 +596,15 @@ public sealed class DownloadPipeline : IDisposable
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
         LogUtil.Normal(_logger, 
-            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {Rejected} rejected after fetch | {NoCand} no candidates | {Ai} AI uploader filtered | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
+            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {Rejected} rejected after fetch | {NoCand} no candidates | {Ai} AI uploader filtered | {Reported} reported ({ReportsDeferred} deferred) | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
             summary.Downloaded,
             summary.FittedToAudio,
             (summary.FitMsTotal / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
             summary.RejectedCandidates,
             summary.SkippedNoCandidates,
             summary.AiUploaderFiltered,
+            summary.Reported,
+            summary.ReportsDeferred,
             summary.NotAvailable,
             summary.SkippedItems,
             summary.SkippedNotDue,
@@ -1544,6 +1558,25 @@ public sealed class DownloadPipeline : IDisposable
                         "[SubDL-D] {File} [{Lang}] — {N} candidate(s) skipped before the walk: QA-rejected in an earlier run ({Ids})",
                         Path.GetFileName(mediaPath), lang, beforeMemoryFilter - ranked.Count,
                         string.Join(",", qaKnownRejected));
+
+                    // F-M450: this is the SECOND sighting of these candidates — the gate refused them
+                    // in an earlier run, and they are refused here without another fetch. That is the
+                    // confirmation a report needs, so this is where a report is filed, once per row.
+                    if (_config.ReportBrokenSubtitles)
+                    {
+                        foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                        {
+                            if (row.ReportedUtc != null
+                                || string.IsNullOrWhiteSpace(row.NId)
+                                || !string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                || !qaKnownRejected.Contains(row.SubdlId, StringComparer.Ordinal))
+                            {
+                                continue;
+                            }
+
+                            await FileReportAsync(row, lang, summary, ct).ConfigureAwait(false);
+                        }
+                    }
                 }
             }
 
@@ -1554,6 +1587,8 @@ public sealed class DownloadPipeline : IDisposable
             // Releases tried and QA-rejected in this run — recorded at run end,
             // so the next run walks fresh candidates only.
             var qaRejectedReleases = new List<string>();
+            // F-M450: what a report would say about each of them — kept as the gate saw it.
+            var qaRejectedFacts = new Dictionary<string, ReportFacts>();
             int savedCount = 0;
             // F-M317 (operator order 08.10.2026): corrected and unprocessed files take their
             // numbers from OPPOSITE ENDS of the range, so they need counters of their own. One
@@ -1757,6 +1792,17 @@ public sealed class DownloadPipeline : IDisposable
                         Path.GetFileName(mediaPath), lang, cand.ReleaseName,
                         bytes == null ? "no bytes returned" : "only " + bytes.Length + " bytes");
 
+                    // F-M450: a package that answers without data is reportable — remembered now,
+                    // filed once the same package has failed a second time.
+                    await RememberAndReportAsync(
+                        item.Id.ToString(),
+                        lang,
+                        cand,
+                        BrokenSubtitleReports.EmptyPayload(bytes?.Length ?? 0),
+                        "empty",
+                        summary,
+                        ct).ConfigureAwait(false);
+
                     continue; // download failed → next candidate
                 }
 
@@ -1867,6 +1913,15 @@ public sealed class DownloadPipeline : IDisposable
                     // Burned fetch (QA gate): the request was spent and nothing is kept.
                     summary.RejectedCandidates++; // F-M286 / F-M387
                     qaRejectedReleases.Add(cand.SubdlId); // burned fetch → memorized
+
+                    // F-M450: keep the gate's own wording as the naked finding. The report is not
+                    // filed here — the next run sees this candidate as already rejected, and THAT
+                    // second sighting is the confirmation a report needs.
+                    string? gateFinding = BrokenSubtitleReports.FindingFromGateFailure(gateFail);
+                    if (gateFinding != null && !string.IsNullOrEmpty(cand.SubdlId))
+                    {
+                        qaRejectedFacts[cand.SubdlId] = new ReportFacts(cand.NId, gateFinding, cand.ReleaseName);
+                    }
 
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
@@ -2604,7 +2659,9 @@ public sealed class DownloadPipeline : IDisposable
             {
                 if (qaRejectedReleases.Count > 0)
                 {
-                    _qaFails.RecordSkippedCandidates(item.Id.ToString(), lang, qaRejectedReleases);
+                    _qaFails.RecordSkippedCandidates(
+                        item.Id.ToString(), lang, qaRejectedReleases, RejectReason.CandidateRejected,
+                        qaRejectedFacts, "qa");
 
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
@@ -3269,7 +3326,92 @@ public sealed class DownloadPipeline : IDisposable
     /// Treats empty/whitespace/placeholder IDs (e.g. "0") as missing so the TMDB
     /// ladder and the skip logic handle them consistently.
     /// </summary>
-    private static string? NormalizeId(string? id)
+    /// <summary>
+    /// F-M450: remembers a defect and files the report once the SAME candidate has failed a SECOND
+    /// time. The store row is the memory: first failure writes it, the next run reads it and only
+    /// then reports. Nothing is reported on a single observation — one empty answer can be a
+    /// hiccup on SubDL's side, two are a broken package.
+    /// </summary>
+    /// <param name="itemId">Jellyfin item id.</param>
+    /// <param name="lang">Language code.</param>
+    /// <param name="cand">The candidate that failed.</param>
+    /// <param name="finding">Naked finding.</param>
+    /// <param name="kind">"empty" (does not block) or "qa" (blocks, as before).</param>
+    /// <param name="summary">Run summary.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Task.</returns>
+    private async Task RememberAndReportAsync(
+        string itemId, string lang, SubtitleCandidate cand, string finding, string kind,
+        DownloadRunSummary summary, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(cand.SubdlId) || string.IsNullOrWhiteSpace(finding))
+        {
+            return;
+        }
+
+        var rows = _qaFails.GetRows(itemId, lang);
+        var previous = rows.FirstOrDefault(r => string.Equals(r.SubdlId, cand.SubdlId, StringComparison.Ordinal)
+                                                && string.Equals(r.Kind, kind, StringComparison.Ordinal));
+
+        _qaFails.RecordSkippedCandidates(
+            itemId,
+            lang,
+            new[] { cand.SubdlId },
+            RejectReason.CandidateRejected,
+            new Dictionary<string, ReportFacts>
+            {
+                [cand.SubdlId] = new ReportFacts(cand.NId, finding, cand.ReleaseName)
+            },
+            kind);
+
+        if (previous == null || previous.ReportedUtc != null || !_config.ReportBrokenSubtitles)
+        {
+            return;
+        }
+
+        var row = _qaFails.GetRows(itemId, lang)
+            .FirstOrDefault(r => string.Equals(r.SubdlId, cand.SubdlId, StringComparison.Ordinal)
+                                 && string.Equals(r.Kind, kind, StringComparison.Ordinal));
+        if (row != null)
+        {
+            await FileReportAsync(row, lang, summary, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// F-M450: files one stored defect with SubDL and marks the row when SubDL takes it. A report
+    /// that is not taken (rate limited, refused) leaves the row unreported, so the next run picks it
+    /// up again — deferred, never dropped and never sent twice.
+    /// </summary>
+    /// <param name="row">Stored defect.</param>
+    /// <param name="lang">Language code.</param>
+    /// <param name="summary">Run summary.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Task.</returns>
+    private async Task FileReportAsync(RejectedCandidateEntity row, string lang, DownloadRunSummary summary, CancellationToken ct)
+    {
+        string version = typeof(DownloadPipeline).Assembly.GetName().Version?.ToString() ?? string.Empty;
+        var text = BrokenSubtitleReports.Build(row.SubdlId, row.ReleaseName, lang, row.Finding, version, _api.AccountName);
+        if (text == null || string.IsNullOrWhiteSpace(row.NId))
+        {
+            return;
+        }
+
+        var outcome = await _api.ReportBrokenSubtitleAsync(row.NId, text.Category, text.Comment, ct).ConfigureAwait(false);
+        if (outcome == SubdlReportOutcome.Accepted)
+        {
+            _qaFails.MarkReported(row);
+            summary.Reported++;
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[SubDL-D] {Release} [{Lang}] — reported to SubDL ({Category}) for subtitle {NId}",
+                row.ReleaseName, lang, text.Category, row.NId);
+            return;
+        }
+
+        summary.ReportsDeferred++;
+    }
+
+    private static string? NormalizeId(string id)
     {
         if (string.IsNullOrWhiteSpace(id))
         {

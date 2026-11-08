@@ -547,6 +547,14 @@
                             <div class="fieldDescription">Candidates from the machine-translation account are dropped at the search result while this is off. Default: off.</div>
                         </div>
 
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="ReportBrokenSubtitles" name="ReportBrokenSubtitles" type="checkbox" is="emby-checkbox" />
+                                <span>Report broken subtitles to SubDL</span>
+                            </label>
+                            <div class="fieldDescription">A subtitle that fails twice (no data, or rejected by the content gates) is reported to SubDL once, with the bare finding. Default: on.</div>
+                        </div>
+
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="DownloadRuntimeToleranceSec">Runtime tolerance (seconds)</label>
                             <input id="DownloadRuntimeToleranceSec" name="DownloadRuntimeToleranceSec" type="number" is="emby-input" min="0" max="1800" />
@@ -1031,6 +1039,7 @@
                         document.querySelector('#QaDownloadVerifyLanguage').checked = config.QaDownloadVerifyLanguage;
                         document.querySelector('#QaDownloadAutoSync').checked = config.QaDownloadAutoSync !== false;
                         document.querySelector('#AllowAiTranslatedSubs').checked = config.AllowAiTranslatedSubs === true;
+                        document.querySelector('#ReportBrokenSubtitles').checked = config.ReportBrokenSubtitles !== false;
                         document.querySelector('#DownloadScoreWeightGroup').value = config.DownloadScoreWeightGroup;
                         document.querySelector('#DownloadScoreWeightToken').value = config.DownloadScoreWeightToken;
                         document.querySelector('#DownloadScoreWeightDownload').value = config.DownloadScoreWeightDownload;
@@ -1651,6 +1660,7 @@ workers.forEach(function (w) {
                         config.QaDownloadVerifyLanguage = document.querySelector('#QaDownloadVerifyLanguage').checked;
                         config.QaDownloadAutoSync = document.querySelector('#QaDownloadAutoSync').checked;
                         config.AllowAiTranslatedSubs = document.querySelector('#AllowAiTranslatedSubs').checked;
+                        config.ReportBrokenSubtitles = document.querySelector('#ReportBrokenSubtitles').checked;
                         config.DownloadScoreWeightGroup = parseInt(document.querySelector('#DownloadScoreWeightGroup').value) || 1000;
                         config.DownloadScoreWeightToken = parseInt(document.querySelector('#DownloadScoreWeightToken').value) || 10;
                         config.DownloadScoreWeightDownload = parseInt(document.querySelector('#DownloadScoreWeightDownload').value, 10); if (isNaN(config.DownloadScoreWeightDownload)) { config.DownloadScoreWeightDownload = 1; }
