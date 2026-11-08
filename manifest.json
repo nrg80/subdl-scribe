@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.342",
-        "changelog": "v12.1.12.342: the AI filter switch sits one row higher in the download quality gates, so the runtime tolerance stays the last field (F-M449).",
+        "version": "12.1.12.343",
+        "changelog": "v12.1.12.343: a subtitle that fails twice is reported to SubDL once — bare finding, category, and an attribution line with plugin version and account; switch `Report broken subtitles to SubDL` sits second to last in the download quality gates and is on by default (F-M450).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.342-dev/Jellyfin.Plugin.SubdlSync_12.1.12.342.zip",
-        "checksum": "78423dcd93230864b0668d9dd2be11ed",
-        "timestamp": "2026-11-06T13:39:16Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.343-dev/Jellyfin.Plugin.SubdlSync_12.1.12.343.zip",
+        "checksum": "d153ca4fa3edfbe2eef86506eaaffe78",
+        "timestamp": "2026-11-08T09:08:33Z"
       }
     ]
   }
