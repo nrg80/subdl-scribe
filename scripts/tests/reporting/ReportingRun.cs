@@ -139,6 +139,8 @@ internal static class ReportingRun
             "the QA path reports at the second sighting, where the candidate is refused again");
         Check(pipeline.Contains("summary.ReportsDeferred++", StringComparison.Ordinal),
             "a report SubDL does not take stays open for the next run");
+        Check(pipeline.Contains("qaRejectedReleases.Contains(row.SubdlId, StringComparer.Ordinal)", StringComparison.Ordinal),
+            "a measured gate verdict is reported in the same run — no second sighting is awaited");
         Check(pipeline.Contains("gateFinding += \" ('\" + packFile.Name + \"')\"", StringComparison.Ordinal),
             "the pipeline puts the resolved pack member into the finding");
         Check(pipeline.Contains("if (!cand.FullSeason && cand.UnpackFiles.Count == 0)", StringComparison.Ordinal),

@@ -2700,6 +2700,24 @@ public sealed class DownloadPipeline : IDisposable
                         item.Id.ToString(), lang, qaRejectedReleases, RejectReason.CandidateRejected,
                         qaRejectedFacts, "qa");
 
+                    // F-M450: a gate verdict is a MEASUREMENT of the file, not a guess — the same
+                    // bytes will read the same way next run. So the report goes out now, in this
+                    // run's flush, instead of waiting for a second sighting that would only confirm
+                    // what was already counted. (Only "no bytes returned" still waits, because there
+                    // a provider hiccup is plausible.)
+                    if (_config.ReportBrokenSubtitles)
+                    {
+                        foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                        {
+                            if (row.ReportedUtc == null
+                                && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                && qaRejectedReleases.Contains(row.SubdlId, StringComparer.Ordinal))
+                            {
+                                QueueReport(row);
+                            }
+                        }
+                    }
+
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
