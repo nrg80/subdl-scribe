@@ -129,6 +129,8 @@ internal static class ReportingRun
             "the QA path reports at the second sighting, where the candidate is refused again");
         Check(pipeline.Contains("summary.ReportsDeferred++", StringComparison.Ordinal),
             "a report SubDL does not take stays open for the next run");
+        Check(pipeline.Contains("if (!cand.FullSeason && cand.UnpackFiles.Count == 0)", StringComparison.Ordinal),
+            "a season/range pack that carries no file for the episode is NOT reported (our selection, not the uploader's defect)");
         Check(pipeline.Contains("QueueReport(row);", StringComparison.Ordinal)
               && !pipeline.Contains("await FileReportAsync(row, lang, summary, ct)", StringComparison.Ordinal),
             "nothing is filed inside the walk — confirmed rows are queued and filed after it");

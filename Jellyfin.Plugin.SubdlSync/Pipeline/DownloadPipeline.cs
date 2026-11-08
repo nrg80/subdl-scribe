@@ -1813,16 +1813,23 @@ public sealed class DownloadPipeline : IDisposable
                         Path.GetFileName(mediaPath), lang, cand.ReleaseName,
                         bytes == null ? "no bytes returned" : "only " + bytes.Length + " bytes");
 
-                    // F-M450: a package that answers without data is reportable — remembered now,
-                    // filed once the same package has failed a second time.
-                    await RememberAndReportAsync(
-                        item.Id.ToString(),
-                        lang,
-                        cand,
-                        BrokenSubtitleReports.EmptyPayload(bytes?.Length ?? 0),
-                        "empty",
-                        summary,
-                        ct).ConfigureAwait(false);
+                    // F-M450: a package that answers without data is remembered, and filed once the
+                    // same package has failed a second time — but NOT when the candidate is a season
+                    // or range pack. A pack that has no file for the episode we asked for is OUR
+                    // selection outcome, not a broken upload: measured on 08.11.2026, every single
+                    // "no bytes returned" of that run was such a pack ("23 files but none for
+                    // S3E11"). Reporting those would be a false diagnosis.
+                    if (!cand.FullSeason && cand.UnpackFiles.Count == 0)
+                    {
+                        await RememberAndReportAsync(
+                            item.Id.ToString(),
+                            lang,
+                            cand,
+                            BrokenSubtitleReports.EmptyPayload(bytes?.Length ?? 0),
+                            "empty",
+                            summary,
+                            ct).ConfigureAwait(false);
+                    }
 
                     continue; // download failed → next candidate
                 }
