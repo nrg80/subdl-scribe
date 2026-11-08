@@ -210,6 +210,13 @@ public sealed class DownloadPipeline : IDisposable
 
     /// <summary>F-M218: the summary of the run in flight, for event handlers.</summary>
     private DownloadRunSummary? _runSummaryForEvents;
+
+    /// <summary>
+    /// F-M450: rows whose report is confirmed and waiting to be filed. Reporting is housekeeping: it
+    /// runs AFTER the walk, never inside a download unit, so a slow or failing report cannot delay,
+    /// fail or reorder anything the pipeline is doing.
+    /// </summary>
+    private readonly List<RejectedCandidateEntity> _pendingReports = new();
     private readonly PluginConfiguration _config;
     private readonly GlobalRateLimiter _limiter;
     private readonly DownloadSearchTracker _searchTracker;
@@ -592,6 +599,20 @@ public sealed class DownloadPipeline : IDisposable
         // run is exactly when those counts matter — but label the first number as what it is:
         // the saves the run would have made.
         string savedLabel = summary.IsDryRun ? "would have saved" : "saved";
+
+        // F-M450: reports are filed here — after the walk, before the line that counts them.
+        try
+        {
+            await FlushReportsAsync(summary, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[SubDL-D] report flush failed: {Msg}", ex.Message);
+        }
         // F-M286: {Rejected} names what was FETCHED AND THROWN AWAY. Without it a run that spent
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
@@ -1574,7 +1595,7 @@ public sealed class DownloadPipeline : IDisposable
                                 continue;
                             }
 
-                            await FileReportAsync(row, lang, summary, ct).ConfigureAwait(false);
+                            QueueReport(row);
                         }
                     }
                 }
@@ -3374,7 +3395,7 @@ public sealed class DownloadPipeline : IDisposable
                                  && string.Equals(r.Kind, kind, StringComparison.Ordinal));
         if (row != null)
         {
-            await FileReportAsync(row, lang, summary, ct).ConfigureAwait(false);
+            QueueReport(row);
         }
     }
 
@@ -3388,6 +3409,56 @@ public sealed class DownloadPipeline : IDisposable
     /// <param name="summary">Run summary.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Task.</returns>
+    /// <summary>
+    /// F-M450: puts a confirmed row on the report queue. Filing happens after the walk, so nothing
+    /// here can slow down or break a download unit.
+    /// </summary>
+    /// <param name="row">Confirmed defect.</param>
+    private void QueueReport(RejectedCandidateEntity row)
+    {
+        if (string.IsNullOrWhiteSpace(row.NId)
+            || _pendingReports.Any(r => string.Equals(r.Id, row.Id, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        _pendingReports.Add(row);
+    }
+
+    /// <summary>
+    /// F-M450: files every queued report. Each call is wrapped: the report route is undocumented, and
+    /// a reporting defect must never surface as a pipeline failure.
+    /// </summary>
+    /// <param name="summary">Run summary.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Task.</returns>
+    private async Task FlushReportsAsync(DownloadRunSummary summary, CancellationToken ct)
+    {
+        if (_pendingReports.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var row in _pendingReports.ToList())
+        {
+            try
+            {
+                await FileReportAsync(row, row.Language, summary, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                summary.ReportsDeferred++;
+                _logger.LogWarning("[SubDL-D] report for {Release} not filed: {Msg}", row.ReleaseName, ex.Message);
+            }
+        }
+
+        _pendingReports.Clear();
+    }
+
     private async Task FileReportAsync(RejectedCandidateEntity row, string lang, DownloadRunSummary summary, CancellationToken ct)
     {
         string version = typeof(DownloadPipeline).Assembly.GetName().Version?.ToString() ?? string.Empty;

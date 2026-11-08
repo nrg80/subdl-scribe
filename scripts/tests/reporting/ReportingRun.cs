@@ -129,6 +129,11 @@ internal static class ReportingRun
             "the QA path reports at the second sighting, where the candidate is refused again");
         Check(pipeline.Contains("summary.ReportsDeferred++", StringComparison.Ordinal),
             "a report SubDL does not take stays open for the next run");
+        Check(pipeline.Contains("QueueReport(row);", StringComparison.Ordinal)
+              && !pipeline.Contains("await FileReportAsync(row, lang, summary, ct)", StringComparison.Ordinal),
+            "nothing is filed inside the walk — confirmed rows are queued and filed after it");
+        Check(Regex.IsMatch(pipeline, @"catch \(Exception ex\)\s*\{\s*summary\.ReportsDeferred\+\+;"),
+            "a failing report is caught, counted as deferred, and never breaks the run");
         Check(pipeline.Contains("_qaFails.MarkReported(row)", StringComparison.Ordinal),
             "an accepted report is marked on the row");
 
