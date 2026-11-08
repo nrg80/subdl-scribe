@@ -401,11 +401,43 @@ if len(assets) != 1:
     sys.exit('  FAIL: release must carry exactly one asset')
 if assets[0]['name'] != '$KEEP':
     sys.exit('  FAIL: unexpected asset name')"
-GOT="$(curl -sSL -m 300 -o /tmp/subdl-asset.zip \
-    "https://github.com/$REPO_SLUG/releases/download/$TAG/$KEEP" \
-    && md5sum /tmp/subdl-asset.zip | cut -d' ' -f1)"
-[[ "$GOT" == "$MD5" ]] || die "downloaded asset md5 $GOT != built $MD5"
-ok "downloaded md5 matches the build: $GOT"
+# Verify against the API, not against a second download. GitHub serves release downloads
+# through a CDN that answers with a short HTML error page under load (measured twice on
+# 08.11.2026: "504 Gateway Time-out", 92 bytes, always the same md5). A download-based check
+# cannot tell that page from a bad asset and aborts a perfectly good release, so the stored
+# asset's own digest and size are compared instead — that is the same bytes GitHub will serve.
+LOCAL_SIZE="$(stat -c %s "$ZIP")"
+LOCAL_SHA="$(sha256sum "$ZIP" | cut -d' ' -f1)"
+REMOTE="$(curl -sS -m 60 -H "$AUTH" "$API/repos/$REPO_SLUG/releases/$REL_ID/assets" \
+- | python3 -c "
+import json, sys
+assets = json.load(sys.stdin)
+if not assets:
+    sys.exit('FAIL')
+a = assets[0]
+print('%d %s' % (a['size'], (a.get('digest') or '').replace('sha256:', '') or '-'))")"
+REMOTE_SIZE="${REMOTE%% *}"
+REMOTE_SHA="${REMOTE##* }"
+[[ "$REMOTE_SIZE" == "$LOCAL_SIZE" ]] \
+    || die "asset size $REMOTE_SIZE != built $LOCAL_SIZE"
+if [[ "$REMOTE_SHA" != "-" ]]; then
+    [[ "$REMOTE_SHA" == "$LOCAL_SHA" ]] || die "asset sha256 $REMOTE_SHA != built $LOCAL_SHA"
+    ok "asset sha256 matches the build: $LOCAL_SHA ($LOCAL_SIZE bytes)"
+else
+    # Older GitHub responses carry no digest; fall back to a download, but insist the file is a
+    # ZIP (magic "PK") before comparing — an HTML error page is a fetch failure, not a mismatch.
+    for _ in 1 2 3; do
+        curl -sSL -m 300 -o /tmp/subdl-asset.zip \
+            "https://github.com/$REPO_SLUG/releases/download/$TAG/$KEEP" || continue
+        [[ "$(head -c 2 /tmp/subdl-asset.zip)" == "PK" ]] || continue
+        GOT="$(md5sum /tmp/subdl-asset.zip | cut -d' ' -f1)"
+        [[ "$GOT" == "$MD5" ]] || die "downloaded asset md5 $GOT != built $MD5"
+        ok "downloaded md5 matches the build: $GOT"
+        break
+    done
+    [[ "$(md5sum /tmp/subdl-asset.zip 2>/dev/null | cut -d' ' -f1)" == "$MD5" ]] \
+        || die "asset could not be fetched for verification (CDN error page, 3 attempts)"
+fi
 
 say "Done — $TAG"
 printf '  release : https://github.com/%s/releases/tag/%s\n' "$REPO_SLUG" "$TAG"
