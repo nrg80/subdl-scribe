@@ -143,6 +143,13 @@ internal static class ReportingRun
         Check(tracker.Contains("!string.Equals(x.Kind, \"empty\", StringComparison.Ordinal)", StringComparison.Ordinal),
             "an empty-payload memo does not turn into a skip memo");
 
+        string db = Read(plugin, "Data/SubdlDbContext.cs");
+        Check(db.Contains("ALTER TABLE rejected_candidates ADD COLUMN NId", StringComparison.Ordinal)
+              && db.Contains("EnsureReportColumns();", StringComparison.Ordinal),
+            "an upgraded data file gets the report columns (EnsureCreated never alters a table)");
+        Check(db.Contains("CurrentSchemaVersion = 7", StringComparison.Ordinal),
+            "the schema version is bumped with the columns");
+
         string api = Read(plugin, "Api/SubdlApiClient.cs");
         Check(api.Contains("\"subtitlePage\"", StringComparison.Ordinal) && api.Contains("c.NId = page[(slash + 1)..]", StringComparison.Ordinal),
             "the report id is taken from the search answer");
