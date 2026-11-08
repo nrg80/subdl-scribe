@@ -1948,6 +1948,15 @@ public sealed class DownloadPipeline : IDisposable
                     string? gateFinding = BrokenSubtitleReports.FindingFromGateFailure(gateFail);
                     if (gateFinding != null && !string.IsNullOrEmpty(cand.SubdlId))
                     {
+                        // F-M450: a pack has many members and the report must say WHICH one is broken —
+                        // otherwise the uploader has to guess. The member name is the one the gate
+                        // actually measured; it goes into the finding, and the category is still read
+                        // from the part before it.
+                        if (packFile != null && !string.IsNullOrWhiteSpace(packFile.Name))
+                        {
+                            gateFinding += " ('" + packFile.Name + "')";
+                        }
+
                         qaRejectedFacts[cand.SubdlId] = new ReportFacts(cand.NId, gateFinding, cand.ReleaseName);
                     }
 

@@ -162,6 +162,22 @@ public static class BrokenSubtitleReports
     }
 
     /// <summary>
+    /// Cuts a finding back to the part the category is decided on.
+    /// <para>
+    /// A finding may name the pack member it belongs to — "cue span 2508s vs. runtime 1254s
+    /// ('The.Middle.S03E01.srt')". That suffix makes the report unambiguous for the reader, but it
+    /// must not change how the finding is classified, so the category is read from the head only.
+    /// </para>
+    /// </summary>
+    /// <param name="finding">Finding, possibly with a member name.</param>
+    /// <returns>Finding without the member name.</returns>
+    private static string Head(string finding)
+    {
+        int at = finding.IndexOf(" ('", StringComparison.Ordinal);
+        return (at > 0 ? finding[..at] : finding).Trim();
+    }
+
+    /// <summary>
     /// Builds the report for one finding, or null when the finding is not reportable.
     /// </summary>
     /// <param name="subdlId">SubDL entry id ("3767750-8689923").</param>
@@ -184,7 +200,8 @@ public static class BrokenSubtitleReports
         string lang = (language ?? string.Empty).Trim().ToUpperInvariant();
         string what = finding.Trim();
 
-        bool listedUnderLanguage = what.StartsWith("contains ", StringComparison.Ordinal);
+        string head = Head(what);
+        bool listedUnderLanguage = head.StartsWith("contains ", StringComparison.Ordinal);
         if (listedUnderLanguage && lang.Length == 0)
         {
             return null;
@@ -196,23 +213,23 @@ public static class BrokenSubtitleReports
 
         string category;
         string sentence;
-        if (what.StartsWith("downloads with ", StringComparison.Ordinal))
+        if (head.StartsWith("downloads with ", StringComparison.Ordinal))
         {
             category = CategoryIncomplete;
             sentence = subject + " " + what + ".";
         }
-        else if (what.EndsWith(" cues", StringComparison.Ordinal))
+        else if (head.EndsWith(" cues", StringComparison.Ordinal))
         {
             category = CategoryIncomplete;
             sentence = subject + ": " + what + ".";
         }
-        else if (what == NoCues || what == NonMonotonic
-                 || what.StartsWith("cue duration ", StringComparison.Ordinal))
+        else if (head == NoCues || head == NonMonotonic
+                 || head.StartsWith("cue duration ", StringComparison.Ordinal))
         {
             category = CategoryIncomplete;
             sentence = subject + ": " + what + ".";
         }
-        else if (what.StartsWith("cue span ", StringComparison.Ordinal))
+        else if (head.StartsWith("cue span ", StringComparison.Ordinal))
         {
             category = CategoryOther;
             sentence = subject + ": " + what + ".";

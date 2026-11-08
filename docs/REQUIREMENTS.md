@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.105
-**Status:** Implementation — v12.1.12.343.
+**Version:** 2.106
+**Status:** Implementation — v12.1.12.344.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -498,7 +498,7 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 
 **F-M449 [D]:** **Maschinenübersetzte Untertitel sind standardmäßig aus.** Ein Untertitel des Übersetzungs-Kontos (SUBDL AI) wird nur geladen, wenn der Schalter `Allow AI translated subs (SUBDL AI)` gesetzt ist. Der Ausschluss greift am Suchergebnis: ein solcher Kandidat kommt weder in die Rangfolge noch kostet er eine Download-Einheit, und die SDH-Variante folgt derselben Regel. Erkannt wird das Konto am Uploader-Namen; Abstände, Punkte, Bindestriche und Unterstriche entfallen vor dem Vergleich, andere Namen bleiben unberührt. Die Laufsumme nennt die verworfene Zahl.
 
-**F-M450 [D]:** **Ein zweimal gescheiterter Untertitel wird an SubDL gemeldet.** Liefert ein Paket keine Daten oder fällt eine Datei durch eine Inhaltsprüfung, wird der Befund beim ersten Mal nur vermerkt; gemeldet wird erst, wenn derselbe Kandidat ein zweites Mal scheitert. Gemeldet wird über das Meldeformular des Portals, mit dem nackten Befund (Paket-Kennung, Release-Name, Sprache, Messwert), der Zuordnung zu einer von vier Kategorien (kein Untertitel, falsche Release-Angaben, kopiert, sonstiges) und einer Absenderzeile aus Produktname, Version und Kontoname — nie die Anmelde-Adresse. Ein Paket ohne Melde-Kennung wird nicht gemeldet. Nimmt das Portal eine Meldung nicht an, bleibt sie offen und wird im nächsten Lauf erneut versucht; eine angenommene Meldung wird nie wiederholt. Die Laufsumme nennt Meldungen und Vertagungen. Der Schalter `Report broken subtitles to SubDL` ist standardmäßig an.
+**F-M450 [D]:** **Ein zweimal gescheiterter Untertitel wird an SubDL gemeldet.** Liefert ein Paket keine Daten oder fällt eine Datei durch eine Inhaltsprüfung, wird der Befund beim ersten Mal nur vermerkt; gemeldet wird erst, wenn derselbe Kandidat ein zweites Mal scheitert. Gemeldet wird über das Meldeformular des Portals, mit dem nackten Befund (Paket-Kennung, Release-Name, Sprache, Messwert), der Zuordnung zu einer von vier Kategorien (kein Untertitel, falsche Release-Angaben, kopiert, sonstiges) — bei einem Paket mit dem Namen der betroffenen Datei und einer Absenderzeile aus Produktname, Version und Kontoname — nie die Anmelde-Adresse. Ein Paket ohne Melde-Kennung wird nicht gemeldet. Nimmt das Portal eine Meldung nicht an, bleibt sie offen und wird im nächsten Lauf erneut versucht; eine angenommene Meldung wird nie wiederholt. Die Laufsumme nennt Meldungen und Vertagungen. Der Schalter `Report broken subtitles to SubDL` ist standardmäßig an.
 
 ### 4.2 Dry Run — Download
 

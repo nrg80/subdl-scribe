@@ -115,6 +115,16 @@ internal static class ReportingRun
         Check(BrokenSubtitleReports.FindingFromGateFailure("runtime (span 2433s vs runtime 1290s (tolerance ±600s))")
               == BrokenSubtitleReports.RuntimeMismatch(2433, 1290),
             "the runtime gate's two numbers become the finding");
+        string memberFinding = BrokenSubtitleReports.RuntimeMismatch(2508, 1254) + " ('The.Middle.S03E01.srt')";
+        var memberReport = BrokenSubtitleReports.Build("1901632-1458818", "The.Middle.S03 Complete", "EN", memberFinding, "12.1.12.344", "rosetestdev");
+        Check(memberReport?.Comment.Contains(": cue span 2508s vs. runtime 1254s ('The.Middle.S03E01.srt').", StringComparison.Ordinal) == true,
+            "a pack report names the member the gate measured");
+        Check(memberReport?.Category == BrokenSubtitleReports.CategoryOther,
+            "the member name does not change the category");
+        Check(BrokenSubtitleReports.Build("1-2", "r", "DE", BrokenSubtitleReports.FewCues(7) + " ('x.srt')", "v", "a")?.Category
+              == BrokenSubtitleReports.CategoryIncomplete,
+            "even a finding that is classified by its tail still lands right with a member name");
+
         Check(BrokenSubtitleReports.FindingFromGateFailure(null) == null
               && BrokenSubtitleReports.FindingFromGateFailure("something") == null,
             "an unknown verdict produces no finding");
@@ -129,6 +139,8 @@ internal static class ReportingRun
             "the QA path reports at the second sighting, where the candidate is refused again");
         Check(pipeline.Contains("summary.ReportsDeferred++", StringComparison.Ordinal),
             "a report SubDL does not take stays open for the next run");
+        Check(pipeline.Contains("gateFinding += \" ('\" + packFile.Name + \"')\"", StringComparison.Ordinal),
+            "the pipeline puts the resolved pack member into the finding");
         Check(pipeline.Contains("if (!cand.FullSeason && cand.UnpackFiles.Count == 0)", StringComparison.Ordinal),
             "a season/range pack that carries no file for the episode is NOT reported (our selection, not the uploader's defect)");
         Check(pipeline.Contains("QueueReport(row);", StringComparison.Ordinal)
