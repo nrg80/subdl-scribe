@@ -1811,7 +1811,9 @@ public sealed class DownloadPipeline : IDisposable
                     LogUtil.PerItem(_config.LogMode, _logger,
                         "[SubDL-D] {File} [{Lang}] — download reject {Release}: {Reason}",
                         Path.GetFileName(mediaPath), lang, cand.ReleaseName,
-                        bytes == null ? "no bytes returned" : "only " + bytes.Length + " bytes");
+                        bytes == null
+                            ? "no bytes (" + _api.LastFileDownloadLabel + ")"
+                            : "only " + bytes.Length + " bytes (" + _api.LastFileDownloadLabel + ")");
 
                     // F-M450: a package that answers without data is remembered, and filed once the
                     // same package has failed a second time — but NOT when the candidate is a season
@@ -1819,13 +1821,20 @@ public sealed class DownloadPipeline : IDisposable
                     // selection outcome, not a broken upload: measured on 08.11.2026, every single
                     // "no bytes returned" of that run was such a pack ("23 files but none for
                     // S3E11"). Reporting those would be a false diagnosis.
-                    if (!cand.FullSeason && cand.UnpackFiles.Count == 0)
+                    // F-M450 (09.11.2026): only a 200 that carries nothing is a broken upload. A 409
+                    // (subtitle exists only as an archive) or a 429 (daily limit) is OUR request
+                    // being refused — reporting those would accuse the uploader of a defect we
+                    // caused ourselves. The measured night: 43 rejects, all 409, zero reportable.
+                    bool genuineEmpty = _api.LastFileDownloadStatus is 200 or 0
+                                        && _api.LastFileDownloadBytes == 0
+                                        && string.IsNullOrEmpty(_api.LastFileDownloadError);
+                    if (genuineEmpty && !cand.FullSeason && cand.UnpackFiles.Count == 0)
                     {
                         await RememberAndReportAsync(
                             item.Id.ToString(),
                             lang,
                             cand,
-                            BrokenSubtitleReports.EmptyPayload(bytes?.Length ?? 0),
+                            BrokenSubtitleReports.EmptyPayload(_api.LastFileDownloadBytes),
                             "empty",
                             summary,
                             ct).ConfigureAwait(false);
@@ -2627,7 +2636,9 @@ public sealed class DownloadPipeline : IDisposable
                                 // same counter. One increment for every reason in this branch.
                                 summary.RejectedCandidates++;
                                 string hiRejectReason = !hiBytesUsable
-                                    ? (hiBytes == null ? "no bytes returned" : "only " + hiBytes.Length + " bytes")
+                                    ? (hiBytes == null
+                                        ? "no bytes (" + _api.LastFileDownloadLabel + ")"
+                                        : "only " + hiBytes.Length + " bytes (" + _api.LastFileDownloadLabel + ")")
                                     : !hiStructureOk
                                         ? (hiStats == null
                                             ? "structure: no parsable cues"
@@ -3134,7 +3145,9 @@ public sealed class DownloadPipeline : IDisposable
 
         if (!string.IsNullOrEmpty(cand.NId))
         {
-            var bytes = await _api.DownloadV2FileAsync(cand.NId, ct).ConfigureAwait(false);
+            // F-M450: the client falls back to ?format=zip when the subtitle has no single file
+            // (409 not_a_single_file) — it needs the wanted episode to pick the right member.
+            var bytes = await _api.DownloadV2FileAsync(cand.NId, ct, season, episode).ConfigureAwait(false);
             return (bytes, null);
         }
 

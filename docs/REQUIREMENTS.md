@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.107
-**Status:** Implementation — v12.1.12.345.
+**Version:** 2.108
+**Status:** Implementation — v12.1.12.346.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,8 +16,8 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 61 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 9 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 62 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 10 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397
@@ -499,6 +499,8 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 **F-M449 [D]:** **Maschinenübersetzte Untertitel sind standardmäßig aus.** Ein Untertitel des Übersetzungs-Kontos (SUBDL AI) wird nur geladen, wenn der Schalter `Allow AI translated subs (SUBDL AI)` gesetzt ist. Der Ausschluss greift am Suchergebnis: ein solcher Kandidat kommt weder in die Rangfolge noch kostet er eine Download-Einheit, und die SDH-Variante folgt derselben Regel. Erkannt wird das Konto am Uploader-Namen; Abstände, Punkte, Bindestriche und Unterstriche entfallen vor dem Vergleich, andere Namen bleiben unberührt. Die Laufsumme nennt die verworfene Zahl.
 
 **F-M450 [D]:** **Ein zweimal gescheiterter Untertitel wird an SubDL gemeldet.** Liefert ein Paket keine Daten oder fällt eine Datei durch eine Inhaltsprüfung, wird der Befund im selben Lauf gemeldet — eine Messung am gelieferten File liest sich beim nächsten Versuch nicht anders; nur bei einer leeren Antwort („keine Bytes") wird ein zweiter Versuch abgewartet, weil dort ein Aussetzer des Anbieters plausibel ist. Gemeldet wird über das Meldeformular des Portals, mit dem nackten Befund (Paket-Kennung, Release-Name, Sprache, Messwert), der Zuordnung zu einer von vier Kategorien (kein Untertitel, falsche Release-Angaben, kopiert, sonstiges) — bei einem Paket mit dem Namen der betroffenen Datei und einer Absenderzeile aus Produktname, Version und Kontoname — nie die Anmelde-Adresse. Ein Paket ohne Melde-Kennung wird nicht gemeldet. Nimmt das Portal eine Meldung nicht an, bleibt sie offen und wird im nächsten Lauf erneut versucht; eine angenommene Meldung wird nie wiederholt. Die Laufsumme nennt Meldungen und Vertagungen. Der Schalter `Report broken subtitles to SubDL` ist standardmäßig an.
+
+**F-M451 [D]:** **Eine Absage des Abrufs ist kein Defekt des Uploads.** Der Einzeldatei-Endpunkt antwortet für Untertitel, die es nur als Archiv gibt, mit `409` und dem Hinweis, das Archiv zu verlangen; das Plugin holt daraufhin das Archiv und entpackt die gesuchte Folge. Ablehnzeilen nennen den HTTP-Status und den Fehlernamen des Portals statt einer Vermutung; gemeldet wird ein Untertitel nur, wenn die Antwort tatsächlich mit `200` kam und nichts enthielt — Status und Inhaltslänge werden dafür festgehalten, und ein Archiv ohne passende Datei zählt nicht als leere Antwort. Eine Sperre des Tageskontingents beendet den Lauf, sie wird nie gemeldet.
 
 ### 4.2 Dry Run — Download
 

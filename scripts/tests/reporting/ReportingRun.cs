@@ -143,7 +143,7 @@ internal static class ReportingRun
             "a measured gate verdict is reported in the same run — no second sighting is awaited");
         Check(pipeline.Contains("gateFinding += \" ('\" + packFile.Name + \"')\"", StringComparison.Ordinal),
             "the pipeline puts the resolved pack member into the finding");
-        Check(pipeline.Contains("if (!cand.FullSeason && cand.UnpackFiles.Count == 0)", StringComparison.Ordinal),
+        Check(pipeline.Contains("genuineEmpty && !cand.FullSeason && cand.UnpackFiles.Count == 0", StringComparison.Ordinal),
             "a season/range pack that carries no file for the episode is NOT reported (our selection, not the uploader's defect)");
         Check(pipeline.Contains("QueueReport(row);", StringComparison.Ordinal)
               && !pipeline.Contains("await FileReportAsync(row, lang, summary, ct)", StringComparison.Ordinal),
@@ -175,6 +175,20 @@ internal static class ReportingRun
             "a rate-limited report is reported back as deferred");
         Check(api.Contains("ud.TryGetProperty(\"name\"", StringComparison.Ordinal),
             "the attribution uses the account name, not the login mail");
+
+        // --- 3c. a refusal is not a defect (measured 09.11.2026) ---------------
+        Check(api.Contains("LastFileDownloadStatus", StringComparison.Ordinal)
+              && api.Contains("LastFileDownloadLabel", StringComparison.Ordinal),
+            "the download path records the HTTP status instead of guessing \"no bytes\"");
+        Check(api.Contains("not_a_single_file", StringComparison.Ordinal)
+              && api.Contains("\"zip\"", StringComparison.Ordinal)
+              && api.Contains("UnpackAsync(archive, zipSeason, zipEpisode, ct)", StringComparison.Ordinal),
+            "a subtitle that exists only as an archive is fetched as zip and unpacked");
+        Check(pipeline.Contains("_api.LastFileDownloadLabel", StringComparison.Ordinal),
+            "the reject line names the HTTP status and the API error");
+        Check(pipeline.Contains("_api.LastFileDownloadBytes == 0", StringComparison.Ordinal)
+              && pipeline.Contains("bool genuineEmpty", StringComparison.Ordinal),
+            "only a 200 that carried nothing may be reported as a broken upload");
 
         // --- 4. the switch ----------------------------------------------------
         string config = Read(plugin, "Configuration/PluginConfiguration.cs");

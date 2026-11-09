@@ -1471,7 +1471,46 @@ public sealed class SubdlApiClient
     /// </summary>
     private static readonly TimeSpan FileTransferTimeout = TimeSpan.FromMinutes(5);
 
-    public async Task<byte[]?> DownloadV2FileAsync(string nId, CancellationToken ct)
+    /// <summary>
+    /// Last HTTP status of the download path, so a rejection can name the REASON instead of
+    /// guessing. Measured 09.11.2026: 43 rejections of one night were all HTTP 409
+    /// <c>not_a_single_file</c> — the subtitle ships only as an archive — and the log called every
+    /// one of them "no bytes returned", which reads like a broken upload and is the opposite.
+    /// The pipeline works one item at a time, so a scalar is enough.
+    /// </summary>
+    public int LastFileDownloadStatus { get; private set; }
+
+    /// <summary>API error name of the last download answer (<c>not_a_single_file</c>, …), if any.</summary>
+    public string? LastFileDownloadError { get; private set; }
+
+    /// <summary>Body length of the last successful download answer — proves whether a 200 really
+    /// carried nothing, which is the only case that may be reported as a broken upload.</summary>
+    public int LastFileDownloadBytes { get; private set; }
+
+    /// <summary>Short label for a reject line — status plus API error, never a guess.</summary>
+    public string LastFileDownloadLabel =>
+        LastFileDownloadStatus == 0
+            ? "no status"
+            : "HTTP " + LastFileDownloadStatus +
+              (string.IsNullOrEmpty(LastFileDownloadError) ? string.Empty : " " + LastFileDownloadError);
+
+    /// <summary>
+    /// V2 single-file download by nId — GET /api/v2/subtitles/{nId}/download?format=file
+    /// (Bearer auth). Same retry contract as v1 downloads (429/5xx backoff, F-M27/F-M58).
+    /// <para>
+    /// F-M450 (09.11.2026): many subtitles have no single file at all — the endpoint then answers
+    /// <c>409 not_a_single_file</c> and says what to do: ask for <c>?format=zip</c>. Measured on a
+    /// night's rejects: every one of them was such a case, and the archive carried exactly the .srt
+    /// that had just been thrown away. So the fallback is part of the download now — fetch the zip
+    /// and unpack the file for the wanted season/episode.
+    /// </para>
+    /// </summary>
+    /// <param name="nId">Subtitle id (<c>subtitlePage</c> tail).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="zipSeason">Wanted season for the archive fallback (0 = none).</param>
+    /// <param name="zipEpisode">Wanted episode for the archive fallback (0 = none).</param>
+    /// <returns>The subtitle file bytes, or null.</returns>
+    public async Task<byte[]?> DownloadV2FileAsync(string nId, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0)
     {
         if (string.IsNullOrWhiteSpace(nId))
         {
@@ -1479,7 +1518,52 @@ public sealed class SubdlApiClient
         }
 
         string apiKey = ApiKey ?? throw new InvalidOperationException("Download requires the SubDL API key");
-        string fullUrl = $"{ApiBase}/api/v2/subtitles/{Uri.EscapeDataString(nId)}/download?format=file";
+        LastFileDownloadStatus = 0;
+        LastFileDownloadError = null;
+        LastFileDownloadBytes = 0;
+        byte[]? bytes = await V2DownloadAttemptAsync(nId, "file", apiKey, ct).ConfigureAwait(false);
+
+        // 409 not_a_single_file: the subtitle is an archive. Ask again in the shape it asked for,
+        // then unpack the member that fits — the same unpacker the v1 archive path uses.
+        if (bytes == null
+            && LastFileDownloadStatus == (int)System.Net.HttpStatusCode.Conflict
+            && string.Equals(LastFileDownloadError, "not_a_single_file", StringComparison.Ordinal))
+        {
+            LogInfo("[SubDL] v2 download " + nId + " has no single file — retrying as ?format=zip");
+            byte[]? archive = await V2DownloadAttemptAsync(nId, "zip", apiKey, ct).ConfigureAwait(false);
+            if (archive != null && archive.Length > 0)
+            {
+                // Keep the 409 in the record after a successful unpack? No: the fetch SUCCEEDED,
+                // so the status describes what came back in the end.
+                LastFileDownloadStatus = 200;
+                LastFileDownloadError = null;
+                byte[]? member = await UnpackAsync(archive, zipSeason, zipEpisode, ct).ConfigureAwait(false);
+                if (member == null || member.Length == 0)
+                {
+                    // The archive arrived but carried no usable member: NOT a 0-byte upload.
+                    LastFileDownloadBytes = 0;
+                    LastFileDownloadError = "archive_without_member";
+                }
+
+                return member;
+            }
+        }
+
+        return bytes;
+    }
+
+    /// <summary>
+    /// One v2 download attempt chain (429/5xx backoff) against a given format. Records the final
+    /// status and API error so the caller can name the reason.
+    /// </summary>
+    /// <param name="nId">Subtitle id.</param>
+    /// <param name="format">"file" or "zip".</param>
+    /// <param name="apiKey">Bearer key.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Body bytes on success, else null.</returns>
+    private async Task<byte[]?> V2DownloadAttemptAsync(string nId, string format, string apiKey, CancellationToken ct)
+    {
+        string fullUrl = $"{ApiBase}/api/v2/subtitles/{Uri.EscapeDataString(nId)}/download?format={format}";
         const int maxAttempts = 3;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -1492,15 +1576,22 @@ public sealed class SubdlApiClient
             TraceCall("GET", fullUrl);
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
             ApiActivity?.Invoke();
-            Trace("GET", fullUrl, (int)resp.StatusCode, $"v2 download attempt {attempt}");
+            Trace("GET", fullUrl, (int)resp.StatusCode, $"v2 download {format} attempt {attempt}");
             if (resp.IsSuccessStatusCode)
             {
-                return await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+                LastFileDownloadStatus = (int)resp.StatusCode;
+                LastFileDownloadError = null;
+                byte[] payload = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+                LastFileDownloadBytes = payload.Length;
+                return payload;
             }
 
+            LastFileDownloadStatus = (int)resp.StatusCode;
+            string body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            LastFileDownloadError = ParseApiErrorName(body);
             if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
             {
-                Classify429(resp, await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+                Classify429(resp, body);
             }
 
             if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests
@@ -1516,6 +1607,32 @@ public sealed class SubdlApiClient
                 continue;
             }
 
+            return null;
+        }
+
+        return null;
+    }
+
+    /// <summary>Reads the <c>error</c> member of a SubDL JSON error answer, if present.</summary>
+    /// <param name="body">Response body.</param>
+    /// <returns>Error name, or null.</returns>
+    private static string? ParseApiErrorName(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body) || body.Length > 4000 || body.TrimStart()[0] != '{')
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.String)
+            {
+                return err.GetString();
+            }
+        }
+        catch (JsonException)
+        {
             return null;
         }
 
