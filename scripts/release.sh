@@ -390,34 +390,41 @@ curl -sS -m 300 -X POST -H "$AUTH" -H 'Content-Type: application/zip' \
 
 # --- 7. verify the published release ----------------------------------------
 say "Verify release"
-curl -sS -m 60 -H "$AUTH" "$API/repos/$REPO_SLUG/releases/$REL_ID/assets" \
- | python3 -c "
-import json, sys
-assets = json.load(sys.stdin)
-print('  assets: %d' % len(assets))
-for a in assets:
-    print('   %-48s %d' % (a['name'], a['size']))
-if len(assets) != 1:
-    sys.exit('  FAIL: release must carry exactly one asset')
-if assets[0]['name'] != '$KEEP':
-    sys.exit('  FAIL: unexpected asset name')"
 # Verify against the API, not against a second download. GitHub serves release downloads
 # through a CDN that answers with a short HTML error page under load (measured twice on
 # 08.11.2026: "504 Gateway Time-out", 92 bytes, always the same md5). A download-based check
 # cannot tell that page from a bad asset and aborts a perfectly good release, so the stored
 # asset's own digest and size are compared instead — that is the same bytes GitHub will serve.
+# The API itself can answer with nothing (measured 09.11.2026: an empty body raised a JSON
+# traceback and killed the run *after* the release was already published), so the answer is
+# fetched to a file, retried until it parses, and an unparsable answer is named as such.
+ASSETS_JSON=/tmp/subdl-assets.json
+for _ in 1 2 3 4 5; do
+    curl -sS -m 60 -H "$AUTH" "$API/repos/$REPO_SLUG/releases/$REL_ID/assets" -o "$ASSETS_JSON" 2>/dev/null || true
+    [[ "$(head -c 1 "$ASSETS_JSON" 2>/dev/null)" == "[" ]] && break
+    sleep 5
+done
+[[ "$(head -c 1 "$ASSETS_JSON" 2>/dev/null)" == "[" ]] \
+    || die "the releases API gave no JSON after 5 attempts — the release exists, verify it by hand"
+
 LOCAL_SIZE="$(stat -c %s "$ZIP")"
 LOCAL_SHA="$(sha256sum "$ZIP" | cut -d' ' -f1)"
-REMOTE="$(curl -sS -m 60 -H "$AUTH" "$API/repos/$REPO_SLUG/releases/$REL_ID/assets" \
-- | python3 -c "
+REMOTE="$(python3 -c "
 import json, sys
-assets = json.load(sys.stdin)
-if not assets:
-    sys.exit('FAIL')
+assets = json.load(open('$ASSETS_JSON'))
+print('  assets: %d' % len(assets))
+for a in assets:
+    print('   %-48s %d' % (a['name'], a['size']))
+if len(assets) != 1:
+    sys.exit('  FAIL: release must carry exactly one asset')
 a = assets[0]
-print('%d %s' % (a['size'], (a.get('digest') or '').replace('sha256:', '') or '-'))")"
-REMOTE_SIZE="${REMOTE%% *}"
-REMOTE_SHA="${REMOTE##* }"
+if a['name'] != '$KEEP':
+    sys.exit('  FAIL: unexpected asset name ' + a['name'])
+print('%d %s' % (a['size'], (a.get('digest') or '').replace('sha256:', '') or '-'))")" \
+    || die "asset listing or identity check failed"
+printf '%s\n' "$REMOTE" | grep -v '^[0-9]'
+REMOTE_SIZE="$(printf '%s\n' "$REMOTE" | tail -1 | cut -d' ' -f1)"
+REMOTE_SHA="$(printf '%s\n' "$REMOTE" | tail -1 | cut -d' ' -f2)"
 [[ "$REMOTE_SIZE" == "$LOCAL_SIZE" ]] \
     || die "asset size $REMOTE_SIZE != built $LOCAL_SIZE"
 if [[ "$REMOTE_SHA" != "-" ]]; then
