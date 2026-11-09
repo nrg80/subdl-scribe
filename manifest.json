@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.344",
-        "changelog": "v12.1.12.344: a report about a season pack now names the member file the gate measured, so the uploader sees which episode is broken (F-M450).",
+        "version": "12.1.12.346",
+        "changelog": "v12.1.12.346: a subtitle that exists only as an archive is fetched as a zip and unpacked instead of being thrown away as \"no bytes\"; reject lines name the HTTP status and the portal's reason, and a refused request (409/429) is never reported to SubDL as a broken upload (F-M451).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.344-dev/Jellyfin.Plugin.SubdlSync_12.1.12.344.zip",
-        "checksum": "bd33e7d040662bcdc4e744cb8dd45956",
-        "timestamp": "2026-11-08T09:26:17Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.346-dev/Jellyfin.Plugin.SubdlSync_12.1.12.346.zip",
+        "checksum": "09e6b12cb31af70c11e8183dc75adccc",
+        "timestamp": "2026-11-09T05:25:33Z"
       }
     ]
   }
