@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.349",
-        "changelog": "v12.1.12.349: no second attempt on an empty answer — the archive answered, so the finding stands and is filed; a reported candidate is spent and is never fetched again (F-M450).",
+        "version": "12.1.12.350",
+        "changelog": "v12.1.12.350: the description of the reporting switch carries only its default; the requirement and the changelog no longer claim a second failure is required (F-M450).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.349-dev/Jellyfin.Plugin.SubdlSync_12.1.12.349.zip",
-        "checksum": "e86ecafb2b7b8ec0bdf5cfe7617a6a0e",
-        "timestamp": "2026-11-09T08:04:45Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.350-dev/Jellyfin.Plugin.SubdlSync_12.1.12.350.zip",
+        "checksum": "159b12c761e2c13b62a0c7e390903fc0",
+        "timestamp": "2026-11-09T19:44:44Z"
       }
     ]
   }
