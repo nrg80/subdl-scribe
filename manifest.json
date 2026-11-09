@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.347",
-        "changelog": "v12.1.12.347: every observed defect is reported to SubDL in the run that observed it — the second-sighting wait is gone; ReportedUtc alone keeps a filing from repeating (F-M450).",
+        "version": "12.1.12.349",
+        "changelog": "v12.1.12.349: no second attempt on an empty answer — the archive answered, so the finding stands and is filed; a reported candidate is spent and is never fetched again (F-M450).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.347-dev/Jellyfin.Plugin.SubdlSync_12.1.12.347.zip",
-        "checksum": "9a5e012079eb02f37ef9b071873ec608",
-        "timestamp": "2026-11-09T05:57:01Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.349-dev/Jellyfin.Plugin.SubdlSync_12.1.12.349.zip",
+        "checksum": "e86ecafb2b7b8ec0bdf5cfe7617a6a0e",
+        "timestamp": "2026-11-09T08:04:45Z"
       }
     ]
   }
