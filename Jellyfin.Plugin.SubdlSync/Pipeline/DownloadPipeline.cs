@@ -3417,10 +3417,6 @@ public sealed class DownloadPipeline : IDisposable
             return;
         }
 
-        var rows = _qaFails.GetRows(itemId, lang);
-        var previous = rows.FirstOrDefault(r => string.Equals(r.SubdlId, cand.SubdlId, StringComparison.Ordinal)
-                                                && string.Equals(r.Kind, kind, StringComparison.Ordinal));
-
         _qaFails.RecordSkippedCandidates(
             itemId,
             lang,
@@ -3432,7 +3428,11 @@ public sealed class DownloadPipeline : IDisposable
             },
             kind);
 
-        if (previous == null || previous.ReportedUtc != null || !_config.ReportBrokenSubtitles)
+        // Operator order 09.11.2026: no second sighting. Every observed defect is filed in the run
+        // that observed it — a measured gate verdict as much as an answer that carried nothing.
+        // ReportedUtc is what keeps a filing from happening twice; the wait was never a safety net,
+        // it only delayed a diagnosis that was already made.
+        if (!_config.ReportBrokenSubtitles)
         {
             return;
         }
@@ -3440,7 +3440,7 @@ public sealed class DownloadPipeline : IDisposable
         var row = _qaFails.GetRows(itemId, lang)
             .FirstOrDefault(r => string.Equals(r.SubdlId, cand.SubdlId, StringComparison.Ordinal)
                                  && string.Equals(r.Kind, kind, StringComparison.Ordinal));
-        if (row != null)
+        if (row != null && row.ReportedUtc == null)
         {
             QueueReport(row);
         }

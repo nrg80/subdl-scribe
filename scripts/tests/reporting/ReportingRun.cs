@@ -129,12 +129,14 @@ internal static class ReportingRun
               && BrokenSubtitleReports.FindingFromGateFailure("something") == null,
             "an unknown verdict produces no finding");
 
-        // --- 3. the second sighting ------------------------------------------
+        // --- 3. filing in the run that saw it ----------------------------------
         string pipeline = Read(plugin, "Pipeline/DownloadPipeline.cs");
         Check(pipeline.Contains("RememberAndReportAsync", StringComparison.Ordinal),
             "the empty-payload reject remembers the defect");
-        Check(Regex.IsMatch(pipeline, @"if \(previous == null \|\| previous\.ReportedUtc != null"),
-            "nothing is reported on the first failure or twice for the same row");
+        Check(!pipeline.Contains("previous == null", StringComparison.Ordinal),
+            "no defect waits for a second sighting any more");
+        Check(pipeline.Contains("if (row != null && row.ReportedUtc == null)", StringComparison.Ordinal),
+            "a row is filed once — ReportedUtc, not a second failure, keeps it from repeating");
         Check(pipeline.Contains("qaKnownRejected.Contains(row.SubdlId, StringComparer.Ordinal)", StringComparison.Ordinal),
             "the QA path reports at the second sighting, where the candidate is refused again");
         Check(pipeline.Contains("summary.ReportsDeferred++", StringComparison.Ordinal),
