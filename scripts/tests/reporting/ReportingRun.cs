@@ -18,8 +18,9 @@
 //      agreed. The attribution names plugin version and account, never the login mail.
 //   2. THE CATEGORY. Incomplete subtitle, wrong metadata, or "other" — decided by the finding, and
 //      an unclassifiable finding is not reported at all.
-//   3. THE SECOND SIGHTING. First failure only remembers; the report is filed when the same
-//      candidate is seen failing again. A rate-limited report stays open for the next run.
+//   3. FILING IN THE RUN THAT SAW IT. A defect is filed in the same run, without a second fetch;
+//      ReportedUtc keeps a filing from repeating and a reported candidate is spent. A rate-limited
+//      report stays open for the next run.
 //   4. THE SWITCH. On by default, in the download quality gates, second to last — the runtime
 //      tolerance stays the last field.
 //
@@ -141,7 +142,7 @@ internal static class ReportingRun
         Check(pipeline.Contains("if (row != null && row.ReportedUtc == null)", StringComparison.Ordinal),
             "a row is filed once — ReportedUtc, not a second failure, keeps it from repeating");
         Check(pipeline.Contains("qaKnownRejected.Contains(row.SubdlId, StringComparer.Ordinal)", StringComparison.Ordinal),
-            "the QA path reports at the second sighting, where the candidate is refused again");
+            "the skip path still files a report — the safety net for rows remembered with the switch off");
         Check(pipeline.Contains("summary.ReportsDeferred++", StringComparison.Ordinal),
             "a report SubDL does not take stays open for the next run");
         Check(pipeline.Contains("qaRejectedReleases.Contains(row.SubdlId, StringComparer.Ordinal)", StringComparison.Ordinal),

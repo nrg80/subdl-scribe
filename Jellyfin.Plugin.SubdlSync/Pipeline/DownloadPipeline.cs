@@ -1580,9 +1580,10 @@ public sealed class DownloadPipeline : IDisposable
                         Path.GetFileName(mediaPath), lang, beforeMemoryFilter - ranked.Count,
                         string.Join(",", qaKnownRejected));
 
-                    // F-M450: this is the SECOND sighting of these candidates — the gate refused them
-                    // in an earlier run, and they are refused here without another fetch. That is the
-                    // confirmation a report needs, so this is where a report is filed, once per row.
+                    // F-M450: the safety net. These candidates were refused in an earlier run and are
+                    // refused here without another fetch. Since 349 a defect is filed in the run that
+                    // observed it, so this path normally finds nothing to do — it stays for the rows
+                    // that were remembered while the switch was off.
                     if (_config.ReportBrokenSubtitles)
                     {
                         foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
@@ -1951,9 +1952,9 @@ public sealed class DownloadPipeline : IDisposable
                     summary.RejectedCandidates++; // F-M286 / F-M387
                     qaRejectedReleases.Add(cand.SubdlId); // burned fetch → memorized
 
-                    // F-M450: keep the gate's own wording as the naked finding. The report is not
-                    // filed here — the next run sees this candidate as already rejected, and THAT
-                    // second sighting is the confirmation a report needs.
+                    // F-M450: keep the gate's own wording as the naked finding. The report is queued
+                    // right here, at the end of the run that measured it — a verdict on delivered bytes
+                    // reads the same on a second fetch, so waiting for one would confirm nothing.
                     string? gateFinding = BrokenSubtitleReports.FindingFromGateFailure(gateFail);
                     if (gateFinding != null && !string.IsNullOrEmpty(cand.SubdlId))
                     {

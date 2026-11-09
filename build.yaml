@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.349"
+version: "12.1.12.350"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,13 +26,14 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.350: the wording of the reporting switch says what it does — a failing subtitle is reported in the same run and not fetched again; the requirement and the history no longer claim a second failure is required (F-M450).
   v12.1.12.349: no second attempt on an empty answer — the archive answered, so the finding stands and is filed; a reported candidate is spent and is never fetched again (F-M450).
   v12.1.12.348: the archive is requested first — it is the only shape SubDL answers for every subtitle (a 23-member season pack and a single-file release alike), so a candidate costs one request instead of two; archives are cached by subtitle id and the episode is unpacked locally (F-M451).
   v12.1.12.347: every observed defect is reported to SubDL in the run that observed it — the second-sighting wait is gone; ReportedUtc alone keeps a filing from repeating (F-M450).
   v12.1.12.346: a subtitle that exists only as an archive is fetched as a zip and unpacked instead of being thrown away as "no bytes"; reject lines name the HTTP status and the portal's reason, and a refused request (409/429) is never reported to SubDL as a broken upload (F-M451).
   v12.1.12.345: a subtitle the content gates measured as broken (no usable cues, too few cues, runtime mismatch, wrong language) is reported to SubDL in the same run; only an empty answer waits for a second attempt, because there a provider hiccup is plausible (F-M450).
   v12.1.12.344: a report about a season pack now names the member file the gate measured, so the uploader sees which episode is broken (F-M450).
-  v12.1.12.343: a subtitle that fails twice is reported to SubDL once — bare finding, category, and an attribution line with plugin version and account; switch `Report broken subtitles to SubDL` sits second to last in the download quality gates and is on by default (F-M450).
+  v12.1.12.343: a broken subtitle (no data, or rejected by the content gates) is reported to SubDL once — bare finding, category, and an attribution line with plugin version and account; the second-sighting wait introduced with it was dropped in 349; switch `Report broken subtitles to SubDL` sits second to last in the download quality gates and is on by default (F-M450).
   v12.1.12.342: the AI filter switch sits one row higher in the download quality gates, so the runtime tolerance stays the last field (F-M449).
   v12.1.12.341: machine-translated subtitles (uploader "SUBDL AI") stay out of the download unless the switch `Allow AI translated subs (SUBDL AI)` is set — the exclusion happens on the search result, before ranking and before a download unit is spent (F-M449).
   v12.1.12.340: a seed that meets a running library scan waits the job spacing (default 15 min) instead of reading an empty stream list (F-M448).
