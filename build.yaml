@@ -26,7 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
-  v12.1.12.350: the wording of the reporting switch says what it does — a failing subtitle is reported in the same run and not fetched again; the requirement and the history no longer claim a second failure is required (F-M450).
+  v12.1.12.350: the description of the reporting switch carries only its default; the requirement and the changelog no longer claim a second failure is required (F-M450).
   v12.1.12.349: no second attempt on an empty answer — the archive answered, so the finding stands and is filed; a reported candidate is spent and is never fetched again (F-M450).
   v12.1.12.348: the archive is requested first — it is the only shape SubDL answers for every subtitle (a 23-member season pack and a single-file release alike), so a candidate costs one request instead of two; archives are cached by subtitle id and the episode is unpacked locally (F-M451).
   v12.1.12.347: every observed defect is reported to SubDL in the run that observed it — the second-sighting wait is gone; ReportedUtc alone keeps a filing from repeating (F-M450).
