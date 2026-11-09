@@ -1521,35 +1521,66 @@ public sealed class SubdlApiClient
         LastFileDownloadStatus = 0;
         LastFileDownloadError = null;
         LastFileDownloadBytes = 0;
-        byte[]? bytes = await V2DownloadAttemptAsync(nId, "file", apiKey, ct).ConfigureAwait(false);
 
-        // 409 not_a_single_file: the subtitle is an archive. Ask again in the shape it asked for,
-        // then unpack the member that fits — the same unpacker the v1 archive path uses.
-        if (bytes == null
-            && LastFileDownloadStatus == (int)System.Net.HttpStatusCode.Conflict
-            && string.Equals(LastFileDownloadError, "not_a_single_file", StringComparison.Ordinal))
+        // F-M451 (measured 09.11.2026): the ARCHIVE is the shape that always answers. Eight
+        // subtitles — a 23-member season pack among them — all refused ?format=file with
+        // 409 not_a_single_file and all delivered a valid zip. So the archive is asked for first,
+        // once, and the member for the wanted episode is picked here; the file route stays as a
+        // fallback for the rare archive that refuses.
+        string zipUrl = $"{ApiBase}/api/v2/subtitles/{Uri.EscapeDataString(nId)}/download?format=zip";
+        string? key = ArchiveKey.FromUrl(zipUrl);
+        byte[]? archive = null;
+        bool fromCache = false;
+        if (key != null && _archiveDiskCache.TryGet(key, out byte[]? cached) && cached is { Length: > 0 })
         {
-            LogInfo("[SubDL] v2 download " + nId + " has no single file — retrying as ?format=zip");
-            byte[]? archive = await V2DownloadAttemptAsync(nId, "zip", apiKey, ct).ConfigureAwait(false);
-            if (archive != null && archive.Length > 0)
+            Trace("GET", zipUrl, 200, "archive cache hit (disk)");
+            archive = cached;
+            fromCache = true;
+            LastFileDownloadStatus = 200;
+            LastFileDownloadBytes = cached.Length;
+        }
+        else
+        {
+            archive = await V2DownloadAttemptAsync(nId, "zip", apiKey, ct).ConfigureAwait(false);
+            if (archive is { Length: > 0 })
             {
-                // Keep the 409 in the record after a successful unpack? No: the fetch SUCCEEDED,
-                // so the status describes what came back in the end.
-                LastFileDownloadStatus = 200;
-                LastFileDownloadError = null;
-                byte[]? member = await UnpackAsync(archive, zipSeason, zipEpisode, ct).ConfigureAwait(false);
-                if (member == null || member.Length == 0)
-                {
-                    // The archive arrived but carried no usable member: NOT a 0-byte upload.
-                    LastFileDownloadBytes = 0;
-                    LastFileDownloadError = "archive_without_member";
-                }
-
-                return member;
+                StoreArchive(key, archive);
             }
         }
 
-        return bytes;
+        if (archive is { Length: > 0 })
+        {
+            byte[]? member = await UnpackAsync(archive, zipSeason, zipEpisode, ct).ConfigureAwait(false);
+            if (member == null && fromCache)
+            {
+                // A cached body that cannot resolve this episode may belong to an archive that was
+                // re-uploaded upstream: fetch for real, refresh the cache, try once more.
+                Trace("GET", zipUrl, 200, "archive cache does not hold this entry — refetching");
+                byte[]? fresh = await V2DownloadAttemptAsync(nId, "zip", apiKey, ct).ConfigureAwait(false);
+                if (fresh is { Length: > 0 })
+                {
+                    StoreArchive(key, fresh);
+                    member = await UnpackAsync(fresh, zipSeason, zipEpisode, ct).ConfigureAwait(false);
+                }
+            }
+
+            if (member is { Length: > 0 })
+            {
+                LastFileDownloadStatus = 200;
+                LastFileDownloadError = null;
+                return member;
+            }
+
+            if (member == null)
+            {
+                // The archive arrived but carried no usable member — not a 0-byte upload.
+                LastFileDownloadError = "archive_without_member";
+            }
+        }
+
+        // Archive refused or carried nothing: ask for the single file, as before.
+        byte[]? file = await V2DownloadAttemptAsync(nId, "file", apiKey, ct).ConfigureAwait(false);
+        return file;
     }
 
     /// <summary>

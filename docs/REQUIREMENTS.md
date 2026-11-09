@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.109
-**Status:** Implementation — v12.1.12.347.
+**Version:** 2.110
+**Status:** Implementation — v12.1.12.348.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -500,7 +500,7 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 
 **F-M450 [D]:** **Ein zweimal gescheiterter Untertitel wird an SubDL gemeldet.** Liefert ein Paket keine Daten oder fällt eine Datei durch eine Inhaltsprüfung, wird der Befund im selben Lauf gemeldet — eine Messung am gelieferten File liest sich beim nächsten Versuch nicht anders, und eine Antwort ohne Inhalt ist ebenso ein Befund. Ein gemeldeter Befund wird nie wiederholt. Gemeldet wird über das Meldeformular des Portals, mit dem nackten Befund (Paket-Kennung, Release-Name, Sprache, Messwert), der Zuordnung zu einer von vier Kategorien (kein Untertitel, falsche Release-Angaben, kopiert, sonstiges) — bei einem Paket mit dem Namen der betroffenen Datei und einer Absenderzeile aus Produktname, Version und Kontoname — nie die Anmelde-Adresse. Ein Paket ohne Melde-Kennung wird nicht gemeldet. Nimmt das Portal eine Meldung nicht an, bleibt sie offen und wird im nächsten Lauf erneut versucht; eine angenommene Meldung wird nie wiederholt. Die Laufsumme nennt Meldungen und Vertagungen. Der Schalter `Report broken subtitles to SubDL` ist standardmäßig an.
 
-**F-M451 [D]:** **Eine Absage des Abrufs ist kein Defekt des Uploads.** Der Einzeldatei-Endpunkt antwortet für Untertitel, die es nur als Archiv gibt, mit `409` und dem Hinweis, das Archiv zu verlangen; das Plugin holt daraufhin das Archiv und entpackt die gesuchte Folge. Ablehnzeilen nennen den HTTP-Status und den Fehlernamen des Portals statt einer Vermutung; gemeldet wird ein Untertitel nur, wenn die Antwort tatsächlich mit `200` kam und nichts enthielt — Status und Inhaltslänge werden dafür festgehalten, und ein Archiv ohne passende Datei zählt nicht als leere Antwort. Eine Sperre des Tageskontingents beendet den Lauf, sie wird nie gemeldet.
+**F-M451 [D]:** **Eine Absage des Abrufs ist kein Defekt des Uploads.** Angefordert wird das Archiv — die einzige Form, die für jeden Untertitel antwortet; die gesuchte Folge wird daraus entpackt. Ein Archiv trägt einen festen Zwischenspeicher-Schlüssel aus seiner Kennung, sodass ein Staffelpaket je Lauf einmal geholt wird. Erst wenn das Archiv nichts liefert, wird die Einzeldatei verlangt. Ablehnzeilen nennen den HTTP-Status und den Fehlernamen des Portals statt einer Vermutung; gemeldet wird ein Untertitel nur, wenn die Antwort tatsächlich mit `200` kam und nichts enthielt — Status und Inhaltslänge werden dafür festgehalten, und ein Archiv ohne passende Datei zählt nicht als leere Antwort. Eine Sperre des Tageskontingents beendet den Lauf, sie wird nie gemeldet.
 
 ### 4.2 Dry Run — Download
 

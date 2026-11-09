@@ -30,6 +30,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Jellyfin.Plugin.SubdlScribe.Api;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
 
 namespace ReportingRun;
@@ -182,6 +183,11 @@ internal static class ReportingRun
         Check(api.Contains("LastFileDownloadStatus", StringComparison.Ordinal)
               && api.Contains("LastFileDownloadLabel", StringComparison.Ordinal),
             "the download path records the HTTP status instead of guessing \"no bytes\"");
+        Check(api.Contains("download?format=zip", StringComparison.Ordinal)
+              && api.Contains("UnpackAsync(archive, zipSeason, zipEpisode, ct)", StringComparison.Ordinal),
+            "the archive is the shape asked for first — one request, unpacked here");
+        Check(ArchiveKey.FromUrl("https://api.subdl.com/api/v2/subtitles/AbCdEf123/download?format=zip") == "v2-AbCdEf123",
+            "a v2 archive has a stable cache key, so a pack is fetched once");
         Check(api.Contains("not_a_single_file", StringComparison.Ordinal)
               && api.Contains("\"zip\"", StringComparison.Ordinal)
               && api.Contains("UnpackAsync(archive, zipSeason, zipEpisode, ct)", StringComparison.Ordinal),

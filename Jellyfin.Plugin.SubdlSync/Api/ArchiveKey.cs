@@ -22,6 +22,9 @@ public static class ArchiveKey
 {
     private const string SubtitlePath = "/subtitle/";
 
+    /// <summary>Path marker of the v2 single-archive route.</summary>
+    private const string V2SubtitlePath = "/api/v2/subtitles/";
+
     /// <summary>
     /// Builds the cache key for a download URL.
     /// </summary>
@@ -57,6 +60,16 @@ public static class ArchiveKey
             }
 
             return IsUsable(segment) ? segment : null;
+        }
+
+        // F-M451: the v2 single-archive route names its archive by subtitle id —
+        // /api/v2/subtitles/<nId>/download?format=zip. Same archive, same key every time, so a
+        // season pack fetched once is free for every further episode of that pack.
+        int v2 = path.IndexOf(V2SubtitlePath, StringComparison.OrdinalIgnoreCase);
+        if (v2 >= 0)
+        {
+            string rest = path[(v2 + V2SubtitlePath.Length)..].Split('/')[0].Trim();
+            return IsUsable(rest) ? "v2-" + rest : null;
         }
 
         // Any other form: a bare zip at the end of the path is its own archive.
