@@ -59,13 +59,15 @@ public sealed class QaFailTracker
         // download cycle with "Invalid BsonExpression when converted from Linq expression".
         // Same pattern as ContentHashRegistry.GetRejectedCandidates; the ItemId index still
         // does the heavy lifting.
-        // F-M450: only "qa" rows block a candidate. "empty" rows (a package that delivered no data)
-        // are a report memo, not a skip memo — that candidate gets fetched again so the second
-        // failure can confirm the diagnosis before anything is reported.
+        // F-M450 (operator order 09.11.2026): a reported candidate is SPENT. Once a defect is on
+        // file with SubDL there is nothing left to learn from the same package, and every further
+        // fetch costs a quota unit — so a row blocks as soon as it carries a report. An "empty"
+        // row without a report still blocks nothing: that is the case where the switch was off,
+        // and a single hiccup must not burn a candidate for good.
         return _db.RejectedCandidates
             .Find(x => x.ItemId == itemId)
             .Where(x => string.Equals(x.Language, language, StringComparison.OrdinalIgnoreCase))
-            .Where(x => !string.Equals(x.Kind, "empty", StringComparison.Ordinal))
+            .Where(x => !string.Equals(x.Kind, "empty", StringComparison.Ordinal) || x.ReportedUtc != null)
             .Select(x => x.SubdlId)
             .Distinct()
             .ToList();

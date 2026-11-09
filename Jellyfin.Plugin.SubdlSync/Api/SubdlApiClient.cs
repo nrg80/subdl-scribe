@@ -1578,7 +1578,20 @@ public sealed class SubdlApiClient
             }
         }
 
-        // Archive refused or carried nothing: ask for the single file, as before.
+        // The archive answered and carried nothing, or nothing for this episode: no second request.
+        // A second shape cannot produce what the first one does not hold, and each request costs a
+        // quota unit — the answer stands as the finding that gets reported.
+        if (LastFileDownloadStatus == 200 && LastFileDownloadBytes == 0 && LastFileDownloadError == null)
+        {
+            return null;
+        }
+
+        if (LastFileDownloadError == "archive_without_member")
+        {
+            return null;
+        }
+
+        // Only when the archive itself was refused (409/429/5xx, non-200) is the single file asked for.
         byte[]? file = await V2DownloadAttemptAsync(nId, "file", apiKey, ct).ConfigureAwait(false);
         return file;
     }

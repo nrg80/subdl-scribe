@@ -31,6 +31,8 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Jellyfin.Plugin.SubdlScribe.Api;
+using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubdlScribe.Registry;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
 
 namespace ReportingRun;
@@ -188,6 +190,30 @@ internal static class ReportingRun
             "the archive is the shape asked for first — one request, unpacked here");
         Check(ArchiveKey.FromUrl("https://api.subdl.com/api/v2/subtitles/AbCdEf123/download?format=zip") == "v2-AbCdEf123",
             "a v2 archive has a stable cache key, so a pack is fetched once");
+        // --- 3b. a spent candidate stays spent ---------------------------------
+        string dir = Path.Combine(Path.GetTempPath(), "subdl-report-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new SubdlDbContext(dir);
+            var spent = new QaFailTracker(store);
+            spent.RecordSkippedCandidates("item", "EN", new[] { "9100001-111111", "9100002-222222" },
+                kind: "empty");
+            spent.RecordSkippedCandidates("item", "EN", new[] { "9100003-333333" }, kind: "qa");
+            var rowToReport = store.RejectedCandidates.Find(x => x.SubdlId == "9100001-111111").First();
+            spent.MarkReported(rowToReport);
+
+            List<string> blocked = spent.GetSkippedCandidates("item", "EN");
+            Check(blocked.Contains("9100001-111111"),
+                "a reported package is spent — it is not fetched a second time");
+            Check(blocked.Contains("9100003-333333"), "a reported gate verdict is spent");
+            Check(!blocked.Contains("9100002-222222"),
+                "an empty row without a report blocks nothing — one hiccup does not burn a candidate");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+
         Check(api.Contains("not_a_single_file", StringComparison.Ordinal)
               && api.Contains("\"zip\"", StringComparison.Ordinal)
               && api.Contains("UnpackAsync(archive, zipSeason, zipEpisode, ct)", StringComparison.Ordinal),

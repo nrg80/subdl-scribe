@@ -32,4 +32,8 @@
     <Reference Include="MediaBrowser.Model"><HintPath>$(JellyfinDir)/MediaBrowser.Model.dll</HintPath></Reference>
     <Reference Include="Microsoft.Extensions.Logging.Abstractions"><HintPath>$(JellyfinDir)/Microsoft.Extensions.Logging.Abstractions.dll</HintPath></Reference>
   </ItemGroup>
+  <ItemGroup>
+    <!-- 3b asks the real store whether a reported candidate still blocks, so the harness opens one. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+  </ItemGroup>
 </Project>
