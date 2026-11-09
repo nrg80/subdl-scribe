@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.350",
-        "changelog": "v12.1.12.350: the description of the reporting switch carries only its default; the requirement and the changelog no longer claim a second failure is required (F-M450).",
+        "version": "12.1.12.351",
+        "changelog": "v12.1.12.351: with the audio fit on, only a version that passed the significance test closes a language pair — a kept original (slot 51–99) is a fallback, not proof, so the pair stays open and later candidates get their chance; the refused release is remembered so it is not fetched again. With the fit off the first download still closes it (F-M452).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.350-dev/Jellyfin.Plugin.SubdlSync_12.1.12.350.zip",
-        "checksum": "159b12c761e2c13b62a0c7e390903fc0",
-        "timestamp": "2026-11-09T19:44:44Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.351-dev/Jellyfin.Plugin.SubdlSync_12.1.12.351.zip",
+        "checksum": "41c5adc1328c1aa94a06525df8dff971",
+        "timestamp": "2026-11-09T21:27:06Z"
       }
     ]
   }
