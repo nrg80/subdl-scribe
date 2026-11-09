@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.112
-**Status:** Implementation — v12.1.12.350.
+**Version:** 2.113
+**Status:** Implementation — v12.1.12.351.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,8 +16,8 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 62 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 10 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 63 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 11 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397
@@ -502,6 +502,8 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 
 **F-M451 [D]:** **Eine Absage des Abrufs ist kein Defekt des Uploads.** Angefordert wird das Archiv — die einzige Form, die für jeden Untertitel antwortet; die gesuchte Folge wird daraus entpackt. Ein Archiv trägt einen festen Zwischenspeicher-Schlüssel aus seiner Kennung, sodass ein Staffelpaket je Lauf einmal geholt wird. Antwortet das Archiv mit `200` und trägt nichts, ist das der Befund: es folgt keine zweite Anfrage in einer anderen Form. Die Einzeldatei wird nur verlangt, wenn das Archiv selbst abgelehnt wurde. Ablehnzeilen nennen den HTTP-Status und den Fehlernamen des Portals statt einer Vermutung; gemeldet wird ein Untertitel nur, wenn die Antwort tatsächlich mit `200` kam und nichts enthielt — Status und Inhaltslänge werden dafür festgehalten, und ein Archiv ohne passende Datei zählt nicht als leere Antwort. Eine Sperre des Tageskontingents beendet den Lauf, sie wird nie gemeldet.
 
+**F-M452 [D]:** **Nur eine Fassung, die die Signifikanz bestanden hat, schließt ein Sprachpaar.** Ein Untertitel im reservierten Originalblock (51–99) ist der unkorrigierte Abruf, den eine abgelehnte Ausrichtung behalten hat — er liegt da, *weil* die Datei sich als falsch erwies. Er zählt deshalb nicht als Beleg: das Paar bleibt offen, der Lauf behält seine N Versuche, und ein späterer Kandidat hat weiter die Chance, als `01` zu landen. Dateinamen ohne Slot (vor F-M316 geschrieben) gehören keinem Block an und zählen wie bisher. Die Regel gilt nur bei eingeschalteter Ausrichtung: ist Auto-Sync aus, wird nie etwas ausgerichtet, jede Datei landet im Originalblock — dann schließt der erste Abruf das Paar, sonst schlösse nie eines. Damit das offene Paar nicht jede Runde dasselbe schlechte Release erneut zieht, merkt sich der Lauf das Release beim Behalten des Originals; der Merker überspringt es vor jedem Abruf und kostet kein Kontingent.
+
 ### 4.2 Dry Run — Download
 
 **F-M277:** **The download dry run runs the search and the selection, and stops before the fetch — the search quota IS spent.**
@@ -731,7 +733,7 @@ not undo the corrected file; it is logged as a warning.
 
 **F-M306 [D]:** **The untouched original is kept as a selectable sidecar in the reserved slot block, and is locked against upload.**
 
-**Rule.** After a correction the pipeline writes the original beside the corrected file as a **loose sidecar** `<base>.<lang>.51.srt`, **numbered from 51 upward** to the first free number up to **99**. It carries the corrected file's language token and `.sdh` marker, and **no marker of its own**. The reserved block is **50–99**; the writer of *corrected* files stops at slot **49** (F-M315). With every reserved slot taken, **no original is written** and the pipeline refuses.
+**Rule.** After a correction the pipeline writes the original beside the corrected file as a **loose sidecar** `<base>.<lang>.51.srt`, **numbered from 51 upward** to the first free number up to **99**. It carries the corrected file's language token and `.sdh` marker, and **no marker of its own**. The reserved block is **51–99**; the writer of *corrected* files stops at slot **49** (F-M315). With every reserved slot taken, **no original is written** and the pipeline refuses.
 
 **The lock.** The original is registered like every other downloaded subtitle — eine Zeile als heruntergeladen gebucht, geschlüsselt auf den Inhalts-Hash of the bytes on disk. Die Inhaltsprüfung zählt jede Zeile **außer `observed`** as known content and the uploader does too, so the seeder drops the file and the uploader returns `duplicate-content`. **Canonical** bytes (F-M296); both tracks share one helper under die automatische Synchronprüfung (F-M304).
 
@@ -747,17 +749,17 @@ not undo the corrected file; it is logged as a warning.
 
 **Cost.** Names written before this rule keep their old form until they are renamed; the pipeline only writes new names, and nothing renames on disk by itself.
 
-**F-M317 [D]:** **The slot encodes WHICH KIND the file is: aligned takes 01 upward, unprocessed 50 upward.**
+**F-M317 [D]:** **The slot encodes WHICH KIND the file is: aligned takes 01 upward, unprocessed 51 upward.**
 
 **Rule.** A downloaded subtitle goes into one of two ranges: was it ALIGNED?
 
 - **Aligned** (the fit applied a correction, or the fit is off and the file is the corrected artifact) → `<base>.<lang>.<NN>.srt`, `NN` = `01`, `02`, `03` … **upward**, its own counter.
 - **Unprocessed** (the fit found the file **WRONG** — shift beyond the limit, first cue negative, too few cues — or the fit is off) → the **reserved block**, `50`, `51`, `52` … **upward**.
-- **`no proven gain` is NEITHER** (F-M321): `01` **and** a byte-identical copy at `50`.
+- **`no proven gain` is NEITHER** (F-M321): `01` **and** a byte-identical copy at `51`.
 
 **"Regardless of whether a corrected version exists"**: an unprocessed file takes a reserved slot **even with no corrected sibling beside it** (F-M321).
 
-die Zähler korrigierter Plätze steigen on the aligned path only; the unprocessed path writes once. Every reserved slot taken → the write is **refused** and counted. F-M315's reservation (50–99, corrected stops at 49) stands; GUI text must match the code (F-M302).
+die Zähler korrigierter Plätze steigen on the aligned path only; the unprocessed path writes once. Every reserved slot taken → the write is **refused** and counted. F-M315's reservation (51–99, corrected stops at 49) stands; GUI text must match the code (F-M302).
 
 **F-M318 [D]:** **The download REPEATS until a candidate's correction proves itself, capped at the QA retry limit.**
 
@@ -773,9 +775,9 @@ The repeat sits AFTER every other download gate (FPS, no-bytes, language verific
 
 Zähler fehlgeschlagener Läufe (Fehlerzähler und Erschöpfungsprüfung) und die zwei Statuszähler gibt es nicht (Übersprungen-Zähler und Aufgebens-Zähler); nothing closes a (item, language) pair. Der QA-Zähler ist der Datensatz verbrannter Kandidaten and nothing else. What bounds the work is the download budget per run (F-M50) plus the burned-release memory (F-M200).
 
-**F-M321 [D]:** **A file the fit finds nothing wrong with is a GOOD file: it is written at 01 upward, its original at 50 upward, and the walk ends.**
+**F-M321 [D]:** **A file the fit finds nothing wrong with is a GOOD file: it is written at 01 upward, its original at 51 upward, and the walk ends.**
 
-**The rule.** `no proven gain` is not a failure — the deploy rule DECLINES to move the file, so the file as downloaded is the best version of that language. It is written as a **good file at `01` upward** (`<base>.<lang>.01.srt`, then `02` … F-M316), advances the **corrected counter** (the reserved block stays free for wrong files), and its **original is written too**, into the reserved block (`99` downward) — "beide original": BOTH carry the original subtitle, identical by construction because the reserved write REUSES the array sent to `01`. The walk **ENDS** there: no candidate can beat a file the fit found nothing wrong with (F-M318).
+**The rule.** `no proven gain` is not a failure — the deploy rule DECLINES to move the file, so the file as downloaded is the best version of that language. It is written as a **good file at `01` upward** (`<base>.<lang>.01.srt`, then `02` … F-M316), advances the **corrected counter** (the reserved block stays free for wrong files), and its **original is written too**, into the reserved block (`51` upward) — "beide original": BOTH carry the original subtitle, identical by construction because the reserved write REUSES the array sent to `01`. The walk **ENDS** there: no candidate can beat a file the fit found nothing wrong with (F-M318).
 
 Only the deploy rule's OWN refusal counts: a refusal that says the file is **wrong** keeps the reserved range and the F-M318 hunt alive. `SubtitleSync.RefusalMeansAlreadyGood` tells the two apart on the exact `no proven gain` prefix. Both tracks carry the rule (F-M317).
 
@@ -2035,6 +2037,10 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T173:** Die `packs`-Tabelle hält, was sie verspricht (F-M390).
 
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
+
+**T178:** Der Store-Harness verweigert ein Repository als Arbeitsverzeichnis und einen Aufruf ohne Verzeichnis — er löscht jedes File in seinem Verzeichnis, und ein Repository-Root wurde dabei schon einmal geleert. **3 Prüfungen** (Repo-Marker, fehlendes Argument, Normalbetrieb).
+
+**T177:** Was eine Datei auf der Platte beweist — der reservierte Originalblock (51–99) schließt kein Paar, eine ausgerichtete `01` schon, eine gelöschte `01` öffnet es wieder, ein unnummerierter Name zählt weiter, und der Slot-Leser liest, was der Schreiber schreibt (F-M452). **12 Prüfungen.**
 
 **T176:** Die Meldung eines beobachteten Defekts — Wortlaut ohne Begründung, Kategorie je Befund, Absenderzeile mit Version und Kontoname, Meldung im selben Lauf, Vertagung statt Verwerfen, gesperrter Kandidat nach der Meldung, Schalter und seine Lage als vorletzter Eintrag (F-M450).
 

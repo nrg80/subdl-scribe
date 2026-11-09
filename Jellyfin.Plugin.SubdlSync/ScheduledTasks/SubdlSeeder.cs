@@ -835,7 +835,8 @@ public sealed class SubdlSeeder
 
         return (Plugin.Instance?.Registry
                 ?? throw new InvalidOperationException("registry unavailable"))
-            .OpenPairs(mediaPath, required, streamLangs, onlyOwnDownloads: !onlyMissing);
+            .OpenPairs(mediaPath, required, streamLangs, onlyOwnDownloads: !onlyMissing,
+                countOriginals: Plugin.Instance?.Configuration.QaDownloadAutoSync != true);
     }
 
 

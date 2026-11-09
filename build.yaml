@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.350"
+version: "12.1.12.351"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.351: with the audio fit on, only a version that passed the significance test closes a language pair — a kept original (slot 51–99) is a fallback, not proof, so the pair stays open and later candidates get their chance; the refused release is remembered so it is not fetched again. With the fit off the first download still closes it (F-M452).
   v12.1.12.350: the description of the reporting switch carries only its default; the requirement and the changelog no longer claim a second failure is required (F-M450).
   v12.1.12.349: no second attempt on an empty answer — the archive answered, so the finding stands and is filed; a reported candidate is spent and is never fetched again (F-M450).
   v12.1.12.348: the archive is requested first — it is the only shape SubDL answers for every subtitle (a 23-member season pack and a single-file release alike), so a candidate costs one request instead of two; archives are cached by subtitle id and the episode is unpacked locally (F-M451).

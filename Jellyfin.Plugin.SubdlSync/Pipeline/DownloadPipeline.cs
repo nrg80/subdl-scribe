@@ -907,7 +907,8 @@ public sealed class DownloadPipeline : IDisposable
             .Required(TargetLanguages, _config.DownloadHearingImpaired);
         var openPairs = Registry.OpenPairs(
             mediaPath, required, EmbeddedPresentLanguagesOf(item),
-            onlyOwnDownloads: !_config.DownloadOnlyMissing);
+            onlyOwnDownloads: !_config.DownloadOnlyMissing,
+            countOriginals: !_config.QaDownloadAutoSync);
 
         // F-M320 (operator order 08.10.2026): a gate rejection no longer closes a pair. The QA retry
         // limit is the FIT's budget (F-M318) — it says how often another candidate may be fetched
@@ -1250,7 +1251,8 @@ public sealed class DownloadPipeline : IDisposable
         var requiredPairs = RequiredPairs(targets);
         var openPairsNow = Registry.OpenPairs(
             mediaPath, requiredPairs, EmbeddedPresentLanguagesOf(item),
-            onlyOwnDownloads: !_config.DownloadOnlyMissing);
+            onlyOwnDownloads: !_config.DownloadOnlyMissing,
+            countOriginals: !_config.QaDownloadAutoSync);
 
         var regularMissing = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleCoverage
             .RegularLanguages(openPairsNow);
@@ -2206,6 +2208,17 @@ public sealed class DownloadPipeline : IDisposable
 
                     await AtomicWriteAsync(targetPath, writeBytes, ct).ConfigureAwait(false);
 
+                    if (!alignedForNaming)
+                    {
+                        // F-M452: an original does not close the pair, so this release must not be
+                        // fetched again on the next run — the memory makes the walk skip it BEFORE any
+                        // download. Without this the open pair would re-fetch the same bad release
+                        // every run and pay a quota unit for a verdict it already has.
+                        _qaFails.RecordSkippedCandidates(
+                            item.Id.ToString(), lang, new[] { cand.SubdlId },
+                            reason: "original kept — alignment refused", kind: "original");
+                    }
+
                     // F-M306/F-M315: the untouched original is kept beside the corrected file.
                     //
                     // Until 07.10.2026 it was kept as a one-entry archive (`<name>.unsynced.zip`),
@@ -2531,6 +2544,14 @@ public sealed class DownloadPipeline : IDisposable
                                         if (hiAligned)
                                         {
                                             hiCorrectedSlotCount++;
+                                        }
+                                        else
+                                        {
+                                            // F-M452: same rule for the variant — the kept original is not
+                                            // evidence, so the release is remembered instead of refetched.
+                                            _qaFails.RecordSkippedCandidates(
+                                                item.Id.ToString(), lang, new[] { hi.SubdlId },
+                                                reason: "original kept — alignment refused", kind: "original");
                                         }
 
                                         // F-M315: the HI track's original is kept the same way — a loose

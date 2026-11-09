@@ -1725,9 +1725,10 @@ public sealed class ContentHashRegistry : IDisposable
         string? mediaPath,
         IEnumerable<SubtitleRef> required,
         IEnumerable<string>? embeddedLanguages = null,
-        bool onlyOwnDownloads = false)
+        bool onlyOwnDownloads = false,
+        bool countOriginals = false)
         => SubtitleCoverage
-            .Read(this, mediaPath, embeddedLanguages, onlyOwnDownloads)
+            .Read(this, mediaPath, embeddedLanguages, onlyOwnDownloads, countOriginals)
             .Open(required);
 
 
