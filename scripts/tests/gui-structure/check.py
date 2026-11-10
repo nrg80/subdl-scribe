@@ -383,15 +383,23 @@ def main():
     check("the remaining rows are grouped by direction, downloads before uploads",
           bool(dl) and bool(up) and max(dl) < min(up),
           "downloads at %s, uploads at %s" % (dl, up))
-    # F-M455 (operator order 10.11.2026): the row "Downloads: broken subtitle reported to SubDL"
-    # joined the table, right under the Auto-Sync row. Eight rows now, each exactly once.
+    # F-M455/F-M458 (operator order 10.11.2026): the reported-to-SubDL row joined the table right
+    # under the Auto-Sync row, and its first label pushed the figure out of the column — labels stay
+    # within the width of the longest row that already fits. Eight rows now, each exactly once.
     check("every quality row is present exactly once",
           len(order) == 8 and len(set(order)) == 8,
           "%d row(s): %s" % (len(order), order))
     check("the reported-to-SubDL row sits directly under Auto-Sync (F-M455)",
-          order.index("Downloads: broken subtitle reported to SubDL") == order.index("Downloads: Auto-Sync") + 1,
+          order.index("Download: Broken subtitles reported") == order.index("Downloads: Auto-Sync") + 1,
           "Auto-Sync at %d, broken-report at %d" % (order.index("Downloads: Auto-Sync"),
-                                                    order.index("Downloads: broken subtitle reported to SubDL")))
+                                                    order.index("Download: Broken subtitles reported")))
+    # F-M458 (operator order 10.11.2026: "die zahlen gehen zu weit nach rechts raus"): no label may be
+    # longer than "Downloads: rejected after being fetched", the longest row the table already fits.
+    longest_fitting = len("Downloads: rejected after being fetched")
+    too_long = [o for o in order if len(o) > longest_fitting]
+    check("no statistics label is longer than the longest row the table already fits (F-M458)",
+          not too_long,
+          "too long: %s (max %d characters)" % (too_long, longest_fitting))
     # The two withdrawn counters must not come back by halves: a row deleted from the page while the
     # field stays in the API is the F-M218 file-pair trap in reverse, and it leaves a counter that
     # still counts and is never read.

@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.116
-**Status:** Implementation — v12.1.12.354.
+**Version:** 2.117
+**Status:** Implementation — v12.1.12.355.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,8 +16,8 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 67 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 15 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 68 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 16 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397, F-M454
@@ -506,11 +506,13 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 
 **F-M454 [D]:** **Ein Pack wird über die Folge aufgelöst, und die Folge darf auch als `Staffel.Folge` im Namen stehen.** Die Suche läuft mit Dateiliste, und die Datei, die *unsere* Folge nennt, wird gezogen — nie die erste im Archiv. Neben `S01E06`, `s01.e06`, `1x06` und SubDLs `S0106` gilt die bloße Form `6.10 …` (gemessen 10.11.2026: das Staffelpack `The Middle Season 6` nennt seine 24 Einträge so, während die API für jedes Mitglied Staffel 0 und Folge 0 meldet — ohne diese Form galt die Folge als nicht vorhanden und das Pack fiel weg, obwohl die Datei darin lag). Diese Form wird zuletzt geprüft und nur am Namensanfang gelesen, damit `DDP5.1` nicht als Staffel 5 Folge 1 gilt und eine Auflösung keine Folge wird; die im Namen genannte Staffel entscheidet, eine abweichende Staffel ergibt keine Folge. Nennt keine Datei die Folge, wird nichts geschrieben — lieber kein Untertitel als der einer fremden Folge.
 
-**F-M455 [D]:** **Ein leerer Abruf ist kein Urteil — er wird einmal nach zehn Sekunden wiederholt, und erst der zweite leere Abruf ist ein Befund.** Gemessen in der Nacht zum 10.11.2026: ein einzelner Kandidat antwortete um 04:0x mit `200` und null Bytes, wenige Stunden später lieferte dieselbe Adresse 83.119 B; das Pack daneben 31.617 B. Deshalb fragt der Lauf denselben Kandidaten genau **einmal** erneut (zehn Sekunden, kein zweiter Versuch, kein Kontingent-Sonderweg), und nur wenn auch dieser Versuch leer bleibt, wird der Befund gemeldet — die einzige Stelle, an der die Zwei-Fehlschläge-Regel noch gilt. Ein Befund wird damit weiterhin im selben Lauf gemeldet. Ein Pack bleibt ausgenommen: mehr als ein Mitglied heißt Auswahl-Ergebnis, nicht defekter Upload; **ein** Mitglied ist die Datei selbst und damit meldbar. Die Statistik führt die angenommenen Meldungen als eigene Zeile `Downloads: broken subtitle reported to SubDL` direkt unter der Auto-Sync-Zeile.
+**F-M455 [D]:** **Ein leerer Abruf ist kein Urteil — er wird einmal nach zehn Sekunden wiederholt, und erst der zweite leere Abruf ist ein Befund.** Gemessen in der Nacht zum 10.11.2026: ein einzelner Kandidat antwortete um 04:0x mit `200` und null Bytes, wenige Stunden später lieferte dieselbe Adresse 83.119 B; das Pack daneben 31.617 B. Deshalb fragt der Lauf denselben Kandidaten genau **einmal** erneut (zehn Sekunden, kein zweiter Versuch, kein Kontingent-Sonderweg), und nur wenn auch dieser Versuch leer bleibt, wird der Befund gemeldet — die einzige Stelle, an der die Zwei-Fehlschläge-Regel noch gilt. Ein Befund wird damit weiterhin im selben Lauf gemeldet. Ein Pack bleibt ausgenommen: mehr als ein Mitglied heißt Auswahl-Ergebnis, nicht defekter Upload; **ein** Mitglied ist die Datei selbst und damit meldbar. Die Statistik führt die angenommenen Meldungen als eigene Zeile `Download: Broken subtitles reported` direkt unter der Auto-Sync-Zeile.
 
 **F-M456 [D]:** **Was kein Abruf war, ist keine leere Antwort.** Jeder Abrufversuch beginnt mit gelöschtem Urteil; bleibt ein Kandidat vor der ersten Anfrage liegen, steht im Log `no bytes (no request made)` statt eines Status, der von einem anderen Kandidaten stammt. Gemessen am 10.11.2026: `A Bona Fide Killer` S01E10 wurde als `no bytes (HTTP 200)` verworfen, obwohl nie gefragt wurde — der Kandidat trug genau eine Datei, die sich nicht als S1E10 lesen ließ, und der Status des Vorgängers sprach für ihn. Eine leere Antwort ist nur dann eine, wenn sie mit **200** kam; Status 0 heißt: wir haben nicht gefragt.
 
 **F-M457 [D]:** **Zierbuchstaben im Namen werden gelesen, bevor die Folge gelesen wird.** Veröffentlichungen nennen ihre Folgenmarke in stilisierten Zeichen (`𝐒𝟎𝐄𝟏𝟎`, vollbreite Formen); die mathematischen Alphanumerica und Vollbreiten werden auf ASCII zurückgefaltet, dann greifen die vier Namensformen. Die Faltung ist arithmetisch und braucht kein ICU — eine Unicode-Normalisierung wirft unter invarianter Globalisierung, die ein Jellyfin-Wirt durchaus fahren kann. Eine **einstellige** Null in der Staffel (`S0E10`) gilt als verlorene Ziffer, die geschriebene `S00` bleibt Staffel 0.
+
+**F-M458 [D]:** **Eine Statistikzeile wird so benannt, dass die Zahl in ihrer Spalte bleibt.** Gemessen am 10.11.2026 an der Zeile für gemeldete Defekte: die Zahl lief rechts aus der Spalte heraus. Kein Zeilenname ist länger als `Downloads: rejected after being fetched` — die längste Zeile, die die Tabelle bereits trägt. Gekürzt wird am Namen, nie an der Zahl.
 
 ### 4.2 Dry Run — Download
 
@@ -1584,7 +1586,7 @@ The wording states what happened, not the code's vocabulary:
  uploads DISCARDED BEFORE TRANSFER — upload candidates dropped before anything was sent, on the QA gates, the und/language checks and the self-echo guard; the upload direction fetches NOTHING.
  downloads rejected after being fetched — download candidates fetched and then thrown away.
  auto-synch — downloaded subtitles whose timing the run MOVED onto their audio track (F-M307), counted when APPLIED; no upload row. Operator's wording: `Downloads: Auto-Sync`.
- broken subtitle reported to SubDL — die unter der Auto-Sync-Zeile, weil der Fit die Datei bemisst und diese Zahl die Antwort darauf zählt: Dateien, die als defekt an SubDL gemeldet und vom Portal angenommen wurden (F-M455). Gezählt wird nur eine angenommene Meldung; eine vertagte oder abgelehnte ist keine.
+ broken subtitles reported — die unter der Auto-Sync-Zeile, weil der Fit die Datei bemisst und diese Zahl die Antwort darauf zählt: Dateien, die als defekt an SubDL gemeldet und vom Portal angenommen wurden (F-M455). Gezählt wird nur eine angenommene Meldung; eine vertagte oder abgelehnte ist keine.
 
  See F-M218, F-M286.
 
@@ -2046,6 +2048,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T173:** Die `packs`-Tabelle hält, was sie verspricht (F-M390).
 
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
+
+**T182:** Kein Statistikname ist länger als die längste Zeile, die die Tabelle schon trägt — der Name wird gekürzt, nie die Zahl (F-M458). **1 Prüfung.**
 
 **T181:** Zierbuchstaben und Urteil je Versuch — `𝐒𝟎𝐄𝟏𝟎` und Vollbreite werden gelesen, die geschriebene `S00` bleibt Staffel 0, ein gelöschtes Urteil trägt keinen Status, und nur ein echter 200 gilt als leere Antwort (F-M456/F-M457). **7 Prüfungen.**
 
