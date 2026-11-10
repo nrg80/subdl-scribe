@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.354",
-        "changelog": "v12.1.12.354: a candidate thrown away before any request no longer inherits the previous candidate's answer — measured case reported \"no bytes (HTTP 200)\" without ever asking, and the verdict is now cleared per attempt with only a real 200 counting as an empty answer; styled Unicode names (\"𝐒𝟎𝐄𝟏𝟎\", fullwidth) are folded to ASCII so their episode is found (F-M456/F-M457).",
+        "version": "12.1.12.355",
+        "changelog": "v12.1.12.355: the statistics row for reported broken subtitles reads \"Download: Broken subtitles reported\" — the first label was longer than any row the table carries and pushed its figure out of the column (F-M458).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.354-dev/Jellyfin.Plugin.SubdlSync_12.1.12.354.zip",
-        "checksum": "3d388be71e409028c66857b4d28c1599",
-        "timestamp": "2026-11-10T03:42:15Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.355-dev/Jellyfin.Plugin.SubdlSync_12.1.12.355.zip",
+        "checksum": "187a0dffc2092737929bca50ad805cbd",
+        "timestamp": "2026-11-10T03:58:48Z"
       }
     ]
   }
