@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.351",
-        "changelog": "v12.1.12.351: with the audio fit on, only a version that passed the significance test closes a language pair — a kept original (slot 51–99) is a fallback, not proof, so the pair stays open and later candidates get their chance; the refused release is remembered so it is not fetched again. With the fit off the first download still closes it (F-M452).",
+        "version": "12.1.12.352",
+        "changelog": "v12.1.12.352: a pack entry may name its episode as \"6.10 …\" — that form is read now, so the season packs on SubDL whose members carry no season/episode fields resolve instead of being thrown away with the wanted file inside (F-M454).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.351-dev/Jellyfin.Plugin.SubdlSync_12.1.12.351.zip",
-        "checksum": "41c5adc1328c1aa94a06525df8dff971",
-        "timestamp": "2026-11-09T21:27:06Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.352-dev/Jellyfin.Plugin.SubdlSync_12.1.12.352.zip",
+        "checksum": "73aa86d67808f9fff068ebb72e3e047b",
+        "timestamp": "2026-11-10T03:14:13Z"
       }
     ]
   }
