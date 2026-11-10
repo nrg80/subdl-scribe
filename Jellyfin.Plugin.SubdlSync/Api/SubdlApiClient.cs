@@ -2033,8 +2033,21 @@ public sealed class SubdlApiClient
             Trace("GET", fullUrl, (int)resp.StatusCode, $"download attempt {attempt}");
             if (resp.IsSuccessStatusCode)
             {
-                return await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+                byte[] payload = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+                // F-M461 (measured 10.11.2026): this route recorded NO verdict at all, so every
+                // reject it caused quoted whatever the last v2 call had left behind — "HTTP 200" on
+                // a healthy upload, or "no request made" on a request that plainly happened. The
+                // v2 route has recorded its status all along; this one now does too, so the reason
+                // in the log is the reason of THIS request.
+                LastFileDownloadStatus = (int)resp.StatusCode;
+                LastFileDownloadError = null;
+                LastFileDownloadBytes = payload.Length;
+                return payload;
             }
+
+            LastFileDownloadStatus = (int)resp.StatusCode;
+            LastFileDownloadBytes = 0;
+            string errorBody = string.Empty;
 
             // F-M27: 429/5xx → exponential backoff (2s, 4s, 8s), then give up.
             // A persistent 429 means SubDL rate-limited us server-side: mark it so
@@ -2043,8 +2056,11 @@ public sealed class SubdlApiClient
             // short retryAfterSeconds window instead of the full daily-limit wait.
             if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
             {
-                Classify429(resp, await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false)); // F-M58
+                errorBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                Classify429(resp, errorBody); // F-M58
             }
+
+            LastFileDownloadError = ParseApiErrorName(errorBody);
 
             if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests
                 || (int)resp.StatusCode >= 500)

@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.357"
+version: "12.1.12.358"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.358: the v1 download route records its own verdict now — it wrote none, so its rejects quoted the previous call ("HTTP 200" on a healthy upload, "no request made" on a request that happened), which is what made two diagnoses wander (F-M461).
   v12.1.12.357: the SDH walk now reports what it measured — it ran the same structure and runtime gates as the main track and filed nothing, which is how two real findings of the last run died; it also clears its verdict per attempt and repeats an empty answer once after ten seconds (F-M460).
   v12.1.12.356: the statistics row reads "Downloads: Broken subtitles reported" like every other row, the figures are pinned to the right edge of the field so they end on the same line as the status columns, and the block header is just "Status" (F-M459).
   v12.1.12.355: the statistics row for reported broken subtitles reads "Download: Broken subtitles reported" — the first label was longer than any row the table carries and pushed its figure out of the column (F-M458).

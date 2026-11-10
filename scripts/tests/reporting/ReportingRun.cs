@@ -306,6 +306,18 @@ internal static class ReportingRun
               && pipeline.Contains("string.Equals(row.SubdlId, hi.SubdlId, StringComparison.Ordinal)", StringComparison.Ordinal),
             "F-M460: the SDH finding is queued right there, not at a run end that only runs when nothing was saved");
 
+        string apiSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "SubdlApiClient.cs"));
+        // F-M461 (measured 10.11.2026): the v1 download route recorded no verdict at all, so its
+        // rejects quoted the previous v2 call — the source of both misleading labels we chased
+        // ("HTTP 200" on a healthy upload, "no request made" on a request that happened).
+        int v1 = apiSource.IndexOf("private async Task<byte[]?> FetchArchiveAsync", StringComparison.Ordinal);
+        int v1End = v1 < 0 ? -1 : apiSource.IndexOf("Downloads a subtitle file from dl.subdl.com", v1, StringComparison.Ordinal);
+        bool v1Records = v1 >= 0 && v1End > v1
+                         && apiSource[v1..v1End].Contains("LastFileDownloadStatus = (int)resp.StatusCode;", StringComparison.Ordinal)
+                         && apiSource[v1..v1End].Contains("LastFileDownloadBytes = payload.Length;", StringComparison.Ordinal);
+        Check(v1Records,
+            "F-M461: the v1 download route records status and body length of its OWN request");
+
         var liveRun = new DownloadRunSummary { Downloaded = 3, Reported = 2 };
         Check(StatusCounterDelta.From(null, liveRun).BrokenReported == 2,
             "F-M455: accepted reports reach the statistics row");

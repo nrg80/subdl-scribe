@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.119
-**Status:** Implementation — v12.1.12.357.
+**Version:** 2.120
+**Status:** Implementation — v12.1.12.358.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,8 +16,8 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 70 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 18 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 71 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 19 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397, F-M454
@@ -517,6 +517,9 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 **F-M459 [D]:** **Die Zahlen der Statistik enden auf derselben Senkrechten wie die Statusspalten.** Rechtsbündig in der Wertespalte allein genügt nicht: solange die Tabelle nur so breit ist wie Beschriftung plus Zahl, liegt ihre rechte Kante dort, wo die breiteste Beschriftung endet. Die Tabelle spannt deshalb das Feld, die Beschriftungsspalte bleibt `max-content` und die Wertespalte wird an den rechten Rand geschoben — ein schmales Gerät scrollt waagerecht wie zuvor, statt die Zahl zu quetschen.
 
 **F-M460 [D]:** **Auch der SDH-Pfad meldet, was er gemessen hat.** Der SDH-Abruf prüft dieselben Dinge wie der Hauptpfad — Struktur, Laufzeit, Bytes —, meldete aber nichts, weil nur der Hauptpfad Meldungen einstellte. Gemessen am 10.11.2026: zwei der vier Ablehnungen des Laufs waren genau das (Ratatouille EN `max 3579000ms`, DE `span 5870s vs runtime 6633s`). Es gelten dieselben Kategorien, dieselbe Wortwahl und derselbe Schalter; der Befund wird **an Ort und Stelle** eingestellt und nicht am Sprach-Ende, denn dort wird nur aufgeräumt, wenn nichts gespeichert wurde — und die Hauptspur ist meist gespeichert, womit diese beiden Befunde starben. Nichts Geliefertes bleibt kein Befund (F-M456), und ein leerer SDH-Abruf wird ebenfalls einmal nach zehn Sekunden wiederholt (F-M455).
+
+**F-M461 [D]:** **Jeder Abrufweg schreibt sein eigenes Urteil.** Der v1-Weg (`dl.subdl.com/subtitle/…`, Einzeldatei oder Archiv) hat gar keins geschrieben; deshalb zitierte jede Ablehnung, die er verursachte, den letzten v2-Aufruf — „HTTP 200" bei einem gesunden Upload, „no request made" bei einer Anfrage, die sehr wohl stattgefunden hat (gemessen 10.11.2026 an `Person of Interest` S02E18). Der v1-Weg hält jetzt Status, Fehlername und Länge der eigenen Antwort fest, wie es der v2-Weg immer tat.`
+
 
 ### 4.2 Dry Run — Download
 
@@ -2052,6 +2055,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T173:** Die `packs`-Tabelle hält, was sie verspricht (F-M390).
 
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
+
+**T185:** Der v1-Abrufweg schreibt Status, Fehlername und Länge seiner eigenen Antwort — ein Reject nennt den Grund dieser Anfrage, nicht den der vorigen (F-M461). **1 Prüfung.**
 
 **T184:** Der SDH-Pfad meldet seine Messungen — Struktur- und Laufzeiturteil werden zu Befunden, nichts Geliefertes nicht, der leere Abruf wird einmal wiederholt, und der Befund wird sofort eingestellt statt am Laufende (F-M460). **6 Prüfungen.**
 
