@@ -2466,8 +2466,35 @@ public sealed class DownloadPipeline : IDisposable
                             // gaps contain an alignment — this one the main track's, the next one the
                             // HI track's. Floor 0.
                             await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
+                            // F-M456/F-M460: the SDH fetch clears its verdict first, exactly like the
+                            // main path — otherwise a reject here would quote the previous request's
+                            // status, which is how a healthy upload once looked broken.
+                            _api.ResetDownloadStatus();
                             var hiBytes = CorrectInvisibleCues(
                                 await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false));
+
+                            // F-M455/F-M460: an empty answer is asked once more after ten seconds,
+                            // here as well. The SDH pool is where the uploaders put their own cuts,
+                            // so a single empty answer is even less of a verdict than on the main
+                            // track.
+                            bool hiEmptyAnswer = _api.LastFileDownloadStatus == 200
+                                                 && _api.LastFileDownloadBytes == 0
+                                                 && string.IsNullOrEmpty(_api.LastFileDownloadError);
+                            if ((hiBytes == null || hiBytes.Length < 100)
+                                && hiEmptyAnswer
+                                && _emptyRetried.Add("hi|" + lang + "|" + hi.Url))
+                            {
+                                LogUtil.PerItem(_config.LogMode, _logger,
+                                    "[SubDL-D] {File} [{Lang}] — SDH: empty answer from {Release}, asking once more in 10 s (F-M455)",
+                                    Path.GetFileName(mediaPath), lang, hi.ReleaseName);
+                                await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+                                _watchdog?.Heartbeat();
+                                _api.ResetRateLimitFlag();
+                                _api.ResetDownloadStatus();
+                                hiBytes = CorrectInvisibleCues(
+                                    await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false));
+                            }
+
                             var hiStats = hiBytes != null && hiBytes.Length >= 100 ? Qa.QaGates.ParseSrt(DecodeSrt(hiBytes)) : null;
                             bool hiStructureOk = hiStats != null
                                 && hiStats.Monotonic
@@ -2710,6 +2737,42 @@ public sealed class DownloadPipeline : IDisposable
                                 LogUtil.PerItem(_config.LogMode, _logger,
                                     "[SubDL-D] HI reject {File} [{Lang}]: {Reason} ({Release})",
                                     Path.GetFileName(mediaPath), lang, hiRejectReason, hi.ReleaseName);
+
+                                // F-M460 (operator order 10.11.2026): the SDH walk measures the SAME
+                                // verdicts as the main track — a cue running over the whole film, a
+                                // span 763 s off the runtime — and said nothing, because only the main
+                                // path filed reports. Measured that morning: two of the run's four
+                                // rejects were exactly this (Ratatouille EN structure, DE runtime).
+                                // Same categories, same wording, same switch. Filed HERE and not at run
+                                // end, because the end-of-language flush only runs when nothing was
+                                // saved — and the main subtitle usually IS saved, which is how these
+                                // two findings died.
+                                string? hiFinding = hiBytes == null
+                                    ? null // F-M456: nothing delivered, nothing measured — not a finding
+                                    : BrokenSubtitleReports.FindingFromGateFailure(hiRejectReason);
+                                if (_config.ReportBrokenSubtitles
+                                    && hiFinding != null
+                                    && !string.IsNullOrEmpty(hi.SubdlId))
+                                {
+                                    _qaFails.RecordSkippedCandidates(
+                                        item.Id.ToString(), lang, new[] { hi.SubdlId },
+                                        RejectReason.CandidateRejected,
+                                        new Dictionary<string, ReportFacts>
+                                        {
+                                            [hi.SubdlId] = new ReportFacts(hi.NId, hiFinding, hi.ReleaseName)
+                                        },
+                                        "qa");
+
+                                    foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                                    {
+                                        if (row.ReportedUtc == null
+                                            && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                            && string.Equals(row.SubdlId, hi.SubdlId, StringComparison.Ordinal))
+                                        {
+                                            QueueReport(row);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

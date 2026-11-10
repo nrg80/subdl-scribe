@@ -283,6 +283,29 @@ internal static class ReportingRun
               && pipeline.Contains("_api.LastFileDownloadStatus == 200", StringComparison.Ordinal),
             "F-M456: only a real 200 counts as an empty answer — status 0 means we never asked");
 
+        // F-M460 (operator order 10.11.2026: "Soll der SDH-Pfad melden" — Ja): the SDH walk measures
+        // the same verdicts and filed nothing, because only the main path reported. The wordings come
+        // verbatim from the run of that morning, and the mapping is the REAL one.
+        string? hiStructureFinding = BrokenSubtitleReports.FindingFromGateFailure(
+            "structure: monotonic=True min=200ms max=3579000ms");
+        Check(!string.IsNullOrEmpty(hiStructureFinding),
+            "F-M460: the SDH structure verdict (a cue over the whole film) becomes a finding");
+
+        string? hiRuntimeFinding = BrokenSubtitleReports.FindingFromGateFailure(
+            "runtime: span 5870s vs runtime 6633s (tolerance \u00b1600s)");
+        Check(!string.IsNullOrEmpty(hiRuntimeFinding) && hiRuntimeFinding!.Contains("5870", StringComparison.Ordinal),
+            "F-M460: the SDH runtime verdict becomes a finding and names the measured span");
+
+        Check(BrokenSubtitleReports.FindingFromGateFailure("no bytes (no request made)") == null,
+            "F-M460/F-M456: nothing delivered is not a finding — the SDH path stays silent there");
+        Check(pipeline.Contains("hiFinding = hiBytes == null", StringComparison.Ordinal),
+            "F-M460: the SDH report is built only from delivered bytes");
+        Check(pipeline.Contains("_emptyRetried.Add(\"hi|\"", StringComparison.Ordinal),
+            "F-M455/F-M460: the SDH fetch also asks once more after ten seconds before anything is said");
+        Check(pipeline.Contains("QueueReport(row);", StringComparison.Ordinal)
+              && pipeline.Contains("string.Equals(row.SubdlId, hi.SubdlId, StringComparison.Ordinal)", StringComparison.Ordinal),
+            "F-M460: the SDH finding is queued right there, not at a run end that only runs when nothing was saved");
+
         var liveRun = new DownloadRunSummary { Downloaded = 3, Reported = 2 };
         Check(StatusCounterDelta.From(null, liveRun).BrokenReported == 2,
             "F-M455: accepted reports reach the statistics row");
