@@ -59,12 +59,41 @@ public sealed class QaFailTracker
         // download cycle with "Invalid BsonExpression when converted from Linq expression".
         // Same pattern as ContentHashRegistry.GetRejectedCandidates; the ItemId index still
         // does the heavy lifting.
+        // F-M450 (operator order 09.11.2026): a reported candidate is SPENT. Once a defect is on
+        // file with SubDL there is nothing left to learn from the same package, and every further
+        // fetch costs a quota unit — so a row blocks as soon as it carries a report. An "empty"
+        // row without a report still blocks nothing: that is the case where the switch was off,
+        // and a single hiccup must not burn a candidate for good.
         return _db.RejectedCandidates
             .Find(x => x.ItemId == itemId)
             .Where(x => string.Equals(x.Language, language, StringComparison.OrdinalIgnoreCase))
+            .Where(x => !string.Equals(x.Kind, "empty", StringComparison.Ordinal) || x.ReportedUtc != null)
             .Select(x => x.SubdlId)
             .Distinct()
             .ToList();
+    }
+
+    /// <summary>
+    /// F-M450: the stored rows of this file and language — what a report needs (report id, finding,
+    /// kind, report timestamp). Read once per walk instead of once per candidate.
+    /// </summary>
+    /// <param name="itemId">Jellyfin item id.</param>
+    /// <param name="language">Language code.</param>
+    /// <returns>Stored rows.</returns>
+    public List<RejectedCandidateEntity> GetRows(string itemId, string language)
+        => _db.RejectedCandidates
+            .Find(x => x.ItemId == itemId)
+            .Where(x => string.Equals(x.Language, language, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    /// <summary>
+    /// F-M450: marks one row as reported, so no second report is ever sent for it.
+    /// </summary>
+    /// <param name="row">The row that was accepted by SubDL.</param>
+    public void MarkReported(RejectedCandidateEntity row)
+    {
+        row.ReportedUtc = DateTime.UtcNow;
+        _db.RejectedCandidates.Upsert(row);
     }
 
     /// <summary>
@@ -76,19 +105,59 @@ public sealed class QaFailTracker
     /// <param name="subdlIds">Release ids to remember.</param>
     /// <param name="reason">Why they were discarded.</param>
     public void RecordSkippedCandidates(string itemId, string language, IEnumerable<string> subdlIds,
-                                        string reason = RejectReason.CandidateRejected)
+                                        string reason = RejectReason.CandidateRejected,
+                                        IReadOnlyDictionary<string, ReportFacts>? details = null,
+                                        string kind = "qa")
     {
         int recorded = 0;
         foreach (var id in subdlIds.Where(IsUploadId).Distinct())
         {
+            // F-M450: keep what a report needs — the subtitle's report id and the bare finding.
+            // The verdict itself is unchanged; the row simply remembers more than the skip memo.
+            string nId = string.Empty;
+            string finding = string.Empty;
+            string release = string.Empty;
+            if (details != null && details.TryGetValue(id, out var detail))
+            {
+                nId = detail.NId ?? string.Empty;
+                finding = detail.Finding ?? string.Empty;
+                release = detail.ReleaseName ?? string.Empty;
+            }
+
+            // F-M450: the row may already carry a report timestamp. Upsert replaces the whole row,
+            // so it is read first — otherwise every further failure would erase "already reported"
+            // and the same broken package would be reported again and again.
+            string key = SubdlDbContext.CandidateKey(itemId, language, id);
+            var previous = _db.RejectedCandidates.Find(x => x.Id == key).FirstOrDefault();
+            DateTime? reportedUtc = previous?.ReportedUtc;
+            if (string.IsNullOrEmpty(nId))
+            {
+                nId = previous?.NId ?? string.Empty;
+            }
+
+            if (string.IsNullOrEmpty(finding))
+            {
+                finding = previous?.Finding ?? string.Empty;
+            }
+
+            if (string.IsNullOrEmpty(release))
+            {
+                release = previous?.ReleaseName ?? string.Empty;
+            }
+
             // F-M200: the verdict is burned here, keyed by item + language + SubDL id.
             _db.RejectedCandidates.Upsert(new RejectedCandidateEntity
             {
-                Id = SubdlDbContext.CandidateKey(itemId, language, id),
+                Id = key,
                 ItemId = itemId,
                 Language = language.ToUpperInvariant(),
                 SubdlId = id,
                 Reason = reason,
+                NId = nId,
+                Finding = finding,
+                ReleaseName = release,
+                Kind = kind,
+                ReportedUtc = reportedUtc,
                 Updated = DateTime.UtcNow
             });
             recorded++;

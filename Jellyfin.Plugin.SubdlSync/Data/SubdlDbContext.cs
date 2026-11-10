@@ -99,7 +99,7 @@ public sealed class SubdlDbContext : IDisposable
     // document store, named subdl-scribe.sqlite (F-M326). An older build opening this file finds no
     // document header and reports a broken store; the marker is what makes that loud instead of
     // silent. The old file is imported once on first start and kept as a .bak (F-M327).
-    public const int CurrentSchemaVersion = 6;
+    public const int CurrentSchemaVersion = 8;
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
@@ -122,6 +122,8 @@ public sealed class SubdlDbContext : IDisposable
         _db = new SubdlSqliteContext(_dbPath);
         _db.Database.EnsureCreated();
         EnsurePacksTable();
+        EnsureReportColumns();
+        EnsureStatusColumns();
         _db.ConfigurePragmas();
 
         Meta = new SubdlSet<MetaEntity>(_db, e => e.Id);
@@ -265,6 +267,96 @@ public sealed class SubdlDbContext : IDisposable
         catch (Exception ex)
         {
             _logger?.LogWarning("[SubDL] could not create the packs table (continuing): {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// F-M450: adds the report columns to <c>rejected_candidates</c> on a data file that predates
+    /// them.
+    /// <para>
+    /// <c>EnsureCreated</c> builds a schema only when the FILE is new and never alters an existing
+    /// table, so an upgraded installation would otherwise keep five columns while every write names
+    /// ten — and the failure would land in the middle of a download run. Each <c>ALTER</c> is
+    /// guarded by the table's own column list, because SQLite has no "ADD COLUMN IF NOT EXISTS".
+    /// A failure is logged and swallowed: reporting must never stop the plugin from starting.
+    /// </para>
+    /// </summary>
+    private void EnsureReportColumns()
+    {
+        try
+        {
+            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var cmd = _db.Database.GetDbConnection().CreateCommand())
+            {
+                if (cmd.Connection!.State != System.Data.ConnectionState.Open)
+                {
+                    cmd.Connection.Open();
+                }
+
+                cmd.CommandText = "PRAGMA table_info(rejected_candidates);";
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    existing.Add(reader.GetString(1));
+                }
+            }
+
+            foreach (var (name, ddl) in new[]
+                     {
+                         ("NId", "ALTER TABLE rejected_candidates ADD COLUMN NId TEXT NOT NULL DEFAULT '';"),
+                         ("ReleaseName", "ALTER TABLE rejected_candidates ADD COLUMN ReleaseName TEXT NOT NULL DEFAULT '';"),
+                         ("Finding", "ALTER TABLE rejected_candidates ADD COLUMN Finding TEXT NOT NULL DEFAULT '';"),
+                         ("Kind", "ALTER TABLE rejected_candidates ADD COLUMN Kind TEXT NOT NULL DEFAULT 'qa';"),
+                         ("ReportedUtc", "ALTER TABLE rejected_candidates ADD COLUMN ReportedUtc TEXT NULL;")
+                     })
+            {
+                if (!existing.Contains(name))
+                {
+                    _db.Database.ExecuteSqlRaw(ddl);
+                    LogUtil.Normal(_logger, "[SubDL] data file: column {Column} added to rejected_candidates.", name);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("[SubDL] could not add the report columns (continuing): {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// F-M455: adds the status row's own late column — the count of broken subtitles reported to
+    /// SubDL. A table that already carries it is left alone, so the pass runs on every start and
+    /// costs one PRAGMA.
+    /// </summary>
+    private void EnsureStatusColumns()
+    {
+        try
+        {
+            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var cmd = _db.Database.GetDbConnection().CreateCommand())
+            {
+                if (cmd.Connection!.State != System.Data.ConnectionState.Open)
+                {
+                    cmd.Connection.Open();
+                }
+
+                cmd.CommandText = "PRAGMA table_info(status_stats);";
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    existing.Add(reader.GetString(1));
+                }
+            }
+
+            if (!existing.Contains("BrokenReported"))
+            {
+                _db.Database.ExecuteSqlRaw("ALTER TABLE status_stats ADD COLUMN BrokenReported INTEGER NOT NULL DEFAULT 0;");
+                LogUtil.Normal(_logger, "[SubDL] data file: column BrokenReported added to status_stats.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("[SubDL] could not add the status column (continuing): {Msg}", ex.Message);
         }
     }
 

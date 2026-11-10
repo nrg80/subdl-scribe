@@ -86,6 +86,18 @@ public class DownloadRunSummary
     /// </summary>
     public int AiUploaderFiltered { get; set; }
 
+    /// <summary>
+    /// F-M450: reports this run filed with SubDL about a subtitle that failed twice (naked finding,
+    /// no measurement history). Only counted when SubDL answered success:true.
+    /// </summary>
+    public int Reported { get; set; }
+
+    /// <summary>
+    /// F-M450: reports that SubDL did not take — rate limited (429) or refused. The rows stay
+    /// unreported, so the next run picks them up again; nothing is lost and nothing is re-sent twice.
+    /// </summary>
+    public int ReportsDeferred { get; set; }
+
     /// <summary>Gets or sets the count of items skipped because SubDL had no candidates at all.</summary>
     public int SkippedNoCandidates { get; set; }
 
@@ -198,6 +210,13 @@ public sealed class DownloadPipeline : IDisposable
 
     /// <summary>F-M218: the summary of the run in flight, for event handlers.</summary>
     private DownloadRunSummary? _runSummaryForEvents;
+
+    /// <summary>
+    /// F-M450: rows whose report is confirmed and waiting to be filed. Reporting is housekeeping: it
+    /// runs AFTER the walk, never inside a download unit, so a slow or failing report cannot delay,
+    /// fail or reorder anything the pipeline is doing.
+    /// </summary>
+    private readonly List<RejectedCandidateEntity> _pendingReports = new();
     private readonly PluginConfiguration _config;
     private readonly GlobalRateLimiter _limiter;
     private readonly DownloadSearchTracker _searchTracker;
@@ -212,6 +231,15 @@ public sealed class DownloadPipeline : IDisposable
     /// Directories already probed (writable) this run — probe once per run per dir.
     /// </summary>
     private readonly HashSet<string> _probedDirs = new(System.StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// F-M455 (operator order 10.11.2026): candidates whose empty answer was already answered with
+    /// the one refetch of this run. The refetch happens ONCE per candidate, so a second empty answer
+    /// is the second failure — and only that one is filed with SubDL. Measured that night: a single
+    /// release answered 200 with nothing at 04:0x and delivered 83,119 B a few hours later, so one
+    /// empty answer proves nothing at all.
+    /// </summary>
+    private readonly HashSet<string> _emptyRetried = new(System.StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Probe write — exactly mirrors AtomicWriteAsync's.part path. Returns false
@@ -580,17 +608,33 @@ public sealed class DownloadPipeline : IDisposable
         // run is exactly when those counts matter — but label the first number as what it is:
         // the saves the run would have made.
         string savedLabel = summary.IsDryRun ? "would have saved" : "saved";
+
+        // F-M450: reports are filed here — after the walk, before the line that counts them.
+        try
+        {
+            await FlushReportsAsync(summary, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[SubDL-D] report flush failed: {Msg}", ex.Message);
+        }
         // F-M286: {Rejected} names what was FETCHED AND THROWN AWAY. Without it a run that spent
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
         LogUtil.Normal(_logger, 
-            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {Rejected} rejected after fetch | {NoCand} no candidates | {Ai} AI uploader filtered | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
+            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {Rejected} rejected after fetch | {NoCand} no candidates | {Ai} AI uploader filtered | {Reported} reported ({ReportsDeferred} deferred) | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
             summary.Downloaded,
             summary.FittedToAudio,
             (summary.FitMsTotal / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
             summary.RejectedCandidates,
             summary.SkippedNoCandidates,
             summary.AiUploaderFiltered,
+            summary.Reported,
+            summary.ReportsDeferred,
             summary.NotAvailable,
             summary.SkippedItems,
             summary.SkippedNotDue,
@@ -872,7 +916,8 @@ public sealed class DownloadPipeline : IDisposable
             .Required(TargetLanguages, _config.DownloadHearingImpaired);
         var openPairs = Registry.OpenPairs(
             mediaPath, required, EmbeddedPresentLanguagesOf(item),
-            onlyOwnDownloads: !_config.DownloadOnlyMissing);
+            onlyOwnDownloads: !_config.DownloadOnlyMissing,
+            countOriginals: !_config.QaDownloadAutoSync);
 
         // F-M320 (operator order 08.10.2026): a gate rejection no longer closes a pair. The QA retry
         // limit is the FIT's budget (F-M318) — it says how often another candidate may be fetched
@@ -1215,7 +1260,8 @@ public sealed class DownloadPipeline : IDisposable
         var requiredPairs = RequiredPairs(targets);
         var openPairsNow = Registry.OpenPairs(
             mediaPath, requiredPairs, EmbeddedPresentLanguagesOf(item),
-            onlyOwnDownloads: !_config.DownloadOnlyMissing);
+            onlyOwnDownloads: !_config.DownloadOnlyMissing,
+            countOriginals: !_config.QaDownloadAutoSync);
 
         var regularMissing = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleCoverage
             .RegularLanguages(openPairsNow);
@@ -1544,6 +1590,26 @@ public sealed class DownloadPipeline : IDisposable
                         "[SubDL-D] {File} [{Lang}] — {N} candidate(s) skipped before the walk: QA-rejected in an earlier run ({Ids})",
                         Path.GetFileName(mediaPath), lang, beforeMemoryFilter - ranked.Count,
                         string.Join(",", qaKnownRejected));
+
+                    // F-M450: the safety net. These candidates were refused in an earlier run and are
+                    // refused here without another fetch. Since 349 a defect is filed in the run that
+                    // observed it, so this path normally finds nothing to do — it stays for the rows
+                    // that were remembered while the switch was off.
+                    if (_config.ReportBrokenSubtitles)
+                    {
+                        foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                        {
+                            if (row.ReportedUtc != null
+                                || string.IsNullOrWhiteSpace(row.NId)
+                                || !string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                || !qaKnownRejected.Contains(row.SubdlId, StringComparer.Ordinal))
+                            {
+                                continue;
+                            }
+
+                            QueueReport(row);
+                        }
+                    }
                 }
             }
 
@@ -1554,6 +1620,8 @@ public sealed class DownloadPipeline : IDisposable
             // Releases tried and QA-rejected in this run — recorded at run end,
             // so the next run walks fresh candidates only.
             var qaRejectedReleases = new List<string>();
+            // F-M450: what a report would say about each of them — kept as the gate saw it.
+            var qaRejectedFacts = new Dictionary<string, ReportFacts>();
             int savedCount = 0;
             // F-M317 (operator order 08.10.2026): corrected and unprocessed files take their
             // numbers from OPPOSITE ENDS of the range, so they need counters of their own. One
@@ -1746,6 +1814,30 @@ public sealed class DownloadPipeline : IDisposable
 
                 if (bytes == null || bytes.Length < 100)
                 {
+                    // F-M455 (operator order 10.11.2026): an empty answer is not a verdict — it is
+                    // asked ONCE more, ten seconds later. Measured that night on "A Bona Fide
+                    // Killer" S01E10/E11: the single candidate answered 200 with nothing at 04:0x
+                    // and delivered 83,119 B a few hours later. Only the SECOND empty answer is a
+                    // finding; that is what the report below is for, and it is the one place where
+                    // the two-failure rule the pipeline dropped in 12.1.12.347 still holds.
+                    bool genuineEmptyNow = _api.LastFileDownloadStatus == 200
+                                           && _api.LastFileDownloadBytes == 0
+                                           && string.IsNullOrEmpty(_api.LastFileDownloadError);
+                    if (genuineEmptyNow && _emptyRetried.Add(lang + "|" + cand.Url))
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — empty answer from {Release}, asking once more in 10 s (F-M455)",
+                            Path.GetFileName(mediaPath), lang, cand.ReleaseName);
+                        await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+                        _watchdog?.Heartbeat();
+                        _api.ResetRateLimitFlag();
+                        (bytes, packFile) = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                        effectiveHi = packFile?.HearingImpaired ?? cand.HearingImpaired;
+                    }
+                }
+
+                if (bytes == null || bytes.Length < 100)
+                {
                     // F-M286: fetched and thrown away — the bytes came back (or the call answered
                     // without a body) and were discarded, so the request was spent. Counted here,
                     // like every other reject path; F-M255 added the line, F-M286 the number.
@@ -1755,7 +1847,42 @@ public sealed class DownloadPipeline : IDisposable
                     LogUtil.PerItem(_config.LogMode, _logger,
                         "[SubDL-D] {File} [{Lang}] — download reject {Release}: {Reason}",
                         Path.GetFileName(mediaPath), lang, cand.ReleaseName,
-                        bytes == null ? "no bytes returned" : "only " + bytes.Length + " bytes");
+                        bytes == null
+                            ? "no bytes (" + _api.LastFileDownloadLabel + ")"
+                            : "only " + bytes.Length + " bytes (" + _api.LastFileDownloadLabel + ")");
+
+                    // F-M450: a package that answers without data is remembered, and filed once the
+                    // same package has failed a second time — but NOT when the candidate is a season
+                    // or range pack. A pack that has no file for the episode we asked for is OUR
+                    // selection outcome, not a broken upload: measured on 08.11.2026, every single
+                    // "no bytes returned" of that run was such a pack ("23 files but none for
+                    // S3E11"). Reporting those would be a false diagnosis.
+                    // F-M450 (09.11.2026): only a 200 that carries nothing is a broken upload. A 409
+                    // (subtitle exists only as an archive) or a 429 (daily limit) is OUR request
+                    // being refused — reporting those would accuse the uploader of a defect we
+                    // caused ourselves. The measured night: 43 rejects, all 409, zero reportable.
+                    // F-M455: "no members" was the wrong test — with unpack=1 a single release
+                    // carries exactly ONE member, the file itself, so the guard kept every ordinary
+                    // candidate from ever being reported. A pack is more than one member; one member
+                    // is one file.
+                    // F-M456: status 200 is REQUIRED — 0 means no request was made at all (the
+                    // candidate could not even be resolved to the episode), and a candidate we
+                    // never asked about says nothing about the upload. The old "200 or 0" let the
+                    // previous candidate's answer speak for this one.
+                    bool genuineEmpty = _api.LastFileDownloadStatus == 200
+                                        && _api.LastFileDownloadBytes == 0
+                                        && string.IsNullOrEmpty(_api.LastFileDownloadError);
+                    if (genuineEmpty && !cand.FullSeason && cand.UnpackFiles.Count <= 1)
+                    {
+                        await RememberAndReportAsync(
+                            item.Id.ToString(),
+                            lang,
+                            cand,
+                            BrokenSubtitleReports.EmptyPayload(_api.LastFileDownloadBytes),
+                            "empty",
+                            summary,
+                            ct).ConfigureAwait(false);
+                    }
 
                     continue; // download failed → next candidate
                 }
@@ -1867,6 +1994,52 @@ public sealed class DownloadPipeline : IDisposable
                     // Burned fetch (QA gate): the request was spent and nothing is kept.
                     summary.RejectedCandidates++; // F-M286 / F-M387
                     qaRejectedReleases.Add(cand.SubdlId); // burned fetch → memorized
+
+                    // F-M450: keep the gate's own wording as the naked finding. The report is queued
+                    // right here, at the end of the run that measured it — a verdict on delivered bytes
+                    // reads the same on a second fetch, so waiting for one would confirm nothing.
+                    string? gateFinding = BrokenSubtitleReports.FindingFromGateFailure(gateFail);
+                    if (gateFinding != null && !string.IsNullOrEmpty(cand.SubdlId))
+                    {
+                        // F-M450: a pack has many members and the report must say WHICH one is broken —
+                        // otherwise the uploader has to guess. The member name is the one the gate
+                        // actually measured; it goes into the finding, and the category is still read
+                        // from the part before it.
+                        if (packFile != null && !string.IsNullOrWhiteSpace(packFile.Name))
+                        {
+                            gateFinding += " ('" + packFile.Name + "')";
+                        }
+
+                        qaRejectedFacts[cand.SubdlId] = new ReportFacts(cand.NId, gateFinding, cand.ReleaseName);
+
+                        // F-M462 (operator order 10.11.2026): the finding is filed HERE, not at the end
+                        // of the language walk. That flush only runs when NOTHING was saved for the
+                        // language, so a verdict on candidate 1 died the moment candidate 2 was saved
+                        // — a measured verdict does not improve by the episode being served by another
+                        // upload. Same shape as the SDH filing (F-M460), and the ReportedUtc mark keeps
+                        // the run-end pass from filing it twice.
+                        if (_config.ReportBrokenSubtitles)
+                        {
+                            _qaFails.RecordSkippedCandidates(
+                                item.Id.ToString(), lang, new[] { cand.SubdlId },
+                                RejectReason.CandidateRejected,
+                                new Dictionary<string, ReportFacts>
+                                {
+                                    [cand.SubdlId] = qaRejectedFacts[cand.SubdlId]
+                                },
+                                "qa");
+
+                            foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                            {
+                                if (row.ReportedUtc == null
+                                    && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                    && string.Equals(row.SubdlId, cand.SubdlId, StringComparison.Ordinal))
+                                {
+                                    QueueReport(row);
+                                }
+                            }
+                        }
+                    }
 
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
@@ -2104,6 +2277,17 @@ public sealed class DownloadPipeline : IDisposable
 
                     await AtomicWriteAsync(targetPath, writeBytes, ct).ConfigureAwait(false);
 
+                    if (!alignedForNaming)
+                    {
+                        // F-M452: an original does not close the pair, so this release must not be
+                        // fetched again on the next run — the memory makes the walk skip it BEFORE any
+                        // download. Without this the open pair would re-fetch the same bad release
+                        // every run and pay a quota unit for a verdict it already has.
+                        _qaFails.RecordSkippedCandidates(
+                            item.Id.ToString(), lang, new[] { cand.SubdlId },
+                            reason: "original kept — alignment refused", kind: "original");
+                    }
+
                     // F-M306/F-M315: the untouched original is kept beside the corrected file.
                     //
                     // Until 07.10.2026 it was kept as a one-entry archive (`<name>.unsynced.zip`),
@@ -2310,8 +2494,35 @@ public sealed class DownloadPipeline : IDisposable
                             // gaps contain an alignment — this one the main track's, the next one the
                             // HI track's. Floor 0.
                             await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
+                            // F-M456/F-M460: the SDH fetch clears its verdict first, exactly like the
+                            // main path — otherwise a reject here would quote the previous request's
+                            // status, which is how a healthy upload once looked broken.
+                            _api.ResetDownloadStatus();
                             var hiBytes = CorrectInvisibleCues(
                                 await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false));
+
+                            // F-M455/F-M460: an empty answer is asked once more after ten seconds,
+                            // here as well. The SDH pool is where the uploaders put their own cuts,
+                            // so a single empty answer is even less of a verdict than on the main
+                            // track.
+                            bool hiEmptyAnswer = _api.LastFileDownloadStatus == 200
+                                                 && _api.LastFileDownloadBytes == 0
+                                                 && string.IsNullOrEmpty(_api.LastFileDownloadError);
+                            if ((hiBytes == null || hiBytes.Length < 100)
+                                && hiEmptyAnswer
+                                && _emptyRetried.Add("hi|" + lang + "|" + hi.Url))
+                            {
+                                LogUtil.PerItem(_config.LogMode, _logger,
+                                    "[SubDL-D] {File} [{Lang}] — SDH: empty answer from {Release}, asking once more in 10 s (F-M455)",
+                                    Path.GetFileName(mediaPath), lang, hi.ReleaseName);
+                                await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+                                _watchdog?.Heartbeat();
+                                _api.ResetRateLimitFlag();
+                                _api.ResetDownloadStatus();
+                                hiBytes = CorrectInvisibleCues(
+                                    await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false));
+                            }
+
                             var hiStats = hiBytes != null && hiBytes.Length >= 100 ? Qa.QaGates.ParseSrt(DecodeSrt(hiBytes)) : null;
                             bool hiStructureOk = hiStats != null
                                 && hiStats.Monotonic
@@ -2430,6 +2641,14 @@ public sealed class DownloadPipeline : IDisposable
                                         {
                                             hiCorrectedSlotCount++;
                                         }
+                                        else
+                                        {
+                                            // F-M452: same rule for the variant — the kept original is not
+                                            // evidence, so the release is remembered instead of refetched.
+                                            _qaFails.RecordSkippedCandidates(
+                                                item.Id.ToString(), lang, new[] { hi.SubdlId },
+                                                reason: "original kept — alignment refused", kind: "original");
+                                        }
 
                                         // F-M315: the HI track's original is kept the same way — a loose
                                         // sidecar in the reserved block, carried with the `.sdh` marker so
@@ -2535,7 +2754,9 @@ public sealed class DownloadPipeline : IDisposable
                                 // same counter. One increment for every reason in this branch.
                                 summary.RejectedCandidates++;
                                 string hiRejectReason = !hiBytesUsable
-                                    ? (hiBytes == null ? "no bytes returned" : "only " + hiBytes.Length + " bytes")
+                                    ? (hiBytes == null
+                                        ? "no bytes (" + _api.LastFileDownloadLabel + ")"
+                                        : "only " + hiBytes.Length + " bytes (" + _api.LastFileDownloadLabel + ")")
                                     : !hiStructureOk
                                         ? (hiStats == null
                                             ? "structure: no parsable cues"
@@ -2544,6 +2765,42 @@ public sealed class DownloadPipeline : IDisposable
                                 LogUtil.PerItem(_config.LogMode, _logger,
                                     "[SubDL-D] HI reject {File} [{Lang}]: {Reason} ({Release})",
                                     Path.GetFileName(mediaPath), lang, hiRejectReason, hi.ReleaseName);
+
+                                // F-M460 (operator order 10.11.2026): the SDH walk measures the SAME
+                                // verdicts as the main track — a cue running over the whole film, a
+                                // span 763 s off the runtime — and said nothing, because only the main
+                                // path filed reports. Measured that morning: two of the run's four
+                                // rejects were exactly this (Ratatouille EN structure, DE runtime).
+                                // Same categories, same wording, same switch. Filed HERE and not at run
+                                // end, because the end-of-language flush only runs when nothing was
+                                // saved — and the main subtitle usually IS saved, which is how these
+                                // two findings died.
+                                string? hiFinding = hiBytes == null
+                                    ? null // F-M456: nothing delivered, nothing measured — not a finding
+                                    : BrokenSubtitleReports.FindingFromGateFailure(hiRejectReason);
+                                if (_config.ReportBrokenSubtitles
+                                    && hiFinding != null
+                                    && !string.IsNullOrEmpty(hi.SubdlId))
+                                {
+                                    _qaFails.RecordSkippedCandidates(
+                                        item.Id.ToString(), lang, new[] { hi.SubdlId },
+                                        RejectReason.CandidateRejected,
+                                        new Dictionary<string, ReportFacts>
+                                        {
+                                            [hi.SubdlId] = new ReportFacts(hi.NId, hiFinding, hi.ReleaseName)
+                                        },
+                                        "qa");
+
+                                    foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                                    {
+                                        if (row.ReportedUtc == null
+                                            && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                            && string.Equals(row.SubdlId, hi.SubdlId, StringComparison.Ordinal))
+                                        {
+                                            QueueReport(row);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -2604,7 +2861,27 @@ public sealed class DownloadPipeline : IDisposable
             {
                 if (qaRejectedReleases.Count > 0)
                 {
-                    _qaFails.RecordSkippedCandidates(item.Id.ToString(), lang, qaRejectedReleases);
+                    _qaFails.RecordSkippedCandidates(
+                        item.Id.ToString(), lang, qaRejectedReleases, RejectReason.CandidateRejected,
+                        qaRejectedFacts, "qa");
+
+                    // F-M450: a gate verdict is a MEASUREMENT of the file, not a guess — the same
+                    // bytes will read the same way next run. So the report goes out now, in this
+                    // run's flush, instead of waiting for a second sighting that would only confirm
+                    // what was already counted. (Only "no bytes returned" still waits, because there
+                    // a provider hiccup is plausible.)
+                    if (_config.ReportBrokenSubtitles)
+                    {
+                        foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                        {
+                            if (row.ReportedUtc == null
+                                && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                && qaRejectedReleases.Contains(row.SubdlId, StringComparer.Ordinal))
+                            {
+                                QueueReport(row);
+                            }
+                        }
+                    }
 
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
@@ -2946,6 +3223,11 @@ public sealed class DownloadPipeline : IDisposable
     private async Task<(byte[]? Bytes, SubtitleUnpackFile? PackFile)> DownloadCandidateRawAsync(
         SubtitleCandidate cand, int season, int episode, CancellationToken ct)
     {
+        // F-M456: the verdict of THIS attempt only. Without the reset a candidate that is thrown
+        // away before any request inherits the previous candidate's answer — measured on
+        // "A Bona Fide Killer" S01E10, rejected as "no bytes (HTTP 200)" without a single request.
+        _api.ResetDownloadStatus();
+
         // F-M215: a season or range pack must be resolved to the episode we are
         // actually working on. The search runs with unpack=1, so the candidate
         // carries the pack's file list; pick the entry whose season/episode matches
@@ -3022,7 +3304,9 @@ public sealed class DownloadPipeline : IDisposable
 
         if (!string.IsNullOrEmpty(cand.NId))
         {
-            var bytes = await _api.DownloadV2FileAsync(cand.NId, ct).ConfigureAwait(false);
+            // F-M450: the client falls back to ?format=zip when the subtitle has no single file
+            // (409 not_a_single_file) — it needs the wanted episode to pick the right member.
+            var bytes = await _api.DownloadV2FileAsync(cand.NId, ct, season, episode).ConfigureAwait(false);
             return (bytes, null);
         }
 
@@ -3269,7 +3553,142 @@ public sealed class DownloadPipeline : IDisposable
     /// Treats empty/whitespace/placeholder IDs (e.g. "0") as missing so the TMDB
     /// ladder and the skip logic handle them consistently.
     /// </summary>
-    private static string? NormalizeId(string? id)
+    /// <summary>
+    /// F-M450: remembers a defect and files the report once the SAME candidate has failed a SECOND
+    /// time. The store row is the memory: first failure writes it, the next run reads it and only
+    /// then reports. Nothing is reported on a single observation — one empty answer can be a
+    /// hiccup on SubDL's side, two are a broken package.
+    /// </summary>
+    /// <param name="itemId">Jellyfin item id.</param>
+    /// <param name="lang">Language code.</param>
+    /// <param name="cand">The candidate that failed.</param>
+    /// <param name="finding">Naked finding.</param>
+    /// <param name="kind">"empty" (does not block) or "qa" (blocks, as before).</param>
+    /// <param name="summary">Run summary.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Task.</returns>
+    private async Task RememberAndReportAsync(
+        string itemId, string lang, SubtitleCandidate cand, string finding, string kind,
+        DownloadRunSummary summary, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(cand.SubdlId) || string.IsNullOrWhiteSpace(finding))
+        {
+            return;
+        }
+
+        _qaFails.RecordSkippedCandidates(
+            itemId,
+            lang,
+            new[] { cand.SubdlId },
+            RejectReason.CandidateRejected,
+            new Dictionary<string, ReportFacts>
+            {
+                [cand.SubdlId] = new ReportFacts(cand.NId, finding, cand.ReleaseName)
+            },
+            kind);
+
+        // Operator order 09.11.2026: no second sighting. Every observed defect is filed in the run
+        // that observed it — a measured gate verdict as much as an answer that carried nothing.
+        // ReportedUtc is what keeps a filing from happening twice; the wait was never a safety net,
+        // it only delayed a diagnosis that was already made.
+        if (!_config.ReportBrokenSubtitles)
+        {
+            return;
+        }
+
+        var row = _qaFails.GetRows(itemId, lang)
+            .FirstOrDefault(r => string.Equals(r.SubdlId, cand.SubdlId, StringComparison.Ordinal)
+                                 && string.Equals(r.Kind, kind, StringComparison.Ordinal));
+        if (row != null && row.ReportedUtc == null)
+        {
+            QueueReport(row);
+        }
+    }
+
+    /// <summary>
+    /// F-M450: files one stored defect with SubDL and marks the row when SubDL takes it. A report
+    /// that is not taken (rate limited, refused) leaves the row unreported, so the next run picks it
+    /// up again — deferred, never dropped and never sent twice.
+    /// </summary>
+    /// <param name="row">Stored defect.</param>
+    /// <param name="lang">Language code.</param>
+    /// <param name="summary">Run summary.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Task.</returns>
+    /// <summary>
+    /// F-M450: puts a confirmed row on the report queue. Filing happens after the walk, so nothing
+    /// here can slow down or break a download unit.
+    /// </summary>
+    /// <param name="row">Confirmed defect.</param>
+    private void QueueReport(RejectedCandidateEntity row)
+    {
+        if (string.IsNullOrWhiteSpace(row.NId)
+            || _pendingReports.Any(r => string.Equals(r.Id, row.Id, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        _pendingReports.Add(row);
+    }
+
+    /// <summary>
+    /// F-M450: files every queued report. Each call is wrapped: the report route is undocumented, and
+    /// a reporting defect must never surface as a pipeline failure.
+    /// </summary>
+    /// <param name="summary">Run summary.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Task.</returns>
+    private async Task FlushReportsAsync(DownloadRunSummary summary, CancellationToken ct)
+    {
+        if (_pendingReports.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var row in _pendingReports.ToList())
+        {
+            try
+            {
+                await FileReportAsync(row, row.Language, summary, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                summary.ReportsDeferred++;
+                _logger.LogWarning("[SubDL-D] report for {Release} not filed: {Msg}", row.ReleaseName, ex.Message);
+            }
+        }
+
+        _pendingReports.Clear();
+    }
+
+    private async Task FileReportAsync(RejectedCandidateEntity row, string lang, DownloadRunSummary summary, CancellationToken ct)
+    {
+        string version = typeof(DownloadPipeline).Assembly.GetName().Version?.ToString() ?? string.Empty;
+        var text = BrokenSubtitleReports.Build(row.SubdlId, row.ReleaseName, lang, row.Finding, version, _api.AccountName);
+        if (text == null || string.IsNullOrWhiteSpace(row.NId))
+        {
+            return;
+        }
+
+        var outcome = await _api.ReportBrokenSubtitleAsync(row.NId, text.Category, text.Comment, ct).ConfigureAwait(false);
+        if (outcome == SubdlReportOutcome.Accepted)
+        {
+            _qaFails.MarkReported(row);
+            summary.Reported++;
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[SubDL-D] {Release} [{Lang}] — reported to SubDL ({Category}) for subtitle {NId}",
+                row.ReleaseName, lang, text.Category, row.NId);
+            return;
+        }
+
+        summary.ReportsDeferred++;
+    }
+
+    private static string? NormalizeId(string id)
     {
         if (string.IsNullOrWhiteSpace(id))
         {

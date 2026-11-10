@@ -69,6 +69,41 @@ public static class SidecarNaming
     public const int OriginalSlotMax = 99;
 
     /// <summary>
+    /// The slot number a sidecar name carries, or 0 when it carries none.
+    /// <para>
+    /// The reader's counterpart to <see cref="Build"/>: same shape, same two-digit slot, and the
+    /// same rule that a slot sits LAST and the markers come before the language token. A name
+    /// written before F-M316 (one digit, or no slot at all) returns 0 — it belongs to neither block
+    /// and is therefore never mistaken for a reserved original.
+    /// </para>
+    /// </summary>
+    /// <param name="fileNameWithoutExtension">Sidecar name without the .srt extension.</param>
+    /// <param name="baseName">Media file name without extension.</param>
+    /// <returns>The slot, or 0.</returns>
+    public static int SlotOf(string fileNameWithoutExtension, string baseName)
+    {
+        if (string.IsNullOrEmpty(fileNameWithoutExtension)
+            || fileNameWithoutExtension.Equals(baseName, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        string[] parts = fileNameWithoutExtension.Split('.');
+        if (parts.Length < 3)
+        {
+            return 0;
+        }
+
+        string last = parts[^1];
+        if (last.Length is > 0 and <= 2 && AllDigits(last))
+        {
+            return int.Parse(last, System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return 0;
+    }
+
+    /// <summary>
     /// True when a slot belongs to the reserved ORIGINAL block (51–99).
     /// <para>
     /// F-M315: the reservation is a property of the number, not of a file's content, so it is a pure

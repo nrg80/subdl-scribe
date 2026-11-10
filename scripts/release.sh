@@ -224,7 +224,7 @@ ZIP="$ROOT/out/Jellyfin.Plugin.SubdlSync_${VER}.zip"
 say "Test suites"
 JFDIR="${JF_TEST_DIR:-/opt/data/jf-test/jellyfin}"
 if [[ -d "$JFDIR" ]]; then
-    for suite in anchorgate forcedtitle langcorrect archivecache seasonpack aifilter; do
+    for suite in anchorgate forcedtitle langcorrect archivecache seasonpack aifilter reporting; do
         OUT="$(DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 /opt/data/.dotnet/dotnet run \
             --project "scripts/tests/$suite/$suite.csproj" -- "$ROOT" 2>&1 | tail -2)"
         echo "$OUT"
@@ -390,22 +390,61 @@ curl -sS -m 300 -X POST -H "$AUTH" -H 'Content-Type: application/zip' \
 
 # --- 7. verify the published release ----------------------------------------
 say "Verify release"
-curl -sS -m 60 -H "$AUTH" "$API/repos/$REPO_SLUG/releases/$REL_ID/assets" \
- | python3 -c "
+# Verify against the API, not against a second download. GitHub serves release downloads
+# through a CDN that answers with a short HTML error page under load (measured twice on
+# 08.11.2026: "504 Gateway Time-out", 92 bytes, always the same md5). A download-based check
+# cannot tell that page from a bad asset and aborts a perfectly good release, so the stored
+# asset's own digest and size are compared instead — that is the same bytes GitHub will serve.
+# The API itself can answer with nothing (measured 09.11.2026: an empty body raised a JSON
+# traceback and killed the run *after* the release was already published), so the answer is
+# fetched to a file, retried until it parses, and an unparsable answer is named as such.
+ASSETS_JSON=/tmp/subdl-assets.json
+for _ in 1 2 3 4 5; do
+    curl -sS -m 60 -H "$AUTH" "$API/repos/$REPO_SLUG/releases/$REL_ID/assets" -o "$ASSETS_JSON" 2>/dev/null || true
+    [[ "$(head -c 1 "$ASSETS_JSON" 2>/dev/null)" == "[" ]] && break
+    sleep 5
+done
+[[ "$(head -c 1 "$ASSETS_JSON" 2>/dev/null)" == "[" ]] \
+    || die "the releases API gave no JSON after 5 attempts — the release exists, verify it by hand"
+
+LOCAL_SIZE="$(stat -c %s "$ZIP")"
+LOCAL_SHA="$(sha256sum "$ZIP" | cut -d' ' -f1)"
+REMOTE="$(python3 -c "
 import json, sys
-assets = json.load(sys.stdin)
+assets = json.load(open('$ASSETS_JSON'))
 print('  assets: %d' % len(assets))
 for a in assets:
     print('   %-48s %d' % (a['name'], a['size']))
 if len(assets) != 1:
     sys.exit('  FAIL: release must carry exactly one asset')
-if assets[0]['name'] != '$KEEP':
-    sys.exit('  FAIL: unexpected asset name')"
-GOT="$(curl -sSL -m 300 -o /tmp/subdl-asset.zip \
-    "https://github.com/$REPO_SLUG/releases/download/$TAG/$KEEP" \
-    && md5sum /tmp/subdl-asset.zip | cut -d' ' -f1)"
-[[ "$GOT" == "$MD5" ]] || die "downloaded asset md5 $GOT != built $MD5"
-ok "downloaded md5 matches the build: $GOT"
+a = assets[0]
+if a['name'] != '$KEEP':
+    sys.exit('  FAIL: unexpected asset name ' + a['name'])
+print('%d %s' % (a['size'], (a.get('digest') or '').replace('sha256:', '') or '-'))")" \
+    || die "asset listing or identity check failed"
+printf '%s\n' "$REMOTE" | grep -v '^[0-9]'
+REMOTE_SIZE="$(printf '%s\n' "$REMOTE" | tail -1 | cut -d' ' -f1)"
+REMOTE_SHA="$(printf '%s\n' "$REMOTE" | tail -1 | cut -d' ' -f2)"
+[[ "$REMOTE_SIZE" == "$LOCAL_SIZE" ]] \
+    || die "asset size $REMOTE_SIZE != built $LOCAL_SIZE"
+if [[ "$REMOTE_SHA" != "-" ]]; then
+    [[ "$REMOTE_SHA" == "$LOCAL_SHA" ]] || die "asset sha256 $REMOTE_SHA != built $LOCAL_SHA"
+    ok "asset sha256 matches the build: $LOCAL_SHA ($LOCAL_SIZE bytes)"
+else
+    # Older GitHub responses carry no digest; fall back to a download, but insist the file is a
+    # ZIP (magic "PK") before comparing — an HTML error page is a fetch failure, not a mismatch.
+    for _ in 1 2 3; do
+        curl -sSL -m 300 -o /tmp/subdl-asset.zip \
+            "https://github.com/$REPO_SLUG/releases/download/$TAG/$KEEP" || continue
+        [[ "$(head -c 2 /tmp/subdl-asset.zip)" == "PK" ]] || continue
+        GOT="$(md5sum /tmp/subdl-asset.zip | cut -d' ' -f1)"
+        [[ "$GOT" == "$MD5" ]] || die "downloaded asset md5 $GOT != built $MD5"
+        ok "downloaded md5 matches the build: $GOT"
+        break
+    done
+    [[ "$(md5sum /tmp/subdl-asset.zip 2>/dev/null | cut -d' ' -f1)" == "$MD5" ]] \
+        || die "asset could not be fetched for verification (CDN error page, 3 attempts)"
+fi
 
 say "Done — $TAG"
 printf '  release : https://github.com/%s/releases/tag/%s\n' "$REPO_SLUG" "$TAG"

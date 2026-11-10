@@ -23,7 +23,25 @@
 
 using Jellyfin.Plugin.SubdlScribe.Data;
 
+if (args.Length == 0)
+{
+    Console.WriteLine(">>> FEHLER: workdir fehlt. Aufruf: storun <leeres arbeitsverzeichnis>");
+    return 2;
+}
+
 var workdir = args[0];
+
+// T178: this harness CLEANS its workdir — it deletes every file in it. Handed a repository root
+// by mistake, it deletes the sources and leaves a store behind (it happened, twice). A workdir that
+// carries a repo marker is not a workdir, and refusing is the only safe direction.
+if (File.Exists(Path.Combine(workdir, "build.yaml"))
+    || Directory.Exists(Path.Combine(workdir, ".git"))
+    || File.Exists(Path.Combine(workdir, ".gitignore")))
+{
+    Console.WriteLine($">>> FEHLER: '{workdir}' ist ein Repository, kein Arbeitsverzeichnis — dieser Lauf loescht dort alle Dateien.");
+    return 3;
+}
+
 Directory.CreateDirectory(workdir);
 foreach (var f in Directory.GetFiles(workdir))
 {

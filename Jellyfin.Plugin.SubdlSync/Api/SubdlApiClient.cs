@@ -45,6 +45,9 @@ public sealed class SubdlApiClient
     // it is off nothing is cached, not even within a run.
     private readonly ArchiveDiskCache _archiveDiskCache = new();
     private string? _token;
+
+    /// <summary>F-M450: account name from the login answer, used to sign automated reports.</summary>
+    public string AccountName { get; private set; } = string.Empty;
     private DateTime _tokenObtained;
 
     /// <summary>
@@ -646,6 +649,15 @@ public sealed class SubdlApiClient
 
         _token = root.GetProperty("token").GetString();
         _tokenObtained = DateTime.UtcNow;
+
+        // F-M450: the account NAME (not the login mail) is what an automated report signs itself
+        // with — "account midevildynasty". It is read here because the login is the only answer
+        // that carries it, and a report must never spell out the owner's address.
+        if (root.TryGetProperty("userData", out var ud) && ud.ValueKind == JsonValueKind.Object
+            && ud.TryGetProperty("name", out var un) && un.ValueKind == JsonValueKind.String)
+        {
+            AccountName = un.GetString() ?? string.Empty;
+        }
         LogInfo("SubDL login OK");
         return _token!;
         }
@@ -706,6 +718,69 @@ public sealed class SubdlApiClient
         catch (JsonException)
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// F-M450: files one report about a subtitle on SubDL. The endpoint is the site's own report
+    /// form (POST /report, Bearer from the login the upload path already performs); it is not part
+    /// of the documented API, so every answer is read defensively: only <c>success:true</c> counts,
+    /// a 429 is reported back as "deferred" so the caller can keep the row for the next run, and
+    /// anything else is a plain failure that must not be retried in a loop.
+    /// </summary>
+    /// <param name="nId">Subtitle report id ("Nj3hP7BQDw").</param>
+    /// <param name="category">One of the four SubDL categories.</param>
+    /// <param name="comment">Comment text.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Accepted, deferred (rate limited) or failed.</returns>
+    public async Task<SubdlReportOutcome> ReportBrokenSubtitleAsync(string nId, string category, string comment, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(nId) || string.IsNullOrWhiteSpace(category))
+        {
+            return SubdlReportOutcome.Failed;
+        }
+
+        // Downloads run on the api key alone; a report needs the session the upload path opens.
+        string token = _token ?? await LoginAsync(ct).ConfigureAwait(false);
+        var payload = new Dictionary<string, object?>
+        {
+            ["targetType"] = "subtitle",
+            ["nId"] = nId,
+            ["reason"] = category,
+            ["comment"] = comment
+        };
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{ApiBase}/report")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json")
+        };
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        TraceCall("POST", $"{ApiBase}/report");
+        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        ApiActivity?.Invoke();
+        Trace("POST", "report", (int)resp.StatusCode);
+
+        if ((int)resp.StatusCode == 429)
+        {
+            return SubdlReportOutcome.Deferred;
+        }
+
+        if (!resp.IsSuccessStatusCode)
+        {
+            return SubdlReportOutcome.Failed;
+        }
+
+        string body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.TryGetProperty("success", out var ok) && ok.ValueKind == JsonValueKind.True
+                ? SubdlReportOutcome.Accepted
+                : SubdlReportOutcome.Failed;
+        }
+        catch (JsonException)
+        {
+            return SubdlReportOutcome.Failed;
         }
     }
 
@@ -1396,7 +1471,63 @@ public sealed class SubdlApiClient
     /// </summary>
     private static readonly TimeSpan FileTransferTimeout = TimeSpan.FromMinutes(5);
 
-    public async Task<byte[]?> DownloadV2FileAsync(string nId, CancellationToken ct)
+    /// <summary>
+    /// Last HTTP status of the download path, so a rejection can name the REASON instead of
+    /// guessing. Measured 09.11.2026: 43 rejections of one night were all HTTP 409
+    /// <c>not_a_single_file</c> — the subtitle ships only as an archive — and the log called every
+    /// one of them "no bytes returned", which reads like a broken upload and is the opposite.
+    /// The pipeline works one item at a time, so a scalar is enough.
+    /// </summary>
+    public int LastFileDownloadStatus { get; private set; }
+
+    /// <summary>API error name of the last download answer (<c>not_a_single_file</c>, …), if any.</summary>
+    public string? LastFileDownloadError { get; private set; }
+
+    /// <summary>Body length of the last successful download answer — proves whether a 200 really
+    /// carried nothing, which is the only case that may be reported as a broken upload.</summary>
+    public int LastFileDownloadBytes { get; private set; }
+
+    /// <summary>Short label for a reject line — status plus API error, never a guess.
+    /// F-M456: status 0 now says "no request made" instead of "no status", because that is what it
+    /// means — a candidate the walk threw away before it ever asked the server.</summary>
+    public string LastFileDownloadLabel =>
+        LastFileDownloadStatus == 0
+            ? "no request made"
+            : "HTTP " + LastFileDownloadStatus +
+              (string.IsNullOrEmpty(LastFileDownloadError) ? string.Empty : " " + LastFileDownloadError);
+
+    /// <summary>
+    /// F-M456 (measured 10.11.2026): clears the download verdict so a reject cannot be explained by
+    /// the PREVIOUS candidate's answer. "A Bona Fide Killer" S01E10 was rejected as
+    /// <c>no bytes (HTTP 200)</c> although no request had been made at all — the candidate's only
+    /// member could not be read as S1E10, the walk returned before asking, and the status left over
+    /// from the candidate before said 200 with nothing. That made a healthy upload look broken and
+    /// would have filed a false report. Every download attempt starts by clearing this.
+    /// </summary>
+    public void ResetDownloadStatus()
+    {
+        LastFileDownloadStatus = 0;
+        LastFileDownloadError = null;
+        LastFileDownloadBytes = 0;
+    }
+
+    /// <summary>
+    /// V2 single-file download by nId — GET /api/v2/subtitles/{nId}/download?format=file
+    /// (Bearer auth). Same retry contract as v1 downloads (429/5xx backoff, F-M27/F-M58).
+    /// <para>
+    /// F-M450 (09.11.2026): many subtitles have no single file at all — the endpoint then answers
+    /// <c>409 not_a_single_file</c> and says what to do: ask for <c>?format=zip</c>. Measured on a
+    /// night's rejects: every one of them was such a case, and the archive carried exactly the .srt
+    /// that had just been thrown away. So the fallback is part of the download now — fetch the zip
+    /// and unpack the file for the wanted season/episode.
+    /// </para>
+    /// </summary>
+    /// <param name="nId">Subtitle id (<c>subtitlePage</c> tail).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="zipSeason">Wanted season for the archive fallback (0 = none).</param>
+    /// <param name="zipEpisode">Wanted episode for the archive fallback (0 = none).</param>
+    /// <returns>The subtitle file bytes, or null.</returns>
+    public async Task<byte[]?> DownloadV2FileAsync(string nId, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0)
     {
         if (string.IsNullOrWhiteSpace(nId))
         {
@@ -1404,7 +1535,96 @@ public sealed class SubdlApiClient
         }
 
         string apiKey = ApiKey ?? throw new InvalidOperationException("Download requires the SubDL API key");
-        string fullUrl = $"{ApiBase}/api/v2/subtitles/{Uri.EscapeDataString(nId)}/download?format=file";
+        LastFileDownloadStatus = 0;
+        LastFileDownloadError = null;
+        LastFileDownloadBytes = 0;
+
+        // F-M451 (measured 09.11.2026): the ARCHIVE is the shape that always answers. Eight
+        // subtitles — a 23-member season pack among them — all refused ?format=file with
+        // 409 not_a_single_file and all delivered a valid zip. So the archive is asked for first,
+        // once, and the member for the wanted episode is picked here; the file route stays as a
+        // fallback for the rare archive that refuses.
+        string zipUrl = $"{ApiBase}/api/v2/subtitles/{Uri.EscapeDataString(nId)}/download?format=zip";
+        string? key = ArchiveKey.FromUrl(zipUrl);
+        byte[]? archive = null;
+        bool fromCache = false;
+        if (key != null && _archiveDiskCache.TryGet(key, out byte[]? cached) && cached is { Length: > 0 })
+        {
+            Trace("GET", zipUrl, 200, "archive cache hit (disk)");
+            archive = cached;
+            fromCache = true;
+            LastFileDownloadStatus = 200;
+            LastFileDownloadBytes = cached.Length;
+        }
+        else
+        {
+            archive = await V2DownloadAttemptAsync(nId, "zip", apiKey, ct).ConfigureAwait(false);
+            if (archive is { Length: > 0 })
+            {
+                StoreArchive(key, archive);
+            }
+        }
+
+        if (archive is { Length: > 0 })
+        {
+            byte[]? member = await UnpackAsync(archive, zipSeason, zipEpisode, ct).ConfigureAwait(false);
+            if (member == null && fromCache)
+            {
+                // A cached body that cannot resolve this episode may belong to an archive that was
+                // re-uploaded upstream: fetch for real, refresh the cache, try once more.
+                Trace("GET", zipUrl, 200, "archive cache does not hold this entry — refetching");
+                byte[]? fresh = await V2DownloadAttemptAsync(nId, "zip", apiKey, ct).ConfigureAwait(false);
+                if (fresh is { Length: > 0 })
+                {
+                    StoreArchive(key, fresh);
+                    member = await UnpackAsync(fresh, zipSeason, zipEpisode, ct).ConfigureAwait(false);
+                }
+            }
+
+            if (member is { Length: > 0 })
+            {
+                LastFileDownloadStatus = 200;
+                LastFileDownloadError = null;
+                return member;
+            }
+
+            if (member == null)
+            {
+                // The archive arrived but carried no usable member — not a 0-byte upload.
+                LastFileDownloadError = "archive_without_member";
+            }
+        }
+
+        // The archive answered and carried nothing, or nothing for this episode: no second request.
+        // A second shape cannot produce what the first one does not hold, and each request costs a
+        // quota unit — the answer stands as the finding that gets reported.
+        if (LastFileDownloadStatus == 200 && LastFileDownloadBytes == 0 && LastFileDownloadError == null)
+        {
+            return null;
+        }
+
+        if (LastFileDownloadError == "archive_without_member")
+        {
+            return null;
+        }
+
+        // Only when the archive itself was refused (409/429/5xx, non-200) is the single file asked for.
+        byte[]? file = await V2DownloadAttemptAsync(nId, "file", apiKey, ct).ConfigureAwait(false);
+        return file;
+    }
+
+    /// <summary>
+    /// One v2 download attempt chain (429/5xx backoff) against a given format. Records the final
+    /// status and API error so the caller can name the reason.
+    /// </summary>
+    /// <param name="nId">Subtitle id.</param>
+    /// <param name="format">"file" or "zip".</param>
+    /// <param name="apiKey">Bearer key.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Body bytes on success, else null.</returns>
+    private async Task<byte[]?> V2DownloadAttemptAsync(string nId, string format, string apiKey, CancellationToken ct)
+    {
+        string fullUrl = $"{ApiBase}/api/v2/subtitles/{Uri.EscapeDataString(nId)}/download?format={format}";
         const int maxAttempts = 3;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -1417,15 +1637,22 @@ public sealed class SubdlApiClient
             TraceCall("GET", fullUrl);
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
             ApiActivity?.Invoke();
-            Trace("GET", fullUrl, (int)resp.StatusCode, $"v2 download attempt {attempt}");
+            Trace("GET", fullUrl, (int)resp.StatusCode, $"v2 download {format} attempt {attempt}");
             if (resp.IsSuccessStatusCode)
             {
-                return await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+                LastFileDownloadStatus = (int)resp.StatusCode;
+                LastFileDownloadError = null;
+                byte[] payload = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+                LastFileDownloadBytes = payload.Length;
+                return payload;
             }
 
+            LastFileDownloadStatus = (int)resp.StatusCode;
+            string body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            LastFileDownloadError = ParseApiErrorName(body);
             if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
             {
-                Classify429(resp, await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+                Classify429(resp, body);
             }
 
             if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests
@@ -1441,6 +1668,32 @@ public sealed class SubdlApiClient
                 continue;
             }
 
+            return null;
+        }
+
+        return null;
+    }
+
+    /// <summary>Reads the <c>error</c> member of a SubDL JSON error answer, if present.</summary>
+    /// <param name="body">Response body.</param>
+    /// <returns>Error name, or null.</returns>
+    private static string? ParseApiErrorName(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body) || body.Length > 4000 || body.TrimStart()[0] != '{')
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.String)
+            {
+                return err.GetString();
+            }
+        }
+        catch (JsonException)
+        {
             return null;
         }
 
@@ -1780,8 +2033,21 @@ public sealed class SubdlApiClient
             Trace("GET", fullUrl, (int)resp.StatusCode, $"download attempt {attempt}");
             if (resp.IsSuccessStatusCode)
             {
-                return await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+                byte[] payload = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+                // F-M461 (measured 10.11.2026): this route recorded NO verdict at all, so every
+                // reject it caused quoted whatever the last v2 call had left behind — "HTTP 200" on
+                // a healthy upload, or "no request made" on a request that plainly happened. The
+                // v2 route has recorded its status all along; this one now does too, so the reason
+                // in the log is the reason of THIS request.
+                LastFileDownloadStatus = (int)resp.StatusCode;
+                LastFileDownloadError = null;
+                LastFileDownloadBytes = payload.Length;
+                return payload;
             }
+
+            LastFileDownloadStatus = (int)resp.StatusCode;
+            LastFileDownloadBytes = 0;
+            string errorBody = string.Empty;
 
             // F-M27: 429/5xx → exponential backoff (2s, 4s, 8s), then give up.
             // A persistent 429 means SubDL rate-limited us server-side: mark it so
@@ -1790,8 +2056,11 @@ public sealed class SubdlApiClient
             // short retryAfterSeconds window instead of the full daily-limit wait.
             if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
             {
-                Classify429(resp, await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false)); // F-M58
+                errorBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                Classify429(resp, errorBody); // F-M58
             }
+
+            LastFileDownloadError = ParseApiErrorName(errorBody);
 
             if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests
                 || (int)resp.StatusCode >= 500)
@@ -2249,6 +2518,20 @@ public sealed class SubtitleCandidate
             c.Author = au.GetString() ?? string.Empty; // Uploader
         }
 
+        // F-M450: the search answers the subtitle's report id only as a page path
+        // ("subtitlePage": "/s/info/Nj3hP7BQDw"). It is the ONLY handle the report endpoint
+        // accepts for a subtitle, so it is kept — without it a broken package cannot be reported
+        // at all, and the value is gone once the walk has discarded the candidate.
+        if (el.TryGetProperty("subtitlePage", out var sp) && sp.ValueKind == JsonValueKind.String)
+        {
+            string page = sp.GetString() ?? string.Empty;
+            int slash = page.LastIndexOf('/');
+            if (slash >= 0 && slash + 1 < page.Length)
+            {
+                c.NId = page[(slash + 1)..];
+            }
+        }
+
         // F-M215: unpack_files — the per-file list of a season or range pack.
         // Present only when the search ran with unpack=1. Each entry addresses one
         // single episode file and carries its own season/episode, so a pack can be
@@ -2383,8 +2666,9 @@ public sealed class SubtitleCandidate
         return found;
     }
 
-    /// <summary>Extracts an episode number from a file name — S01E06, s01.e06, 1x06 and
-    /// SubDL's S0106 style. Returns 0 when nothing is recognisable, and also 0 when the
+    /// <summary>Extracts an episode number from a file name — S01E06, s01.e06, 1x06,
+    /// SubDL's S0106 style, and the bare "season.episode" form ("6.10 Pam Freakin' Staggs.srt").
+    /// Returns 0 when nothing is recognisable, and also 0 when the
     /// named season contradicts <paramref name="season"/>, so a same-numbered episode of
     /// another season is never picked.</summary>
     /// <param name="name">File name of the pack entry.</param>
@@ -2397,7 +2681,27 @@ public sealed class SubtitleCandidate
             return 0;
         }
 
-        foreach (var pattern in new[] { @"[Ss](\d{1,2})[\s._-]?[Ee](\d{1,3})\b", @"\b(\d{1,2})x(\d{2})\b", @"[Ss](\d{2})(\d{2})\b" })
+        // F-M457 (measured 10.11.2026, "A Bona Fide Killer" S01E10): uploads are named with styled
+        // Unicode letters — "[𝐂𝐨𝐟𝐟𝐞𝐞𝐏𝐫𝐢𝐬𝐨𝐧] … 𝐒𝟎𝐄𝟏𝟎 𝐕𝐊 𝐖𝐄𝐁" — and no pattern matched, so the
+        // candidate looked like a pack without our episode and was thrown away although its one
+        // file WAS the episode. Fold the styling back to ASCII before reading.
+        name = FoldStyledLetters(name);
+
+        // The bare "season.episode" form is tried LAST and is anchored at the start on purpose.
+        // Measured on SubDL (10.11.2026, "The Middle Season 6"): a whole season pack can name its
+        // entries "6.01 Unbraceable You.srt" … "6.10 Pam Freakin' Staggs.srt" while the API reports
+        // season 0 and episode 0 for every member — without this form the episode counted as
+        // "not in the pack" and the pack was thrown away although the file was right there.
+        // Anchoring keeps it from reading "DDP5.1" or a version number as season 5, episode 1;
+        // the two-digit episode keeps "5.1" out, and a name that starts with an SxxExx token is
+        // already answered by the first pattern.
+        foreach (var pattern in new[]
+                 {
+                     @"[Ss](\d{1,2})[\s._-]?[Ee](\d{1,3})\b",
+                     @"\b(\d{1,2})x(\d{2})\b",
+                     @"[Ss](\d{2})(\d{2})\b",
+                     @"^\s*(\d{1,2})\.(\d{2})\b",
+                 })
         {
             var m = System.Text.RegularExpressions.Regex.Match(name, pattern);
             if (!m.Success)
@@ -2405,8 +2709,13 @@ public sealed class SubtitleCandidate
                 continue;
             }
 
-            int sn = int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-            if (season > 0 && sn != season)
+            string snText = m.Groups[1].Value;
+            int sn = int.Parse(snText, System.Globalization.CultureInfo.InvariantCulture);
+            // F-M457: "S0E10" with a single-digit zero is a dropped digit, not season 0 — the same
+            // upload wrote it that way. "S00E05" is the specials convention and keeps its meaning,
+            // so only the single-digit form counts as unknown.
+            bool seasonUnknown = sn == 0 && snText.Length == 1;
+            if (season > 0 && !seasonUnknown && sn != season)
             {
                 return 0;
             }
@@ -2415,6 +2724,86 @@ public sealed class SubtitleCandidate
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// F-M457: folds styled Unicode letters and digits to ASCII — the mathematical alphanumerics
+    /// (bold/italic/script/fraktur/double-struck/sans-serif/monospace) and the fullwidth forms that
+    /// East-Asian releases use. Deliberately arithmetic instead of a Unicode normalisation call:
+    /// <see cref="string.Normalize(System.Text.NormalizationForm)"/> needs ICU and throws under
+    /// invariant globalization, which a Jellyfin host may well run. Each style block carries its 52
+    /// letter slots in order (A–Z then a–z), even where Unicode leaves a slot unassigned because a
+    /// letterlike character stands in for it, so an offset maps cleanly; the digits come in runs of
+    /// ten, so a modulo ten reads them all.
+    /// </summary>
+    /// <param name="text">File or release name.</param>
+    /// <returns>The same name with the styling folded away.</returns>
+    private static string FoldStyledLetters(string text)
+    {
+        int[] capitalStarts =
+        {
+            0x1D400, 0x1D434, 0x1D468, 0x1D49C, 0x1D4D0, 0x1D504, 0x1D538,
+            0x1D56C, 0x1D5A0, 0x1D5D4, 0x1D608, 0x1D63C, 0x1D670,
+        };
+
+        var sb = new System.Text.StringBuilder(text.Length);
+        bool changed = false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            int width = char.IsHighSurrogate(text[i]) && i + 1 < text.Length
+                        && char.IsLowSurrogate(text[i + 1]) ? 2 : 1;
+            int cp = width == 2 ? char.ConvertToUtf32(text[i], text[i + 1]) : text[i];
+            char folded = '\0';
+
+            if (cp >= 0x1D7CE && cp <= 0x1D7FF)
+            {
+                folded = (char)('0' + ((cp - 0x1D7CE) % 10));
+            }
+            else if (cp >= 0x1D400 && cp <= 0x1D7CB)
+            {
+                foreach (int start in capitalStarts)
+                {
+                    if (cp < start || cp >= start + 52)
+                    {
+                        continue;
+                    }
+
+                    int off = cp - start;
+                    folded = (char)(off < 26 ? 'A' + off : 'a' + (off - 26));
+                    break;
+                }
+            }
+            else if (cp == 0x210E)
+            {
+                folded = 'h'; // the italic small h lives outside the block
+            }
+            else if (cp >= 0xFF10 && cp <= 0xFF19)
+            {
+                folded = (char)('0' + (cp - 0xFF10));
+            }
+            else if (cp >= 0xFF21 && cp <= 0xFF3A)
+            {
+                folded = (char)('A' + (cp - 0xFF21));
+            }
+            else if (cp >= 0xFF41 && cp <= 0xFF5A)
+            {
+                folded = (char)('a' + (cp - 0xFF41));
+            }
+
+            if (folded == '\0')
+            {
+                sb.Append(text, i, width);
+            }
+            else
+            {
+                sb.Append(folded);
+                changed = true;
+            }
+
+            i += width - 1;
+        }
+
+        return changed ? sb.ToString() : text;
     }
 
     private static int GetInt(JsonElement el, string name)
@@ -2426,6 +2815,19 @@ public sealed class SubtitleCandidate
 
         return 0;
     }
+}
+
+/// <summary>F-M450: what came of one report to SubDL.</summary>
+public enum SubdlReportOutcome
+{
+    /// <summary>SubDL confirmed the report.</summary>
+    Accepted,
+
+    /// <summary>Rate limited — the row stays unreported and is taken up by the next run.</summary>
+    Deferred,
+
+    /// <summary>Not accepted; no retry.</summary>
+    Failed
 }
 
 /// <summary>

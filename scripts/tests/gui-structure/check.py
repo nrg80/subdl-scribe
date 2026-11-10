@@ -383,9 +383,33 @@ def main():
     check("the remaining rows are grouped by direction, downloads before uploads",
           bool(dl) and bool(up) and max(dl) < min(up),
           "downloads at %s, uploads at %s" % (dl, up))
+    # F-M455/F-M458 (operator order 10.11.2026): the reported-to-SubDL row joined the table right
+    # under the Auto-Sync row, and its first label pushed the figure out of the column — labels stay
+    # within the width of the longest row that already fits. Eight rows now, each exactly once.
     check("every quality row is present exactly once",
-          len(order) == 7 and len(set(order)) == 7,
+          len(order) == 8 and len(set(order)) == 8,
           "%d row(s): %s" % (len(order), order))
+    check("the reported-to-SubDL row sits directly under Auto-Sync (F-M455)",
+          order.index("Downloads: Broken subtitles reported") == order.index("Downloads: Auto-Sync") + 1,
+          "Auto-Sync at %d, broken-report at %d" % (order.index("Downloads: Auto-Sync"),
+                                                    order.index("Downloads: Broken subtitles reported")))
+    # F-M458 (operator order 10.11.2026: "die zahlen gehen zu weit nach rechts raus"): no label may be
+    # longer than "Downloads: rejected after being fetched", the longest row the table already fits.
+    longest_fitting = len("Downloads: rejected after being fetched")
+    too_long = [o for o in order if len(o) > longest_fitting]
+    check("no statistics label is longer than the longest row the table already fits (F-M458)",
+          not too_long,
+          "too long: %s (max %d characters)" % (too_long, longest_fitting))
+    # F-M459 (operator order 10.11.2026): "die statistics zahlen wie beim status in der tabelle
+    # rechtsbuendig". Right-aligning inside the cell was already there and still looked ragged,
+    # because the table was only as wide as label plus figure. It now spans the field and pushes the
+    # value column to the right edge, so the figures end where the status and worker columns end.
+    stats_grid = re.search(r"#StatsTable \{(.*?)\}", html, re.S)
+    check("the statistics grid spans the field and pins the figures to its right edge (F-M459)",
+          stats_grid is not None
+          and "justify-content: space-between" in stats_grid.group(1)
+          and "width: 100%" in stats_grid.group(1),
+          "grid block: %s" % (stats_grid.group(1)[:80] if stats_grid else "not found"))
     # The two withdrawn counters must not come back by halves: a row deleted from the page while the
     # field stays in the API is the F-M218 file-pair trap in reverse, and it leaves a counter that
     # still counts and is never read.

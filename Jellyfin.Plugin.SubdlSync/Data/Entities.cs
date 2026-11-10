@@ -417,9 +417,37 @@ public class RejectedCandidateEntity
     /// <summary>Why it was discarded (one of <see cref="RejectReason"/>, suffixes allowed).</summary>
     public string Reason { get; set; } = string.Empty;
 
+    /// <summary>F-M450: the subtitle's report id from the search response ("subtitlePage",
+    /// "/s/info/Nj3hP7BQDw" → "Nj3hP7BQDw"). Empty for rows written before the field was kept, and
+    /// for candidates the search never delivered one for — such a row cannot be reported.</summary>
+    public string NId { get; set; } = string.Empty;
+
+    /// <summary>F-M450: the release name as SubDL lists it — the report names the package by id and
+    /// by this name, and the row outlives the candidate that carried it.</summary>
+    public string ReleaseName { get; set; } = string.Empty;
+
+    /// <summary>F-M450: the bare finding as it would be sent to SubDL ("downloads with 0 bytes",
+    /// "no usable cues", "cue span 2433s vs. runtime 1290s"). Empty when unknown.</summary>
+    public string Finding { get; set; } = string.Empty;
+
+    /// <summary>F-M450: "qa" rows keep a candidate out of the walk (as before), "empty" rows only
+    /// remember that the package delivered no data — they must not turn into a skip memo, because
+    /// the same package is fetched again and the second failure is what confirms the diagnosis.</summary>
+    public string Kind { get; set; } = "qa";
+
+    /// <summary>F-M450: when the report for this row was accepted by SubDL. Null = not reported
+    /// (never, or the attempt was deferred). One report per row, ever.</summary>
+    public DateTime? ReportedUtc { get; set; }
+
     /// <summary>When the candidate was discarded.</summary>
     public DateTime Updated { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>F-M450: what a report needs about the candidate that failed, as stored.</summary>
+/// <param name="NId">Subtitle report id.</param>
+/// <param name="Finding">Bare finding.</param>
+/// <param name="ReleaseName">Release name as SubDL lists it.</param>
+public sealed record ReportFacts(string NId, string Finding, string ReleaseName);
 
 /// <summary>
 /// Area 1: OSHash cache entry mapping a media path to its computed hash.
@@ -542,6 +570,16 @@ public class StatusStatsEntity
     /// volume. Download only: the upload direction has no audio fit.
     /// </summary>
     public long FittedToAudio { get; set; }
+
+    /// <summary>
+    /// F-M455 (operator order 10.11.2026: "Neues Statistikfeld Download: Broken subtitle reported to
+    /// SubDL nach Auto-Sync"): subtitles this run reported to SubDL as broken — a file that failed
+    /// its content gates or answered empty TWICE, and whose report the portal confirmed. It sits
+    /// directly behind the Auto-Sync row because it belongs to the same story: the fit measures the
+    /// file, and when the measurement says the upload is broken, this is where the answer goes. Only
+    /// an accepted report counts; a deferred or refused one is not a report.
+    /// </summary>
+    public long BrokenReported { get; set; }
 
     /// <summary>
     /// F-M311: media FILES whose language codes were written by the seeder's allocation pass — not a

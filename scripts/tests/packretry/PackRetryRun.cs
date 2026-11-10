@@ -448,6 +448,76 @@ internal static class Program
         Check(upload.Contains("var (fileImdb, _, fileSeason, fileNumber, fileIsSeries) = ResolveIdsRaw(item);", StringComparison.Ordinal),
             "F-M434: FileLanguages matches the same way");
 
+        // ---------------------------------------------------------------------------------------
+        // F-M215/F-M454 (measured 10.11.2026 on SubDL): a season pack may name its entries
+        // "6.10 Pam Freakin' Staggs.srt" and report season 0 / episode 0 for every member. The
+        // bare "season.episode" form is what makes such a pack resolvable — without it the
+        // episode counted as absent and the pack was thrown away with the file right there.
+        // Driven through the REAL reader (SubtitleCandidate.FindUnpackFiles), not through a copy.
+        // ---------------------------------------------------------------------------------------
+        var dotted = new SubtitleCandidate
+        {
+            ReleaseName = "The Middle Season 6",
+            Url = "https://dl.subdl.com/subtitle/1778462-2505150.zip",
+            Language = "EN",
+            Season = 6,
+            FullSeason = true
+        };
+        dotted.UnpackFiles.Add(Member("6.01 Unbraceable You.srt", 0, 0, hi: false));
+        dotted.UnpackFiles.Add(Member("6.09 The Christmas Wall.srt", 0, 0, hi: false));
+        dotted.UnpackFiles.Add(Member("6.10 Pam Freakin' Staggs.srt", 0, 0, hi: false));
+        dotted.UnpackFiles.Add(Member("6.11 A Quarry Story.srt", 0, 0, hi: false));
+
+        var picked = dotted.FindUnpackFile(6, 10);
+        Check(picked != null && picked.Name == "6.10 Pam Freakin' Staggs.srt",
+            "F-M454: \"6.10 …\" inside a pack is E10 of season 6 — the bare season.episode form is read",
+            picked?.Name ?? "null");
+
+        Check(dotted.FindUnpackFile(6, 12) == null,
+            "F-M454: an episode the pack does not carry stays absent — no guessing at the nearest number");
+
+        var otherSeason = new SubtitleCandidate { ReleaseName = "Fremde Staffel", Url = "x.zip", Language = "EN" };
+        otherSeason.UnpackFiles.Add(Member("5.10 Ein anderer Fall.srt", 0, 0, hi: false));
+        Check(otherSeason.FindUnpackFile(6, 10) == null,
+            "F-M454: \"5.10\" is never handed out as season 6 — the season in the name decides");
+
+        var channel = new SubtitleCandidate { ReleaseName = "Tonkanal", Url = "x.zip", Language = "EN" };
+        channel.UnpackFiles.Add(Member("Film.2024.German.DL.DDP5.1.srt", 0, 0, hi: false));
+        Check(channel.FindUnpackFile(5, 1) == null,
+            "F-M454: \"DDP5.1\" is a sound format, not season 5 episode 1 — one digit after the dot is not read");
+
+        // ---------------------------------------------------------------------------------------
+        // F-M457 (measured 10.11.2026 on SubDL): uploads named in styled Unicode — "[𝐂𝐨𝐟𝐟𝐞𝐞𝐏𝐫𝐢𝐬𝐨𝐧]
+        // … 𝐒𝟎𝐄𝟏𝟎 𝐕𝐊 𝐖𝐄𝐁" — carried the right file and were thrown away as an unresolvable pack,
+        // because the letters of the episode marker were MATHEMATICAL BOLD characters. The styling
+        // is folded to ASCII before reading, and a single-digit "S0" counts as a dropped digit.
+        // Driven through the REAL reader.
+        // ---------------------------------------------------------------------------------------
+        var styled = new SubtitleCandidate { ReleaseName = "Styled", Url = "x.zip", Language = "EN" };
+        styled.UnpackFiles.Add(Member("[\U0001D41C\U0001D428\U0001D41F\U0001D41F\U0001D41E\U0001D41E\U0001D429\U0001D42B\U0001D422\U0001D42C\U0001D428\U0001D427] A BONA FIDE KILLER \U0001D412\U0001D7CE\U0001D404\U0001D7CF\U0001D7CE VK WEB EN.srt", 0, 0, hi: false));
+        Check(styled.FindUnpackFile(1, 10)?.Name.EndsWith("EN.srt", StringComparison.Ordinal) == true,
+            "F-M457: bold mathematical letters fold to ASCII — \"𝐒𝟎𝐄𝟏𝟎\" is read as S0E10 and the file is found");
+
+        var specials = new SubtitleCandidate { ReleaseName = "Specials", Url = "x.zip", Language = "EN" };
+        specials.UnpackFiles.Add(Member("Show.S00E05.Behind.the.Scenes.srt", 0, 0, hi: false));
+        Check(specials.FindUnpackFile(1, 5) == null,
+            "F-M457: only the single-digit \"S0\" counts as a dropped digit — a written S00 stays season 0");
+
+        var fullwidth = new SubtitleCandidate { ReleaseName = "Fullwidth", Url = "x.zip", Language = "EN" };
+        fullwidth.UnpackFiles.Add(Member("Ｍｙ Ｓｈｏｗ Ｓ０２Ｅ０７.ｓｒｔ", 0, 0, hi: false));
+        Check(fullwidth.FindUnpackFile(2, 7) != null,
+            "F-M457: fullwidth forms fold too — east-asian releases are readable");
+
+        var resolution = new SubtitleCandidate { ReleaseName = "Aufloesung", Url = "x.zip", Language = "EN" };
+        resolution.UnpackFiles.Add(Member("The.Middle.S06.1080p.srt", 0, 0, hi: false));
+        Check(resolution.FindUnpackFile(6, 10) == null,
+            "F-M454: \"S06.1080p\" carries no episode — the resolution is not read as one");
+
+        var standard = new SubtitleCandidate { ReleaseName = "Standard", Url = "x.zip", Language = "EN" };
+        standard.UnpackFiles.Add(Member("The.Middle.S06E10.HDTV.x264-LOL.srt", 0, 0, hi: false));
+        Check(standard.FindUnpackFile(6, 10)?.Name == "The.Middle.S06E10.HDTV.x264-LOL.srt",
+            "F-M454: the SxxExx form keeps working beside the new one");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

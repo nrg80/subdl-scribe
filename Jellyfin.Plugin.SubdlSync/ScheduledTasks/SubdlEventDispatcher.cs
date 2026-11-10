@@ -1579,7 +1579,8 @@ public sealed class SubdlEventDispatcher : IDisposable
                 delta.RejectedUpload,
                 delta.FittedToAudio,
                 delta.LanguageCodesAllocated,
-                delta.LooseSubtitlesRenamed);
+                delta.LooseSubtitlesRenamed,
+                delta.BrokenReported); // F-M455: broken subtitles filed with SubDL and accepted
         }
         catch (Exception ex)
         {

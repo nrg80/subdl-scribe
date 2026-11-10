@@ -92,7 +92,8 @@ public sealed class SubtitleCoverage
         ContentHashRegistry? registry,
         string? mediaPath,
         IEnumerable<string>? embeddedLanguages = null,
-        bool onlyOwnDownloads = false)
+        bool onlyOwnDownloads = false,
+        bool countOriginals = false)
     {
         var covered = new HashSet<SubtitleRef>();
 
@@ -122,10 +123,27 @@ public sealed class SubtitleCoverage
 
         // 1. The files beside the media file. Each name states its own data — including forced,
         //    which is why the listing carries all three parts (F-M284).
+        //
+        //    F-M452 (operator order 09.11.2026: "ok ist erst wenn eine Version vorliegt die die
+        //    Signifikanz bestanden hat … natürlich nur wenn auto sync ein ist. Wenn aus können wir
+        //    mit dem ersten 51er download schließen"): while the audio fit is ON, a file from the
+        //    reserved ORIGINAL block (51–99) is NOT evidence. An original is the untouched download kept beside a correction — it exists
+        //    because the alignment was refused, so counting it would report a language as covered
+        //    by the very file that proved it wrong. The pair stays open and a later candidate gets
+        //    its chance; the original keeps sitting there as the fallback it is. Names without a
+        //    slot (written before F-M316) are not in either block and still count.
         if (!string.IsNullOrEmpty(mediaPath))
         {
-            foreach (var (_, language, hearingImpaired, forced) in SidecarNaming.List(mediaPath))
+            foreach (var (path, language, hearingImpaired, forced) in SidecarNaming.List(mediaPath))
             {
+                string baseName = System.IO.Path.GetFileNameWithoutExtension(mediaPath);
+                if (!countOriginals
+                    && SidecarNaming.IsOriginalSlot(
+                        SidecarNaming.SlotOf(System.IO.Path.GetFileNameWithoutExtension(path), baseName)))
+                {
+                    continue;
+                }
+
                 Add(covered, language, hearingImpaired, forced);
             }
         }

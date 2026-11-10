@@ -662,7 +662,8 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             // SubtitleCoverage exists as the ONE reader).
             var openPairs = registry.OpenPairs(
                 media.Path!, required,
-                onlyOwnDownloads: Plugin.Instance?.Configuration.DownloadOnlyMissing != true);
+                onlyOwnDownloads: Plugin.Instance?.Configuration.DownloadOnlyMissing != true,
+                countOriginals: Plugin.Instance?.Configuration.QaDownloadAutoSync != true);
             if (openPairs.Count == 0)
             {
                 continue;

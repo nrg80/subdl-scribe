@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.342"
+version: "12.1.12.359"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,23 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.359: a main-path verdict is filed where it is measured — the only flush sat behind "nothing was saved for this language", so a broken top candidate went unreported as soon as a later candidate served the episode (F-M462).
+  v12.1.12.358: the v1 download route records its own verdict now — it wrote none, so its rejects quoted the previous call ("HTTP 200" on a healthy upload, "no request made" on a request that happened), which is what made two diagnoses wander (F-M461).
+  v12.1.12.357: the SDH walk now reports what it measured — it ran the same structure and runtime gates as the main track and filed nothing, which is how two real findings of the last run died; it also clears its verdict per attempt and repeats an empty answer once after ten seconds (F-M460).
+  v12.1.12.356: the statistics row reads "Downloads: Broken subtitles reported" like every other row, the figures are pinned to the right edge of the field so they end on the same line as the status columns, and the block header is just "Status" (F-M459).
+  v12.1.12.355: the statistics row for reported broken subtitles reads "Download: Broken subtitles reported" — the first label was longer than any row the table carries and pushed its figure out of the column (F-M458).
+  v12.1.12.354: a candidate thrown away before any request no longer inherits the previous candidate's answer — measured case reported "no bytes (HTTP 200)" without ever asking, and the verdict is now cleared per attempt with only a real 200 counting as an empty answer; styled Unicode names ("𝐒𝟎𝐄𝟏𝟎", fullwidth) are folded to ASCII so their episode is found (F-M456/F-M457).
+  v12.1.12.353: an empty download answer is asked once more after ten seconds and only a second empty answer is reported to SubDL — a release that answered nothing at night delivered 83 KB hours later; the report guard no longer mistakes a single-file release for a pack; the statistics gained "Downloads: broken subtitle reported to SubDL" right under the Auto-Sync row (F-M455).
+  v12.1.12.352: a pack entry may name its episode as "6.10 …" — that form is read now, so the season packs on SubDL whose members carry no season/episode fields resolve instead of being thrown away with the wanted file inside (F-M454).
+  v12.1.12.351: with the audio fit on, only a version that passed the significance test closes a language pair — a kept original (slot 51–99) is a fallback, not proof, so the pair stays open and later candidates get their chance; the refused release is remembered so it is not fetched again. With the fit off the first download still closes it (F-M452).
+  v12.1.12.350: the description of the reporting switch carries only its default; the requirement and the changelog no longer claim a second failure is required (F-M450).
+  v12.1.12.349: no second attempt on an empty answer — the archive answered, so the finding stands and is filed; a reported candidate is spent and is never fetched again (F-M450).
+  v12.1.12.348: the archive is requested first — it is the only shape SubDL answers for every subtitle (a 23-member season pack and a single-file release alike), so a candidate costs one request instead of two; archives are cached by subtitle id and the episode is unpacked locally (F-M451).
+  v12.1.12.347: every observed defect is reported to SubDL in the run that observed it — the second-sighting wait is gone; ReportedUtc alone keeps a filing from repeating (F-M450).
+  v12.1.12.346: a subtitle that exists only as an archive is fetched as a zip and unpacked instead of being thrown away as "no bytes"; reject lines name the HTTP status and the portal's reason, and a refused request (409/429) is never reported to SubDL as a broken upload (F-M451).
+  v12.1.12.345: a subtitle the content gates measured as broken (no usable cues, too few cues, runtime mismatch, wrong language) is reported to SubDL in the same run; only an empty answer waits for a second attempt, because there a provider hiccup is plausible (F-M450).
+  v12.1.12.344: a report about a season pack now names the member file the gate measured, so the uploader sees which episode is broken (F-M450).
+  v12.1.12.343: a broken subtitle (no data, or rejected by the content gates) is reported to SubDL once — bare finding, category, and an attribution line with plugin version and account; the second-sighting wait introduced with it was dropped in 349; switch `Report broken subtitles to SubDL` sits second to last in the download quality gates and is on by default (F-M450).
   v12.1.12.342: the AI filter switch sits one row higher in the download quality gates, so the runtime tolerance stays the last field (F-M449).
   v12.1.12.341: machine-translated subtitles (uploader "SUBDL AI") stay out of the download unless the switch `Allow AI translated subs (SUBDL AI)` is set — the exclusion happens on the search result, before ranking and before a download unit is spent (F-M449).
   v12.1.12.340: a seed that meets a running library scan waits the job spacing (default 15 min) instead of reading an empty stream list (F-M448).

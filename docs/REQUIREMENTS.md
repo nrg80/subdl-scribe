@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.104
-**Status:** Implementation — v12.1.12.342.
+**Version:** 2.122
+**Status:** Implementation — v12.1.12.359.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,11 +16,11 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 60 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 8 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 72 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 20 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
- - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397
+ - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397, F-M454
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 14 requirements
 - [6. Database Refresh](#6-database-refresh) — 9 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -291,7 +291,7 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 
 **F-M410 [P]:** **Der Pack-Filler fragt den Medien-Hash einmal je Folge, nicht zweimal.** Beleg-Hash (F-M395) und Kandidaten-Hash waren zwei Aufrufe derselben Abfrage; jede schrieb ihre eigene oshash-Zeile.
 
-**F-M411 [P]:** **Ein Cache-Treffer wird einmal je Datei protokolliert, nicht einmal je Spur.** Gemessen: 1341 Trefferzeilen in einem Zyklus, für eine einzelne Folge 215 Mal dieselbe Zeile — der Lauf sah aus, als würde er nur nachschlagen.
+**F-M411 [P]:** **Ein Cache-Treffer wird einmal je Datei protokolliert, nicht einmal je Spur.** Die Trefferzeile entsteht einmal je Datei und nennt die Zahl der Treffer, nicht eine Zeile je Spur.
 
 **F-M412 [P]:** **Der State beantwortet zwei Fragen je Einzelfolge: ob wir sie hochgeladen haben, und ob wir sie löschen können.** Die erste steht im Status der Embed-Zeile (`uploaded`), die zweite in ihrer SubDL-Id — ohne Id gibt es nichts zu löschen. Der Pack nennt deshalb vor dem Absenden jede Mitgliedsfolge ohne Id: `… carries no SubDL id in the store — uploaded by us, but not deletable, they stay beside the pack.`
 
@@ -313,7 +313,7 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 
 **F-M422 [P]:** **Die Ablehnung einer Staffel nennt ihre Belege.** Bisher sagte die Zeile nur „no language is uploaded for every episode, no pack is built" — ein Urteil ohne Beweis, aus dem nicht hervorging, ob eine Folge fehlt, ob das SDH-Kennzeichen die Sprache in zwei Paare spaltet oder ob ein Medien-Hash nicht mehr passt. Das Log folgt: `Closest: [EN] 9/10, missing 4 | [DE/SDH] 3/10, missing 4,5,6` (bis zu drei nächstbeste Paare mit Zählung und fehlenden Folgen) und `Episodes with no uploaded row at all: 4,7` (Folgen, zu denen es gar keine `uploaded`-Zeile gibt — das ist ein Hash-/Waisenproblem, kein Abdeckungsproblem). Grund: die Prüfung ist der Flaschenhals zwischen 7.958 hochgeladenen Zeilen und den tatsächlich gebauten Packs; ohne diese Zahlen ist jede Erklärung dafür eine Vermutung.
 
-**F-M423 [P]:** **Bereits veröffentlichte Uploads lassen sich in die Registry übernehmen** (der Übernahme-Endpunkt). Die Vollständigkeitsprüfung einer Staffel liest ausschließlich `uploaded`-Zeilen dieser Registry — Zeilen, die nur dieses Plugin schreibt. Alles, was ein früherer Seeder unter demselben Konto veröffentlicht hat, ist damit unsichtbar: am hatte Person of Interest S1 für **23 von 23** Folgen keine einzige Zeile, obwohl auf SubDL 14 englische Einzel-Einträge lagen, und For All Mankind S1–S5 (je 10 von 10 Folgen) ergab keinen Pack. Der Endpunkt nimmt je Eintrag `{path, subPos, language, subdlId, hearingImpaired}` und schreibt genau die Zeile, die der Uploader geschrieben hätte: `Status = uploaded` mit der Id, die die Einzelfolge später löschbar macht (F-M412). Er lädt nichts hoch, löscht nichts und spricht SubDL nicht an — er trägt nur nach, was dieses Konto ohnehin veröffentlicht hat. Die Antwort zählt übernommen, Datei fehlt, unlesbar, Id fehlt, Position falsch; die Log-Zeile nennt dieselben Zahlen mit der Dateizahl.
+**F-M423 [P]:** **Bereits veröffentlichte Uploads lassen sich in die Registry übernehmen** (der Übernahme-Endpunkt). Die Vollständigkeitsprüfung einer Staffel liest ausschließlich `uploaded`-Zeilen dieser Registry — Zeilen, die nur dieses Plugin schreibt. Alles, was ein früherer Seeder unter demselben Konto veröffentlicht hat, ist damit unsichtbar und ergibt weder Vollständigkeit noch Pack. Der Endpunkt nimmt je Eintrag `{path, subPos, language, subdlId, hearingImpaired}` und schreibt genau die Zeile, die der Uploader geschrieben hätte: `Status = uploaded` mit der Id, die die Einzelfolge später löschbar macht (F-M412). Er lädt nichts hoch, löscht nichts und spricht SubDL nicht an — er trägt nur nach, was dieses Konto ohnehin veröffentlicht hat. Die Antwort zählt übernommen, Datei fehlt, unlesbar, Id fehlt, Position falsch; die Log-Zeile nennt dieselben Zahlen mit der Dateizahl.
 
 **F-M424 [P]:** **Ein Arrival-Lauf prüft, ob seine eigenen Items eine Staffel schließen, und baut dann den Pack ausschließlich aus ihnen.** F-M418 hatte den Arrival-Lauf vollständig aus der Pack-Bildung genommen; diese Anweisung ersetzt das. Ablauf: nach der Item-Schleife wird je (Serie, Staffel) verglichen, ob die **in diesem Lauf eingereihten** Folgen die ausgestrahlte Folgenmenge abdecken. Ja → `season pack closing` aus genau diesen Folgen (die Pack-Planung bekommt die erlaubte Folgenmenge als Schnitt, der Füll-Lauf läuft über dieselbe Menge). Nein → `arrival: … brought {Have} of {Aired} episode(s)`, kein Pack, die Folgen gehen einzeln hoch. Der Schnitt ist die eigentliche Zusage: die Bibliothek hält die Staffel meist vollständig, ohne ihn würde der Pack Mitglieder enthalten, die dieser Lauf nie angefasst hat — also Zeilen aus dem Store statt aus der Ankunft. Nicht-Arrival-Läufe (Refetch, Manual, Scheduled) sind unverändert: dort gilt weiter F-M420 (erst Einzelupload, dann Staffelpack aus dem Store).
 
@@ -333,7 +333,7 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 
 **F-M432 [P]:** **Die Upload-Id wird auch aus der Veröffentlichungsliste geholt.** Die Id ist der einzige Griff, mit dem ein eigener Eintrag wieder gelöscht werden kann (ersetzt ein Pack eine Einzelfolge), und sie steht in der Liste der eigenen Untertitel — einer Liste, die nur nicht veröffentlichte Einsendungen führt und deshalb leer ist, sobald SubDL alles freigegeben hat. Ein Film hat zusätzlich keine Staffel und keine Folgennummer, über die sich ein Eintrag wiederfinden ließe, hatte also gar keine Id. Neu liest die Abfrage der Veröffentlichungsliste (neueste zuerst, seitenweise, wie die API sie liefert); die Auflösung der eigenen Upload-Id und der eigenen Pack-Id fragen sie, wenn die Einreichungsliste nichts hergibt, und gleichen über den **Release-Namen** ab — denselben Griff, den Pack und Einzelfolge schon benutzen. Die Log-Zeile nennt die Quelle (`… taken from myPublishedSubtitles for …`). Der Eintragsparser versteht dafür auch die Schreibweisen der Veröffentlichungsliste (Anlagezeitpunkt, Staffel als `s`).
 
-**F-M433 [P]:** **Der Store entscheidet nicht allein — die Dateien sind der zweite Zeuge.** Die Vollständigkeitsprüfung je Sprache fragt den Store, also das, was schon hochgeladen oder beobachtet wurde. Eine Staffel, deren Texte zum **ersten** Mal hochgehen, kennt der Store nicht: er meldete „0 von 13 Folgen tragen diese Sprache", der Pack fiel aus, und die Einzelphase lud jede Folge direkt aus ihrer Datei hoch — genau das Bild „Tracker geht einzeln hoch". Neu fragt der Füller die Dateien: Die Sprachabfrage nennt die Sprachpaare, die in den Spuren einer Staffel liegen (Spurlisten, keine Extraktion), die Träger-Prüfung beantwortet die Frage je Folge. Der Pack-Plan nimmt seine Sprachen aus **Store und Dateien**, und die Vollständigkeit gilt als gegeben, wenn **entweder** der Store **oder** die Dateien die Sprache in jeder ausgestrahlten Folge zeigen; nur wenn beide sie nicht finden, bleibt es beim Skip (Log nennt dann beide Zahlen). Der Fall, für den F-M416 gedacht war — es gibt überhaupt keine Spur in dieser Sprache — spart weiterhin die Extraktion, weil eine Spurliste nichts kostet.
+**F-M433 [P]:** **Der Store entscheidet nicht allein — die Dateien sind der zweite Zeuge.** Die Vollständigkeitsprüfung je Sprache fragt den Store, also das, was schon hochgeladen oder beobachtet wurde. Eine Staffel, deren Texte zum **ersten** Mal hochgehen, kennt der Store nicht. Deshalb fragt der Füller auch die Dateien: Die Sprachabfrage nennt die Sprachpaare, die in den Spuren einer Staffel liegen (Spurlisten, keine Extraktion), die Träger-Prüfung beantwortet die Frage je Folge. Der Pack-Plan nimmt seine Sprachen aus **Store und Dateien**, und die Vollständigkeit gilt als gegeben, wenn **entweder** der Store **oder** die Dateien die Sprache in jeder ausgestrahlten Folge zeigen; nur wenn beide sie nicht finden, bleibt es beim Skip (Log nennt dann beide Zahlen). Der Fall ohne jede Spur in dieser Sprache spart weiterhin die Extraktion, weil eine Spurliste nichts kostet (F-M416).
 
 **F-M434 [P]:** **Die Dateien werden zur Pack-Zeit auch gefunden.** F-M433 fragte die Dateien, bekam aber für jede Sprache „nein": die Zuordnung Folge → Datei lief über `episode.Series?.ProviderIds`, und dieses Serienobjekt ist nicht geladen, wenn die Pack-Phase frägt — sie läuft seit F-M429 **vor** der Item-Schleife, die die Staffel-Anker füllt. Belegt an „For All Mankind" S1: die Dateien tragen `eng` (E4 zusätzlich 35 Sprachen), der Lauf meldete trotzdem für **jede** Sprache „weder Store noch Dateien". Zwei Korrekturen: der Vollständigkeits-Scan übergibt seine Episoden-Items an den Füller (`_seasonEpisodes`), und die Zuordnung läuft über die Rohauflösung (IMDb, Staffel, Folgennummer) statt über das Serienobjekt — in der Träger-Prüfung wie in der Sprachabfrage. Der Store bleibt der erste Zeuge; die Dateien sind der zweite, der tatsächlich antwortet.
 
@@ -497,6 +497,31 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 **F-M46 [D]:** **Overall selection:** one best candidate per (item, language) by combined score from F-M43–F-M45 — the best CORRECTED one where a correction can be proven (F-M318/F-M319). No candidate passing → the language counts as "not available".
 
 **F-M449 [D]:** **Maschinenübersetzte Untertitel sind standardmäßig aus.** Ein Untertitel des Übersetzungs-Kontos (SUBDL AI) wird nur geladen, wenn der Schalter `Allow AI translated subs (SUBDL AI)` gesetzt ist. Der Ausschluss greift am Suchergebnis: ein solcher Kandidat kommt weder in die Rangfolge noch kostet er eine Download-Einheit, und die SDH-Variante folgt derselben Regel. Erkannt wird das Konto am Uploader-Namen; Abstände, Punkte, Bindestriche und Unterstriche entfallen vor dem Vergleich, andere Namen bleiben unberührt. Die Laufsumme nennt die verworfene Zahl.
+
+**F-M450 [D]:** **Ein beobachteter Defekt wird an SubDL gemeldet.** Liefert ein Paket keine Daten oder fällt eine Datei durch eine Inhaltsprüfung, wird der Befund im selben Lauf gemeldet; auch eine Antwort ohne Inhalt ist ein Befund. Ein gemeldeter Befund wird nie wiederholt, und ein gemeldeter Kandidat ist verbraucht — er wird nicht erneut geholt, denn jede weitere Anfrage kostet eine Kontingent-Einheit und kann am Befund nichts ändern. Gemeldet wird über das Meldeformular des Portals, mit dem nackten Befund (Paket-Kennung, Release-Name, Sprache, Messwert), der Zuordnung zu einer von vier Kategorien (kein Untertitel, falsche Release-Angaben, kopiert, sonstiges) — bei einem Paket mit dem Namen der betroffenen Datei und einer Absenderzeile aus Produktname, Version und Kontoname — nie die Anmelde-Adresse. Ein Paket ohne Melde-Kennung wird nicht gemeldet. Nimmt das Portal eine Meldung nicht an, bleibt sie offen und wird im nächsten Lauf erneut versucht; eine angenommene Meldung wird nie wiederholt. Die Laufsumme nennt Meldungen und Vertagungen. Der Schalter `Report broken subtitles to SubDL` ist standardmäßig an.
+
+**F-M451 [D]:** **Eine Absage des Abrufs ist kein Defekt des Uploads.** Angefordert wird das Archiv — die einzige Form, die für jeden Untertitel antwortet; die gesuchte Folge wird daraus entpackt. Ein Archiv trägt einen festen Zwischenspeicher-Schlüssel aus seiner Kennung, sodass ein Staffelpaket je Lauf einmal geholt wird. Antwortet das Archiv mit `200` und trägt nichts, ist das der Befund: es folgt keine zweite Anfrage in einer anderen Form. Die Einzeldatei wird nur verlangt, wenn das Archiv selbst abgelehnt wurde. Ablehnzeilen nennen den HTTP-Status und den Fehlernamen des Portals statt einer Vermutung; gemeldet wird ein Untertitel nur, wenn die Antwort tatsächlich mit `200` kam und nichts enthielt — Status und Inhaltslänge werden dafür festgehalten, und ein Archiv ohne passende Datei zählt nicht als leere Antwort. Eine Sperre des Tageskontingents beendet den Lauf, sie wird nie gemeldet.
+
+**F-M452 [D]:** **Nur eine Fassung, die die Signifikanz bestanden hat, schließt ein Sprachpaar.** Ein Untertitel im reservierten Originalblock (51–99) ist der unkorrigierte Abruf, den eine abgelehnte Ausrichtung behalten hat — er liegt da, *weil* die Datei sich als falsch erwies. Er zählt deshalb nicht als Beleg: das Paar bleibt offen, der Lauf behält seine N Versuche, und ein späterer Kandidat hat weiter die Chance, als `01` zu landen. Dateinamen ohne Slot (vor F-M316 geschrieben) gehören keinem Block an und zählen wie bisher. Die Regel gilt nur bei eingeschalteter Ausrichtung: ist Auto-Sync aus, wird nie etwas ausgerichtet, jede Datei landet im Originalblock — dann schließt der erste Abruf das Paar, sonst schlösse nie eines. Damit das offene Paar nicht jede Runde dasselbe schlechte Release erneut zieht, merkt sich der Lauf das Release beim Behalten des Originals; der Merker überspringt es vor jedem Abruf und kostet kein Kontingent.
+
+**F-M454 [D]:** **Ein Pack wird über die Folge aufgelöst, und die Folge darf auch als `Staffel.Folge` im Namen stehen.** Die Suche läuft mit Dateiliste, und die Datei, die *unsere* Folge nennt, wird gezogen — nie die erste im Archiv. Neben `S01E06`, `s01.e06`, `1x06` und SubDLs `S0106` gilt die bloße Form `6.10 …`; die API meldet für solche Mitglieder Staffel 0 und Folge 0, die Folge steht nur im Namen. Diese Form wird zuletzt geprüft und nur am Namensanfang gelesen, damit `DDP5.1` nicht als Staffel 5 Folge 1 gilt und eine Auflösung keine Folge wird; die im Namen genannte Staffel entscheidet, eine abweichende Staffel ergibt keine Folge. Nennt keine Datei die Folge, wird nichts geschrieben — lieber kein Untertitel als der einer fremden Folge.
+
+**F-M455 [D]:** **Ein leerer Abruf ist kein Urteil — er wird einmal nach zehn Sekunden wiederholt, und erst der zweite leere Abruf ist ein Befund.** Deshalb fragt der Lauf denselben Kandidaten genau **einmal** erneut (zehn Sekunden, kein zweiter Versuch, kein Kontingent-Sonderweg), und nur wenn auch dieser Versuch leer bleibt, wird der Befund gemeldet — die einzige Stelle, an der die Zwei-Fehlschläge-Regel noch gilt. Ein Befund wird damit weiterhin im selben Lauf gemeldet. Ein Pack bleibt ausgenommen: mehr als ein Mitglied heißt Auswahl-Ergebnis, nicht defekter Upload; **ein** Mitglied ist die Datei selbst und damit meldbar. Die Statistik führt die angenommenen Meldungen als eigene Zeile `Downloads: Broken subtitles reported` direkt unter der Auto-Sync-Zeile.
+
+**F-M456 [D]:** **Was kein Abruf war, ist keine leere Antwort.** Jeder Abrufversuch beginnt mit gelöschtem Urteil; bleibt ein Kandidat vor der ersten Anfrage liegen, steht im Log `no bytes (no request made)` statt eines Status, der von einem anderen Kandidaten stammt. Ein Kandidat, der vor der ersten Anfrage liegt, trägt keinen fremden Status. Eine leere Antwort ist nur dann eine, wenn sie mit **200** kam; Status 0 heißt: wir haben nicht gefragt.
+
+**F-M457 [D]:** **Zierbuchstaben im Namen werden gelesen, bevor die Folge gelesen wird.** Veröffentlichungen nennen ihre Folgenmarke in stilisierten Zeichen (`𝐒𝟎𝐄𝟏𝟎`, vollbreite Formen); die mathematischen Alphanumerica und Vollbreiten werden auf ASCII zurückgefaltet, dann greifen die vier Namensformen. Die Faltung ist arithmetisch und braucht kein ICU — eine Unicode-Normalisierung wirft unter invarianter Globalisierung, die ein Jellyfin-Wirt durchaus fahren kann. Eine **einstellige** Null in der Staffel (`S0E10`) gilt als verlorene Ziffer, die geschriebene `S00` bleibt Staffel 0.
+
+**F-M458 [D]:** **Eine Statistikzeile wird so benannt, dass die Zahl in ihrer Spalte bleibt.** Kein Zeilenname ist länger als `Downloads: rejected after being fetched` — die längste Zeile, die die Tabelle bereits trägt. Gekürzt wird am Namen, nie an der Zahl.
+
+**F-M459 [D]:** **Die Zahlen der Statistik enden auf derselben Senkrechten wie die Statusspalten.** Rechtsbündig in der Wertespalte allein genügt nicht: solange die Tabelle nur so breit ist wie Beschriftung plus Zahl, liegt ihre rechte Kante dort, wo die breiteste Beschriftung endet. Die Tabelle spannt deshalb das Feld, die Beschriftungsspalte bleibt `max-content` und die Wertespalte wird an den rechten Rand geschoben — ein schmales Gerät scrollt waagerecht wie zuvor, statt die Zahl zu quetschen.
+
+**F-M460 [D]:** **Der SDH-Pfad meldet, was er festgestellt hat.** Der SDH-Abruf prüft dieselben Dinge wie der Hauptpfad — Struktur, Laufzeit, Bytes — und meldet mit denselben Kategorien, derselben Wortwahl und demselben Schalter. Der Befund wird **an Ort und Stelle** eingestellt, nicht am Ende des Sprachlaufs. Nichts Geliefertes bleibt kein Befund (F-M456), und ein leerer SDH-Abruf wird ebenfalls einmal nach zehn Sekunden wiederholt (F-M455).
+
+**F-M461 [D]:** **Jeder Abrufweg schreibt sein eigenes Urteil.** Der v1-Weg (`dl.subdl.com/subtitle/…`, Einzeldatei oder Archiv) und der v2-Weg halten beide Status, Fehlername und Länge der **eigenen** Antwort fest. Ein Ablehnungsgrund nennt damit den Grund dieser Anfrage, nie den einer anderen.
+
+**F-M462 [D]:** **Ein gemessenes Urteil wird eingestellt, wo es gemessen wurde — nicht am Ende des Sprachlaufs.** Am Ende des Sprachlaufs wird nur aufgeräumt, wenn für die Sprache **nichts** gespeichert wurde; ein späterer Treffer lässt den Befund des vorigen Kandidaten unberührt. Der Befund geht an Ort und Stelle in die Warteschlange, und die Marke `ReportedUtc` verhindert, dass der Laufende-Durchgang ihn ein zweites Mal einstellt.
+
 
 ### 4.2 Dry Run — Download
 
@@ -727,7 +752,7 @@ not undo the corrected file; it is logged as a warning.
 
 **F-M306 [D]:** **The untouched original is kept as a selectable sidecar in the reserved slot block, and is locked against upload.**
 
-**Rule.** After a correction the pipeline writes the original beside the corrected file as a **loose sidecar** `<base>.<lang>.51.srt`, **numbered from 51 upward** to the first free number up to **99**. It carries the corrected file's language token and `.sdh` marker, and **no marker of its own**. The reserved block is **50–99**; the writer of *corrected* files stops at slot **49** (F-M315). With every reserved slot taken, **no original is written** and the pipeline refuses.
+**Rule.** After a correction the pipeline writes the original beside the corrected file as a **loose sidecar** `<base>.<lang>.51.srt`, **numbered from 51 upward** to the first free number up to **99**. It carries the corrected file's language token and `.sdh` marker, and **no marker of its own**. The reserved block is **51–99**; the writer of *corrected* files stops at slot **49** (F-M315). With every reserved slot taken, **no original is written** and the pipeline refuses.
 
 **The lock.** The original is registered like every other downloaded subtitle — eine Zeile als heruntergeladen gebucht, geschlüsselt auf den Inhalts-Hash of the bytes on disk. Die Inhaltsprüfung zählt jede Zeile **außer `observed`** as known content and the uploader does too, so the seeder drops the file and the uploader returns `duplicate-content`. **Canonical** bytes (F-M296); both tracks share one helper under die automatische Synchronprüfung (F-M304).
 
@@ -743,17 +768,17 @@ not undo the corrected file; it is logged as a warning.
 
 **Cost.** Names written before this rule keep their old form until they are renamed; the pipeline only writes new names, and nothing renames on disk by itself.
 
-**F-M317 [D]:** **The slot encodes WHICH KIND the file is: aligned takes 01 upward, unprocessed 50 upward.**
+**F-M317 [D]:** **The slot encodes WHICH KIND the file is: aligned takes 01 upward, unprocessed 51 upward.**
 
 **Rule.** A downloaded subtitle goes into one of two ranges: was it ALIGNED?
 
 - **Aligned** (the fit applied a correction, or the fit is off and the file is the corrected artifact) → `<base>.<lang>.<NN>.srt`, `NN` = `01`, `02`, `03` … **upward**, its own counter.
 - **Unprocessed** (the fit found the file **WRONG** — shift beyond the limit, first cue negative, too few cues — or the fit is off) → the **reserved block**, `50`, `51`, `52` … **upward**.
-- **`no proven gain` is NEITHER** (F-M321): `01` **and** a byte-identical copy at `50`.
+- **`no proven gain` is NEITHER** (F-M321): `01` **and** a byte-identical copy at `51`.
 
 **"Regardless of whether a corrected version exists"**: an unprocessed file takes a reserved slot **even with no corrected sibling beside it** (F-M321).
 
-die Zähler korrigierter Plätze steigen on the aligned path only; the unprocessed path writes once. Every reserved slot taken → the write is **refused** and counted. F-M315's reservation (50–99, corrected stops at 49) stands; GUI text must match the code (F-M302).
+die Zähler korrigierter Plätze steigen on the aligned path only; the unprocessed path writes once. Every reserved slot taken → the write is **refused** and counted. F-M315's reservation (51–99, corrected stops at 49) stands; GUI text must match the code (F-M302).
 
 **F-M318 [D]:** **The download REPEATS until a candidate's correction proves itself, capped at the QA retry limit.**
 
@@ -769,9 +794,9 @@ The repeat sits AFTER every other download gate (FPS, no-bytes, language verific
 
 Zähler fehlgeschlagener Läufe (Fehlerzähler und Erschöpfungsprüfung) und die zwei Statuszähler gibt es nicht (Übersprungen-Zähler und Aufgebens-Zähler); nothing closes a (item, language) pair. Der QA-Zähler ist der Datensatz verbrannter Kandidaten and nothing else. What bounds the work is the download budget per run (F-M50) plus the burned-release memory (F-M200).
 
-**F-M321 [D]:** **A file the fit finds nothing wrong with is a GOOD file: it is written at 01 upward, its original at 50 upward, and the walk ends.**
+**F-M321 [D]:** **A file the fit finds nothing wrong with is a GOOD file: it is written at 01 upward, its original at 51 upward, and the walk ends.**
 
-**The rule.** `no proven gain` is not a failure — the deploy rule DECLINES to move the file, so the file as downloaded is the best version of that language. It is written as a **good file at `01` upward** (`<base>.<lang>.01.srt`, then `02` … F-M316), advances the **corrected counter** (the reserved block stays free for wrong files), and its **original is written too**, into the reserved block (`99` downward) — "beide original": BOTH carry the original subtitle, identical by construction because the reserved write REUSES the array sent to `01`. The walk **ENDS** there: no candidate can beat a file the fit found nothing wrong with (F-M318).
+**The rule.** `no proven gain` is not a failure — the deploy rule DECLINES to move the file, so the file as downloaded is the best version of that language. It is written as a **good file at `01` upward** (`<base>.<lang>.01.srt`, then `02` … F-M316), advances the **corrected counter** (the reserved block stays free for wrong files), and its **original is written too**, into the reserved block (`51` upward) — "beide original": BOTH carry the original subtitle, identical by construction because the reserved write REUSES the array sent to `01`. The walk **ENDS** there: no candidate can beat a file the fit found nothing wrong with (F-M318).
 
 Only the deploy rule's OWN refusal counts: a refusal that says the file is **wrong** keeps the reserved range and the F-M318 hunt alive. `SubtitleSync.RefusalMeansAlreadyGood` tells the two apart on the exact `no proven gain` prefix. Both tracks carry the rule (F-M317).
 
@@ -834,7 +859,7 @@ ein Einstiegspunkt für beide Spuren (F-M307 kept). It returns the corrected tex
 
 Dieses Unterkapitel hält fest, was die Download-Seite mit Packs tut und warum das die Upload-Seite bindet. Es führt **keine neuen Anforderungen** ein; die normativen Sätze stehen unter den zitierten IDs.
 
-**Ein Pack ist die günstigere Quelle.** Ein Pack-Kandidat wird einem gleich guten Einzel-Kandidaten vorgezogen: ein Archiv-Body bedient **alle** Folgen des Packs und kostet eine Quota-Einheit; ein bereits im Platten-Cache liegender Pack steht ganz vorn (F-M384). Beim Entpacken gilt das `hearing_impaired`-Flag **der einzelnen Datei**, nicht das des Pack-Headers (F-M384), und jede entpackte Datei wird als `downloaded` gebucht — genau die Herkunft, die sie später als Pack-Material disqualifiziert.
+**Ein Pack ist die günstigere Quelle.** Ein Pack-Kandidat wird einem gleich guten Einzel-Kandidaten vorgezogen: ein Archiv-Body bedient **alle** Folgen des Packs und kostet eine Quota-Einheit; ein bereits im Platten-Cache liegender Pack steht ganz vorn (F-M384). Beim Entpacken gilt das `hearing_impaired`-Flag **der einzelnen Datei**, nicht das des Pack-Headers (F-M384), und welche Datei die gesuchte Folge ist, entscheidet der Mitgliedsname (F-M454), und jede entpackte Datei wird als `downloaded` gebucht — genau die Herkunft, die sie später als Pack-Material disqualifiziert.
 
 **Was ein Dry Run auf der Download-Seite nie erreicht.** Ein Trockenlauf holt keinen Archiv-Body, entpackt also nichts und schreibt keine Datei — die Zahlen, die er nennt, sind hypothetisch, und er hinterlässt keine `downloaded`-Zeile (F-M334).
 
@@ -1570,6 +1595,7 @@ The wording states what happened, not the code's vocabulary:
  uploads DISCARDED BEFORE TRANSFER — upload candidates dropped before anything was sent, on the QA gates, the und/language checks and the self-echo guard; the upload direction fetches NOTHING.
  downloads rejected after being fetched — download candidates fetched and then thrown away.
  auto-synch — downloaded subtitles whose timing the run MOVED onto their audio track (F-M307), counted when APPLIED; no upload row. Operator's wording: `Downloads: Auto-Sync`.
+ broken subtitles reported — die unter der Auto-Sync-Zeile, weil der Fit die Datei bemisst und diese Zahl die Antwort darauf zählt: Dateien, die als defekt an SubDL gemeldet und vom Portal angenommen wurden (F-M455). Gezählt wird nur eine angenommene Meldung; eine vertagte oder abgelehnte ist keine.
 
  See F-M218, F-M286.
 
@@ -2031,6 +2057,28 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T173:** Die `packs`-Tabelle hält, was sie verspricht (F-M390).
 
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
+
+**T186:** Der Befund des Hauptpfads wird dort eingestellt, wo er gemessen wurde — vor dem Weiterlauf zum nächsten Kandidaten, nicht hinter „nichts gespeichert" (F-M462). **1 Prüfung.**
+
+**T185:** Der v1-Abrufweg schreibt Status, Fehlername und Länge seiner eigenen Antwort — ein Reject nennt den Grund dieser Anfrage, nicht den der vorigen (F-M461). **1 Prüfung.**
+
+**T184:** Der SDH-Pfad meldet seine Messungen — Struktur- und Laufzeiturteil werden zu Befunden, nichts Geliefertes nicht, der leere Abruf wird einmal wiederholt, und der Befund wird sofort eingestellt statt am Laufende (F-M460). **6 Prüfungen.**
+
+**T183:** Die Statistik spannt das Feld und schiebt die Zahl an seine rechte Kante, damit sie auf derselben Senkrechten endet wie die Statusspalten (F-M459). **1 Prüfung.**
+
+**T182:** Kein Statistikname ist länger als die längste Zeile, die die Tabelle schon trägt — der Name wird gekürzt, nie die Zahl (F-M458). **1 Prüfung.**
+
+**T181:** Zierbuchstaben und Urteil je Versuch — `𝐒𝟎𝐄𝟏𝟎` und Vollbreite werden gelesen, die geschriebene `S00` bleibt Staffel 0, ein gelöschtes Urteil trägt keinen Status, und nur ein echter 200 gilt als leere Antwort (F-M456/F-M457). **7 Prüfungen.**
+
+**T180:** Ein leerer Abruf ist kein Urteil — der Refetch nach zehn Sekunden, genau einmal je Kandidat, gemeldet erst beim zweiten leeren Abruf; ein Mitglied ist eine Datei und damit meldbar, ein Pack nicht; und die angenommene Meldung erreicht die Statistikzeile, ein Trockenlauf nicht (F-M455). **6 Prüfungen.**
+
+**T179:** Welcher Name eine Folge trägt — `6.10 …` in einem Pack ist E10, `5.10 …` ist nie Staffel 6, `DDP5.1` ist kein E1, `S06.1080p` ist keine Folge, und `SxxExx` funktioniert daneben unverändert (F-M454). **6 Prüfungen.**
+
+**T178:** Der Store-Harness verweigert ein Repository als Arbeitsverzeichnis und einen Aufruf ohne Verzeichnis — er löscht jedes File in seinem Verzeichnis, und ein Repository-Root wurde dabei schon einmal geleert. **3 Prüfungen** (Repo-Marker, fehlendes Argument, Normalbetrieb).
+
+**T177:** Was eine Datei auf der Platte beweist — der reservierte Originalblock (51–99) schließt kein Paar, eine ausgerichtete `01` schon, eine gelöschte `01` öffnet es wieder, ein unnummerierter Name zählt weiter, und der Slot-Leser liest, was der Schreiber schreibt (F-M452). **12 Prüfungen.**
+
+**T176:** Die Meldung eines beobachteten Defekts — Wortlaut ohne Begründung, Kategorie je Befund, Absenderzeile mit Version und Kontoname, Meldung im selben Lauf, Vertagung statt Verwerfen, gesperrter Kandidat nach der Meldung, Schalter und seine Lage als vorletzter Eintrag (F-M450).
 
 **T175:** Der Account-Filter der Download-Suche — Kontokennung, kein Fehlgriff auf fremde Uploader, Ausschluss vor der Rangfolge und der Schalter samt seiner Beschriftung (F-M449).
 
