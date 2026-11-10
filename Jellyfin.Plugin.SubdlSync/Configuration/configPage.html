@@ -64,7 +64,7 @@
                         </div>
                         <div id="RandomScheduleInfo" style="margin-top:-0.4em; font-size:0.85em; opacity:0.8;"></div>
 
-                        <h3>SubDL/TMDb Status</h3>
+                        <h3>Status</h3>
                         <div id="SubdlQuotaBox" style="margin-bottom:1em;"></div>
                         <div id="SubdlStatusBox" style="display:flex;flex-direction:column;margin-bottom:1em;">
                             <div class="subdl-status-row" id="SubdlLoginStatus">
@@ -655,9 +655,19 @@
            keeps a narrow phone from cutting a row off.
            NO backticks in this comment: it sits inside a JS template literal, and one backtick
            ends the string early so the CSS silently never gets injected. */
+        /* F-M459 (operator order 10.11.2026): the figures must end on the SAME vertical edge the
+           status and worker columns end on. Right-aligning inside the value cell was not enough:
+           the table was only as wide as label plus figure, so its right edge sat wherever the widest
+           label happened to end. width:100% plus space-between puts the label column at the left
+           edge and the value column at the right edge of the field, whatever the label lengths are.
+           The label column stays max-content, so a narrow phone scrolls horizontally exactly as
+           before instead of squeezing the figures. */
         #StatsTable {
             display: grid;
             grid-template-columns: max-content max-content;
+            justify-content: space-between;
+            width: 100%;
+            box-sizing: border-box;
             align-items: baseline;
             column-gap: 1.1em;
             row-gap: 0.15em;
@@ -1091,7 +1101,9 @@
                                 // F-M458 (operator order 10.11.2026): the long label pushed the figure
                                 // out of the column — keep statistics labels within the width of the
                                 // longest row that already fits.
-                                ['Download: Broken subtitles reported', s.BrokenReported || 0],
+                                // F-M458b (operator order 10.11.2026): plural, like every other row —
+                                // at 36 characters it still stays under the longest label the table carries.
+                                ['Downloads: Broken subtitles reported', s.BrokenReported || 0],
                                 ['Uploads: stopped before sending', s.RejectedUpload || 0],
                                 ['Media files: language codes added', s.LanguageCodesAllocated || 0],
                                 ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0]
