@@ -2633,8 +2633,9 @@ public sealed class SubtitleCandidate
         return found;
     }
 
-    /// <summary>Extracts an episode number from a file name — S01E06, s01.e06, 1x06 and
-    /// SubDL's S0106 style. Returns 0 when nothing is recognisable, and also 0 when the
+    /// <summary>Extracts an episode number from a file name — S01E06, s01.e06, 1x06,
+    /// SubDL's S0106 style, and the bare "season.episode" form ("6.10 Pam Freakin' Staggs.srt").
+    /// Returns 0 when nothing is recognisable, and also 0 when the
     /// named season contradicts <paramref name="season"/>, so a same-numbered episode of
     /// another season is never picked.</summary>
     /// <param name="name">File name of the pack entry.</param>
@@ -2647,7 +2648,21 @@ public sealed class SubtitleCandidate
             return 0;
         }
 
-        foreach (var pattern in new[] { @"[Ss](\d{1,2})[\s._-]?[Ee](\d{1,3})\b", @"\b(\d{1,2})x(\d{2})\b", @"[Ss](\d{2})(\d{2})\b" })
+        // The bare "season.episode" form is tried LAST and is anchored at the start on purpose.
+        // Measured on SubDL (10.11.2026, "The Middle Season 6"): a whole season pack can name its
+        // entries "6.01 Unbraceable You.srt" … "6.10 Pam Freakin' Staggs.srt" while the API reports
+        // season 0 and episode 0 for every member — without this form the episode counted as
+        // "not in the pack" and the pack was thrown away although the file was right there.
+        // Anchoring keeps it from reading "DDP5.1" or a version number as season 5, episode 1;
+        // the two-digit episode keeps "5.1" out, and a name that starts with an SxxExx token is
+        // already answered by the first pattern.
+        foreach (var pattern in new[]
+                 {
+                     @"[Ss](\d{1,2})[\s._-]?[Ee](\d{1,3})\b",
+                     @"\b(\d{1,2})x(\d{2})\b",
+                     @"[Ss](\d{2})(\d{2})\b",
+                     @"^\s*(\d{1,2})\.(\d{2})\b",
+                 })
         {
             var m = System.Text.RegularExpressions.Regex.Match(name, pattern);
             if (!m.Success)

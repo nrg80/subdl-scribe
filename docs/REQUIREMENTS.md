@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.113
-**Status:** Implementation — v12.1.12.351.
+**Version:** 2.114
+**Status:** Implementation — v12.1.12.352.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,11 +16,11 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 63 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 11 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 64 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 12 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
- - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397
+ - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397, F-M454
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 14 requirements
 - [6. Database Refresh](#6-database-refresh) — 9 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -504,6 +504,8 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 
 **F-M452 [D]:** **Nur eine Fassung, die die Signifikanz bestanden hat, schließt ein Sprachpaar.** Ein Untertitel im reservierten Originalblock (51–99) ist der unkorrigierte Abruf, den eine abgelehnte Ausrichtung behalten hat — er liegt da, *weil* die Datei sich als falsch erwies. Er zählt deshalb nicht als Beleg: das Paar bleibt offen, der Lauf behält seine N Versuche, und ein späterer Kandidat hat weiter die Chance, als `01` zu landen. Dateinamen ohne Slot (vor F-M316 geschrieben) gehören keinem Block an und zählen wie bisher. Die Regel gilt nur bei eingeschalteter Ausrichtung: ist Auto-Sync aus, wird nie etwas ausgerichtet, jede Datei landet im Originalblock — dann schließt der erste Abruf das Paar, sonst schlösse nie eines. Damit das offene Paar nicht jede Runde dasselbe schlechte Release erneut zieht, merkt sich der Lauf das Release beim Behalten des Originals; der Merker überspringt es vor jedem Abruf und kostet kein Kontingent.
 
+**F-M454 [D]:** **Ein Pack wird über die Folge aufgelöst, und die Folge darf auch als `Staffel.Folge` im Namen stehen.** Die Suche läuft mit Dateiliste, und die Datei, die *unsere* Folge nennt, wird gezogen — nie die erste im Archiv. Neben `S01E06`, `s01.e06`, `1x06` und SubDLs `S0106` gilt die bloße Form `6.10 …` (gemessen 10.11.2026: das Staffelpack `The Middle Season 6` nennt seine 24 Einträge so, während die API für jedes Mitglied Staffel 0 und Folge 0 meldet — ohne diese Form galt die Folge als nicht vorhanden und das Pack fiel weg, obwohl die Datei darin lag). Diese Form wird zuletzt geprüft und nur am Namensanfang gelesen, damit `DDP5.1` nicht als Staffel 5 Folge 1 gilt und eine Auflösung keine Folge wird; die im Namen genannte Staffel entscheidet, eine abweichende Staffel ergibt keine Folge. Nennt keine Datei die Folge, wird nichts geschrieben — lieber kein Untertitel als der einer fremden Folge.
+
 ### 4.2 Dry Run — Download
 
 **F-M277:** **The download dry run runs the search and the selection, and stops before the fetch — the search quota IS spent.**
@@ -840,7 +842,7 @@ ein Einstiegspunkt für beide Spuren (F-M307 kept). It returns the corrected tex
 
 Dieses Unterkapitel hält fest, was die Download-Seite mit Packs tut und warum das die Upload-Seite bindet. Es führt **keine neuen Anforderungen** ein; die normativen Sätze stehen unter den zitierten IDs.
 
-**Ein Pack ist die günstigere Quelle.** Ein Pack-Kandidat wird einem gleich guten Einzel-Kandidaten vorgezogen: ein Archiv-Body bedient **alle** Folgen des Packs und kostet eine Quota-Einheit; ein bereits im Platten-Cache liegender Pack steht ganz vorn (F-M384). Beim Entpacken gilt das `hearing_impaired`-Flag **der einzelnen Datei**, nicht das des Pack-Headers (F-M384), und jede entpackte Datei wird als `downloaded` gebucht — genau die Herkunft, die sie später als Pack-Material disqualifiziert.
+**Ein Pack ist die günstigere Quelle.** Ein Pack-Kandidat wird einem gleich guten Einzel-Kandidaten vorgezogen: ein Archiv-Body bedient **alle** Folgen des Packs und kostet eine Quota-Einheit; ein bereits im Platten-Cache liegender Pack steht ganz vorn (F-M384). Beim Entpacken gilt das `hearing_impaired`-Flag **der einzelnen Datei**, nicht das des Pack-Headers (F-M384), und welche Datei die gesuchte Folge ist, entscheidet der Mitgliedsname (F-M454), und jede entpackte Datei wird als `downloaded` gebucht — genau die Herkunft, die sie später als Pack-Material disqualifiziert.
 
 **Was ein Dry Run auf der Download-Seite nie erreicht.** Ein Trockenlauf holt keinen Archiv-Body, entpackt also nichts und schreibt keine Datei — die Zahlen, die er nennt, sind hypothetisch, und er hinterlässt keine `downloaded`-Zeile (F-M334).
 
@@ -2037,6 +2039,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T173:** Die `packs`-Tabelle hält, was sie verspricht (F-M390).
 
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
+
+**T179:** Welcher Name eine Folge trägt — `6.10 …` in einem Pack ist E10, `5.10 …` ist nie Staffel 6, `DDP5.1` ist kein E1, `S06.1080p` ist keine Folge, und `SxxExx` funktioniert daneben unverändert (F-M454). **6 Prüfungen.**
 
 **T178:** Der Store-Harness verweigert ein Repository als Arbeitsverzeichnis und einen Aufruf ohne Verzeichnis — er löscht jedes File in seinem Verzeichnis, und ein Repository-Root wurde dabei schon einmal geleert. **3 Prüfungen** (Repo-Marker, fehlendes Argument, Normalbetrieb).
 
