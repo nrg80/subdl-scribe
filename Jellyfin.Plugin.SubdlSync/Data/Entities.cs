@@ -572,6 +572,16 @@ public class StatusStatsEntity
     public long FittedToAudio { get; set; }
 
     /// <summary>
+    /// F-M455 (operator order 10.11.2026: "Neues Statistikfeld Download: Broken subtitle reported to
+    /// SubDL nach Auto-Sync"): subtitles this run reported to SubDL as broken — a file that failed
+    /// its content gates or answered empty TWICE, and whose report the portal confirmed. It sits
+    /// directly behind the Auto-Sync row because it belongs to the same story: the fit measures the
+    /// file, and when the measurement says the upload is broken, this is where the answer goes. Only
+    /// an accepted report counts; a deferred or refused one is not a report.
+    /// </summary>
+    public long BrokenReported { get; set; }
+
+    /// <summary>
     /// F-M311: media FILES whose language codes were written by the seeder's allocation pass — not a
     /// download and not an upload. One count is one file that got at least one real tag where it had
     /// none (or had <c>und</c>), counted only when the write actually happened: a dry run, a disabled

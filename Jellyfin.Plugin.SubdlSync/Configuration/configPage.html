@@ -1085,6 +1085,10 @@
                                 ['Subtitles uploaded', s.Uploaded || 0, true],
                                 ['Downloads: rejected after being fetched', s.RejectedDownload || 0],
                                 ['Downloads: Auto-Sync', s.FittedToAudio || 0],
+                                // F-M455 (operator order 10.11.2026): right behind the Auto-Sync row —
+                                // the fit is what measures the file, and when its verdict says the upload
+                                // is broken, this is where the answer to SubDL is counted.
+                                ['Downloads: broken subtitle reported to SubDL', s.BrokenReported || 0],
                                 ['Uploads: stopped before sending', s.RejectedUpload || 0],
                                 ['Media files: language codes added', s.LanguageCodesAllocated || 0],
                                 ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0]

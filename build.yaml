@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.352"
+version: "12.1.12.353"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.353: an empty download answer is asked once more after ten seconds and only a second empty answer is reported to SubDL — a release that answered nothing at night delivered 83 KB hours later; the report guard no longer mistakes a single-file release for a pack; the statistics gained "Downloads: broken subtitle reported to SubDL" right under the Auto-Sync row (F-M455).
   v12.1.12.352: a pack entry may name its episode as "6.10 …" — that form is read now, so the season packs on SubDL whose members carry no season/episode fields resolve instead of being thrown away with the wanted file inside (F-M454).
   v12.1.12.351: with the audio fit on, only a version that passed the significance test closes a language pair — a kept original (slot 51–99) is a fallback, not proof, so the pair stays open and later candidates get their chance; the refused release is remembered so it is not fetched again. With the fit off the first download still closes it (F-M452).
   v12.1.12.350: the description of the reporting switch carries only its default; the requirement and the changelog no longer claim a second failure is required (F-M450).

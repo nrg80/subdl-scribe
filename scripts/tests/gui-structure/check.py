@@ -383,9 +383,15 @@ def main():
     check("the remaining rows are grouped by direction, downloads before uploads",
           bool(dl) and bool(up) and max(dl) < min(up),
           "downloads at %s, uploads at %s" % (dl, up))
+    # F-M455 (operator order 10.11.2026): the row "Downloads: broken subtitle reported to SubDL"
+    # joined the table, right under the Auto-Sync row. Eight rows now, each exactly once.
     check("every quality row is present exactly once",
-          len(order) == 7 and len(set(order)) == 7,
+          len(order) == 8 and len(set(order)) == 8,
           "%d row(s): %s" % (len(order), order))
+    check("the reported-to-SubDL row sits directly under Auto-Sync (F-M455)",
+          order.index("Downloads: broken subtitle reported to SubDL") == order.index("Downloads: Auto-Sync") + 1,
+          "Auto-Sync at %d, broken-report at %d" % (order.index("Downloads: Auto-Sync"),
+                                                    order.index("Downloads: broken subtitle reported to SubDL")))
     # The two withdrawn counters must not come back by halves: a row deleted from the page while the
     # field stays in the API is the F-M218 file-pair trap in reverse, and it leaves a counter that
     # still counts and is never read.

@@ -40,7 +40,8 @@ public readonly struct StatusCounterDelta
         long rejectedUpload,
         long fittedToAudio,
         long languageCodesAllocated,
-        long looseSubtitlesRenamed)
+        long looseSubtitlesRenamed,
+        long brokenReported = 0)
     {
         Uploaded = uploaded;
         Downloaded = downloaded;
@@ -49,6 +50,7 @@ public readonly struct StatusCounterDelta
         FittedToAudio = fittedToAudio;
         LanguageCodesAllocated = languageCodesAllocated;
         LooseSubtitlesRenamed = looseSubtitlesRenamed;
+        BrokenReported = brokenReported;
     }
 
     /// <summary>Gets subtitles uploaded by this run.</summary>
@@ -72,11 +74,14 @@ public readonly struct StatusCounterDelta
     /// <summary>Gets the F-M313 loose subtitle files renamed so their name carries the language.</summary>
     public long LooseSubtitlesRenamed { get; }
 
+    /// <summary>Gets the F-M455 broken subtitles this run reported to SubDL and the portal accepted.</summary>
+    public long BrokenReported { get; }
+
     /// <summary>Gets a value indicating whether this delta leaves the statistics row untouched.</summary>
     public bool IsEmpty
         => Uploaded == 0 && Downloaded == 0
            && RejectedDownload == 0 && RejectedUpload == 0 && FittedToAudio == 0
-           && LanguageCodesAllocated == 0 && LooseSubtitlesRenamed == 0;
+           && LanguageCodesAllocated == 0 && LooseSubtitlesRenamed == 0 && BrokenReported == 0;
 
     /// <summary>
     /// F-M247: builds the delta for one direction run, discarding everything a dry run produced.
@@ -104,6 +109,7 @@ public readonly struct StatusCounterDelta
             rejectedUpload: uploadDry ? 0 : upload?.RejectedCandidates ?? 0,
             fittedToAudio: downloadDry ? 0 : download?.FittedToAudio ?? 0,
             languageCodesAllocated: languageCodesAllocated,
-            looseSubtitlesRenamed: looseSubtitlesRenamed);
+            looseSubtitlesRenamed: looseSubtitlesRenamed,
+            brokenReported: downloadDry ? 0 : download?.Reported ?? 0);
     }
 }

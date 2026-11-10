@@ -233,6 +233,15 @@ public sealed class DownloadPipeline : IDisposable
     private readonly HashSet<string> _probedDirs = new(System.StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// F-M455 (operator order 10.11.2026): candidates whose empty answer was already answered with
+    /// the one refetch of this run. The refetch happens ONCE per candidate, so a second empty answer
+    /// is the second failure — and only that one is filed with SubDL. Measured that night: a single
+    /// release answered 200 with nothing at 04:0x and delivered 83,119 B a few hours later, so one
+    /// empty answer proves nothing at all.
+    /// </summary>
+    private readonly HashSet<string> _emptyRetried = new(System.StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Probe write — exactly mirrors AtomicWriteAsync's.part path. Returns false
     /// and caches the directory on any failure (read-only share, permission, quota).
     /// </summary>
@@ -1805,6 +1814,30 @@ public sealed class DownloadPipeline : IDisposable
 
                 if (bytes == null || bytes.Length < 100)
                 {
+                    // F-M455 (operator order 10.11.2026): an empty answer is not a verdict — it is
+                    // asked ONCE more, ten seconds later. Measured that night on "A Bona Fide
+                    // Killer" S01E10/E11: the single candidate answered 200 with nothing at 04:0x
+                    // and delivered 83,119 B a few hours later. Only the SECOND empty answer is a
+                    // finding; that is what the report below is for, and it is the one place where
+                    // the two-failure rule the pipeline dropped in 12.1.12.347 still holds.
+                    bool genuineEmptyNow = _api.LastFileDownloadStatus is 200 or 0
+                                           && _api.LastFileDownloadBytes == 0
+                                           && string.IsNullOrEmpty(_api.LastFileDownloadError);
+                    if (genuineEmptyNow && _emptyRetried.Add(lang + "|" + cand.Url))
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — empty answer from {Release}, asking once more in 10 s (F-M455)",
+                            Path.GetFileName(mediaPath), lang, cand.ReleaseName);
+                        await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+                        _watchdog?.Heartbeat();
+                        _api.ResetRateLimitFlag();
+                        (bytes, packFile) = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                        effectiveHi = packFile?.HearingImpaired ?? cand.HearingImpaired;
+                    }
+                }
+
+                if (bytes == null || bytes.Length < 100)
+                {
                     // F-M286: fetched and thrown away — the bytes came back (or the call answered
                     // without a body) and were discarded, so the request was spent. Counted here,
                     // like every other reject path; F-M255 added the line, F-M286 the number.
@@ -1828,10 +1861,14 @@ public sealed class DownloadPipeline : IDisposable
                     // (subtitle exists only as an archive) or a 429 (daily limit) is OUR request
                     // being refused — reporting those would accuse the uploader of a defect we
                     // caused ourselves. The measured night: 43 rejects, all 409, zero reportable.
+                    // F-M455: "no members" was the wrong test — with unpack=1 a single release
+                    // carries exactly ONE member, the file itself, so the guard kept every ordinary
+                    // candidate from ever being reported. A pack is more than one member; one member
+                    // is one file.
                     bool genuineEmpty = _api.LastFileDownloadStatus is 200 or 0
                                         && _api.LastFileDownloadBytes == 0
                                         && string.IsNullOrEmpty(_api.LastFileDownloadError);
-                    if (genuineEmpty && !cand.FullSeason && cand.UnpackFiles.Count == 0)
+                    if (genuineEmpty && !cand.FullSeason && cand.UnpackFiles.Count <= 1)
                     {
                         await RememberAndReportAsync(
                             item.Id.ToString(),

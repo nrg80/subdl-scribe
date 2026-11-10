@@ -149,8 +149,11 @@ internal static class ReportingRun
             "a measured gate verdict is reported in the same run — no second sighting is awaited");
         Check(pipeline.Contains("gateFinding += \" ('\" + packFile.Name + \"')\"", StringComparison.Ordinal),
             "the pipeline puts the resolved pack member into the finding");
-        Check(pipeline.Contains("genuineEmpty && !cand.FullSeason && cand.UnpackFiles.Count == 0", StringComparison.Ordinal),
-            "a season/range pack that carries no file for the episode is NOT reported (our selection, not the uploader's defect)");
+        // F-M455 replaced the "no members" test with "at most one member": with unpack=1 an ordinary
+        // single release carries exactly one member — the file itself — so the old guard silenced
+        // every honest candidate. A pack is MORE than one member, and a pack stays excluded.
+        Check(pipeline.Contains("genuineEmpty && !cand.FullSeason && cand.UnpackFiles.Count <= 1", StringComparison.Ordinal),
+            "a season/range pack that carries no file for the episode is NOT reported (our selection, not the uploader's defect), and a single file is");
         Check(pipeline.Contains("QueueReport(row);", StringComparison.Ordinal)
               && !pipeline.Contains("await FileReportAsync(row, lang, summary, ct)", StringComparison.Ordinal),
             "nothing is filed inside the walk — confirmed rows are queued and filed after it");
@@ -169,8 +172,8 @@ internal static class ReportingRun
         Check(db.Contains("ALTER TABLE rejected_candidates ADD COLUMN NId", StringComparison.Ordinal)
               && db.Contains("EnsureReportColumns();", StringComparison.Ordinal),
             "an upgraded data file gets the report columns (EnsureCreated never alters a table)");
-        Check(db.Contains("CurrentSchemaVersion = 7", StringComparison.Ordinal),
-            "the schema version is bumped with the columns");
+        Check(db.Contains("CurrentSchemaVersion = 8", StringComparison.Ordinal),
+            "the schema version is bumped with the columns (8 carries the status row\'s BrokenReported)");
 
         string api = Read(plugin, "Api/SubdlApiClient.cs");
         Check(api.Contains("\"subtitlePage\"", StringComparison.Ordinal) && api.Contains("c.NId = page[(slash + 1)..]", StringComparison.Ordinal),
@@ -248,6 +251,31 @@ internal static class ReportingRun
 
         string summaryLine = Regex.Match(pipeline, @"{Reported} reported \(\{ReportsDeferred\} deferred\)").Value;
         Check(summaryLine.Length > 0, "the run summary names reports and deferrals");
+
+        // -------------------------------------------------------------------------------------------
+        // F-M455 (operator order 10.11.2026): "für leere subs den einmaligen refetch nach 10 Sekunden
+        // zurück. Melden dann erst nach dem zweiten Fehlschlag." One empty answer proves nothing — it
+        // was measured that night: a release answered 200 with nothing and delivered 83,119 B a few
+        // hours later. So the candidate is asked once more, and only the second empty answer is a
+        // finding. Driven through the source of the real walk plus the REAL delta builder.
+        // -------------------------------------------------------------------------------------------
+        Check(pipeline.Contains("asking once more in 10 s (F-M455)", StringComparison.Ordinal)
+              && pipeline.Contains("await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);", StringComparison.Ordinal),
+            "F-M455: an empty answer is asked once more after ten seconds");
+        Check(pipeline.Contains("_emptyRetried.Add(lang + \"|\" + cand.Url)", StringComparison.Ordinal),
+            "F-M455: the refetch happens ONCE per candidate — a second empty answer is the second failure");
+        Check(pipeline.Contains("cand.UnpackFiles.Count <= 1", StringComparison.Ordinal),
+            "F-M455: one member is a single file, so an ordinary candidate can be reported (the old test demanded none)");
+
+        var liveRun = new DownloadRunSummary { Downloaded = 3, Reported = 2 };
+        Check(StatusCounterDelta.From(null, liveRun).BrokenReported == 2,
+            "F-M455: accepted reports reach the statistics row");
+
+        var dryRun = new DownloadRunSummary { Downloaded = 3, Reported = 2, IsDryRun = true };
+        Check(StatusCounterDelta.From(null, dryRun).BrokenReported == 0,
+            "F-M455: a dry run reports nothing, so it counts nothing");
+        Check(StatusCounterDelta.From(null, liveRun).IsEmpty == false,
+            "F-M455: a run that only filed reports is not an empty run — the row gets written");
 
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0

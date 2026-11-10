@@ -99,7 +99,7 @@ public sealed class SubdlDbContext : IDisposable
     // document store, named subdl-scribe.sqlite (F-M326). An older build opening this file finds no
     // document header and reports a broken store; the marker is what makes that loud instead of
     // silent. The old file is imported once on first start and kept as a .bak (F-M327).
-    public const int CurrentSchemaVersion = 7;
+    public const int CurrentSchemaVersion = 8;
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
@@ -123,6 +123,7 @@ public sealed class SubdlDbContext : IDisposable
         _db.Database.EnsureCreated();
         EnsurePacksTable();
         EnsureReportColumns();
+        EnsureStatusColumns();
         _db.ConfigurePragmas();
 
         Meta = new SubdlSet<MetaEntity>(_db, e => e.Id);
@@ -319,6 +320,43 @@ public sealed class SubdlDbContext : IDisposable
         catch (Exception ex)
         {
             _logger?.LogWarning("[SubDL] could not add the report columns (continuing): {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// F-M455: adds the status row's own late column — the count of broken subtitles reported to
+    /// SubDL. A table that already carries it is left alone, so the pass runs on every start and
+    /// costs one PRAGMA.
+    /// </summary>
+    private void EnsureStatusColumns()
+    {
+        try
+        {
+            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var cmd = _db.Database.GetDbConnection().CreateCommand())
+            {
+                if (cmd.Connection!.State != System.Data.ConnectionState.Open)
+                {
+                    cmd.Connection.Open();
+                }
+
+                cmd.CommandText = "PRAGMA table_info(status_stats);";
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    existing.Add(reader.GetString(1));
+                }
+            }
+
+            if (!existing.Contains("BrokenReported"))
+            {
+                _db.Database.ExecuteSqlRaw("ALTER TABLE status_stats ADD COLUMN BrokenReported INTEGER NOT NULL DEFAULT 0;");
+                LogUtil.Normal(_logger, "[SubDL] data file: column BrokenReported added to status_stats.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("[SubDL] could not add the status column (continuing): {Msg}", ex.Message);
         }
     }
 
