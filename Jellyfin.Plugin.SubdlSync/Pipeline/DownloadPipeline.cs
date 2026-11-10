@@ -1820,7 +1820,7 @@ public sealed class DownloadPipeline : IDisposable
                     // and delivered 83,119 B a few hours later. Only the SECOND empty answer is a
                     // finding; that is what the report below is for, and it is the one place where
                     // the two-failure rule the pipeline dropped in 12.1.12.347 still holds.
-                    bool genuineEmptyNow = _api.LastFileDownloadStatus is 200 or 0
+                    bool genuineEmptyNow = _api.LastFileDownloadStatus == 200
                                            && _api.LastFileDownloadBytes == 0
                                            && string.IsNullOrEmpty(_api.LastFileDownloadError);
                     if (genuineEmptyNow && _emptyRetried.Add(lang + "|" + cand.Url))
@@ -1865,7 +1865,11 @@ public sealed class DownloadPipeline : IDisposable
                     // carries exactly ONE member, the file itself, so the guard kept every ordinary
                     // candidate from ever being reported. A pack is more than one member; one member
                     // is one file.
-                    bool genuineEmpty = _api.LastFileDownloadStatus is 200 or 0
+                    // F-M456: status 200 is REQUIRED — 0 means no request was made at all (the
+                    // candidate could not even be resolved to the episode), and a candidate we
+                    // never asked about says nothing about the upload. The old "200 or 0" let the
+                    // previous candidate's answer speak for this one.
+                    bool genuineEmpty = _api.LastFileDownloadStatus == 200
                                         && _api.LastFileDownloadBytes == 0
                                         && string.IsNullOrEmpty(_api.LastFileDownloadError);
                     if (genuineEmpty && !cand.FullSeason && cand.UnpackFiles.Count <= 1)
@@ -3128,6 +3132,11 @@ public sealed class DownloadPipeline : IDisposable
     private async Task<(byte[]? Bytes, SubtitleUnpackFile? PackFile)> DownloadCandidateRawAsync(
         SubtitleCandidate cand, int season, int episode, CancellationToken ct)
     {
+        // F-M456: the verdict of THIS attempt only. Without the reset a candidate that is thrown
+        // away before any request inherits the previous candidate's answer — measured on
+        // "A Bona Fide Killer" S01E10, rejected as "no bytes (HTTP 200)" without a single request.
+        _api.ResetDownloadStatus();
+
         // F-M215: a season or range pack must be resolved to the episode we are
         // actually working on. The search runs with unpack=1, so the candidate
         // carries the pack's file list; pick the entry whose season/episode matches

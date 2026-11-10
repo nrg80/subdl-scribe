@@ -267,6 +267,22 @@ internal static class ReportingRun
         Check(pipeline.Contains("cand.UnpackFiles.Count <= 1", StringComparison.Ordinal),
             "F-M455: one member is a single file, so an ordinary candidate can be reported (the old test demanded none)");
 
+        // F-M456 (measured 10.11.2026): a candidate that is thrown away BEFORE any request was
+        // explained with the previous candidate's answer — "no bytes (HTTP 200)" on a candidate
+        // nobody had asked about. The verdict is cleared per attempt, and only a real 200 counts as
+        // an empty answer. Driven through the REAL client.
+        var probe = new SubdlApiClient(new System.Net.Http.HttpClient()) { ApiKey = "00000000000000000000000000000000" };
+        probe.ResetDownloadStatus();
+        Check(probe.LastFileDownloadStatus == 0 && probe.LastFileDownloadBytes == 0 && string.IsNullOrEmpty(probe.LastFileDownloadError),
+            "F-M456: a cleared verdict carries no status, no bytes and no error");
+        Check(probe.LastFileDownloadLabel == "no request made",
+            "F-M456: the reject line says 'no request made' instead of naming a status that came from somewhere else");
+        Check(pipeline.Contains("_api.ResetDownloadStatus();", StringComparison.Ordinal),
+            "F-M456: every download attempt starts by clearing the verdict");
+        Check(!pipeline.Contains("LastFileDownloadStatus is 200 or 0", StringComparison.Ordinal)
+              && pipeline.Contains("_api.LastFileDownloadStatus == 200", StringComparison.Ordinal),
+            "F-M456: only a real 200 counts as an empty answer — status 0 means we never asked");
+
         var liveRun = new DownloadRunSummary { Downloaded = 3, Reported = 2 };
         Check(StatusCounterDelta.From(null, liveRun).BrokenReported == 2,
             "F-M455: accepted reports reach the statistics row");

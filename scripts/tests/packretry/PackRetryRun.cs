@@ -486,6 +486,28 @@ internal static class Program
         Check(channel.FindUnpackFile(5, 1) == null,
             "F-M454: \"DDP5.1\" is a sound format, not season 5 episode 1 — one digit after the dot is not read");
 
+        // ---------------------------------------------------------------------------------------
+        // F-M457 (measured 10.11.2026 on SubDL): uploads named in styled Unicode — "[𝐂𝐨𝐟𝐟𝐞𝐞𝐏𝐫𝐢𝐬𝐨𝐧]
+        // … 𝐒𝟎𝐄𝟏𝟎 𝐕𝐊 𝐖𝐄𝐁" — carried the right file and were thrown away as an unresolvable pack,
+        // because the letters of the episode marker were MATHEMATICAL BOLD characters. The styling
+        // is folded to ASCII before reading, and a single-digit "S0" counts as a dropped digit.
+        // Driven through the REAL reader.
+        // ---------------------------------------------------------------------------------------
+        var styled = new SubtitleCandidate { ReleaseName = "Styled", Url = "x.zip", Language = "EN" };
+        styled.UnpackFiles.Add(Member("[\U0001D41C\U0001D428\U0001D41F\U0001D41F\U0001D41E\U0001D41E\U0001D429\U0001D42B\U0001D422\U0001D42C\U0001D428\U0001D427] A BONA FIDE KILLER \U0001D412\U0001D7CE\U0001D404\U0001D7CF\U0001D7CE VK WEB EN.srt", 0, 0, hi: false));
+        Check(styled.FindUnpackFile(1, 10)?.Name.EndsWith("EN.srt", StringComparison.Ordinal) == true,
+            "F-M457: bold mathematical letters fold to ASCII — \"𝐒𝟎𝐄𝟏𝟎\" is read as S0E10 and the file is found");
+
+        var specials = new SubtitleCandidate { ReleaseName = "Specials", Url = "x.zip", Language = "EN" };
+        specials.UnpackFiles.Add(Member("Show.S00E05.Behind.the.Scenes.srt", 0, 0, hi: false));
+        Check(specials.FindUnpackFile(1, 5) == null,
+            "F-M457: only the single-digit \"S0\" counts as a dropped digit — a written S00 stays season 0");
+
+        var fullwidth = new SubtitleCandidate { ReleaseName = "Fullwidth", Url = "x.zip", Language = "EN" };
+        fullwidth.UnpackFiles.Add(Member("Ｍｙ Ｓｈｏｗ Ｓ０２Ｅ０７.ｓｒｔ", 0, 0, hi: false));
+        Check(fullwidth.FindUnpackFile(2, 7) != null,
+            "F-M457: fullwidth forms fold too — east-asian releases are readable");
+
         var resolution = new SubtitleCandidate { ReleaseName = "Aufloesung", Url = "x.zip", Language = "EN" };
         resolution.UnpackFiles.Add(Member("The.Middle.S06.1080p.srt", 0, 0, hi: false));
         Check(resolution.FindUnpackFile(6, 10) == null,

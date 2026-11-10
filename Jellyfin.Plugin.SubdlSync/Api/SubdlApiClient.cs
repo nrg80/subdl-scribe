@@ -1487,12 +1487,29 @@ public sealed class SubdlApiClient
     /// carried nothing, which is the only case that may be reported as a broken upload.</summary>
     public int LastFileDownloadBytes { get; private set; }
 
-    /// <summary>Short label for a reject line — status plus API error, never a guess.</summary>
+    /// <summary>Short label for a reject line — status plus API error, never a guess.
+    /// F-M456: status 0 now says "no request made" instead of "no status", because that is what it
+    /// means — a candidate the walk threw away before it ever asked the server.</summary>
     public string LastFileDownloadLabel =>
         LastFileDownloadStatus == 0
-            ? "no status"
+            ? "no request made"
             : "HTTP " + LastFileDownloadStatus +
               (string.IsNullOrEmpty(LastFileDownloadError) ? string.Empty : " " + LastFileDownloadError);
+
+    /// <summary>
+    /// F-M456 (measured 10.11.2026): clears the download verdict so a reject cannot be explained by
+    /// the PREVIOUS candidate's answer. "A Bona Fide Killer" S01E10 was rejected as
+    /// <c>no bytes (HTTP 200)</c> although no request had been made at all — the candidate's only
+    /// member could not be read as S1E10, the walk returned before asking, and the status left over
+    /// from the candidate before said 200 with nothing. That made a healthy upload look broken and
+    /// would have filed a false report. Every download attempt starts by clearing this.
+    /// </summary>
+    public void ResetDownloadStatus()
+    {
+        LastFileDownloadStatus = 0;
+        LastFileDownloadError = null;
+        LastFileDownloadBytes = 0;
+    }
 
     /// <summary>
     /// V2 single-file download by nId — GET /api/v2/subtitles/{nId}/download?format=file
@@ -2648,6 +2665,12 @@ public sealed class SubtitleCandidate
             return 0;
         }
 
+        // F-M457 (measured 10.11.2026, "A Bona Fide Killer" S01E10): uploads are named with styled
+        // Unicode letters — "[𝐂𝐨𝐟𝐟𝐞𝐞𝐏𝐫𝐢𝐬𝐨𝐧] … 𝐒𝟎𝐄𝟏𝟎 𝐕𝐊 𝐖𝐄𝐁" — and no pattern matched, so the
+        // candidate looked like a pack without our episode and was thrown away although its one
+        // file WAS the episode. Fold the styling back to ASCII before reading.
+        name = FoldStyledLetters(name);
+
         // The bare "season.episode" form is tried LAST and is anchored at the start on purpose.
         // Measured on SubDL (10.11.2026, "The Middle Season 6"): a whole season pack can name its
         // entries "6.01 Unbraceable You.srt" … "6.10 Pam Freakin' Staggs.srt" while the API reports
@@ -2670,8 +2693,13 @@ public sealed class SubtitleCandidate
                 continue;
             }
 
-            int sn = int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-            if (season > 0 && sn != season)
+            string snText = m.Groups[1].Value;
+            int sn = int.Parse(snText, System.Globalization.CultureInfo.InvariantCulture);
+            // F-M457: "S0E10" with a single-digit zero is a dropped digit, not season 0 — the same
+            // upload wrote it that way. "S00E05" is the specials convention and keeps its meaning,
+            // so only the single-digit form counts as unknown.
+            bool seasonUnknown = sn == 0 && snText.Length == 1;
+            if (season > 0 && !seasonUnknown && sn != season)
             {
                 return 0;
             }
@@ -2680,6 +2708,86 @@ public sealed class SubtitleCandidate
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// F-M457: folds styled Unicode letters and digits to ASCII — the mathematical alphanumerics
+    /// (bold/italic/script/fraktur/double-struck/sans-serif/monospace) and the fullwidth forms that
+    /// East-Asian releases use. Deliberately arithmetic instead of a Unicode normalisation call:
+    /// <see cref="string.Normalize(System.Text.NormalizationForm)"/> needs ICU and throws under
+    /// invariant globalization, which a Jellyfin host may well run. Each style block carries its 52
+    /// letter slots in order (A–Z then a–z), even where Unicode leaves a slot unassigned because a
+    /// letterlike character stands in for it, so an offset maps cleanly; the digits come in runs of
+    /// ten, so a modulo ten reads them all.
+    /// </summary>
+    /// <param name="text">File or release name.</param>
+    /// <returns>The same name with the styling folded away.</returns>
+    private static string FoldStyledLetters(string text)
+    {
+        int[] capitalStarts =
+        {
+            0x1D400, 0x1D434, 0x1D468, 0x1D49C, 0x1D4D0, 0x1D504, 0x1D538,
+            0x1D56C, 0x1D5A0, 0x1D5D4, 0x1D608, 0x1D63C, 0x1D670,
+        };
+
+        var sb = new System.Text.StringBuilder(text.Length);
+        bool changed = false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            int width = char.IsHighSurrogate(text[i]) && i + 1 < text.Length
+                        && char.IsLowSurrogate(text[i + 1]) ? 2 : 1;
+            int cp = width == 2 ? char.ConvertToUtf32(text[i], text[i + 1]) : text[i];
+            char folded = '\0';
+
+            if (cp >= 0x1D7CE && cp <= 0x1D7FF)
+            {
+                folded = (char)('0' + ((cp - 0x1D7CE) % 10));
+            }
+            else if (cp >= 0x1D400 && cp <= 0x1D7CB)
+            {
+                foreach (int start in capitalStarts)
+                {
+                    if (cp < start || cp >= start + 52)
+                    {
+                        continue;
+                    }
+
+                    int off = cp - start;
+                    folded = (char)(off < 26 ? 'A' + off : 'a' + (off - 26));
+                    break;
+                }
+            }
+            else if (cp == 0x210E)
+            {
+                folded = 'h'; // the italic small h lives outside the block
+            }
+            else if (cp >= 0xFF10 && cp <= 0xFF19)
+            {
+                folded = (char)('0' + (cp - 0xFF10));
+            }
+            else if (cp >= 0xFF21 && cp <= 0xFF3A)
+            {
+                folded = (char)('A' + (cp - 0xFF21));
+            }
+            else if (cp >= 0xFF41 && cp <= 0xFF5A)
+            {
+                folded = (char)('a' + (cp - 0xFF41));
+            }
+
+            if (folded == '\0')
+            {
+                sb.Append(text, i, width);
+            }
+            else
+            {
+                sb.Append(folded);
+                changed = true;
+            }
+
+            i += width - 1;
+        }
+
+        return changed ? sb.ToString() : text;
     }
 
     private static int GetInt(JsonElement el, string name)
