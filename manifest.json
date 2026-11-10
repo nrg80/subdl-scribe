@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/logo.png",
     "versions": [
       {
-        "version": "12.1.12.356",
-        "changelog": "v12.1.12.356: the statistics row reads \"Downloads: Broken subtitles reported\" like every other row, the figures are pinned to the right edge of the field so they end on the same line as the status columns, and the block header is just \"Status\" (F-M459).",
+        "version": "12.1.12.359",
+        "changelog": "v12.1.12.359: a main-path verdict is filed where it is measured — the only flush sat behind \"nothing was saved for this language\", so a broken top candidate went unreported as soon as a later candidate served the episode (F-M462).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.356-dev/Jellyfin.Plugin.SubdlSync_12.1.12.356.zip",
-        "checksum": "15377bd3518074ff147996285078e5b0",
-        "timestamp": "2026-11-10T04:10:55Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.359-dev/Jellyfin.Plugin.SubdlSync_12.1.12.359.zip",
+        "checksum": "12b36834b76b8f5e39f99c76e726a41b",
+        "timestamp": "2026-11-10T06:01:48Z"
       }
     ]
   }
