@@ -306,6 +306,16 @@ internal static class ReportingRun
               && pipeline.Contains("string.Equals(row.SubdlId, hi.SubdlId, StringComparison.Ordinal)", StringComparison.Ordinal),
             "F-M460: the SDH finding is queued right there, not at a run end that only runs when nothing was saved");
 
+        // F-M462 (operator order 10.11.2026): a gate verdict died as soon as a LATER candidate saved
+        // the language, because the only flush sat behind "nothing was saved". It is filed where it is
+        // measured now — before the walk moves on.
+        int gateFact = pipeline.IndexOf("qaRejectedFacts[cand.SubdlId] = new ReportFacts", StringComparison.Ordinal);
+        int gateFile = pipeline.IndexOf("F-M462", StringComparison.Ordinal);
+        int runEndFlush = pipeline.IndexOf("if (!savedAny && attempts > 0)", StringComparison.Ordinal);
+        Check(gateFact > 0 && gateFile > gateFact && runEndFlush > gateFile
+              && pipeline[gateFile..runEndFlush].Contains("QueueReport(row);", StringComparison.Ordinal),
+            "F-M462: the main-path verdict is queued where it is measured, not behind 'nothing was saved'");
+
         string apiSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "SubdlApiClient.cs"));
         // F-M461 (measured 10.11.2026): the v1 download route recorded no verdict at all, so its
         // rejects quoted the previous v2 call — the source of both misleading labels we chased

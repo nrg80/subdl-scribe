@@ -2011,6 +2011,34 @@ public sealed class DownloadPipeline : IDisposable
                         }
 
                         qaRejectedFacts[cand.SubdlId] = new ReportFacts(cand.NId, gateFinding, cand.ReleaseName);
+
+                        // F-M462 (operator order 10.11.2026): the finding is filed HERE, not at the end
+                        // of the language walk. That flush only runs when NOTHING was saved for the
+                        // language, so a verdict on candidate 1 died the moment candidate 2 was saved
+                        // — a measured verdict does not improve by the episode being served by another
+                        // upload. Same shape as the SDH filing (F-M460), and the ReportedUtc mark keeps
+                        // the run-end pass from filing it twice.
+                        if (_config.ReportBrokenSubtitles)
+                        {
+                            _qaFails.RecordSkippedCandidates(
+                                item.Id.ToString(), lang, new[] { cand.SubdlId },
+                                RejectReason.CandidateRejected,
+                                new Dictionary<string, ReportFacts>
+                                {
+                                    [cand.SubdlId] = qaRejectedFacts[cand.SubdlId]
+                                },
+                                "qa");
+
+                            foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                            {
+                                if (row.ReportedUtc == null
+                                    && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                    && string.Equals(row.SubdlId, cand.SubdlId, StringComparison.Ordinal))
+                                {
+                                    QueueReport(row);
+                                }
+                            }
+                        }
                     }
 
                     if (_config.LogMode >= LogLevelMode.Verbose)
