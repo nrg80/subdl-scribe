@@ -12,9 +12,9 @@
         "version": "12.1.12.359",
         "changelog": "v12.1.12.359: a main-path verdict is filed where it is measured — the only flush sat behind \"nothing was saved for this language\", so a broken top candidate went unreported as soon as a later candidate served the episode (F-M462).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.359-dev/Jellyfin.Plugin.SubdlSync_12.1.12.359.zip",
-        "checksum": "12b36834b76b8f5e39f99c76e726a41b",
-        "timestamp": "2026-11-10T06:01:48Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.359/Jellyfin.Plugin.SubdlSync_12.1.12.359.zip",
+        "checksum": "eafda69574c5e8457ff58cc82cac0a31",
+        "timestamp": "2026-11-10T06:10:48Z"
       }
     ]
   }
