@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.364",
-        "changelog": "v12.1.12.364: the per-file language check reads the stream list by media id — a season read as folder children carries no media sources, so every language was denied (F-M468).",
+        "version": "12.1.12.365",
+        "changelog": "v12.1.12.365: a pack carries ONE release — the release group is binding even when every episode is on disk; a season split over several encodes no longer becomes a pack (F-M469).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.364-dev/Jellyfin.Plugin.SubdlSync_12.1.12.364.zip",
-        "checksum": "f5ba5f7b8de9135ec46a3dda9f0fc663",
-        "timestamp": "2026-11-11T19:09:52Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.365-dev/Jellyfin.Plugin.SubdlSync_12.1.12.365.zip",
+        "checksum": "cd04b8a051304d7fe6e141f2222fb8b6",
+        "timestamp": "2026-11-11T19:49:04Z"
       }
     ]
   }
