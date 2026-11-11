@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.359",
-        "changelog": "v12.1.12.359: a main-path verdict is filed where it is measured — the only flush sat behind \"nothing was saved for this language\", so a broken top candidate went unreported as soon as a later candidate served the episode (F-M462).",
+        "version": "12.1.12.360",
+        "changelog": "v12.1.12.360: the picked file name now travels into the download — a pack whose entries carry no SxxExx (\"16 - Relevance.en.srt\") could not be resolved, so the same archive was refetched once per episode and ate a day's quota for a body already on disk (F-M463).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.359-dev/Jellyfin.Plugin.SubdlSync_12.1.12.359.zip",
-        "checksum": "12b36834b76b8f5e39f99c76e726a41b",
-        "timestamp": "2026-11-10T06:01:48Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.360-dev/Jellyfin.Plugin.SubdlSync_12.1.12.360.zip",
+        "checksum": "3dff0e79cef7b8c1975212046bde7510",
+        "timestamp": "2026-11-11T00:44:57Z"
       }
     ]
   }
