@@ -4191,16 +4191,53 @@ public sealed class UploadPipeline : IPackFiller
             .ToList();
     }
 
-    private static (string? ImdbId, string? TmdbId, int Season, int Episode, bool IsSeries) ResolveIdsRaw(BaseItem item)
+    /// <summary>
+    /// F-M467 (measured 11.11.2026 on VisionQuest tt23112594): the IDS OF THE SERIES, and the series is
+    /// resolved even when the episode does not carry it. <c>Episode.Series</c> is a convenience that is
+    /// NULL for items read as children of a season folder — which is exactly how the pack phase reads a
+    /// season it did not work this run. Every per-FILE language check then compared against a null id,
+    /// answered "no" for every language, and no pack was built although the files carried 25 languages
+    /// in all eight episodes. The lookup by <c>SeriesId</c> is the second witness; it is what makes a
+    /// pack independent of whether the series object happened to be loaded.
+    /// </summary>
+    /// <param name="ep">Episode item.</param>
+    /// <param name="byId">Resolves an item id, usually the library manager.</param>
+    /// <returns>The series' IMDb and TMDB ids, or nulls when the series cannot be reached.</returns>
+    internal static (string? ImdbId, string? TmdbId) SeriesIdsOf(Episode ep, Func<Guid, BaseItem?>? byId)
+    {
+        // The convenience getter throws when the episode cannot resolve its series (measured in the
+        // harness: Episode.get_Series() raises instead of answering null), so the access is guarded —
+        // a lookup that cannot answer must never cost the pack phase.
+        MediaBrowser.Controller.Entities.TV.Series? series = null;
+        try
+        {
+            series = ep.Series;
+        }
+        catch (Exception)
+        {
+            series = null;
+        }
+
+        if (series == null && ep.SeriesId != Guid.Empty && byId != null)
+        {
+            series = byId(ep.SeriesId) as MediaBrowser.Controller.Entities.TV.Series;
+        }
+
+        string? imdb = null;
+        string? tmdb = null;
+        series?.ProviderIds?.TryGetValue("Imdb", out imdb);
+        series?.ProviderIds?.TryGetValue("Tmdb", out tmdb);
+        return (imdb, tmdb);
+    }
+
+    private (string? ImdbId, string? TmdbId, int Season, int Episode, bool IsSeries) ResolveIdsRaw(BaseItem item)
     {
         switch (item)
         {
             case Episode ep:
-                // F-M9/F-M28: SERIES IMDB, never episode IMDB
-                string? seriesImdb = null;
-                string? seriesTmdb = null;
-                ep.Series?.ProviderIds?.TryGetValue("Imdb", out seriesImdb);
-                ep.Series?.ProviderIds?.TryGetValue("Tmdb", out seriesTmdb);
+                // F-M9/F-M28: SERIES IMDB, never episode IMDB — and F-M467: the series is resolved by id
+                // when the episode does not carry it.
+                var (seriesImdb, seriesTmdb) = SeriesIdsOf(ep, id => _libraryManager.GetItemById(id));
                 return (seriesImdb, seriesTmdb, ep.ParentIndexNumber ?? -1, ep.IndexNumber ?? -1, true);
             case Movie movie:
                 string? imdb = null;
@@ -4220,14 +4257,13 @@ public sealed class UploadPipeline : IPackFiller
     /// as 3× the call period). Returns the fresh item or null on timeout.
     /// </summary>
 
-    private static (string? ImdbId, int Season, int Episode, bool IsSeries) ResolveIds(BaseItem item)
+    private (string? ImdbId, int Season, int Episode, bool IsSeries) ResolveIds(BaseItem item)
     {
         switch (item)
         {
             case Episode ep:
-                // F-M9/F-M28: SERIES IMDB, never episode IMDB
-                string? seriesImdb = null;
-                ep.Series?.ProviderIds?.TryGetValue("Imdb", out seriesImdb);
+                // F-M9/F-M28: SERIES IMDB, never episode IMDB — F-M467 resolves the series by id.
+                var (seriesImdb, _) = SeriesIdsOf(ep, id => _libraryManager.GetItemById(id));
                 return (seriesImdb, ep.ParentIndexNumber ?? -1, ep.IndexNumber ?? -1, true);
             case Movie movie:
                 string? imdb = null;

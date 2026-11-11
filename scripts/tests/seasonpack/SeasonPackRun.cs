@@ -717,6 +717,37 @@ internal static class Program
                 && coordinatorSrc2.IndexOf("DeletePublishedSubtitleAsync(single.Id") < coordinatorSrc2.IndexOf("await _api.UploadSeasonPackAsync"),
             "F-M391 stays as ordered: the absorbed singles are deleted BEFORE the pack goes up");
 
+        // F-M467 (measured 11.11.2026 on VisionQuest tt23112594): the pack phase reads a season as
+        // children of the folder it did not work this run — there Episode.Series is NULL, and every
+        // per-file language check compared against a null id. The series is resolved BY ID now, and
+        // the real helper is asked here with an episode that carries nothing but its series id.
+        var idsOf = typeof(UploadPipeline).GetMethod("SeriesIdsOf",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Check(idsOf != null, "F-M467: the series-id helper exists");
+
+        var loadedSeries = new MediaBrowser.Controller.Entities.TV.Series();
+        loadedSeries.ProviderIds["Imdb"] = "tt23112594";
+        loadedSeries.ProviderIds["Tmdb"] = "213375";
+        Guid seriesId = Guid.NewGuid();
+
+        var bare = new MediaBrowser.Controller.Entities.TV.Episode { SeriesId = seriesId };
+        Func<Guid, MediaBrowser.Controller.Entities.BaseItem?> lookup = id => id == seriesId ? loadedSeries : null;
+        var resolved = ((string? ImdbId, string? TmdbId))idsOf!.Invoke(null, new object?[] { bare, lookup })!;
+        Check(resolved.ImdbId == "tt23112594" && resolved.TmdbId == "213375",
+            "F-M467: an episode without a loaded series still resolves the SERIES ids — through its series id");
+
+        var unresolved = ((string? ImdbId, string? TmdbId))idsOf!.Invoke(null, new object?[] { bare, null })!;
+        Check(unresolved.ImdbId == null,
+            "F-M467: without a lookup nothing is invented — a null stays a null");
+
+        string uploadSrc2 = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "UploadPipeline.cs"));
+        Check(uploadSrc2.Contains("series = ep.Series;", StringComparison.Ordinal)
+              && uploadSrc2.IndexOf("series = ep.Series;", StringComparison.Ordinal)
+                 < uploadSrc2.IndexOf("byId(ep.SeriesId)", StringComparison.Ordinal),
+            "F-M467: a loaded series is used as it is — the lookup is the second witness, not the first");
+        Check(uploadSrc2.Contains("var (seriesImdb, seriesTmdb) = SeriesIdsOf(ep, id => _libraryManager.GetItemById(id));", StringComparison.Ordinal),
+            "F-M467: every id resolution goes through the one helper — the pack phase and the single path agree");
+
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
             : $"seasonpack: {_checks} checks, {Failures.Count} failed.");

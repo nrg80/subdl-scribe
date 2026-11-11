@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.125
-**Status:** Implementation — v12.1.12.362.
+**Version:** 2.126
+**Status:** Implementation — v12.1.12.363.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,8 +16,8 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 76 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 24 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 77 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 25 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397, F-M454
@@ -529,6 +529,8 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 **F-M465 [D]:** **Der Upload-Nachlauf hängt am Upload.** Ein Upload-Lauf, der nichts hochgeladen hat, stellt keinen Nachlauf-Termin; ein Termin, der von anderer Stelle steht, bleibt unangetastet. Ein Nutzerstopp storniert weiterhin.
 
 **F-M466 [D]:** **Staffel-Memo mit Fingerabdruck.** Je Serie, Staffel, Sprache und Variante wird der gebaute Pack mit einem Fingerabdruck über seine Mitglieder gemerkt. Gleicher Fingerabdruck bedeutet derselben Pack: nichts wird erneut abgeleitet oder gesendet. Ein anderer Fingerabdruck bedeutet einen neuen Pack. Eine Zeile ohne Fingerabdruck fällt auf den Mitgliedervergleich zurück.
+
+**F-M467 [D]:** **Die Serie wird über ihre Id aufgelöst, nicht über die Bequemlichkeit des Objekts.** Trägt eine Folge ihre Serie nicht (die Pack-Phase liest eine Staffel als Ordnerkinder), wird sie über `SeriesId` geholt; ein Zugriff, der nicht antworten kann, kostet die Pack-Phase nicht. Jede Sprachprüfung je Datei vergleicht gegen die Ids der Serie, nie gegen die der Folge.
 
 
 ### 4.2 Dry Run — Download
@@ -2065,6 +2067,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T173:** Die `packs`-Tabelle hält, was sie verspricht (F-M390).
 
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
+
+**T190:** Die Serie wird über ihre Id aufgelöst — ohne geladene Serie, ohne Lookup, und mit Vorrang der geladenen Serie (F-M467). **4 Prüfungen.**
 
 **T189:** Der Upload-Nachlauf hängt am Upload, das Staffel-Memo am Fingerabdruck (F-M465, F-M466). **7 Prüfungen.**
 
