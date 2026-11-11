@@ -564,6 +564,40 @@ internal static class Program
         Check(Picked(null) == null,
             "F-M463: without a pick and without a readable episode the archive yields nothing — which is why the pick exists");
 
+        // F-M465 (operator decision 11.11.2026, "nur bei > 0 uploaded anmahnen"): a run that uploaded
+        // nothing arms no postprocessing order; an order someone else placed is left alone.
+        string uploadSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "UploadPipeline.cs"));
+        Check(uploadSource.Contains("else if (summary.Uploaded > 0)", StringComparison.Ordinal)
+              && uploadSource.Contains("nothing uploaded — no postprocessing order armed (F-M465)", StringComparison.Ordinal),
+            "F-M465: the postprocessing is only armed when the run actually uploaded something");
+
+        // F-M466: the memo per season + language — its key is the fingerprint over the members, and it
+        // answers "same pack?" in one comparison. The hash itself is the REAL one used for the name.
+        string sameA = SeasonPack.PackHash(new[] { "aaa", "bbb", "ccc" });
+        string sameB = SeasonPack.PackHash(new[] { "aaa", "bbb", "ccc" });
+        string other = SeasonPack.PackHash(new[] { "aaa", "bbb", "ddd" });
+        string fewer = SeasonPack.PackHash(new[] { "aaa", "bbb" });
+        Check(sameA == sameB,
+            "F-M466: identical members give the same fingerprint — that is what the memo compares");
+        Check(other != sameA && fewer != sameA,
+            "F-M466: one changed member or one member less is a different fingerprint, so the pack is new");
+
+        string packSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "SeasonPackCoordinator.cs"));
+        Check(packSource.Contains("string packFingerprint = SeasonPack.PackHash(", StringComparison.Ordinal)
+              && packSource.Contains("packFingerprint));", StringComparison.Ordinal),
+            "F-M466: the fingerprint is computed once and written into the memo row");
+        Check(packSource.Contains("recorded.Fingerprint", StringComparison.Ordinal)
+              && packSource.IndexOf("recorded.Fingerprint", StringComparison.Ordinal)
+                 < packSource.IndexOf("bool sameMembers", StringComparison.Ordinal),
+            "F-M466: the memo is consulted BEFORE members are compared — a hit ends the question");
+        string entitySource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Data", "Entities.cs"));
+        Check(entitySource.Contains("public string? Fingerprint { get; set; }", StringComparison.Ordinal),
+            "F-M466: the memo row carries the fingerprint");
+        string dbSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Data", "SubdlDbContext.cs"));
+        Check(dbSource.Contains("ALTER TABLE packs ADD COLUMN Fingerprint TEXT NULL;", StringComparison.Ordinal)
+              && dbSource.Contains("EnsurePackColumns();", StringComparison.Ordinal),
+            "F-M466: an older data file gets the column on start, guarded by the table's own column list");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

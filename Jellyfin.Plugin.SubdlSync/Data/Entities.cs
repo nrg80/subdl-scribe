@@ -718,6 +718,16 @@ public class PackEntity
     /// </summary>
     public string? AbsorbedIds { get; set; }
 
+    /// <summary>
+    /// F-M466: fingerprint of the pack as it was built — the hash over its member contents plus the
+    /// release it carries. It answers "is the pack the same one?" in one comparison, without
+    /// re-deriving anything from the subtitle rows: equal fingerprint means the same members in the
+    /// same shape, so nothing is re-sent; a different one means the set changed and the pack is
+    /// legitimately new. Rows written before this column existed carry null and fall back to the
+    /// member comparison.
+    /// </summary>
+    public string? Fingerprint { get; set; }
+
     /// <summary>When the row was first written (UTC).</summary>
     public DateTime Created { get; set; } = DateTime.UtcNow;
 

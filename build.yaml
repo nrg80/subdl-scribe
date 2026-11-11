@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.361"
+version: "12.1.12.362"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.362: the upload postprocessing is only armed by a run that uploaded something (F-M465), and the season pack memo carries a fingerprint over its members so a repeat run answers "same pack?" in one comparison (F-M466).
   v12.1.12.361: the download verdict travels with the call that produced it (no state on the client) and an archive member is resolved once — pick by name, episode match on the same body, and only then a refetch; a pack is fetched over the route its file list came from (F-M464).
   v12.1.12.360: the picked file name now travels into the download — a pack whose entries carry no SxxExx ("16 - Relevance.en.srt") could not be resolved, so the same archive was refetched once per episode and ate a day's quota for a body already on disk (F-M463).
   v12.1.12.359: a main-path verdict is filed where it is measured — the only flush sat behind "nothing was saved for this language", so a broken top candidate went unreported as soon as a later candidate served the episode (F-M462).

@@ -99,7 +99,7 @@ public sealed class SubdlDbContext : IDisposable
     // document store, named subdl-scribe.sqlite (F-M326). An older build opening this file finds no
     // document header and reports a broken store; the marker is what makes that loud instead of
     // silent. The old file is imported once on first start and kept as a .bak (F-M327).
-    public const int CurrentSchemaVersion = 8;
+    public const int CurrentSchemaVersion = 9;
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
@@ -124,6 +124,7 @@ public sealed class SubdlDbContext : IDisposable
         EnsurePacksTable();
         EnsureReportColumns();
         EnsureStatusColumns();
+        EnsurePackColumns();
         _db.ConfigurePragmas();
 
         Meta = new SubdlSet<MetaEntity>(_db, e => e.Id);
@@ -259,6 +260,7 @@ public sealed class SubdlDbContext : IDisposable
                 + "PackId TEXT NULL, "
                 + "Episodes TEXT NOT NULL DEFAULT '', "
                 + "AbsorbedIds TEXT NULL, "
+                + "Fingerprint TEXT NULL, "
                 + "Created TEXT NOT NULL DEFAULT '', "
                 + "Updated TEXT NOT NULL DEFAULT '');");
             _db.Database.ExecuteSqlRaw("CREATE INDEX IF NOT EXISTS IX_packs_ImdbId ON packs (ImdbId);");
@@ -320,6 +322,43 @@ public sealed class SubdlDbContext : IDisposable
         catch (Exception ex)
         {
             _logger?.LogWarning("[SubDL] could not add the report columns (continuing): {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// F-M466: adds the pack fingerprint column. A table that already carries it is left alone, so
+    /// the pass runs on every start and costs one PRAGMA.
+    /// </summary>
+    private void EnsurePackColumns()
+    {
+        try
+        {
+            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var cmd = _db.Database.GetDbConnection().CreateCommand())
+            {
+                if (cmd.Connection!.State != System.Data.ConnectionState.Open)
+                {
+                    cmd.Connection.Open();
+                }
+
+                cmd.CommandText = "PRAGMA table_info(packs);";
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    existing.Add(reader.GetString(1));
+                }
+            }
+
+            const string Name = "Fingerprint";
+            if (!existing.Contains(Name))
+            {
+                _db.Database.ExecuteSqlRaw("ALTER TABLE packs ADD COLUMN Fingerprint TEXT NULL;");
+                LogUtil.Normal(_logger, "[SubDL] data file: column {Column} added to packs.", Name);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("[SubDL] could not add the pack columns (continuing): {Msg}", ex.Message);
         }
     }
 

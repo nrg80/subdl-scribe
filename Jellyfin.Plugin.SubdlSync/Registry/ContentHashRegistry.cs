@@ -1286,6 +1286,7 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="packId">SubDL id (or the pack name when the answer carried no id).</param>
     /// <param name="episodes">Episode numbers the pack carries.</param>
     /// <param name="absorbedIds">SubDL ids of single uploads folded into this pack, when known.</param>
+    /// <param name="fingerprint">F-M466: hash over the pack's member contents — the memo's key.</param>
     public void RecordPack(
         string imdbId,
         int season,
@@ -1294,7 +1295,8 @@ public sealed class ContentHashRegistry : IDisposable
         string? releaseName,
         string? packId,
         IEnumerable<int> episodes,
-        IEnumerable<string>? absorbedIds = null)
+        IEnumerable<string>? absorbedIds = null,
+        string? fingerprint = null)
     {
         if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || string.IsNullOrWhiteSpace(language))
         {
@@ -1314,6 +1316,8 @@ public sealed class ContentHashRegistry : IDisposable
             PackId = packId,
             Episodes = string.Join(",", episodes.OrderBy(e => e).Select(e => e.ToString(System.Globalization.CultureInfo.InvariantCulture))),
             AbsorbedIds = absorbedIds == null ? existing?.AbsorbedIds : string.Join(",", absorbedIds),
+            // F-M466: the fingerprint is the memo — same members in the same shape mean the same pack.
+            Fingerprint = string.IsNullOrWhiteSpace(fingerprint) ? existing?.Fingerprint : fingerprint,
             Created = existing?.Created ?? DateTime.UtcNow,
             Updated = DateTime.UtcNow,
         });

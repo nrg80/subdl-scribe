@@ -497,8 +497,12 @@ public sealed class SeasonPackCoordinator
         var files = ordered
             .Select(c => (FileName: SeasonPack.MemberFileName(key.Season, c.Episode, c.Item?.Name, key.Lang, key.Hi), Srt: c.Srt))
             .ToList();
-        string name = SeasonPack.Name(
-            key.ImdbId, key.Season, SeasonPack.PackHash(files.Select(f => ContentHashRegistry.ComputeHash(f.Srt))), key.Lang, key.Hi);
+        // F-M466: the fingerprint over the members IS the pack's identity — it already sits in the
+        // name, and it is stored on the memo row so a later run answers "same pack?" in one compare
+        // instead of re-deriving the member list. Computed once, used for the name, the guard and the
+        // memo.
+        string packFingerprint = SeasonPack.PackHash(files.Select(f => ContentHashRegistry.ComputeHash(f.Srt)));
+        string name = SeasonPack.Name(key.ImdbId, key.Season, packFingerprint, key.Lang, key.Hi);
         var first = ordered[0];
 
         if (_config.DryRun)
@@ -520,6 +524,20 @@ public sealed class SeasonPackCoordinator
         var recorded = _registry.GetPack(key.ImdbId, key.Season, key.Lang, key.Hi);
         if (recorded != null)
         {
+            // F-M466 (memo per season + language with a fingerprint): the stored fingerprint is the
+            // answer to "is this the pack we already built?". Equal means same members in the same
+            // shape — nothing to re-derive, nothing to re-send. A row from before the column existed
+            // carries null and falls through to the member comparison below.
+            if (!string.IsNullOrEmpty(recorded.Fingerprint)
+                && string.Equals(recorded.Fingerprint, packFingerprint, StringComparison.Ordinal))
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season memo hit — {Imdb} S{Season} [{Lang}]: fingerprint {Fingerprint} unchanged, nothing is re-sent.",
+                    key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), packFingerprint);
+                return;
+            }
+
             string want = string.Join(",", ordered.Select(c => c.Episode).OrderBy(e => e));
             bool sameMembers = string.Equals(recorded.Episodes, want, StringComparison.Ordinal);
             bool sameRelease = string.IsNullOrEmpty(recorded.ReleaseName)
@@ -690,7 +708,8 @@ public sealed class SeasonPackCoordinator
             first.ReleaseName,
             packId,
             ordered.Select(x => x.Episode),
-            deletedIds.Count > 0 ? deletedIds : null));
+            deletedIds.Count > 0 ? deletedIds : null,
+            packFingerprint));
 
         _countUploaded($"{key.ImdbId} S{key.Season} [{key.Lang}]", ordered.Count);
         LogUtil.Normal(

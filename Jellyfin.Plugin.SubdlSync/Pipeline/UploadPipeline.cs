@@ -1789,10 +1789,19 @@ public sealed class UploadPipeline : IPackFiller
                 ScheduledTasks.SubdlSchedulerCoordinator.Instance?.CancelUploadPostprocessing(
                     $"upload run stopped by the user ({summary.Uploaded} uploaded)");
             }
-            else
+            else if (summary.Uploaded > 0)
             {
                 ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ArmUploadPostprocessing(
                     $"upload run ended ({summary.Uploaded} uploaded)");
+            }
+            else
+            {
+                // F-M465 (operator decision 11.11.2026, "nur bei > 0 uploaded anmahnen"): a run that
+                // uploaded nothing has nothing for the postprocessing to remap, so it arms no order.
+                // An order someone else placed stays untouched — this run does not own it.
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] upload: nothing uploaded — no postprocessing order armed (F-M465).");
             }
 
             PipelineRunLock.Release(_logger, "upload");
