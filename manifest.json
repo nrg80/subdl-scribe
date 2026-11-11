@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.362",
-        "changelog": "v12.1.12.362: the upload postprocessing is only armed by a run that uploaded something (F-M465), and the season pack memo carries a fingerprint over its members so a repeat run answers \"same pack?\" in one comparison (F-M466).",
+        "version": "12.1.12.363",
+        "changelog": "v12.1.12.363: the series is resolved by its id when an episode does not carry it — the pack phase reads a season as folder children, where Episode.Series is null (or throws), so every per-file language check compared against nothing and no pack was built (F-M467).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.362/Jellyfin.Plugin.SubdlSync_12.1.12.362.zip",
-        "checksum": "e5c11686c82f75af8c5a8056246b38cd",
-        "timestamp": "2026-11-11T01:59:28Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.363-dev/Jellyfin.Plugin.SubdlSync_12.1.12.363.zip",
+        "checksum": "9e68d1d857a4adfcd5dd524da221a4af",
+        "timestamp": "2026-11-11T18:56:37Z"
       }
     ]
   }
