@@ -757,6 +757,40 @@ internal static class Program
                  < uploadSrc2.IndexOf("?? item.GetMediaStreams())", StringComparison.Ordinal),
             "F-M468: the object's own list is only the fallback for a manager that has nothing");
 
+        // F-M469 (operator 11.11.2026, "aber wir fassen nur denselben release zusammen"): a pack carries
+        // ONE release. The real helper is asked with the measured situation — eight episodes over three
+        // encodes (NeoNoir 4, MeGusta 2, two renamed files without a release).
+        var aired = new[] { 1, 2, 3, 4, 5, 6, 7, 8 };
+        var split = new (string Group, IEnumerable<int> Episodes)[]
+        {
+            ("NeoNoir", new[] { 1, 2, 7, 8 }),
+            ("MeGusta", new[] { 5, 6 }),
+            (SeasonPack.UnknownGroup, new[] { 3, 4 }),
+        };
+        Check(SeasonPack.GroupCoveringSeason(aired, split) == null,
+            "F-M469: a season split over three releases has no covering group — no pack");
+
+        var whole = new (string Group, IEnumerable<int> Episodes)[]
+        {
+            ("NeoNoir", new[] { 1, 2, 7, 8 }),
+            ("MeGusta", new[] { 1, 2, 3, 4, 5, 6, 7, 8 }),
+        };
+        Check(SeasonPack.GroupCoveringSeason(aired, whole) == "MeGusta",
+            "F-M469: the group that supplies every aired episode wins");
+
+        var nameless = new (string Group, IEnumerable<int> Episodes)[]
+        {
+            (SeasonPack.UnknownGroup, new[] { 1, 2, 3, 4, 5, 6, 7, 8 }),
+        };
+        Check(SeasonPack.GroupCoveringSeason(aired, nameless) == SeasonPack.UnknownGroup,
+            "F-M469: files that state no release are their own group and never win over a named one");
+
+        string uploadSrc3 = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "UploadPipeline.cs"));
+        Check(uploadSrc3.Contains("if (SeasonPack.IsComplete(aired, entry.Value) && completeGroup != null)", StringComparison.Ordinal),
+            "F-M469: being complete on disk is no longer enough — the group has to cover the season too");
+        Check(uploadSrc3.Contains("a pack carries one release, stays single", StringComparison.Ordinal),
+            "F-M469: the refusal says why it refused");
+
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
             : $"seasonpack: {_checks} checks, {Failures.Count} failed.");

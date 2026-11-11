@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.127
-**Status:** Implementation — v12.1.12.364.
+**Version:** 2.128
+**Status:** Implementation — v12.1.12.365.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,8 +16,8 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 78 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 26 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 79 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 27 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397, F-M454
@@ -533,6 +533,8 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 **F-M467 [D]:** **Die Serie wird über ihre Id aufgelöst, nicht über die Bequemlichkeit des Objekts.** Trägt eine Folge ihre Serie nicht (die Pack-Phase liest eine Staffel als Ordnerkinder), wird sie über `SeriesId` geholt; ein Zugriff, der nicht antworten kann, kostet die Pack-Phase nicht. Jede Sprachprüfung je Datei vergleicht gegen die Ids der Serie, nie gegen die der Folge.
 
 **F-M468 [D]:** **Spuren werden über die Id des Mediums gelesen.** Die Sprachprüfung je Datei fragt den Media-Source-Manager mit der Id des Eintrags; die eigene Spurliste des Objekts ist nur der Rückfall, wenn dieser nichts liefert. Eine Staffel, die als Ordnerkinder gelesen wird, trägt keine Mediensourcen — ihre eigene Liste ist leer und würde jede Sprache verneinen.
+
+**F-M469 [D]:** **Ein Pack trägt eine Release — auch wenn die Staffel vollständig auf der Platte liegt.** Gepackt wird nur die Release-Gruppe, die alle ausgestrahlten Folgen stellt; stellt keine Gruppe die Staffel, entsteht kein Pack, die Einzeluploads bleiben. Dateien ohne erkennbare Release bilden eine eigene Gruppe und gewinnen nie gegen eine benannte.
 
 
 ### 4.2 Dry Run — Download
@@ -2069,6 +2071,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T173:** Die `packs`-Tabelle hält, was sie verspricht (F-M390).
 
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
+
+**T192:** Die Gruppenwahl ist bindend: geteilte Staffel ohne Deckung, deckende Gruppe, namenlose Gruppe (F-M469). **5 Prüfungen.**
 
 **T191:** Die Spurliste wird über die Id des Mediums gelesen, die Objektliste bleibt Rückfall (F-M468). **2 Prüfungen.**
 
