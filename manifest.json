@@ -12,9 +12,9 @@
         "version": "12.1.12.362",
         "changelog": "v12.1.12.362: the upload postprocessing is only armed by a run that uploaded something (F-M465), and the season pack memo carries a fingerprint over its members so a repeat run answers \"same pack?\" in one comparison (F-M466).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.362-dev/Jellyfin.Plugin.SubdlSync_12.1.12.362.zip",
-        "checksum": "69a920ec0db72938c0fc7aa542c9d04f",
-        "timestamp": "2026-11-11T01:58:35Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.362/Jellyfin.Plugin.SubdlSync_12.1.12.362.zip",
+        "checksum": "e5c11686c82f75af8c5a8056246b38cd",
+        "timestamp": "2026-11-11T01:59:28Z"
       }
     ]
   }
