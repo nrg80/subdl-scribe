@@ -186,12 +186,17 @@ internal static class ReportingRun
             "the attribution uses the account name, not the login mail");
 
         // --- 3c. a refusal is not a defect (measured 09.11.2026) ---------------
-        Check(api.Contains("LastFileDownloadStatus", StringComparison.Ordinal)
-              && api.Contains("LastFileDownloadLabel", StringComparison.Ordinal),
-            "the download path records the HTTP status instead of guessing \"no bytes\"");
+        string outcomeSource = Read(plugin, "Api/DownloadOutcome.cs");
+        Check(outcomeSource.Contains("record DownloadOutcome", StringComparison.Ordinal)
+              && outcomeSource.Contains("public required int Status", StringComparison.Ordinal)
+              && outcomeSource.Contains("public string Label =>", StringComparison.Ordinal),
+            "F-M464: every fetch returns its own outcome — status, bytes, error and payload together");
+        Check(!api.Contains("LastFileDownloadStatus", StringComparison.Ordinal)
+              && !api.Contains("ResetDownloadStatus", StringComparison.Ordinal),
+            "F-M464: the client carries no download verdict any more, so no call can overwrite another's");
         Check(api.Contains("download?format=zip", StringComparison.Ordinal)
-              && api.Contains("UnpackAsync(archive, zipSeason, zipEpisode, ct)", StringComparison.Ordinal),
-            "the archive is the shape asked for first — one request, unpacked here");
+              && api.Contains("ResolveMemberAsync(archive, zipSeason, zipEpisode, ct, memberName)", StringComparison.Ordinal),
+            "the archive is the shape asked for first — one request, resolved here");
         Check(ArchiveKey.FromUrl("https://api.subdl.com/api/v2/subtitles/AbCdEf123/download?format=zip") == "v2-AbCdEf123",
             "a v2 archive has a stable cache key, so a pack is fetched once");
         // --- 3b. a spent candidate stays spent ---------------------------------
@@ -220,11 +225,14 @@ internal static class ReportingRun
 
         Check(api.Contains("not_a_single_file", StringComparison.Ordinal)
               && api.Contains("\"zip\"", StringComparison.Ordinal)
-              && api.Contains("UnpackAsync(archive, zipSeason, zipEpisode, ct)", StringComparison.Ordinal),
-            "a subtitle that exists only as an archive is fetched as zip and unpacked");
-        Check(pipeline.Contains("_api.LastFileDownloadLabel", StringComparison.Ordinal),
-            "the reject line names the HTTP status and the API error");
-        Check(pipeline.Contains("_api.LastFileDownloadBytes == 0", StringComparison.Ordinal)
+              && api.Contains("ResolveMemberAsync(archive, zipSeason, zipEpisode, ct, memberName)", StringComparison.Ordinal),
+            "a subtitle that exists only as an archive is fetched as zip and resolved");
+        Check(pipeline.Contains("dl.Label", StringComparison.Ordinal),
+            "the reject line names the HTTP status and the API error of THIS attempt");
+        Check(!pipeline.Contains("_api.LastFileDownload", StringComparison.Ordinal)
+              && !pipeline.Contains("_api.ResetDownloadStatus", StringComparison.Ordinal),
+            "F-M464: the walk reads the outcome of its own call, never state on the client");
+        Check(pipeline.Contains("dl.GenuineEmpty", StringComparison.Ordinal)
               && pipeline.Contains("bool genuineEmpty", StringComparison.Ordinal),
             "only a 200 that carried nothing may be reported as a broken upload");
 
@@ -271,17 +279,15 @@ internal static class ReportingRun
         // explained with the previous candidate's answer — "no bytes (HTTP 200)" on a candidate
         // nobody had asked about. The verdict is cleared per attempt, and only a real 200 counts as
         // an empty answer. Driven through the REAL client.
-        var probe = new SubdlApiClient(new System.Net.Http.HttpClient()) { ApiKey = "00000000000000000000000000000000" };
-        probe.ResetDownloadStatus();
-        Check(probe.LastFileDownloadStatus == 0 && probe.LastFileDownloadBytes == 0 && string.IsNullOrEmpty(probe.LastFileDownloadError),
-            "F-M456: a cleared verdict carries no status, no bytes and no error");
-        Check(probe.LastFileDownloadLabel == "no request made",
+        DownloadOutcome neverAsked = DownloadOutcome.None("candidate");
+        Check(neverAsked.NoRequest && neverAsked.Bytes == 0 && string.IsNullOrEmpty(neverAsked.Error),
+            "F-M456: an attempt that never happened carries no status, no bytes and no error");
+        Check(neverAsked.Label == "no request made",
             "F-M456: the reject line says 'no request made' instead of naming a status that came from somewhere else");
-        Check(pipeline.Contains("_api.ResetDownloadStatus();", StringComparison.Ordinal),
-            "F-M456: every download attempt starts by clearing the verdict");
-        Check(!pipeline.Contains("LastFileDownloadStatus is 200 or 0", StringComparison.Ordinal)
-              && pipeline.Contains("_api.LastFileDownloadStatus == 200", StringComparison.Ordinal),
-            "F-M456: only a real 200 counts as an empty answer — status 0 means we never asked");
+        Check(!neverAsked.GenuineEmpty,
+            "F-M456: status 0 is not an empty answer — only a real 200 that carried nothing is");
+        Check(pipeline.Contains("DownloadOutcome.None(\"candidate\")", StringComparison.Ordinal),
+            "F-M456: a candidate dropped before any request starts from a verdict of its own, not the last one");
 
         // F-M460 (operator order 10.11.2026: "Soll der SDH-Pfad melden" — Ja): the SDH walk measures
         // the same verdicts and filed nothing, because only the main path reported. The wordings come
@@ -320,13 +326,14 @@ internal static class ReportingRun
         // F-M461 (measured 10.11.2026): the v1 download route recorded no verdict at all, so its
         // rejects quoted the previous v2 call — the source of both misleading labels we chased
         // ("HTTP 200" on a healthy upload, "no request made" on a request that happened).
-        int v1 = apiSource.IndexOf("private async Task<byte[]?> FetchArchiveAsync", StringComparison.Ordinal);
+        int v1 = apiSource.IndexOf("private async Task<DownloadOutcome> FetchArchiveAsync", StringComparison.Ordinal);
         int v1End = v1 < 0 ? -1 : apiSource.IndexOf("Downloads a subtitle file from dl.subdl.com", v1, StringComparison.Ordinal);
         bool v1Records = v1 >= 0 && v1End > v1
-                         && apiSource[v1..v1End].Contains("LastFileDownloadStatus = (int)resp.StatusCode;", StringComparison.Ordinal)
-                         && apiSource[v1..v1End].Contains("LastFileDownloadBytes = payload.Length;", StringComparison.Ordinal);
+                         && apiSource[v1..v1End].Contains("Status = (int)resp.StatusCode,", StringComparison.Ordinal)
+                         && apiSource[v1..v1End].Contains("Bytes = payload.Length,", StringComparison.Ordinal)
+                         && apiSource[v1..v1End].Contains("Route = \"v1\",", StringComparison.Ordinal);
         Check(v1Records,
-            "F-M461: the v1 download route records status and body length of its OWN request");
+            "F-M461: the v1 download route returns status and body length of its OWN request");
 
         var liveRun = new DownloadRunSummary { Downloaded = 3, Reported = 2 };
         Check(StatusCounterDelta.From(null, liveRun).BrokenReported == 2,

@@ -1471,45 +1471,12 @@ public sealed class SubdlApiClient
     /// </summary>
     private static readonly TimeSpan FileTransferTimeout = TimeSpan.FromMinutes(5);
 
-    /// <summary>
-    /// Last HTTP status of the download path, so a rejection can name the REASON instead of
-    /// guessing. Measured 09.11.2026: 43 rejections of one night were all HTTP 409
-    /// <c>not_a_single_file</c> — the subtitle ships only as an archive — and the log called every
-    /// one of them "no bytes returned", which reads like a broken upload and is the opposite.
-    /// The pipeline works one item at a time, so a scalar is enough.
-    /// </summary>
-    public int LastFileDownloadStatus { get; private set; }
-
-    /// <summary>API error name of the last download answer (<c>not_a_single_file</c>, …), if any.</summary>
-    public string? LastFileDownloadError { get; private set; }
-
-    /// <summary>Body length of the last successful download answer — proves whether a 200 really
-    /// carried nothing, which is the only case that may be reported as a broken upload.</summary>
-    public int LastFileDownloadBytes { get; private set; }
-
-    /// <summary>Short label for a reject line — status plus API error, never a guess.
-    /// F-M456: status 0 now says "no request made" instead of "no status", because that is what it
-    /// means — a candidate the walk threw away before it ever asked the server.</summary>
-    public string LastFileDownloadLabel =>
-        LastFileDownloadStatus == 0
-            ? "no request made"
-            : "HTTP " + LastFileDownloadStatus +
-              (string.IsNullOrEmpty(LastFileDownloadError) ? string.Empty : " " + LastFileDownloadError);
-
-    /// <summary>
-    /// F-M456 (measured 10.11.2026): clears the download verdict so a reject cannot be explained by
-    /// the PREVIOUS candidate's answer. "A Bona Fide Killer" S01E10 was rejected as
-    /// <c>no bytes (HTTP 200)</c> although no request had been made at all — the candidate's only
-    /// member could not be read as S1E10, the walk returned before asking, and the status left over
-    /// from the candidate before said 200 with nothing. That made a healthy upload look broken and
-    /// would have filed a false report. Every download attempt starts by clearing this.
-    /// </summary>
-    public void ResetDownloadStatus()
-    {
-        LastFileDownloadStatus = 0;
-        LastFileDownloadError = null;
-        LastFileDownloadBytes = 0;
-    }
+    // F-M464 (measured 11.11.2026): the download verdict is no longer carried on the client. Three
+    // mutable properties held the answer of "the last call", so four defects came out of one shape:
+    // a reject quoting the previous candidate's 200 (F-M456), a route that recorded nothing at all
+    // (F-M461), a finding that died when a later candidate succeeded (F-M462), and an empty answer
+    // believed twice (F-M455). Every fetch now returns its own DownloadOutcome, and no consumer asks
+    // the client what happened — the answer travels with the call that produced it.
 
     /// <summary>
     /// V2 single-file download by nId — GET /api/v2/subtitles/{nId}/download?format=file
@@ -1526,18 +1493,15 @@ public sealed class SubdlApiClient
     /// <param name="ct">Cancellation token.</param>
     /// <param name="zipSeason">Wanted season for the archive fallback (0 = none).</param>
     /// <param name="zipEpisode">Wanted episode for the archive fallback (0 = none).</param>
-    /// <returns>The subtitle file bytes, or null.</returns>
-    public async Task<byte[]?> DownloadV2FileAsync(string nId, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0, string? memberName = null)
+    /// <returns>What this attempt produced, with its own status — never state on the client.</returns>
+    public async Task<DownloadOutcome> DownloadV2FileAsync(string nId, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0, string? memberName = null)
     {
         if (string.IsNullOrWhiteSpace(nId))
         {
-            return null;
+            return DownloadOutcome.None("v2-zip");
         }
 
         string apiKey = ApiKey ?? throw new InvalidOperationException("Download requires the SubDL API key");
-        LastFileDownloadStatus = 0;
-        LastFileDownloadError = null;
-        LastFileDownloadBytes = 0;
 
         // F-M451 (measured 09.11.2026): the ARCHIVE is the shape that always answers. Eight
         // subtitles — a 23-member season pack among them — all refused ?format=file with
@@ -1546,78 +1510,74 @@ public sealed class SubdlApiClient
         // fallback for the rare archive that refuses.
         string zipUrl = $"{ApiBase}/api/v2/subtitles/{Uri.EscapeDataString(nId)}/download?format=zip";
         string? key = ArchiveKey.FromUrl(zipUrl);
-        byte[]? archive = null;
+        DownloadOutcome attempt;
         bool fromCache = false;
         if (key != null && _archiveDiskCache.TryGet(key, out byte[]? cached) && cached is { Length: > 0 })
         {
             Trace("GET", zipUrl, 200, "archive cache hit (disk)");
-            archive = cached;
+            attempt = new DownloadOutcome
+            {
+                Status = 200,
+                Bytes = cached.Length,
+                Route = "v2-zip",
+                ServedFromCache = true,
+                Content = cached,
+            };
             fromCache = true;
-            LastFileDownloadStatus = 200;
-            LastFileDownloadBytes = cached.Length;
         }
         else
         {
-            archive = await V2DownloadAttemptAsync(nId, "zip", apiKey, ct).ConfigureAwait(false);
-            if (archive is { Length: > 0 })
+            attempt = await V2DownloadAttemptAsync(nId, "zip", apiKey, ct).ConfigureAwait(false);
+            if (attempt.HasContent)
             {
-                StoreArchive(key, archive);
+                StoreArchive(key, attempt.Content);
             }
         }
 
+        byte[]? archive = attempt.Content;
         if (archive is { Length: > 0 })
         {
-            byte[]? member = await UnpackAsync(archive, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
-            if (member == null && !string.IsNullOrWhiteSpace(memberName))
-            {
-                // F-M463: same order as the v1 route — the pick by name, then the episode match on
-                // the body we already hold, and only then a real refetch.
-                member = await UnpackAsync(archive, zipSeason, zipEpisode, ct).ConfigureAwait(false);
-            }
-
+            byte[]? member = await ResolveMemberAsync(archive, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
             if (member == null && fromCache)
             {
                 // A cached body that cannot resolve this episode may belong to an archive that was
                 // re-uploaded upstream: fetch for real, refresh the cache, try once more.
                 Trace("GET", zipUrl, 200, "archive cache does not hold this entry — refetching");
-                byte[]? fresh = await V2DownloadAttemptAsync(nId, "zip", apiKey, ct).ConfigureAwait(false);
-                if (fresh is { Length: > 0 })
+                DownloadOutcome fresh = await V2DownloadAttemptAsync(nId, "zip", apiKey, ct).ConfigureAwait(false);
+                if (fresh.HasContent)
                 {
-                    StoreArchive(key, fresh);
-                    member = await UnpackAsync(fresh, zipSeason, zipEpisode, ct).ConfigureAwait(false);
+                    StoreArchive(key, fresh.Content);
+                    member = await ResolveMemberAsync(fresh.Content!, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
                 }
             }
 
             if (member is { Length: > 0 })
             {
-                LastFileDownloadStatus = 200;
-                LastFileDownloadError = null;
-                return member;
+                return attempt with { Status = 200, Error = null, Content = member, Member = memberName };
             }
 
             if (member == null)
             {
                 // The archive arrived but carried no usable member — not a 0-byte upload.
-                LastFileDownloadError = "archive_without_member";
+                return attempt with { Error = "archive_without_member", Content = null };
             }
         }
 
         // The archive answered and carried nothing, or nothing for this episode: no second request.
         // A second shape cannot produce what the first one does not hold, and each request costs a
         // quota unit — the answer stands as the finding that gets reported.
-        if (LastFileDownloadStatus == 200 && LastFileDownloadBytes == 0 && LastFileDownloadError == null)
+        if (attempt.GenuineEmpty)
         {
-            return null;
+            return attempt with { Content = null };
         }
 
-        if (LastFileDownloadError == "archive_without_member")
+        if (attempt.Error == "archive_without_member")
         {
-            return null;
+            return attempt with { Content = null };
         }
 
         // Only when the archive itself was refused (409/429/5xx, non-200) is the single file asked for.
-        byte[]? file = await V2DownloadAttemptAsync(nId, "file", apiKey, ct).ConfigureAwait(false);
-        return file;
+        return await V2DownloadAttemptAsync(nId, "file", apiKey, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1628,10 +1588,12 @@ public sealed class SubdlApiClient
     /// <param name="format">"file" or "zip".</param>
     /// <param name="apiKey">Bearer key.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Body bytes on success, else null.</returns>
-    private async Task<byte[]?> V2DownloadAttemptAsync(string nId, string format, string apiKey, CancellationToken ct)
+    /// <returns>What this attempt chain produced — its own status, bytes and error.</returns>
+    private async Task<DownloadOutcome> V2DownloadAttemptAsync(string nId, string format, string apiKey, CancellationToken ct)
     {
         string fullUrl = $"{ApiBase}/api/v2/subtitles/{Uri.EscapeDataString(nId)}/download?format={format}";
+        string route = "v2-" + format;
+        DownloadOutcome last = DownloadOutcome.None(route);
         const int maxAttempts = 3;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -1647,16 +1609,25 @@ public sealed class SubdlApiClient
             Trace("GET", fullUrl, (int)resp.StatusCode, $"v2 download {format} attempt {attempt}");
             if (resp.IsSuccessStatusCode)
             {
-                LastFileDownloadStatus = (int)resp.StatusCode;
-                LastFileDownloadError = null;
                 byte[] payload = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
-                LastFileDownloadBytes = payload.Length;
-                return payload;
+                return new DownloadOutcome
+                {
+                    Status = (int)resp.StatusCode,
+                    Bytes = payload.Length,
+                    Route = route,
+                    Content = payload,
+                };
             }
 
-            LastFileDownloadStatus = (int)resp.StatusCode;
+            int status = (int)resp.StatusCode;
             string body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            LastFileDownloadError = ParseApiErrorName(body);
+            last = new DownloadOutcome
+            {
+                Status = status,
+                Bytes = 0,
+                Error = ParseApiErrorName(body),
+                Route = route,
+            };
             if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
             {
                 Classify429(resp, body);
@@ -1667,7 +1638,7 @@ public sealed class SubdlApiClient
             {
                 if (attempt == maxAttempts)
                 {
-                    return null;
+                    return last;
                 }
 
                 int backoffMs = 2000 << (attempt - 1);
@@ -1675,10 +1646,10 @@ public sealed class SubdlApiClient
                 continue;
             }
 
-            return null;
+            return last;
         }
 
-        return null;
+        return last;
     }
 
     /// <summary>Reads the <c>error</c> member of a SubDL JSON error answer, if present.</summary>
@@ -2024,10 +1995,11 @@ public sealed class SubdlApiClient
     /// </summary>
     /// <param name="fullUrl">Absolute download URL.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>The response body, or null when every attempt failed.</returns>
-    private async Task<byte[]?> FetchArchiveAsync(string fullUrl, CancellationToken ct)
+    /// <returns>The archive body as an outcome — status, bytes and error of THIS request.</returns>
+    private async Task<DownloadOutcome> FetchArchiveAsync(string fullUrl, CancellationToken ct)
     {
         const int maxAttempts = 3;
+        DownloadOutcome last = DownloadOutcome.None("v1");
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, fullUrl);
@@ -2043,17 +2015,18 @@ public sealed class SubdlApiClient
                 byte[] payload = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
                 // F-M461 (measured 10.11.2026): this route recorded NO verdict at all, so every
                 // reject it caused quoted whatever the last v2 call had left behind — "HTTP 200" on
-                // a healthy upload, or "no request made" on a request that plainly happened. The
-                // v2 route has recorded its status all along; this one now does too, so the reason
-                // in the log is the reason of THIS request.
-                LastFileDownloadStatus = (int)resp.StatusCode;
-                LastFileDownloadError = null;
-                LastFileDownloadBytes = payload.Length;
-                return payload;
+                // a healthy upload, or "no request made" on a request that plainly happened.
+                // F-M464: the verdict is now returned by the request that made it.
+                return new DownloadOutcome
+                {
+                    Status = (int)resp.StatusCode,
+                    Bytes = payload.Length,
+                    Route = "v1",
+                    Content = payload,
+                };
             }
 
-            LastFileDownloadStatus = (int)resp.StatusCode;
-            LastFileDownloadBytes = 0;
+            int status = (int)resp.StatusCode;
             string errorBody = string.Empty;
 
             // F-M27: 429/5xx → exponential backoff (2s, 4s, 8s), then give up.
@@ -2067,14 +2040,20 @@ public sealed class SubdlApiClient
                 Classify429(resp, errorBody); // F-M58
             }
 
-            LastFileDownloadError = ParseApiErrorName(errorBody);
+            last = new DownloadOutcome
+            {
+                Status = status,
+                Bytes = 0,
+                Error = ParseApiErrorName(errorBody),
+                Route = "v1",
+            };
 
             if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests
                 || (int)resp.StatusCode >= 500)
             {
                 if (attempt == maxAttempts)
                 {
-                    return null;
+                    return last;
                 }
 
                 int backoffMs = 2000 << (attempt - 1); // 2s, 4s
@@ -2082,10 +2061,10 @@ public sealed class SubdlApiClient
                 continue;
             }
 
-            return null; // other status codes (404 etc.) — no retry
+            return last; // other status codes (404 etc.) — no retry
         }
 
-        return null;
+        return last;
     }
 
     /// <summary>
@@ -2095,8 +2074,8 @@ public sealed class SubdlApiClient
     /// </summary>
     /// <param name="dlUrl">Download path or URL from the search result.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Raw subtitle bytes (SRT extracted when ZIP-packaged) or null on failure.</returns>
-    public async Task<byte[]?> DownloadSubtitleFileAsync(string dlUrl, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0, string? memberName = null)
+    /// <returns>What this attempt produced, with its own status — never state on the client.</returns>
+    public async Task<DownloadOutcome> DownloadSubtitleFileAsync(string dlUrl, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0, string? memberName = null)
     {
         string fullUrl = NormalizeDlUrl(dlUrl);
 
@@ -2106,23 +2085,15 @@ public sealed class SubdlApiClient
         // 0p9xSnSU4g/… nine times, BlwZSYtLaU/… seven times — and no cache hit, because the key
         // was the full URL). The key comes from the URL alone, so the cache can answer without a
         // request; the bytes live on disk (F-M386: one layer, not two).
-        var (bytes, fromCache) = await GetArchiveBodyAsync(fullUrl, ct).ConfigureAwait(false);
+        var (attempt, fromCache) = await GetArchiveBodyAsync(fullUrl, ct).ConfigureAwait(false);
 
-        if (bytes == null || bytes.Length == 0)
+        if (!attempt.HasContent)
         {
-            return null;
+            return attempt with { Content = null };
         }
 
-        byte[]? srt = await UnpackAsync(bytes, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
-        if (srt == null && !string.IsNullOrWhiteSpace(memberName))
-        {
-            // F-M463 (measured 11.11.2026): a pack whose entries carry no SxxExx hands us the pick
-            // as "16 - Relevance.en.srt". When that exact entry is gone, the episode match on the
-            // SAME cached body is still the better answer — and it costs nothing. Doing this before
-            // the refetch is the whole point: the previous order refetched the archive once per
-            // episode and burned the daily quota for a body that was already on disk.
-            srt = await UnpackAsync(bytes, zipSeason, zipEpisode, ct).ConfigureAwait(false);
-        }
+        byte[] bytes = attempt.Content!;
+        byte[]? srt = await ResolveMemberAsync(bytes, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
 
         if (srt == null && fromCache)
         {
@@ -2130,16 +2101,26 @@ public sealed class SubdlApiClient
             // segment. A cached body that cannot resolve this episode must not be reported as a
             // rejection: fetch for real, refresh both layers, and try once more.
             Trace("GET", fullUrl, 200, "archive cache does not hold this entry — refetching");
-            byte[]? fresh = await FetchArchiveAsync(fullUrl, ct).ConfigureAwait(false);
+            DownloadOutcome fresh = await FetchArchiveAsync(fullUrl, ct).ConfigureAwait(false);
             string? key = ArchiveKey.FromUrl(fullUrl);
-            if (fresh is { Length: > 0 })
+            if (fresh.HasContent)
             {
-                StoreArchive(key, fresh);
-                srt = await UnpackAsync(fresh, zipSeason, zipEpisode, ct).ConfigureAwait(false);
+                StoreArchive(key, fresh.Content);
+                srt = await ResolveMemberAsync(fresh.Content!, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
+            }
+
+            if (srt is { Length: > 0 })
+            {
+                return fresh with { Status = 200, Error = null, Content = srt, Member = memberName };
             }
         }
 
-        return srt;
+        if (srt is { Length: > 0 })
+        {
+            return attempt with { Content = srt, Member = memberName };
+        }
+
+        return attempt with { Content = null };
     }
 
     /// <summary>
@@ -2171,18 +2152,29 @@ public sealed class SubdlApiClient
     /// </summary>
     /// <param name="fullUrl">Absolute dl.subdl.com URL of the archive.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>The body, and whether it came from the cache.</returns>
-    private async Task<(byte[]? Body, bool FromCache)> GetArchiveBodyAsync(string fullUrl, CancellationToken ct)
+    /// <returns>The body as an outcome of its own, and whether it came from the cache.</returns>
+    private async Task<(DownloadOutcome Outcome, bool FromCache)> GetArchiveBodyAsync(string fullUrl, CancellationToken ct)
     {
         string? key = ArchiveKey.FromUrl(fullUrl);
         if (key != null && _archiveDiskCache.TryGet(key, out byte[]? diskBytes) && diskBytes is { Length: > 0 })
         {
             Trace("GET", fullUrl, 200, "archive cache hit (disk)");
-            return (diskBytes, true);
+            return (new DownloadOutcome
+            {
+                Status = 200,
+                Bytes = diskBytes.Length,
+                Route = "v1",
+                ServedFromCache = true,
+                Content = diskBytes,
+            }, true);
         }
 
-        byte[]? fetched = await FetchArchiveAsync(fullUrl, ct).ConfigureAwait(false);
-        StoreArchive(key, fetched);
+        DownloadOutcome fetched = await FetchArchiveAsync(fullUrl, ct).ConfigureAwait(false);
+        if (fetched.HasContent)
+        {
+            StoreArchive(key, fetched.Content);
+        }
+
         return (fetched, false);
     }
 
@@ -2204,13 +2196,44 @@ public sealed class SubdlApiClient
         }
 
         string fullUrl = NormalizeDlUrl(archiveUrl);
-        var (bytes, _) = await GetArchiveBodyAsync(fullUrl, ct).ConfigureAwait(false);
-        if (bytes is not { Length: > 4 } || bytes[0] != 'P' || bytes[1] != 'K')
+        var (attempt, _) = await GetArchiveBodyAsync(fullUrl, ct).ConfigureAwait(false);
+        if (attempt.Content is not { Length: > 4 } bytes || bytes[0] != 'P' || bytes[1] != 'K')
         {
             return null;
         }
 
         return await UnpackAsync(bytes, 0, 0, ct, memberName).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// F-M464: the ONE order in which an archive is asked for a member, shared by both routes.
+    /// <list type="number">
+    /// <item>the picked entry, by NAME — the pick is the archive's own listing;</item>
+    /// <item>the episode match on the SAME bytes — no request, no quota unit;</item>
+    /// <item>only the caller may then decide to refetch.</item>
+    /// </list>
+    /// Measured 11.11.2026: every stage used to re-derive the episode from a file name that does not
+    /// carry one, so a pick that was already known was thrown away and the archive was paid for
+    /// again — once per episode.
+    /// </summary>
+    /// <param name="archive">Archive body.</param>
+    /// <param name="season">Wanted season (0 when unknown).</param>
+    /// <param name="episode">Wanted episode (0 when unknown).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="memberName">Entry name the pick chose, if there is one.</param>
+    /// <returns>The member bytes, or null.</returns>
+    private static async Task<byte[]?> ResolveMemberAsync(byte[] archive, int season, int episode, CancellationToken ct, string? memberName)
+    {
+        if (!string.IsNullOrWhiteSpace(memberName))
+        {
+            byte[]? byName = await UnpackAsync(archive, season, episode, ct, memberName).ConfigureAwait(false);
+            if (byName != null)
+            {
+                return byName;
+            }
+        }
+
+        return await UnpackAsync(archive, season, episode, ct).ConfigureAwait(false);
     }
 
     /// <summary>

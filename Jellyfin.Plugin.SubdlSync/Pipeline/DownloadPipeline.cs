@@ -1757,7 +1757,11 @@ public sealed class DownloadPipeline : IDisposable
                 await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
 
                 _watchdog?.Heartbeat();
-                var (bytes, packFile) = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                DownloadOutcome dl = DownloadOutcome.None("candidate");
+                CandidateAttempt attempt = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                byte[]? bytes = attempt.Bytes;
+                SubtitleUnpackFile? packFile = attempt.PackFile;
+                dl = attempt.Outcome;
 
                 // F-M260: the file the bytes actually came from. Absent for a whole-candidate
                 // download; present for a pack, where it carries that ONE file's own HI flag —
@@ -1782,7 +1786,10 @@ public sealed class DownloadPipeline : IDisposable
                     await Task.Delay(TimeSpan.FromSeconds(waitSec), ct).ConfigureAwait(false);
                     _watchdog?.Heartbeat();
                     _api.ResetRateLimitFlag();
-                    (bytes, packFile) = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                    attempt = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                    bytes = attempt.Bytes;
+                    packFile = attempt.PackFile;
+                    dl = attempt.Outcome;
                     effectiveHi = packFile?.HearingImpaired ?? cand.HearingImpaired;
                 }
 
@@ -1792,7 +1799,10 @@ public sealed class DownloadPipeline : IDisposable
                 {
                     _api.ResetRateLimitFlag();
                     _watchdog?.Heartbeat();
-                    (bytes, packFile) = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                    attempt = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                    bytes = attempt.Bytes;
+                    packFile = attempt.PackFile;
+                    dl = attempt.Outcome;
                     effectiveHi = packFile?.HearingImpaired ?? cand.HearingImpaired;
                 }
 
@@ -1820,9 +1830,7 @@ public sealed class DownloadPipeline : IDisposable
                     // and delivered 83,119 B a few hours later. Only the SECOND empty answer is a
                     // finding; that is what the report below is for, and it is the one place where
                     // the two-failure rule the pipeline dropped in 12.1.12.347 still holds.
-                    bool genuineEmptyNow = _api.LastFileDownloadStatus == 200
-                                           && _api.LastFileDownloadBytes == 0
-                                           && string.IsNullOrEmpty(_api.LastFileDownloadError);
+                    bool genuineEmptyNow = dl.GenuineEmpty;
                     if (genuineEmptyNow && _emptyRetried.Add(lang + "|" + cand.Url))
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
@@ -1831,7 +1839,10 @@ public sealed class DownloadPipeline : IDisposable
                         await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
                         _watchdog?.Heartbeat();
                         _api.ResetRateLimitFlag();
-                        (bytes, packFile) = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                        attempt = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                        bytes = attempt.Bytes;
+                        packFile = attempt.PackFile;
+                        dl = attempt.Outcome;
                         effectiveHi = packFile?.HearingImpaired ?? cand.HearingImpaired;
                     }
                 }
@@ -1848,8 +1859,8 @@ public sealed class DownloadPipeline : IDisposable
                         "[SubDL-D] {File} [{Lang}] — download reject {Release}: {Reason}",
                         Path.GetFileName(mediaPath), lang, cand.ReleaseName,
                         bytes == null
-                            ? "no bytes (" + _api.LastFileDownloadLabel + ")"
-                            : "only " + bytes.Length + " bytes (" + _api.LastFileDownloadLabel + ")");
+                            ? "no bytes (" + dl.Label + ")"
+                            : "only " + bytes.Length + " bytes (" + dl.Label + ")");
 
                     // F-M450: a package that answers without data is remembered, and filed once the
                     // same package has failed a second time — but NOT when the candidate is a season
@@ -1869,16 +1880,14 @@ public sealed class DownloadPipeline : IDisposable
                     // candidate could not even be resolved to the episode), and a candidate we
                     // never asked about says nothing about the upload. The old "200 or 0" let the
                     // previous candidate's answer speak for this one.
-                    bool genuineEmpty = _api.LastFileDownloadStatus == 200
-                                        && _api.LastFileDownloadBytes == 0
-                                        && string.IsNullOrEmpty(_api.LastFileDownloadError);
+                    bool genuineEmpty = dl.GenuineEmpty;
                     if (genuineEmpty && !cand.FullSeason && cand.UnpackFiles.Count <= 1)
                     {
                         await RememberAndReportAsync(
                             item.Id.ToString(),
                             lang,
                             cand,
-                            BrokenSubtitleReports.EmptyPayload(_api.LastFileDownloadBytes),
+                            BrokenSubtitleReports.EmptyPayload(dl.Bytes),
                             "empty",
                             summary,
                             ct).ConfigureAwait(false);
@@ -2494,20 +2503,16 @@ public sealed class DownloadPipeline : IDisposable
                             // gaps contain an alignment — this one the main track's, the next one the
                             // HI track's. Floor 0.
                             await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
-                            // F-M456/F-M460: the SDH fetch clears its verdict first, exactly like the
-                            // main path — otherwise a reject here would quote the previous request's
-                            // status, which is how a healthy upload once looked broken.
-                            _api.ResetDownloadStatus();
-                            var hiBytes = CorrectInvisibleCues(
-                                await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false));
+                            // F-M464: the SDH fetch carries its own outcome — no reset, no state on
+                            // the client, nothing a later request could overwrite.
+                            DownloadOutcome hiDl = await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false);
+                            var hiBytes = CorrectInvisibleCues(hiDl.Content);
 
                             // F-M455/F-M460: an empty answer is asked once more after ten seconds,
                             // here as well. The SDH pool is where the uploaders put their own cuts,
                             // so a single empty answer is even less of a verdict than on the main
                             // track.
-                            bool hiEmptyAnswer = _api.LastFileDownloadStatus == 200
-                                                 && _api.LastFileDownloadBytes == 0
-                                                 && string.IsNullOrEmpty(_api.LastFileDownloadError);
+                            bool hiEmptyAnswer = hiDl.GenuineEmpty;
                             if ((hiBytes == null || hiBytes.Length < 100)
                                 && hiEmptyAnswer
                                 && _emptyRetried.Add("hi|" + lang + "|" + hi.Url))
@@ -2518,9 +2523,8 @@ public sealed class DownloadPipeline : IDisposable
                                 await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
                                 _watchdog?.Heartbeat();
                                 _api.ResetRateLimitFlag();
-                                _api.ResetDownloadStatus();
-                                hiBytes = CorrectInvisibleCues(
-                                    await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false));
+                                hiDl = await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false);
+                                hiBytes = CorrectInvisibleCues(hiDl.Content);
                             }
 
                             var hiStats = hiBytes != null && hiBytes.Length >= 100 ? Qa.QaGates.ParseSrt(DecodeSrt(hiBytes)) : null;
@@ -2755,8 +2759,8 @@ public sealed class DownloadPipeline : IDisposable
                                 summary.RejectedCandidates++;
                                 string hiRejectReason = !hiBytesUsable
                                     ? (hiBytes == null
-                                        ? "no bytes (" + _api.LastFileDownloadLabel + ")"
-                                        : "only " + hiBytes.Length + " bytes (" + _api.LastFileDownloadLabel + ")")
+                                        ? "no bytes (" + hiDl.Label + ")"
+                                        : "only " + hiBytes.Length + " bytes (" + hiDl.Label + ")")
                                     : !hiStructureOk
                                         ? (hiStats == null
                                             ? "structure: no parsable cues"
@@ -3182,10 +3186,15 @@ public sealed class DownloadPipeline : IDisposable
     /// <param name="episode">Wanted episode.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The fetched payload, corrected.</returns>
-    private async Task<(byte[]? Bytes, SubtitleUnpackFile? PackFile)> DownloadCandidateAsync(
+    /// <summary>F-M464: the bytes of one candidate attempt together with the verdict that produced
+    /// them. Payload and outcome cannot be separated, so no stage can quote someone else's status.</summary>
+    private sealed record CandidateAttempt(byte[]? Bytes, SubtitleUnpackFile? PackFile, DownloadOutcome Outcome);
+
+    private async Task<CandidateAttempt> DownloadCandidateAsync(
         SubtitleCandidate cand, int season, int episode, CancellationToken ct)
     {
-        var (raw, packFile) = await DownloadCandidateRawAsync(cand, season, episode, ct).ConfigureAwait(false);
+        CandidateAttempt rawAttempt = await DownloadCandidateRawAsync(cand, season, episode, ct).ConfigureAwait(false);
+        byte[]? raw = rawAttempt.Bytes;
         byte[]? corrected = CorrectInvisibleCues(raw);
         if (corrected != null && raw != null && corrected.Length != raw.Length)
         {
@@ -3196,7 +3205,7 @@ public sealed class DownloadPipeline : IDisposable
                 Qa.QaGates.ParseSrt(DecodeSrt(corrected))?.CueCount ?? 0);
         }
 
-        return (corrected, packFile);
+        return rawAttempt with { Bytes = corrected };
     }
 
     /// <summary>
@@ -3220,13 +3229,12 @@ public sealed class DownloadPipeline : IDisposable
         return System.Text.Encoding.UTF8.GetBytes(ContentHashRegistry.NormalizeSrt(DecodeSrt(raw)));
     }
 
-    private async Task<(byte[]? Bytes, SubtitleUnpackFile? PackFile)> DownloadCandidateRawAsync(
+    private async Task<CandidateAttempt> DownloadCandidateRawAsync(
         SubtitleCandidate cand, int season, int episode, CancellationToken ct)
     {
-        // F-M456: the verdict of THIS attempt only. Without the reset a candidate that is thrown
-        // away before any request inherits the previous candidate's answer — measured on
-        // "A Bona Fide Killer" S01E10, rejected as "no bytes (HTTP 200)" without a single request.
-        _api.ResetDownloadStatus();
+        // F-M464: the verdict of this attempt travels WITH the attempt (CandidateAttempt.Outcome).
+        // A candidate that is thrown away before any request carries status 0, which reads "no
+        // request made" — it can never quote what the previous candidate's request answered.
 
         // F-M215: a season or range pack must be resolved to the episode we are
         // actually working on. The search runs with unpack=1, so the candidate
@@ -3256,12 +3264,22 @@ public sealed class DownloadPipeline : IDisposable
                 // then takes the entry that names OUR episode, never "the first .srt".
                 bool archiveUrl = cand.Url.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
                     || cand.Url.Contains(".zip?", StringComparison.OrdinalIgnoreCase);
-                if (cand.UnpackFiles.Count >= 2 && archiveUrl)
+                // F-M464: the archive is fetched over the SAME route the file list came from. The
+                // unpack listing belongs to the nId archive, so a candidate that has an nId is asked
+                // for by nId — the cache key is then the archive's identity, and one archive cannot
+                // be paid for twice under two keys (v1 URL, v2 nId). Without an nId the classic
+                // dl.subdl.com URL is the identity.
+                bool archiveRoute = cand.UnpackFiles.Count >= 2
+                    && (!string.IsNullOrEmpty(cand.NId) || archiveUrl);
+                if (archiveRoute)
                 {
                     // F-M463: hand the pick down. Entries like "16 - Relevance.en.srt" carry no
                     // SxxExx, so the season/episode re-derivation cannot find them — and the old code
                     // then refetched the same archive once per episode (16 fetches, one day's quota).
-                    byte[]? whole = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode, want.Name).ConfigureAwait(false);
+                    DownloadOutcome archiveOutcome = !string.IsNullOrEmpty(cand.NId)
+                        ? await _api.DownloadV2FileAsync(cand.NId, ct, season, episode, want.Name).ConfigureAwait(false)
+                        : await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode, want.Name).ConfigureAwait(false);
+                    byte[]? whole = archiveOutcome.Content;
                     if (whole is { Length: > 0 })
                     {
                         // Info, not Detail: this line marks every episode that is served from the
@@ -3271,7 +3289,7 @@ public sealed class DownloadPipeline : IDisposable
                         _logger.LogInformation(
                             "[SubDL] pack served whole — {N} file(s) per archive fetch: {Release}",
                             cand.UnpackFiles.Count, cand.ReleaseName);
-                        return (whole, want);
+                        return new CandidateAttempt(whole, want, archiveOutcome);
                     }
 
                     // The archive did not resolve to our episode (F-M215): fall through to the
@@ -3281,8 +3299,8 @@ public sealed class DownloadPipeline : IDisposable
                         cand.ReleaseName, season, episode);
                 }
 
-                var packBytes = await _api.DownloadSubtitleFileAsync(want.Url, ct).ConfigureAwait(false);
-                return (packBytes, want);
+                DownloadOutcome packOutcome = await _api.DownloadSubtitleFileAsync(want.Url, ct).ConfigureAwait(false);
+                return new CandidateAttempt(packOutcome.Content, want, packOutcome);
             }
 
             // The pack carries a file list but nothing matches our episode. Taking the
@@ -3291,7 +3309,7 @@ public sealed class DownloadPipeline : IDisposable
             _logger.LogWarning(
                 "[SubDL-D] pack {Release} has {N} files but none for S{Season}E{Episode} — candidate skipped instead of saving the wrong episode.",
                 cand.ReleaseName, cand.UnpackFiles.Count, season, episode);
-            return (null, null);
+            return new CandidateAttempt(null, null, DownloadOutcome.None("candidate"));
         }
 
         // unpack-file candidates carry a ready single-file url (dl.subdl.com) —
@@ -3301,20 +3319,20 @@ public sealed class DownloadPipeline : IDisposable
             || cand.Url.Contains(".zip?", StringComparison.OrdinalIgnoreCase);
         if (!zipUrl && !string.IsNullOrEmpty(cand.Url))
         {
-            var bytes = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode).ConfigureAwait(false);
-            return (bytes, null);
+            DownloadOutcome direct = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode).ConfigureAwait(false);
+            return new CandidateAttempt(direct.Content, null, direct);
         }
 
         if (!string.IsNullOrEmpty(cand.NId))
         {
             // F-M450: the client falls back to ?format=zip when the subtitle has no single file
             // (409 not_a_single_file) — it needs the wanted episode to pick the right member.
-            var bytes = await _api.DownloadV2FileAsync(cand.NId, ct, season, episode).ConfigureAwait(false);
-            return (bytes, null);
+            DownloadOutcome v2 = await _api.DownloadV2FileAsync(cand.NId, ct, season, episode).ConfigureAwait(false);
+            return new CandidateAttempt(v2.Content, null, v2);
         }
 
-        var fallback = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode).ConfigureAwait(false);
-        return (fallback, null);
+        DownloadOutcome fallback = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode).ConfigureAwait(false);
+        return new CandidateAttempt(fallback.Content, null, fallback);
     }
 
     /// <summary>

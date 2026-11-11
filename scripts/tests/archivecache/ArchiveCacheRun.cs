@@ -209,7 +209,7 @@ internal static class Program
             "a hit is visible without being counted as a download");
         // F-M387 moved the fetch into GetArchiveBodyAsync, which every reader shares; the store
         // happens there, so both the entry download and the sibling retry fill the one cache.
-        Check(api.Contains("StoreArchive(key, fetched)", StringComparison.Ordinal),
+        Check(api.Contains("StoreArchive(key, fetched.Content)", StringComparison.Ordinal),
             "a fetch fills the cache (in the shared body reader)");
         Check(api.Split("GetArchiveBodyAsync(").Length - 1 >= 3,
             "the entry download and the member retry go through that one reader");
@@ -217,7 +217,7 @@ internal static class Program
             "packs only — the store and the unpacker agree on what a ZIP is");
         Check(api.Contains("archive cache does not hold this entry — refetching", StringComparison.Ordinal),
             "a cached pack without the wanted entry is refetched instead of reported as rejected");
-        Check(api.Contains("private async Task<byte[]?> FetchArchiveAsync(string fullUrl, CancellationToken ct)", StringComparison.Ordinal),
+        Check(api.Contains("private async Task<DownloadOutcome> FetchArchiveAsync(string fullUrl, CancellationToken ct)", StringComparison.Ordinal),
             "the retry ladder still lives in its own method");
 
         var pipe = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
@@ -268,20 +268,30 @@ internal static class Program
         // once per episode. The order is the rule: pick by name, then the episode match on the same
         // body, and only then a real refetch.
         string apiSource = File.ReadAllText(System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "SubdlApiClient.cs"));
-        int v1 = apiSource.IndexOf("public async Task<byte[]?> DownloadSubtitleFileAsync", StringComparison.Ordinal);
-        int v1Refetch = apiSource.IndexOf("archive cache does not hold this entry", v1, StringComparison.Ordinal);
+        int v1 = apiSource.IndexOf("public async Task<DownloadOutcome> DownloadSubtitleFileAsync", StringComparison.Ordinal);
+        int v1Refetch = v1 < 0 ? -1 : apiSource.IndexOf("archive cache does not hold this entry", v1, StringComparison.Ordinal);
         bool v1Ordered = v1 >= 0 && v1Refetch > v1
-                         && apiSource[v1..v1Refetch].Contains("F-M463", StringComparison.Ordinal)
-                         && apiSource[v1..v1Refetch].Contains("UnpackAsync(bytes, zipSeason, zipEpisode, ct)", StringComparison.Ordinal);
+                         && apiSource[v1..v1Refetch].Contains("ResolveMemberAsync(", StringComparison.Ordinal);
         Check(v1Ordered,
-            "F-M463: the v1 route tries the episode match on the cached body before it refetches");
+            "F-M463: the v1 route tries the name, then the episode match on the cached body, before it refetches");
 
-        int v2 = apiSource.IndexOf("public async Task<byte[]?> DownloadV2FileAsync", StringComparison.Ordinal);
-        int v2Refetch = apiSource.IndexOf("archive cache does not hold this entry", v2, StringComparison.Ordinal);
+        int v2 = apiSource.IndexOf("public async Task<DownloadOutcome> DownloadV2FileAsync", StringComparison.Ordinal);
+        int v2Refetch = v2 < 0 ? -1 : apiSource.IndexOf("archive cache does not hold this entry", v2, StringComparison.Ordinal);
         bool v2Ordered = v2 >= 0 && v2Refetch > v2
-                         && apiSource[v2..v2Refetch].Contains("F-M463", StringComparison.Ordinal);
+                         && apiSource[v2..v2Refetch].Contains("ResolveMemberAsync(", StringComparison.Ordinal);
         Check(v2Ordered,
-            "F-M463: the v2 route does the same, so a cached archive is never paid for twice");
+            "F-M463: the v2 route uses the same order, so a cached archive is never paid for twice");
+
+        // F-M464: the order lives in ONE place, and the pick travels into the fetch.
+        int resolve = apiSource.IndexOf("private static async Task<byte[]?> ResolveMemberAsync", StringComparison.Ordinal);
+        bool resolveShared = resolve >= 0
+                             && apiSource[(resolve)..].Contains("UnpackAsync(archive, season, episode, ct, memberName)", StringComparison.Ordinal)
+                             && apiSource[(resolve)..].Contains("return await UnpackAsync(archive, season, episode, ct)", StringComparison.Ordinal);
+        Check(resolveShared,
+            "F-M464: pick by name, then the episode match — one shared order instead of one per route");
+        string pipeSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
+        Check(pipeSource.Contains("DownloadV2FileAsync(cand.NId, ct, season, episode, want.Name)", StringComparison.Ordinal),
+            "F-M464: a pack is fetched over the route its file list came from — the nId archive, not a second URL");
 
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
