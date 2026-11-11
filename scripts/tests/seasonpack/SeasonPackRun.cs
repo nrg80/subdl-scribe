@@ -748,6 +748,15 @@ internal static class Program
         Check(uploadSrc2.Contains("var (seriesImdb, seriesTmdb) = SeriesIdsOf(ep, id => _libraryManager.GetItemById(id));", StringComparison.Ordinal),
             "F-M467: every id resolution goes through the one helper — the pack phase and the single path agree");
 
+        // F-M468 (measured 11.11.2026, same season): the stream list is asked BY ID. A folder child has
+        // no media sources, so its own list is empty — every language then answered "the file does not
+        // carry it" although the files carried 25.
+        Check(uploadSrc2.Contains("_mediaSourceManager.GetMediaStreams(item.Id)", StringComparison.Ordinal),
+            "F-M468: the per-file language check asks the media source manager by id, not the item object");
+        Check(uploadSrc2.IndexOf("_mediaSourceManager.GetMediaStreams(item.Id)", StringComparison.Ordinal)
+                 < uploadSrc2.IndexOf("?? item.GetMediaStreams())", StringComparison.Ordinal),
+            "F-M468: the object's own list is only the fallback for a manager that has nothing");
+
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
             : $"seasonpack: {_checks} checks, {Failures.Count} failed.");

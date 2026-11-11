@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.363"
+version: "12.1.12.364"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.364: the per-file language check reads the stream list by media id — a season read as folder children carries no media sources, so every language was denied (F-M468).
   v12.1.12.363: the series is resolved by its id when an episode does not carry it — the pack phase reads a season as folder children, where Episode.Series is null (or throws), so every per-file language check compared against nothing and no pack was built (F-M467).
   v12.1.12.362: the upload postprocessing is only armed by a run that uploaded something (F-M465), and the season pack memo carries a fingerprint over its members so a repeat run answers "same pack?" in one comparison (F-M466).
   v12.1.12.361: the download verdict travels with the call that produced it (no state on the client) and an archive member is resolved once — pick by name, episode match on the same body, and only then a refetch; a pack is fetched over the route its file list came from (F-M464).

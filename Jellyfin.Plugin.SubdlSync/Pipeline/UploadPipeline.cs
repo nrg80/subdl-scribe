@@ -3761,7 +3761,13 @@ public sealed class UploadPipeline : IPackFiller
         {
             // F-M431: enumerated exactly the way the extraction reads the file — every subtitle stream of
             // the item, external ones included — so a position means the same thing in both places.
-            allSubs = item.GetMediaStreams()?
+            // F-M468 (measured 11.11.2026 on VisionQuest tt23112594): asked by ID, not on the object. The
+            // pack phase reads a season as folder children, and such an item carries no media sources —
+            // its own stream list is empty, so every language answered "the file does not carry it"
+            // although the files carry 25. Every other place in this pipeline asks the media source
+            // manager by id; the object is only the fallback for a source manager that has nothing.
+            allSubs = (_mediaSourceManager.GetMediaStreams(item.Id)
+                       ?? item.GetMediaStreams())?
                 .Where(s => s.Type == MediaStreamType.Subtitle)
                 .ToList() ?? new List<MediaStream>();
         }
