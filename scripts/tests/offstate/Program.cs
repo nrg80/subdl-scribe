@@ -177,15 +177,19 @@ Check("a failed row is no longer exempt from the deferral lamp",
 // falsch: jeder beendete Upload-Lauf terminiert den Auftrag genau einmal, und dieser erste Lauf ist
 // planmaessig — nichts wurde vertagt. Geprueft wird das Paar: das Wort steht da, UND es haengt am
 // Postprocessing-Worker, nicht an allen.
-Check("the postprocessing note says `schedule` instead of the default `deferred`",
-    quota.Contains("reason = \"schedule\";"),
-    "an armed order that runs on plan is not a deferral");
-Check("the `schedule` word is gated on the postprocessing worker",
-    quota.Contains("string.Equals(worker.Key, Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey"),
-    "the other workers keep their real deferrals");
-Check("a failed postprocessing row still speaks before the word",
-    quota.Contains("if (string.IsNullOrEmpty(reason)"),
-    "the failure cause (F-M436) outranks any word about the order");
+// F-M470 (operator 11.11.2026, "wieso wird postprocessing jetzt 2x gemeldet?"): F-M447 gave the
+// postprocessing the word `schedule` on THIS line — but the armed order has its own line on the page
+// ("Postprocessing due <when>"), so the same moment stood twice. The word is gone; the worker is
+// skipped here entirely unless its run failed, which is the one thing only this line can say.
+Check("the postprocessing no longer rides on the deferral line",
+    quota.Contains("&& !isFailed)") && quota.Contains("continue;"),
+    "the armed order is shown once — by its own line (F-M445)");
+Check("the skip is gated on the postprocessing worker and on a healthy run",
+    quota.Contains("Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey, StringComparison.Ordinal)\n                    && !isFailed"),
+    "a FAILED postprocessing run still speaks here (F-M436)");
+Check("the duplicate word is gone",
+    !quota.Contains("reason = \"schedule\";"),
+    "one fact, one line");
 
 Console.WriteLine();
 Console.WriteLine(f == 0 ? ">>> OFFSTATE OK" : $">>> OFFSTATE {f} FAILURE(S)");

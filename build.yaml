@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.365"
+version: "12.1.12.366"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.366: the armed postprocessing order is shown once — its own line; the worker status line no longer repeats it unless the run failed (F-M470).
   v12.1.12.365: a pack carries ONE release — the release group is binding even when every episode is on disk; a season split over several encodes no longer becomes a pack (F-M469).
   v12.1.12.364: the per-file language check reads the stream list by media id — a season read as folder children carries no media sources, so every language was denied (F-M468).
   v12.1.12.363: the series is resolved by its id when an episode does not carry it — the pack phase reads a season as folder children, where Episode.Series is null (or throws), so every per-file language check compared against nothing and no pack was built (F-M467).
