@@ -263,6 +263,26 @@ internal static class Program
         Check(after == 0, "and the folder is empty afterwards");
         Check(ArchiveDiskCache.PurgeDirectory(purgeDir) == 0, "a second purge removes nothing and throws nothing");
 
+        // F-M463 (measured 11.11.2026): a cache hit was thrown away because the member could not be
+        // re-derived from its name — and the code refetched the archive that was already on disk,
+        // once per episode. The order is the rule: pick by name, then the episode match on the same
+        // body, and only then a real refetch.
+        string apiSource = File.ReadAllText(System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "SubdlApiClient.cs"));
+        int v1 = apiSource.IndexOf("public async Task<byte[]?> DownloadSubtitleFileAsync", StringComparison.Ordinal);
+        int v1Refetch = apiSource.IndexOf("archive cache does not hold this entry", v1, StringComparison.Ordinal);
+        bool v1Ordered = v1 >= 0 && v1Refetch > v1
+                         && apiSource[v1..v1Refetch].Contains("F-M463", StringComparison.Ordinal)
+                         && apiSource[v1..v1Refetch].Contains("UnpackAsync(bytes, zipSeason, zipEpisode, ct)", StringComparison.Ordinal);
+        Check(v1Ordered,
+            "F-M463: the v1 route tries the episode match on the cached body before it refetches");
+
+        int v2 = apiSource.IndexOf("public async Task<byte[]?> DownloadV2FileAsync", StringComparison.Ordinal);
+        int v2Refetch = apiSource.IndexOf("archive cache does not hold this entry", v2, StringComparison.Ordinal);
+        bool v2Ordered = v2 >= 0 && v2Refetch > v2
+                         && apiSource[v2..v2Refetch].Contains("F-M463", StringComparison.Ordinal);
+        Check(v2Ordered,
+            "F-M463: the v2 route does the same, so a cached archive is never paid for twice");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"archivecache: {_checks} checks, all green."

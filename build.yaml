@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.359"
+version: "12.1.12.360"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.360: the picked file name now travels into the download — a pack whose entries carry no SxxExx ("16 - Relevance.en.srt") could not be resolved, so the same archive was refetched once per episode and ate a day's quota for a body already on disk (F-M463).
   v12.1.12.359: a main-path verdict is filed where it is measured — the only flush sat behind "nothing was saved for this language", so a broken top candidate went unreported as soon as a later candidate served the episode (F-M462).
   v12.1.12.358: the v1 download route records its own verdict now — it wrote none, so its rejects quoted the previous call ("HTTP 200" on a healthy upload, "no request made" on a request that happened), which is what made two diagnoses wander (F-M461).
   v12.1.12.357: the SDH walk now reports what it measured — it ran the same structure and runtime gates as the main track and filed nothing, which is how two real findings of the last run died; it also clears its verdict per attempt and repeats an empty answer once after ten seconds (F-M460).
