@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.122
-**Status:** Implementation — v12.1.12.359.
+**Version:** 2.123
+**Status:** Implementation — v12.1.12.360.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,8 +16,8 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 72 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 20 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 73 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 21 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397, F-M454
@@ -521,6 +521,8 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 **F-M461 [D]:** **Jeder Abrufweg schreibt sein eigenes Urteil.** Der v1-Weg (`dl.subdl.com/subtitle/…`, Einzeldatei oder Archiv) und der v2-Weg halten beide Status, Fehlername und Länge der **eigenen** Antwort fest. Ein Ablehnungsgrund nennt damit den Grund dieser Anfrage, nie den einer anderen.
 
 **F-M462 [D]:** **Ein gemessenes Urteil wird eingestellt, wo es gemessen wurde — nicht am Ende des Sprachlaufs.** Am Ende des Sprachlaufs wird nur aufgeräumt, wenn für die Sprache **nichts** gespeichert wurde; ein späterer Treffer lässt den Befund des vorigen Kandidaten unberührt. Der Befund geht an Ort und Stelle in die Warteschlange, und die Marke `ReportedUtc` verhindert, dass der Laufende-Durchgang ihn ein zweites Mal einstellt.
+
+**F-M463 [D]:** **Der gewählte Dateiname geht mit in den Abruf.** Nennt eine Pack-Datei ihre Folge nicht im Namen (`16 - Relevance.en.srt`), findet die Auflösung über Staffel und Folge sie nicht. Der Abruf bekommt deshalb den bereits gewählten Dateinamen und nimmt genau diesen Eintrag; fehlt er im Archiv, folgt die Folgen-Suche auf **denselben** Bytes, und erst danach wird neu geladen. Ein Archiv, das schon auf der Platte liegt, wird nie ein zweites Mal bezahlt.
 
 
 ### 4.2 Dry Run — Download
@@ -2057,6 +2059,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T173:** Die `packs`-Tabelle hält, was sie verspricht (F-M390).
 
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
+
+**T187:** Der gewählte Dateiname entscheidet im Archiv — er löst einen Eintrag ohne Folgennamen auf, ein nicht vorhandener Name bleibt null, und die Folgen-Suche kommt vor dem Neuladen (F-M463). **7 Prüfungen.**
 
 **T186:** Der Befund des Hauptpfads wird dort eingestellt, wo er gemessen wurde — vor dem Weiterlauf zum nächsten Kandidaten, nicht hinter „nichts gespeichert" (F-M462). **1 Prüfung.**
 

@@ -518,6 +518,52 @@ internal static class Program
         Check(standard.FindUnpackFile(6, 10)?.Name == "The.Middle.S06E10.HDTV.x264-LOL.srt",
             "F-M454: the SxxExx form keeps working beside the new one");
 
+        // F-M463 (measured 11.11.2026): the KangMus pack names its entries "16 - Relevance.en.srt".
+        // No season, no SxxExx — so the entry cannot be found by re-deriving season/episode from the
+        // name, and the walk refetched the SAME archive once per episode: 16 quota units for one body.
+        var bare = new SubtitleCandidate { ReleaseName = "Person.Of.Interest.S02.Complete.720p.BrRip.x264-KangMus", Url = "x.zip", Language = "EN" };
+        bare.UnpackFiles.Add(Member("15 - Booked Solid.en.srt", 0, 0, hi: false));
+        bare.UnpackFiles.Add(Member("16 - Relevance.en.srt", 0, 0, hi: false));
+        Check(bare.FindUnpackFile(2, 16) == null,
+            "F-M463: entries named \"16 - Relevance.en.srt\" name no episode — the pick has to be carried");
+
+        // The real unpacker, called the way the download routes call it: the pick by NAME resolves
+        // the entry even though its name carries no episode.
+        byte[] zipBytes;
+        using (var ms = new MemoryStream())
+        {
+            using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+            {
+                void Add(string name, string body)
+                {
+                    using var w = new StreamWriter(zip.CreateEntry(name).Open());
+                    w.Write(body);
+                }
+
+                Add("15 - Booked Solid.en.srt", "S02E15");
+                Add("16 - Relevance.en.srt", "S02E16");
+            }
+
+            zipBytes = ms.ToArray();
+        }
+
+        var unpack = typeof(SubdlApiClient).GetMethod("UnpackAsync",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        string? Picked(string? name)
+        {
+            var task = (System.Threading.Tasks.Task<byte[]?>)unpack!.Invoke(null,
+                new object?[] { zipBytes, 2, 16, System.Threading.CancellationToken.None, name })!;
+            var bytes = task.GetAwaiter().GetResult();
+            return bytes == null ? null : System.Text.Encoding.UTF8.GetString(bytes);
+        }
+
+        Check(Picked("16 - Relevance.en.srt") == "S02E16",
+            "F-M463: the picked file name resolves the entry — no episode parsing involved");
+        Check(Picked("not in the archive.srt") == null,
+            "F-M463: a pick that is not in the archive stays a null, never another file");
+        Check(Picked(null) == null,
+            "F-M463: without a pick and without a readable episode the archive yields nothing — which is why the pick exists");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"packretry: {_checks} checks, all green."

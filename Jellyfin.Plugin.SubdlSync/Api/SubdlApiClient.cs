@@ -1527,7 +1527,7 @@ public sealed class SubdlApiClient
     /// <param name="zipSeason">Wanted season for the archive fallback (0 = none).</param>
     /// <param name="zipEpisode">Wanted episode for the archive fallback (0 = none).</param>
     /// <returns>The subtitle file bytes, or null.</returns>
-    public async Task<byte[]?> DownloadV2FileAsync(string nId, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0)
+    public async Task<byte[]?> DownloadV2FileAsync(string nId, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0, string? memberName = null)
     {
         if (string.IsNullOrWhiteSpace(nId))
         {
@@ -1567,7 +1567,14 @@ public sealed class SubdlApiClient
 
         if (archive is { Length: > 0 })
         {
-            byte[]? member = await UnpackAsync(archive, zipSeason, zipEpisode, ct).ConfigureAwait(false);
+            byte[]? member = await UnpackAsync(archive, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
+            if (member == null && !string.IsNullOrWhiteSpace(memberName))
+            {
+                // F-M463: same order as the v1 route — the pick by name, then the episode match on
+                // the body we already hold, and only then a real refetch.
+                member = await UnpackAsync(archive, zipSeason, zipEpisode, ct).ConfigureAwait(false);
+            }
+
             if (member == null && fromCache)
             {
                 // A cached body that cannot resolve this episode may belong to an archive that was
@@ -2089,7 +2096,7 @@ public sealed class SubdlApiClient
     /// <param name="dlUrl">Download path or URL from the search result.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Raw subtitle bytes (SRT extracted when ZIP-packaged) or null on failure.</returns>
-    public async Task<byte[]?> DownloadSubtitleFileAsync(string dlUrl, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0)
+    public async Task<byte[]?> DownloadSubtitleFileAsync(string dlUrl, CancellationToken ct, int zipSeason = 0, int zipEpisode = 0, string? memberName = null)
     {
         string fullUrl = NormalizeDlUrl(dlUrl);
 
@@ -2106,7 +2113,17 @@ public sealed class SubdlApiClient
             return null;
         }
 
-        byte[]? srt = await UnpackAsync(bytes, zipSeason, zipEpisode, ct).ConfigureAwait(false);
+        byte[]? srt = await UnpackAsync(bytes, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
+        if (srt == null && !string.IsNullOrWhiteSpace(memberName))
+        {
+            // F-M463 (measured 11.11.2026): a pack whose entries carry no SxxExx hands us the pick
+            // as "16 - Relevance.en.srt". When that exact entry is gone, the episode match on the
+            // SAME cached body is still the better answer — and it costs nothing. Doing this before
+            // the refetch is the whole point: the previous order refetched the archive once per
+            // episode and burned the daily quota for a body that was already on disk.
+            srt = await UnpackAsync(bytes, zipSeason, zipEpisode, ct).ConfigureAwait(false);
+        }
+
         if (srt == null && fromCache)
         {
             // The key names the archive, and an archive can be re-uploaded upstream under the same

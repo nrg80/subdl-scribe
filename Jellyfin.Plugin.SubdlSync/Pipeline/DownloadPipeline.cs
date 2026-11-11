@@ -3258,7 +3258,10 @@ public sealed class DownloadPipeline : IDisposable
                     || cand.Url.Contains(".zip?", StringComparison.OrdinalIgnoreCase);
                 if (cand.UnpackFiles.Count >= 2 && archiveUrl)
                 {
-                    byte[]? whole = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode).ConfigureAwait(false);
+                    // F-M463: hand the pick down. Entries like "16 - Relevance.en.srt" carry no
+                    // SxxExx, so the season/episode re-derivation cannot find them — and the old code
+                    // then refetched the same archive once per episode (16 fetches, one day's quota).
+                    byte[]? whole = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode, want.Name).ConfigureAwait(false);
                     if (whole is { Length: > 0 })
                     {
                         // Info, not Detail: this line marks every episode that is served from the
