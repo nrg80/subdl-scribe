@@ -12,9 +12,9 @@
         "version": "12.1.12.360",
         "changelog": "v12.1.12.360: the picked file name now travels into the download — a pack whose entries carry no SxxExx (\"16 - Relevance.en.srt\") could not be resolved, so the same archive was refetched once per episode and ate a day's quota for a body already on disk (F-M463).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.360-dev/Jellyfin.Plugin.SubdlSync_12.1.12.360.zip",
-        "checksum": "3dff0e79cef7b8c1975212046bde7510",
-        "timestamp": "2026-11-11T00:44:57Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.360/Jellyfin.Plugin.SubdlSync_12.1.12.360.zip",
+        "checksum": "2944b192370524b88f93584e4142592f",
+        "timestamp": "2026-11-11T00:45:52Z"
       }
     ]
   }
