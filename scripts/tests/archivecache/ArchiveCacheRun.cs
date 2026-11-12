@@ -294,12 +294,16 @@ internal static class Program
         // F-M471 (operator order 12.11.2026: "Archiv immer als ganzes. In den cache, dann entpacken.
         // Wege auf v2 harmonisieren"): every fetch goes through ONE helper, the archive is fetched
         // whole, and no route fetches a single member url any more.
-        Check(pipeSource.Contains("private Task<DownloadOutcome> FetchArchiveAsync(", StringComparison.Ordinal),
+        Check(pipeSource.Contains("Task<DownloadOutcome> FetchArchiveAsync(string? nId, CancellationToken ct", StringComparison.Ordinal),
             "F-M471: one helper owns the way to the bytes");
-        Check(pipeSource.Contains("FetchArchiveAsync(cand.NId, cand.Url, ct, season, episode, want?.Name)", StringComparison.Ordinal),
-            "F-M471: the download route passes the address — nId first, the entry's url as fallback");
-        Check(pipeSource.Contains("FetchArchiveAsync(hi.NId, hi.Url, ct, season, episode, null)", StringComparison.Ordinal),
+        Check(pipeSource.Contains("FetchArchiveAsync(cand.NId, ct, season, episode, want?.Name)", StringComparison.Ordinal),
+            "F-M471: the download route asks by entry id — no url address beside it");
+        Check(pipeSource.Contains("FetchArchiveAsync(hi.NId, ct, season, episode, null)", StringComparison.Ordinal),
             "F-M471: the hearing-impaired variant takes the same way (it used the member url before)");
+        Check(pipeSource.Contains("return DownloadOutcome.None(\"no-entry-id\");", StringComparison.Ordinal),
+            "F-M471: an entry without an id is skipped and said so, not fetched over a second shape");
+        Check(!pipeSource.Contains("_api.DownloadSubtitleFileAsync", StringComparison.Ordinal),
+            "F-M471: one address — the pipeline no longer calls the v1 route at all");
         Check(!pipeSource.Contains("DownloadSubtitleFileAsync(want.Url", StringComparison.Ordinal),
             "F-M471: no member url is fetched on its own");
         Check(!pipeSource.Contains("archiveRoute", StringComparison.Ordinal),

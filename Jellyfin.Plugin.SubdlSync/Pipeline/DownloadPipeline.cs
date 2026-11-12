@@ -2505,7 +2505,7 @@ public sealed class DownloadPipeline : IDisposable
                             await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
                             // F-M464: the SDH fetch carries its own outcome — no reset, no state on
                             // the client, nothing a later request could overwrite.
-                            DownloadOutcome hiDl = await FetchArchiveAsync(hi.NId, hi.Url, ct, season, episode, null).ConfigureAwait(false);
+                            DownloadOutcome hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
                             var hiBytes = CorrectInvisibleCues(hiDl.Content);
 
                             // F-M455/F-M460: an empty answer is asked once more after ten seconds,
@@ -2523,7 +2523,7 @@ public sealed class DownloadPipeline : IDisposable
                                 await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
                                 _watchdog?.Heartbeat();
                                 _api.ResetRateLimitFlag();
-                                hiDl = await FetchArchiveAsync(hi.NId, hi.Url, ct, season, episode, null).ConfigureAwait(false);
+                                hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
                                 hiBytes = CorrectInvisibleCues(hiDl.Content);
                             }
 
@@ -3198,18 +3198,28 @@ public sealed class DownloadPipeline : IDisposable
     /// entry carries one (v2, Bearer), else the entry's own url (v1). Nothing fetches a single
     /// member url any more.
     /// </summary>
-    /// <param name="nId">Entry id (<c>subtitlePage</c> tail), empty when the entry has none.</param>
-    /// <param name="url">The entry's own download url (fallback address).</param>
+    /// <param name="nId">Entry id (<c>subtitlePage</c> tail). Required — see the note below.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="season">Wanted season (0 = none).</param>
     /// <param name="episode">Wanted episode (0 = none).</param>
     /// <param name="member">Member name to prefer inside the archive (null = derive from season/episode).</param>
     /// <returns>What the fetch produced, with its own outcome.</returns>
-    private Task<DownloadOutcome> FetchArchiveAsync(string? nId, string url, CancellationToken ct, int season, int episode, string? member)
+    private async Task<DownloadOutcome> FetchArchiveAsync(string? nId, CancellationToken ct, int season, int episode, string? member)
     {
-        return !string.IsNullOrEmpty(nId)
-            ? _api.DownloadV2FileAsync(nId!, ct, season, episode, member)
-            : _api.DownloadSubtitleFileAsync(url, ct, season, episode, member);
+        if (string.IsNullOrEmpty(nId))
+        {
+            // F-M471 (measured 12.11.2026): 121 hits over 13 searches — old films from 1942, 1954,
+            // 1964 among them — and every single one carried a subtitlePage. The entry id is not a
+            // "usually present" field, so the second address (the entry's own url) was a fallback
+            // without a single measured case. It is gone: an entry without an id is skipped and SAID
+            // SO, instead of being fetched over a shape nobody has ever verified.
+            _logger.LogWarning(
+                "[SubDL-D] entry without an id (no subtitlePage) — cannot fetch S{Season}E{Episode}: {Member}",
+                season, episode, member ?? "—");
+            return DownloadOutcome.None("no-entry-id");
+        }
+
+        return await _api.DownloadV2FileAsync(nId, ct, season, episode, member).ConfigureAwait(false);
     }
 
     private async Task<CandidateAttempt> DownloadCandidateAsync(
@@ -3291,7 +3301,7 @@ public sealed class DownloadPipeline : IDisposable
             }
         }
 
-        DownloadOutcome archive = await FetchArchiveAsync(cand.NId, cand.Url, ct, season, episode, want?.Name).ConfigureAwait(false);
+        DownloadOutcome archive = await FetchArchiveAsync(cand.NId, ct, season, episode, want?.Name).ConfigureAwait(false);
 
         if (archive.Content is { Length: > 0 })
         {
