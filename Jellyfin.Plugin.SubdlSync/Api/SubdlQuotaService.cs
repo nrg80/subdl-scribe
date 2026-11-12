@@ -200,17 +200,18 @@ public class SubdlQuota : ControllerBase
                     reason = row!.Detail ?? string.Empty;
                 }
 
-                // F-M447 (operator order 05.11.2026, "für das upload Postprocessing im worker status
-                // bitte nicht defer sondern schedule verwenden. Der erste lauf ist planmäßig"): the armed
-                // postprocessing order is NOT a deferral. Every finished upload run arms it once, and that
-                // first run happens on plan — nothing was pushed back, no run failed, no quota was hit. The
-                // page defaults an empty reason to the word "deferred", so the postprocessing said
-                // "deferred — next attempt …" for its ordinary schedule. Word kept at the operator's own
-                // spelling. A failed row still speaks first: its "last run failed: …" outranks the word.
-                if (string.IsNullOrEmpty(reason)
-                    && string.Equals(worker.Key, Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey, StringComparison.Ordinal))
+                // F-M470 (operator 11.11.2026, "wieso wird postprocessing jetzt 2x gemeldet?"): the armed
+                // postprocessing order has its OWN line on the page ("Postprocessing due <when>", F-M445),
+                // so it must not be repeated here — the same moment stood twice, once as "Postprocessing
+                // due 9:04 PM" and once as "Upl. Postproc.: schedule — next attempt Wed 9:04 PM".
+                // F-M447 had given it the word "schedule" on this line; that turned a duplicate into a
+                // duplicate with a nicer word. The schedule is the other line's job. What stays is the one
+                // thing this line alone can say: a FAILED postprocessing run, whose cause would otherwise
+                // vanish (F-M436).
+                if (string.Equals(worker.Key, Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey, StringComparison.Ordinal)
+                    && !isFailed)
                 {
-                    reason = "schedule";
+                    continue;
                 }
 
                 entries.Add(new

@@ -20,6 +20,12 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 public static partial class SeasonPack
 {
     /// <summary>
+    /// F-M469: the group a file belongs to when its name states no release at all. It is a group of its
+    /// own — and it never wins against a named group.
+    /// </summary>
+    public const string UnknownGroup = "?";
+
+    /// <summary>
     /// One item of a run, as far as the pack plan needs it: identity, series IMDb id and the
     /// position inside the season. Movies carry a null IMDb id and never join a pack.
     /// </summary>
@@ -86,6 +92,36 @@ public static partial class SeasonPack
         var want = AiredNumbers(aired).ToList();
         var have = AiredNumbers(present).ToList();
         return want.Count > 0 && want.Count == have.Count && want.SequenceEqual(have);
+    }
+
+    /// <summary>
+    /// F-M469 (operator order 11.11.2026, "aber wir fassen nur denselben release zusammen"): the ONE
+    /// release group that supplies every aired episode, or null when the season is split over several.
+    /// <para>
+    /// A pack carries one release. A season whose eight episodes come from three encodes is not a pack,
+    /// it is a zip of three releases — and it must not be built even though every episode is on disk.
+    /// The unknown group (<c>?</c>) is a group of its own and loses against every named one; files that
+    /// state no release are never promoted over files that do.
+    /// </para>
+    /// </summary>
+    /// <param name="aired">Aired episodes.</param>
+    /// <param name="byGroup">Episode numbers per release group.</param>
+    /// <returns>The covering group's name, or null.</returns>
+    public static string? GroupCoveringSeason(
+        IEnumerable<int> aired, IEnumerable<(string Group, IEnumerable<int> Episodes)> byGroup)
+    {
+        var want = AiredNumbers(aired).ToList();
+        if (want.Count == 0)
+        {
+            return null;
+        }
+
+        return byGroup
+            .Where(g => !string.IsNullOrWhiteSpace(g.Group) && IsComplete(want, g.Episodes))
+            .OrderBy(g => g.Group == UnknownGroup ? 1 : 0)
+            .ThenBy(g => g.Group, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.Group)
+            .FirstOrDefault();
     }
 
     /// <summary>

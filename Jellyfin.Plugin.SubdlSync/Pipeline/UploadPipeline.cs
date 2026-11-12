@@ -2988,7 +2988,7 @@ public sealed class UploadPipeline : IPackFiller
                     continue;
                 }
 
-                string group = SeasonPack.ReleaseGroup(item.Path) ?? "?";
+                string group = SeasonPack.ReleaseGroup(item.Path) ?? SeasonPack.UnknownGroup;
                 if (!groupOf.TryGetValue(group, out var groupNumbers))
                 {
                     groupNumbers = new List<int>();
@@ -3001,27 +3001,41 @@ public sealed class UploadPipeline : IPackFiller
                 }
             }
 
-            string? completeGroup = groupOf
-                .Where(g => SeasonPack.IsComplete(aired, g.Value))
-                .Select(g => g.Key)
-                .OrderBy(g => g, StringComparer.OrdinalIgnoreCase)
-                .FirstOrDefault();
+            // F-M469: the group is binding in BOTH cases. "Every episode is on disk" was enough to hand
+            // the whole folder to the pack — and a season of three encodes became one zip of three
+            // releases, although the rule says a pack carries one release.
+            string? completeGroup = SeasonPack.GroupCoveringSeason(
+                aired, groupOf.Select(g => (g.Key, (IEnumerable<int>)g.Value)));
 
-            if (SeasonPack.IsComplete(aired, entry.Value))
+            if (SeasonPack.IsComplete(aired, entry.Value) && completeGroup != null)
             {
                 result[entry.Key] = aired;
-                _completeSeasonItems[entry.Key] = itemsOf[entry.Key];
+                _completeSeasonItems[entry.Key] = itemsOf[entry.Key]
+                    .Where(x => string.Equals(
+                        SeasonPack.ReleaseGroup(x.Path) ?? SeasonPack.UnknownGroup, completeGroup,
+                        StringComparison.OrdinalIgnoreCase))
+                    .ToList();
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack candidate: {Imdb} S{Season} — {Count} of {Aired} episode(s) on disk, season complete.",
-                    entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count);
+                    "[SubDL] season pack candidate: {Imdb} S{Season} — {Count} of {Aired} episode(s) on disk, season complete, release group {Group}.",
+                    entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count, completeGroup);
+            }
+            else if (SeasonPack.IsComplete(aired, entry.Value))
+            {
+                // F-M469: complete on disk, but not one release — no pack. The single uploads of the run
+                // are unaffected; this is the pack's own refusal.
+                LogUtil.Normal(
+                    _logger,
+                    "[SubDL] season pack skipped: {Imdb} S{Season} — all {Aired} episode(s) are on disk but split over {Groups} release(s) ({List}), a pack carries one release, stays single.",
+                    entry.Key.Item1, entry.Key.Item2, aired.Count, groupOf.Count,
+                    string.Join(", ", groupOf.Select(g => $"{g.Key}: {g.Value.Count}")));
             }
             else if (completeGroup != null)
             {
                 result[entry.Key] = aired;
                 _completeSeasonItems[entry.Key] = itemsOf[entry.Key]
                     .Where(x => string.Equals(
-                        SeasonPack.ReleaseGroup(x.Path) ?? "?", completeGroup,
+                        SeasonPack.ReleaseGroup(x.Path) ?? SeasonPack.UnknownGroup, completeGroup,
                         StringComparison.OrdinalIgnoreCase))
                     .ToList();
                 LogUtil.Normal(
@@ -3761,7 +3775,13 @@ public sealed class UploadPipeline : IPackFiller
         {
             // F-M431: enumerated exactly the way the extraction reads the file — every subtitle stream of
             // the item, external ones included — so a position means the same thing in both places.
-            allSubs = item.GetMediaStreams()?
+            // F-M468 (measured 11.11.2026 on VisionQuest tt23112594): asked by ID, not on the object. The
+            // pack phase reads a season as folder children, and such an item carries no media sources —
+            // its own stream list is empty, so every language answered "the file does not carry it"
+            // although the files carry 25. Every other place in this pipeline asks the media source
+            // manager by id; the object is only the fallback for a source manager that has nothing.
+            allSubs = (_mediaSourceManager.GetMediaStreams(item.Id)
+                       ?? item.GetMediaStreams())?
                 .Where(s => s.Type == MediaStreamType.Subtitle)
                 .ToList() ?? new List<MediaStream>();
         }

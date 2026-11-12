@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.362",
-        "changelog": "v12.1.12.362: the upload postprocessing is only armed by a run that uploaded something (F-M465), and the season pack memo carries a fingerprint over its members so a repeat run answers \"same pack?\" in one comparison (F-M466).",
+        "version": "12.1.12.366",
+        "changelog": "v12.1.12.366: the armed postprocessing order is shown once — its own line; the worker status line no longer repeats it unless the run failed (F-M470).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.362/Jellyfin.Plugin.SubdlSync_12.1.12.362.zip",
-        "checksum": "e5c11686c82f75af8c5a8056246b38cd",
-        "timestamp": "2026-11-11T01:59:28Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.366-dev/Jellyfin.Plugin.SubdlSync_12.1.12.366.zip",
+        "checksum": "91fa826a029cabd9f9bae570d0b6f36b",
+        "timestamp": "2026-11-11T20:00:40Z"
       }
     ]
   }
