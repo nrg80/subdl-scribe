@@ -12,9 +12,9 @@
         "version": "12.1.12.367",
         "changelog": "v12.1.12.367: one way to the bytes — the archive is fetched whole, cached, then unpacked; the address (nId or url) is a parameter and no single member is fetched (F-M471).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.367-dev/Jellyfin.Plugin.SubdlSync_12.1.12.367.zip",
-        "checksum": "7dceb099e59c2987d7fa4aab7a2045e1",
-        "timestamp": "2026-11-12T02:53:34Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.367/Jellyfin.Plugin.SubdlSync_12.1.12.367.zip",
+        "checksum": "3b7608452d2cf055142e9a29cca71d49",
+        "timestamp": "2026-11-12T02:56:31Z"
       }
     ]
   }
