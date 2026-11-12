@@ -12,9 +12,9 @@
         "version": "12.1.12.368",
         "changelog": "v12.1.12.368: the entry id is the only address — the url fallback is gone, an entry without an id is skipped and named (F-M471).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.368-dev/Jellyfin.Plugin.SubdlSync_12.1.12.368.zip",
-        "checksum": "05526bbfc7b96b8c9bb5dc71b53fcea7",
-        "timestamp": "2026-11-12T03:03:47Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.368/Jellyfin.Plugin.SubdlSync_12.1.12.368.zip",
+        "checksum": "9566c985c4cf0246d3fd6eaf1e060530",
+        "timestamp": "2026-11-12T03:19:24Z"
       }
     ]
   }
