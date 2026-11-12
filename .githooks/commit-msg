@@ -1,0 +1,18 @@
+#!/bin/sh
+# Cliff: code commits belong on develop. main takes merges and "release:" commits only.
+# A commit-msg hook: pre-commit receives NO message, so a message test there always saw an
+# empty subject and blocked every commit on main - which silently ate release.sh's manifest
+# commit ("git commit ... || ok '(manifest unchanged)'").
+branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+if [ "$branch" = "main" ]; then
+  subject=$(head -1 "$1" 2>/dev/null)
+  case "$subject" in
+    release:*|Merge\ *|merge:*) ;;
+    *)
+      echo "ABORT: '$branch' ist der Release-Zweig. Code gehoert auf develop." >&2
+      echo "       Wechsle mit: git checkout develop" >&2
+      exit 1
+      ;;
+  esac
+fi
+exit 0
