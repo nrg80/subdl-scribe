@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.368",
-        "changelog": "v12.1.12.368: the entry id is the only address — the url fallback is gone, an entry without an id is skipped and named (F-M471).",
+        "version": "12.1.12.369",
+        "changelog": "v12.1.12.369: both tracks name the file a pack report is about — the entry the archive resolution actually took (F-M450).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.368-dev/Jellyfin.Plugin.SubdlSync_12.1.12.368.zip",
-        "checksum": "05526bbfc7b96b8c9bb5dc71b53fcea7",
-        "timestamp": "2026-11-12T03:03:47Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.369-dev/Jellyfin.Plugin.SubdlSync_12.1.12.369.zip",
+        "checksum": "a17ffa5b0a34d2de77aa805354198af7",
+        "timestamp": "2026-11-12T03:34:57Z"
       }
     ]
   }
