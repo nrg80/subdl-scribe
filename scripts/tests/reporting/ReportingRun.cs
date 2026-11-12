@@ -149,6 +149,12 @@ internal static class ReportingRun
             "a measured gate verdict is reported in the same run — no second sighting is awaited");
         Check(pipeline.Contains("gateFinding += \" ('\" + packFile.Name + \"')\"", StringComparison.Ordinal),
             "the pipeline puts the resolved pack member into the finding");
+        Check(pipeline.Contains("hiFinding += \" ('\" + hiDl.Member + \"')\"", StringComparison.Ordinal),
+            "F-M450: the SDH path names its member too — the file the gate measured, not the pack");
+        Check(Read(plugin, "Api/SubdlApiClient.cs").Contains("Member = memberEntry ?? memberName", StringComparison.Ordinal),
+            "F-M450: the outcome reports the entry that was actually resolved, not the guessed name");
+        Check(Read(plugin, "Api/SubdlApiClient.cs").Contains("return (ms.ToArray(), entry.Name);", StringComparison.Ordinal),
+            "F-M450: only the unpack step knows which entry it handed back — it says so");
         // F-M455 replaced the "no members" test with "at most one member": with unpack=1 an ordinary
         // single release carries exactly one member — the file itself — so the old guard silenced
         // every honest candidate. A pack is MORE than one member, and a pack stays excluded.

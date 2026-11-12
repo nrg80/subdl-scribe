@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.368"
+version: "12.1.12.369"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.369: both tracks name the file a pack report is about — the entry the archive resolution actually took (F-M450).
   v12.1.12.368: the entry id is the only address — the url fallback is gone, an entry without an id is skipped and named (F-M471).
   v12.1.12.367: one way to the bytes — the archive is fetched whole, cached, then unpacked; the address (nId or url) is a parameter and no single member is fetched (F-M471).
   v12.1.12.366: the armed postprocessing order is shown once — its own line; the worker status line no longer repeats it unless the run failed (F-M470).

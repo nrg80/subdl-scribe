@@ -2786,6 +2786,15 @@ public sealed class DownloadPipeline : IDisposable
                                     && hiFinding != null
                                     && !string.IsNullOrEmpty(hi.SubdlId))
                                 {
+                                    // F-M450: the same rule as the main path — a pack report names
+                                    // the file the gate measured. Here the name is the entry the
+                                    // resolution actually took (hiDl.Member), because the SDH walk
+                                    // asks the archive by episode, not by listed name.
+                                    if (!string.IsNullOrWhiteSpace(hiDl.Member))
+                                    {
+                                        hiFinding += " ('" + hiDl.Member + "')";
+                                    }
+
                                     _qaFails.RecordSkippedCandidates(
                                         item.Id.ToString(), lang, new[] { hi.SubdlId },
                                         RejectReason.CandidateRejected,

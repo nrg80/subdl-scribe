@@ -549,13 +549,17 @@ internal static class Program
 
         var unpack = typeof(SubdlApiClient).GetMethod("UnpackAsync",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        string? Picked(string? name)
+        // F-M450: the unpack step hands back the entry it ACTUALLY took beside the bytes, so the
+        // harness reads the same tuple the client does.
+        (string? Text, string? Entry) PickedWithName(string? name)
         {
-            var task = (System.Threading.Tasks.Task<byte[]?>)unpack!.Invoke(null,
+            var task = (System.Threading.Tasks.Task<(byte[]? Content, string? Name)>)unpack!.Invoke(null,
                 new object?[] { zipBytes, 2, 16, System.Threading.CancellationToken.None, name })!;
-            var bytes = task.GetAwaiter().GetResult();
-            return bytes == null ? null : System.Text.Encoding.UTF8.GetString(bytes);
+            var (bytes, entry) = task.GetAwaiter().GetResult();
+            return (bytes == null ? null : System.Text.Encoding.UTF8.GetString(bytes), entry);
         }
+
+        string? Picked(string? name) => PickedWithName(name).Text;
 
         Check(Picked("16 - Relevance.en.srt") == "S02E16",
             "F-M463: the picked file name resolves the entry — no episode parsing involved");
@@ -563,6 +567,8 @@ internal static class Program
             "F-M463: a pick that is not in the archive stays a null, never another file");
         Check(Picked(null) == null,
             "F-M463: without a pick and without a readable episode the archive yields nothing — which is why the pick exists");
+        Check(PickedWithName("16 - Relevance.en.srt").Entry == "16 - Relevance.en.srt",
+            "F-M450: the resolution names the entry it took — that name is what a report has to say");
 
         // F-M465 (operator decision 11.11.2026, "nur bei > 0 uploaded anmahnen"): a run that uploaded
         // nothing arms no postprocessing order; an order someone else placed is left alone.

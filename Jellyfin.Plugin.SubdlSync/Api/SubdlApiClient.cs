@@ -1537,7 +1537,7 @@ public sealed class SubdlApiClient
         byte[]? archive = attempt.Content;
         if (archive is { Length: > 0 })
         {
-            byte[]? member = await ResolveMemberAsync(archive, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
+            var (member, memberEntry) = await ResolveMemberAsync(archive, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
             if (member == null && fromCache)
             {
                 // A cached body that cannot resolve this episode may belong to an archive that was
@@ -1547,13 +1547,15 @@ public sealed class SubdlApiClient
                 if (fresh.HasContent)
                 {
                     StoreArchive(key, fresh.Content);
-                    member = await ResolveMemberAsync(fresh.Content!, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
+                    (member, memberEntry) = await ResolveMemberAsync(fresh.Content!, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
                 }
             }
 
             if (member is { Length: > 0 })
             {
-                return attempt with { Status = 200, Error = null, Content = member, Member = memberName };
+                // F-M450: Member is the entry that was ACTUALLY resolved — not the name the caller
+                // guessed. A report naming the wrong file of a pack accuses the wrong uploader.
+                return attempt with { Status = 200, Error = null, Content = member, Member = memberEntry ?? memberName };
             }
 
             if (member == null)
@@ -2095,7 +2097,7 @@ public sealed class SubdlApiClient
         }
 
         byte[] bytes = attempt.Content!;
-        byte[]? srt = await ResolveMemberAsync(bytes, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
+        var (srt, srtEntry) = await ResolveMemberAsync(bytes, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
 
         if (srt == null && fromCache)
         {
@@ -2108,18 +2110,18 @@ public sealed class SubdlApiClient
             if (fresh.HasContent)
             {
                 StoreArchive(key, fresh.Content);
-                srt = await ResolveMemberAsync(fresh.Content!, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
+                (srt, srtEntry) = await ResolveMemberAsync(fresh.Content!, zipSeason, zipEpisode, ct, memberName).ConfigureAwait(false);
             }
 
             if (srt is { Length: > 0 })
             {
-                return fresh with { Status = 200, Error = null, Content = srt, Member = memberName };
+                return fresh with { Status = 200, Error = null, Content = srt, Member = srtEntry ?? memberName };
             }
         }
 
         if (srt is { Length: > 0 })
         {
-            return attempt with { Content = srt, Member = memberName };
+            return attempt with { Content = srt, Member = srtEntry ?? memberName };
         }
 
         return attempt with { Content = null };
@@ -2204,7 +2206,8 @@ public sealed class SubdlApiClient
             return null;
         }
 
-        return await UnpackAsync(bytes, 0, 0, ct, memberName).ConfigureAwait(false);
+        var (named, _) = await UnpackAsync(bytes, 0, 0, ct, memberName).ConfigureAwait(false);
+        return named;
     }
 
     /// <summary>
@@ -2224,12 +2227,12 @@ public sealed class SubdlApiClient
     /// <param name="ct">Cancellation token.</param>
     /// <param name="memberName">Entry name the pick chose, if there is one.</param>
     /// <returns>The member bytes, or null.</returns>
-    private static async Task<byte[]?> ResolveMemberAsync(byte[] archive, int season, int episode, CancellationToken ct, string? memberName)
+    private static async Task<(byte[]? Content, string? Name)> ResolveMemberAsync(byte[] archive, int season, int episode, CancellationToken ct, string? memberName)
     {
         if (!string.IsNullOrWhiteSpace(memberName))
         {
-            byte[]? byName = await UnpackAsync(archive, season, episode, ct, memberName).ConfigureAwait(false);
-            if (byName != null)
+            var byName = await UnpackAsync(archive, season, episode, ct, memberName).ConfigureAwait(false);
+            if (byName.Content != null)
             {
                 return byName;
             }
@@ -2293,11 +2296,11 @@ public sealed class SubdlApiClient
     /// <param name="zipEpisode">Episode the caller wants (0 when unknown).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The subtitle bytes, or null.</returns>
-    private static async Task<byte[]?> UnpackAsync(byte[] bytes, int zipSeason, int zipEpisode, CancellationToken ct, string? memberName = null)
+    private static async Task<(byte[]? Content, string? Name)> UnpackAsync(byte[] bytes, int zipSeason, int zipEpisode, CancellationToken ct, string? memberName = null)
     {
         if (bytes.Length <= 4 || bytes[0] != 'P' || bytes[1] != 'K')
         {
-            return bytes;
+            return (bytes, null);
         }
 
         try
@@ -2327,7 +2330,7 @@ public sealed class SubdlApiClient
 
                 if (wanted == null)
                 {
-                    return null;
+                    return (null, null);
                 }
             }
             else if (zipEpisode > 0)
@@ -2361,7 +2364,7 @@ public sealed class SubdlApiClient
 
                     if (srtCount > 1)
                     {
-                        return null; // multi-file pack, episode unresolvable → do not guess
+                        return (null, null); // multi-file pack, episode unresolvable → do not guess
                     }
                 }
             }
@@ -2381,14 +2384,16 @@ public sealed class SubdlApiClient
                 await using var es = await entry.OpenAsync(ct).ConfigureAwait(false);
                 using var ms = new MemoryStream();
                 await es.CopyToAsync(ms, ct).ConfigureAwait(false);
-                return ms.ToArray();
+                // The entry that was actually handed back. A report has to name the file that was
+                // measured, and only this line knows which one that is (F-M450).
+                return (ms.ToArray(), entry.Name);
             }
 
-            return null; // ZIP without .srt
+            return (null, null); // ZIP without .srt
         }
         catch (System.IO.InvalidDataException)
         {
-            return null; // corrupt ZIP
+            return (null, null); // corrupt ZIP
         }
     }
 }

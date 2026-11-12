@@ -283,7 +283,7 @@ internal static class Program
             "F-M463: the v2 route uses the same order, so a cached archive is never paid for twice");
 
         // F-M464: the order lives in ONE place, and the pick travels into the fetch.
-        int resolve = apiSource.IndexOf("private static async Task<byte[]?> ResolveMemberAsync", StringComparison.Ordinal);
+        int resolve = apiSource.IndexOf("private static async Task<(byte[]? Content, string? Name)> ResolveMemberAsync", StringComparison.Ordinal);
         bool resolveShared = resolve >= 0
                              && apiSource[(resolve)..].Contains("UnpackAsync(archive, season, episode, ct, memberName)", StringComparison.Ordinal)
                              && apiSource[(resolve)..].Contains("return await UnpackAsync(archive, season, episode, ct)", StringComparison.Ordinal);
