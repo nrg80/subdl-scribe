@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.129
-**Status:** Implementation — v12.1.12.366.
+**Version:** 2.130
+**Status:** Implementation — v12.1.12.367.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,8 +16,8 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 80 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 28 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 81 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 29 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397, F-M454
@@ -537,6 +537,8 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 **F-M469 [D]:** **Ein Pack trägt eine Release — auch wenn die Staffel vollständig auf der Platte liegt.** Gepackt wird nur die Release-Gruppe, die alle ausgestrahlten Folgen stellt; stellt keine Gruppe die Staffel, entsteht kein Pack, die Einzeluploads bleiben. Dateien ohne erkennbare Release bilden eine eigene Gruppe und gewinnen nie gegen eine benannte.
 
 **F-M470 [D]:** **Ein Umstand, eine Zeile.** Der gestellte Nachlauf-Auftrag wird genau einmal angezeigt — von seiner eigenen Zeile. Die Statuszeile der Workers führt ihn nicht mehr mit; sie nennt ihn nur noch, wenn sein letzter Lauf fehlgeschlagen ist, weil der Grund sonst nirgends stünde.
+
+**F-M471 [D]:** **Das Archiv ist der eine Weg.** Ein Abruf holt das Archiv vollständig, legt es in die Ablage und entpackt daraus das gesuchte Mitglied. Die Adresse ist ein Parameter — die Eintrags-Id, wenn der Eintrag eine trägt, sonst seine eigene URL. Es gibt keinen Einzeldatei-Abruf, keinen Mitglieder-Link und keine zweite Gestalt hinter dem Archiv: Ein abgelehntes Archiv ist der Befund.
 
 
 ### 4.2 Dry Run — Download
@@ -2073,6 +2075,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T173:** Die `packs`-Tabelle hält, was sie verspricht (F-M390).
 
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
+
+**T194:** Ein Weg zu den Bytes: Archiv ganz holen, in die Ablage legen, Mitglied daraus entpacken; Adresse als Parameter; keine Einzeldatei-Gestalt. **6 Prüfungen.**
 
 **T193:** Der Nachlauf steht einmal auf der Seite; die Statuszeile schweigt über ihn, solange er gesund ist, und nennt ihn im Fehlerfall (F-M470). **3 Prüfungen.**
 

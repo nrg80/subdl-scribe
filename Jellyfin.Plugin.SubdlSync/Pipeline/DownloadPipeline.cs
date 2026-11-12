@@ -2505,7 +2505,7 @@ public sealed class DownloadPipeline : IDisposable
                             await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
                             // F-M464: the SDH fetch carries its own outcome — no reset, no state on
                             // the client, nothing a later request could overwrite.
-                            DownloadOutcome hiDl = await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false);
+                            DownloadOutcome hiDl = await FetchArchiveAsync(hi.NId, hi.Url, ct, season, episode, null).ConfigureAwait(false);
                             var hiBytes = CorrectInvisibleCues(hiDl.Content);
 
                             // F-M455/F-M460: an empty answer is asked once more after ten seconds,
@@ -2523,7 +2523,7 @@ public sealed class DownloadPipeline : IDisposable
                                 await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
                                 _watchdog?.Heartbeat();
                                 _api.ResetRateLimitFlag();
-                                hiDl = await _api.DownloadSubtitleFileAsync(hi.Url, ct, season, episode).ConfigureAwait(false);
+                                hiDl = await FetchArchiveAsync(hi.NId, hi.Url, ct, season, episode, null).ConfigureAwait(false);
                                 hiBytes = CorrectInvisibleCues(hiDl.Content);
                             }
 
@@ -3190,6 +3190,28 @@ public sealed class DownloadPipeline : IDisposable
     /// them. Payload and outcome cannot be separated, so no stage can quote someone else's status.</summary>
     private sealed record CandidateAttempt(byte[]? Bytes, SubtitleUnpackFile? PackFile, DownloadOutcome Outcome);
 
+    /// <summary>
+    /// F-M471 (operator order 12.11.2026: "Archiv immer als ganzes. In den cache, dann entpacken.
+    /// Wege auf v2 harmonisieren"): ONE way to the bytes. The archive is fetched whole, it lands in
+    /// the disk cache, and the wanted member is unpacked from that body — the HI route, the pack
+    /// route and the plain route all come through here. The address is a parameter: the nId when the
+    /// entry carries one (v2, Bearer), else the entry's own url (v1). Nothing fetches a single
+    /// member url any more.
+    /// </summary>
+    /// <param name="nId">Entry id (<c>subtitlePage</c> tail), empty when the entry has none.</param>
+    /// <param name="url">The entry's own download url (fallback address).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="season">Wanted season (0 = none).</param>
+    /// <param name="episode">Wanted episode (0 = none).</param>
+    /// <param name="member">Member name to prefer inside the archive (null = derive from season/episode).</param>
+    /// <returns>What the fetch produced, with its own outcome.</returns>
+    private Task<DownloadOutcome> FetchArchiveAsync(string? nId, string url, CancellationToken ct, int season, int episode, string? member)
+    {
+        return !string.IsNullOrEmpty(nId)
+            ? _api.DownloadV2FileAsync(nId!, ct, season, episode, member)
+            : _api.DownloadSubtitleFileAsync(url, ct, season, episode, member);
+    }
+
     private async Task<CandidateAttempt> DownloadCandidateAsync(
         SubtitleCandidate cand, int season, int episode, CancellationToken ct)
     {
@@ -3236,104 +3258,67 @@ public sealed class DownloadPipeline : IDisposable
         // A candidate that is thrown away before any request carries status 0, which reads "no
         // request made" — it can never quote what the previous candidate's request answered.
 
-        // F-M215: a season or range pack must be resolved to the episode we are
-        // actually working on. The search runs with unpack=1, so the candidate
-        // carries the pack's file list; pick the entry whose season/episode matches
-        // the media item and download THAT single file. Without this the pack was
-        // downloaded whole and the first .srt inside it was used for every episode
-        // of the season (measured 26.09.2026: one E01 subtitle on E05..E10).
+        // F-M471 (operator order 12.11.2026: "Archiv immer als ganzes. In den cache, dann
+        // entpacken. Wege auf v2 harmonisieren"): ONE way to the bytes. The archive is fetched
+        // whole, it lands in the disk cache, and the wanted episode is unpacked from that body.
+        // The address is a parameter — the nId when the entry carries one, else the entry's own
+        // url — so there is no member url and no single-file shortcut left. A whole archive costs
+        // one download unit and serves every further episode of the same pack from the cache
+        // (measured 12.11.2026: 79 member fetches from 38 packs, 41 of them for two archives);
+        // a season zip of .srt files is one or two megabytes, so the bytes never justified
+        // splitting the way in the first place.
+        // F-M215 stays: the archive is resolved to OUR episode, never "the first .srt".
+        SubtitleUnpackFile? want = null;
         if (cand.UnpackFiles.Count > 0 && (episode > 0 || season > 0))
         {
-            var want = cand.FindUnpackFile(season, episode);
-            if (want != null && !string.IsNullOrWhiteSpace(want.Url))
+            want = cand.FindUnpackFile(season, episode);
+            if (want == null)
             {
-                if (_config.LogMode >= LogLevelMode.Debug)
-                {
-                    LogUtil.Detail(_config.LogMode, _logger, 
-                        "[SubDL-D] unpack pick S{Season}E{Episode} from pack {Release} → {File} (HI={Hi})",
-                        season, episode, cand.ReleaseName, want.Name, want.HearingImpaired);
-                }
-
-                // F-M383 (measured 01.11.2026 on rosetestdev, /api/v2/me before and after each
-                // fetch): a single archive ENTRY costs one download unit, and the whole ARCHIVE
-                // costs one unit too — 58,376 B for one episode and 196,283 B for all ten. Ten
-                // single fetches therefore spend ten of the fifty daily units on a season that
-                // one archive fetch serves completely. The archive is fetched through
-                // DownloadSubtitleFileAsync, so the run cache and the disk cache (F-M369/F-M370)
-                // answer every further episode of the same pack without a request; UnpackAsync
-                // then takes the entry that names OUR episode, never "the first .srt".
-                bool archiveUrl = cand.Url.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
-                    || cand.Url.Contains(".zip?", StringComparison.OrdinalIgnoreCase);
-                // F-M464: the archive is fetched over the SAME route the file list came from. The
-                // unpack listing belongs to the nId archive, so a candidate that has an nId is asked
-                // for by nId — the cache key is then the archive's identity, and one archive cannot
-                // be paid for twice under two keys (v1 URL, v2 nId). Without an nId the classic
-                // dl.subdl.com URL is the identity.
-                bool archiveRoute = cand.UnpackFiles.Count >= 2
-                    && (!string.IsNullOrEmpty(cand.NId) || archiveUrl);
-                if (archiveRoute)
-                {
-                    // F-M463: hand the pick down. Entries like "16 - Relevance.en.srt" carry no
-                    // SxxExx, so the season/episode re-derivation cannot find them — and the old code
-                    // then refetched the same archive once per episode (16 fetches, one day's quota).
-                    DownloadOutcome archiveOutcome = !string.IsNullOrEmpty(cand.NId)
-                        ? await _api.DownloadV2FileAsync(cand.NId, ct, season, episode, want.Name).ConfigureAwait(false)
-                        : await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode, want.Name).ConfigureAwait(false);
-                    byte[]? whole = archiveOutcome.Content;
-                    if (whole is { Length: > 0 })
-                    {
-                        // Info, not Detail: this line marks every episode that is served from the
-                        // ARCHIVE instead of its own member URL — once per pack the archive is
-                        // fetched, every further episode of the same pack is a cache hit (the run
-                        // summary names the split: "N archive hit(s) (M from disk)").
-                        _logger.LogInformation(
-                            "[SubDL] pack served whole — {N} file(s) per archive fetch: {Release}",
-                            cand.UnpackFiles.Count, cand.ReleaseName);
-                        return new CandidateAttempt(whole, want, archiveOutcome);
-                    }
-
-                    // The archive did not resolve to our episode (F-M215): fall through to the
-                    // single member URL rather than saving the wrong text.
-                    _logger.LogWarning(
-                        "[SubDL-D] pack {Release} did not resolve S{Season}E{Episode} from the archive — trying the single file.",
-                        cand.ReleaseName, season, episode);
-                }
-
-                DownloadOutcome packOutcome = await _api.DownloadSubtitleFileAsync(want.Url, ct).ConfigureAwait(false);
-                return new CandidateAttempt(packOutcome.Content, want, packOutcome);
+                // The pack carries a file list but nothing matches our episode. Taking the first
+                // entry would write the wrong episode's text next to this file — worse than not
+                // saving anything, so treat it as no candidate (F-M215).
+                _logger.LogWarning(
+                    "[SubDL-D] pack {Release} has {N} files but none for S{Season}E{Episode} — candidate skipped instead of saving the wrong episode.",
+                    cand.ReleaseName, cand.UnpackFiles.Count, season, episode);
+                return new CandidateAttempt(null, null, DownloadOutcome.None("candidate"));
             }
 
-            // The pack carries a file list but nothing matches our episode. Taking the
-            // first entry would write the wrong episode's text next to this file — worse
-            // than not saving anything, so treat it as no candidate (F-M215).
+            if (_config.LogMode >= LogLevelMode.Debug)
+            {
+                LogUtil.Detail(_config.LogMode, _logger,
+                    "[SubDL-D] unpack pick S{Season}E{Episode} from pack {Release} → {File} (HI={Hi})",
+                    season, episode, cand.ReleaseName, want.Name, want.HearingImpaired);
+            }
+        }
+
+        DownloadOutcome archive = await FetchArchiveAsync(cand.NId, cand.Url, ct, season, episode, want?.Name).ConfigureAwait(false);
+
+        if (archive.Content is { Length: > 0 })
+        {
+            if (want != null)
+            {
+                // Info, not Detail: this line marks every episode served from the ARCHIVE instead
+                // of its own member URL — once per pack the archive is fetched, every further
+                // episode of the same pack is a cache hit.
+                _logger.LogInformation(
+                    "[SubDL] pack served whole — {N} file(s) per archive fetch: {Release}",
+                    cand.UnpackFiles.Count, cand.ReleaseName);
+            }
+
+            return new CandidateAttempt(archive.Content, want, archive);
+        }
+
+        if (want != null)
+        {
             _logger.LogWarning(
-                "[SubDL-D] pack {Release} has {N} files but none for S{Season}E{Episode} — candidate skipped instead of saving the wrong episode.",
-                cand.ReleaseName, cand.UnpackFiles.Count, season, episode);
-            return new CandidateAttempt(null, null, DownloadOutcome.None("candidate"));
+                "[SubDL-D] pack {Release} did not resolve S{Season}E{Episode} from the archive — nothing saved.",
+                cand.ReleaseName, season, episode);
         }
 
-        // unpack-file candidates carry a ready single-file url (dl.subdl.com) —
-        // download it directly; batch candidates carry a zip url + nId → v2
-        // single-file endpoint (format=file).
-        bool zipUrl = cand.Url.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
-            || cand.Url.Contains(".zip?", StringComparison.OrdinalIgnoreCase);
-        if (!zipUrl && !string.IsNullOrEmpty(cand.Url))
-        {
-            DownloadOutcome direct = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode).ConfigureAwait(false);
-            return new CandidateAttempt(direct.Content, null, direct);
-        }
+        return new CandidateAttempt(null, want, archive);
 
-        if (!string.IsNullOrEmpty(cand.NId))
-        {
-            // F-M450: the client falls back to ?format=zip when the subtitle has no single file
-            // (409 not_a_single_file) — it needs the wanted episode to pick the right member.
-            DownloadOutcome v2 = await _api.DownloadV2FileAsync(cand.NId, ct, season, episode).ConfigureAwait(false);
-            return new CandidateAttempt(v2.Content, null, v2);
-        }
-
-        DownloadOutcome fallback = await _api.DownloadSubtitleFileAsync(cand.Url, ct, season, episode).ConfigureAwait(false);
-        return new CandidateAttempt(fallback.Content, null, fallback);
     }
+
 
     /// <summary>
     /// F-M384: how much a candidate is worth as an ARCHIVE. <c>2</c> when the pack carries this
