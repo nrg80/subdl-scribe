@@ -290,8 +290,22 @@ internal static class Program
         Check(resolveShared,
             "F-M464: pick by name, then the episode match — one shared order instead of one per route");
         string pipeSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
-        Check(pipeSource.Contains("DownloadV2FileAsync(cand.NId, ct, season, episode, want.Name)", StringComparison.Ordinal),
-            "F-M464: a pack is fetched over the route its file list came from — the nId archive, not a second URL");
+
+        // F-M471 (operator order 12.11.2026: "Archiv immer als ganzes. In den cache, dann entpacken.
+        // Wege auf v2 harmonisieren"): every fetch goes through ONE helper, the archive is fetched
+        // whole, and no route fetches a single member url any more.
+        Check(pipeSource.Contains("private Task<DownloadOutcome> FetchArchiveAsync(", StringComparison.Ordinal),
+            "F-M471: one helper owns the way to the bytes");
+        Check(pipeSource.Contains("FetchArchiveAsync(cand.NId, cand.Url, ct, season, episode, want?.Name)", StringComparison.Ordinal),
+            "F-M471: the download route passes the address — nId first, the entry's url as fallback");
+        Check(pipeSource.Contains("FetchArchiveAsync(hi.NId, hi.Url, ct, season, episode, null)", StringComparison.Ordinal),
+            "F-M471: the hearing-impaired variant takes the same way (it used the member url before)");
+        Check(!pipeSource.Contains("DownloadSubtitleFileAsync(want.Url", StringComparison.Ordinal),
+            "F-M471: no member url is fetched on its own");
+        Check(!pipeSource.Contains("archiveRoute", StringComparison.Ordinal),
+            "F-M471: no threshold and no second route gate the archive any more");
+        Check(!apiSource.Contains("V2DownloadAttemptAsync(nId, \"file\"", StringComparison.Ordinal),
+            "F-M471: no single-file shape behind the archive — a refused archive is the finding");
 
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0

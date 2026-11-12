@@ -1576,8 +1576,10 @@ public sealed class SubdlApiClient
             return attempt with { Content = null };
         }
 
-        // Only when the archive itself was refused (409/429/5xx, non-200) is the single file asked for.
-        return await V2DownloadAttemptAsync(nId, "file", apiKey, ct).ConfigureAwait(false);
+        // F-M471 (operator order 12.11.2026, "Archiv immer als ganzes"): no second shape. If the
+        // archive itself was refused, that refusal IS the finding — asking for a single file would
+        // spend another quota unit on a shape that cannot hold more than the archive does.
+        return attempt with { Content = null };
     }
 
     /// <summary>
