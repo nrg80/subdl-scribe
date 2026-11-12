@@ -12,9 +12,9 @@
         "version": "12.1.12.366",
         "changelog": "v12.1.12.366: the armed postprocessing order is shown once — its own line; the worker status line no longer repeats it unless the run failed (F-M470).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.366-dev/Jellyfin.Plugin.SubdlSync_12.1.12.366.zip",
-        "checksum": "91fa826a029cabd9f9bae570d0b6f36b",
-        "timestamp": "2026-11-11T20:00:40Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.366/Jellyfin.Plugin.SubdlSync_12.1.12.366.zip",
+        "checksum": "88dbeb79d2ff20417bf1bb7f35e65151",
+        "timestamp": "2026-11-12T02:30:24Z"
       }
     ]
   }
