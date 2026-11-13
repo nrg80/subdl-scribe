@@ -464,6 +464,14 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool QaDownloadAutoSync { get; set; } = true;
 
     /// <summary>
+    /// F-M473: whether a download run that saved subtitles tells Jellyfin about them, so they show
+    /// up right away. On by default. Only the written files are reported — the server looks for new
+    /// and updated files in precisely those paths, never a full database scan. A run that saved
+    /// nothing reports nothing.
+    /// </summary>
+    public bool RefreshLibraryAfterDownload { get; set; } = true;
+
+    /// <summary>
     /// F-M296 (development): the audio track an audio-reading gate decodes, chosen by
     /// LANGUAGE rather than by stream order.
     /// <para>

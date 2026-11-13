@@ -3755,6 +3755,11 @@ public sealed class DownloadPipeline : IDisposable
     /// <param name="summary">The run summary that says whether anything was saved.</param>
     private void TriggerLibraryRefreshForSavedSubtitles(DownloadRunSummary summary)
     {
+        if (!_config.RefreshLibraryAfterDownload)
+        {
+            return; // F-M473: the operator turned the hand-over off in the download tab
+        }
+
         if (summary.IsDryRun || summary.Downloaded <= 0 || _savedSubtitlePaths.Count == 0)
         {
             return;

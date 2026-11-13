@@ -320,9 +320,10 @@ internal static class Program
         Check(!pipeSource.Contains("_libraryManager.ValidateMediaLibrary", StringComparison.Ordinal)
               && !pipeSource.Contains("QueueLibraryScan(", StringComparison.Ordinal),
             "F-M473: no full database scan is triggered");
-        Check(pipeSource.Contains("1 new subtitle file(s) reported", StringComparison.Ordinal) == false
-              && pipeSource.Contains("{Count} new subtitle file(s) reported for scanning", StringComparison.Ordinal),
+        Check(pipeSource.Contains("{Count} new subtitle file(s) reported for scanning", StringComparison.Ordinal),
             "F-M473: the run says how many files it reported");
+        Check(pipeSource.Contains("if (!_config.RefreshLibraryAfterDownload)", StringComparison.Ordinal),
+            "F-M473: the switch in the download tab decides — off means the run reports nothing");
         Check(!pipeSource.Contains("archiveRoute", StringComparison.Ordinal),
             "F-M471: no threshold and no second route gate the archive any more");
         Check(!apiSource.Contains("V2DownloadAttemptAsync(nId, \"file\"", StringComparison.Ordinal),

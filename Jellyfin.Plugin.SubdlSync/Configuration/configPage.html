@@ -521,6 +521,14 @@
                             <div class="fieldDescription">Also save the SDH variant as separate file. Default: off.</div>
                         </div>
 
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="RefreshLibraryAfterDownload" name="RefreshLibraryAfterDownload" type="checkbox" is="emby-checkbox" />
+                                <span>Refresh Jellyfin library after download run</span>
+                            </label>
+                            <div class="fieldDescription">This makes newly downloaded subtitles immediately visible. Default: on.</div>
+                        </div>
+
                     <h3 style="margin-top:1.2em;">Quality gates (before download save)</h3>
                         <div class="fieldDescription" style="margin-bottom:.6em;">Structure, runtime and known-content checks always run. Extra gates reject before saving.</div>
 
@@ -1048,6 +1056,7 @@
                         document.querySelector('#QaDownloadMinCues').checked = config.QaDownloadMinCues;
                         document.querySelector('#QaDownloadVerifyLanguage').checked = config.QaDownloadVerifyLanguage;
                         document.querySelector('#QaDownloadAutoSync').checked = config.QaDownloadAutoSync !== false;
+                        document.querySelector('#RefreshLibraryAfterDownload').checked = config.RefreshLibraryAfterDownload !== false;
                         document.querySelector('#AllowAiTranslatedSubs').checked = config.AllowAiTranslatedSubs === true;
                         document.querySelector('#ReportBrokenSubtitles').checked = config.ReportBrokenSubtitles !== false;
                         document.querySelector('#DownloadScoreWeightGroup').value = config.DownloadScoreWeightGroup;
@@ -1678,6 +1687,7 @@ workers.forEach(function (w) {
                         config.QaDownloadMinCues = document.querySelector('#QaDownloadMinCues').checked;
                         config.QaDownloadVerifyLanguage = document.querySelector('#QaDownloadVerifyLanguage').checked;
                         config.QaDownloadAutoSync = document.querySelector('#QaDownloadAutoSync').checked;
+                        config.RefreshLibraryAfterDownload = document.querySelector('#RefreshLibraryAfterDownload').checked;
                         config.AllowAiTranslatedSubs = document.querySelector('#AllowAiTranslatedSubs').checked;
                         config.ReportBrokenSubtitles = document.querySelector('#ReportBrokenSubtitles').checked;
                         config.DownloadScoreWeightGroup = parseInt(document.querySelector('#DownloadScoreWeightGroup').value) || 1000;
