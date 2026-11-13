@@ -306,6 +306,23 @@ internal static class Program
             "F-M471: one address — the pipeline no longer calls the v1 route at all");
         Check(!pipeSource.Contains("DownloadSubtitleFileAsync(want.Url", StringComparison.Ordinal),
             "F-M471: no member url is fetched on its own");
+        // F-M473 (operator order 12.11.2026): "Nach Abschluss des download runs, wenn ein sub für die
+        // betreffende lib herunterladen wurde, bitte die Funktion nach neuen und aktualisierten subs
+        // für die lib antriggern (kein Vollständiger jf database scan)." The run reports the files it
+        // wrote to the monitor, which makes the server look for new and updated files in exactly
+        // those paths — and it never starts the full database scan.
+        Check(pipeSource.Contains("TriggerLibraryRefreshForSavedSubtitles(summary);", StringComparison.Ordinal),
+            "F-M473: the run end triggers the library update");
+        Check(pipeSource.Contains("if (summary.IsDryRun || summary.Downloaded <= 0 || _savedSubtitlePaths.Count == 0)", StringComparison.Ordinal),
+            "F-M473: only a run that really saved asks for the scan — a dry run writes nothing");
+        Check(pipeSource.Contains("_libraryMonitor.ReportFileSystemChanged(path);", StringComparison.Ordinal),
+            "F-M473: the saved files are reported one by one — the narrow path, not the whole library");
+        Check(!pipeSource.Contains("_libraryManager.ValidateMediaLibrary", StringComparison.Ordinal)
+              && !pipeSource.Contains("QueueLibraryScan(", StringComparison.Ordinal),
+            "F-M473: no full database scan is triggered");
+        Check(pipeSource.Contains("1 new subtitle file(s) reported", StringComparison.Ordinal) == false
+              && pipeSource.Contains("{Count} new subtitle file(s) reported for scanning", StringComparison.Ordinal),
+            "F-M473: the run says how many files it reported");
         Check(!pipeSource.Contains("archiveRoute", StringComparison.Ordinal),
             "F-M471: no threshold and no second route gate the archive any more");
         Check(!apiSource.Contains("V2DownloadAttemptAsync(nId, \"file\"", StringComparison.Ordinal),

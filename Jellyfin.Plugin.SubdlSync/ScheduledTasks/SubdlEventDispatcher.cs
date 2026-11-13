@@ -55,6 +55,7 @@ public sealed class SubdlEventDispatcher : IDisposable
 
     private readonly ILibraryManager _libraryManager;
     private readonly IMediaSourceManager _mediaSourceManager;
+    private readonly ILibraryMonitor _libraryMonitor;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger _logger;
     private readonly SubdlSeeder _seeder;
@@ -212,9 +213,10 @@ public sealed class SubdlEventDispatcher : IDisposable
     private string PurgedPath => Path.Combine(Plugin.Instance!.DataFolderPath, "purged-items.json");
 
     /// <summary>Initializes the dispatcher (DI singleton — eager resolution via task ctors).</summary>
-    public SubdlEventDispatcher(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ILoggerFactory loggerFactory, TmdbImdbResolver tmdb)
+    public SubdlEventDispatcher(ILibraryManager libraryManager, ILibraryMonitor libraryMonitor, IMediaSourceManager mediaSourceManager, ILoggerFactory loggerFactory, TmdbImdbResolver tmdb)
     {
         _libraryManager = libraryManager;
+        _libraryMonitor = libraryMonitor;
         _mediaSourceManager = mediaSourceManager;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger("Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlEventDispatcher");
@@ -1381,7 +1383,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
         else
         {
-            var bundle = PluginServiceRegistrator.BuildDownloadPipeline(_loggerFactory, _libraryManager, _mediaSourceManager, config);
+            var bundle = PluginServiceRegistrator.BuildDownloadPipeline(_loggerFactory, _libraryManager, _libraryMonitor, _mediaSourceManager, config);
             bundle.Pipeline.QueueFilter = filter;
             bundle.Pipeline.IsArrivalRun = arrivalScoped; // F-M446: same rule for the download leg
             bundle.Pipeline.ItemResult += (id, outcome) => OnItemResult(_downloadQueue, id, outcome);

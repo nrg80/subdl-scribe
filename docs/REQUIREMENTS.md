@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.133
-**Status:** Implementation — v12.1.12.370.
+**Version:** 2.134
+**Status:** Implementation — v12.1.12.371.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,8 +16,8 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 82 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 30 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 83 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 31 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397, F-M454
@@ -541,6 +541,8 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 **F-M471 [D]:** **Das Archiv ist der eine Weg.** Ein Abruf holt das Archiv vollständig, legt es in die Ablage und entpackt daraus das gesuchte Mitglied — über die Eintrags-Id, den einzigen Adressweg. Es gibt keinen Einzeldatei-Abruf, keinen Mitglieder-Link, keine zweite Adresse und keine zweite Gestalt hinter dem Archiv: Ein abgelehntes Archiv ist der Befund, und ein Eintrag ohne Kennung wird übersprungen und benannt.
 
 **F-M472 [D]:** **Ein Staffelpack bedient sofort die übrigen Folgen desselben Releases.** Kommt eine Folge aus einem Staffelpack, werden die restlichen Folgen dieses Releases unmittelbar danach eingereiht und im selben Lauf bedient — das Archiv liegt bereits in der Ablage, sie kosten also weder einen Abruf noch eine Wartezeit auf ihre eigene Runde. Maßgeblich ist allein das Release: Mitglieder, die ein anderes Release nennen, gehören nicht dazu, und eine Vollständigkeit der Staffel wird nicht verlangt — bedient wird, was das Release deckt.
+
+**F-M473 [D]:** **Nach dem Lauf erfährt Jellyfin von den neuen Untertiteln.** Endet ein Lauf, in dem Untertitel gespeichert wurden, werden genau diese Dateien der Bibliothek gemeldet, und der Server sucht in ihren Pfaden nach neuen und aktualisierten Dateien. Ein vollständiger Datenbank-Scan wird nicht ausgelöst; ein Trockenlauf meldet nichts, weil er nichts schreibt.
 
 
 ### 4.2 Dry Run — Download
@@ -2077,6 +2079,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T173:** Die `packs`-Tabelle hält, was sie verspricht (F-M390).
 
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
+
+**T196:** Der Lauf meldet die geschriebenen Untertitel: nur bei gespeicherten Dateien, je Datei ein Pfad, kein vollständiger Scan. **5 Prüfungen.**
 
 **T195:** Ein Staffelpack reicht an die übrigen Folgen desselben Releases weiter: nur gleiches Release, keine Vollzähligkeitsprüfung, Einreihung direkt hinter der bedienten Folge, Indexschleife statt Aufzählung. **5 Prüfungen.**
 

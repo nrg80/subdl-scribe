@@ -234,6 +234,15 @@ public sealed class DownloadPipeline : IDisposable
     /// front of the queue instead of waiting for their own turn.
     /// </summary>
     private PackCover? _packCover;
+
+    /// <summary>
+    /// Libraries something was actually saved into during this run. F-M473: at the end of the run
+    /// each of them gets ONE "scan for new and updated files" so the new subtitles show up in
+    /// Jellyfin right away — the full database scan is not what is wanted.
+    /// </summary>
+    private readonly ILibraryMonitor _libraryMonitor;
+    private readonly HashSet<Guid> _librariesSaved = new();
+    private readonly HashSet<string> _savedSubtitlePaths = new(StringComparer.Ordinal);
     private readonly PluginConfiguration _config;
     private readonly GlobalRateLimiter _limiter;
     private readonly DownloadSearchTracker _searchTracker;
@@ -377,6 +386,7 @@ public sealed class DownloadPipeline : IDisposable
     public DownloadPipeline(
         ILogger<DownloadPipeline> logger,
         ILibraryManager libraryManager,
+        ILibraryMonitor libraryMonitor,
         IMediaSourceManager mediaSourceManager,
         SubdlApiClient api,
         TmdbImdbResolver tmdb,
@@ -387,6 +397,7 @@ public sealed class DownloadPipeline : IDisposable
     {
         _logger = logger;
         _libraryManager = libraryManager;
+        _libraryMonitor = libraryMonitor;
         _mediaSourceManager = mediaSourceManager;
         _api = api;
         _tmdb = tmdb;
@@ -518,6 +529,8 @@ public sealed class DownloadPipeline : IDisposable
         // F-M24a (user decision 09.09.2026): TMDB calls trace at VERBOSE (SubDL API calls are Debug).
         _tmdb.Trace += OnTmdbTrace;
         _runSummaryForEvents = summary; // F-M218: event handlers need the running summary
+        _librariesSaved.Clear(); // F-M473: this run names only the libraries IT saved into
+        _savedSubtitlePaths.Clear();
 
         // F-M54: wrong TMDB key reported ONCE at Normal/Error level.
         _tmdb.AuthError += msg => _logger.LogError("[SubDL-D] {Msg}", msg);
@@ -686,6 +699,12 @@ public sealed class DownloadPipeline : IDisposable
         {
             _logger.LogWarning("[SubDL-D] report flush failed: {Msg}", ex.Message);
         }
+        // F-M473 (operator order 12.11.2026): a saved subtitle is a file Jellyfin has not seen yet.
+        // After the walk — and only when something was really saved — each affected library gets
+        // the narrow "new and updated files" scan, so the subtitles appear without waiting for the
+        // next full database scan. One call per library, never per file; the run does not wait on it.
+        TriggerLibraryRefreshForSavedSubtitles(summary);
+
         // F-M286: {Rejected} names what was FETCHED AND THROWN AWAY. Without it a run that spent
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
@@ -1802,6 +1821,7 @@ public sealed class DownloadPipeline : IDisposable
                     }
 
                     summary.Downloaded++;
+                    RememberSavedLibrary(item, mediaPath); // F-M473
                     ReportOutcome(item, ItemOutcome.Done);
                     // F-M22: `savedAny` stays set on purpose although nothing was saved. It is not
                     // the mark's only reader: it also decides whether this language counts as a
@@ -2474,6 +2494,7 @@ public sealed class DownloadPipeline : IDisposable
                         Path.GetFileName(targetPath), targetPath));
                     _qaFails.RecordSuccess(item.Id.ToString(), lang); // A real save resets the QA counter
                     summary.Downloaded++;
+                    RememberSavedLibrary(item, targetPath); // F-M473
                     ReportOutcome(item, ItemOutcome.Done);
                     // F-M472: this save came out of a season pack, and the archive holding the other
                     // episodes of the SAME release is already here. Remember the cover so the run
@@ -2784,6 +2805,7 @@ public sealed class DownloadPipeline : IDisposable
                                             Path.GetFileName(hiPath), hiPath));
                                         _qaFails.RecordSuccess(item.Id.ToString(), lang); // HI save resets the pair counter too
                                         summary.Downloaded++;
+                                        RememberSavedLibrary(item, hiPath); // F-M473
                                         ReportOutcome(item, ItemOutcome.Done);
                                         if (_config.LogMode >= LogLevelMode.Verbose)
                                         {
@@ -3695,6 +3717,73 @@ public sealed class DownloadPipeline : IDisposable
         if (row != null && row.ReportedUtc == null)
         {
             QueueReport(row);
+        }
+    }
+
+    /// <summary>
+    /// F-M473: notes the library an item belongs to, so the end of the run can tell it to look for
+    /// new and updated files. Nested libraries resolve to the folder Jellyfin itself scans (F-M189).
+    /// </summary>
+    /// <param name="item">Item a subtitle was just saved for.</param>
+    /// <param name="savedPath">The subtitle file that was written, if this call is a real save.</param>
+    private void RememberSavedLibrary(BaseItem item, string? savedPath = null)
+    {
+        try
+        {
+            foreach (var folder in _libraryManager.GetCollectionFolders(item))
+            {
+                _librariesSaved.Add(folder.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("[SubDL-D] library lookup failed for {Item}: {Msg}", item.Id, ex.Message);
+        }
+
+        if (!string.IsNullOrWhiteSpace(savedPath))
+        {
+            _savedSubtitlePaths.Add(savedPath);
+        }
+    }
+
+    /// <summary>
+    /// F-M473 (operator order 12.11.2026): "die Funktion nach neuen und aktualisierten subs für die
+    /// lib antriggern (kein vollständiger jf database scan)". Only libraries that received a
+    /// subtitle are named, exactly once each, and only when the run really saved something — a dry
+    /// run writes nothing, so it triggers nothing. Jellyfin queues the scan; the run does not wait.
+    /// </summary>
+    /// <param name="summary">The run summary that says whether anything was saved.</param>
+    private void TriggerLibraryRefreshForSavedSubtitles(DownloadRunSummary summary)
+    {
+        if (summary.IsDryRun || summary.Downloaded <= 0 || _savedSubtitlePaths.Count == 0)
+        {
+            return;
+        }
+
+        // Jellyfin 12 exposes the library scan only as a FULL database scan
+        // (ValidateMediaLibrary takes no library list), and that is exactly what was ruled out.
+        // What it does expose per path is the monitor's change report: the server then looks for
+        // new and updated files in precisely those paths — the same narrow pass the dashboard's
+        // "scan library files" ends up doing, without walking the rest of the library.
+        int reported = 0;
+        foreach (var path in _savedSubtitlePaths)
+        {
+            try
+            {
+                _libraryMonitor.ReportFileSystemChanged(path);
+                reported++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("[SubDL-D] library scan report for {File} failed: {Msg}", Path.GetFileName(path), ex.Message);
+            }
+        }
+
+        if (reported > 0)
+        {
+            LogUtil.Normal(_logger,
+                "[SubDL-D] library update: {Count} new subtitle file(s) reported for scanning ({Libraries} library(ies)) — no full database scan",
+                reported, _librariesSaved.Count);
         }
     }
 
