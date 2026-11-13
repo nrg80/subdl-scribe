@@ -320,8 +320,12 @@ internal static class Program
         Check(!pipeSource.Contains("_libraryManager.ValidateMediaLibrary", StringComparison.Ordinal)
               && !pipeSource.Contains("QueueLibraryScan(", StringComparison.Ordinal),
             "F-M473: no full database scan is triggered");
-        Check(pipeSource.Contains("MetadataRefreshMode = MetadataRefreshMode.ValidationOnly,", StringComparison.Ordinal),
-            "F-M473: the mode is 'look for new and updated files', not a metadata overhaul");
+        Check(pipeSource.Contains("MetadataRefreshMode = MetadataRefreshMode.Default,", StringComparison.Ordinal)
+              && pipeSource.Contains("ImageRefreshMode = MetadataRefreshMode.Default,", StringComparison.Ordinal),
+            "F-M473: the mode is the dashboard's 'look for new and updated files' — Default, not FullRefresh");
+        Check(!pipeSource.Contains("ReplaceAllMetadata = true", StringComparison.Ordinal)
+              && !pipeSource.Contains("ForceSave = true", StringComparison.Ordinal),
+            "F-M473: nothing is replaced or force-saved — only new and updated files are looked at");
         Check(pipeSource.Contains("scan for new and updated files queued", StringComparison.Ordinal),
             "F-M473: the run says which library it queued");
         Check(pipeSource.Contains("if (!_config.RefreshLibraryAfterDownload)", StringComparison.Ordinal),

@@ -3770,19 +3770,19 @@ public sealed class DownloadPipeline : IDisposable
             return;
         }
 
-        // Exactly the dashboard's "Metadaten aktualisieren → nach neuen und aktualisierten Dateien
-        // suchen" (MetadataRefreshMode.ValidationOnly), queued on the library the subtitle went into.
-        // Jellyfin 12 offers that mode per ITEM (IProviderManager.QueueRefresh), not as a scoped
-        // library scan — the only library-wide call is ValidateMediaLibrary, the full database scan
-        // that was ruled out. Queued, not awaited: the run ends when it ends, the server works after.
+        // Exactly the dashboard's "Bibliothek scannen → nach neuen und aktualisierten Dateien suchen"
+        // (jellyfin-web refreshdialog: mode "scan" sends MetadataRefreshMode AND ImageRefreshMode as
+        // Default, Recursive, no replace), queued on the library the subtitles went into. Jellyfin 12
+        // offers this per ITEM (IProviderManager.QueueRefresh); the only library-wide call is
+        // ValidateMediaLibrary, the full database scan that was ruled out. Queued, not awaited.
         foreach (var libraryId in _librariesSaved)
         {
             try
             {
                 var options = new MetadataRefreshOptions(new DirectoryService(_fileSystem))
                 {
-                    MetadataRefreshMode = MetadataRefreshMode.ValidationOnly,
-                    ImageRefreshMode = MetadataRefreshMode.ValidationOnly,
+                    MetadataRefreshMode = MetadataRefreshMode.Default,
+                    ImageRefreshMode = MetadataRefreshMode.Default,
                     ReplaceAllImages = false,
                     ReplaceAllMetadata = false,
                     ForceSave = false,
