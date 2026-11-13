@@ -36,6 +36,16 @@ using Jellyfin.Plugin.SubdlScribe.Data;
 namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 
 /// <summary>
+/// F-M472: the season pack one episode was served from — the SAME release, its season, and the
+/// episodes it still holds.
+/// </summary>
+/// <param name="SeriesId">Series the pack belongs to.</param>
+/// <param name="ReleaseName">Release name as SubDL lists it.</param>
+/// <param name="Season">Season the members share.</param>
+/// <param name="Episodes">Episode numbers of the other members of the same release.</param>
+internal sealed record PackCover(Guid? SeriesId, string ReleaseName, int Season, IReadOnlyCollection<int> Episodes);
+
+/// <summary>
 /// Download pipeline run summary ([D] F-M41).
 /// </summary>
 public class DownloadRunSummary
@@ -217,6 +227,13 @@ public sealed class DownloadPipeline : IDisposable
     /// fail or reorder anything the pipeline is doing.
     /// </summary>
     private readonly List<RejectedCandidateEntity> _pendingReports = new();
+
+    /// <summary>
+    /// F-M472: what the last processed item got out of a season pack, or null. Read by the run
+    /// loop right after the item, which then puts the remaining episodes of that SAME release in
+    /// front of the queue instead of waiting for their own turn.
+    /// </summary>
+    private PackCover? _packCover;
     private readonly PluginConfiguration _config;
     private readonly GlobalRateLimiter _limiter;
     private readonly DownloadSearchTracker _searchTracker;
@@ -554,8 +571,14 @@ public sealed class DownloadPipeline : IDisposable
             : items.Count(it => QueueFilter.Contains(it.Id.ToString()));
 
         int idx = 0;
-        foreach (var item in items)
+        // F-M472: episodes pulled in from a season pack are worked even though no arrival queued
+        // them — that is the point of the rule, so they are named here and pass the queue filter.
+        var packQueued = new HashSet<string>(StringComparer.Ordinal);
+        // An index loop, not foreach: the pack hand-over INSERTS items behind the current one, and
+        // inserting into a list while it is being enumerated throws.
+        for (int pos = 0; pos < items.Count; pos++)
         {
+            var item = items[pos];
             // User stop marker — check BEFORE doing any work.
             if (PipelineStopSignal.IsStopped(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: false, runCt))
             {
@@ -568,8 +591,10 @@ public sealed class DownloadPipeline : IDisposable
             _watchdog.Heartbeat();
 
             // F-M111: queue-driven — only queued items are worked; others stay
-            // invisible to this run (the seeder owns admission).
-            if (QueueFilter != null && !QueueFilter.Contains(item.Id.ToString()))
+            // invisible to this run (the seeder owns admission). F-M472 adds the pack hand-over:
+            // an episode that the same release already covers IS worked, queued or not.
+            if (QueueFilter != null && !QueueFilter.Contains(item.Id.ToString())
+                && !packQueued.Contains(item.Id.ToString()))
             {
                 continue;
             }
@@ -588,8 +613,47 @@ public sealed class DownloadPipeline : IDisposable
             idx++;
             // Fine-grained progress: item start + item done (streams inside report via 0.5 steps)
             progress?.Report((idx - 1 + 0.05) / Math.Max(items.Count, 1) * 100);
+            _packCover = null;
             await ProcessItemAsync(item, targets, summary, skipFilter, refetchGap, runCt).ConfigureAwait(false);
             progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
+
+            // F-M472 (operator order 12.11.2026): when an episode was served from a season pack, the
+            // remaining episodes of that SAME release are worked immediately after it — the archive
+            // is in the cache, so they cost neither a download nor a wait for their own turn. No
+            // completeness check: whatever the release covers gets served.
+            if (_packCover is { } cover)
+            {
+                var pulled = new List<BaseItem>();
+                for (int k = items.Count - 1; k > pos; k--)
+                {
+                    if (items[k] is Episode sibling
+                        && sibling.IndexNumber is int number
+                        && cover.Episodes.Contains(number)
+                        && sibling.ParentIndexNumber == cover.Season
+                        && sibling.SeriesId == cover.SeriesId)
+                    {
+                        pulled.Insert(0, sibling);
+                        items.RemoveAt(k);
+                    }
+                }
+
+                if (pulled.Count > 0)
+                {
+                    items.InsertRange(pos + 1, pulled);
+                    foreach (var sibling in pulled)
+                    {
+                        packQueued.Add(sibling.Id.ToString());
+                        if (QueueFilter == null || !QueueFilter.Contains(sibling.Id.ToString()))
+                        {
+                            queuedTotal++;
+                        }
+                    }
+
+                    LogUtil.Normal(_logger,
+                        "[SubDL-D] pack \"{Release}\" — {N} more episode(s) of the same release queued right after {File}",
+                        cover.ReleaseName, pulled.Count, Path.GetFileName(item.Path));
+                }
+            }
         }
 
         _api.DebugTrace -= OnApiTrace;
@@ -2411,6 +2475,10 @@ public sealed class DownloadPipeline : IDisposable
                     _qaFails.RecordSuccess(item.Id.ToString(), lang); // A real save resets the QA counter
                     summary.Downloaded++;
                     ReportOutcome(item, ItemOutcome.Done);
+                    // F-M472: this save came out of a season pack, and the archive holding the other
+                    // episodes of the SAME release is already here. Remember the cover so the run
+                    // loop can put those episodes right after this one.
+                    RememberPackCover(item, season, episode, cand);
                     savedCount++;
                     // F-M317: only an ALIGNED file advances the corrected counter. An unprocessed
                     // file already took its number from the reserved block and must not consume a
@@ -3628,6 +3696,64 @@ public sealed class DownloadPipeline : IDisposable
         {
             QueueReport(row);
         }
+    }
+
+    /// <summary>
+    /// F-M472: remembers the season pack an episode was just served from, so the run loop can put
+    /// the remaining episodes of the SAME release right after it. Only members that name the same
+    /// release count: a pack of mixed releases is not "one release", and completeness of the season
+    /// is deliberately NOT required (operator order 12.11.2026) — whatever the pack covers is served.
+    /// </summary>
+    /// <param name="item">The item that was just saved.</param>
+    /// <param name="season">Season of that item.</param>
+    /// <param name="episode">Episode number of that item.</param>
+    /// <param name="cand">The candidate the file came from.</param>
+    private void RememberPackCover(BaseItem item, int season, int episode, SubtitleCandidate cand)
+    {
+        _packCover = null;
+        if (cand.UnpackFiles.Count < 2)
+        {
+            return; // one member is a single file, not a pack
+        }
+
+        var episodes = new SortedSet<int>();
+        foreach (var member in cand.UnpackFiles)
+        {
+            // "Desselben Releases": a member that names a different release belongs to another
+            // upload and its file is none of this pack's business.
+            if (!string.IsNullOrWhiteSpace(member.ReleaseName)
+                && !string.IsNullOrWhiteSpace(cand.ReleaseName)
+                && !string.Equals(member.ReleaseName.Trim(), cand.ReleaseName.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            int memberSeason = member.Season > 0 ? member.Season : season;
+            if (memberSeason != season)
+            {
+                continue;
+            }
+
+            int memberEpisode = member.Episode > 0
+                ? member.Episode
+                : SubtitleCandidate.EpisodeFromFileName(member.Name, memberSeason);
+
+            // The episode that was just served, and anything the pack itself could not name, is not
+            // a lead for another item.
+            if (memberEpisode <= 0 || memberEpisode == episode)
+            {
+                continue;
+            }
+
+            episodes.Add(memberEpisode);
+        }
+
+        if (episodes.Count == 0)
+        {
+            return;
+        }
+
+        _packCover = new PackCover(item is Episode ep ? ep.SeriesId : null, cand.ReleaseName, season, episodes);
     }
 
     /// <summary>

@@ -791,6 +791,25 @@ internal static class Program
         Check(uploadSrc3.Contains("a pack carries one release, stays single", StringComparison.Ordinal),
             "F-M469: the refusal says why it refused");
 
+        // F-M472 (operator order 12.11.2026): the DOWNLOAD side gets the counterpart. An episode that
+        // came out of a season pack hands the rest of the SAME release to the run loop, which works
+        // them right after it. Only the same release counts, and completeness of the season is
+        // explicitly NOT required this time.
+        string dlPipeline = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "DownloadPipeline.cs"));
+        Check(dlPipeline.Contains("RememberPackCover(item, season, episode, cand);", StringComparison.Ordinal),
+            "F-M472: a save out of a pack records the cover for the run loop");
+        Check(dlPipeline.Contains("!string.Equals(member.ReleaseName.Trim(), cand.ReleaseName.Trim(), StringComparison.OrdinalIgnoreCase)", StringComparison.Ordinal),
+            "F-M472: only members of the SAME release are pulled — a mixed pack is no release");
+        Check(dlPipeline.Contains("items.InsertRange(pos + 1, pulled);", StringComparison.Ordinal),
+            "F-M472: the other episodes are inserted right behind the one that was served");
+        int coverAt = dlPipeline.IndexOf("private void RememberPackCover", StringComparison.Ordinal);
+        string coverBody = coverAt < 0 ? string.Empty : dlPipeline[coverAt..Math.Min(dlPipeline.Length, coverAt + 3200)];
+        Check(coverAt > 0 && !coverBody.Contains("IsComplete", StringComparison.Ordinal)
+              && !coverBody.Contains("aired", StringComparison.Ordinal),
+            "F-M472: no completeness check — whatever the release covers is served");
+        Check(dlPipeline.Contains("for (int pos = 0; pos < items.Count; pos++)", StringComparison.Ordinal),
+            "F-M472: the run loop is an index loop, because the hand-over inserts while it walks");
+
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
             : $"seasonpack: {_checks} checks, {Failures.Count} failed.");
