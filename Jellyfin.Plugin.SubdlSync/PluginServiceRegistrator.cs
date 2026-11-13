@@ -19,6 +19,8 @@ using Jellyfin.Plugin.SubdlScribe.Registry;
 using Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.IO;
 using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Model.Plugins;
 using Microsoft.Extensions.DependencyInjection;
@@ -118,7 +120,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <param name="mediaSourceManager">Media source manager.</param>
     /// <param name="config">Plugin configuration.</param>
     /// <returns>Disposable download pipeline bundle.</returns>
-    public static DownloadPipelineBundle BuildDownloadPipeline(ILoggerFactory loggerFactory, ILibraryManager libraryManager, ILibraryMonitor libraryMonitor, IMediaSourceManager mediaSourceManager, PluginConfiguration config)
+    public static DownloadPipelineBundle BuildDownloadPipeline(ILoggerFactory loggerFactory, ILibraryManager libraryManager, IProviderManager providerManager, IFileSystem fileSystem, IMediaSourceManager mediaSourceManager, PluginConfiguration config)
     {
         string dataDir = Plugin.Instance!.DataFolderPath;
         var db = Plugin.Instance.SharedDbContext;
@@ -135,7 +137,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         var searchTracker = new DownloadSearchTracker(db, loggerFactory.CreateLogger<DownloadSearchTracker>());
         var qaFails = new QaFailTracker(db, loggerFactory.CreateLogger<QaFailTracker>());
         var logger = loggerFactory.CreateLogger<DownloadPipeline>();
-        var pipeline = new DownloadPipeline(logger, libraryManager, libraryMonitor, mediaSourceManager, api, tmdb, config, limiter, searchTracker, qaFails);
+        var pipeline = new DownloadPipeline(logger, libraryManager, providerManager, fileSystem, mediaSourceManager, api, tmdb, config, limiter, searchTracker, qaFails);
         return new DownloadPipelineBundle(pipeline, registry, http, searchTracker, qaFails);
     }
 

@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.372"
+version: "12.1.12.373"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.373: the library is queued with the dashboard's "look for new and updated files" mode, not a full scan (F-M473).
   v12.1.12.372: the library hand-over has a switch in the download tab, before the quality gates (F-M473).
   v12.1.12.371: the run reports the subtitles it wrote, so Jellyfin finds them without a full database scan (F-M473).
   v12.1.12.370: a season pack serves the remaining episodes of the SAME release right after the one it answered (F-M472).

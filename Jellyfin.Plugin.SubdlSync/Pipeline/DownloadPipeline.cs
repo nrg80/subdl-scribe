@@ -27,7 +27,9 @@ using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Persistence;
+using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.IO;
 using Microsoft.Extensions.Logging;
 using Episode = MediaBrowser.Controller.Entities.TV.Episode;
 using Movie = MediaBrowser.Controller.Entities.Movies.Movie;
@@ -240,7 +242,8 @@ public sealed class DownloadPipeline : IDisposable
     /// each of them gets ONE "scan for new and updated files" so the new subtitles show up in
     /// Jellyfin right away — the full database scan is not what is wanted.
     /// </summary>
-    private readonly ILibraryMonitor _libraryMonitor;
+    private readonly IProviderManager _providerManager;
+    private readonly IFileSystem _fileSystem;
     private readonly HashSet<Guid> _librariesSaved = new();
     private readonly HashSet<string> _savedSubtitlePaths = new(StringComparer.Ordinal);
     private readonly PluginConfiguration _config;
@@ -386,7 +389,8 @@ public sealed class DownloadPipeline : IDisposable
     public DownloadPipeline(
         ILogger<DownloadPipeline> logger,
         ILibraryManager libraryManager,
-        ILibraryMonitor libraryMonitor,
+        IProviderManager providerManager,
+        IFileSystem fileSystem,
         IMediaSourceManager mediaSourceManager,
         SubdlApiClient api,
         TmdbImdbResolver tmdb,
@@ -397,7 +401,8 @@ public sealed class DownloadPipeline : IDisposable
     {
         _logger = logger;
         _libraryManager = libraryManager;
-        _libraryMonitor = libraryMonitor;
+        _providerManager = providerManager;
+        _fileSystem = fileSystem;
         _mediaSourceManager = mediaSourceManager;
         _api = api;
         _tmdb = tmdb;
@@ -3765,30 +3770,35 @@ public sealed class DownloadPipeline : IDisposable
             return;
         }
 
-        // Jellyfin 12 exposes the library scan only as a FULL database scan
-        // (ValidateMediaLibrary takes no library list), and that is exactly what was ruled out.
-        // What it does expose per path is the monitor's change report: the server then looks for
-        // new and updated files in precisely those paths — the same narrow pass the dashboard's
-        // "scan library files" ends up doing, without walking the rest of the library.
-        int reported = 0;
-        foreach (var path in _savedSubtitlePaths)
+        // Exactly the dashboard's "Metadaten aktualisieren → nach neuen und aktualisierten Dateien
+        // suchen" (MetadataRefreshMode.ValidationOnly), queued on the library the subtitle went into.
+        // Jellyfin 12 offers that mode per ITEM (IProviderManager.QueueRefresh), not as a scoped
+        // library scan — the only library-wide call is ValidateMediaLibrary, the full database scan
+        // that was ruled out. Queued, not awaited: the run ends when it ends, the server works after.
+        foreach (var libraryId in _librariesSaved)
         {
             try
             {
-                _libraryMonitor.ReportFileSystemChanged(path);
-                reported++;
+                var options = new MetadataRefreshOptions(new DirectoryService(_fileSystem))
+                {
+                    MetadataRefreshMode = MetadataRefreshMode.ValidationOnly,
+                    ImageRefreshMode = MetadataRefreshMode.ValidationOnly,
+                    ReplaceAllImages = false,
+                    ReplaceAllMetadata = false,
+                    ForceSave = false,
+                    IsAutomated = false,
+                    RemoveOldMetadata = false,
+                };
+
+                _providerManager.QueueRefresh(libraryId, options, RefreshPriority.High);
+                LogUtil.Normal(_logger,
+                    "[SubDL-D] library {Library}: scan for new and updated files queued ({Count} subtitle(s) saved in this run, {Files} file(s) reported)",
+                    libraryId.ToString("N"), summary.Downloaded, _savedSubtitlePaths.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("[SubDL-D] library scan report for {File} failed: {Msg}", Path.GetFileName(path), ex.Message);
+                _logger.LogWarning("[SubDL-D] library update for {Library} failed: {Msg}", libraryId.ToString("N"), ex.Message);
             }
-        }
-
-        if (reported > 0)
-        {
-            LogUtil.Normal(_logger,
-                "[SubDL-D] library update: {Count} new subtitle file(s) reported for scanning ({Libraries} library(ies)) — no full database scan",
-                reported, _librariesSaved.Count);
         }
     }
 

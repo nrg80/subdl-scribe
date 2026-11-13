@@ -315,13 +315,15 @@ internal static class Program
             "F-M473: the run end triggers the library update");
         Check(pipeSource.Contains("if (summary.IsDryRun || summary.Downloaded <= 0 || _savedSubtitlePaths.Count == 0)", StringComparison.Ordinal),
             "F-M473: only a run that really saved asks for the scan — a dry run writes nothing");
-        Check(pipeSource.Contains("_libraryMonitor.ReportFileSystemChanged(path);", StringComparison.Ordinal),
-            "F-M473: the saved files are reported one by one — the narrow path, not the whole library");
+        Check(pipeSource.Contains("_providerManager.QueueRefresh(libraryId, options, RefreshPriority.High);", StringComparison.Ordinal),
+            "F-M473: the library is queued for exactly the dashboard's refresh — and the run does not wait");
         Check(!pipeSource.Contains("_libraryManager.ValidateMediaLibrary", StringComparison.Ordinal)
               && !pipeSource.Contains("QueueLibraryScan(", StringComparison.Ordinal),
             "F-M473: no full database scan is triggered");
-        Check(pipeSource.Contains("{Count} new subtitle file(s) reported for scanning", StringComparison.Ordinal),
-            "F-M473: the run says how many files it reported");
+        Check(pipeSource.Contains("MetadataRefreshMode = MetadataRefreshMode.ValidationOnly,", StringComparison.Ordinal),
+            "F-M473: the mode is 'look for new and updated files', not a metadata overhaul");
+        Check(pipeSource.Contains("scan for new and updated files queued", StringComparison.Ordinal),
+            "F-M473: the run says which library it queued");
         Check(pipeSource.Contains("if (!_config.RefreshLibraryAfterDownload)", StringComparison.Ordinal),
             "F-M473: the switch in the download tab decides — off means the run reports nothing");
         Check(!pipeSource.Contains("archiveRoute", StringComparison.Ordinal),

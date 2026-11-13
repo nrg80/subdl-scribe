@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.135
-**Status:** Implementation — v12.1.12.372.
+**Version:** 2.136
+**Status:** Implementation — v12.1.12.373.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -542,7 +542,7 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 
 **F-M472 [D]:** **Ein Staffelpack bedient sofort die übrigen Folgen desselben Releases.** Kommt eine Folge aus einem Staffelpack, werden die restlichen Folgen dieses Releases unmittelbar danach eingereiht und im selben Lauf bedient — das Archiv liegt bereits in der Ablage, sie kosten also weder einen Abruf noch eine Wartezeit auf ihre eigene Runde. Maßgeblich ist allein das Release: Mitglieder, die ein anderes Release nennen, gehören nicht dazu, und eine Vollständigkeit der Staffel wird nicht verlangt — bedient wird, was das Release deckt.
 
-**F-M473 [D]:** **Nach dem Lauf erfährt Jellyfin von den neuen Untertiteln.** Endet ein Lauf, in dem Untertitel gespeichert wurden, werden genau diese Dateien der Bibliothek gemeldet, und der Server sucht in ihren Pfaden nach neuen und aktualisierten Dateien. Ein vollständiger Datenbank-Scan wird nicht ausgelöst; ein Trockenlauf meldet nichts, weil er nichts schreibt. Der Schalter **Refresh Jellyfin library after download run** im Download-Reiter vor den Quality Gates schaltet die Meldung ab. Schalter aus: keine Meldung. Default: on.
+**F-M473 [D]:** **Nach dem Lauf erfährt Jellyfin von den neuen Untertiteln.** Endet ein Lauf, in dem Untertitel gespeichert wurden, wird die Bibliothek mit dem Modus **nach neuen und aktualisierten Dateien suchen** (`MetadataRefreshMode.ValidationOnly`) eingereiht — dieselbe Funktion, die das Dashboard unter „Metadaten aktualisieren" anbietet. Die Meldung wird eingereiht, nicht abgewartet; der Lauf endet, der Server arbeitet danach. Ein vollständiger Datenbank-Scan wird nicht ausgelöst; ein Trockenlauf meldet nichts, weil er nichts schreibt. Der Schalter **Refresh Jellyfin library after download run** im Download-Reiter vor den Quality Gates schaltet die Meldung ab. Schalter aus: keine Meldung. Default: on.
 
 
 ### 4.2 Dry Run — Download
@@ -2080,7 +2080,7 @@ fix and is exactly the fingerprint F-M29 forbids).
 
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
 
-**T196:** Der Lauf meldet die geschriebenen Untertitel: nur bei gespeicherten Dateien, je Datei ein Pfad, kein vollständiger Scan; der Schalter vor den Quality Gates kann es abschalten. **6 Prüfungen im Lauf, 4 in der Oberfläche.**
+**T196:** Der Lauf reiht die Bibliothek mit „nach neuen und aktualisierten Dateien suchen" ein: nur bei gespeicherten Dateien, je Bibliothek einmal, kein vollständiger Scan; der Schalter vor den Quality Gates kann es abschalten. **7 Prüfungen im Lauf, 4 in der Oberfläche.**
 
 **T195:** Ein Staffelpack reicht an die übrigen Folgen desselben Releases weiter: nur gleiches Release, keine Vollzähligkeitsprüfung, Einreihung direkt hinter der bedienten Folge, Indexschleife statt Aufzählung. **5 Prüfungen.**
 
