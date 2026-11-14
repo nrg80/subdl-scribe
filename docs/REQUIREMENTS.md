@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.140
-**Status:** Implementation — v12.1.12.377.
+**Version:** 2.141
+**Status:** Implementation — v12.1.12.378.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -16,8 +16,8 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M387–F-M399, F-M401–F-M403, F-M405–F-M420
-- [4. Download Pipeline](#4-download-pipeline) — 83 requirements
- - [4.1 Quality Gates — Download](#41-quality-gates-download) — 31 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 84 requirements
+ - [4.1 Quality Gates — Download](#41-quality-gates-download) — 32 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397, F-M454
@@ -544,6 +544,7 @@ Decodes the audio, derives speech islands from the frame envelope, anchors each 
 
 **F-M473 [D]:** **Nach dem Lauf erfährt Jellyfin von den neuen Untertiteln.** Endet ein Lauf, in dem Untertitel gespeichert wurden, wird die Bibliothek mit dem Modus **nach neuen und aktualisierten Dateien suchen** eingereiht — dieselbe Funktion, die das Dashboard als „Bibliothek scannen" anbietet (`MetadataRefreshMode` und `ImageRefreshMode` = `Default`, kein Ersetzen, kein ForceSave). Die Meldung wird eingereiht, nicht abgewartet; der Lauf endet, der Server arbeitet danach. Ein vollständiger Datenbank-Scan wird nicht ausgelöst; ein Trockenlauf meldet nichts, weil er nichts schreibt. Der Schalter **Refresh Jellyfin library after download run** im Download-Reiter vor den Quality Gates schaltet die Meldung ab. Schalter aus: keine Meldung. Default: on.
 
+**F-M474 [D]:** **Was nichts kostet, kommt zuerst — und ein Staffelpack vor der Einzelfassung.** Die Rangfolge der Kandidaten richtet sich nach dem Preis, den der Lauf zahlt, und nach der Reichweite: <c>4</c> Staffelpack mit dieser Folge, Archiv bereits in der Ablage (kostet nichts und bedient die ganze Staffel); <c>3</c> Einzelfassung, Archiv bereits in der Ablage (kostet nichts, bedient diese Folge); <c>2</c> Staffelpack mit dieser Folge, muss geladen werden (ein Abruf, ganze Staffel); <c>1</c> Einzelfassung, muss geladen werden (ein Abruf, eine Folge); <c>0</c> Pack ohne diese Folge. Der Abruf ist die knappe Einheit, deshalb wird nichts bezahlt, solange etwas Gratis vorliegt, und bei gleichem Preis deckt das Pack die Staffel ab. Die Rangfolge gilt für die erste Wahl, für das Nachfassen und für die HI-Variante gleichermaßen; der Textscore entscheidet erst innerhalb einer Preisstufe. Ob ein Archiv in der Ablage liegt, wird über die Eintrags-Id geprüft — über die Adresse, unter der auch geladen wird — nicht über die alte Einzel-URL.
 
 ### 4.2 Dry Run — Download
 
@@ -2081,6 +2082,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T174:** Erst Einzelupload, dann Staffelpack — und im Arrival gar kein Pack (F-M418, F-M420).
 
 **T196:** Der Lauf reiht die Bibliothek mit „nach neuen und aktualisierten Dateien suchen" ein: nur bei gespeicherten Dateien, je Bibliothek einmal, kein vollständiger Scan; der Schalter vor den Quality Gates kann es abschalten. **8 Prüfungen im Lauf, 4 in der Oberfläche.**
+
+**T197:** Die Rangfolge der Kandidaten richtet sich nach Preis und Reichweite: vier Stufen, Gratis vor bezahlt, Staffelpack vor Einzelfassung bei gleichem Preis, Pack ohne die Folge bleibt draußen; die Cache-Prüfung geht über die Eintrags-Id; die Rangfolge gilt auch für das Nachfassen und die HI-Variante. **6 Prüfungen.**
 
 **T195:** Ein Staffelpack reicht an die übrigen Folgen desselben Releases weiter: nur die Folgen aus der Warteschlange des Laufs, kein Namensvergleich gegen den Pack-Namen, keine Vollzähligkeitsprüfung, Einreihung direkt hinter der bedienten Folge, Indexschleife statt Aufzählung; ein Nachfass-Kandidat derselben Folge löscht den Merker nicht. **7 Prüfungen.**
 

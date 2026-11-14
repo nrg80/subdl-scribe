@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "SubDL Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.377"
+version: "12.1.12.378"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.378: candidates are ranked by price and reach — free before paid, season pack before single; the cache is asked by entry id (F-M474).
   v12.1.12.377: the hand-over line names the episode stretch low-to-high.
   v12.1.12.376: a follow-up single-file save no longer wipes the pack cover (F-M472).
   v12.1.12.375: the pack hand-over works without a name comparison and re-orders only the run's own queue (F-M472).

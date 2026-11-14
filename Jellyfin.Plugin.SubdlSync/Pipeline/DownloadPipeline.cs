@@ -1657,10 +1657,10 @@ public sealed class DownloadPipeline : IDisposable
             // pack candidate beats an equally good single — and a pack whose archive is ALREADY
             // cached beats both, because it costs no download unit at all. The preference is a sort
             // key in front of the text score, not a change to it: a pack only wins when it carries
-            // this episode (PackPreference returns 0 otherwise), and the text similarity still
+            // this episode (CandidateRank returns 0 otherwise), and the text similarity still
             // decides between two packs.
             var ranked = langCands
-                .Select(c => (Cand: c, Score: Score(c, videoBase), Pack: PackPreference(c, season, episode)))
+                .Select(c => (Cand: c, Score: Score(c, videoBase), Pack: CandidateRank(c, season, episode)))
                 .OrderByDescending(x => x.Pack)
                 .ThenByDescending(x => x.Score)
                 .ToList();
@@ -1822,7 +1822,8 @@ public sealed class DownloadPipeline : IDisposable
                     {
                         var hiForLang = hiCandidates.Where(c => c.Language == lang).ToList();
                         var hiPick = hiForLang
-                            .OrderByDescending(c => Score(c, videoBase))
+                            .OrderByDescending(c => CandidateRank(c, season, episode))
+                            .ThenByDescending(c => Score(c, videoBase))
                             .ThenByDescending(c => c.DownloadCount)
                             .FirstOrDefault();
                         LogUtil.PerItem(_config.LogMode, _logger,
@@ -2576,7 +2577,8 @@ public sealed class DownloadPipeline : IDisposable
                     if (_config.DownloadHearingImpaired && !effectiveHi)
                     {
                         var hi = hiCandidates.Where(c => c.Language == lang)
-                            .OrderByDescending(c => Score(c, videoBase))
+                            .OrderByDescending(c => CandidateRank(c, season, episode))
+                            .ThenByDescending(c => Score(c, videoBase))
                             .ThenByDescending(c => c.DownloadCount)
                             .FirstOrDefault();
                         if (hi == null || string.IsNullOrEmpty(hi.Url))
@@ -3442,28 +3444,39 @@ public sealed class DownloadPipeline : IDisposable
 
 
     /// <summary>
-    /// F-M384: how much a candidate is worth as an ARCHIVE. <c>2</c> when the pack carries this
-    /// episode and its archive is already cached (free), <c>1</c> when it carries the episode but
-    /// must be fetched (one unit for the whole season), <c>0</c> for anything else — including a
-    /// pack that does not contain the episode, which the download path would refuse anyway.
+    /// F-M384/F-M474: what a candidate COSTS this run, and how much it covers. The scarce unit is a
+    /// download (50 a day), so nothing that costs one is taken while something free is on offer,
+    /// and a season pack is preferred over a single at the same price because one fetch serves every
+    /// episode of the season (F-M472 hands them over).
+    /// <para>
+    /// <c>4</c> pack that carries this episode, archive cached (free, and free for the season);
+    /// <c>3</c> single file, archive cached (free, this episode only);
+    /// <c>2</c> pack that carries this episode, must be fetched (one unit, whole season);
+    /// <c>1</c> single file, must be fetched (one unit, one episode);
+    /// <c>0</c> pack without this episode — it could not serve it at all.
+    /// </para>
     /// </summary>
     /// <param name="c">Candidate from the search.</param>
     /// <param name="season">Wanted season (0 = unknown).</param>
     /// <param name="episode">Wanted episode (0 = unknown).</param>
-    /// <returns>Preference rank, higher wins.</returns>
-    private long PackPreference(SubtitleCandidate c, int season, int episode)
+    /// <returns>Cost rank, higher wins.</returns>
+    private long CandidateRank(SubtitleCandidate c, int season, int episode)
     {
-        if (c.UnpackFiles.Count < 2 || (season <= 0 && episode <= 0))
+        bool cached = _api.IsEntryArchiveCached(c.NId);
+
+        if (c.UnpackFiles.Count >= 2)
         {
-            return 0;
+            if (season <= 0 && episode <= 0)
+            {
+                return 0;
+            }
+
+            return c.FindUnpackFile(season, episode) != null
+                ? (cached ? 4 : 2)
+                : 0;
         }
 
-        if (c.FindUnpackFile(season, episode) == null)
-        {
-            return 0;
-        }
-
-        return _api.IsArchiveCached(c.Url) ? 2 : 1;
+        return cached ? 3 : 1;
     }
 
     private long Score(SubtitleCandidate c, string videoBase)

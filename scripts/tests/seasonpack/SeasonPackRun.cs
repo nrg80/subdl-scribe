@@ -816,6 +816,25 @@ internal static class Program
             "F-M472: no completeness check — whatever the release covers is served");
         Check(coverAt > 0 && !coverBody.Contains("_packCover = null;\n        if (cand.UnpackFiles.Count < 2)", StringComparison.Ordinal),
             "F-M472: a save from a single-file follow-up does not wipe the pack cover");
+        // F-M474 (operator decision 13.11.2026): the ranking pays attention to the PRICE — nothing
+        // that costs a download is taken while something free is on offer — and, at the same price,
+        // a season pack beats a single because one fetch serves the whole season. The cache question
+        // is asked by ENTRY ID, the address the download actually uses.
+        int rankAt = dlPipeline.IndexOf("private long CandidateRank", StringComparison.Ordinal);
+        string rankBody = rankAt < 0 ? string.Empty : dlPipeline[rankAt..Math.Min(dlPipeline.Length, rankAt + 2200)];
+        Check(rankAt > 0 && !dlPipeline.Contains("private long PackPreference", StringComparison.Ordinal),
+            "F-M474: the cost rank replaced the old pack-only preference");
+        Check(rankBody.Contains("? (cached ? 4 : 2)", StringComparison.Ordinal)
+              && rankBody.Contains("return cached ? 3 : 1;", StringComparison.Ordinal),
+            "F-M474: four ranks — free/pack, free/single, paid/pack, paid/single");
+        Check(rankBody.Contains("FindUnpackFile(season, episode) != null", StringComparison.Ordinal),
+            "F-M474: a pack without this episode keeps rank 0 — it could not serve it at all");
+        Check(dlPipeline.Contains("_api.IsEntryArchiveCached(c.NId)", StringComparison.Ordinal)
+              && !dlPipeline.Contains("_api.IsArchiveCached(c.Url)", StringComparison.Ordinal),
+            "F-M474: the cache is asked by entry id, the address the download uses");
+        Check(dlPipeline.Split(".OrderByDescending(c => CandidateRank(c, season, episode))").Length - 1 >= 2
+              && dlPipeline.Contains("Pack: CandidateRank(c, season, episode)", StringComparison.Ordinal),
+            "F-M474: the same rank orders the main pick and both HI picks");
         Check(dlPipeline.Contains("for (int pos = 0; pos < items.Count; pos++)", StringComparison.Ordinal),
             "F-M472: the run loop is an index loop, because the hand-over inserts while it walks");
         Check(dlPipeline.Contains("covers {Season}x{First}-{Last}", StringComparison.Ordinal),
