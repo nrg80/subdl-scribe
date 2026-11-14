@@ -15,6 +15,15 @@ status, statistics, and when each worker last ran (credentials masked):
 
 ![The SubDL Scribe settings page](docs/images/config-general.png)
 
+**Download** — what gets fetched, when a run happens, and the quality gates a subtitle has to pass
+before it is saved:
+
+![Download settings](docs/images/config-download.png)
+
+**Upload** — off by default; the same shape as the download side, with its own gates:
+
+![Upload settings](docs/images/config-upload.png)
+
 ## Requirements
 
 - Jellyfin **12.1.x** (targetAbi `12.1.0.0`)
