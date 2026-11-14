@@ -17,6 +17,14 @@ on:
 
 jobs:
   call:
+    # The reusable workflow declares no permissions of its own, so it inherits whatever this job
+    # grants — and without a block it falls back to the repository default (read-only), which is why
+    # the run on main failed on 01.11.2026 with 403 "Resource not accessible by integration" on
+    # POST /repos/nrg80/subdl-scribe/labels. Labels are managed through the issues API.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     uses: jellyfin/jellyfin-meta-plugins/.github/workflows/sync-labels.yaml@master
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
