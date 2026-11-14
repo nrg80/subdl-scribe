@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.374",
-        "changelog": "v12.1.12.374: the library refresh uses the dashboard's mode — Default for metadata and images, nothing replaced (F-M473).",
+        "version": "12.1.12.378",
+        "changelog": "v12.1.12.378: candidates are ranked by price and reach — free before paid, season pack before single; the cache is asked by entry id (F-M474).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.374-dev/Jellyfin.Plugin.SubdlSync_12.1.12.374.zip",
-        "checksum": "dcfa832aa2fbe29c52b7b5da274d8d86",
-        "timestamp": "2026-11-13T05:46:50Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.378-dev/Jellyfin.Plugin.SubdlSync_12.1.12.378.zip",
+        "checksum": "af39f402142d400832860ef7d90a5625",
+        "timestamp": "2026-11-14T08:46:29Z"
       }
     ]
   }
