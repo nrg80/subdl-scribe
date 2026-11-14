@@ -8,6 +8,16 @@ Written by an **AI agent** under the maintainer's direction.
 
 Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 
+## What it looks like
+
+**Configuration** — libraries you opt in, target languages, refetch interval:
+
+![Configuration page of SubDL Scribe](docs/images/config-general.png)
+
+**Statistics and workers** — what the plugin has done, and when each part last ran:
+
+![Statistics and worker status](docs/images/config-statistics-workers.png)
+
 ## Requirements
 
 - Jellyfin **12.1.x** (targetAbi `12.1.0.0`)
