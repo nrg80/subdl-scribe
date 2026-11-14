@@ -10,13 +10,10 @@ Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 
 ## What it looks like
 
-**Configuration** — libraries you opt in, target languages, refetch interval:
+The plugin page in one piece — libraries you opt in, target languages, quota and connection
+status, statistics, and when each worker last ran (credentials masked):
 
-![Configuration page of SubDL Scribe](docs/images/config-general.png)
-
-**Statistics and workers** — what the plugin has done, and when each part last ran:
-
-![Statistics and worker status](docs/images/config-statistics-workers.png)
+![The SubDL Scribe settings page](docs/images/config-general.png)
 
 ## Requirements
 
