@@ -641,6 +641,12 @@ public sealed class DownloadPipeline : IDisposable
             // completeness check: whatever the release covers gets served.
             if (_packCover is { } cover)
             {
+                // F-M472: the pack that just served this episode names the other episodes of its own
+                // entry, so the ones already waiting further back in THIS run's queue come along right
+                // behind it. Only the queue — an episode nobody queued stays untouched (operator
+                // order 13.11.2026: "doch nur die in der queue"). The archive is in the cache, so
+                // they cost no download, and the per-item open-pair check still drops any that have
+                // the language before an API call is made.
                 var pulled = new List<BaseItem>();
                 for (int k = items.Count - 1; k > pos; k--)
                 {
@@ -668,8 +674,9 @@ public sealed class DownloadPipeline : IDisposable
                     }
 
                     LogUtil.Normal(_logger,
-                        "[SubDL-D] pack \"{Release}\" — {N} more episode(s) of the same release queued right after {File}",
-                        cover.ReleaseName, pulled.Count, Path.GetFileName(item.Path));
+                        "[SubDL-D] pack \"{Release}\" covers {Season}x{First}-{Last} — {N} episode(s) of that release moved right after {File}",
+                        cover.ReleaseName, cover.Season, ((Episode)pulled[0]).IndexNumber ?? 0,
+                        ((Episode)pulled[^1]).IndexNumber ?? 0, pulled.Count, Path.GetFileName(item.Path));
                 }
             }
         }
@@ -3820,18 +3827,16 @@ public sealed class DownloadPipeline : IDisposable
             return; // one member is a single file, not a pack
         }
 
+        // The pack IS the release: it answered this episode, so every member of the same entry
+        // belongs to the release that just proved itself. No name comparison — measured on SubDL
+        // 13.11.2026 (The Middle S9, entry …-3055878) the pack is called
+        // "The.Middle.S09.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb" while its members are named
+        // "The Middle - S09E01 (2009) WEB.eng.srt" …, so any string comparison against the pack
+        // name — or between member names — only invents a way to drop members that are in fact
+        // the same release. What separates releases is the entry, and the entry has already matched.
         var episodes = new SortedSet<int>();
         foreach (var member in cand.UnpackFiles)
         {
-            // "Desselben Releases": a member that names a different release belongs to another
-            // upload and its file is none of this pack's business.
-            if (!string.IsNullOrWhiteSpace(member.ReleaseName)
-                && !string.IsNullOrWhiteSpace(cand.ReleaseName)
-                && !string.Equals(member.ReleaseName.Trim(), cand.ReleaseName.Trim(), StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
             int memberSeason = member.Season > 0 ? member.Season : season;
             if (memberSeason != season)
             {

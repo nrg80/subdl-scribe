@@ -798,8 +798,15 @@ internal static class Program
         string dlPipeline = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "DownloadPipeline.cs"));
         Check(dlPipeline.Contains("RememberPackCover(item, season, episode, cand);", StringComparison.Ordinal),
             "F-M472: a save out of a pack records the cover for the run loop");
-        Check(dlPipeline.Contains("!string.Equals(member.ReleaseName.Trim(), cand.ReleaseName.Trim(), StringComparison.OrdinalIgnoreCase)", StringComparison.Ordinal),
-            "F-M472: only members of the SAME release are pulled — a mixed pack is no release");
+        Check(!dlPipeline.Contains("member.ReleaseName.Trim(), cand.ReleaseName.Trim()", StringComparison.Ordinal),
+            "F-M472: no name comparison against the pack — the entry that matched IS the release");
+        int handAt = dlPipeline.IndexOf("if (_packCover is { } cover)", StringComparison.Ordinal);
+        string handBody = handAt < 0 ? string.Empty : dlPipeline[handAt..Math.Min(dlPipeline.Length, handAt + 2600)];
+        Check(handAt > 0 && !handBody.Contains("GetItemList", StringComparison.Ordinal)
+              && !handBody.Contains("InternalItemsQuery", StringComparison.Ordinal),
+            "F-M472: only the run's own queue is re-ordered — the library is not asked for episodes");
+        Check(dlPipeline.Contains("sibling.ParentIndexNumber == cover.Season", StringComparison.Ordinal),
+            "F-M472: only the season the pack covers is pulled forward");
         Check(dlPipeline.Contains("items.InsertRange(pos + 1, pulled);", StringComparison.Ordinal),
             "F-M472: the other episodes are inserted right behind the one that was served");
         int coverAt = dlPipeline.IndexOf("private void RememberPackCover", StringComparison.Ordinal);
@@ -809,6 +816,8 @@ internal static class Program
             "F-M472: no completeness check — whatever the release covers is served");
         Check(dlPipeline.Contains("for (int pos = 0; pos < items.Count; pos++)", StringComparison.Ordinal),
             "F-M472: the run loop is an index loop, because the hand-over inserts while it walks");
+        Check(dlPipeline.Contains("covers {Season}x{First}-{Last}", StringComparison.Ordinal),
+            "F-M472: the run says which stretch of the season it moved forward");
 
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
