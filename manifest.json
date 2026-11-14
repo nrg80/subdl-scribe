@@ -12,9 +12,9 @@
         "version": "12.1.12.378",
         "changelog": "v12.1.12.378: candidates are ranked by price and reach — free before paid, season pack before single; the cache is asked by entry id (F-M474).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.378-dev/Jellyfin.Plugin.SubdlSync_12.1.12.378.zip",
-        "checksum": "af39f402142d400832860ef7d90a5625",
-        "timestamp": "2026-11-14T08:46:29Z"
+        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.378/Jellyfin.Plugin.SubdlSync_12.1.12.378.zip",
+        "checksum": "60ffdeab359faf1afe148ed5b9cf4482",
+        "timestamp": "2026-11-14T10:22:30Z"
       }
     ]
   }
