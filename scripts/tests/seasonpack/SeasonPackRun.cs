@@ -791,6 +791,55 @@ internal static class Program
         Check(uploadSrc3.Contains("a pack carries one release, stays single", StringComparison.Ordinal),
             "F-M469: the refusal says why it refused");
 
+        // F-M472 (operator order 12.11.2026): the DOWNLOAD side gets the counterpart. An episode that
+        // came out of a season pack hands the rest of the SAME release to the run loop, which works
+        // them right after it. Only the same release counts, and completeness of the season is
+        // explicitly NOT required this time.
+        string dlPipeline = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "DownloadPipeline.cs"));
+        Check(dlPipeline.Contains("RememberPackCover(item, season, episode, cand);", StringComparison.Ordinal),
+            "F-M472: a save out of a pack records the cover for the run loop");
+        Check(!dlPipeline.Contains("member.ReleaseName.Trim(), cand.ReleaseName.Trim()", StringComparison.Ordinal),
+            "F-M472: no name comparison against the pack — the entry that matched IS the release");
+        int handAt = dlPipeline.IndexOf("if (_packCover is { } cover)", StringComparison.Ordinal);
+        string handBody = handAt < 0 ? string.Empty : dlPipeline[handAt..Math.Min(dlPipeline.Length, handAt + 2600)];
+        Check(handAt > 0 && !handBody.Contains("GetItemList", StringComparison.Ordinal)
+              && !handBody.Contains("InternalItemsQuery", StringComparison.Ordinal),
+            "F-M472: only the run's own queue is re-ordered — the library is not asked for episodes");
+        Check(dlPipeline.Contains("sibling.ParentIndexNumber == cover.Season", StringComparison.Ordinal),
+            "F-M472: only the season the pack covers is pulled forward");
+        Check(dlPipeline.Contains("items.InsertRange(pos + 1, pulled);", StringComparison.Ordinal),
+            "F-M472: the other episodes are inserted right behind the one that was served");
+        int coverAt = dlPipeline.IndexOf("private void RememberPackCover", StringComparison.Ordinal);
+        string coverBody = coverAt < 0 ? string.Empty : dlPipeline[coverAt..Math.Min(dlPipeline.Length, coverAt + 3200)];
+        Check(coverAt > 0 && !coverBody.Contains("IsComplete", StringComparison.Ordinal)
+              && !coverBody.Contains("aired", StringComparison.Ordinal),
+            "F-M472: no completeness check — whatever the release covers is served");
+        Check(coverAt > 0 && !coverBody.Contains("_packCover = null;\n        if (cand.UnpackFiles.Count < 2)", StringComparison.Ordinal),
+            "F-M472: a save from a single-file follow-up does not wipe the pack cover");
+        // F-M474 (operator decision 13.11.2026): the ranking pays attention to the PRICE — nothing
+        // that costs a download is taken while something free is on offer — and, at the same price,
+        // a season pack beats a single because one fetch serves the whole season. The cache question
+        // is asked by ENTRY ID, the address the download actually uses.
+        int rankAt = dlPipeline.IndexOf("private long CandidateRank", StringComparison.Ordinal);
+        string rankBody = rankAt < 0 ? string.Empty : dlPipeline[rankAt..Math.Min(dlPipeline.Length, rankAt + 2200)];
+        Check(rankAt > 0 && !dlPipeline.Contains("private long PackPreference", StringComparison.Ordinal),
+            "F-M474: the cost rank replaced the old pack-only preference");
+        Check(rankBody.Contains("? (cached ? 4 : 2)", StringComparison.Ordinal)
+              && rankBody.Contains("return cached ? 3 : 1;", StringComparison.Ordinal),
+            "F-M474: four ranks — free/pack, free/single, paid/pack, paid/single");
+        Check(rankBody.Contains("FindUnpackFile(season, episode) != null", StringComparison.Ordinal),
+            "F-M474: a pack without this episode keeps rank 0 — it could not serve it at all");
+        Check(dlPipeline.Contains("_api.IsEntryArchiveCached(c.NId)", StringComparison.Ordinal)
+              && !dlPipeline.Contains("_api.IsArchiveCached(c.Url)", StringComparison.Ordinal),
+            "F-M474: the cache is asked by entry id, the address the download uses");
+        Check(dlPipeline.Split(".OrderByDescending(c => CandidateRank(c, season, episode))").Length - 1 >= 2
+              && dlPipeline.Contains("Pack: CandidateRank(c, season, episode)", StringComparison.Ordinal),
+            "F-M474: the same rank orders the main pick and both HI picks");
+        Check(dlPipeline.Contains("for (int pos = 0; pos < items.Count; pos++)", StringComparison.Ordinal),
+            "F-M472: the run loop is an index loop, because the hand-over inserts while it walks");
+        Check(dlPipeline.Contains("covers {Season}x{First}-{Last}", StringComparison.Ordinal),
+            "F-M472: the run says which stretch of the season it moved forward");
+
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
             : $"seasonpack: {_checks} checks, {Failures.Count} failed.");

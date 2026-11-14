@@ -306,6 +306,30 @@ internal static class Program
             "F-M471: one address — the pipeline no longer calls the v1 route at all");
         Check(!pipeSource.Contains("DownloadSubtitleFileAsync(want.Url", StringComparison.Ordinal),
             "F-M471: no member url is fetched on its own");
+        // F-M473 (operator order 12.11.2026): "Nach Abschluss des download runs, wenn ein sub für die
+        // betreffende lib herunterladen wurde, bitte die Funktion nach neuen und aktualisierten subs
+        // für die lib antriggern (kein Vollständiger jf database scan)." The run reports the files it
+        // wrote to the monitor, which makes the server look for new and updated files in exactly
+        // those paths — and it never starts the full database scan.
+        Check(pipeSource.Contains("TriggerLibraryRefreshForSavedSubtitles(summary);", StringComparison.Ordinal),
+            "F-M473: the run end triggers the library update");
+        Check(pipeSource.Contains("if (summary.IsDryRun || summary.Downloaded <= 0 || _savedSubtitlePaths.Count == 0)", StringComparison.Ordinal),
+            "F-M473: only a run that really saved asks for the scan — a dry run writes nothing");
+        Check(pipeSource.Contains("_providerManager.QueueRefresh(libraryId, options, RefreshPriority.High);", StringComparison.Ordinal),
+            "F-M473: the library is queued for exactly the dashboard's refresh — and the run does not wait");
+        Check(!pipeSource.Contains("_libraryManager.ValidateMediaLibrary", StringComparison.Ordinal)
+              && !pipeSource.Contains("QueueLibraryScan(", StringComparison.Ordinal),
+            "F-M473: no full database scan is triggered");
+        Check(pipeSource.Contains("MetadataRefreshMode = MetadataRefreshMode.Default,", StringComparison.Ordinal)
+              && pipeSource.Contains("ImageRefreshMode = MetadataRefreshMode.Default,", StringComparison.Ordinal),
+            "F-M473: the mode is the dashboard's 'look for new and updated files' — Default, not FullRefresh");
+        Check(!pipeSource.Contains("ReplaceAllMetadata = true", StringComparison.Ordinal)
+              && !pipeSource.Contains("ForceSave = true", StringComparison.Ordinal),
+            "F-M473: nothing is replaced or force-saved — only new and updated files are looked at");
+        Check(pipeSource.Contains("scan for new and updated files queued", StringComparison.Ordinal),
+            "F-M473: the run says which library it queued");
+        Check(pipeSource.Contains("if (!_config.RefreshLibraryAfterDownload)", StringComparison.Ordinal),
+            "F-M473: the switch in the download tab decides — off means the run reports nothing");
         Check(!pipeSource.Contains("archiveRoute", StringComparison.Ordinal),
             "F-M471: no threshold and no second route gate the archive any more");
         Check(!apiSource.Contains("V2DownloadAttemptAsync(nId, \"file\"", StringComparison.Ordinal),

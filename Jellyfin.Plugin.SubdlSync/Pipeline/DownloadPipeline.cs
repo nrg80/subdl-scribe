@@ -27,13 +27,25 @@ using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Persistence;
+using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.IO;
 using Microsoft.Extensions.Logging;
 using Episode = MediaBrowser.Controller.Entities.TV.Episode;
 using Movie = MediaBrowser.Controller.Entities.Movies.Movie;
 using Jellyfin.Plugin.SubdlScribe.Data;
 
 namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+
+/// <summary>
+/// F-M472: the season pack one episode was served from — the SAME release, its season, and the
+/// episodes it still holds.
+/// </summary>
+/// <param name="SeriesId">Series the pack belongs to.</param>
+/// <param name="ReleaseName">Release name as SubDL lists it.</param>
+/// <param name="Season">Season the members share.</param>
+/// <param name="Episodes">Episode numbers of the other members of the same release.</param>
+internal sealed record PackCover(Guid? SeriesId, string ReleaseName, int Season, IReadOnlyCollection<int> Episodes);
 
 /// <summary>
 /// Download pipeline run summary ([D] F-M41).
@@ -217,6 +229,23 @@ public sealed class DownloadPipeline : IDisposable
     /// fail or reorder anything the pipeline is doing.
     /// </summary>
     private readonly List<RejectedCandidateEntity> _pendingReports = new();
+
+    /// <summary>
+    /// F-M472: what the last processed item got out of a season pack, or null. Read by the run
+    /// loop right after the item, which then puts the remaining episodes of that SAME release in
+    /// front of the queue instead of waiting for their own turn.
+    /// </summary>
+    private PackCover? _packCover;
+
+    /// <summary>
+    /// Libraries something was actually saved into during this run. F-M473: at the end of the run
+    /// each of them gets ONE "scan for new and updated files" so the new subtitles show up in
+    /// Jellyfin right away — the full database scan is not what is wanted.
+    /// </summary>
+    private readonly IProviderManager _providerManager;
+    private readonly IFileSystem _fileSystem;
+    private readonly HashSet<Guid> _librariesSaved = new();
+    private readonly HashSet<string> _savedSubtitlePaths = new(StringComparer.Ordinal);
     private readonly PluginConfiguration _config;
     private readonly GlobalRateLimiter _limiter;
     private readonly DownloadSearchTracker _searchTracker;
@@ -360,6 +389,8 @@ public sealed class DownloadPipeline : IDisposable
     public DownloadPipeline(
         ILogger<DownloadPipeline> logger,
         ILibraryManager libraryManager,
+        IProviderManager providerManager,
+        IFileSystem fileSystem,
         IMediaSourceManager mediaSourceManager,
         SubdlApiClient api,
         TmdbImdbResolver tmdb,
@@ -370,6 +401,8 @@ public sealed class DownloadPipeline : IDisposable
     {
         _logger = logger;
         _libraryManager = libraryManager;
+        _providerManager = providerManager;
+        _fileSystem = fileSystem;
         _mediaSourceManager = mediaSourceManager;
         _api = api;
         _tmdb = tmdb;
@@ -501,6 +534,8 @@ public sealed class DownloadPipeline : IDisposable
         // F-M24a (user decision 09.09.2026): TMDB calls trace at VERBOSE (SubDL API calls are Debug).
         _tmdb.Trace += OnTmdbTrace;
         _runSummaryForEvents = summary; // F-M218: event handlers need the running summary
+        _librariesSaved.Clear(); // F-M473: this run names only the libraries IT saved into
+        _savedSubtitlePaths.Clear();
 
         // F-M54: wrong TMDB key reported ONCE at Normal/Error level.
         _tmdb.AuthError += msg => _logger.LogError("[SubDL-D] {Msg}", msg);
@@ -554,8 +589,14 @@ public sealed class DownloadPipeline : IDisposable
             : items.Count(it => QueueFilter.Contains(it.Id.ToString()));
 
         int idx = 0;
-        foreach (var item in items)
+        // F-M472: episodes pulled in from a season pack are worked even though no arrival queued
+        // them — that is the point of the rule, so they are named here and pass the queue filter.
+        var packQueued = new HashSet<string>(StringComparer.Ordinal);
+        // An index loop, not foreach: the pack hand-over INSERTS items behind the current one, and
+        // inserting into a list while it is being enumerated throws.
+        for (int pos = 0; pos < items.Count; pos++)
         {
+            var item = items[pos];
             // User stop marker — check BEFORE doing any work.
             if (PipelineStopSignal.IsStopped(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: false, runCt))
             {
@@ -568,8 +609,10 @@ public sealed class DownloadPipeline : IDisposable
             _watchdog.Heartbeat();
 
             // F-M111: queue-driven — only queued items are worked; others stay
-            // invisible to this run (the seeder owns admission).
-            if (QueueFilter != null && !QueueFilter.Contains(item.Id.ToString()))
+            // invisible to this run (the seeder owns admission). F-M472 adds the pack hand-over:
+            // an episode that the same release already covers IS worked, queued or not.
+            if (QueueFilter != null && !QueueFilter.Contains(item.Id.ToString())
+                && !packQueued.Contains(item.Id.ToString()))
             {
                 continue;
             }
@@ -588,8 +631,54 @@ public sealed class DownloadPipeline : IDisposable
             idx++;
             // Fine-grained progress: item start + item done (streams inside report via 0.5 steps)
             progress?.Report((idx - 1 + 0.05) / Math.Max(items.Count, 1) * 100);
+            _packCover = null;
             await ProcessItemAsync(item, targets, summary, skipFilter, refetchGap, runCt).ConfigureAwait(false);
             progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
+
+            // F-M472 (operator order 12.11.2026): when an episode was served from a season pack, the
+            // remaining episodes of that SAME release are worked immediately after it — the archive
+            // is in the cache, so they cost neither a download nor a wait for their own turn. No
+            // completeness check: whatever the release covers gets served.
+            if (_packCover is { } cover)
+            {
+                // F-M472: the pack that just served this episode names the other episodes of its own
+                // entry, so the ones already waiting further back in THIS run's queue come along right
+                // behind it. Only the queue — an episode nobody queued stays untouched (operator
+                // order 13.11.2026: "doch nur die in der queue"). The archive is in the cache, so
+                // they cost no download, and the per-item open-pair check still drops any that have
+                // the language before an API call is made.
+                var pulled = new List<BaseItem>();
+                for (int k = items.Count - 1; k > pos; k--)
+                {
+                    if (items[k] is Episode sibling
+                        && sibling.IndexNumber is int number
+                        && cover.Episodes.Contains(number)
+                        && sibling.ParentIndexNumber == cover.Season
+                        && sibling.SeriesId == cover.SeriesId)
+                    {
+                        pulled.Insert(0, sibling);
+                        items.RemoveAt(k);
+                    }
+                }
+
+                if (pulled.Count > 0)
+                {
+                    items.InsertRange(pos + 1, pulled);
+                    foreach (var sibling in pulled)
+                    {
+                        packQueued.Add(sibling.Id.ToString());
+                        if (QueueFilter == null || !QueueFilter.Contains(sibling.Id.ToString()))
+                        {
+                            queuedTotal++;
+                        }
+                    }
+
+                    var numbers = pulled.Select(p => ((Episode)p).IndexNumber ?? 0).OrderBy(n => n).ToList();
+                    LogUtil.Normal(_logger,
+                        "[SubDL-D] pack \"{Release}\" covers {Season}x{First}-{Last} — {N} episode(s) of that release moved right after {File}",
+                        cover.ReleaseName, cover.Season, numbers[0], numbers[^1], pulled.Count, Path.GetFileName(item.Path));
+                }
+            }
         }
 
         _api.DebugTrace -= OnApiTrace;
@@ -622,6 +711,12 @@ public sealed class DownloadPipeline : IDisposable
         {
             _logger.LogWarning("[SubDL-D] report flush failed: {Msg}", ex.Message);
         }
+        // F-M473 (operator order 12.11.2026): a saved subtitle is a file Jellyfin has not seen yet.
+        // After the walk — and only when something was really saved — each affected library gets
+        // the narrow "new and updated files" scan, so the subtitles appear without waiting for the
+        // next full database scan. One call per library, never per file; the run does not wait on it.
+        TriggerLibraryRefreshForSavedSubtitles(summary);
+
         // F-M286: {Rejected} names what was FETCHED AND THROWN AWAY. Without it a run that spent
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
@@ -1562,10 +1657,10 @@ public sealed class DownloadPipeline : IDisposable
             // pack candidate beats an equally good single — and a pack whose archive is ALREADY
             // cached beats both, because it costs no download unit at all. The preference is a sort
             // key in front of the text score, not a change to it: a pack only wins when it carries
-            // this episode (PackPreference returns 0 otherwise), and the text similarity still
+            // this episode (CandidateRank returns 0 otherwise), and the text similarity still
             // decides between two packs.
             var ranked = langCands
-                .Select(c => (Cand: c, Score: Score(c, videoBase), Pack: PackPreference(c, season, episode)))
+                .Select(c => (Cand: c, Score: Score(c, videoBase), Pack: CandidateRank(c, season, episode)))
                 .OrderByDescending(x => x.Pack)
                 .ThenByDescending(x => x.Score)
                 .ToList();
@@ -1727,7 +1822,8 @@ public sealed class DownloadPipeline : IDisposable
                     {
                         var hiForLang = hiCandidates.Where(c => c.Language == lang).ToList();
                         var hiPick = hiForLang
-                            .OrderByDescending(c => Score(c, videoBase))
+                            .OrderByDescending(c => CandidateRank(c, season, episode))
+                            .ThenByDescending(c => Score(c, videoBase))
                             .ThenByDescending(c => c.DownloadCount)
                             .FirstOrDefault();
                         LogUtil.PerItem(_config.LogMode, _logger,
@@ -1738,6 +1834,7 @@ public sealed class DownloadPipeline : IDisposable
                     }
 
                     summary.Downloaded++;
+                    RememberSavedLibrary(item, mediaPath); // F-M473
                     ReportOutcome(item, ItemOutcome.Done);
                     // F-M22: `savedAny` stays set on purpose although nothing was saved. It is not
                     // the mark's only reader: it also decides whether this language counts as a
@@ -2410,7 +2507,12 @@ public sealed class DownloadPipeline : IDisposable
                         Path.GetFileName(targetPath), targetPath));
                     _qaFails.RecordSuccess(item.Id.ToString(), lang); // A real save resets the QA counter
                     summary.Downloaded++;
+                    RememberSavedLibrary(item, targetPath); // F-M473
                     ReportOutcome(item, ItemOutcome.Done);
+                    // F-M472: this save came out of a season pack, and the archive holding the other
+                    // episodes of the SAME release is already here. Remember the cover so the run
+                    // loop can put those episodes right after this one.
+                    RememberPackCover(item, season, episode, cand);
                     savedCount++;
                     // F-M317: only an ALIGNED file advances the corrected counter. An unprocessed
                     // file already took its number from the reserved block and must not consume a
@@ -2475,7 +2577,8 @@ public sealed class DownloadPipeline : IDisposable
                     if (_config.DownloadHearingImpaired && !effectiveHi)
                     {
                         var hi = hiCandidates.Where(c => c.Language == lang)
-                            .OrderByDescending(c => Score(c, videoBase))
+                            .OrderByDescending(c => CandidateRank(c, season, episode))
+                            .ThenByDescending(c => Score(c, videoBase))
                             .ThenByDescending(c => c.DownloadCount)
                             .FirstOrDefault();
                         if (hi == null || string.IsNullOrEmpty(hi.Url))
@@ -2716,6 +2819,7 @@ public sealed class DownloadPipeline : IDisposable
                                             Path.GetFileName(hiPath), hiPath));
                                         _qaFails.RecordSuccess(item.Id.ToString(), lang); // HI save resets the pair counter too
                                         summary.Downloaded++;
+                                        RememberSavedLibrary(item, hiPath); // F-M473
                                         ReportOutcome(item, ItemOutcome.Done);
                                         if (_config.LogMode >= LogLevelMode.Verbose)
                                         {
@@ -3340,28 +3444,39 @@ public sealed class DownloadPipeline : IDisposable
 
 
     /// <summary>
-    /// F-M384: how much a candidate is worth as an ARCHIVE. <c>2</c> when the pack carries this
-    /// episode and its archive is already cached (free), <c>1</c> when it carries the episode but
-    /// must be fetched (one unit for the whole season), <c>0</c> for anything else — including a
-    /// pack that does not contain the episode, which the download path would refuse anyway.
+    /// F-M384/F-M474: what a candidate COSTS this run, and how much it covers. The scarce unit is a
+    /// download (50 a day), so nothing that costs one is taken while something free is on offer,
+    /// and a season pack is preferred over a single at the same price because one fetch serves every
+    /// episode of the season (F-M472 hands them over).
+    /// <para>
+    /// <c>4</c> pack that carries this episode, archive cached (free, and free for the season);
+    /// <c>3</c> single file, archive cached (free, this episode only);
+    /// <c>2</c> pack that carries this episode, must be fetched (one unit, whole season);
+    /// <c>1</c> single file, must be fetched (one unit, one episode);
+    /// <c>0</c> pack without this episode — it could not serve it at all.
+    /// </para>
     /// </summary>
     /// <param name="c">Candidate from the search.</param>
     /// <param name="season">Wanted season (0 = unknown).</param>
     /// <param name="episode">Wanted episode (0 = unknown).</param>
-    /// <returns>Preference rank, higher wins.</returns>
-    private long PackPreference(SubtitleCandidate c, int season, int episode)
+    /// <returns>Cost rank, higher wins.</returns>
+    private long CandidateRank(SubtitleCandidate c, int season, int episode)
     {
-        if (c.UnpackFiles.Count < 2 || (season <= 0 && episode <= 0))
+        bool cached = _api.IsEntryArchiveCached(c.NId);
+
+        if (c.UnpackFiles.Count >= 2)
         {
-            return 0;
+            if (season <= 0 && episode <= 0)
+            {
+                return 0;
+            }
+
+            return c.FindUnpackFile(season, episode) != null
+                ? (cached ? 4 : 2)
+                : 0;
         }
 
-        if (c.FindUnpackFile(season, episode) == null)
-        {
-            return 0;
-        }
-
-        return _api.IsArchiveCached(c.Url) ? 2 : 1;
+        return cached ? 3 : 1;
     }
 
     private long Score(SubtitleCandidate c, string videoBase)
@@ -3628,6 +3743,142 @@ public sealed class DownloadPipeline : IDisposable
         {
             QueueReport(row);
         }
+    }
+
+    /// <summary>
+    /// F-M473: notes the library an item belongs to, so the end of the run can tell it to look for
+    /// new and updated files. Nested libraries resolve to the folder Jellyfin itself scans (F-M189).
+    /// </summary>
+    /// <param name="item">Item a subtitle was just saved for.</param>
+    /// <param name="savedPath">The subtitle file that was written, if this call is a real save.</param>
+    private void RememberSavedLibrary(BaseItem item, string? savedPath = null)
+    {
+        try
+        {
+            foreach (var folder in _libraryManager.GetCollectionFolders(item))
+            {
+                _librariesSaved.Add(folder.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("[SubDL-D] library lookup failed for {Item}: {Msg}", item.Id, ex.Message);
+        }
+
+        if (!string.IsNullOrWhiteSpace(savedPath))
+        {
+            _savedSubtitlePaths.Add(savedPath);
+        }
+    }
+
+    /// <summary>
+    /// F-M473 (operator order 12.11.2026): "die Funktion nach neuen und aktualisierten subs für die
+    /// lib antriggern (kein vollständiger jf database scan)". Only libraries that received a
+    /// subtitle are named, exactly once each, and only when the run really saved something — a dry
+    /// run writes nothing, so it triggers nothing. Jellyfin queues the scan; the run does not wait.
+    /// </summary>
+    /// <param name="summary">The run summary that says whether anything was saved.</param>
+    private void TriggerLibraryRefreshForSavedSubtitles(DownloadRunSummary summary)
+    {
+        if (!_config.RefreshLibraryAfterDownload)
+        {
+            return; // F-M473: the operator turned the hand-over off in the download tab
+        }
+
+        if (summary.IsDryRun || summary.Downloaded <= 0 || _savedSubtitlePaths.Count == 0)
+        {
+            return;
+        }
+
+        // Exactly the dashboard's "Bibliothek scannen → nach neuen und aktualisierten Dateien suchen"
+        // (jellyfin-web refreshdialog: mode "scan" sends MetadataRefreshMode AND ImageRefreshMode as
+        // Default, Recursive, no replace), queued on the library the subtitles went into. Jellyfin 12
+        // offers this per ITEM (IProviderManager.QueueRefresh); the only library-wide call is
+        // ValidateMediaLibrary, the full database scan that was ruled out. Queued, not awaited.
+        foreach (var libraryId in _librariesSaved)
+        {
+            try
+            {
+                var options = new MetadataRefreshOptions(new DirectoryService(_fileSystem))
+                {
+                    MetadataRefreshMode = MetadataRefreshMode.Default,
+                    ImageRefreshMode = MetadataRefreshMode.Default,
+                    ReplaceAllImages = false,
+                    ReplaceAllMetadata = false,
+                    ForceSave = false,
+                    IsAutomated = false,
+                    RemoveOldMetadata = false,
+                };
+
+                _providerManager.QueueRefresh(libraryId, options, RefreshPriority.High);
+                LogUtil.Normal(_logger,
+                    "[SubDL-D] library {Library}: scan for new and updated files queued ({Count} subtitle(s) saved in this run, {Files} file(s) reported)",
+                    libraryId.ToString("N"), summary.Downloaded, _savedSubtitlePaths.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("[SubDL-D] library update for {Library} failed: {Msg}", libraryId.ToString("N"), ex.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// F-M472: remembers the season pack an episode was just served from, so the run loop can put
+    /// the remaining episodes of the SAME release right after it. Only members that name the same
+    /// release count: a pack of mixed releases is not "one release", and completeness of the season
+    /// is deliberately NOT required (operator order 12.11.2026) — whatever the pack covers is served.
+    /// </summary>
+    /// <param name="item">The item that was just saved.</param>
+    /// <param name="season">Season of that item.</param>
+    /// <param name="episode">Episode number of that item.</param>
+    /// <param name="cand">The candidate the file came from.</param>
+    private void RememberPackCover(BaseItem item, int season, int episode, SubtitleCandidate cand)
+    {
+        // Never clear here. The item starts with a clean marker, and a save from a single-file entry
+        // — the follow-up candidate after the pack already served the language — must not wipe the
+        // cover the pack just recorded. Measured on the bench 13.11.2026: the pack saved at 09:11:03,
+        // the follow-up one second later, and the hand-over found nothing.
+        if (cand.UnpackFiles.Count < 2)
+        {
+            return; // one member is a single file, not a pack
+        }
+
+        // The pack IS the release: it answered this episode, so every member of the same entry
+        // belongs to the release that just proved itself. No name comparison — measured on SubDL
+        // 13.11.2026 (The Middle S9, entry …-3055878) the pack is called
+        // "The.Middle.S09.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb" while its members are named
+        // "The Middle - S09E01 (2009) WEB.eng.srt" …, so any string comparison against the pack
+        // name — or between member names — only invents a way to drop members that are in fact
+        // the same release. What separates releases is the entry, and the entry has already matched.
+        var episodes = new SortedSet<int>();
+        foreach (var member in cand.UnpackFiles)
+        {
+            int memberSeason = member.Season > 0 ? member.Season : season;
+            if (memberSeason != season)
+            {
+                continue;
+            }
+
+            int memberEpisode = member.Episode > 0
+                ? member.Episode
+                : SubtitleCandidate.EpisodeFromFileName(member.Name, memberSeason);
+
+            // The episode that was just served, and anything the pack itself could not name, is not
+            // a lead for another item.
+            if (memberEpisode <= 0 || memberEpisode == episode)
+            {
+                continue;
+            }
+
+            episodes.Add(memberEpisode);
+        }
+
+        if (episodes.Count == 0)
+        {
+            return;
+        }
+
+        _packCover = new PackCover(item is Episode ep ? ep.SeriesId : null, cand.ReleaseName, season, episodes);
     }
 
     /// <summary>

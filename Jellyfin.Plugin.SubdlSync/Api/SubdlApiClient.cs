@@ -2275,6 +2275,30 @@ public sealed class SubdlApiClient
     /// </summary>
     /// <param name="dlUrl">Download path or URL from a search result.</param>
     /// <returns>True when the body is cached.</returns>
+    /// <summary>
+    /// F-M384/F-M474: whether the archive of an ENTRY is already on disk. Downloads go by entry id
+    /// over the v2 zip route, so the key is built from that address — a candidate's own v1 url keys
+    /// under a different name and would answer "not cached" for an archive that is sitting right
+    /// there.
+    /// </summary>
+    /// <param name="nId">Entry id (subtitlePage segment).</param>
+    /// <returns>True when the archive bytes are cached.</returns>
+    public bool IsEntryArchiveCached(string? nId)
+    {
+        if (string.IsNullOrWhiteSpace(nId))
+        {
+            return false;
+        }
+
+        string zipUrl = $"{ApiBase}/api/v2/subtitles/{Uri.EscapeDataString(nId)}/download?format=zip";
+        return IsArchiveCached(zipUrl);
+    }
+
+    /// <summary>
+    /// Whether the archive behind a download URL is on disk.
+    /// </summary>
+    /// <param name="dlUrl">Download URL.</param>
+    /// <returns>True when cached.</returns>
     public bool IsArchiveCached(string? dlUrl)
     {
         string? key = ArchiveKey.FromUrl(dlUrl);

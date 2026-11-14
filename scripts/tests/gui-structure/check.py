@@ -1750,6 +1750,17 @@ def main():
     check(".subdl-dryrun { color: #767676;" in page_src,
           "F-M409: the dry marker uses the same grey as cancel")
 
+    # ---- F-M473: der Schalter fuer die Bibliotheksmeldung sitzt im Download-Tab VOR den Quality Gates.
+    check('id="RefreshLibraryAfterDownload"' in page_src,
+          "F-M473: the switch exists in the download tab")
+    check(page_src.index('id="RefreshLibraryAfterDownload"') < page_src.index("Quality gates (before download save)"),
+          "F-M473: the switch sits before the quality gates")
+    check("This makes newly downloaded subtitles immediately visible." in page_src,
+          "F-M473: the switch says what it is for")
+    check("document.querySelector('#RefreshLibraryAfterDownload').checked = config.RefreshLibraryAfterDownload !== false;" in page_src
+          and "config.RefreshLibraryAfterDownload = document.querySelector('#RefreshLibraryAfterDownload').checked;" in page_src,
+          "F-M473: the switch is loaded and saved")
+
     print(">>> GUI-STRUKTUR %s: %d/%d Pruefungen bestanden"
           % ("OK" if not failed else "FEHLER", len(results) - len(failed), len(results)))
     return 1 if failed else 0
