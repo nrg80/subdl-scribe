@@ -673,10 +673,10 @@ public sealed class DownloadPipeline : IDisposable
                         }
                     }
 
+                    var numbers = pulled.Select(p => ((Episode)p).IndexNumber ?? 0).OrderBy(n => n).ToList();
                     LogUtil.Normal(_logger,
                         "[SubDL-D] pack \"{Release}\" covers {Season}x{First}-{Last} — {N} episode(s) of that release moved right after {File}",
-                        cover.ReleaseName, cover.Season, ((Episode)pulled[0]).IndexNumber ?? 0,
-                        ((Episode)pulled[^1]).IndexNumber ?? 0, pulled.Count, Path.GetFileName(item.Path));
+                        cover.ReleaseName, cover.Season, numbers[0], numbers[^1], pulled.Count, Path.GetFileName(item.Path));
                 }
             }
         }
@@ -3821,7 +3821,10 @@ public sealed class DownloadPipeline : IDisposable
     /// <param name="cand">The candidate the file came from.</param>
     private void RememberPackCover(BaseItem item, int season, int episode, SubtitleCandidate cand)
     {
-        _packCover = null;
+        // Never clear here. The item starts with a clean marker, and a save from a single-file entry
+        // — the follow-up candidate after the pack already served the language — must not wipe the
+        // cover the pack just recorded. Measured on the bench 13.11.2026: the pack saved at 09:11:03,
+        // the follow-up one second later, and the hand-over found nothing.
         if (cand.UnpackFiles.Count < 2)
         {
             return; // one member is a single file, not a pack

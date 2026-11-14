@@ -814,6 +814,8 @@ internal static class Program
         Check(coverAt > 0 && !coverBody.Contains("IsComplete", StringComparison.Ordinal)
               && !coverBody.Contains("aired", StringComparison.Ordinal),
             "F-M472: no completeness check — whatever the release covers is served");
+        Check(coverAt > 0 && !coverBody.Contains("_packCover = null;\n        if (cand.UnpackFiles.Count < 2)", StringComparison.Ordinal),
+            "F-M472: a save from a single-file follow-up does not wipe the pack cover");
         Check(dlPipeline.Contains("for (int pos = 0; pos < items.Count; pos++)", StringComparison.Ordinal),
             "F-M472: the run loop is an index loop, because the hand-over inserts while it walks");
         Check(dlPipeline.Contains("covers {Season}x{First}-{Last}", StringComparison.Ordinal),

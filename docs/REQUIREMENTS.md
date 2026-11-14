@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
-**Version:** 2.138
-**Status:** Implementation — v12.1.12.375.
+**Version:** 2.140
+**Status:** Implementation — v12.1.12.377.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -2082,7 +2082,7 @@ fix and is exactly the fingerprint F-M29 forbids).
 
 **T196:** Der Lauf reiht die Bibliothek mit „nach neuen und aktualisierten Dateien suchen" ein: nur bei gespeicherten Dateien, je Bibliothek einmal, kein vollständiger Scan; der Schalter vor den Quality Gates kann es abschalten. **8 Prüfungen im Lauf, 4 in der Oberfläche.**
 
-**T195:** Ein Staffelpack reicht an die übrigen Folgen desselben Releases weiter: nur die Folgen aus der Warteschlange des Laufs, kein Namensvergleich gegen den Pack-Namen, keine Vollzähligkeitsprüfung, Einreihung direkt hinter der bedienten Folge, Indexschleife statt Aufzählung. **6 Prüfungen.**
+**T195:** Ein Staffelpack reicht an die übrigen Folgen desselben Releases weiter: nur die Folgen aus der Warteschlange des Laufs, kein Namensvergleich gegen den Pack-Namen, keine Vollzähligkeitsprüfung, Einreihung direkt hinter der bedienten Folge, Indexschleife statt Aufzählung; ein Nachfass-Kandidat derselben Folge löscht den Merker nicht. **7 Prüfungen.**
 
 **T194:** Ein Weg zu den Bytes: Archiv ganz holen, in die Ablage legen, Mitglied daraus entpacken; nur die Eintrags-Id als Adresse; keine Einzeldatei-Gestalt; Eintrag ohne Kennung wird übersprungen und benannt. **8 Prüfungen.**
 
