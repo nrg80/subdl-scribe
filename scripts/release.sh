@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# This file is part of Sub Scribe (https://github.com/nrg80/subdl-scribe)
+# This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Sub Scribe is free software: you can redistribute it and/or modify it
@@ -29,7 +29,7 @@
 
 set -euo pipefail
 
-REPO_SLUG="nrg80/subdl-scribe"
+REPO_SLUG="nrg80/sub-scribe"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"

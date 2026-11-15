@@ -38,7 +38,7 @@ before it is saved:
 2. Add this repository URL:
 
    ```
-   https://raw.githubusercontent.com/nrg80/subdl-scribe/main/manifest.json
+   https://raw.githubusercontent.com/nrg80/sub-scribe/main/manifest.json
    ```
 
 3. Open **Dashboard → Plugins → All**, find **Sub Scribe** and install it.

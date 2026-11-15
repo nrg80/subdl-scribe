@@ -1,4 +1,4 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // T164 / F-M382: a cue that is too short to be seen is DROPPED, not used to convict the file.

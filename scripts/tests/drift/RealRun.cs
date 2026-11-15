@@ -1,4 +1,4 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // F-M295 end-to-end check against REAL material. The synthetic test proves the
