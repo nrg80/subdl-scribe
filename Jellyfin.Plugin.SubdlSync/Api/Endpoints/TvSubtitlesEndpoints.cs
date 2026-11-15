@@ -1,0 +1,223 @@
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Sub Scribe is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the
+// Free Software Foundation, either version 3 of the License, or (at your
+// option) any later version.
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Jellyfin.Plugin.SubdlScribe.Configuration;
+
+namespace Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
+
+/// <summary>
+/// F-M483: the tvsubtitles.net download endpoint. The source has no id index, so the series is resolved
+/// by NAME out of its show list, then the season's episode pages are walked until one states the wanted
+/// season and episode. That walk is the price of a source without an API — it is bounded by the season
+/// (at most 22 pages) and stops at the first match.
+/// <para>
+/// WIRED = false (F-M484): the endpoint exists and is tested, but the pipeline's run loop still calls
+/// SubDL only. Nothing is gained by claiming otherwise in the GUI.
+/// </para>
+/// </summary>
+public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
+{
+    private readonly TvSubtitlesClient _client;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TvSubtitlesDownloadEndpoint"/> class.
+    /// </summary>
+    /// <param name="client">The tvsubtitles.net client.</param>
+    public TvSubtitlesDownloadEndpoint(TvSubtitlesClient client) =>
+        _client = client ?? throw new ArgumentNullException(nameof(client));
+
+    /// <inheritdoc />
+    public SubtitleProvider Provider => SubtitleProvider.TvSubtitles;
+
+    /// <inheritdoc />
+    public bool Wired => false;
+
+    /// <summary>
+    /// F-M483: the site's language code for a two-letter language. SubDL speaks ISO-ish codes, the site
+    /// has its own set (F-M480) — the bridge is this method, and it is deliberately the only place that
+    /// knows both vocabularies.
+    /// </summary>
+    /// <param name="language">Two-letter language, any case.</param>
+    /// <returns>The site's code, or null when the site has no such language.</returns>
+    public static string? SiteLanguage(string? language)
+    {
+        if (string.IsNullOrWhiteSpace(language))
+        {
+            return null;
+        }
+
+        var code = language.Trim().ToLowerInvariant();
+        return TvSubtitlesClient.Languages.ContainsKey(code) ? code : null;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SubtitleHit>> SearchAsync(
+        SubtitleQuery query, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var language = SiteLanguage(query.Language)
+            ?? throw new ArgumentException(
+                "tvsubtitles.net has no language '" + query.Language + "'", nameof(query));
+
+        if (string.IsNullOrWhiteSpace(query.ShowName))
+        {
+            // No id index on this source: without a title there is nothing to look up.
+            return Array.Empty<SubtitleHit>();
+        }
+
+        var shows = await _client.ShowsAsync(cancellationToken).ConfigureAwait(false);
+        var showId = TvSubtitlesClient.ResolveShow(shows, query.ShowName);
+        if (showId is null)
+        {
+            return Array.Empty<SubtitleHit>();
+        }
+
+        var pages = await _client.EpisodePagesAsync(showId.Value, query.Season, cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var page in pages)
+        {
+            var (season, episode) = await _client.EpisodeLabelAsync(page, cancellationToken).ConfigureAwait(false);
+            if (season != query.Season || episode != query.Episode)
+            {
+                continue;
+            }
+
+            var entries = await _client.EntriesAsync(page, cancellationToken).ConfigureAwait(false);
+            return entries
+                .Where(e => string.Equals(e.Language, language, StringComparison.Ordinal))
+                .Select(e => new SubtitleHit(
+                    SubtitleProvider.TvSubtitles, e.SubtitleId, e.Language, e.Rip, e.Release, false))
+                .ToList();
+        }
+
+        return Array.Empty<SubtitleHit>();
+    }
+
+    /// <inheritdoc />
+    public async Task<SubtitlePayload?> FetchAsync(
+        SubtitleHit hit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hit);
+        if (string.IsNullOrWhiteSpace(hit.Id))
+        {
+            return null;
+        }
+
+        var (name, data) = await _client.DownloadAsync(hit.Id, cancellationToken).ConfigureAwait(false);
+        return data.Length == 0 ? null : new SubtitlePayload(name, data, hit.Language);
+    }
+}
+
+/// <summary>
+/// F-M483: the tvsubtitles.net upload endpoint. The site is written by a form, so the ticket is turned
+/// into the form's fields (F-M481) and sent as multipart. A dry run builds the same body and sends
+/// nothing — which is also the default, so a mis-wired caller cannot upload by accident.
+/// </summary>
+public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
+{
+    private readonly TvSubtitlesClient _client;
+    private readonly bool _dryRun;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TvSubtitlesUploadEndpoint"/> class.
+    /// </summary>
+    /// <param name="client">The tvsubtitles.net client.</param>
+    /// <param name="dryRun">True (default) builds the request and sends nothing. The plugin's own
+    /// DryRun switch is passed in here — it is not read inside, so the endpoint stays testable.</param>
+    public TvSubtitlesUploadEndpoint(TvSubtitlesClient client, bool dryRun = true)
+    {
+        _client = client ?? throw new ArgumentNullException(nameof(client));
+        _dryRun = dryRun;
+    }
+
+    /// <inheritdoc />
+    public SubtitleProvider Provider => SubtitleProvider.TvSubtitles;
+
+    /// <inheritdoc />
+    public bool Wired => false;
+
+    /// <inheritdoc />
+    public async Task<EndpointAnswer> SendAsync(
+        UploadTicket ticket, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ticket);
+
+        if (ticket.SeasonPack)
+        {
+            return new EndpointAnswer(
+                Provider, false, "this source has no season packs — one episode per upload", 0, null, _dryRun);
+        }
+
+        var language = TvSubtitlesDownloadEndpoint.SiteLanguage(ticket.Language);
+        if (language is null)
+        {
+            return new EndpointAnswer(
+                Provider, false, "tvsubtitles.net has no language '" + ticket.Language + "'", 0, null, _dryRun);
+        }
+
+        if (string.IsNullOrWhiteSpace(ticket.ShowName))
+        {
+            return new EndpointAnswer(
+                Provider, false, "a show name is needed — this source has no id index", 0, null, _dryRun);
+        }
+
+        var shows = await _client.ShowsAsync(cancellationToken).ConfigureAwait(false);
+        var showId = TvSubtitlesClient.ResolveShow(shows, ticket.ShowName);
+        if (showId is null)
+        {
+            return new EndpointAnswer(
+                Provider, false, "show not on tvsubtitles.net: " + ticket.ShowName, 0, null, _dryRun);
+        }
+
+        TvSubtitlesUpload upload;
+        try
+        {
+            var tmdb = long.TryParse(ticket.TmdbId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var t)
+                ? t
+                : (long?)null;
+            upload = TvSubtitlesClient.BuildUpload(
+                showId.Value,
+                ticket.Season,
+                ticket.Episode,
+                language,
+                ticket.FileName,
+                ticket.Data,
+                ticket.Rip,
+                ticket.Release,
+                tmdb,
+                ticket.ImdbId,
+                commentExtra: null,
+                doubleEpisode: ticket.DoubleEpisode,
+                hearingImpaired: ticket.HearingImpaired);
+        }
+        catch (ArgumentException ex)
+        {
+            return new EndpointAnswer(Provider, false, ex.Message, ticket.Data.Length, null, _dryRun);
+        }
+
+        var result = await _client.UploadAsync(upload, _dryRun, cancellationToken).ConfigureAwait(false);
+        var ok = !_dryRun && result.Status is >= 200 and < 300;
+        return new EndpointAnswer(
+            Provider,
+            _dryRun || ok,
+            _dryRun ? null : (ok ? null : "HTTP " + result.Status),
+            result.BodyBytes,
+            result.Response,
+            !result.Sent);
+    }
+}

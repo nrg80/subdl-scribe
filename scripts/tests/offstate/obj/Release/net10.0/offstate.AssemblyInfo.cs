@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("offstate")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2be9adefb96059fdac36a8cc35f4345097c04a67")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c9acaaa41e75a19edd604553c50ea4de85fb7846")]
 [assembly: System.Reflection.AssemblyProductAttribute("offstate")]
 [assembly: System.Reflection.AssemblyTitleAttribute("offstate")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

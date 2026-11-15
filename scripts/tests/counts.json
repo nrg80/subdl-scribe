@@ -56,6 +56,11 @@
       "args": [
         "<root>"
       ]
+    },
+    "endpoints": {
+      "args": [
+        "<root>"
+      ]
     }
   },
   "tests": {
@@ -162,6 +167,10 @@
     "T203": {
       "suite": "tvsubtitles",
       "checks": 41
+    },
+    "T204": {
+      "suite": "endpoints",
+      "checks": 28
     }
   }
 }

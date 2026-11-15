@@ -862,8 +862,8 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <returns>The reason, or null when the source is wired in.</returns>
     public static string? MissingProviderReason(SubtitleProvider provider) => provider switch
     {
-        SubtitleProvider.TvSubtitles => "tvsubtitles.net — kein Anbieter verbaut: der Schalter ist sichtbar, "
-            + "aber es gibt weder einen Abruf noch einen Upload für diese Quelle.",
+        SubtitleProvider.TvSubtitles => "tvsubtitles.net — Endpunkte stehen (Abruf und Upload), sind aber noch "
+            + "nicht in den Lauf eingebunden: der Schalter hat noch keine Wirkung.",
         _ => null,
     };
 
