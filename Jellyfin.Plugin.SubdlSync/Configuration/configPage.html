@@ -487,10 +487,10 @@
                         <div class="selectContainer">
                             <label class="selectLabel" for="DownloadOrder">Download order</label>
                             <select id="DownloadOrder" name="DownloadOrder" is="emby-select-withcolor" class="emby-select-withcolor emby-select">
-                                <option value="SubdlFirst">SubDL first, tvsubtitles.net as fallback</option>
                                 <option value="TvSubtitlesFirst">tvsubtitles.net first, SubDL as fallback</option>
+                                <option value="SubdlFirst">SubDL first, tvsubtitles.net as fallback</option>
                             </select>
-                            <div class="fieldDescription">Which source is asked first for a missing language. The other one is only asked when the first has nothing. Default: SubDL first.</div>
+                            <div class="fieldDescription">Which source is asked first for a missing language. The other one is only asked when the first has nothing. Default: tvsubtitles.net first.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -1079,9 +1079,9 @@
                             config.SubdlDownloadEnabled === null || config.SubdlDownloadEnabled === undefined
                                 ? !!config.DownloadEnabled : !!config.SubdlDownloadEnabled;
                         document.querySelector('#TvSubtitlesDownloadEnabled').checked = !!config.TvSubtitlesDownloadEnabled;
-                        document.querySelector('#DownloadOrder').value = config.DownloadOrder === 'TvSubtitlesFirst'
-                            ? 'TvSubtitlesFirst'
-                            : 'SubdlFirst';
+                        document.querySelector('#DownloadOrder').value = config.DownloadOrder === 'SubdlFirst'
+                            ? 'SubdlFirst'
+                            : 'TvSubtitlesFirst';
                         subdlPopulateLangList(config);
                         document.querySelector('#DownloadLanguagesDisplay').value = (config.DownloadLanguages || '');
                         document.querySelector('#DownloadOnlyMissing').checked = config.DownloadOnlyMissing;

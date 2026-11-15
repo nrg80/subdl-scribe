@@ -370,10 +370,10 @@ internal static class Program
             && registrySource.Contains("if (tvSubtitlesUploadedAt.HasValue)", StringComparison.Ordinal));
 
         // ---- 13. Reihenfolge und Erfolgsbegriff (F-M491) --------------------------------------
-        Check("the download order is a setting, default SubDL first",
+        Check("the download order is a setting, and tvsubtitles is first by default (operator 15.11.2026)",
             downloadSource.Contains("DownloadOrder", StringComparison.Ordinal)
             && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"))
-                .Contains("DownloadSourceOrder.SubdlFirst;", StringComparison.Ordinal));
+                .Contains("DownloadSourceOrder.TvSubtitlesFirst;", StringComparison.Ordinal));
         Check("the GUI offers the order under downloads and saves the chosen value",
             File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"))
                 .Contains("id=\"DownloadOrder\"", StringComparison.Ordinal)

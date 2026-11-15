@@ -139,7 +139,7 @@ bekannt ist, und ein leerer Wert löscht keine vorhandene Angabe.
 
 ## Reihenfolge und Erfolgsbegriff (F-M491)
 
-Unter Downloads steht die Reihenfolge: **SubDL first** (Default) oder **tvsubtitles.net first**. Steht tvst
+Unter Downloads steht die Reihenfolge: **tvsubtitles.net first** (Default) oder **SubDL first**. Steht tvst
 vorn, **ersetzen** seine Treffer die SubDL-Kandidaten statt sich hinter sie zu stellen; hat die Seite für
 die Sprache nichts, bleibt SubDL der Rückfall. Rangfolge, Tore, Fit, Ablage und Herkunft sind für beide
 Reihenfolgen derselbe Code.

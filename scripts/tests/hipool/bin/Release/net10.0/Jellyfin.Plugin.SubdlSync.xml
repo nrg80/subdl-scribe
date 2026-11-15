@@ -3427,8 +3427,9 @@
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadOrder">
             <summary>
-            Gets or sets which download source is asked first (F-M491). Default: SubDL first — that is the
-            behaviour every run had before the second source existed.
+            Gets or sets which download source is asked first (F-M491). Operator decision 15.11.2026:
+            "Tvst ist zuerst" — tvsubtitles.net is asked first, SubDL is the fallback for a language the site
+            does not have.
             </summary>
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadLanguages">
@@ -3844,10 +3845,10 @@
             </summary>
         </member>
         <member name="F:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadSourceOrder.SubdlFirst">
-            <summary>SubDL first, tvsubtitles.net when SubDL has nothing (the default).</summary>
+            <summary>SubDL first, tvsubtitles.net when SubDL has nothing.</summary>
         </member>
         <member name="F:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst">
-            <summary>tvsubtitles.net first, SubDL when the site has nothing.</summary>
+            <summary>tvsubtitles.net first, SubDL when the site has nothing (the default, F-M491).</summary>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.MissingProviderReason(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
             <summary>
