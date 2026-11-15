@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.384"
+version: "12.1.12.385"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -27,6 +27,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.385: both download endpoints are asked in the configured order and the second one gets its own attempt — the candidate lists are merged instead of replaced, the ranking leads with the source, and a refused correction no longer ends the hunt for the other source; the upload walks the same chain, asking each source's switch before its start and keeping the provenance gate per source (F-M494/F-M495).
   v12.1.12.384: the queue fills for the direction instead of for SubDL — with SubDL switched off (or its allowance spent) a tvsubtitles run still queues its episodes (F-M492).
   v12.1.12.383: the direction gates ask the direction, not SubDL — with SubDL switched off and tvsubtitles on the download runs instead of being skipped as disabled (F-M492).
   v12.1.12.382: the pre-checks ask per source — the SubDL API key is only required when SubDL downloads, the login pair only when SubDL uploads, and a spent SubDL quota no longer holds a cycle that still has tvsubtitles; every download write now carries its origin (F-M492/F-M493).

@@ -1515,8 +1515,8 @@ public sealed class UploadPipeline : IPackFiller
                 // ein tvst-Upload den SubDL-Upload und umgekehrt; und ein Reup auf dieselbe Quelle muss
                 // genauso ausbleiben wie ein Quellenwechsel.
                 var gateFrueh = Api.Endpoints.UploadGate.Decide(
-                    _config.IsUploadEnabled(Configuration.SubtitleProvider.Subdl),
-                    _config.IsUploadEnabled(Configuration.SubtitleProvider.TvSubtitles),
+                    SourceAllowed(Configuration.SubtitleProvider.Subdl),
+                    SourceAllowed(Configuration.SubtitleProvider.TvSubtitles),
                     Registry.GetOrigin(contentHash).Origin,
                     Registry.IsUploadedTo(mediaHash, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.Subdl),
                     Registry.IsUploadedTo(mediaHash, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.TvSubtitles));
@@ -2278,8 +2278,8 @@ public sealed class UploadPipeline : IPackFiller
         // "diese Quelle hat ihn schon" (F-M488). Ein Reup auf dieselbe Quelle ist genauso unerwuenscht
         // wie eine Kreuzkontamination, und SubDLs alter Status darf tvsubtitles nicht blockieren.
         var gate = Api.Endpoints.UploadGate.Decide(
-            _config.IsUploadEnabled(Configuration.SubtitleProvider.Subdl),
-            _config.IsUploadEnabled(Configuration.SubtitleProvider.TvSubtitles),
+            SourceAllowed(Configuration.SubtitleProvider.Subdl),
+            SourceAllowed(Configuration.SubtitleProvider.TvSubtitles),
             herkunft,
             Registry.IsUploadedTo(mediaHash, lang, hearingImpaired, Configuration.SubtitleProvider.Subdl),
             Registry.IsUploadedTo(mediaHash, lang, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles));
@@ -2299,36 +2299,85 @@ public sealed class UploadPipeline : IPackFiller
                 neutralName, lang, Api.Endpoints.Provenance.CrossSourceReason(herkunft!, Configuration.SubtitleProvider.Subdl));
         }
 
-        UploadResult result;
-        var vonZweiter = false;
-        if (darfSubdl)
+        // F-M495 (Operator-Anweisung 15.11.2026): beide Endpunkte werden hintereinander gefragt, in der
+        // eingestellten Reihenfolge, und vor dem Start jedes Endpunkts wird DESSEN Toggle geprueft.
+        //
+        // Vorher waehlte der Lauf genau EIN Ziel (`vonZweiter`) und nahm die zweite Quelle nur dann, wenn
+        // die erste abgelehnt hatte. Jetzt bekommt jede Quelle ihren eigenen Versuch: was sie genommen
+        // hat, steht danach in IHREM Id-/Zeitstempel-Feld, und beide Felder koennen gesetzt sein. Die
+        // Reihenfolge ist die konfigurierte Download-Reihenfolge — eine eigene Einstellung fuer den
+        // Upload gibt es nicht (Operator: keine neue GUI-Option).
+        var quellenReihenfolge = _config.DownloadOrder == Configuration.PluginConfiguration.DownloadSourceOrder.SubdlFirst
+            ? new[] { Configuration.SubtitleProvider.Subdl, Configuration.SubtitleProvider.TvSubtitles }
+            : new[] { Configuration.SubtitleProvider.TvSubtitles, Configuration.SubtitleProvider.Subdl };
+
+        UploadResult? subdlErgebnis = null;
+        UploadResult? zweiteErgebnis = null;
+        foreach (var quelle in quellenReihenfolge)
         {
-            result = await _api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired, framerate).ConfigureAwait(false);
-        }
-        else
-        {
-            result = UploadResult.Skipped("subdl-off");
+            // Der Toggle der Quelle, ueber denselben Pruefpunkt wie Gate und Sammelstufe. Aus heisst
+            // UEBERSPRINGEN, nicht abbrechen: die andere Quelle kann den Untertitel noch nehmen.
+            if (!SourceAllowed(quelle))
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[SubDL] {Name} [{Lang}] — source {Source} skipped: that source is switched off",
+                    neutralName, lang, Api.Endpoints.Provenance.Name(quelle));
+                continue;
+            }
+
+            // F-M489/F-M495: die beiden Tore gelten JE QUELLE — „diese Quelle hat ihn schon" (F-M488)
+            // und die Herkunft (F-M487, MayUploadTo: bekannt = nur zur eigenen Quelle, unbekannt =
+            // ueberallhin). Ein verbotenes Ziel wird uebersprungen und im Log genannt; die Kette laeuft
+            // weiter, das Tor wird also nicht abgeschafft, sondern je Quelle gefragt.
+            if (quelle == Configuration.SubtitleProvider.Subdl ? !darfSubdl : !darfZweite)
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[SubDL] {Name} [{Lang}] — source {Source} skipped: {Reason}",
+                    neutralName, lang, Api.Endpoints.Provenance.Name(quelle),
+                    Api.Endpoints.Provenance.MayUploadTo(herkunft, quelle)
+                        ? "already-uploaded:" + Api.Endpoints.Provenance.Name(quelle)
+                        : "cross-source");
+                continue;
+            }
+
+            try
+            {
+                if (quelle == Configuration.SubtitleProvider.Subdl)
+                {
+                    subdlErgebnis = await _api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired, framerate).ConfigureAwait(false);
+                }
+                else
+                {
+                    zweiteErgebnis = await SendToSecondSourceAsync(
+                        srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, hearingImpaired, ct)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // F-M495: ein Fehler bei DIESER Quelle darf den Versuch bei der naechsten nicht
+                // verhindern. Der Prioritaet geht immer; kann die zweite nicht, ist das hinnehmbar.
+                _logger.LogWarning(
+                    "[SubDL] upload to {Source} failed for {Name} [{Lang}]: {Msg} — the next source is still tried.",
+                    Api.Endpoints.Provenance.Name(quelle), neutralName, lang, ex.Message);
+            }
         }
 
-        if (!result.Ok && darfZweite)
-        {
-            var zweite = await SendToSecondSourceAsync(
-                srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, hearingImpaired, ct)
-                .ConfigureAwait(false);
-            if (zweite.Ok)
-            {
-                // F-M488: die Id der Quelle reist im Ergebnis mit und wird vom Aufrufer in das eigene
-                // Feld geschrieben — hier fehlen mediaHash und SubPos, dort sind sie im Griff.
-                result = zweite;
-                vonZweiter = true;
-            }
-            else if (!result.SkippedItem)
-            {
-                // SubDL hat es versucht und nicht genommen — der Grund der zweiten Quelle ist der
-                // einzige, der noch etwas erklärt.
-                result = UploadResult.Failed(zweite.Reason ?? "second-source-refused");
-            }
-        }
+        bool subdlGenommen = subdlErgebnis is { Ok: true };
+        bool zweiteGenommen = zweiteErgebnis is { Ok: true };
+
+        // Was der Rest der Methode liest: die Fassung, die genommen hat. Hat keine genommen, der
+        // aussagekraeftigste Fehlschlag (eine „nicht zustaendig"-Meldung der zweiten Quelle erklaert
+        // nichts, wenn SubDL es versucht und nicht genommen hat).
+        UploadResult result = subdlGenommen ? subdlErgebnis!
+            : zweiteGenommen ? zweiteErgebnis!
+            : (subdlErgebnis is { SkippedItem: false } ? subdlErgebnis : null)
+                ?? (zweiteErgebnis is { SkippedItem: false } ? zweiteErgebnis : null)
+                ?? subdlErgebnis ?? zweiteErgebnis ?? UploadResult.Skipped("no-upload-source");
 
         if (result.Ok)
         {
@@ -2342,7 +2391,10 @@ public sealed class UploadPipeline : IPackFiller
             // simply resolved on a later run — nothing is polled and nothing times out.
             string? sdId = null;
             int? uploadId = null;
-            if (result.Response != null)
+            // F-M495: die Antwort mit `sd_id`/`subtitle_id` und die Id-Nachfrage bei mySubtitles gehoeren
+            // zu SubDL — hat tvsubtitles allein genommen, gibt es hier nichts zu lesen. Die Marken
+            // beider Quellen stehen weiter unten und haengen an `subdlGenommen`/`zweiteGenommen`.
+            if (subdlGenommen && result.Response != null)
             {
                 var root = result.Response.RootElement;
                 if (root.TryGetProperty("subtitle", out var subEl) && subEl.ValueKind == System.Text.Json.JsonValueKind.Object)
@@ -2365,7 +2417,7 @@ public sealed class UploadPipeline : IPackFiller
             // kept NULL and the pack could never delete the single it absorbed. The id does exist:
             // /user/mySubtitles lists every own upload with its UploadId. It is fetched right here,
             // per upload, and written into the same row.
-            if (uploadId != null)
+            if (subdlGenommen && uploadId != null)
             {
                 // F-M421 (operator question 02.11.2026: "wird die upload id im log gelistet?"): yes,
                 // in every case. The id is the only handle that can delete this single when a pack
@@ -2375,7 +2427,7 @@ public sealed class UploadPipeline : IPackFiller
                     "[SubDL] upload id {Id} from the upload answer for {File} [{Lang}].",
                     uploadId, Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
             }
-            else
+            else if (subdlGenommen)
             {
                 uploadId = await ResolveOwnUploadIdAsync(imdbId, season, episode, lang, releaseName, loosePath, ct)
                     .ConfigureAwait(false);
@@ -2409,38 +2461,39 @@ public sealed class UploadPipeline : IPackFiller
                         // F-M488: eigenes Feld je Quelle und Richtung. Liefert die Quelle keine Id,
                         // vergeben wir eine eigene (Präfix own:) — ein Upload ohne Kennzeichen wäre von
                         // einem, der nie stattfand, nicht zu unterscheiden.
-                        // Nur die Quelle bekommt ihr Kennzeichen, die den Upload wirklich genommen hat.
-                        subdlUploadId: vonZweiter
-                            ? null
-                            : uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                                ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.Subdl, contentHashEarly, releaseName, DateTime.UtcNow),
-                        tvSubtitlesUploadId: vonZweiter
-                            ? result.SourceId
+                        // F-M495: JEDE Quelle bekommt ihre Marke, soweit sie genommen hat — nach der
+                        // Kette können BEIDE Felder gesetzt sein, vorher war es genau eines.
+                        subdlUploadId: subdlGenommen
+                            ? uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                                ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.Subdl, contentHashEarly, releaseName, DateTime.UtcNow)
+                            : null,
+                        tvSubtitlesUploadId: zweiteGenommen
+                            ? zweiteErgebnis!.SourceId
                                 ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.TvSubtitles, contentHashEarly, releaseName, DateTime.UtcNow)
                             : null,
                         // F-M490: "hochgeladen" je Quelle, mit Zeitpunkt — nur fuer die Quelle, die
                         // den Upload wirklich genommen hat.
-                        subdlUploadedAt: vonZweiter ? null : DateTime.UtcNow,
-                        tvSubtitlesUploadedAt: vonZweiter ? DateTime.UtcNow : null);
+                        subdlUploadedAt: subdlGenommen ? DateTime.UtcNow : null,
+                        tvSubtitlesUploadedAt: zweiteGenommen ? DateTime.UtcNow : null);
                 }
                 else
                 {
                     Registry.MarkEmbed(mediaHash, subPos, lang, hearingImpaired,
                         SubtitleStatus.Uploaded, contentHash: contentHashEarly,
                         subdlId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        // Nur die Quelle bekommt ihr Kennzeichen, die den Upload wirklich genommen hat.
-                        subdlUploadId: vonZweiter
-                            ? null
-                            : uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                                ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.Subdl, contentHashEarly, releaseName, DateTime.UtcNow),
-                        tvSubtitlesUploadId: vonZweiter
-                            ? result.SourceId
+                        // F-M495: je Quelle ihre eigene Marke — beide Felder können gesetzt sein.
+                        subdlUploadId: subdlGenommen
+                            ? uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                                ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.Subdl, contentHashEarly, releaseName, DateTime.UtcNow)
+                            : null,
+                        tvSubtitlesUploadId: zweiteGenommen
+                            ? zweiteErgebnis!.SourceId
                                 ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.TvSubtitles, contentHashEarly, releaseName, DateTime.UtcNow)
                             : null,
                         // F-M490: "hochgeladen" je Quelle, mit Zeitpunkt — nur fuer die Quelle, die
                         // den Upload wirklich genommen hat.
-                        subdlUploadedAt: vonZweiter ? null : DateTime.UtcNow,
-                        tvSubtitlesUploadedAt: vonZweiter ? DateTime.UtcNow : null);
+                        subdlUploadedAt: subdlGenommen ? DateTime.UtcNow : null,
+                        tvSubtitlesUploadedAt: zweiteGenommen ? DateTime.UtcNow : null);
                 }
             });
 
@@ -4844,6 +4897,20 @@ public sealed class UploadPipeline : IPackFiller
     }
 
     /// <summary>
+    /// F-M495 (Operator-Anweisung 15.11.2026: „beide Endpunkte hintereinander, in der eingestellten
+    /// Reihenfolge, und vor dem Start jedes Endpunkts dessen Toggle"): EIN Pruefpunkt fuer „darf diese
+    /// Quelle jetzt hochladen".
+    ///
+    /// Der Upload waehlt sein Ziel nicht mehr am Anfang des Laufs aus (das alte `vonZweiter` kannte
+    /// genau eine Quelle); er geht die Quellen nacheinander durch. Damit waere der Toggle an drei
+    /// Stellen zu lesen — Kette, Gate und Sammelstufe —, und die naechste Stelle vergisst ihn. Also
+    /// fragen alle drei diese Methode und lesen den Schalter nirgends sonst.
+    /// </summary>
+    /// <param name="provider">Die Quelle, die hochladen soll.</param>
+    /// <returns>Wahr, wenn diese Quelle per Upload-Schalter freigeschaltet ist.</returns>
+    private bool SourceAllowed(Configuration.SubtitleProvider provider) => _config.IsUploadEnabled(provider);
+
+    /// <summary>
     /// F-M489: has ANY upload source still to get this pair? Asked per source, because a tvst upload must
     /// not keep the pair out of a SubDL upload and vice versa. Provenance is unknown at collection time
     /// without hashing the content, and unknown provenance is allowed everywhere (F-M487) — that is the
@@ -4855,8 +4922,8 @@ public sealed class UploadPipeline : IPackFiller
     /// <returns>True when at least one enabled source does not have it yet.</returns>
     private bool AnyUploadSourceStillWants(string? mediaHash, string language, bool hearingImpaired) =>
         Api.Endpoints.UploadGate.Decide(
-            _config.IsUploadEnabled(Configuration.SubtitleProvider.Subdl),
-            _config.IsUploadEnabled(Configuration.SubtitleProvider.TvSubtitles),
+            SourceAllowed(Configuration.SubtitleProvider.Subdl),
+            SourceAllowed(Configuration.SubtitleProvider.TvSubtitles),
             origin: null,
             Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.Subdl),
             Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles))

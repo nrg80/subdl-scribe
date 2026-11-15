@@ -1670,31 +1670,41 @@ public sealed class DownloadPipeline : IDisposable
             // Gelegenheit — aber nur, wenn ihr Schalter an ist. Die Treffer laufen danach durch
             // dieselbe Rangfolge, dieselben Tore, denselben Fit und dieselbe Ablage wie ein
             // SubDL-Treffer; sie sind nur woandersher.
-            // F-M491: die Reihenfolge aus der GUI entscheidet, wer ZUERST gefragt wird. Steht
-            // tvsubtitles vorn, ersetzen seine Treffer die SubDL-Kandidaten (statt sich hinter sie zu
-            // stellen); hat die Seite nichts, bleibt SubDL der Rückfall — genau umgekehrt zum Default.
+            // F-M491: die Reihenfolge aus der GUI entscheidet, wer ZUERST gefragt wird.
+            // F-M494 (Messung 15.11.2026): F-M491 liess die zuerst gefragte Quelle die andere
+            // ERSETZEN (die tvst-Liste nahm die Stelle der SubDL-Liste ein). Bei tvsubtitles-first
+            // heisst das: 27 Folgen, jede mit genau einem tvst-Treffer, keine einzige SubDL-Zeile im
+            // Log — und weil eine tvst-Fassung ohne nachweisbare Korrektur die Suche fuer diese
+            // Sprache beendet, kam SubDL nie zum Zug (6 signifikant, 19 als Original behalten, 1
+            // verworfen). Jetzt werden BEIDE Endpunkte in der eingestellten Reihenfolge gefragt, und
+            // beide Listen werden ZUSAMMENGEFUEHRT: der zweite Endpunkt bekommt seinen eigenen
+            // Versuch, auch wenn der erste Treffer geliefert hat. Wer zuerst laeuft, entscheidet die
+            // fuehrende Stufe der Rangfolge weiter unten — hier geht keine Quelle verloren.
+            //
+            // F-M494, zweiter Teil (Operator-Anweisung 15.11.2026: „Vor Start des jeweiligen Endpunkts
+            // pruefen ob er per Toggle freigeschaltet ist"): der Start dieses Endpunkts fragt den
+            // Schalter ueber SourceAllowed, nicht ueber den Toggle direkt — dieselbe Pruefung steht
+            // vor jedem Abruf eines Kandidaten.
             var tvZuerst = _config.DownloadOrder == Configuration.PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst;
-            if ((tvZuerst || langCands.Count == 0) && _config.IsDownloadEnabled(Configuration.SubtitleProvider.TvSubtitles))
+            if (SourceAllowed(Configuration.SubtitleProvider.TvSubtitles))
             {
                 var fremd = await ForeignCandidatesAsync(title, isSeries, season, episode, lang, ct).ConfigureAwait(false);
                 if (fremd.Count > 0)
                 {
-                    if (tvZuerst)
-                    {
-                        // Nur die Treffer der zuerst gefragten Quelle — der Rest des Laufs (Rangfolge,
-                        // Tore, Fit, Ablage) bleibt derselbe.
-                        langCands = fremd;
-                    }
-                    else
-                    {
-                        candidates.AddRange(fremd);
-                        langCands = candidates.Where(c => c.Language == lang).ToList();
-                    }
-
-                    LogUtil.PerItem(_config.LogMode, _logger,
-                        "[tvsubtitles-D] {File} [{Lang}] — {N} candidate(s), source order {Order}",
-                        Path.GetFileName(mediaPath), lang, fremd.Count, tvZuerst ? "tvsubtitles-first" : "fallback");
+                    // Anhaengen statt ersetzen (F-M494). Der Rest des Laufs (Rangfolge, Tore, Fit,
+                    // Ablage) bleibt derselbe — die Treffer sind nur woandersher.
+                    candidates.AddRange(fremd);
+                    langCands = candidates.Where(c => c.Language == lang).ToList();
                 }
+
+                // Beide Zahlen in EINER Zeile, in beiden Reihenfolgen: eine Quelle, die nichts
+                // geliefert hat, ist damit im Log sichtbar und nicht mehr nur abwesend (F-M494).
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[tvsubtitles-D] {File} [{Lang}] — {Tv} tvsubtitles candidate(s), {Sd} SubDL candidate(s), order {Order}",
+                    Path.GetFileName(mediaPath), lang,
+                    langCands.Count(c => c.Provider == Configuration.SubtitleProvider.TvSubtitles),
+                    langCands.Count(c => c.Provider == Configuration.SubtitleProvider.Subdl),
+                    tvZuerst ? "tvsubtitles-first" : "subdl-first");
             }
 
             if (langCands.Count == 0)
@@ -1720,7 +1730,13 @@ public sealed class DownloadPipeline : IDisposable
             // decides between two packs.
             var ranked = langCands
                 .Select(c => (Cand: c, Score: Score(c, videoBase), Pack: CandidateRank(c, season, episode)))
-                .OrderByDescending(x => x.Pack)
+                // F-M494: die fuehrende Stufe ist die QUELLE, und zwar in der eingestellten
+                // Reihenfolge. Jeder Treffer der zuerst gefragten Quelle steht damit vor jedem
+                // Treffer der zweiten, auch wenn dessen Textscore hoeher liegt — der zweite Endpunkt
+                // wird gefragt, aber er verdraengt den ersten nicht. Innerhalb einer Quelle bleibt
+                // die Rangfolge unveraendert (Pack vor Textscore).
+                .OrderByDescending(x => (x.Cand.Provider == Configuration.SubtitleProvider.TvSubtitles) == tvZuerst)
+                .ThenByDescending(x => x.Pack)
                 .ThenByDescending(x => x.Score)
                 .ToList();
 
@@ -1858,6 +1874,16 @@ public sealed class DownloadPipeline : IDisposable
                     if (hiSaved || ct.IsCancellationRequested)
                     {
                         break;
+                    }
+
+                    // F-M494, zweiter Teil: auch die SDH-Variante wird ueber ihren Endpunkt geholt —
+                    // ist die Quelle des Kandidaten aus, wird SIE uebersprungen, nicht der Durchlauf.
+                    if (!SourceAllowed(hi.Provider))
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — candidate from {Source} skipped: that source is switched off",
+                            Path.GetFileName(mediaPath), lang, Api.Endpoints.Provenance.Name(hi.Provider));
+                        continue;
                     }
 
                             // F-M26: the HI variant is a SECOND real download for this item, so it
@@ -2305,6 +2331,20 @@ public sealed class DownloadPipeline : IDisposable
                     // mark is guarded at its own site instead.
                     savedAny = true;
                     break;
+                }
+
+                // F-M494, zweiter Teil (Operator-Anweisung 15.11.2026: „Vor Start des jeweiligen
+                // Endpunkts pruefen ob er per Toggle freigeschaltet ist"): der Schalter der QUELLE
+                // entscheidet ueber den Abruf, nicht die Liste, aus der der Kandidat stammt — die
+                // Listen beider Quellen sind seit F-M494 gemischt, ein Kandidat kann also aus einer
+                // Suche stammen, die lief, als der Schalter noch an war. Aus heisst UEBERSPRINGEN,
+                // nicht abbrechen: die andere Quelle kann den Rest des Laufs tragen.
+                if (!SourceAllowed(cand.Provider))
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] {File} [{Lang}] — candidate from {Source} skipped: that source is switched off",
+                        Path.GetFileName(mediaPath), lang, Api.Endpoints.Provenance.Name(cand.Provider));
+                    continue;
                 }
 
                 // F-M26: the pause before a REAL download (download→download), ±30 %.
@@ -3093,9 +3133,33 @@ public sealed class DownloadPipeline : IDisposable
                     // would download every remaining candidate to receive the same refusal word for
                     // word, while each one still costs daily quota and writes another unprocessed file
                     // — up to ten of them for one episode.
+                    //
+                    // F-M494 (Messung 15.11.2026): ein Ablehnungswort stammt von EINER Quelle und sagt
+                    // nichts ueber die andere. Bei tvsubtitles-first lieferten 27 Folgen je genau einen
+                    // tvst-Treffer, und der Abbruch nach dessen Fit beendete die Suche fuer die
+                    // Sprache, bevor SubDL ueberhaupt gefragt war: 6 signifikant, 19 als Original
+                    // behalten, 1 verworfen — keine SubDL-Zeile im Log. Solange unter den noch nicht
+                    // versuchten Kandidaten (`ranked.Skip(attempts)`) einer von der ANDEREN Quelle
+                    // steht, laeuft die Suche deshalb fuer diese Quelle weiter: der Abbruch wird
+                    // zurueckgenommen und der Ablehnungszaehler, auf dem er beruhte, auf 0 gesetzt —
+                    // so bekommt der zweite Endpunkt seinen eigenen Versuch. Erst wenn keine andere
+                    // Quelle mehr uebrig ist, endet der Lauf wie bisher.
                     if (correctionHuntAbandoned)
                     {
-                        break;
+                        var offeneAndereQuelle = ranked.Skip(attempts).Where(x => x.Cand.Provider != cand.Provider).ToList();
+                        if (offeneAndereQuelle.Count == 0)
+                        {
+                            break;
+                        }
+
+                        correctionHuntAbandoned = false;
+                        refusalsThisRun = 0;
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — correction hunt continues on {Other}: the refusal came from {Source}, {N} candidate(s) of the other source are still untried (F-M494)",
+                            Path.GetFileName(mediaPath), lang,
+                            Api.Endpoints.Provenance.Name(offeneAndereQuelle[0].Cand.Provider),
+                            Api.Endpoints.Provenance.Name(cand.Provider),
+                            offeneAndereQuelle.Count);
                     }
 
                     // No break here. There used to be an unconditional one at this point, which
@@ -3571,9 +3635,35 @@ public sealed class DownloadPipeline : IDisposable
         }
     }
 
+    /// <summary>
+    /// F-M494 (Operator-Anweisung 15.11.2026: „Vor Start des jeweiligen Endpunkts pruefen ob er per
+    /// Toggle freigeschaltet ist"): EIN Pruefpunkt fuer „darf diese Quelle jetzt abgerufen werden".
+    ///
+    /// Die Kandidatenliste ist die falsche Frage. Ein Kandidat kann aus einer Suche stammen, die lief,
+    /// als der Schalter noch an war, und seit F-M494 tragen die Listen beider Quellen gemischt
+    /// dieselben Eintraege. Wer den Abruf an der Liste entscheidet, holt also ueber einen Endpunkt, der
+    /// abgeschaltet ist. Deshalb fragen ALLE Abrufstellen — der Hauptdurchlauf, die SDH-Variante und
+    /// der Abruf selbst — diese eine Methode und lesen den Toggle nirgends sonst: sonst laeuft die
+    /// Regel an drei Stellen auseinander, und die dritte Stelle vergisst man beim naechsten Umbau.
+    /// </summary>
+    /// <param name="provider">Die Quelle des Kandidaten, der abgerufen werden soll.</param>
+    /// <returns>Wahr, wenn diese Quelle per Download-Schalter freigeschaltet ist.</returns>
+    private bool SourceAllowed(Configuration.SubtitleProvider provider) => _config.IsDownloadEnabled(provider);
+
     private async Task<CandidateAttempt> DownloadCandidateRawAsync(
         SubtitleCandidate cand, int season, int episode, CancellationToken ct)
     {
+        // F-M494: die letzte Tuer vor dem Netz. Jeder Aufrufer prueft schon selbst und ueberspringt
+        // den Kandidaten (der Durchlauf mit `continue`, damit die andere Quelle weitermacht) — hier
+        // steht die Pruefung trotzdem ein zweites Mal, weil auch die Wiederholungen dieses Abrufs
+        // (429, leere Antwort, Quota) durch diese Methode laufen und ein Lauf den Schalter waehrend
+        // seiner Laufzeit nicht neu liest.
+        if (!SourceAllowed(cand.Provider))
+        {
+            return new CandidateAttempt(null, null, DownloadOutcome.None("source-off"));
+        }
+
+
         // F-M485: ein Kandidat der zweiten Quelle wird bei seinem eigenen Endpunkt geholt — die
         // SubDL-Routen (Archiv, Cache, v2) gelten nur für SubDL.
         if (cand.Provider != Configuration.SubtitleProvider.Subdl)

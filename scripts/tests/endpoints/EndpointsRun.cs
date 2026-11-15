@@ -237,14 +237,18 @@ internal static class Program
         var downloadSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
         var uploadSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         Check("the download pipeline asks the second source exactly where a language would be given up",
-            downloadSource.Contains("IsDownloadEnabled(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
+            // F-M494: der Schalter wird seit dem Einzelpruefpunkt ueber SourceAllowed gelesen — die
+            // Absicht der Pruefung ist dieselbe: die zweite Quelle wird in der Sprachschleife gefragt,
+            // bevor „nicht verfuegbar" geschrieben wird.
+            (downloadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
+             || downloadSource.Contains("IsDownloadEnabled(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal))
             && downloadSource.Contains("ForeignCandidatesAsync(title, isSeries, season, episode, lang, ct)", StringComparison.Ordinal),
             "the fallback sits in the language loop, before \"not available\"");
         Check("a foreign candidate is fetched from its own endpoint, not over SubDL's routes",
             downloadSource.Contains("cand.Provider != Configuration.SubtitleProvider.Subdl", StringComparison.Ordinal)
             && downloadSource.Contains("Route = \"tvsubtitles\"", StringComparison.Ordinal));
-        Check("the upload pipeline sends to the second source only when its switch is on and SubDL did not take it",
-            uploadSource.Contains("IsUploadEnabled(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
+        Check("the upload pipeline sends to the second source through the same gate, and its switch is asked (F-M485/F-M495)",
+            uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
             && uploadSource.Contains("SendToSecondSourceAsync(", StringComparison.Ordinal));
         Check("the SubDL upload call itself is untouched — the response body the caller reads stays",
             uploadSource.Contains("_api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired, framerate)", StringComparison.Ordinal));
@@ -304,11 +308,11 @@ internal static class Program
             downloadSource.Contains("subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null", StringComparison.Ordinal)
             && downloadSource.Contains("tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null", StringComparison.Ordinal));
         Check("the upload writes SubDL's id into SubDL's field",
-            uploadSource.Contains("subdlUploadId: vonZweiter", StringComparison.Ordinal)
+            uploadSource.Contains("subdlUploadId: subdlGenommen", StringComparison.Ordinal)
             && uploadSource.Contains("uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture)", StringComparison.Ordinal));
         Check("the second source's upload id is carried in the result and stored in its own field",
-            uploadSource.Contains("tvSubtitlesUploadId: vonZweiter", StringComparison.Ordinal)
-            && uploadSource.Contains("result.SourceId", StringComparison.Ordinal));
+            uploadSource.Contains("tvSubtitlesUploadId: zweiteGenommen", StringComparison.Ordinal)
+            && uploadSource.Contains("zweiteErgebnis!.SourceId", StringComparison.Ordinal));
         var ownId = Provenance.OwnUploadId(SubtitleProvider.TvSubtitles, "abc123", "The.Middle.S02E24.720p", new DateTime(2026, 11, 15, 14, 30, 12, DateTimeKind.Utc));
         Check("a missing id is replaced by our own, unmistakably prefixed",
             ownId.StartsWith("own:tvsubtitles:20261115T143012Z:", StringComparison.Ordinal)
@@ -318,10 +322,9 @@ internal static class Program
             ownId == Provenance.OwnUploadId(SubtitleProvider.TvSubtitles, "abc123", "The.Middle.S02E24.720p", new DateTime(2026, 11, 15, 14, 30, 12, DateTimeKind.Utc))
             && ownId != Provenance.OwnUploadId(SubtitleProvider.TvSubtitles, "def456", "The.Middle.S02E24.720p", new DateTime(2026, 11, 15, 14, 30, 12, DateTimeKind.Utc)));
         Check("only the source that took the upload gets its mark",
-            uploadSource.Contains("var vonZweiter = false;", StringComparison.Ordinal)
-            && uploadSource.Contains("subdlUploadId: vonZweiter", StringComparison.Ordinal)
-            && uploadSource.Contains("tvSubtitlesUploadId: vonZweiter", StringComparison.Ordinal)
-            && uploadSource.Contains("vonZweiter = true;", StringComparison.Ordinal));
+            uploadSource.Contains("subdlUploadId: subdlGenommen", StringComparison.Ordinal)
+            && uploadSource.Contains("tvSubtitlesUploadId: zweiteGenommen", StringComparison.Ordinal)
+            && !uploadSource.Contains("subdlUploadId: vonZweiter", StringComparison.Ordinal));
         Check("the id is read back from the episode page, never invented",
             ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/TvSubtitlesClient.cs"))
                 .Contains("public async Task<string?> FindUploadedIdAsync(", StringComparison.Ordinal)
@@ -360,8 +363,8 @@ internal static class Program
             && dbc.Contains("ALTER TABLE sidecars ADD COLUMN SubdlUploadedAt TEXT NULL;", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;", StringComparison.Ordinal));
         Check("the timestamp is set for the source that took the upload, never for the other",
-            uploadSource.Contains("subdlUploadedAt: vonZweiter ? null : DateTime.UtcNow", StringComparison.Ordinal)
-            && uploadSource.Contains("tvSubtitlesUploadedAt: vonZweiter ? DateTime.UtcNow : null", StringComparison.Ordinal));
+            uploadSource.Contains("subdlUploadedAt: subdlGenommen ? DateTime.UtcNow : null", StringComparison.Ordinal)
+            && uploadSource.Contains("tvSubtitlesUploadedAt: zweiteGenommen ? DateTime.UtcNow : null", StringComparison.Ordinal));
         Check("\"uploaded to this source\" is read from its own timestamp first",
             registrySource.Contains("x.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.TvSubtitlesUploadId)", StringComparison.Ordinal)
             && registrySource.Contains("x.SubdlUploadedAt != null", StringComparison.Ordinal));
@@ -369,7 +372,7 @@ internal static class Program
             registrySource.Contains("if (subdlUploadedAt.HasValue)", StringComparison.Ordinal)
             && registrySource.Contains("if (tvSubtitlesUploadedAt.HasValue)", StringComparison.Ordinal));
 
-        // ---- 13. Reihenfolge und Erfolgsbegriff (F-M491) --------------------------------------
+        // ---- 13. Reihenfolge und Erfolgsbegriff (F-M491, F-M494) -----------------------------
         Check("the download order is a setting, and tvsubtitles is first by default (operator 15.11.2026)",
             downloadSource.Contains("DownloadOrder", StringComparison.Ordinal)
             && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"))
@@ -379,9 +382,27 @@ internal static class Program
                 .Contains("id=\"DownloadOrder\"", StringComparison.Ordinal)
             && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"))
                 .Contains("config.DownloadOrder =", StringComparison.Ordinal));
-        Check("with tvsubtitles first its hits REPLACE the SubDL candidates, they do not queue behind them",
-            downloadSource.Contains("langCands = fremd;", StringComparison.Ordinal)
-            && downloadSource.Contains("tvZuerst || langCands.Count == 0", StringComparison.Ordinal));
+        Check("both endpoints are asked and their candidates are MERGED, not replaced (F-M494)",
+            !downloadSource.Contains("langCands = fremd;", StringComparison.Ordinal)
+            && downloadSource.Contains("candidates.AddRange(fremd);", StringComparison.Ordinal)
+            && downloadSource.Contains("{Tv} tvsubtitles candidate(s), {Sd} SubDL candidate(s), order {Order}", StringComparison.Ordinal)
+            && !downloadSource.Contains("tvZuerst || langCands.Count == 0", StringComparison.Ordinal));
+        Check("the ranking leads with the source in the configured order, pack and score stay behind it (F-M494)",
+            downloadSource.Contains(
+                ".OrderByDescending(x => (x.Cand.Provider == Configuration.SubtitleProvider.TvSubtitles) == tvZuerst)",
+                StringComparison.Ordinal)
+            && downloadSource.Contains(".ThenByDescending(x => x.Pack)", StringComparison.Ordinal));
+        Check("a source change restarts the correction hunt instead of ending it (F-M494)",
+            downloadSource.Contains("var offeneAndereQuelle = ranked.Skip(attempts).Where(x => x.Cand.Provider != cand.Provider)", StringComparison.Ordinal)
+            && downloadSource.Contains("correctionHuntAbandoned = false;", StringComparison.Ordinal)
+            && downloadSource.Contains("refusalsThisRun = 0;", StringComparison.Ordinal));
+        Check("the fetch path asks the candidate's own source switch, through ONE helper, before the fetch (F-M494)",
+            downloadSource.Contains("private bool SourceAllowed(Configuration.SubtitleProvider provider) => _config.IsDownloadEnabled(provider);", StringComparison.Ordinal)
+            && downloadSource.Contains("if (!SourceAllowed(cand.Provider))", StringComparison.Ordinal)
+            && downloadSource.Contains("if (!SourceAllowed(hi.Provider))", StringComparison.Ordinal)
+            && downloadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
+            && downloadSource.Contains("candidate from {Source} skipped: that source is switched off", StringComparison.Ordinal)
+            && !downloadSource.Contains("if (_config.IsDownloadEnabled(Configuration.SubtitleProvider.TvSubtitles))", StringComparison.Ordinal));
         Check("a kept original is a download but not a success while auto-sync is on",
             downloadSource.Contains("if (!_config.QaDownloadAutoSync || alignedForNaming)", StringComparison.Ordinal)
             && downloadSource.Contains("summary.DownloadedWithoutSignificance++;", StringComparison.Ordinal));
@@ -417,6 +438,25 @@ internal static class Program
         Check("the off-state of a direction is asked for the direction, not for SubDL",
             offStateSource.Contains("return !config.AnyDownloadEnabled", StringComparison.Ordinal)
             && offStateSource.Contains("return !config.AnyUploadEnabled", StringComparison.Ordinal));
+
+        // ---- 15. Upload: beide Endpunkte hintereinander (F-M495) --------------------------------
+        Check("the upload walks BOTH sources in the configured order — no single target any more",
+            uploadSource.Contains("var quellenReihenfolge = _config.DownloadOrder == Configuration.PluginConfiguration.DownloadSourceOrder.SubdlFirst", StringComparison.Ordinal)
+            && uploadSource.Contains("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal)
+            && uploadSource.Contains("bool subdlGenommen = subdlErgebnis is { Ok: true };", StringComparison.Ordinal)
+            && uploadSource.Contains("bool zweiteGenommen = zweiteErgebnis is { Ok: true };", StringComparison.Ordinal)
+            && !uploadSource.Contains("var vonZweiter = false;", StringComparison.Ordinal));
+        Check("each endpoint's switch is asked right before its start — through ONE helper, skip instead of break (F-M495)",
+            uploadSource.Contains("private bool SourceAllowed(Configuration.SubtitleProvider provider) => _config.IsUploadEnabled(provider);", StringComparison.Ordinal)
+            && uploadSource.Contains("if (!SourceAllowed(quelle))", StringComparison.Ordinal)
+            && uploadSource.Contains("source {Source} skipped: that source is switched off", StringComparison.Ordinal)
+            && !uploadSource.Contains("_config.IsUploadEnabled(Configuration.SubtitleProvider.Subdl)", StringComparison.Ordinal)
+            && !uploadSource.Contains("_config.IsUploadEnabled(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal));
+        Check("the provenance gate still decides PER SOURCE — a refused source is skipped, the chain runs on (F-M495)",
+            uploadSource.Contains("if (quelle == Configuration.SubtitleProvider.Subdl ? !darfSubdl : !darfZweite)", StringComparison.Ordinal)
+            && uploadSource.Contains("\"cross-source\"", StringComparison.Ordinal)
+            && uploadSource.Contains("Api.Endpoints.Provenance.MayUploadTo(herkunft, quelle)", StringComparison.Ordinal)
+            && uploadSource.Contains("Api.Endpoints.UploadGate.Decide(", StringComparison.Ordinal));
 
         Console.WriteLine();
         if (_failures > 0)

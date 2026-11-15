@@ -6156,6 +6156,21 @@
             aus ist, kein Serienname bekannt ist oder die Quelle nichts hat.
             </summary>
         </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.SourceAllowed(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+             <summary>
+             F-M494 (Operator-Anweisung 15.11.2026: „Vor Start des jeweiligen Endpunkts pruefen ob er per
+             Toggle freigeschaltet ist"): EIN Pruefpunkt fuer „darf diese Quelle jetzt abgerufen werden".
+            
+             Die Kandidatenliste ist die falsche Frage. Ein Kandidat kann aus einer Suche stammen, die lief,
+             als der Schalter noch an war, und seit F-M494 tragen die Listen beider Quellen gemischt
+             dieselben Eintraege. Wer den Abruf an der Liste entscheidet, holt also ueber einen Endpunkt, der
+             abgeschaltet ist. Deshalb fragen ALLE Abrufstellen — der Hauptdurchlauf, die SDH-Variante und
+             der Abruf selbst — diese eine Methode und lesen den Toggle nirgends sonst: sonst laeuft die
+             Regel an drei Stellen auseinander, und die dritte Stelle vergisst man beim naechsten Umbau.
+             </summary>
+             <param name="provider">Die Quelle des Kandidaten, der abgerufen werden soll.</param>
+             <returns>Wahr, wenn diese Quelle per Download-Schalter freigeschaltet ist.</returns>
+        </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.CandidateRank(Jellyfin.Plugin.SubdlScribe.Api.SubtitleCandidate,System.Int32,System.Int32)">
             <summary>
             F-M384/F-M474: what a candidate COSTS this run, and how much it covers. The scarce unit is a
@@ -8614,6 +8629,20 @@
             media file's own name through the same parser the download uses — the source has no id index, so
             a name is all it can resolve.
             </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.SourceAllowed(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+             <summary>
+             F-M495 (Operator-Anweisung 15.11.2026: „beide Endpunkte hintereinander, in der eingestellten
+             Reihenfolge, und vor dem Start jedes Endpunkts dessen Toggle"): EIN Pruefpunkt fuer „darf diese
+             Quelle jetzt hochladen".
+            
+             Der Upload waehlt sein Ziel nicht mehr am Anfang des Laufs aus (das alte `vonZweiter` kannte
+             genau eine Quelle); er geht die Quellen nacheinander durch. Damit waere der Toggle an drei
+             Stellen zu lesen — Kette, Gate und Sammelstufe —, und die naechste Stelle vergisst ihn. Also
+             fragen alle drei diese Methode und lesen den Schalter nirgends sonst.
+             </summary>
+             <param name="provider">Die Quelle, die hochladen soll.</param>
+             <returns>Wahr, wenn diese Quelle per Upload-Schalter freigeschaltet ist.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.AnyUploadSourceStillWants(System.String,System.String,System.Boolean)">
             <summary>

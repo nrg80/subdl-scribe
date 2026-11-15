@@ -137,12 +137,18 @@ den Upload wirklich genommen hat.
 Schema 11, in `sidecars` **und** `embeds`, per `ALTER TABLE` nachgezogen; geschrieben wird nur, was
 bekannt ist, und ein leerer Wert löscht keine vorhandene Angabe.
 
-## Reihenfolge und Erfolgsbegriff (F-M491)
+## Reihenfolge und Erfolgsbegriff (F-M491, F-M494)
 
-Unter Downloads steht die Reihenfolge: **tvsubtitles.net first** (Default) oder **SubDL first**. Steht tvst
-vorn, **ersetzen** seine Treffer die SubDL-Kandidaten statt sich hinter sie zu stellen; hat die Seite für
-die Sprache nichts, bleibt SubDL der Rückfall. Rangfolge, Tore, Fit, Ablage und Herkunft sind für beide
-Reihenfolgen derselbe Code.
+Unter Downloads steht die Reihenfolge: **tvsubtitles.net first** (Default) oder **SubDL first**. Beide
+Endpunkte werden **in dieser Reihenfolge gefragt**, und ihre Kandidaten für dieselbe Sprache werden
+**zusammengeführt** — der zweite Endpunkt bekommt seinen eigenen Versuch, auch wenn der erste Treffer
+geliefert hat, und verdrängt ihn nicht. Die Rangfolge führt mit der Quelle in der eingestellten
+Reihenfolge; dahinter entscheiden wie bisher Pack und Textscore. Der Abbruch „diese Ablehnung kann kein
+anderer Kandidat ändern" gilt **je Quelle**: solange noch ein Kandidat der anderen Quelle unversucht ist,
+läuft die Suche für sie weiter (und zählt ihr Ablehnungsbudget neu). Vor dem Start jedes Endpunkts — Suche,
+Hauptdurchlauf, SDH-Variante, Abruf — wird zusätzlich der Schalter der **eigenen Quelle** geprüft
+(`SourceAllowed`); ein Kandidat einer abgeschalteten Quelle wird übersprungen, nicht der Lauf beendet.
+Rangfolge, Tore, Fit, Ablage und Herkunft sind für beide Reihenfolgen derselbe Code.
 
 **Erfolgreich heruntergeladen** heißt bei eingeschaltetem Auto-Sync: die Fassung hat die **Signifikanz
 bestanden** (`alignedForNaming`). Eine behaltene Originalfassung ist **heruntergeladen, nicht erfolgreich**
@@ -173,6 +179,18 @@ selbst. Gründe im Log: `already-uploaded:subdl`, `already-uploaded:tvsubtitles`
 
 Altzeilen ohne eigenes Kennzeichen gelten für SubDL als hochgeladen, wenn `SubdlId` **und**
 `Status=Uploaded` stehen — sonst ginge nach dem Upgrade jeder alte Upload ein zweites Mal hinaus.
+
+## Upload: beide Endpunkte hintereinander (F-M495)
+
+Der Upload wählt sein Ziel nicht mehr am Anfang aus, sondern geht eine **Kette**: Quelle A wird versucht,
+danach Quelle B — in der eingestellten Download-Reihenfolge, eine eigene Upload-Reihenfolge gibt es nicht.
+**Vor dem Start jedes Endpunkts** wird dessen Toggle geprüft (`SourceAllowed`); aus heißt: diese Quelle
+überspringen und im Log nennen, nicht die Kette beenden. Die beiden Tore bleiben und entscheiden **je
+Quelle**: „diese Quelle hat ihn schon" über ihre eigenen Id-/Zeitstempel-Felder, und die Herkunft über
+`Provenance.MayUploadTo` — bekannt heißt nur zur eigenen Quelle, unbekannt überallhin; ein verbotenes Ziel
+wird mit `cross-source` bzw. `already-uploaded:<Quelle>` übersprungen. Ein Fehler bei A verhindert B nicht
+(der Priorität geht immer). Danach tragen **beide** Felder ihre Marke, soweit die jeweilige Quelle genommen
+hat — vorher war es genau eines.
 
 ## Der nächste Schritt (nicht Teil dieses Schnitts)
 
