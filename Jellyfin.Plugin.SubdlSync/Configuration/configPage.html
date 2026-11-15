@@ -402,7 +402,7 @@
                                 <input id="TvSubtitlesUploadEnabled" name="TvSubtitlesUploadEnabled" type="checkbox" is="emby-checkbox" />
                                 <span>Upload enabled — tvsubtitles.net</span>
                             </label>
-                            <div class="fieldDescription" id="TvSubtitlesUploadReason">tvsubtitles.net — eigener Abruf und eigener Upload, gesteuert von diesen zwei Schaltern. Staffelpacks und der HI-Pool bleiben bei SubDL.</div>
+                            <div class="fieldDescription" id="TvSubtitlesUploadReason">tvsubtitles.net — eigener Abruf und eigener Upload, gesteuert von diesen zwei Schaltern. Staffelpacks und der HI-Pool bleiben bei SubDL. Default: off (F-M503) — der Download dieser Quelle ist default an.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -489,7 +489,7 @@
                                 <input id="TvSubtitlesDownloadEnabled" name="TvSubtitlesDownloadEnabled" type="checkbox" is="emby-checkbox" />
                                 <span>Download enabled — tvsubtitles.net</span>
                             </label>
-                            <div class="fieldDescription" id="TvSubtitlesDownloadReason">tvsubtitles.net — eigener Abruf und eigener Upload, gesteuert von diesen zwei Schaltern. Staffelpacks und der HI-Pool bleiben bei SubDL.</div>
+                            <div class="fieldDescription" id="TvSubtitlesDownloadReason">tvsubtitles.net — eigener Abruf und eigener Upload, gesteuert von diesen zwei Schaltern. Staffelpacks und der HI-Pool bleiben bei SubDL. Default: on (F-M503) — der Upload dieser Quelle bleibt default aus.</div>
                         </div>
 
                         <div class="selectContainer">
@@ -1086,7 +1086,10 @@
                         document.querySelector('#SubdlDownloadEnabled').checked =
                             config.SubdlDownloadEnabled === null || config.SubdlDownloadEnabled === undefined
                                 ? !!config.DownloadEnabled : !!config.SubdlDownloadEnabled;
-                        document.querySelector('#TvSubtitlesDownloadEnabled').checked = !!config.TvSubtitlesDownloadEnabled;
+                        // F-M503: an undecided tvst download is ON — the box shows the EFFECTIVE state, not the raw null.
+                        document.querySelector('#TvSubtitlesDownloadEnabled').checked =
+                            config.TvSubtitlesDownloadEnabled === null || config.TvSubtitlesDownloadEnabled === undefined
+                                ? true : !!config.TvSubtitlesDownloadEnabled;
                         document.querySelector('#DownloadOrder').value = config.DownloadOrder === 'SubdlFirst'
                             ? 'SubdlFirst'
                             : 'TvSubtitlesFirst';

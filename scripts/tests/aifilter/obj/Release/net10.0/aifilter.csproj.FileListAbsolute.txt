@@ -61,3 +61,4 @@
 /opt/data/subdl-scribe/scripts/tests/aifilter/obj/Release/net10.0/aifilterrun.pdb
 /opt/data/subdl-scribe/scripts/tests/aifilter/obj/Release/net10.0/aifilter.genruntimeconfig.cache
 /opt/data/subdl-scribe/scripts/tests/aifilter/obj/Release/net10.0/ref/aifilterrun.dll
+/opt/data/subdl-scribe/scripts/tests/aifilter/bin/Release/net10.0/Jellyfin.Plugin.SubdlSync.xml

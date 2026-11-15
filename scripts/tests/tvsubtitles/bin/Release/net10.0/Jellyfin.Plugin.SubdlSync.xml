@@ -282,6 +282,54 @@
             <param name="target">The source that was refused.</param>
             <returns>The reason line.</returns>
         </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SourceOrder">
+            <summary>
+            F-M504 (Nutzerergänzung 15.11.2026: „Dritte bis n quelle sind ebenfalls denkbar"): die Reihenfolge,
+            in der die Quellen gefragt werden — EINE Stelle für beide Richtungen.
+            <para>
+            Die Konfiguration kennt heute genau zwei Werte (<c>DownloadSourceOrder</c>: „SubDL zuerst" /
+            „tvsubtitles.net zuerst"). Das ist eine Aussage über die FÜHRENDE Quelle, nicht über die Anzahl:
+            wer führt, wird vorn einsortiert, und alle übrigen Quellen folgen in der Reihenfolge, in der sie im
+            Enum <see cref="T:Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider"/> stehen. Damit ist eine dritte Quelle ohne Umbau einsortierbar:
+            ein Enum-Eintrag und ein Endpunkt genügen, an dieser Datei und an den Schleifen ändert sich nichts.
+            </para>
+            <para>
+            Die alternative Lesart — eine Liste von Anbietern in der Konfiguration — wäre die flexiblere, kostet
+            aber eine neue GUI-Option; der Operator hat für den Upload ausdrücklich „keine neue GUI-Option"
+            verlangt (F-M495), und für den Download gilt dieselbe Reihenfolge. Deshalb: ein Führer plus
+            Enum-Rest, kein zweiter Einstellungsblock.
+            </para>
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SourceOrder.MainSearch">
+            <summary>
+            F-M504: die Quelle, deren Abfrage die Hauptsuche selbst fährt — SubDLs Id-Suche
+            (<c>RunV2SearchAsync</c>) mit Id-Prüfung/Backfill, HI-Pool und Quota-Pfaden. Sie wird NICHT
+            über ihren Endpunkt gefragt, und sie ist die eine Quelle, deren Frage kein Endpunkt-Abruf ist.
+            <para>
+            Der Name steht HIER und nicht in der Pipeline, weil die Frage-Reihenfolge dieselbe Aussage
+            braucht: an welcher Stelle der Liste die SubDL-Suche läuft, entscheidet, wer zuerst gefragt
+            wird. Die Pipeline und die Prüfung lesen deshalb dieselbe Konstante.
+            </para>
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SourceOrder.Leading(Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadSourceOrder)">
+            <summary>
+            Die Quelle, die die konfigurierte Reihenfolge nach vorn stellt. Sie wird als ERSTE gefragt; alle
+            anderen folgen (siehe <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SourceOrder.ForOrder(Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadSourceOrder)"/>).
+            </summary>
+            <param name="order">Die gespeicherte Reihenfolge.</param>
+            <returns>Die führende Quelle.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SourceOrder.ForOrder(Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadSourceOrder)">
+            <summary>
+            ALLE Quellen in Frage-Reihenfolge: die führende zuerst, danach die übrigen in Enum-Reihenfolge.
+            Ob eine Quelle tatsächlich gefragt wird (Schalter an, Endpunkt verdrahtet), entscheidet der
+            Aufrufer JE QUELLE — diese Methode sagt nur, in welcher Reihenfolge gefragt würde.
+            </summary>
+            <param name="order">Die gespeicherte Reihenfolge.</param>
+            <returns>Alle Quellen, führende zuerst.</returns>
+        </member>
         <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlDownloadEndpoint">
             <summary>
             F-M483: the SubDL download endpoint — a thin wrapper, not a rewrite. It calls exactly the client
@@ -3721,9 +3769,9 @@
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.TvSubtitlesUploadEnabled">
             <summary>
-            Gets or sets the tvsubtitles.net upload switch. Null = not decided yet. There is no provider
-            wired in for this source, so the effective value is always false (F-M478) — the switch is shown
-            so the page does not have to pretend the choice exists twice.
+            Gets or sets the tvsubtitles.net upload switch. Null = not decided yet, and an undecided tvst
+            UPLOAD is OFF (F-M503: download defaults on, upload defaults off — an explicitly stored true
+            still uploads). The legacy <see cref="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.UploadEnabled"/> does NOT answer here (F-M477).
             </summary>
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.UploadSeasonPacks">
@@ -3753,8 +3801,13 @@
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.TvSubtitlesDownloadEnabled">
             <summary>
-            Gets or sets the tvsubtitles.net download switch. Null = not decided yet; there is no provider
-            wired in, so the effective value is always false (F-M478).
+            Gets or sets the tvsubtitles.net download switch. Null = not decided yet, and an undecided
+            tvst DOWNLOAD is ON (F-M503, operator decision 15.11.2026: "tvst download als download default
+            aktivieren sie, upload default deaktiviert"). The two tvst directions therefore default in
+            opposite directions: download on, upload off (<see cref="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.TvSubtitlesUploadEnabled"/> stays
+            <c>?? false</c>). An explicitly stored false still means OFF — the default only answers while
+            the value was never written. The legacy <see cref="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadEnabled"/> does NOT answer here: it
+            belongs to SubDL (F-M477).
             </summary>
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadOrder">
@@ -4192,8 +4245,10 @@
         <member name="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.IsDownloadEnabled(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
             <summary>
             F-M477 (operator order 15.11.2026): is the DOWNLOAD direction on for this source?
-            The per-provider switch answers; while it is null the legacy <see cref="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadEnabled"/>
+            SubDL: the per-provider switch answers; while it is null the legacy <see cref="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadEnabled"/>
             answers, so a configuration written before the split keeps its meaning.
+            F-M503: tvsubtitles.net has no legacy value — an undecided tvst download is ON (the operator's
+            default), an explicitly stored false is OFF.
             A source with no provider wired in is always off (F-M478) — see <see cref="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.HasProvider(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>.
             </summary>
             <param name="provider">The subtitle source asked about.</param>
@@ -6098,7 +6153,10 @@
             </summary>
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadRunSummary.SkippedNoCandidates">
-            <summary>Gets or sets the count of items skipped because SubDL had no candidates at all.</summary>
+            <summary>
+            F-M504: items where NOT ONE of the asked sources had a candidate — the counter used to mean
+            "SubDL had nothing", which read as a verdict on a source that had never been asked.
+            </summary>
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadRunSummary.SkippedNoId">
             <summary>Gets or sets the count of items skipped for id-less (hard IMDB match).</summary>
@@ -6203,8 +6261,20 @@
             tvsubtitles.net joins only when its switch is on.
             </summary>
         </member>
-        <member name="F:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline._tvDownload">
-            <summary>The tvsubtitles.net download endpoint, or null when the source cannot be reached.</summary>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.MainSearchSource">
+            <summary>
+            F-M504: die Quelle, deren Treffer die Hauptsuche oben bereits liefert. <c>RunV2SearchAsync</c>
+            fragt SubDL über ihren Id-Index (Ids, HI-Pool, Quota-Behandlung) und trägt das Ergebnis in
+            <c>candidates</c> ein; sie wird unten NICHT ein zweites Mal über ihren Endpunkt gefragt —
+            dieselbe Antwort zweimal zu holen kostet einen Aufruf und könnte eine andere sein.
+            <para>
+            F-M504 (Nutzerkorrektur 15.11.2026): der Name ist ein ALIAS auf
+            <see cref="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SourceOrder.MainSearch"/>, weil die Frage-Reihenfolge dieselbe Aussage
+            braucht — an welcher Stelle der Liste diese Quelle steht, entscheidet, wann ihre Suche läuft.
+            Die Hauptsuche selbst auf den Endpunkt-Katalog umzustellen wäre ein eigener Umbau (die
+            Id-Prüfung mit Backfill, der HI-Pool, die 429-/Quota-Pfade hängen an ihr).
+            </para>
+            </summary>
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.Registry">
             <summary>Always use the current Plugin.Instance registry so a DB reset is respected.</summary>
@@ -6547,12 +6617,25 @@
             <param name="raw">Payload as fetched.</param>
             <returns>Corrected payload, or null when nothing was fetched.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.ForeignCandidatesAsync(System.String,System.Boolean,System.Int32,System.Int32,System.String,System.Threading.CancellationToken)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.ForeignCandidatesAsync(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider,System.String,System.Boolean,System.Int32,System.Int32,System.String,System.Threading.CancellationToken)">
             <summary>
-            F-M485: fragt die zweite Quelle nach dieser Sprache und gibt ihre Treffer als Kandidaten
-            zurück — mit ihrem Anbieter, damit der Abruf weiß, wen er fragen muss. Leer, wenn der Schalter
-            aus ist, kein Serienname bekannt ist oder die Quelle nichts hat.
+            F-M485/F-M504: fragt EINE Zusatzquelle nach dieser Sprache und gibt ihre Treffer als Kandidaten
+            zurück — mit dem Anbieter, der sie geliefert hat, damit der Abruf weiß, wen er fragen muss. Leer,
+            wenn es für diese Quelle keinen Endpunkt gibt, kein Serienname bekannt ist oder sie nichts hat.
+            <para>
+            Die Quelle ist ein PARAMETER (F-M504, „dritte bis n quelle"): die Methode kennt keine zweite
+            Quelle und keinen Namen — sie holt den Endpunkt des Anbieters aus dem Katalog und bildet die
+            Antwort auf den neutralen Kandidaten ab. Ein neuer Anbieter braucht hier nichts.
+            </para>
             </summary>
+            <param name="quelle">Die Zusatzquelle, die gefragt wird.</param>
+            <param name="title">Serienname (Quellen ohne Id-Index suchen daraus).</param>
+            <param name="isSeries">Falsch bei Filmen — dann gibt es nichts zu fragen.</param>
+            <param name="season">Staffel.</param>
+            <param name="episode">Folge.</param>
+            <param name="lang">Zielsprache.</param>
+            <param name="ct">Cancellation token.</param>
+            <returns>Die Treffer dieser Quelle; leer, wenn sie nichts hat.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.SourceAllowed(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
              <summary>
@@ -6568,6 +6651,37 @@
              </summary>
              <param name="provider">Die Quelle des Kandidaten, der abgerufen werden soll.</param>
              <returns>Wahr, wenn diese Quelle per Download-Schalter freigeschaltet ist.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.DownloadQueryOrder">
+            <summary>
+            F-M504: die Download-Quellen, die in DIESEM Lauf gefragt werden, in Frage-Reihenfolge — die
+            konfigurierte Quelle zuerst, die uebrigen in Enum-Reihenfolge (<see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SourceOrder"/>).
+            <para>
+            Die Schleife, die diese Liste abarbeitet, kennt keine Anzahl: JE QUELLE entscheidet
+            <see cref="M:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.SourceAllowed(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>, und ein Anbieter ohne verdrahteten Endpunkt faellt hier heraus.
+            Eine dritte Quelle braucht deshalb nur einen Enum-Eintrag und einen Endpunkt im Katalog.
+            </para>
+            </summary>
+            <returns>Die Quellen dieses Laufs, zuerst gefragte zuerst.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.EndpointFor(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M504: der Download-Endpunkt EINER Quelle aus dem Katalog — die einzige Stelle, an der ein
+            Anbieter auf seinen Endpunkt abgebildet wird (Suche und Abruf fragen beide hier). Null, wenn es
+            fuer diese Quelle keinen Endpunkt gibt.
+            </summary>
+            <param name="provider">Die Quelle.</param>
+            <returns>Ihr Endpunkt, oder null.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.QuellenRang(System.Collections.Generic.IReadOnlyDictionary{Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider,System.Int32},Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M504: der Rang einer Quelle in der Frage-Reihenfolge; 0 heisst „zuerst gefragt". Eine Quelle
+            ohne Rang (nicht freigeschaltet) steht hinten — sie kann in der Rangfolge nur auftauchen, wenn
+            ein Kandidat aus einer frueheren Konfiguration stammt.
+            </summary>
+            <param name="rang">Die Raenge der Quellen dieses Laufs.</param>
+            <param name="provider">Die Quelle des Kandidaten.</param>
+            <returns>Der Rang; <see cref="F:System.Int32.MaxValue"/> fuer unbekannte Quellen.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.CandidateRank(Jellyfin.Plugin.SubdlScribe.Api.SubtitleCandidate,System.Int32,System.Int32)">
             <summary>
@@ -9086,6 +9200,13 @@
             Aufzaehlungen derselben Reihenfolge waeren zwei Wahrheiten, und der Trockenlauf wuerde sie
             irgendwann anders erzaehlen als der echte Lauf sie nimmt.
             </summary>
+            <para>
+            F-M504 (Nutzerergaenzung 15.11.2026: „Dritte bis n quelle sind ebenfalls denkbar"): die
+            Reihenfolge kommt aus <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SourceOrder"/> und nicht mehr aus einem
+            Zwei-Werte-Vergleich. Hier stand bis jetzt ein Array mit genau zwei Quellen; eine dritte Quelle
+            waere darin nie angetreten. Die Kette selbst lief schon ueber die Liste — sie hat die neue
+            Quelle also ohne Aenderung mitgenommen.
+            </para>
             <returns>Die Quellen in der Reihenfolge, in der sie angetreten werden.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.AnyUploadSourceStillWants(System.String,System.String,System.Boolean)">

@@ -5166,11 +5166,16 @@ public sealed class UploadPipeline : IPackFiller
     /// Aufzaehlungen derselben Reihenfolge waeren zwei Wahrheiten, und der Trockenlauf wuerde sie
     /// irgendwann anders erzaehlen als der echte Lauf sie nimmt.
     /// </summary>
+    /// <para>
+    /// F-M504 (Nutzerergaenzung 15.11.2026: „Dritte bis n quelle sind ebenfalls denkbar"): die
+    /// Reihenfolge kommt aus <see cref="Api.Endpoints.SourceOrder"/> und nicht mehr aus einem
+    /// Zwei-Werte-Vergleich. Hier stand bis jetzt ein Array mit genau zwei Quellen; eine dritte Quelle
+    /// waere darin nie angetreten. Die Kette selbst lief schon ueber die Liste — sie hat die neue
+    /// Quelle also ohne Aenderung mitgenommen.
+    /// </para>
     /// <returns>Die Quellen in der Reihenfolge, in der sie angetreten werden.</returns>
     private Configuration.SubtitleProvider[] UploadSourceOrder() =>
-        _config.DownloadOrder == Configuration.PluginConfiguration.DownloadSourceOrder.SubdlFirst
-            ? new[] { Configuration.SubtitleProvider.Subdl, Configuration.SubtitleProvider.TvSubtitles }
-            : new[] { Configuration.SubtitleProvider.TvSubtitles, Configuration.SubtitleProvider.Subdl };
+        Api.Endpoints.SourceOrder.ForOrder(_config.DownloadOrder).ToArray();
 
     /// <summary>
     /// F-M489: has ANY upload source still to get this pair? Asked per source, because a tvst upload must

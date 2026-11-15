@@ -352,9 +352,9 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool? SubdlUploadEnabled { get; set; }
 
     /// <summary>
-    /// Gets or sets the tvsubtitles.net upload switch. Null = not decided yet. There is no provider
-    /// wired in for this source, so the effective value is always false (F-M478) — the switch is shown
-    /// so the page does not have to pretend the choice exists twice.
+    /// Gets or sets the tvsubtitles.net upload switch. Null = not decided yet, and an undecided tvst
+    /// UPLOAD is OFF (F-M503: download defaults on, upload defaults off — an explicitly stored true
+    /// still uploads). The legacy <see cref="UploadEnabled"/> does NOT answer here (F-M477).
     /// </summary>
     public bool? TvSubtitlesUploadEnabled { get; set; }
 
@@ -389,8 +389,13 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool? SubdlDownloadEnabled { get; set; }
 
     /// <summary>
-    /// Gets or sets the tvsubtitles.net download switch. Null = not decided yet; there is no provider
-    /// wired in, so the effective value is always false (F-M478).
+    /// Gets or sets the tvsubtitles.net download switch. Null = not decided yet, and an undecided
+    /// tvst DOWNLOAD is ON (F-M503, operator decision 15.11.2026: "tvst download als download default
+    /// aktivieren sie, upload default deaktiviert"). The two tvst directions therefore default in
+    /// opposite directions: download on, upload off (<see cref="TvSubtitlesUploadEnabled"/> stays
+    /// <c>?? false</c>). An explicitly stored false still means OFF — the default only answers while
+    /// the value was never written. The legacy <see cref="DownloadEnabled"/> does NOT answer here: it
+    /// belongs to SubDL (F-M477).
     /// </summary>
     public bool? TvSubtitlesDownloadEnabled { get; set; }
 
@@ -869,8 +874,10 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>
     /// F-M477 (operator order 15.11.2026): is the DOWNLOAD direction on for this source?
-    /// The per-provider switch answers; while it is null the legacy <see cref="DownloadEnabled"/>
+    /// SubDL: the per-provider switch answers; while it is null the legacy <see cref="DownloadEnabled"/>
     /// answers, so a configuration written before the split keeps its meaning.
+    /// F-M503: tvsubtitles.net has no legacy value — an undecided tvst download is ON (the operator's
+    /// default), an explicitly stored false is OFF.
     /// A source with no provider wired in is always off (F-M478) — see <see cref="HasProvider"/>.
     /// </summary>
     /// <param name="provider">The subtitle source asked about.</param>
@@ -878,7 +885,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool IsDownloadEnabled(SubtitleProvider provider) => provider switch
     {
         SubtitleProvider.Subdl => HasProvider(provider) && (SubdlDownloadEnabled ?? DownloadEnabled),
-        SubtitleProvider.TvSubtitles => HasProvider(provider) && (TvSubtitlesDownloadEnabled ?? false),
+        SubtitleProvider.TvSubtitles => HasProvider(provider) && (TvSubtitlesDownloadEnabled ?? true),
         _ => false,
     };
 

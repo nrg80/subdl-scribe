@@ -255,6 +255,14 @@
     "T224": {
       "suite": "tvsubtitles",
       "checks": 9
+    },
+    "T225": {
+      "suite": "offstate",
+      "checks": 3
+    },
+    "T226": {
+      "suite": "endpoints",
+      "checks": 10
     }
   }
 }

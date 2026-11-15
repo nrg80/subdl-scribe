@@ -117,7 +117,10 @@ public class DownloadRunSummary
     /// </summary>
     public int ReportsDeferred { get; set; }
 
-    /// <summary>Gets or sets the count of items skipped because SubDL had no candidates at all.</summary>
+    /// <summary>
+    /// F-M504: items where NOT ONE of the asked sources had a candidate — the counter used to mean
+    /// "SubDL had nothing", which read as a verdict on a source that had never been asked.
+    /// </summary>
     public int SkippedNoCandidates { get; set; }
 
     /// <summary>Gets or sets the count of items skipped for id-less (hard IMDB match).</summary>
@@ -232,8 +235,20 @@ public sealed class DownloadPipeline : IDisposable
     /// </summary>
     private readonly Api.Endpoints.SubtitleEndpointCatalog _endpoints;
 
-    /// <summary>The tvsubtitles.net download endpoint, or null when the source cannot be reached.</summary>
-    private readonly Api.Endpoints.IDownloadEndpoint? _tvDownload;
+    /// <summary>
+    /// F-M504: die Quelle, deren Treffer die Hauptsuche oben bereits liefert. <c>RunV2SearchAsync</c>
+    /// fragt SubDL über ihren Id-Index (Ids, HI-Pool, Quota-Behandlung) und trägt das Ergebnis in
+    /// <c>candidates</c> ein; sie wird unten NICHT ein zweites Mal über ihren Endpunkt gefragt —
+    /// dieselbe Antwort zweimal zu holen kostet einen Aufruf und könnte eine andere sein.
+    /// <para>
+    /// F-M504 (Nutzerkorrektur 15.11.2026): der Name ist ein ALIAS auf
+    /// <see cref="Api.Endpoints.SourceOrder.MainSearch"/>, weil die Frage-Reihenfolge dieselbe Aussage
+    /// braucht — an welcher Stelle der Liste diese Quelle steht, entscheidet, wann ihre Suche läuft.
+    /// Die Hauptsuche selbst auf den Endpunkt-Katalog umzustellen wäre ein eigener Umbau (die
+    /// Id-Prüfung mit Backfill, der HI-Pool, die 429-/Quota-Pfade hängen an ihr).
+    /// </para>
+    /// </summary>
+    private const Configuration.SubtitleProvider MainSearchSource = Api.Endpoints.SourceOrder.MainSearch;
     /// <summary>Always use the current Plugin.Instance registry so a DB reset is respected.</summary>
     private ContentHashRegistry Registry => Plugin.Instance?.Registry ?? throw new InvalidOperationException("Plugin not initialized");
     private readonly TmdbImdbResolver _tmdb;
@@ -429,12 +444,16 @@ public sealed class DownloadPipeline : IDisposable
         _searchTracker = searchTracker;
         _qaFails = qaFails;
 
-        // F-M485: the second download source. Its client is built here and not injected, so the
-        // pipeline's constructor — and everyone who calls it — stays exactly as it was.
+        // F-M485/F-M504: die Download-Quellen dieses Laufs. Der Katalog ist die EINE Stelle, an der
+        // steht, welche Endpunkte es gibt; die REIHENFOLGE kommt aus der Konfiguration (SourceOrder),
+        // nicht aus der Reihenfolge dieses Arrays.
         var tvClient = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
-        _tvDownload = new Api.Endpoints.TvSubtitlesDownloadEndpoint(tvClient);
         _endpoints = new Api.Endpoints.SubtitleEndpointCatalog(
-            new[] { (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.SubdlDownloadEndpoint(api), _tvDownload },
+            new[]
+            {
+                (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.SubdlDownloadEndpoint(api),
+                (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.TvSubtitlesDownloadEndpoint(tvClient),
+            },
             new[] { (Api.Endpoints.IUploadEndpoint)new Api.Endpoints.SubdlUploadEndpoint(api) });
     }
 
@@ -1426,133 +1445,236 @@ public sealed class DownloadPipeline : IDisposable
         // bounds a hopeless file now is the download budget per run (F-M50) and the burned-release
         // memory (F-M200), both of which leave the search itself intact.
 
-        // F-M20/F-M26: the configured rate paces this search; the plugin holds no budget of
-        // its own. A per-run hourly bucket sat here until 03.10.2026 and could stop the whole run
-        // via `_stopRun`. It was our own invention — SubDL publishes DAILY counters only — and it
-        // stopped runs the server would have allowed (735 of 2000 searches still free when it
-        // fired). Enforcement belongs to SubDL: a real 429 is answered below by the
-        // QuotaStopDecision path, which reads the live counters before it decides.
-        // The pause stays (F-M48 fix 08.09.2026): without it the search path fired up to 100
-        // requests in ~9 s, SubDL answered 429 and every result was silently discarded as
-        // "no candidates".
-        await _limiter.PauseAsync(ct).ConfigureAwait(false);
-        // (16.09.2026, user decision): this pause is the only one before a search. An
-        // extra delay sat here once and doubled it — every search waited 2× MinCallPauseSec.
+        // F-M504 (Nutzerkorrektur 15.11.2026: „Suchen engines werden der Reihenfolge nach befragt.
+        // Zur zeit sind es 2"): die Quellen werden in der eingestellten Reihenfolge GEFRAGT, nicht nur
+        // in ihr sortiert. Bis hierher stand die SubDL-Suche als fester Block in dieser Methode und
+        // lief deshalb IMMER zuerst; die Einstellung `DownloadOrder` entschied danach nur, wer in der
+        // Rangfolge fuehrt und wer als „Zusatzquelle" nachgefragt wird. Bei `TvSubtitlesFirst` wurde
+        // tvsubtitles damit erst NACH SubDL gefragt — die eingestellte Reihenfolge war eine Aussage
+        // ueber die Rangfolge, nicht ueber den Ablauf.
+        //
+        // Jetzt gibt es EINE Schleife ueber `DownloadQueryOrder()` — die eingestellte Quelle zuerst,
+        // danach die uebrigen in Enum-Reihenfolge, JE QUELLE gefiltert ueber `SourceAllowed` und einen
+        // verdrahteten Endpunkt:
+        //
+        //   * die Hauptsuche (SubDL) ist die Abfrage IHRER Quelle. `RunV2SearchAsync` ist mehr als
+        //     eine Suchanfrage (Id-Pruefung mit Backfill, HI-Pool, Quota-Pfade) und bleibt deshalb
+        //     genau der Block, der er war — er laeuft nur an der Stelle, die die Reihenfolge vorgibt.
+        //   * jede andere Quelle wird fuer JEDE fehlende Sprache genau einmal ueber ihren Endpunkt
+        //     gefragt (`ForeignCandidatesAsync`), in derselben Schleife, an ihrer Stelle.
+        //
+        // Innerhalb der Schleife gibt es KEINEN Ausstieg: eine leere Antwort der ersten Quelle beendet
+        // nichts, die naechste wird trotzdem gefragt (F-M504). Erst NACH der Schleife entscheidet
+        // sich, ob der Vorgang „keine Kandidaten" hat. Die Rangfolge der Treffer folgt derselben
+        // Liste: Rang 0 ist die zuerst gefragte Quelle (`quellenRang` weiter unten).
+        var quellenReihenfolge = DownloadQueryOrder();
 
-        // One search per item with the server-side filters (season, episode, target
-        // languages) — strict, no fallbacks (user decision 08.09.2026). The client-side
-        // episode filter stays as a second safety net.
-        // F-M58 (09.09.2026): a transient service_busy 429 (retryAfterSeconds) is
-        // NOT the daily limit — wait the short window and retry the SAME search up
-        // to 3 times before giving up. Only a real daily-limit 429 aborts the run.
-        _watchdog?.Heartbeat();
-        // (16.09.2026, user decision): v2 filename batch (BACKUP) REMOVED — it added a
-        // filename-similarity second pass on top of the v1 search for nothing. With F-M45 hardened
-        // (operator order 08.10.2026) the v1 MAIN search is an ID search, period: no title anchor,
-        // no soft-mode rung. Main path is the episode-exact v1 search (GET /api/v1/subtitles by
-        // imdb/tmdb + season/episode, unpack=1); no v2 search remains in the download path.
-        var (candidates, usedBackup, thresholdPassCount, hiCandidates) = await RunV2SearchAsync(
-            item, mediaPath, imdbId, tmdbId, season, isSeries ? episode : 0, missing, variantMissing, summary, ct);
+        // Die Antworten der Quellen. Die Hauptsuche traegt ihre Kandidaten selbst ein, jede
+        // Zusatzquelle ihre Treffer je Sprache — nach der Schleife ist jede gefragte Quelle genau
+        // einmal gelaufen, und keine hat auf die andere gewartet.
+        List<SubtitleCandidate> candidates = new();
+        List<SubtitleCandidate> hiCandidates = new();
+        bool usedBackup = false;
+        int thresholdPassCount = 0;
+        var fremdProSprache = new Dictionary<string, List<SubtitleCandidate>>(StringComparer.OrdinalIgnoreCase);
 
-        const int maxTransientRetries = 3;
-        int transientAttempt = 0;
-        while (candidates == null && _api.TransientOverload && transientAttempt < maxTransientRetries)
+        // F-M504: welche Quellen dieser Vorgang TATSAECHLICH gefragt hat, in Frage-Reihenfolge. Die
+        // Abschlusszeile nennt genau diese Liste; eine uebersprungene Quelle (Schalter aus oder nicht
+        // konfiguriert) steht nicht darin.
+        var gefragteQuellen = new List<Configuration.SubtitleProvider>();
+
+        // F-M504: die Abfrage der Hauptsuche als eigener Schritt. Sie ist mehr als eine Suchanfrage
+        // (Id-Pruefung mit Backfill, HI-Pool, Quota-Pfade) und bleibt deshalb der Block, der sie war;
+        // sie laeuft nur da, wo die Reihenfolge sie hinstellt. Rueckgabe falsch = die Suche kam nicht
+        // durch (429/5xx/403): der Vorgang endet dann hier, wie bisher (F-M48).
+        async Task<bool> RunMainSearchAsync()
         {
-            // F-M152 (rev.10): NO /me diagnostic call - a service_busy 429 is
-            // server overload (or Edge throttling); the run retries briefly and
-            // stops with the overload fire if it persists.
-            transientAttempt++;
-            int waitSec = Math.Max(5, _api.TransientRetrySeconds);
-            _logger.LogWarning(
-                "[SubDL-D] SubDL transiently overloaded (429 service_busy) at {File} — waiting {Sec}s, retry {Attempt}/{Max}. Not the daily limit; run continues.",
-                Path.GetFileName(mediaPath), waitSec, transientAttempt, maxTransientRetries);
-            await Task.Delay(TimeSpan.FromSeconds(waitSec), ct).ConfigureAwait(false);
+            // F-M20/F-M26: the configured rate paces this search; the plugin holds no budget of
+            // its own. A per-run hourly bucket sat here until 03.10.2026 and could stop the whole run
+            // via `_stopRun`. It was our own invention — SubDL publishes DAILY counters only — and it
+            // stopped runs the server would have allowed (735 of 2000 searches still free when it
+            // fired). Enforcement belongs to SubDL: a real 429 is answered below by the
+            // QuotaStopDecision path, which reads the live counters before it decides.
+            // The pause stays (F-M48 fix 08.09.2026): without it the search path fired up to 100
+            // requests in ~9 s, SubDL answered 429 and every result was silently discarded as
+            // "no candidates".
+            await _limiter.PauseAsync(ct).ConfigureAwait(false);
+            // (16.09.2026, user decision): this pause is the only one before a search. An
+            // extra delay sat here once and doubled it — every search waited 2× MinCallPauseSec.
+
+            // One search per item with the server-side filters (season, episode, target
+            // languages) — strict, no fallbacks (user decision 08.09.2026). The client-side
+            // episode filter stays as a second safety net.
+            // F-M58 (09.09.2026): a transient service_busy 429 (retryAfterSeconds) is
+            // NOT the daily limit — wait the short window and retry the SAME search up
+            // to 3 times before giving up. Only a real daily-limit 429 aborts the run.
             _watchdog?.Heartbeat();
-            _api.ResetRateLimitFlag(); // clear the transient marker before the retry
-            (candidates, usedBackup, thresholdPassCount, hiCandidates) = await RunV2SearchAsync(
+            // (16.09.2026, user decision): v2 filename batch (BACKUP) REMOVED — it added a
+            // filename-similarity second pass on top of the v1 search for nothing. With F-M45 hardened
+            // (operator order 08.10.2026) the v1 MAIN search is an ID search, period: no title anchor,
+            // no soft-mode rung. Main path is the episode-exact v1 search (GET /api/v1/subtitles by
+            // imdb/tmdb + season/episode, unpack=1); no v2 search remains in the download path.
+            var ergebnis = await RunV2SearchAsync(
                 item, mediaPath, imdbId, tmdbId, season, isSeries ? episode : 0, missing, variantMissing, summary, ct);
-        }
 
-        // F-M52: requirement marker added for traceability.
-        // F-M48 fix (08.09.2026): null = search did not complete (429/5xx/403) — do NOT
-        // mark the item "searched"; abort the run so this and all remaining items
-        // stay due for the next run instead of being poisoned with garbage results.
-        if (candidates == null)
-        {
-            _stopRun = true;
-            if (_api.AuthBroken)
+            const int maxTransientRetries = 3;
+            int transientAttempt = 0;
+            while (ergebnis.Candidates == null && _api.TransientOverload && transientAttempt < maxTransientRetries)
             {
-                _logger.LogError("[SubDL-D] API key rejected (403) — run stopped at {File}, check credentials.",
-                    Path.GetFileName(mediaPath));
-            }
-            else if (_api.TransientOverload)
-            {
-                // F-M152 (rev.10): NO /me diagnostic call — service_busy is real
-                // server overload; the recovery fire is the short overload fire.
-                ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
+                // F-M152 (rev.10): NO /me diagnostic call - a service_busy 429 is
+                // server overload (or Edge throttling); the run retries briefly and
+                // stops with the overload fire if it persists.
+                transientAttempt++;
+                int waitSec = Math.Max(5, _api.TransientRetrySeconds);
                 _logger.LogWarning(
-                    "[SubDL-D] SubDL still overloaded (429 service_busy) after {Max} retries — stopping run at {File}; item stays due for the overload fire.",
-                    maxTransientRetries, Path.GetFileName(mediaPath));
+                    "[SubDL-D] SubDL transiently overloaded (429 service_busy) at {File} — waiting {Sec}s, retry {Attempt}/{Max}. Not the daily limit; run continues.",
+                    Path.GetFileName(mediaPath), waitSec, transientAttempt, maxTransientRetries);
+                await Task.Delay(TimeSpan.FromSeconds(waitSec), ct).ConfigureAwait(false);
+                _watchdog?.Heartbeat();
+                _api.ResetRateLimitFlag(); // clear the transient marker before the retry
+                ergebnis = await RunV2SearchAsync(
+                    item, mediaPath, imdbId, tmdbId, season, isSeries ? episode : 0, missing, variantMissing, summary, ct);
             }
-            else
-            {
-                // F-M238: a 429 on the search endpoint is not automatically the daily
-                // allowance — SubDL answers the same code for a short-term trip. Ask the
-                // live counters which one it is, then let the decision name the retry
-                // shape. A spent OR unreadable allowance earns the day-long fire; only a
-                // free allowance is respaced. Both day-long cases MUST schedule, or the
-                // item waits for the next regular anchor instead of the reset.
-                var read = await _api.ReadQuotaAsync(forDownload: false, ct).ConfigureAwait(false);
-                bool searchExhausted = read == QuotaRead.Spent;
-                bool searchUnreadable = read == QuotaRead.Unreadable;
-                var stop = QuotaStopDecision.Decide(
-                    _config.DownloadContinueAfterLimit,
-                    IsArrivalRun,
-                    searchExhausted,
-                    searchUnreadable);
 
-                if (stop == QuotaStop.Respaced)
+            // F-M52: requirement marker added for traceability.
+            // F-M48 fix (08.09.2026): null = search did not complete (429/5xx/403) — do NOT
+            // mark the item "searched"; abort the run so this and all remaining items
+            // stay due for the next run instead of being poisoned with garbage results.
+            if (ergebnis.Candidates == null)
+            {
+                _stopRun = true;
+                if (_api.AuthBroken)
                 {
-                    _api.ResetRateLimitFlag();
-                    _stopRun = false;
+                    _logger.LogError("[SubDL-D] API key rejected (403) — run stopped at {File}, check credentials.",
+                        Path.GetFileName(mediaPath));
+                }
+                else if (_api.TransientOverload)
+                {
+                    // F-M152 (rev.10): NO /me diagnostic call — service_busy is real
+                    // server overload; the recovery fire is the short overload fire.
                     ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
                     _logger.LogWarning(
-                        "[SubDL-D] 429 at {File} is a short-term rate limit — search allowance still has {Remaining}/{Limit} left; "
-                        + "run respaced by JobSpacingMinutes, item stays due (F-M238).",
-                        Path.GetFileName(mediaPath), _api.Quota?.SearchRemaining, _api.Quota?.SearchLimit);
-                }
-                else if (stop == QuotaStop.NextDayFire)
-                {
-                    // Count the stop, or the dispatcher cannot tell it from an "ok" cycle: it would
-                    // paint the download light GREEN and mark every item this run never worked as
-                    // Done, removing it from the queue. `QuotaStopped` is the only flag the
-                    // dispatcher reads (SubdlEventDispatcher.CleanupDirectionQueue).
-                    summary.QuotaStopped++;
-                    // Day-long: anchor on the server's reset (or the fail-safe midnight),
-                    // exactly like the download-429 path. Without this the search path
-                    // stopped without scheduling anything and nothing retried until the
-                    // next regular anchor.
-                    var anchor = _api.RateLimitResetUtc ?? NextMidnightUtc();
-                    ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFire(upload: false, anchor.ToUniversalTime());
-                    _logger.LogWarning(
-                        "[SubDL-D] Search allowance spent ({Reason}) — run stopped at {File}; one recovery fire after the reset at {Reset} local (F-M238).",
-                        searchExhausted ? "counter says spent" : "allowance unreadable, treated as spent",
-                        Path.GetFileName(mediaPath),
-                        TimeZoneInfo.ConvertTimeFromUtc(anchor, TimeZoneInfo.Local).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
+                        "[SubDL-D] SubDL still overloaded (429 service_busy) after {Max} retries — stopping run at {File}; item stays due for the overload fire.",
+                        maxTransientRetries, Path.GetFileName(mediaPath));
                 }
                 else
                 {
-                    // A spent allowance with a clean stop and no fire — still a quota stop (the work
-                    // did not happen), so the counter and the queue guard apply.
-                    summary.QuotaStopped++;
-                    _logger.LogWarning(
-                        "[SubDL-D] Search allowance spent — run stopped at {File}; no recovery fire (continue-after-limit is off or arrival run) (F-M238).",
-                        Path.GetFileName(mediaPath));
+                    // F-M238: a 429 on the search endpoint is not automatically the daily
+                    // allowance — SubDL answers the same code for a short-term trip. Ask the
+                    // live counters which one it is, then let the decision name the retry
+                    // shape. A spent OR unreadable allowance earns the day-long fire; only a
+                    // free allowance is respaced. Both day-long cases MUST schedule, or the
+                    // item waits for the next regular anchor instead of the reset.
+                    var read = await _api.ReadQuotaAsync(forDownload: false, ct).ConfigureAwait(false);
+                    bool searchExhausted = read == QuotaRead.Spent;
+                    bool searchUnreadable = read == QuotaRead.Unreadable;
+                    var stop = QuotaStopDecision.Decide(
+                        _config.DownloadContinueAfterLimit,
+                        IsArrivalRun,
+                        searchExhausted,
+                        searchUnreadable);
+
+                    if (stop == QuotaStop.Respaced)
+                    {
+                        _api.ResetRateLimitFlag();
+                        _stopRun = false;
+                        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
+                        _logger.LogWarning(
+                            "[SubDL-D] 429 at {File} is a short-term rate limit — search allowance still has {Remaining}/{Limit} left; "
+                            + "run respaced by JobSpacingMinutes, item stays due (F-M238).",
+                            Path.GetFileName(mediaPath), _api.Quota?.SearchRemaining, _api.Quota?.SearchLimit);
+                    }
+                    else if (stop == QuotaStop.NextDayFire)
+                    {
+                        // Count the stop, or the dispatcher cannot tell it from an "ok" cycle: it would
+                        // paint the download light GREEN and mark every item this run never worked as
+                        // Done, removing it from the queue. `QuotaStopped` is the only flag the
+                        // dispatcher reads (SubdlEventDispatcher.CleanupDirectionQueue).
+                        summary.QuotaStopped++;
+                        // Day-long: anchor on the server's reset (or the fail-safe midnight),
+                        // exactly like the download-429 path. Without this the search path
+                        // stopped without scheduling anything and nothing retried until the
+                        // next regular anchor.
+                        var anchor = _api.RateLimitResetUtc ?? NextMidnightUtc();
+                        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFire(upload: false, anchor.ToUniversalTime());
+                        _logger.LogWarning(
+                            "[SubDL-D] Search allowance spent ({Reason}) — run stopped at {File}; one recovery fire after the reset at {Reset} local (F-M238).",
+                            searchExhausted ? "counter says spent" : "allowance unreadable, treated as spent",
+                            Path.GetFileName(mediaPath),
+                            TimeZoneInfo.ConvertTimeFromUtc(anchor, TimeZoneInfo.Local).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
+                    }
+                    else
+                    {
+                        // A spent allowance with a clean stop and no fire — still a quota stop (the work
+                        // did not happen), so the counter and the queue guard apply.
+                        summary.QuotaStopped++;
+                        _logger.LogWarning(
+                            "[SubDL-D] Search allowance spent — run stopped at {File}; no recovery fire (continue-after-limit is off or arrival run) (F-M238).",
+                            Path.GetFileName(mediaPath));
+                    }
                 }
+
+                return false;
             }
 
-            return;
+            candidates = ergebnis.Candidates;
+            hiCandidates = ergebnis.HiCandidates;
+            usedBackup = ergebnis.UsedFilenameFallback;
+            thresholdPassCount = ergebnis.ThresholdPassCount;
+
+            return true;
         }
+
+        // Die Frage-Reihenfolge selbst: eine Quelle nach der anderen, jede genau einmal. Steht
+        // tvsubtitles vorn, wird ERST fuer alle fehlenden Sprachen tvst gefragt und DANACH die
+        // SubDL-Suche gefahren; steht SubDL vorn, ist es umgekehrt. In beiden Faellen laeuft
+        // dieselbe Schleife — die Reihenfolge ist Daten, kein Sonderfall im Code.
+        foreach (var quelle in quellenReihenfolge)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (quelle == MainSearchSource)
+            {
+                // F-M497: eine Quelle ohne das, was ihr Pfad braucht, tritt nicht an — sie steht
+                // dann auch nicht in der Liste der gefragten Quellen.
+                if (!_config.IsConfiguredForDownload(MainSearchSource))
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] {File} — SubDL skipped — not configured (required for SubDL only)",
+                        Path.GetFileName(mediaPath));
+                    continue;
+                }
+
+                if (!await RunMainSearchAsync().ConfigureAwait(false))
+                {
+                    return;
+                }
+
+                gefragteQuellen.Add(quelle);
+                continue;
+            }
+
+            // F-M504: eine Zusatzquelle wird fuer ALLE fehlenden Sprachen gefragt — genau einmal je
+            // Sprache —, bevor die naechste Quelle an die Reihe kommt. Ohne fehlende Sprache gibt es
+            // nichts zu fragen; dann steht sie auch nicht in der Liste der gefragten Quellen.
+            if (missing.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (string lang in missing)
+            {
+                ct.ThrowIfCancellationRequested();
+                var treffer = fremdProSprache.TryGetValue(lang, out var bisher)
+                    ? bisher
+                    : new List<SubtitleCandidate>();
+                treffer.AddRange(await ForeignCandidatesAsync(quelle, title, isSeries, season, episode, lang, ct).ConfigureAwait(false));
+                fremdProSprache[lang] = treffer;
+            }
+
+            gefragteQuellen.Add(quelle);
+        }
+
         // F-M47: search performed (success OR no-candidates) — start the per-item
         // refetch clock. Items with missing languages get re-searched after the
         // configured interval; new arrivals pass immediately. 5xx errors don't count
@@ -1565,7 +1687,11 @@ public sealed class DownloadPipeline : IDisposable
         // interval: the very run meant to answer "what WOULD happen" silently suppressed the
         // next real one. Unlike the old download mark there is no invalidation pass to undo
         // a wrong stamp — the pipeline trusts it — so this one did not self-heal.
-        if (!_config.DownloadDryRun)
+        // F-M504 (Nutzerkorrektur 15.11.2026): der Takt gehoert zur HAUPTSUCHE. Lief sie in diesem
+        // Lauf nicht (ihr Schalter aus oder nicht konfiguriert), wird sie auch nicht als „gefragt"
+        // gestempelt — sonst schoebe ein tvst-only-Lauf die naechste SubDL-Suche um das ganze
+        // Intervall, obwohl SubDL gar nicht gefragt wurde.
+        if (!_config.DownloadDryRun && gefragteQuellen.Contains(MainSearchSource))
         {
             _searchTracker.MarkSearched(item.Id.ToString(), targets);
         }
@@ -1648,16 +1774,44 @@ public sealed class DownloadPipeline : IDisposable
             }
         }
 
-        if (candidates.Count == 0)
+        // F-M504: die Antworten BEIDER Quellen liegen seit der Schleife oben vor — `candidates` von
+        // der Hauptsuche, `fremdProSprache` von jeder Zusatzquelle (einmal je Quelle und Sprache,
+        // gefragt in der eingestellten Reihenfolge). Hier wird nichts mehr geholt und nichts mehr
+        // entschieden: die Sprachschleife unten liest nur noch, was schon da ist.
+
+        // Erst wenn ALLE gefragten Quellen nichts haben, gilt der Vorgang als „keine Kandidaten"
+        // (F-M504).
+        if (candidates.Count == 0 && !fremdProSprache.Values.Any(liste => liste.Count > 0))
         {
             summary.NotAvailable += missing.Count;
             summary.SkippedNoCandidates++;
             // F-M183: LogUtil.PerItem gates on Verbose internally, so the run-end
             // Aggregate below is what makes this visible at Normal level (keeps
             // per-item lines out of Normal — 400 items must not mean 400 lines).
-            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] {File} — no candidates on SubDL for [{Langs}]", Path.GetFileName(mediaPath), string.Join(",", missing));
+            // F-M504: die Zeile nennt die Quellen, die TATSAECHLICH gefragt wurden. „no candidates on
+            // SubDL" behauptete eine Suche, an der tvsubtitles gar nicht beteiligt war — und wenn es
+            // gefragt wurde, ist „nur SubDL war leer" die falsche Auskunft.
+            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] {File} — no candidates for [{Langs}] — asked: {Sources}",
+                Path.GetFileName(mediaPath),
+                string.Join(",", missing),
+                gefragteQuellen.Count == 0
+                    ? "none"
+                    : string.Join(", ", gefragteQuellen.Select(Api.Endpoints.Provenance.Name)));
             return;
         }
+
+        // F-M504: der Rang einer Quelle in der Frage-Reihenfolge — 0 heisst „zuerst gefragt". Er ist die
+        // fuehrende Stufe der Rangfolge weiter unten. Bei zwei Quellen ist das dieselbe Aussage wie
+        // vorher (tvsubtitles-first ⇔ tvst vor SubDL), bei drei Quellen bleibt sie richtig, ohne Umbau.
+        var quellenRang = new Dictionary<Configuration.SubtitleProvider, int>();
+        for (int i = 0; i < quellenReihenfolge.Count; i++)
+        {
+            quellenRang[quellenReihenfolge[i]] = i;
+        }
+
+        string orderText = quellenReihenfolge.Count == 0
+            ? "none"
+            : string.Join(", ", quellenReihenfolge.Select(Api.Endpoints.Provenance.Name));
 
         string videoBase = Path.GetFileNameWithoutExtension(mediaPath);
         double? videoFps = GetVideoFps(item);
@@ -1666,7 +1820,7 @@ public sealed class DownloadPipeline : IDisposable
             ct.ThrowIfCancellationRequested();
             var langCands = candidates.Where(c => c.Language == lang).ToList();
 
-            // F-M485: bevor eine Sprache als „nicht verfügbar" gilt, bekommt die zweite Quelle ihre
+            // F-M485: bevor eine Sprache als „nicht verfügbar" gilt, bekommen die Zusatzquellen ihre
             // Gelegenheit — aber nur, wenn ihr Schalter an ist. Die Treffer laufen danach durch
             // dieselbe Rangfolge, dieselben Tore, denselben Fit und dieselbe Ablage wie ein
             // SubDL-Treffer; sie sind nur woandersher.
@@ -1676,35 +1830,41 @@ public sealed class DownloadPipeline : IDisposable
             // heisst das: 27 Folgen, jede mit genau einem tvst-Treffer, keine einzige SubDL-Zeile im
             // Log — und weil eine tvst-Fassung ohne nachweisbare Korrektur die Suche fuer diese
             // Sprache beendet, kam SubDL nie zum Zug (6 signifikant, 19 als Original behalten, 1
-            // verworfen). Jetzt werden BEIDE Endpunkte in der eingestellten Reihenfolge gefragt, und
-            // beide Listen werden ZUSAMMENGEFUEHRT: der zweite Endpunkt bekommt seinen eigenen
-            // Versuch, auch wenn der erste Treffer geliefert hat. Wer zuerst laeuft, entscheidet die
-            // fuehrende Stufe der Rangfolge weiter unten — hier geht keine Quelle verloren.
+            // verworfen). Jetzt werden ALLE Endpunkte in der eingestellten Reihenfolge gefragt, und
+            // ihre Listen werden ZUSAMMENGEFUEHRT: jede Quelle bekommt ihren eigenen Versuch, auch
+            // wenn die erste Treffer geliefert hat. Wer zuerst laeuft, entscheidet die fuehrende Stufe
+            // dieser Rangfolge — hier geht keine Quelle verloren.
             //
             // F-M494, zweiter Teil (Operator-Anweisung 15.11.2026: „Vor Start des jeweiligen Endpunkts
-            // pruefen ob er per Toggle freigeschaltet ist"): der Start dieses Endpunkts fragt den
+            // pruefen ob er per Toggle freigeschaltet ist"): der Start jedes Endpunkts fragt den
             // Schalter ueber SourceAllowed, nicht ueber den Toggle direkt — dieselbe Pruefung steht
             // vor jedem Abruf eines Kandidaten.
-            var tvZuerst = _config.DownloadOrder == Configuration.PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst;
-            if (SourceAllowed(Configuration.SubtitleProvider.TvSubtitles))
+            //
+            // F-M504: die Treffer wurden OBEN geholt — einmal je Quelle und Sprache, VOR dem Ausstieg
+            // bei leerer Hauptantwort. Hier wird die Antwort nur noch GELESEN, nicht erneut geholt:
+            // `fremdProSprache` ist der einzige Zugang zu ihr, und es gibt keinen zweiten Aufruf, der
+            // ihn umgehen koennte (kein Doppelabruf, fuer JEDE Quelle).
+            if (fremdProSprache.TryGetValue(lang, out var fremd) && fremd.Count > 0)
             {
-                var fremd = await ForeignCandidatesAsync(title, isSeries, season, episode, lang, ct).ConfigureAwait(false);
-                if (fremd.Count > 0)
-                {
-                    // Anhaengen statt ersetzen (F-M494). Der Rest des Laufs (Rangfolge, Tore, Fit,
-                    // Ablage) bleibt derselbe — die Treffer sind nur woandersher.
-                    candidates.AddRange(fremd);
-                    langCands = candidates.Where(c => c.Language == lang).ToList();
-                }
+                // Anhaengen statt ersetzen (F-M494). Der Rest des Laufs (Rangfolge, Tore, Fit,
+                // Ablage) bleibt derselbe — die Treffer sind nur woandersher.
+                candidates.AddRange(fremd);
+                langCands = candidates.Where(c => c.Language == lang).ToList();
+            }
 
-                // Beide Zahlen in EINER Zeile, in beiden Reihenfolgen: eine Quelle, die nichts
-                // geliefert hat, ist damit im Log sichtbar und nicht mehr nur abwesend (F-M494).
+            if (gefragteQuellen.Any(quelle => quelle != MainSearchSource))
+            {
+                // Eine Zahl JE gefragter Quelle in EINER Zeile: eine Quelle, die nichts geliefert hat,
+                // ist damit im Log sichtbar und nicht mehr nur abwesend (F-M494). Die Zeile laeuft
+                // ueber die Liste der Quellen und nicht ueber zwei feste Namen (F-M504) — eine dritte
+                // Quelle steht hier ohne Umbau. Die Bedingung fragt, ob ausser der Hauptsuche
+                // ueberhaupt eine Quelle mitgelaufen ist; ohne sie waere die Zeile eine Selbstauskunft.
+                string zaehlung = string.Join(", ", quellenReihenfolge.Select(quelle =>
+                    langCands.Count(c => c.Provider == quelle).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + " " + Api.Endpoints.Provenance.Name(quelle) + " candidate(s)"));
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[tvsubtitles-D] {File} [{Lang}] — {Tv} tvsubtitles candidate(s), {Sd} SubDL candidate(s), order {Order}",
-                    Path.GetFileName(mediaPath), lang,
-                    langCands.Count(c => c.Provider == Configuration.SubtitleProvider.TvSubtitles),
-                    langCands.Count(c => c.Provider == Configuration.SubtitleProvider.Subdl),
-                    tvZuerst ? "tvsubtitles-first" : "subdl-first");
+                    "[tvsubtitles-D] {File} [{Lang}] — {Counts}, order {Order}",
+                    Path.GetFileName(mediaPath), lang, zaehlung, orderText);
             }
 
             if (langCands.Count == 0)
@@ -1732,10 +1892,12 @@ public sealed class DownloadPipeline : IDisposable
                 .Select(c => (Cand: c, Score: Score(c, videoBase), Pack: CandidateRank(c, season, episode)))
                 // F-M494: die fuehrende Stufe ist die QUELLE, und zwar in der eingestellten
                 // Reihenfolge. Jeder Treffer der zuerst gefragten Quelle steht damit vor jedem
-                // Treffer der zweiten, auch wenn dessen Textscore hoeher liegt — der zweite Endpunkt
-                // wird gefragt, aber er verdraengt den ersten nicht. Innerhalb einer Quelle bleibt
-                // die Rangfolge unveraendert (Pack vor Textscore).
-                .OrderByDescending(x => (x.Cand.Provider == Configuration.SubtitleProvider.TvSubtitles) == tvZuerst)
+                // Treffer der naechsten, auch wenn dessen Textscore hoeher liegt — die weitere Quelle
+                // wird gefragt, aber sie verdraengt die erste nicht. Innerhalb einer Quelle bleibt die
+                // Rangfolge unveraendert (Pack vor Textscore).
+                // F-M504: „zuerst gefragt" ist ein RANG in der Frage-Reihenfolge, kein Vergleich mit
+                // einer bestimmten Quelle — bei drei Quellen sortiert dieselbe Zeile sie richtig.
+                .OrderBy(x => QuellenRang(quellenRang, x.Cand.Provider))
                 .ThenByDescending(x => x.Pack)
                 .ThenByDescending(x => x.Score)
                 .ToList();
@@ -3609,15 +3771,29 @@ public sealed class DownloadPipeline : IDisposable
     }
 
     /// <summary>
-    /// F-M485: fragt die zweite Quelle nach dieser Sprache und gibt ihre Treffer als Kandidaten
-    /// zurück — mit ihrem Anbieter, damit der Abruf weiß, wen er fragen muss. Leer, wenn der Schalter
-    /// aus ist, kein Serienname bekannt ist oder die Quelle nichts hat.
+    /// F-M485/F-M504: fragt EINE Zusatzquelle nach dieser Sprache und gibt ihre Treffer als Kandidaten
+    /// zurück — mit dem Anbieter, der sie geliefert hat, damit der Abruf weiß, wen er fragen muss. Leer,
+    /// wenn es für diese Quelle keinen Endpunkt gibt, kein Serienname bekannt ist oder sie nichts hat.
+    /// <para>
+    /// Die Quelle ist ein PARAMETER (F-M504, „dritte bis n quelle"): die Methode kennt keine zweite
+    /// Quelle und keinen Namen — sie holt den Endpunkt des Anbieters aus dem Katalog und bildet die
+    /// Antwort auf den neutralen Kandidaten ab. Ein neuer Anbieter braucht hier nichts.
+    /// </para>
     /// </summary>
+    /// <param name="quelle">Die Zusatzquelle, die gefragt wird.</param>
+    /// <param name="title">Serienname (Quellen ohne Id-Index suchen daraus).</param>
+    /// <param name="isSeries">Falsch bei Filmen — dann gibt es nichts zu fragen.</param>
+    /// <param name="season">Staffel.</param>
+    /// <param name="episode">Folge.</param>
+    /// <param name="lang">Zielsprache.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Die Treffer dieser Quelle; leer, wenn sie nichts hat.</returns>
     private async Task<List<SubtitleCandidate>> ForeignCandidatesAsync(
-        string title, bool isSeries, int season, int episode, string lang, CancellationToken ct)
+        Configuration.SubtitleProvider quelle, string title, bool isSeries, int season, int episode, string lang, CancellationToken ct)
     {
         var leer = new List<SubtitleCandidate>();
-        if (_tvDownload is null || !isSeries || string.IsNullOrWhiteSpace(title))
+        var endpoint = EndpointFor(quelle);
+        if (endpoint is null || !isSeries || string.IsNullOrWhiteSpace(title))
         {
             // Ohne Staffel/Folge und ohne Titel hat diese Quelle nichts, wonach sie suchen könnte:
             // sie hat keinen Id-Index (F-M480).
@@ -3626,13 +3802,13 @@ public sealed class DownloadPipeline : IDisposable
 
         try
         {
-            var hits = await _tvDownload.SearchAsync(
+            var hits = await endpoint.SearchAsync(
                 new Api.Endpoints.SubtitleQuery(title, null, null, season, episode, lang), ct).ConfigureAwait(false);
 
             return hits.Select(h => new SubtitleCandidate
             {
-                Provider = Configuration.SubtitleProvider.TvSubtitles,
-                ReleaseName = h.Release.Length > 0 ? h.Release : "tvsubtitles " + h.Rip,
+                Provider = quelle,
+                ReleaseName = h.Release.Length > 0 ? h.Release : Api.Endpoints.Provenance.Name(quelle) + " " + h.Rip,
                 Language = lang.ToUpperInvariant(),
                 Url = h.Id,
                 Season = season,
@@ -3641,9 +3817,9 @@ public sealed class DownloadPipeline : IDisposable
         }
         catch (Exception ex)
         {
-            // Die zweite Quelle ist ein Zusatz, kein Muss: ein Fehler dort darf den Lauf nicht kippen.
-            _logger.LogWarning("[tvsubtitles-D] search failed for {Title} S{Season}E{Episode} [{Lang}]: {Error}",
-                title, season, episode, lang, ex.Message);
+            // Eine Zusatzquelle ist ein Zusatz, kein Muss: ein Fehler dort darf den Lauf nicht kippen.
+            _logger.LogWarning("[{Source}-D] search failed for {Title} S{Season}E{Episode} [{Lang}]: {Error}",
+                Api.Endpoints.Provenance.Name(quelle), title, season, episode, lang, ex.Message);
             return leer;
         }
     }
@@ -3662,6 +3838,43 @@ public sealed class DownloadPipeline : IDisposable
     /// <param name="provider">Die Quelle des Kandidaten, der abgerufen werden soll.</param>
     /// <returns>Wahr, wenn diese Quelle per Download-Schalter freigeschaltet ist.</returns>
     private bool SourceAllowed(Configuration.SubtitleProvider provider) => _config.IsDownloadEnabled(provider);
+
+    /// <summary>
+    /// F-M504: die Download-Quellen, die in DIESEM Lauf gefragt werden, in Frage-Reihenfolge — die
+    /// konfigurierte Quelle zuerst, die uebrigen in Enum-Reihenfolge (<see cref="Api.Endpoints.SourceOrder"/>).
+    /// <para>
+    /// Die Schleife, die diese Liste abarbeitet, kennt keine Anzahl: JE QUELLE entscheidet
+    /// <see cref="SourceAllowed"/>, und ein Anbieter ohne verdrahteten Endpunkt faellt hier heraus.
+    /// Eine dritte Quelle braucht deshalb nur einen Enum-Eintrag und einen Endpunkt im Katalog.
+    /// </para>
+    /// </summary>
+    /// <returns>Die Quellen dieses Laufs, zuerst gefragte zuerst.</returns>
+    private List<Configuration.SubtitleProvider> DownloadQueryOrder() =>
+        Api.Endpoints.SourceOrder.ForOrder(_config.DownloadOrder)
+            .Where(SourceAllowed)
+            .Where(quelle => EndpointFor(quelle) is { Wired: true })
+            .ToList();
+
+    /// <summary>
+    /// F-M504: der Download-Endpunkt EINER Quelle aus dem Katalog — die einzige Stelle, an der ein
+    /// Anbieter auf seinen Endpunkt abgebildet wird (Suche und Abruf fragen beide hier). Null, wenn es
+    /// fuer diese Quelle keinen Endpunkt gibt.
+    /// </summary>
+    /// <param name="provider">Die Quelle.</param>
+    /// <returns>Ihr Endpunkt, oder null.</returns>
+    private Api.Endpoints.IDownloadEndpoint? EndpointFor(Configuration.SubtitleProvider provider) =>
+        _endpoints.AllDownloads.FirstOrDefault(endpoint => endpoint.Provider == provider);
+
+    /// <summary>
+    /// F-M504: der Rang einer Quelle in der Frage-Reihenfolge; 0 heisst „zuerst gefragt". Eine Quelle
+    /// ohne Rang (nicht freigeschaltet) steht hinten — sie kann in der Rangfolge nur auftauchen, wenn
+    /// ein Kandidat aus einer frueheren Konfiguration stammt.
+    /// </summary>
+    /// <param name="rang">Die Raenge der Quellen dieses Laufs.</param>
+    /// <param name="provider">Die Quelle des Kandidaten.</param>
+    /// <returns>Der Rang; <see cref="int.MaxValue"/> fuer unbekannte Quellen.</returns>
+    private static int QuellenRang(IReadOnlyDictionary<Configuration.SubtitleProvider, int> rang, Configuration.SubtitleProvider provider) =>
+        rang.TryGetValue(provider, out int index) ? index : int.MaxValue;
 
     private async Task<CandidateAttempt> DownloadCandidateRawAsync(
         SubtitleCandidate cand, int season, int episode, CancellationToken ct)
@@ -3685,16 +3898,19 @@ public sealed class DownloadPipeline : IDisposable
         }
 
 
-        // F-M485: ein Kandidat der zweiten Quelle wird bei seinem eigenen Endpunkt geholt — die
-        // SubDL-Routen (Archiv, Cache, v2) gelten nur für SubDL.
-        if (cand.Provider != Configuration.SubtitleProvider.Subdl)
+        // F-M485/F-M504: ein Kandidat wird bei SEINEM Endpunkt geholt — die SubDL-Routen (Archiv,
+        // Cache, v2) gelten nur für die Hauptsuche. Die Frage ist nicht „zweite Quelle?", sondern
+        // „liegt dieser Kandidat bei der Hauptsuche?"; alles andere geht ueber den Katalog, damit eine
+        // dritte Quelle ohne Umbau denselben Weg nimmt.
+        if (cand.Provider != MainSearchSource)
         {
-            if (_tvDownload is null)
+            var endpoint = EndpointFor(cand.Provider);
+            if (endpoint is null)
             {
-                return new CandidateAttempt(null, null, DownloadOutcome.None("no-second-source"));
+                return new CandidateAttempt(null, null, DownloadOutcome.None("no-source-endpoint"));
             }
 
-            var fremd = await _tvDownload.FetchAsync(
+            var fremd = await endpoint.FetchAsync(
                 new Api.Endpoints.SubtitleHit(
                     cand.Provider, cand.Url, cand.Language, string.Empty, cand.ReleaseName, false), ct)
                 .ConfigureAwait(false);
@@ -3704,7 +3920,13 @@ public sealed class DownloadPipeline : IDisposable
                 : new CandidateAttempt(
                     fremd.Data,
                     null,
-                    new DownloadOutcome { Status = 200, Bytes = fremd.Data.Length, Route = "tvsubtitles", Content = fremd.Data });
+                    new DownloadOutcome
+                    {
+                        Status = 200,
+                        Bytes = fremd.Data.Length,
+                        Route = Api.Endpoints.Provenance.Name(cand.Provider),
+                        Content = fremd.Data,
+                    });
         }
 
         // F-M464: the verdict of this attempt travels WITH the attempt (CandidateAttempt.Outcome).

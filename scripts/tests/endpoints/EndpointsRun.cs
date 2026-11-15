@@ -78,20 +78,37 @@ internal static class Program
             catalog.AllDownloads.All(e => e.Wired) && catalog.AllUploads.All(e => e.Wired));
 
         // ---- 2. the catalog obeys switches AND wiring ------------------------------------------
-        var aus = Conf(c => { c.DownloadEnabled = false; c.UploadEnabled = false; });
+        // F-M503: der tvst-Download ist im null-Fall AN. „alles aus" heisst deshalb seit dem
+        // Operator-Entscheid vom 15.11.2026: BEIDE Download-Schalter aus — der Alt-Schalter allein
+        // traegt die Quelle nicht mehr.
+        var aus = Conf(c => { c.DownloadEnabled = false; c.UploadEnabled = false; c.TvSubtitlesDownloadEnabled = false; });
         Check("everything off yields no endpoint",
             catalog.EnabledDownloads(aus).Count == 0 && catalog.EnabledUploads(aus).Count == 0);
 
-        var nurDownload = Conf(c => { c.DownloadEnabled = true; c.UploadEnabled = false; });
+        var nurDownload = Conf(c => { c.DownloadEnabled = true; c.UploadEnabled = false; c.TvSubtitlesDownloadEnabled = false; });
         Check("the download switch alone yields exactly the SubDL download endpoint",
             catalog.EnabledDownloads(nurDownload).Count == 1
             && catalog.EnabledDownloads(nurDownload)[0].Provider == SubtitleProvider.Subdl
             && catalog.EnabledUploads(nurDownload).Count == 0);
 
         var beide = Conf(c => { c.DownloadEnabled = true; c.UploadEnabled = true; });
-        Check("switching SubDL on does not drag tvsubtitles into the run",
-            catalog.EnabledDownloads(beide).All(e => e.Provider == SubtitleProvider.Subdl)
-            && catalog.EnabledUploads(beide).All(e => e.Provider == SubtitleProvider.Subdl));
+        // F-M503 (Nutzerentscheid 15.11.2026): der ungesetzte tvst-Download-Schalter zieht die zweite
+        // Quelle jetzt herein — das ist der Default, keine Regression. Der Upload bleibt unberuehrt.
+        Check("an unset tvsubtitles DOWNLOAD switch now pulls the second source in — the upload switch does not (F-M503)",
+            catalog.EnabledDownloads(beide).Count == 2
+            && catalog.EnabledDownloads(beide).Any(e => e.Provider == SubtitleProvider.TvSubtitles)
+            && catalog.EnabledUploads(beide).All(e => e.Provider == SubtitleProvider.Subdl),
+            "downloads=" + catalog.EnabledDownloads(beide).Count + " uploads=" + catalog.EnabledUploads(beide).Count);
+
+        var beideTvstAus = Conf(c =>
+        {
+            c.DownloadEnabled = true;
+            c.UploadEnabled = true;
+            c.TvSubtitlesDownloadEnabled = false;
+        });
+        Check("an explicitly switched-off tvsubtitles download stays out of the run (F-M503)",
+            catalog.EnabledDownloads(beideTvstAus).All(e => e.Provider == SubtitleProvider.Subdl)
+            && catalog.EnabledUploads(beideTvstAus).All(e => e.Provider == SubtitleProvider.Subdl));
 
         var tvAn = Conf(c =>
         {
@@ -236,24 +253,29 @@ internal static class Program
         var root2 = args.Length > 0 ? args[0] : "/opt/data/subdl-scribe";
         var downloadSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
         var uploadSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
-        Check("the download pipeline asks the second source exactly where a language would be given up",
-            // F-M494: der Schalter wird seit dem Einzelpruefpunkt ueber SourceAllowed gelesen — die
-            // Absicht der Pruefung ist dieselbe: die zweite Quelle wird in der Sprachschleife gefragt,
-            // bevor „nicht verfuegbar" geschrieben wird.
-            (downloadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
-             || downloadSource.Contains("IsDownloadEnabled(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal))
-            && downloadSource.Contains("ForeignCandidatesAsync(title, isSeries, season, episode, lang, ct)", StringComparison.Ordinal),
-            "the fallback sits in the language loop, before \"not available\"");
-        Check("a foreign candidate is fetched from its own endpoint, not over SubDL's routes",
-            downloadSource.Contains("cand.Provider != Configuration.SubtitleProvider.Subdl", StringComparison.Ordinal)
-            && downloadSource.Contains("Route = \"tvsubtitles\"", StringComparison.Ordinal));
+        var orderSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/Endpoints/SourceOrder.cs"));
+        Check("the download pipeline asks EVERY enabled source before a language is given up (F-M485/F-M504)",
+            // F-M504: die Quellen werden nicht mehr in der Sprachschleife gefragt, sondern VOR dem
+            // Ausstieg bei leerer Hauptantwort — und die Schleife laeuft ueber alle Quellen in der
+            // eingestellten Reihenfolge, nicht ueber zwei. Die Absicht der Pruefung bleibt: kein
+            // Ausstieg, bevor die Quelle gefragt wurde.
+            downloadSource.Contains("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal)
+            && downloadSource.Contains("ForeignCandidatesAsync(quelle, title, isSeries, season, episode, lang, ct)", StringComparison.Ordinal)
+            && downloadSource.Contains("if (candidates.Count == 0 && !fremdProSprache.Values.Any(", StringComparison.Ordinal)
+            && downloadSource.IndexOf("ForeignCandidatesAsync(quelle, title", StringComparison.Ordinal)
+               < downloadSource.IndexOf("no candidates for [{Langs}]", StringComparison.Ordinal),
+            "the sources are asked before the empty exit");
+        Check("a candidate is fetched from its own endpoint, not over SubDL's routes",
+            downloadSource.Contains("if (cand.Provider != MainSearchSource)", StringComparison.Ordinal)
+            && downloadSource.Contains("var endpoint = EndpointFor(cand.Provider);", StringComparison.Ordinal)
+            && downloadSource.Contains("Route = Api.Endpoints.Provenance.Name(cand.Provider)", StringComparison.Ordinal));
         Check("the upload pipeline sends to the second source through the same gate, and its switch is asked (F-M485/F-M495)",
             uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
             && uploadSource.Contains("SendToSecondSourceAsync(", StringComparison.Ordinal));
         Check("the SubDL upload call itself is untouched — the response body the caller reads stays",
             uploadSource.Contains("_api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired, framerate)", StringComparison.Ordinal));
-        Check("the second source never breaks the run — its errors are warnings",
-            downloadSource.Contains("[tvsubtitles-D] search failed for", StringComparison.Ordinal));
+        Check("an additional source never breaks the run — its errors are warnings",
+            downloadSource.Contains("[{Source}-D] search failed for", StringComparison.Ordinal));
 
         // ---- 9. Herkunft und Kreuzkontamination (F-M486/F-M487) -------------------------------
         Check("the store value names the source, and parses back",
@@ -398,15 +420,14 @@ internal static class Program
                 .Contains("id=\"DownloadOrder\"", StringComparison.Ordinal)
             && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"))
                 .Contains("config.DownloadOrder =", StringComparison.Ordinal));
-        Check("both endpoints are asked and their candidates are MERGED, not replaced (F-M494)",
+        Check("every source is asked and the candidates are MERGED, not replaced (F-M494/F-M504)",
             !downloadSource.Contains("langCands = fremd;", StringComparison.Ordinal)
             && downloadSource.Contains("candidates.AddRange(fremd);", StringComparison.Ordinal)
-            && downloadSource.Contains("{Tv} tvsubtitles candidate(s), {Sd} SubDL candidate(s), order {Order}", StringComparison.Ordinal)
-            && !downloadSource.Contains("tvZuerst || langCands.Count == 0", StringComparison.Ordinal));
-        Check("the ranking leads with the source in the configured order, pack and score stay behind it (F-M494)",
-            downloadSource.Contains(
-                ".OrderByDescending(x => (x.Cand.Provider == Configuration.SubtitleProvider.TvSubtitles) == tvZuerst)",
-                StringComparison.Ordinal)
+            && downloadSource.Contains("{Counts}, order {Order}", StringComparison.Ordinal)
+            && downloadSource.Contains("langCands.Count(c => c.Provider == quelle)", StringComparison.Ordinal)
+            && !downloadSource.Contains("tvZuerst", StringComparison.Ordinal));
+        Check("the ranking leads with the source in the query order, pack and score stay behind it (F-M494/F-M504)",
+            downloadSource.Contains(".OrderBy(x => QuellenRang(quellenRang, x.Cand.Provider))", StringComparison.Ordinal)
             && downloadSource.Contains(".ThenByDescending(x => x.Pack)", StringComparison.Ordinal));
         Check("a source change restarts the correction hunt instead of ending it (F-M494)",
             downloadSource.Contains("var offeneAndereQuelle = ranked.Skip(attempts).Where(x => x.Cand.Provider != cand.Provider)", StringComparison.Ordinal)
@@ -416,7 +437,7 @@ internal static class Program
             downloadSource.Contains("private bool SourceAllowed(Configuration.SubtitleProvider provider) => _config.IsDownloadEnabled(provider);", StringComparison.Ordinal)
             && downloadSource.Contains("if (!SourceAllowed(cand.Provider))", StringComparison.Ordinal)
             && downloadSource.Contains("if (!SourceAllowed(hi.Provider))", StringComparison.Ordinal)
-            && downloadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
+            && downloadSource.Contains(".Where(SourceAllowed)", StringComparison.Ordinal)
             && downloadSource.Contains("candidate from {Source} skipped: that source is switched off", StringComparison.Ordinal)
             && !downloadSource.Contains("if (_config.IsDownloadEnabled(Configuration.SubtitleProvider.TvSubtitles))", StringComparison.Ordinal));
         Check("a kept original is a download but not a success while auto-sync is on",
@@ -461,7 +482,8 @@ internal static class Program
         // ---- 15. Upload: beide Endpunkte hintereinander (F-M495) --------------------------------
         Check("the upload walks BOTH sources in the configured order — no single target any more",
             uploadSource.Contains("var quellenReihenfolge = UploadSourceOrder();", StringComparison.Ordinal)
-            && uploadSource.Contains("_config.DownloadOrder == Configuration.PluginConfiguration.DownloadSourceOrder.SubdlFirst", StringComparison.Ordinal)
+            && uploadSource.Contains("Api.Endpoints.SourceOrder.ForOrder(_config.DownloadOrder)", StringComparison.Ordinal)
+            && orderSource.Contains("PluginConfiguration.DownloadSourceOrder.SubdlFirst", StringComparison.Ordinal)
             && uploadSource.Contains("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal)
             && uploadSource.Contains("bool subdlGenommen = subdlErgebnis is { Ok: true };", StringComparison.Ordinal)
             && uploadSource.Contains("bool zweiteGenommen = zweiteErgebnis is { Ok: true };", StringComparison.Ordinal)
@@ -1085,6 +1107,135 @@ internal static class Program
                 // liegen gebliebene Datei: kein Grund, die Suite rot zu machen
             }
         }
+
+        // ---- 21. F-M504: eine leere erste Quelle beendet den Vorgang nicht mehr ---------------
+        // Gemessen 15.11.2026 (Probelauf jf-test, DownloadLanguages=DE): 27 Zeilen
+        // "no candidates on SubDL for [DE]" und KEINE tvst-Zeile, obwohl der tvst-Schalter an war —
+        // der Ausstieg bei leerer SubDL-Antwort stand VOR der Stelle, die die zweite Quelle fragte.
+        // Und die Frage lautet nicht "zwei Quellen", sondern "alle Quellen, deren Schalter an ist"
+        // (Nutzerergaenzung 15.11.2026: "Dritte bis n quelle sind ebenfalls denkbar").
+        var alleAnbieter = Enum.GetValues<SubtitleProvider>().ToList();
+
+        // (a) Die Reihenfolge deckt ALLE Anbieter ab, der konfigurierte fuehrt — nicht zwei feste.
+        var tvstZuerst = SourceOrder.ForOrder(PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst);
+        var subdlZuerst = SourceOrder.ForOrder(PluginConfiguration.DownloadSourceOrder.SubdlFirst);
+        Check("the query order names EVERY provider, the configured one first (F-M504)",
+            tvstZuerst.Count == alleAnbieter.Count
+            && subdlZuerst.Count == alleAnbieter.Count
+            && tvstZuerst[0] == SubtitleProvider.TvSubtitles
+            && subdlZuerst[0] == SubtitleProvider.Subdl
+            && tvstZuerst.Skip(1).SequenceEqual(alleAnbieter.Where(p => p != SubtitleProvider.TvSubtitles))
+            && subdlZuerst.Skip(1).SequenceEqual(alleAnbieter.Where(p => p != SubtitleProvider.Subdl))
+            && SourceOrder.Leading(PluginConfiguration.DownloadSourceOrder.SubdlFirst) == SubtitleProvider.Subdl
+            && SourceOrder.Leading(PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst) == SubtitleProvider.TvSubtitles,
+            "tvst-first=" + string.Join(",", tvstZuerst) + " | subdl-first=" + string.Join(",", subdlZuerst));
+
+        // Die Anzahl der befragten Quellen ist die Anzahl der freigeschalteten — nachgebaut aus genau
+        // den Bausteinen, die der Lauf benutzt. Eine fest verdrahtete Zwei faellt hier auf, sobald das
+        // Enum eine dritte Quelle bekommt.
+        var beideAn = Conf(c => { c.DownloadEnabled = true; c.TvSubtitlesDownloadEnabled = true; });
+        var nurSubdl = Conf(c => { c.DownloadEnabled = true; c.TvSubtitlesDownloadEnabled = false; });
+        var freigeschaltetBeide = alleAnbieter.Where(beideAn.IsDownloadEnabled).ToList();
+        var befragtBeide = SourceOrder.ForOrder(beideAn.DownloadOrder).Where(beideAn.IsDownloadEnabled).ToList();
+        Check("the number of sources asked equals the number of switched-on sources (F-M504)",
+            befragtBeide.Count == freigeschaltetBeide.Count
+            && befragtBeide.Except(freigeschaltetBeide).Any() == false
+            && freigeschaltetBeide.Except(befragtBeide).Any() == false
+            && SourceOrder.ForOrder(nurSubdl.DownloadOrder).Where(nurSubdl.IsDownloadEnabled).Single() == SubtitleProvider.Subdl,
+            "asked=" + string.Join(",", befragtBeide) + " on=" + string.Join(",", freigeschaltetBeide));
+
+        // (a) DIE AUFRUFREIHENFOLGE, nicht nur die Rangfolge (Nutzerkorrektur 15.11.2026: „Suchen
+        // engines werden der Reihenfolge nach befragt. Zur zeit sind es 2"): bis hierher lief die
+        // SubDL-Suche als fester Block zuerst, und die Einstellung entschied nur ueber den Rang. Der
+        // Ablauf wird deshalb aus DENSELBEN Bausteinen nachgebaut, die der Lauf benutzt — die
+        // eingestellte Reihenfolge aus SourceOrder.ForOrder und die Frage „ist das die Hauptsuche?"
+        // ueber SourceOrder.MainSearch, also genau die Konstante, auf die die Pipeline verzweigt.
+        static List<string> Ablauf(PluginConfiguration.DownloadSourceOrder order) =>
+            SourceOrder.ForOrder(order)
+                .Select(p => p == SourceOrder.MainSearch ? "main-search" : "endpoint:" + Provenance.Name(p))
+                .ToList();
+
+        var ablaufTvst = Ablauf(PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst);
+        var ablaufSubdl = Ablauf(PluginConfiguration.DownloadSourceOrder.SubdlFirst);
+        Check("tvst-first asks tvsubtitles BEFORE the SubDL search, subdl-first after it (F-M504)",
+            ablaufTvst[0] == "endpoint:tvsubtitles"
+            && ablaufTvst.IndexOf("endpoint:tvsubtitles") < ablaufTvst.IndexOf("main-search")
+            && ablaufSubdl[0] == "main-search"
+            && ablaufSubdl.IndexOf("main-search") < ablaufSubdl.IndexOf("endpoint:tvsubtitles"),
+            "tvst-first=" + string.Join(" > ", ablaufTvst) + " | subdl-first=" + string.Join(" > ", ablaufSubdl));
+
+        // Dieselbe Aussage am Quelltext: die SubDL-Suche steht NICHT mehr als eigener Block vor der
+        // Schleife, sondern laeuft in der lokalen Funktion, die der Zweig „diese Quelle ist die
+        // Hauptsuche" aufruft — also an der Stelle, die die Reihenfolge vorgibt. Der letzte Aufruf
+        // von RunV2SearchAsync muss VOR der Schleife liegen, und es darf keinen danach geben.
+        var mainSearchKopf = downloadSource.IndexOf("async Task<bool> RunMainSearchAsync()", StringComparison.Ordinal);
+        var letzteSubdlSuche = downloadSource.LastIndexOf("await RunV2SearchAsync(", StringComparison.Ordinal);
+        var schleife = downloadSource.IndexOf("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal);
+        Check("the SubDL search runs where the order puts it — inside the ordered loop, not before it (F-M504)",
+            mainSearchKopf > 0 && letzteSubdlSuche > mainSearchKopf && letzteSubdlSuche < schleife
+            && downloadSource.Contains("if (quelle == MainSearchSource)", StringComparison.Ordinal)
+            && downloadSource.Contains("if (!await RunMainSearchAsync().ConfigureAwait(false))", StringComparison.Ordinal),
+            "main-search head @" + mainSearchKopf + ", last call @" + letzteSubdlSuche + ", loop @" + schleife);
+
+        // (b) KEIN vorzeitiger Ausstieg: die Schleife fragt jede Quelle, und der Ausstieg „keine
+        // Kandidaten" steht HINTER ihr. Im Rumpf gibt es kein `break` und keine Ausstiegszeile; die
+        // beiden `continue` sind die dokumentierten Faelle (SubDL nicht konfiguriert, keine fehlende
+        // Sprache) und ueberspringen eine Abfrage, nicht eine Quelle, die noch zu fragen waere.
+        var schleifeEnde = downloadSource.IndexOf("// F-M47: search performed", StringComparison.Ordinal);
+        var schleifenRumpf = schleife > 0 && schleifeEnde > schleife
+            ? downloadSource.Substring(schleife, schleifeEnde - schleife)
+            : string.Empty;
+        Check("no source is skipped and nothing leaves the loop before the next one is asked (F-M504)",
+            schleifenRumpf.Length > 0
+            && schleifenRumpf.Contains("if (quelle == MainSearchSource)", StringComparison.Ordinal)
+            && schleifenRumpf.Contains("await ForeignCandidatesAsync(quelle, title", StringComparison.Ordinal)
+            && schleifenRumpf.Contains("gefragteQuellen.Add(quelle);", StringComparison.Ordinal)
+            && !schleifenRumpf.Contains("break;", StringComparison.Ordinal)
+            && !schleifenRumpf.Contains("no candidates for [{Langs}]", StringComparison.Ordinal)
+            && !downloadSource.Substring(schleifeEnde).Contains("await ForeignCandidatesAsync(", StringComparison.Ordinal),
+            "loop body " + schleifenRumpf.Length + " chars");
+
+        // (d) ausgeschaltete Quelle: der Filter steht JE QUELLE in der Liste, die die Schleife abarbeitet.
+        Check("a switched-off source is never asked — the loop runs over the switch-filtered order (F-M504)",
+            downloadSource.Contains("Api.Endpoints.SourceOrder.ForOrder(_config.DownloadOrder)", StringComparison.Ordinal)
+            && downloadSource.Contains(".Where(SourceAllowed)", StringComparison.Ordinal)
+            && downloadSource.Contains("var quellenReihenfolge = DownloadQueryOrder();", StringComparison.Ordinal)
+            && downloadSource.Contains("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal)
+            && !downloadSource.Contains("foreach (var quelle in zusatzQuellen)", StringComparison.Ordinal)
+            && !downloadSource.Contains("Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal),
+            "the list is built from the order AND the switch of each source");
+
+        // (a) leere erste Antwort: die Fragen stehen VOR dem Ausstieg — beide, nicht nur die zweite.
+        var frageStelle = downloadSource.IndexOf("await ForeignCandidatesAsync(", StringComparison.Ordinal);
+        var ausstieg = downloadSource.IndexOf("no candidates for [{Langs}]", StringComparison.Ordinal);
+        Check("an empty first source no longer ends the item — the next sources are asked first (F-M504)",
+            frageStelle > 0 && ausstieg > frageStelle && ausstieg > letzteSubdlSuche
+            && downloadSource.Contains("if (candidates.Count == 0 && !fremdProSprache.Values.Any(", StringComparison.Ordinal),
+            "asked @" + frageStelle + ", subdl search @" + letzteSubdlSuche + ", exit @" + ausstieg);
+
+        // (b) beide leer: das bisherige Ergebnis bleibt, und die Zeile nennt die gefragten Quellen.
+        Check("when every asked source is empty the old verdict stands, and the line names them (F-M504)",
+            downloadSource.Contains("summary.NotAvailable += missing.Count;", StringComparison.Ordinal)
+            && downloadSource.Contains("summary.SkippedNoCandidates++;", StringComparison.Ordinal)
+            && downloadSource.Contains("asked: {Sources}", StringComparison.Ordinal)
+            && downloadSource.Contains("Api.Endpoints.Provenance.Name", StringComparison.Ordinal)
+            && !downloadSource.Contains("[SubDL-D] {File} — no candidates on ", StringComparison.Ordinal));
+
+        // (c) kein Doppelabruf: EIN Aufruf je Quelle und Sprache, die Schleife liest nur noch.
+        var abrufe = System.Text.RegularExpressions.Regex.Matches(downloadSource, @"await ForeignCandidatesAsync\(").Count;
+        Check("every source is asked ONCE per language — the language loop only reads the answer (F-M504)",
+            abrufe == 1
+            && downloadSource.Contains("fremdProSprache[lang] = treffer;", StringComparison.Ordinal)
+            && downloadSource.Contains("if (fremdProSprache.TryGetValue(lang, out var fremd) && fremd.Count > 0)", StringComparison.Ordinal),
+            abrufe + " call site(s)");
+
+        // Und der Abruf selbst hat die Zwei-Quellen-Annahme verloren: der Endpunkt kommt aus dem
+        // Katalog, ueber denselben Helfer fuer Suche UND Abruf.
+        Check("search and fetch resolve the endpoint of ANY source over the catalog (F-M504)",
+            downloadSource.Contains("private Api.Endpoints.IDownloadEndpoint? EndpointFor(Configuration.SubtitleProvider provider) =>", StringComparison.Ordinal)
+            && downloadSource.Contains("var endpoint = EndpointFor(quelle);", StringComparison.Ordinal)
+            && downloadSource.Contains("var endpoint = EndpointFor(cand.Provider);", StringComparison.Ordinal)
+            && !downloadSource.Contains("_tvDownload", StringComparison.Ordinal));
 
         Console.WriteLine();
         if (_failures > 0)

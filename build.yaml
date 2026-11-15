@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.391"
+version: "12.1.12.394"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -29,6 +29,9 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.394: the configured order now decides which search engine is asked first, not only which hit leads — the SubDL search runs inside the ordered source loop instead of always up front — F-M504.
+  v12.1.12.393: a subtitle hunt no longer ends when the first source finds nothing — every enabled source is asked, in the configured order, once per language, and the source list is a loop over all providers instead of two hard-coded ones — F-M504.
+  v12.1.12.392: the tvsubtitles download is on by default when its switch is unset; the tvsubtitles upload stays off by default — F-M503.
   v12.1.12.391: the tvsubtitles client maps ISO language codes onto the site's own codes (el/gre becomes gr, cze cs, zho cn, jpn jp, and so on), so uploads in those languages are no longer refused — F-M502.
   v12.1.12.390: the plugin keeps the tvsubtitles show number next to the TMDb and IMDb ids (store schema 13) and creates a missing show from the TMDb title, year and season count after a narrow name comparison (case, "&"/"and", whitespace) — F-M501.
   v12.1.12.389: the upload path asks which source holds a subtitle before it settles it, so one endpoint no longer blocks the other (F-M499, F-M500); subtitles downloaded from a source are never uploaded anywhere (no reup, no cross-contamination); the tvsubtitles upload sends the hearing-impaired flag and maps the release name onto the site's rip values.

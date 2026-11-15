@@ -32,7 +32,7 @@ Check("ready upload is NOT off", !WorkerOffState.Applies(UL, ok));
 Check("ready postprocessing is NOT off", !WorkerOffState.Applies(PP, ok));
 
 // --- download: four independent hard stops ----------------------------------
-Check("download off when the toggle is off", Off(DL, c => c.DownloadEnabled = false));
+Check("download off when the toggle is off", Off(DL, c => { c.DownloadEnabled = false; c.TvSubtitlesDownloadEnabled = false; }));
 Check("download off when no library is selected", Off(DL, c => c.SelectedLibraries.Clear()));
 Check("download off when the language list is empty", Off(DL, c => c.DownloadLanguages = "  , ,"));
 Check("download off when the MANDATORY credential is missing — and NOT for a missing SubDL key, because tvsubtitles still runs (F-M497)",
@@ -80,9 +80,19 @@ Check("tvsubtitles nennt seine Grenzen, SubDL hat keine zu nennen",
 Check("beide Quellen sind Anbieter (F-M485: tvsubtitles ist eingebunden)",
     PluginConfiguration.HasProvider(SubtitleProvider.TvSubtitles)
     && PluginConfiguration.HasProvider(SubtitleProvider.Subdl));
-Check("ohne gesetzten Schalter bleibt tvsubtitles aus, auch wenn der Alt-Wert an ist",
-    !Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; }).IsDownloadEnabled(SubtitleProvider.TvSubtitles)
-    && !Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.TvSubtitles));
+// F-M503 (Nutzerentscheid 15.11.2026: "tvst download als download default aktivieren sie, upload
+// default deaktiviert"): die beiden tvst-Richtungen fallen im null-Fall GEGENLAEUFIG aus. Der
+// Download ist default AN, der Upload bleibt default AUS, und ein explizit gesetztes false muss
+// weiterhin AUS heissen — der Default antwortet nur, solange nichts geschrieben wurde.
+Check("ohne gesetzten Schalter ist der tvst-DOWNLOAD an, auch wenn der Alt-Wert aus ist",
+    Mutate(c => { c.DownloadEnabled = false; c.UploadEnabled = false; }).IsDownloadEnabled(SubtitleProvider.TvSubtitles),
+    "F-M503: null → Download AN");
+Check("ein explizit ausgeschalteter tvst-Download bleibt aus",
+    !Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; c.TvSubtitlesDownloadEnabled = false; }).IsDownloadEnabled(SubtitleProvider.TvSubtitles),
+    "F-M503: false → Download AUS, der Default ueberschreibt keine Entscheidung");
+Check("ohne gesetzten Schalter bleibt der tvst-UPLOAD aus, auch wenn der Alt-Wert an ist",
+    !Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.TvSubtitles),
+    "F-M503: null → Upload AUS (unveraendert)");
 
 // --- the lamps are NOT repainted (operator: note it, do not grey the row) ---
 var gate = Mutate(c => c.UploadEnabled = false);
@@ -105,8 +115,13 @@ Check("a scheduled rhythm is NOT manual",
 Check("manual needs a runnable direction - upload off is off, not manual",
     WorkerOffState.Applies(UL, Mutate(c => { c.UploadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; })));
 Check("download manual and off are mutually exclusive by construction",
-    WorkerOffState.Applies(DL, Mutate(c => { c.DownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; }))
-    && WorkerOffState.IsManualOnly(DL, Mutate(c => { c.DownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; })));
+    WorkerOffState.Applies(DL, Mutate(c => { c.DownloadEnabled = false; c.TvSubtitlesDownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; }))
+    && WorkerOffState.IsManualOnly(DL, Mutate(c => { c.DownloadEnabled = false; c.TvSubtitlesDownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; })));
+// F-M503: der Alt-Schalter allein schaltet die Richtung NICHT mehr ab — der tvst-Download ist im
+// null-Fall an. Genau diese Folge wird hier festgehalten, damit sie nicht als Regression auftaucht.
+Check("Download alt aus + tvst ungesetzt = Richtung bleibt an (F-M503)",
+    !WorkerOffState.Applies(DL, Mutate(c => c.DownloadEnabled = false)),
+    "der tvst-Download default traegt die Richtung");
 
 // --- the maintenance workers say MANUAL, not off -----------------------------
 const string DB = WorkerOffState.DatabaseWorkerKey;
