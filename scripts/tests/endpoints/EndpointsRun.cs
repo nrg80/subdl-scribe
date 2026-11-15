@@ -409,6 +409,11 @@ internal static class Program
         Check("the download task asks whether ANY source downloads, not whether SubDL does",
             taskSource.Contains("if (!config.AnyDownloadEnabled)", StringComparison.Ordinal)
             && !taskSource.Contains("IsDownloadEnabled(SubtitleProvider.Subdl)", StringComparison.Ordinal));
+        var seederSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlSeeder.cs"));
+        Check("the queue fills for the direction, not for SubDL — a spent SubDL allowance does not empty it",
+            seederSource.Contains("bool downloadQueueable = config.AnyDownloadEnabled", StringComparison.Ordinal)
+            && seederSource.Contains("(downloadAllowed || config.IsDownloadEnabled(SubtitleProvider.TvSubtitles))", StringComparison.Ordinal)
+            && seederSource.Contains("config.AnyUploadEnabled && IsUploadTodo", StringComparison.Ordinal));
         Check("the off-state of a direction is asked for the direction, not for SubDL",
             offStateSource.Contains("return !config.AnyDownloadEnabled", StringComparison.Ordinal)
             && offStateSource.Contains("return !config.AnyUploadEnabled", StringComparison.Ordinal));

@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.382"
+version: "12.1.12.384"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -27,6 +27,8 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.384: the queue fills for the direction instead of for SubDL — with SubDL switched off (or its allowance spent) a tvsubtitles run still queues its episodes (F-M492).
+  v12.1.12.383: the direction gates ask the direction, not SubDL — with SubDL switched off and tvsubtitles on the download runs instead of being skipped as disabled (F-M492).
   v12.1.12.382: the pre-checks ask per source — the SubDL API key is only required when SubDL downloads, the login pair only when SubDL uploads, and a spent SubDL quota no longer holds a cycle that still has tvsubtitles; every download write now carries its origin (F-M492/F-M493).
   v12.1.12.381: tvsubtitles.net is a real second source — its own download and upload switches, four endpoints behind one seam, the download order is a setting (tv subtitles first by default), provenance and per-source ids live in the store, no re-upload and no cross-source upload, and only a subtitle that passed the alignment significance counts as a successful download (F-M477–F-M491).
   v12.1.12.380: the hearing-impaired pool is walked instead of grabbed, and it carries the main track when the regular pool runs dry — an episode whose pack produced nothing usable is no longer marked "language not available" while its HI uploads sit unused (F-M476).

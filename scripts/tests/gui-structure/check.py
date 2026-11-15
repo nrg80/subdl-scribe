@@ -1057,9 +1057,9 @@ def main():
               "ReadQuotaAsync" not in seed_src and "SubdlApiClient" not in seed_src,
               "the seeder fills queues; asking the API is the dispatcher's job")
         check("the download queue is gated by that flag, like the download switch",
-              "&& downloadAllowed" in seed_src
+              "downloadAllowed ||" in seed_src
               and "bool downloadAllowed = true" in seed_src,
-              "a spent limit must keep items out of the queue the way switching off does")
+              "a spent limit must keep items out of the queue the way switching off does — unless another source can run (F-M492)")
     if disp_src:
         # Assert the EXACT call site, not the method name: `if (false) …ReadDownloadAllowanceAsync(…)`
         # contains every one of those words and disables the probe completely. Measured: the

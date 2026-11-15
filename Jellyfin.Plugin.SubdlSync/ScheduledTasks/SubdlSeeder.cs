@@ -364,16 +364,21 @@ public sealed class SubdlSeeder
                 // download switch allows it. `downloadAllowed` is that same kind of flag — lowered
                 // by the dispatcher when SubDL has no download allowance left — so a spent limit
                 // keeps items out of the queue the way switching the direction off does.
+                // F-M492: das Einreihen fragt die RICHTUNG, nicht SubDL — sonst fuellt ein Lauf mit
+                // SubDL aus und tvst an eine leere Queue (gemessen 15.11.2026: „0 download queued",
+                // obwohl 27 Folgen ohne ES-Untertitel dastanden). `downloadAllowed` sagt nur, ob das
+                // SubDL-Konto noch darf; ist eine andere Quelle da, haelt es das Einreihen nicht auf.
+                bool downloadQueueable = config.AnyDownloadEnabled
+                    && (downloadAllowed || config.IsDownloadEnabled(SubtitleProvider.TvSubtitles));
                 if (dir != SubdlEventDispatcher.CycleDirection.UploadOnly
-                    && config.IsDownloadEnabled(SubtitleProvider.Subdl)
-                    && downloadAllowed
+                    && downloadQueueable
                     && IsDownloadTodo(item, mediaPath, config))
                 {
                     snapshot.Download.Add(Clone(qi));
                 }
 
                 if (dir != SubdlEventDispatcher.CycleDirection.DownloadOnly
-                    && config.IsUploadEnabled(SubtitleProvider.Subdl) && IsUploadTodo(item, mediaPath, config))
+                    && config.AnyUploadEnabled && IsUploadTodo(item, mediaPath, config))
                 {
                     snapshot.Upload.Add(Clone(qi));
                 }
