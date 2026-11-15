@@ -99,7 +99,7 @@ public sealed class SubdlDbContext : IDisposable
     // document store, named subdl-scribe.sqlite (F-M326). An older build opening this file finds no
     // document header and reports a broken store; the marker is what makes that loud instead of
     // silent. The old file is imported once on first start and kept as a .bak (F-M327).
-    public const int CurrentSchemaVersion = 11;
+    public const int CurrentSchemaVersion = 12;
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
@@ -342,7 +342,13 @@ public sealed class SubdlDbContext : IDisposable
                      ("embeds", "SubdlDownloadId", "ALTER TABLE embeds ADD COLUMN SubdlDownloadId TEXT NULL;"),
                      ("embeds", "SubdlUploadId", "ALTER TABLE embeds ADD COLUMN SubdlUploadId TEXT NULL;"),
                      ("embeds", "TvSubtitlesDownloadId", "ALTER TABLE embeds ADD COLUMN TvSubtitlesDownloadId TEXT NULL;"),
-                     ("embeds", "TvSubtitlesUploadId", "ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadId TEXT NULL;")
+                     ("embeds", "TvSubtitlesUploadId", "ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadId TEXT NULL;"),
+
+                     // F-M490 (schema 12): "hochgeladen" je Quelle, mit Zeitpunkt.
+                     ("sidecars", "SubdlUploadedAt", "ALTER TABLE sidecars ADD COLUMN SubdlUploadedAt TEXT NULL;"),
+                     ("sidecars", "TvSubtitlesUploadedAt", "ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;"),
+                     ("embeds", "SubdlUploadedAt", "ALTER TABLE embeds ADD COLUMN SubdlUploadedAt TEXT NULL;"),
+                     ("embeds", "TvSubtitlesUploadedAt", "ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;")
                  })
         {
             try

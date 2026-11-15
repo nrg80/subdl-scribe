@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("reportingrun")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f26605185e6c6827dd18a6fb2a33b9bc0e89df3c")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0f59bd4720fc7cc58c4438ac8ff97e08851a614c")]
 [assembly: System.Reflection.AssemblyProductAttribute("reportingrun")]
 [assembly: System.Reflection.AssemblyTitleAttribute("reportingrun")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

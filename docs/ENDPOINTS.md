@@ -137,6 +137,17 @@ den Upload wirklich genommen hat.
 Schema 11, in `sidecars` **und** `embeds`, per `ALTER TABLE` nachgezogen; geschrieben wird nur, was
 bekannt ist, und ein leerer Wert löscht keine vorhandene Angabe.
 
+## „Hochgeladen" je Quelle (F-M490)
+
+Zwei eigene Zeitstempel, `SubdlUploadedAt` und `TvSubtitlesUploadedAt` (Schema 12, in `sidecars` **und**
+`embeds`). Ein Zeitpunkt statt eines Schalters — „hochgeladen" ohne „wann" beantwortet die halbe Frage,
+und eine Zeile kann **beide** Quellen tragen: im März zu SubDL, im November zu tvsubtitles.
+
+Gesetzt wird nur der Zeitstempel der Quelle, die den Upload wirklich genommen hat; ein Zeitstempel wird
+nie mit einem leeren Wert überschrieben. `IsUploadedTo` liest zuerst den Zeitstempel, dann das Kennzeichen
+der Quelle (F-M488) — eine Zeile mit Id, aber ohne Zeitstempel (Schema-11-Altdaten) gilt weiter als
+hochgeladen. F-M489 hängt damit nicht mehr daran, ob eine Id vorhanden war.
+
 ## Kein Reup, je Quelle (F-M489)
 
 „Schon hochgeladen" wird aus dem **eigenen Kennzeichen der Quelle** gelesen, nicht aus `Status=Uploaded`

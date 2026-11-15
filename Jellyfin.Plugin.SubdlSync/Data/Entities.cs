@@ -313,6 +313,19 @@ public abstract class SubtitleState
     /// the send. Null means the id could not be read back — it is never filled with a guess.
     /// </summary>
     public string? TvSubtitlesUploadId { get; set; }
+
+    /// <summary>
+    /// F-M490 (operator order 15.11.2026): when OUR upload to SubDL happened (UTC). A timestamp rather
+    /// than a flag, because "uploaded" without "when" answers half the question — and because a row can
+    /// carry both sources: uploaded to SubDL in March, to tvsubtitles.net in November.
+    /// </summary>
+    public DateTime? SubdlUploadedAt { get; set; }
+
+    /// <summary>
+    /// F-M490: when OUR upload to tvsubtitles.net happened (UTC). Independent of
+    /// <see cref="SubdlUploadedAt"/> — that is the whole point of two fields.
+    /// </summary>
+    public DateTime? TvSubtitlesUploadedAt { get; set; }
 }
 
 /// <summary>

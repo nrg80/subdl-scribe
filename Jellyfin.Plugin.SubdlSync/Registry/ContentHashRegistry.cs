@@ -486,7 +486,8 @@ public sealed class ContentHashRegistry : IDisposable
     public void MarkEmbed(string? mediaHash, int subPos, string language, bool hearingImpaired,
                           string status, string? contentHash = null, string? reason = null, string? subdlId = null,
                           bool forced = false, string? subdlUploadId = null, string? tvSubtitlesUploadId = null,
-                          string? subdlDownloadId = null, string? tvSubtitlesDownloadId = null)
+                          string? subdlDownloadId = null, string? tvSubtitlesDownloadId = null,
+                          DateTime? subdlUploadedAt = null, DateTime? tvSubtitlesUploadedAt = null)
     {
         if (string.IsNullOrEmpty(mediaHash) || subPos < 0)
         {
@@ -537,6 +538,17 @@ public sealed class ContentHashRegistry : IDisposable
         if (!string.IsNullOrEmpty(tvSubtitlesDownloadId))
         {
             existing.TvSubtitlesDownloadId = tvSubtitlesDownloadId;
+        }
+
+        // F-M490: "hochgeladen" je Quelle, mit Zeitpunkt.
+        if (subdlUploadedAt.HasValue)
+        {
+            existing.SubdlUploadedAt = subdlUploadedAt;
+        }
+
+        if (tvSubtitlesUploadedAt.HasValue)
+        {
+            existing.TvSubtitlesUploadedAt = tvSubtitlesUploadedAt;
         }
 
         _db.Embeds.Upsert(existing);
@@ -947,31 +959,33 @@ public sealed class ContentHashRegistry : IDisposable
             return false;
         }
 
-        // Beide Ablagen zaehlen: eingebettete Spuren UND lose Sidecars tragen ihre Kennzeichen (F-M488).
+        // F-M490: das eigene "hochgeladen" der Quelle ist die erste Antwort. Das Kennzeichen (F-M488)
+        // bleibt als zweite: eine Zeile, die eine Id hat, ist hochgeladen, auch wenn der Zeitstempel
+        // fehlt (Altdaten aus Schema 11). Beide Ablagen zaehlen — embeds UND sidecars.
         if (provider == SubtitleProvider.TvSubtitles)
         {
             return _db.Embeds.Exists(x => x.MediaHash == mediaHash
                     && x.Language == language
                     && x.HearingImpaired == hearingImpaired
-                    && x.TvSubtitlesUploadId != null
-                    && x.TvSubtitlesUploadId != string.Empty)
+                    && (x.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.TvSubtitlesUploadId)))
                 || _db.Sidecars.Exists(x => x.MediaHash == mediaHash
                     && x.Language == language
                     && x.HearingImpaired == hearingImpaired
-                    && x.TvSubtitlesUploadId != null
-                    && x.TvSubtitlesUploadId != string.Empty);
+                    && (x.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.TvSubtitlesUploadId)));
         }
 
         return _db.Embeds.Exists(x => x.MediaHash == mediaHash
                 && x.Language == language
                 && x.HearingImpaired == hearingImpaired
-                && ((x.SubdlUploadId != null && x.SubdlUploadId != string.Empty)
-                    || (x.Status == SubtitleStatus.Uploaded && x.SubdlId != null && x.SubdlId != string.Empty)))
+                && (x.SubdlUploadedAt != null
+                    || !string.IsNullOrEmpty(x.SubdlUploadId)
+                    || (x.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(x.SubdlId))))
             || _db.Sidecars.Exists(x => x.MediaHash == mediaHash
                 && x.Language == language
                 && x.HearingImpaired == hearingImpaired
-                && ((x.SubdlUploadId != null && x.SubdlUploadId != string.Empty)
-                    || (x.Status == SubtitleStatus.Uploaded && x.SubdlId != null && x.SubdlId != string.Empty)));
+                && (x.SubdlUploadedAt != null
+                    || !string.IsNullOrEmpty(x.SubdlUploadId)
+                    || (x.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(x.SubdlId))));
     }
 
     /// <summary>
@@ -1123,7 +1137,8 @@ public sealed class ContentHashRegistry : IDisposable
                             string? fileName = null, string? path = null, string? origin = null,
                             string? originId = null, string? subdlDownloadId = null,
                             string? subdlUploadId = null, string? tvSubtitlesDownloadId = null,
-                            string? tvSubtitlesUploadId = null)
+                            string? tvSubtitlesUploadId = null, DateTime? subdlUploadedAt = null,
+                            DateTime? tvSubtitlesUploadedAt = null)
     {
         if (string.IsNullOrEmpty(contentHash))
         {
@@ -1182,6 +1197,17 @@ public sealed class ContentHashRegistry : IDisposable
         if (!string.IsNullOrEmpty(tvSubtitlesUploadId))
         {
             existing.TvSubtitlesUploadId = tvSubtitlesUploadId;
+        }
+
+        // F-M490: "hochgeladen" je Quelle, mit Zeitpunkt. Ein Zeitpunkt wird nie zurueckgesetzt.
+        if (subdlUploadedAt.HasValue)
+        {
+            existing.SubdlUploadedAt = subdlUploadedAt;
+        }
+
+        if (tvSubtitlesUploadedAt.HasValue)
+        {
+            existing.TvSubtitlesUploadedAt = tvSubtitlesUploadedAt;
         }
 
         if (!string.IsNullOrEmpty(fileName))

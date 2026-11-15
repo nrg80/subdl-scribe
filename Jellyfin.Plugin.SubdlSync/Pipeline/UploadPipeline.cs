@@ -2417,7 +2417,11 @@ public sealed class UploadPipeline : IPackFiller
                         tvSubtitlesUploadId: vonZweiter
                             ? result.SourceId
                                 ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.TvSubtitles, contentHashEarly, releaseName, DateTime.UtcNow)
-                            : null);
+                            : null,
+                        // F-M490: "hochgeladen" je Quelle, mit Zeitpunkt — nur fuer die Quelle, die
+                        // den Upload wirklich genommen hat.
+                        subdlUploadedAt: vonZweiter ? null : DateTime.UtcNow,
+                        tvSubtitlesUploadedAt: vonZweiter ? DateTime.UtcNow : null);
                 }
                 else
                 {
@@ -2432,7 +2436,11 @@ public sealed class UploadPipeline : IPackFiller
                         tvSubtitlesUploadId: vonZweiter
                             ? result.SourceId
                                 ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.TvSubtitles, contentHashEarly, releaseName, DateTime.UtcNow)
-                            : null);
+                            : null,
+                        // F-M490: "hochgeladen" je Quelle, mit Zeitpunkt — nur fuer die Quelle, die
+                        // den Upload wirklich genommen hat.
+                        subdlUploadedAt: vonZweiter ? null : DateTime.UtcNow,
+                        tvSubtitlesUploadedAt: vonZweiter ? DateTime.UtcNow : null);
                 }
             });
 

@@ -4185,6 +4185,19 @@
             the send. Null means the id could not be read back — it is never filled with a guess.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.SubdlUploadedAt">
+            <summary>
+            F-M490 (operator order 15.11.2026): when OUR upload to SubDL happened (UTC). A timestamp rather
+            than a flag, because "uploaded" without "when" answers half the question — and because a row can
+            carry both sources: uploaded to SubDL in March, to tvsubtitles.net in November.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.TvSubtitlesUploadedAt">
+            <summary>
+            F-M490: when OUR upload to tvsubtitles.net happened (UTC). Independent of
+            <see cref="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.SubdlUploadedAt"/> — that is the whole point of two fields.
+            </summary>
+        </member>
         <member name="T:Jellyfin.Plugin.SubdlScribe.Data.EmbedTrackEntity">
             <summary>
             Area 2, beneath the file: one row per embedded subtitle stream.
@@ -10185,7 +10198,7 @@
             <summary>Removes media records whose file is gone from disk, with their subtitles.</summary>
             <returns>Counts of removed rows.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkEmbed(System.String,System.Int32,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String,System.String)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkEmbed(System.String,System.Int32,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Nullable{System.DateTime},System.Nullable{System.DateTime})">
             <summary>
             Records an embedded track verdict. The key is (media hash, position), so re-marking the same
             stream always updates its own row.
@@ -10204,13 +10217,13 @@
             <summary>
             F-M257: records what a track IS (language, HI at this position) without touching a verdict.
             <para>
-            The embedded area's only writer used to be <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkEmbed(System.String,System.Int32,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String,System.String)"/>, called exclusively by the
+            The embedded area's only writer used to be <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkEmbed(System.String,System.Int32,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Nullable{System.DateTime},System.Nullable{System.DateTime})"/>, called exclusively by the
             upload pipeline — so on a default install (<c>UploadEnabled=false</c>) the area stayed empty
             and every registry reader of it answered from nothing. The seeder scans every item anyway and
             holds the streams in its hand; this method lets that fact be recorded where the readers look.
             </para>
             <para>
-            A verdict, once written, is never overwritten here: <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkEmbed(System.String,System.Int32,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String,System.String)"/> sets
+            A verdict, once written, is never overwritten here: <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkEmbed(System.String,System.Int32,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Nullable{System.DateTime},System.Nullable{System.DateTime})"/> sets
             <c>Status</c>/<c>Reason</c> unconditionally, so calling it from an observer would erase an
             uploader's "uploaded"/"rejected" verdict with an observation. A fresh row is created as
             <see cref="F:Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Observed"/>, which no terminality check counts.
@@ -10435,7 +10448,7 @@
             <param name="season">Season number.</param>
             <returns>Language and HI variant, unordered.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.Nullable{System.DateTime},System.Nullable{System.DateTime})">
             <summary>
             Records a sidecar verdict, keyed by content hash.
             <para>
@@ -10464,7 +10477,7 @@
             <summary>
             F-M259: records what a loose subtitle FILE is, without touching a verdict.
             <para>
-            The sidecar half of <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ObserveEmbed(System.String,System.Int32,System.String,System.Boolean,System.Boolean)"/>, and the same gap: <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String)"/> is
+            The sidecar half of <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ObserveEmbed(System.String,System.Int32,System.String,System.Boolean,System.Boolean)"/>, and the same gap: <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.Nullable{System.DateTime},System.Nullable{System.DateTime})"/> is
             the area's only writer and only the upload and download pipelines call it, both behind their
             own switch (upload is off by default). A <c>.srt</c> beside the media that no plugin run ever
             moved — written by another tool, kept from before the registry existed, or simply never
@@ -10474,7 +10487,7 @@
             </para>
             <para>
             A verdict is never overwritten here, for the same reason as on the embedded side:
-            <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String)"/> sets <c>Status</c> unconditionally, so observing through it would
+            <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.Nullable{System.DateTime},System.Nullable{System.DateTime})"/> sets <c>Status</c> unconditionally, so observing through it would
             erase an uploader's or downloader's verdict. A fresh row is created as
             <see cref="F:Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Observed"/>.
             </para>

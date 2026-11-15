@@ -286,7 +286,7 @@ internal static class Program
             && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
                 .Contains("ALTER TABLE sidecars ADD COLUMN Origin TEXT NULL;", StringComparison.Ordinal)
             && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
-                .Contains("CurrentSchemaVersion = 11", StringComparison.Ordinal));
+                .Contains("CurrentSchemaVersion = 12", StringComparison.Ordinal));
 
         // ---- 10. eigene Kennzeichen je Quelle und Richtung (F-M488) ---------------------------
         var entities = File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"));
@@ -297,7 +297,7 @@ internal static class Program
             && entities.Contains("public string? TvSubtitlesDownloadId { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public string? TvSubtitlesUploadId { get; set; }", StringComparison.Ordinal));
         Check("schema 11 adds them to sidecars AND embeds",
-            dbc.Contains("CurrentSchemaVersion = 11", StringComparison.Ordinal)
+            dbc.Contains("CurrentSchemaVersion = 12", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId TEXT NULL;", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE embeds ADD COLUMN TvSubtitlesDownloadId TEXT NULL;", StringComparison.Ordinal));
         Check("the download writes the field of its own source",
@@ -350,6 +350,24 @@ internal static class Program
             && uploadSource.Split("UploadGate.Decide(").Length - 1 >= 2
             && uploadSource.Contains("Registry.IsUploadedTo(mediaHash, lang, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
             && !uploadSource.Contains("Registry.IsUploaded(mediaHash, cand.Lang", StringComparison.Ordinal));
+
+        // ---- 12. "hochgeladen" je Quelle (F-M490) ---------------------------------------------
+        var registrySource = File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
+        Check("each source has its own uploaded timestamp, sidecars and embeds alike",
+            entities.Contains("public DateTime? SubdlUploadedAt { get; set; }", StringComparison.Ordinal)
+            && entities.Contains("public DateTime? TvSubtitlesUploadedAt { get; set; }", StringComparison.Ordinal)
+            && dbc.Contains("CurrentSchemaVersion = 12", StringComparison.Ordinal)
+            && dbc.Contains("ALTER TABLE sidecars ADD COLUMN SubdlUploadedAt TEXT NULL;", StringComparison.Ordinal)
+            && dbc.Contains("ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;", StringComparison.Ordinal));
+        Check("the timestamp is set for the source that took the upload, never for the other",
+            uploadSource.Contains("subdlUploadedAt: vonZweiter ? null : DateTime.UtcNow", StringComparison.Ordinal)
+            && uploadSource.Contains("tvSubtitlesUploadedAt: vonZweiter ? DateTime.UtcNow : null", StringComparison.Ordinal));
+        Check("\"uploaded to this source\" is read from its own timestamp first",
+            registrySource.Contains("x.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.TvSubtitlesUploadId)", StringComparison.Ordinal)
+            && registrySource.Contains("x.SubdlUploadedAt != null", StringComparison.Ordinal));
+        Check("a timestamp is never overwritten with nothing",
+            registrySource.Contains("if (subdlUploadedAt.HasValue)", StringComparison.Ordinal)
+            && registrySource.Contains("if (tvSubtitlesUploadedAt.HasValue)", StringComparison.Ordinal));
 
         Console.WriteLine();
         if (_failures > 0)
