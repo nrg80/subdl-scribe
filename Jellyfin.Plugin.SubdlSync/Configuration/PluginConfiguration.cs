@@ -766,25 +766,41 @@ public class PluginConfiguration : BasePluginConfiguration
     /// named, instead of failing later at the first call that needs it.
     /// </para>
     /// </summary>
+    /// <remarks>
+    /// F-M492 (operator order 15.11.2026, found by the testbench run): the question is now asked
+    /// <b>per source and direction</b>, because the credentials do not belong to the plugin, they belong
+    /// to what the run is going to do. A run that only asks tvsubtitles.net never logs in to SubDL, so
+    /// demanding the SubDL login pair refused a run that could have worked — measured on jf-test: two
+    /// cycles died on credentials that the configured sources never needed.
+    /// </remarks>
     /// <returns>The human-readable labels of every missing credential; empty when complete.</returns>
     public List<string> MissingCredentials()
     {
         var missing = new List<string>();
-        if (string.IsNullOrWhiteSpace(Username))
-        {
-            missing.Add("SubDL email");
-        }
 
-        if (string.IsNullOrWhiteSpace(Password))
-        {
-            missing.Add("SubDL password");
-        }
-
-        if (string.IsNullOrWhiteSpace(ApiKey))
+        // The SubDL API key authenticates the SEARCH, the file fetch and the quota read — that is the
+        // download direction and nothing else. The login pair authenticates the UPLOAD (its three steps
+        // carry a Bearer token from /login), so it is only required when an upload is switched on.
+        if (IsDownloadEnabled(SubtitleProvider.Subdl) && string.IsNullOrWhiteSpace(ApiKey))
         {
             missing.Add("SubDL API key");
         }
 
+        if (IsUploadEnabled(SubtitleProvider.Subdl))
+        {
+            if (string.IsNullOrWhiteSpace(Username))
+            {
+                missing.Add("SubDL email");
+            }
+
+            if (string.IsNullOrWhiteSpace(Password))
+            {
+                missing.Add("SubDL password");
+            }
+        }
+
+        // The TMDb key is the one both sources and both directions need: it resolves and corrects the ids
+        // the store, the ranking and tvsubtitles.net's upload comment are all keyed on.
         if (string.IsNullOrWhiteSpace(TmdbApiKey))
         {
             missing.Add("TMDb API key (v3)");

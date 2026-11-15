@@ -858,6 +858,19 @@ public sealed class SubdlEventDispatcher : IDisposable
             return null; // the pipeline refuses on its own; not this check's verdict to make
         }
 
+        // F-M492 (operator order 15.11.2026, found on jf-test: a tvsubtitles-first cycle died on
+        // "download limit spent (50/50)" although SubDL was never going to fetch that file). The counters
+        // belong to the SubDL ACCOUNT, so they may only hold a cycle that is going to ask SubDL:
+        //   - SubDL download switched off      → the counters say nothing about this cycle, no call at all
+        //   - SubDL on but spent, tvst usable  → SubDL sits this cycle out, the other source runs
+        //   - SubDL the only source            → the hold stands, exactly as before (F-M331)
+        if (!config.IsDownloadEnabled(Configuration.SubtitleProvider.Subdl))
+        {
+            return null;
+        }
+
+        var secondSourceCanRun = config.IsDownloadEnabled(Configuration.SubtitleProvider.TvSubtitles);
+
         var (api, http) = PluginServiceRegistrator.BuildApiClient(config);
         try
         {
@@ -873,6 +886,18 @@ public sealed class SubdlEventDispatcher : IDisposable
                 var down = await api.ReadQuotaAsync(forDownload: true, System.Threading.CancellationToken.None).ConfigureAwait(false);
                 if (down == QuotaRead.Spent && api.Quota != null)
                 {
+                    if (secondSourceCanRun)
+                    {
+                        // F-M492: no hold — SubDL is spent, but the cycle still has a source. Reported
+                        // once per cycle so the reason SubDL delivered nothing is in the log.
+                        LogUtil.Normal(
+                            _logger,
+                            "[SubDL-Dispatch] SubDL download limit spent ({0}/{1}) — this cycle runs on tvsubtitles.net only (F-M492)",
+                            api.Quota.DownloadsUsed,
+                            api.Quota.DownloadsLimit);
+                        return null;
+                    }
+
                     return string.Format(
                         System.Globalization.CultureInfo.InvariantCulture,
                         "download limit spent ({0}/{1})",

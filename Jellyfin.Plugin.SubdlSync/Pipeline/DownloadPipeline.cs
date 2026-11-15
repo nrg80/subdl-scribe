@@ -747,10 +747,11 @@ public sealed class DownloadPipeline : IDisposable
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
         LogUtil.Normal(_logger, 
-            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {Rejected} rejected after fetch | {NoCand} no candidates | {Ai} AI uploader filtered | {Reported} reported ({ReportsDeferred} deferred) | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
+            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {NotSignificant} downloaded without significance | {Rejected} rejected after fetch | {NoCand} no candidates | {Ai} AI uploader filtered | {Reported} reported ({ReportsDeferred} deferred) | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
             summary.Downloaded,
             summary.FittedToAudio,
             (summary.FitMsTotal / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
+            summary.DownloadedWithoutSignificance,
             summary.RejectedCandidates,
             summary.SkippedNoCandidates,
             summary.AiUploaderFiltered,
@@ -2064,7 +2065,13 @@ public sealed class DownloadPipeline : IDisposable
                                                     // Same row as the HI corrected file (see the main path).
                                                     Registry.MarkAndFlush(() => Registry.MarkDownloaded(
                                                         hiOriginalHash, mediaHash, lang, true,
-                                                        fileName: Path.GetFileName(hiOriginalPath), path: hiOriginalPath));
+                                                        fileName: Path.GetFileName(hiOriginalPath), path: hiOriginalPath,
+                                                        // F-M493: auch das behaltene HI-Original traegt seine Herkunft.
+                                                        // Der HI-Pool ist SubDL — die Marke ist die des HI-Treffers.
+                                                        origin: Api.Endpoints.Provenance.Name(hi.Provider),
+                                                        originId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : hi.Url,
+                                                        subdlDownloadId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : null,
+                                                        tvSubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.TvSubtitles ? hi.Url : null));
 
                                                     if (_config.LogMode >= LogLevelMode.Verbose)
                                                     {
@@ -2084,7 +2091,12 @@ public sealed class DownloadPipeline : IDisposable
 
                                         Registry.MarkAndFlush(() => Registry.MarkDownloaded(
                                             hiHash, mediaHash, lang, true, hi.SubdlId,
-                                            Path.GetFileName(hiPath), hiPath));
+                                            Path.GetFileName(hiPath), hiPath,
+                                            // F-M493: jede Ablage traegt ihre Herkunft, auch die HI-Fassung.
+                                            origin: Api.Endpoints.Provenance.Name(hi.Provider),
+                                            originId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : hi.Url,
+                                            subdlDownloadId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : null,
+                                            tvSubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.TvSubtitles ? hi.Url : null));
                                         _qaFails.RecordSuccess(item.Id.ToString(), lang); // HI save resets the pair counter too
                                         summary.Downloaded++;
                                         RememberSavedLibrary(item, hiPath); // F-M473
@@ -2928,7 +2940,16 @@ public sealed class DownloadPipeline : IDisposable
                                 // duplicate-content. No new vocabulary, no second mechanism.
                                 Registry.MarkAndFlush(() => Registry.MarkDownloaded(
                                     originalHash, mediaHash, lang, effectiveHi,
-                                    fileName: Path.GetFileName(originalPath), path: originalPath));
+                                    fileName: Path.GetFileName(originalPath), path: originalPath,
+                                    // F-M493 (Messung jf-test 15.11.2026: 5 von 24 behaltenen Originalen
+                                    // standen ohne Herkunft im Store): das behaltene Original ist eine
+                                    // eigene Zeile, also braucht SIE die Marke — sonst weiss ein spaeterer
+                                    // Upload nicht, wohin die Datei gehoert (F-M487), und „kein Reup je
+                                    // Quelle" (F-M489) sieht sie nicht.
+                                    origin: Api.Endpoints.Provenance.Name(cand.Provider),
+                                    originId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url,
+                                    subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null,
+                                    tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null));
 
                                 if (_config.LogMode >= LogLevelMode.Verbose)
                                 {
@@ -2957,8 +2978,9 @@ public sealed class DownloadPipeline : IDisposable
                         Path.GetFileName(targetPath), targetPath,
                         // F-M486: die Herkunft wandert in den Store — Quelle und deren eigene Id.
                         // Ohne sie wüsste ein späterer Upload nicht, wohin dieser Fund gehört (F-M487).
-                        Api.Endpoints.Provenance.Name(cand.Provider),
-                        cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url,
+                        // F-M493: benannt uebergeben, damit alle vier Schreibstellen gleich aussehen.
+                        origin: Api.Endpoints.Provenance.Name(cand.Provider),
+                        originId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url,
                         // F-M488: und zusätzlich in das eigene Feld der Quelle und Richtung.
                         subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null,
                         tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null));

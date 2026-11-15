@@ -3783,6 +3783,13 @@
             named, instead of failing later at the first call that needs it.
             </para>
             </summary>
+            <remarks>
+            F-M492 (operator order 15.11.2026, found by the testbench run): the question is now asked
+            <b>per source and direction</b>, because the credentials do not belong to the plugin, they belong
+            to what the run is going to do. A run that only asks tvsubtitles.net never logs in to SubDL, so
+            demanding the SubDL login pair refused a run that could have worked — measured on jf-test: two
+            cycles died on credentials that the configured sources never needed.
+            </remarks>
             <returns>The human-readable labels of every missing credential; empty when complete.</returns>
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.TmdbApiKey">

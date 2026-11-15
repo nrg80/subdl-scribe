@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.380.
+**Status:** Implementation — v12.1.12.381.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -26,7 +26,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
 - [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 5 requirements
 
-- [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 44 requirements
+- [9. SubDL/TMDb API, IDs and Credentials](#9-subdltmdb-api-ids-and-credentials) — 46 requirements
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 22 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 27 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
@@ -1195,6 +1195,10 @@ The value is read from the NAME, and the subtitle's OWN name wins over the conta
 
 **F-M491 [D]:** **Die Reihenfolge der Download-Quellen ist einstellbar, und „erfolgreich heruntergeladen" verlangt die Signifikanz.** Unter Downloads steht die Auswahl `SubDL first, tvsubtitles.net as fallback` / `tvsubtitles.net first, SubDL as fallback` (`DownloadOrder`, Default **tvsubtitles.net zuerst** — Operator-Entscheidung 15.11.2026: „Tvst ist zuerst"). Steht tvst vorn, **ersetzen** seine Treffer die SubDL-Kandidaten statt sich hinter sie zu stellen; hat die Seite für die Sprache nichts, bleibt SubDL der Rückfall. Der Rest des Laufs — Rangfolge, Tore, Fit, Ablage, Herkunft (F-M487) — ist für beide Reihenfolgen derselbe. **Erfolgsbegriff:** bei eingeschaltetem Auto-Sync zählt nur eine Fassung, die die **Signifikanz bestanden** hat (`alignedForNaming`), als erfolgreich heruntergeladen; eine behaltene Originalfassung ist **heruntergeladen, nicht erfolgreich** (`summary.DownloadedWithoutSignificance`, das Paar bleibt über die Abdeckung offen — F-M452). Ist Auto-Sync **aus**, gibt es keinen Fit und damit keinen Unterschied: jeder Abruf zählt. Gilt für beide Quellen gleich. Geprüft von T210.
 
+**F-M492 [D]:** **Zugangsdaten und Quota richten sich nach den Quellen, die wirklich dran sind.** Gefunden am 15.11.2026 im Testbench-Lauf: ein tvsubtitles-first-Lauf starb zweimal an Prüfungen, die nur SubDL betreffen — erst an fehlenden SubDL-Zugangsdaten, dann an „download limit spent (50/50)". Beides gehört zum SubDL-Konto, nicht zum Lauf. Deshalb: der **SubDL-API-Schlüssel** wird nur verlangt, wenn SubDL-Download an ist (er authentifiziert Suche, Dateiabruf und Quota-Lesen); das **Login-Paar** nur, wenn SubDL-Upload an ist (es authentifiziert den Upload); der **TMDb-Schlüssel** bleibt in beiden Richtungen und für beide Quellen Pflicht, weil er die Ids auflöst, auf denen Store, Rangfolge und der tvst-Upload-Kommentar beruhen. Die **Download-Quota** hält einen Zyklus nur noch, wenn SubDL die einzige Quelle ist: ist SubDL-Download aus, wird sie gar nicht gelesen; ist SubDL ausgeschöpft und tvst verfügbar, läuft der Zyklus auf tvst und der Grund steht einmal im Log. Geprüft von T211.
+
+**F-M493 [D]:** **Jede Ablage trägt ihre Herkunft — an allen vier Schreibstellen.** Messung jf-test 15.11.2026: 5 von 24 behaltenen Originalen standen ohne `Origin` im Store, weil der Pfad „Original behalten" seine eigene Zeile ohne Herkunft schrieb. Das behaltene Original ist eine eigene Zeile, also braucht SIE die Marke — sonst weiß ein späterer Upload nicht, wohin die Datei gehört (F-M487), und „kein Reup je Quelle" (F-M489) sieht sie nicht. Gilt für die Hauptablage, das behaltene Original, die HI-Ablage und das behaltene HI-Original. Der Laufabschluss nennt zusätzlich `DownloadedWithoutSignificance`. Geprüft von T212.
+
 ## 10. Scheduler, Quota and Timing
 
 **F-M20 [B1]:** Configurable pacing — a transfer rate (**default 400/h**) and a pause between API calls (**0.1–10 s, default 0.5 s**) — **and no local call limit of any kind**. A configured pause replaces the rate-derived one; the two are not compared. The range is the server's own fastest allowed rate at the floor (SubDL allows 600 req/min = 0.1 s) and a slow, polite pace at the top; it never permits an unpaused burst. The GUI range and the limiter clamp are identical (0.1–10), so a value entered in the page is the value the limiter uses. The rate is clamped to **1–2000**. **The plugin enforces no quota of its own.** No code path counts API calls and no run is stopped for making "too many" calls. **Only SubDL stops a run**: on a real HTTP 429 the server's own counters are read and the quota decision decides between a short respacing and a day-long stop (F-M238). The limiter now only spaces calls; it cannot refuse one.
@@ -2123,6 +2127,10 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T198:** Ein Aufschub des Seed-Laufs ist ein Termin der Richtung: er ersetzt einen späteren Termin derselben Richtung, schiebt einen früheren nicht nach hinten, steht in der Terminliste, aus der die Statuszeile ihre Zeitpunkte liest, überlebt mit seinem Grund einen Neustart, und die Statuszeile nennt den Grund des Termins statt der Zeile des letzten Laufs; kein Timer im Speicher trägt die Wartezeit, und ein Termin, der gerade verbraucht wird, nennt seinen Grund trotz abgelaufener Frist. Dasselbe gilt für die drei Wartungs-Termine (Database, OSHash, Nachlauf): Sie nennen ihren Grund, ein gewöhnliches Armen löscht den alten Grund, und ein Kurzzeichen ohne Termin wird nicht angezeigt. **29 Prüfungen.**
 
 **T201:** Der HI-Pool ist eine Rangliste, kein Einzelgriff: Er wird abgelaufen, ein Duplikat beendet ihn nicht, ein gespeicherter Kandidat schon; derselbe Ablauf bedient die Variante neben einer gespeicherten Hauptspur und den Rückfall, wenn der reguläre Ablauf ohne Speichern endet, und der Rückfall steht vor der Meldung „nicht verfügbar" und zählt als Speichern der Sprache. Beide Aufrufe hängen am HI-Schalter, eine gespeicherte Datei trägt das Kennzeichen im Namen und `hi = true` im Store, ihre SDH-Zeilen bleiben stehen, und der Ablauf ordnet nach Preis und Reichweite vor dem Textscore. **20 Prüfungen.**
+
+**T211:** Quellenabhängige Vorprüfungen: der SubDL-Schlüssel hängt am SubDL-Download, das Login-Paar am SubDL-Upload, der TMDb-Schlüssel bleibt Pflicht; ein Zyklus ohne SubDL-Download liest die SubDL-Zähler nicht, und eine ausgeschöpfte SubDL-Quota hält keinen Zyklus, der noch tvst hat. **3 Prüfungen**, Suite `endpoints`.
+
+**T212:** Herkunft an jeder Ablage: **jeder** `MarkDownloaded`-Aufruf im Download übergibt `origin:` (gezählt, nicht geschätzt), und die Abschlusszeile nennt `DownloadedWithoutSignificance`. **2 Prüfungen**, Suite `endpoints`.
 
 **T210:** Reihenfolge und Erfolgsbegriff: die Reihenfolge ist eine Einstellung mit Default SubDL zuerst, die GUI bietet sie unter Downloads an und speichert die Auswahl, bei „tvsubtitles first" **ersetzen** die tvst-Treffer die SubDL-Kandidaten (sie stellen sich nicht dahinter), und eine behaltene Originalfassung zählt bei Auto-Sync nicht als Erfolg, sondern als `DownloadedWithoutSignificance`. **4 Prüfungen**, alle in der Suite `endpoints`.
 

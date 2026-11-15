@@ -5,7 +5,7 @@
   },
   "projects": {
     "/opt/data/subdl-scribe/scripts/tests/hipool/hipool.csproj": {
-      "version": "1.0.0",
+      "version": "12.1.11.5",
       "restore": {
         "projectUniqueName": "/opt/data/subdl-scribe/scripts/tests/hipool/hipool.csproj",
         "projectName": "hipoolrun",

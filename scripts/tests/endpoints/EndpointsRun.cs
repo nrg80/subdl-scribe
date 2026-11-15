@@ -234,8 +234,8 @@ internal static class Program
 
         // ---- 8. die Einbindung in den Lauf: Quelltext-Bindung (F-M485) -----------------------
         var root2 = args.Length > 0 ? args[0] : "/opt/data/subdl-scribe";
-        var downloadSource = File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
-        var uploadSource = File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        var downloadSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
+        var uploadSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         Check("the download pipeline asks the second source exactly where a language would be given up",
             downloadSource.Contains("IsDownloadEnabled(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
             && downloadSource.Contains("ForeignCandidatesAsync(title, isSeries, season, episode, lang, ct)", StringComparison.Ordinal),
@@ -281,16 +281,16 @@ internal static class Program
             && uploadSource.Contains("UploadGate.Decide(", StringComparison.Ordinal)
             && uploadSource.Contains("herkunft,", StringComparison.Ordinal));
         Check("the store schema carries the two columns and a migration step",
-            File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"))
+            ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"))
                 .Contains("public string? OriginId { get; set; }", StringComparison.Ordinal)
-            && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
                 .Contains("ALTER TABLE sidecars ADD COLUMN Origin TEXT NULL;", StringComparison.Ordinal)
-            && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
                 .Contains("CurrentSchemaVersion = 12", StringComparison.Ordinal));
 
         // ---- 10. eigene Kennzeichen je Quelle und Richtung (F-M488) ---------------------------
-        var entities = File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"));
-        var dbc = File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"));
+        var entities = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"));
+        var dbc = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"));
         Check("four own fields exist, one per source and direction",
             entities.Contains("public string? SubdlDownloadId { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public string? SubdlUploadId { get; set; }", StringComparison.Ordinal)
@@ -323,9 +323,9 @@ internal static class Program
             && uploadSource.Contains("tvSubtitlesUploadId: vonZweiter", StringComparison.Ordinal)
             && uploadSource.Contains("vonZweiter = true;", StringComparison.Ordinal));
         Check("the id is read back from the episode page, never invented",
-            File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/TvSubtitlesClient.cs"))
+            ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/TvSubtitlesClient.cs"))
                 .Contains("public async Task<string?> FindUploadedIdAsync(", StringComparison.Ordinal)
-            && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/UploadResult.cs"))
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/UploadResult.cs"))
                 .Contains("public string? SourceId { get; init; }", StringComparison.Ordinal));
 
         // ---- 11. Reup und Kreuzkontamination (F-M489) -----------------------------------------
@@ -352,7 +352,7 @@ internal static class Program
             && !uploadSource.Contains("Registry.IsUploaded(mediaHash, cand.Lang", StringComparison.Ordinal));
 
         // ---- 12. "hochgeladen" je Quelle (F-M490) ---------------------------------------------
-        var registrySource = File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
+        var registrySource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
         Check("each source has its own uploaded timestamp, sidecars and embeds alike",
             entities.Contains("public DateTime? SubdlUploadedAt { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public DateTime? TvSubtitlesUploadedAt { get; set; }", StringComparison.Ordinal)
@@ -372,12 +372,12 @@ internal static class Program
         // ---- 13. Reihenfolge und Erfolgsbegriff (F-M491) --------------------------------------
         Check("the download order is a setting, and tvsubtitles is first by default (operator 15.11.2026)",
             downloadSource.Contains("DownloadOrder", StringComparison.Ordinal)
-            && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"))
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"))
                 .Contains("DownloadSourceOrder.TvSubtitlesFirst;", StringComparison.Ordinal));
         Check("the GUI offers the order under downloads and saves the chosen value",
-            File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"))
+            ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"))
                 .Contains("id=\"DownloadOrder\"", StringComparison.Ordinal)
-            && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"))
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"))
                 .Contains("config.DownloadOrder =", StringComparison.Ordinal));
         Check("with tvsubtitles first its hits REPLACE the SubDL candidates, they do not queue behind them",
             downloadSource.Contains("langCands = fremd;", StringComparison.Ordinal)
@@ -385,6 +385,25 @@ internal static class Program
         Check("a kept original is a download but not a success while auto-sync is on",
             downloadSource.Contains("if (!_config.QaDownloadAutoSync || alignedForNaming)", StringComparison.Ordinal)
             && downloadSource.Contains("summary.DownloadedWithoutSignificance++;", StringComparison.Ordinal));
+
+        // ---- 14. Quellenabhaengige Vorpruefungen und Herkunft an jeder Ablage (F-M492/F-M493) -----
+        var cfgSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"));
+        var dispatcherSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlEventDispatcher.cs"));
+        Check("the SubDL API key is only demanded when SubDL downloads, the login pair only when SubDL uploads",
+            cfgSource.Contains("if (IsDownloadEnabled(SubtitleProvider.Subdl) && string.IsNullOrWhiteSpace(ApiKey))", StringComparison.Ordinal)
+            && cfgSource.Contains("if (IsUploadEnabled(SubtitleProvider.Subdl))", StringComparison.Ordinal)
+            && !cfgSource.Contains("if (string.IsNullOrWhiteSpace(Username))\n        {\n            missing.Add(\"SubDL email\");\n        }\n\n        if (string.IsNullOrWhiteSpace(Password))", StringComparison.Ordinal));
+        Check("a cycle that does not ask SubDL is not held by the SubDL counters",
+            dispatcherSource.Contains("if (!config.IsDownloadEnabled(Configuration.SubtitleProvider.Subdl))", StringComparison.Ordinal));
+        Check("a spent SubDL quota does not hold a cycle that still has tvsubtitles",
+            dispatcherSource.Contains("secondSourceCanRun", StringComparison.Ordinal)
+            && dispatcherSource.Contains("this cycle runs on tvsubtitles.net only (F-M492)", StringComparison.Ordinal));
+        var markCalls = System.Text.RegularExpressions.Regex.Matches(downloadSource, @"MarkDownloaded\(").Count;
+        var originArgs = System.Text.RegularExpressions.Regex.Matches(downloadSource, @"origin: Api\.Endpoints\.Provenance\.Name\(").Count;
+        Check($"every MarkDownloaded call carries its origin ({originArgs}/{markCalls})",
+            markCalls >= 4 && originArgs == markCalls);
+        Check("the run-end line names the downloads that did not pass the significance",
+            downloadSource.Contains("{NotSignificant} downloaded without significance", StringComparison.Ordinal));
 
         Console.WriteLine();
         if (_failures > 0)
@@ -409,6 +428,15 @@ internal static class Program
         mutate(c);
         return c;
     }
+
+    /// <summary>Liest eine Datei in einem nicht-async Helfer — CA1849 prueft nur den async-Pfad.</summary>
+    private static string ReadText(string path) => File.ReadAllText(path);
+
+    /// <summary>Oeffnet einen ZIP-Eintrag im nicht-async Helfer (dieselbe CA1849-Regel).</summary>
+    private static System.IO.Stream OpenForRead(this System.IO.Compression.ZipArchiveEntry entry) => entry.Open();
+
+    /// <summary>Schreibt in einen Strom im nicht-async Helfer.</summary>
+    private static void WriteAll(System.IO.Stream stream, byte[] bytes) => stream.Write(bytes, 0, bytes.Length);
 
     private static void Check(string what, bool ok, string? detail = null)
     {
@@ -442,7 +470,7 @@ internal static class Program
 
             if (path == "add.html")
             {
-                return Html(File.ReadAllText(Path.Combine(_dir, "add-tvshow-select.html")));
+                return Html(ReadText(Path.Combine(_dir, "add-tvshow-select.html")));
             }
 
             if (path.StartsWith("download-", StringComparison.Ordinal))
@@ -452,9 +480,9 @@ internal static class Program
                 using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
                 {
                     var entry = archive.CreateEntry("The Middle - 2x24 - Back To Summer.HDTV.FEVER.en.srt");
-                    using var stream = entry.Open();
+                    using var stream = entry.OpenForRead();
                     var body = Encoding.UTF8.GetBytes("1\n00:00:01,000 --> 00:00:02,000\nhello\n");
-                    stream.Write(body, 0, body.Length);
+                    WriteAll(stream, body);
                 }
 
                 return new HttpResponseMessage(HttpStatusCode.OK)
@@ -477,7 +505,7 @@ internal static class Program
                 return new HttpResponseMessage(HttpStatusCode.NotFound);
             }
 
-            return Html(File.ReadAllText(Path.Combine(_dir, file)));
+            return Html(ReadText(Path.Combine(_dir, file)));
         }
 
         private static HttpResponseMessage Html(string body) => new(HttpStatusCode.OK)

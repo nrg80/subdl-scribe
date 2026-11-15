@@ -191,6 +191,14 @@
     "T210": {
       "suite": "endpoints",
       "checks": 4
+    },
+    "T211": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T212": {
+      "suite": "endpoints",
+      "checks": 2
     }
   }
 }
