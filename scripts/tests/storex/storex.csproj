@@ -44,4 +44,9 @@
     <Reference Include="SQLitePCLRaw.batteries_v2"><HintPath>$(JellyfinDir)/SQLitePCLRaw.batteries_v2.dll</HintPath></Reference>
     <Reference Include="Microsoft.Extensions.Logging.Abstractions"><HintPath>$(JellyfinDir)/Microsoft.Extensions.Logging.Abstractions.dll</HintPath></Reference>
   </ItemGroup>
+  <ItemGroup>
+    <!-- Der Harness oeffnet den echten Store: SQLite-Provider und native Bibliothek muessen mit.
+         Ohne diesen Verweis stirbt der Lauf im DbContext-Konstruktor (EnsureCreated). -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+  </ItemGroup>
 </Project>

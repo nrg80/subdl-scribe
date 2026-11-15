@@ -211,6 +211,14 @@ say "Specification"
 python3 scripts/tests/spec-doc/check.py | tail -3 \
     || die "spec-doc check failed — the Lastenheft does not describe this build"
 
+# The check COUNTS the Lastenheft states ("**29 Prüfungen.**") are claims like any other: they were
+# never recomputed, so a suite could shrink under its stated number and nobody noticed. This gate binds
+# every stated count to the suite that carries it (scripts/tests/counts.json) and holds the suite's own
+# total against the sum of its claims.
+say "Metriken"
+python3 scripts/tests/counts/check.py | tail -3 \
+    || die "counts check failed — a stated check count is not carried by its suite"
+
 # --- 2. build ----------------------------------------------------------------
 say "Build"
 ./build.sh "$VER" | tail -3

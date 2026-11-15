@@ -1,0 +1,145 @@
+{
+  "_note": "Bindung Test -> Suite fuer die Pruefungszahlen im Lastenheft. Der Pruefer vergleicht jede im Dokument genannte Zahl mit der Bindung hier und stellt sicher, dass die Suite diese Zahl noch traegt (Suite-Summe >= Summe der Testzahlen). Exakte Pruefung je Test braucht Gruppenmarken in der Suite; solange die fehlen, ist die Suite-Summe die harte Grenze.",
+  "suites": {
+    "reporting": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "coverage": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "storex": {
+      "args": [
+        "<temp>/storexwork"
+      ],
+      "invariant": false,
+      "skip_run": "Suite braucht echte Globalisierung (de-Collation im Store); dotnet bricht auf diesem Host in TimeZoneInfo ab"
+    },
+    "packretry": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "gui-structure": {
+      "python": "scripts/tests/gui-structure/check.py",
+      "file": "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"
+    },
+    "seasonpack": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "offstate": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "archivecache": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "stopfire": {
+      "args": [
+        "<root>"
+      ]
+    }
+  },
+  "tests": {
+    "T176": {
+      "suite": "reporting",
+      "checks": 4
+    },
+    "T177": {
+      "suite": "coverage",
+      "checks": 12
+    },
+    "T178": {
+      "suite": "storex",
+      "checks": 3
+    },
+    "T179": {
+      "suite": "packretry",
+      "checks": 6
+    },
+    "T180": {
+      "suite": "reporting",
+      "checks": 6
+    },
+    "T181": {
+      "suite": "packretry",
+      "checks": 7
+    },
+    "T182": {
+      "suite": "gui-structure",
+      "checks": 1
+    },
+    "T183": {
+      "suite": "gui-structure",
+      "checks": 1
+    },
+    "T184": {
+      "suite": "reporting",
+      "checks": 6
+    },
+    "T185": {
+      "suite": "reporting",
+      "checks": 1
+    },
+    "T186": {
+      "suite": "reporting",
+      "checks": 1
+    },
+    "T187": {
+      "suite": "packretry",
+      "checks": 7
+    },
+    "T188": {
+      "suite": "archivecache",
+      "checks": 9
+    },
+    "T189": {
+      "suite": "packretry",
+      "checks": 7
+    },
+    "T190": {
+      "suite": "seasonpack",
+      "checks": 4
+    },
+    "T191": {
+      "suite": "seasonpack",
+      "checks": 2
+    },
+    "T192": {
+      "suite": "seasonpack",
+      "checks": 5
+    },
+    "T193": {
+      "suite": "offstate",
+      "checks": 3
+    },
+    "T194": {
+      "suite": "archivecache",
+      "checks": 8
+    },
+    "T195": {
+      "suite": "seasonpack",
+      "checks": 7
+    },
+    "T196": {
+      "suite": "gui-structure",
+      "checks": 8
+    },
+    "T197": {
+      "suite": "seasonpack",
+      "checks": 6
+    },
+    "T198": {
+      "suite": "stopfire",
+      "checks": 29
+    }
+  }
+}

@@ -40,6 +40,18 @@ internal static class DupSkip
     private static int Main(string[] args)
     {
         string root = args.Length > 0 ? args[0] : Path.Combine(Path.GetTempPath(), "dupskip");
+        // T178 (operator finding 15.11.2026, second occurrence): this harness DELETES its working
+        // directory. Handed a repository root by mistake — e.g. by a script that passes the checkout to
+        // every suite — it removes the sources. A directory carrying a repo marker is not a workdir, and
+        // refusing is the only safe direction.
+        if (File.Exists(Path.Combine(root, "build.yaml"))
+            || Directory.Exists(Path.Combine(root, ".git"))
+            || File.Exists(Path.Combine(root, ".gitignore")))
+        {
+            Console.WriteLine($">>> FEHLER: '{root}' ist ein Repository, kein Arbeitsverzeichnis — dieser Lauf loescht dort alle Dateien.");
+            return 3;
+        }
+
         if (Directory.Exists(root)) Directory.Delete(root, true);
         Directory.CreateDirectory(root);
 
