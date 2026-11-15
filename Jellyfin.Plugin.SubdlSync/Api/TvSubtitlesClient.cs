@@ -221,7 +221,7 @@ public sealed class TvSubtitlesClient
         var wanted = name.Trim().ToLowerInvariant();
         foreach (var pair in shows)
         {
-            if (pair.Key > 0 && pair.Value.ToLowerInvariant() == wanted)
+            if (pair.Key > 0 && string.Equals(pair.Value.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase))
             {
                 return pair.Key;
             }
@@ -593,7 +593,7 @@ public sealed class TvSubtitlesClient
             ?? throw new InvalidOperationException(
                 "no .srt inside the ZIP (tvsubtitles.net): " + string.Join(", ", archive.Entries.Take(3).Select(e => e.Name)));
 
-        using var entryStream = member.Open();
+        using var entryStream = await member.OpenAsync(cancellationToken).ConfigureAwait(false);
         using var buffer = new MemoryStream();
         await entryStream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
         return (member.Name, buffer.ToArray());
