@@ -1091,7 +1091,7 @@ def main():
         # into the same wall, and prod had 1144 items already queued.
         check("the RUN is refused at the same place as the download switch",
               "heldByAllowance" in disp_src
-              and "!config.DownloadEnabled || heldByAllowance" in disp_src,
+              and "!config.IsDownloadEnabled(SubtitleProvider.Subdl) || heldByAllowance" in disp_src,
               "gating only the fill still walks what earlier cycles queued")
         # F-M365 superseded the deferred row: a held-back download writes NO row (a row would have
         # to invent a time for work that did not happen) and says why in the log instead.
@@ -1510,7 +1510,9 @@ def main():
         # Assert the GATE CONSTRUCT, not the word: both files legitimately NAME UploadEnabled in the
         # comment that explains why the gate was removed, and a word-level ban went RED on a correct
         # file (measured). Match an `if` that tests the flag — that is the shape a re-added gate takes.
-        gate = re.compile(r"if\s*\(\s*!?\s*[\w.]*UploadEnabled\s*\)")
+        # F-M477: the flag is now read through IsUploadEnabled(…); the shape a re-added gate takes
+        # covers both spellings.
+        gate = re.compile(r"if\s*\(\s*!?\s*(?:[\w.]*UploadEnabled|[\w.]*IsUploadEnabled\s*\([^)]*\))\s*\)")
         check("the manual endpoint no longer refuses when upload is off",
               gate.search(ctrl) is None,
               "a manual trigger must run regardless of the upload switch")
@@ -1521,7 +1523,7 @@ def main():
         # F-M445: the automatic path is bound to the upload switch AND to the armed moment — there is
         # no cadence left to test against.
         check("the automatic path is still bound to the upload switch",
-              "config.UploadEnabled && _postprocessArmUtc != DateTime.MinValue" in sched,
+              "config.IsUploadEnabled(SubtitleProvider.Subdl) && _postprocessArmUtc != DateTime.MinValue" in sched,
               "removing the rule entirely would let the schedule run with upload off")
     # The description names the BOUND half and only that. Operator order 08.10.2026: the trailing
     # "the button below always runs" had to go — the button sits directly beneath this line, so

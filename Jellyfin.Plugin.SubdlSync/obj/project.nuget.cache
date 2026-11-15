@@ -1,0 +1,61 @@
+{
+  "version": 2,
+  "dgSpecHash": "55041FDFhjY=",
+  "success": true,
+  "projectFilePath": "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Jellyfin.Plugin.SubdlSync.csproj",
+  "expectedPackageFiles": [
+    "/opt/data/home/.nuget/packages/diacritics/4.1.8/diacritics.4.1.8.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/icu4n/60.1.0-alpha.356/icu4n.60.1.0-alpha.356.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/icu4n.transliterator/60.1.0-alpha.356/icu4n.transliterator.60.1.0-alpha.356.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/j2n/2.0.0/j2n.2.0.0.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/jellyfin.common/12.1.0/jellyfin.common.12.1.0.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/jellyfin.controller/12.1.0/jellyfin.controller.12.1.0.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/jellyfin.data/12.1.0/jellyfin.data.12.1.0.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/jellyfin.database.implementations/12.1.0/jellyfin.database.implementations.12.1.0.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/jellyfin.extensions/12.1.0/jellyfin.extensions.12.1.0.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/jellyfin.mediaencoding.keyframes/12.1.0/jellyfin.mediaencoding.keyframes.12.1.0.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/jellyfin.model/12.1.0/jellyfin.model.12.1.0.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/jellyfin.naming/12.1.0/jellyfin.naming.12.1.0.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/languagedetection/1.2.0/languagedetection.1.2.0.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.data.sqlite.core/10.0.11/microsoft.data.sqlite.core.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.entityframeworkcore/10.0.11/microsoft.entityframeworkcore.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.entityframeworkcore.abstractions/10.0.11/microsoft.entityframeworkcore.abstractions.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.entityframeworkcore.analyzers/10.0.11/microsoft.entityframeworkcore.analyzers.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.entityframeworkcore.relational/10.0.11/microsoft.entityframeworkcore.relational.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.entityframeworkcore.sqlite/10.0.11/microsoft.entityframeworkcore.sqlite.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.entityframeworkcore.sqlite.core/10.0.11/microsoft.entityframeworkcore.sqlite.core.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.extensions.caching.abstractions/10.0.11/microsoft.extensions.caching.abstractions.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.extensions.caching.memory/10.0.11/microsoft.extensions.caching.memory.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.extensions.configuration/10.0.11/microsoft.extensions.configuration.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.extensions.configuration.abstractions/10.0.11/microsoft.extensions.configuration.abstractions.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.extensions.configuration.binder/10.0.11/microsoft.extensions.configuration.binder.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.extensions.dependencyinjection/10.0.11/microsoft.extensions.dependencyinjection.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.extensions.dependencyinjection.abstractions/10.0.11/microsoft.extensions.dependencyinjection.abstractions.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.extensions.dependencymodel/10.0.11/microsoft.extensions.dependencymodel.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.extensions.logging/10.0.11/microsoft.extensions.logging.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.extensions.logging.abstractions/10.0.11/microsoft.extensions.logging.abstractions.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.extensions.options/10.0.11/microsoft.extensions.options.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/microsoft.extensions.primitives/10.0.11/microsoft.extensions.primitives.10.0.11.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/nebml/1.1.0.5/nebml.1.1.0.5.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/polly/8.7.0/polly.8.7.0.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/polly.core/8.7.0/polly.core.8.7.0.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/sqlitepclraw.bundle_e_sqlite3/2.1.12/sqlitepclraw.bundle_e_sqlite3.2.1.12.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/sqlitepclraw.core/2.1.12/sqlitepclraw.core.2.1.12.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/sqlitepclraw.lib.e_sqlite3/2.1.12/sqlitepclraw.lib.e_sqlite3.2.1.12.nupkg.sha512",
+    "/opt/data/home/.nuget/packages/sqlitepclraw.provider.e_sqlite3/2.1.12/sqlitepclraw.provider.e_sqlite3.2.1.12.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1701",
+      "level": "Warning",
+      "message": "Package 'LanguageDetection 1.2.0' was restored using '.NETFramework,Version=v4.6.1, .NETFramework,Version=v4.6.2, .NETFramework,Version=v4.7, .NETFramework,Version=v4.7.1, .NETFramework,Version=v4.7.2, .NETFramework,Version=v4.8, .NETFramework,Version=v4.8.1' instead of the project target framework 'net10.0'. This package may not be fully compatible with your project.",
+      "projectPath": "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Jellyfin.Plugin.SubdlSync.csproj",
+      "warningLevel": 1,
+      "filePath": "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Jellyfin.Plugin.SubdlSync.csproj",
+      "libraryId": "LanguageDetection",
+      "targetGraphs": [
+        "net10.0"
+      ]
+    }
+  ]
+}

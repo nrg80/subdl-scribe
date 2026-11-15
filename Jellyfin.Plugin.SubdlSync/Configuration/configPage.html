@@ -383,10 +383,18 @@
 <div class="subdl-tab" data-tab-content="upload" style="display:none">
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
-                                <input id="UploadEnabled" name="UploadEnabled" type="checkbox" is="emby-checkbox" />
-                                <span>Upload enabled</span>
+                                <input id="SubdlUploadEnabled" name="SubdlUploadEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Upload enabled — SubDL</span>
                             </label>
-                            <div class="fieldDescription">Enable all upload functions. Default: off.</div>
+                            <div class="fieldDescription">Enable all upload functions against SubDL. Default: off.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="TvSubtitlesUploadEnabled" name="TvSubtitlesUploadEnabled" type="checkbox" is="emby-checkbox" disabled="disabled" />
+                                <span>Upload enabled — tvsubtitles.net</span>
+                            </label>
+                            <div class="fieldDescription" id="TvSubtitlesUploadReason">tvsubtitles.net — kein Anbieter verbaut: der Schalter ist sichtbar, aber es gibt weder einen Abruf noch einen Upload für diese Quelle.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -462,10 +470,18 @@
                     <div class="subdl-tab" data-tab-content="download" style="display:none">
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
-                                <input id="DownloadEnabled" name="DownloadEnabled" type="checkbox" is="emby-checkbox" />
-                                <span>Download enabled</span>
+                                <input id="SubdlDownloadEnabled" name="SubdlDownloadEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Download enabled — SubDL</span>
                             </label>
-                            <div class="fieldDescription">Enable all download functions. Default: on.</div>
+                            <div class="fieldDescription">Enable all download functions against SubDL. Default: on.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="TvSubtitlesDownloadEnabled" name="TvSubtitlesDownloadEnabled" type="checkbox" is="emby-checkbox" disabled="disabled" />
+                                <span>Download enabled — tvsubtitles.net</span>
+                            </label>
+                            <div class="fieldDescription" id="TvSubtitlesDownloadReason">tvsubtitles.net — kein Anbieter verbaut: der Schalter ist sichtbar, aber es gibt weder einen Abruf noch einen Upload für diese Quelle.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -1024,7 +1040,11 @@
                         }
                         document.querySelector('#UploadOnArrival').checked = config.UploadOnArrival;
                         document.querySelector('#UploadSeasonPacks').checked = config.UploadSeasonPacks;
-                        document.querySelector('#UploadEnabled').checked = config.UploadEnabled;
+                        // F-M477: provider switch first, the pre-split value answers while it is unset.
+                        document.querySelector('#SubdlUploadEnabled').checked =
+                            config.SubdlUploadEnabled === null || config.SubdlUploadEnabled === undefined
+                                ? !!config.UploadEnabled : !!config.SubdlUploadEnabled;
+                        document.querySelector('#TvSubtitlesUploadEnabled').checked = !!config.TvSubtitlesUploadEnabled;
                         document.querySelector('#DryRun').checked = config.DryRun;
                         document.querySelector('#LogMode').value = config.LogMode;
                         document.querySelector('#OshashRefresh').value = config.OshashRefresh || 'Monthly';
@@ -1046,7 +1066,10 @@
                                '.!qb', '.!ut', '.bc!', '.!bt', '.az!', '.bt!', '.part', '.partial', '.downloading',
                                '.crdownload', '.opdownload',
                                '.ob!', '.fb!', '.jc!', '.td', '.dtapart', '.tmp'].join('\n');
-                        document.querySelector('#DownloadEnabled').checked = config.DownloadEnabled;
+                        document.querySelector('#SubdlDownloadEnabled').checked =
+                            config.SubdlDownloadEnabled === null || config.SubdlDownloadEnabled === undefined
+                                ? !!config.DownloadEnabled : !!config.SubdlDownloadEnabled;
+                        document.querySelector('#TvSubtitlesDownloadEnabled').checked = !!config.TvSubtitlesDownloadEnabled;
                         subdlPopulateLangList(config);
                         document.querySelector('#DownloadLanguagesDisplay').value = (config.DownloadLanguages || '');
                         document.querySelector('#DownloadOnlyMissing').checked = config.DownloadOnlyMissing;
@@ -1662,7 +1685,9 @@ workers.forEach(function (w) {
                         config.FollowUpRoundsUpload = document.querySelector('#FollowUpRoundsUpload').checked;
                         config.UploadOnArrival = document.querySelector('#UploadOnArrival').checked;
                         config.UploadSeasonPacks = document.querySelector('#UploadSeasonPacks').checked;
-                                                config.UploadEnabled = document.querySelector('#UploadEnabled').checked;
+                        config.SubdlUploadEnabled = document.querySelector('#SubdlUploadEnabled').checked;
+                        // F-M478: the source has no provider, so its switch cannot be switched on — keep it false.
+                        config.TvSubtitlesUploadEnabled = false;
                         config.DryRun = document.querySelector('#DryRun').checked;
                         config.LogMode = document.querySelector('#LogMode').value;
                         config.OshashRefresh = document.querySelector('#OshashRefresh').value;
@@ -1678,7 +1703,9 @@ workers.forEach(function (w) {
                         config.UploadContinueAfterLimit = document.querySelector('#UploadContinueAfterLimit').checked;
                         config.SkipDirPatterns = document.querySelector('#SkipDirs').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
                         config.SkipFilePatterns = document.querySelector('#SkipFiles').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
-                        config.DownloadEnabled = document.querySelector('#DownloadEnabled').checked;
+                        config.SubdlDownloadEnabled = document.querySelector('#SubdlDownloadEnabled').checked;
+                        // F-M478: no provider for this source — the switch stays off whatever the markup says.
+                        config.TvSubtitlesDownloadEnabled = false;
                         config.DownloadLanguages = document.querySelector('#DownloadLanguagesDisplay').value;
                         config.DownloadOnlyMissing = document.querySelector('#DownloadOnlyMissing').checked;
                         config.DownloadHearingImpaired = document.querySelector('#DownloadHearingImpaired').checked;

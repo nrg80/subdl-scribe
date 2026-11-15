@@ -30,7 +30,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 22 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 27 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
-- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 17 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 20 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 18 requirements
 - [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 48 requirements
 - [16. Non-Goals](#16-non-goals)
@@ -1448,6 +1448,12 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M409 [P]:** **Der `dry`-Marker trägt dasselbe Grau wie das Wort `cancel` (`#767676`).** Zwei Grautöne nebeneinander auf derselben Seite behaupteten zwei Bedeutungen, wo eine gemeint ist: „nichts passiert".
 
+**F-M477 [D]:** **Upload und Download sind je Anbieter und Richtung geschaltet, und der alte Schalter bleibt der Rückfall.** Vier Schalter ersetzen die zwei globalen: `SubdlDownloadEnabled`, `SubdlUploadEnabled`, `TvSubtitlesDownloadEnabled`, `TvSubtitlesUploadEnabled`. Die vier sind **nullbar**, damit „nie angefasst" von „ausgeschaltet" unterscheidbar bleibt: solange ein Anbieterschalter leer ist, antwortet der Alt-Wert (`DownloadEnabled` bzw. `UploadEnabled`), und eine Konfigurationsdatei von vor der Trennung bedeutet weiter genau, was sie bedeutete — ohne Migration, ohne Neustart-Artefakt. Gelesen wird ausschließlich über `IsDownloadEnabled(provider)` und `IsUploadEnabled(provider)`, nie über das Feld: kein Aufrufer darf die Reihenfolge selbst nachbauen. Die beiden **Ankunfts-Schalter** (`DownloadOnArrival`, `UploadOnArrival`) bleiben global — sie sagen, *wann* eine Richtung läuft, nicht *wohin*, und je Anbieter vervierfacht wäre daraus ein Zeitplan, den niemand mehr überblickt. Geprüft von T202.
+
+**F-M478 [D]:** **Ein Schalter ohne verbauten Anbieter ist sichtbar, abgeschaltet und sagt warum.** tvsubtitles.net hat seine zwei Schalter auf der Seite, aber weder einen Abruf noch einen Upload im Code: `HasProvider(TvSubtitles)` ist falsch, beide Richtungen sind unabhängig vom gespeicherten Wert aus, und unter dem Schalter steht der Grund (`MissingProviderReason`) im selben Wortlaut, den auch die Worker-Notiz benutzt. Das Feld ist abgeschaltet (`disabled`) und wird beim Speichern auf `false` geschrieben, damit ein alter Wert nie als Einladung stehen bleibt. Die Regel ist dieselbe wie bei F-M366: ein Bedienelement, das nichts tut, ist schlimmer als keines, weil es eine Wahl behauptet. Geprüft von T202.
+
+**F-M479 [P]:** **Die vier Schalter stehen im Tab ihrer Richtung, nicht in einem eigenen Anbieter-Tab.** Download-Schalter im Download-Tab, Upload-Schalter im Upload-Tab, je Anbieter eine Zeile mit dem Anbieternamen im Label (`Download enabled — SubDL`). Ein Anbieter-Tab hätte die Richtung von ihrer Schaltung getrennt und den Weg „erst hier, dann dort" erzwungen; die Richtung ist die Frage, die der Nutzer hat.
+
 ## 14. Data Model and Persistence
 
 **F-M38 [B1]:** **Persistent state split by the kind of thing described** (section 14). Embedded tracks live under their video file, keyed by media hash + stream position; sidecars are keyed by normalized content hash; the file's own record carries path, IDs, season/episode and the derived language aggregate. The **hearing-impaired flag belongs to each subtitle datum**, never to the file (F-M282), and **completeness is derived rather than stored** (F-M283) — so the file record carries no download mark and no HI aggregate. Both pipelines read and write the same store.
@@ -2093,6 +2099,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T198:** Ein Aufschub des Seed-Laufs ist ein Termin der Richtung: er ersetzt einen späteren Termin derselben Richtung, schiebt einen früheren nicht nach hinten, steht in der Terminliste, aus der die Statuszeile ihre Zeitpunkte liest, überlebt mit seinem Grund einen Neustart, und die Statuszeile nennt den Grund des Termins statt der Zeile des letzten Laufs; kein Timer im Speicher trägt die Wartezeit, und ein Termin, der gerade verbraucht wird, nennt seinen Grund trotz abgelaufener Frist. Dasselbe gilt für die drei Wartungs-Termine (Database, OSHash, Nachlauf): Sie nennen ihren Grund, ein gewöhnliches Armen löscht den alten Grund, und ein Kurzzeichen ohne Termin wird nicht angezeigt. **29 Prüfungen.**
 
 **T201:** Der HI-Pool ist eine Rangliste, kein Einzelgriff: Er wird abgelaufen, ein Duplikat beendet ihn nicht, ein gespeicherter Kandidat schon; derselbe Ablauf bedient die Variante neben einer gespeicherten Hauptspur und den Rückfall, wenn der reguläre Ablauf ohne Speichern endet, und der Rückfall steht vor der Meldung „nicht verfügbar" und zählt als Speichern der Sprache. Beide Aufrufe hängen am HI-Schalter, eine gespeicherte Datei trägt das Kennzeichen im Namen und `hi = true` im Store, ihre SDH-Zeilen bleiben stehen, und der Ablauf ordnet nach Preis und Reichweite vor dem Textscore. **20 Prüfungen.**
+
+**T202:** Die Schalter sind je Anbieter und Richtung getrennt und der alte Wert bleibt der Rückfall: der Anbieterschalter gewinnt, auch gegen den Alt-Wert; solange er leer ist, antwortet der Alt-Wert in beiden Richtungen; tvsubtitles.net ist in beiden Richtungen aus, selbst wenn sein Schalter gesetzt ist, nennt dafür einen Grund und gilt nicht als Anbieter. **8 Prüfungen**, alle in der Suite `offstate`.
 
 **T197:** Die Rangfolge der Kandidaten richtet sich nach Preis und Reichweite: vier Stufen, Gratis vor bezahlt, Staffelpack vor Einzelfassung bei gleichem Preis, Pack ohne die Folge bleibt draußen; die Cache-Prüfung geht über die Eintrags-Id; die Rangfolge gilt auch für das Nachfassen und die HI-Variante. **6 Prüfungen.**
 

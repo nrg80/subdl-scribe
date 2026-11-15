@@ -149,6 +149,10 @@
     "T201": {
       "suite": "hipool",
       "checks": 20
+    },
+    "T202": {
+      "suite": "offstate",
+      "checks": 8
     }
   }
 }

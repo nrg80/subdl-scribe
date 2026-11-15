@@ -162,7 +162,7 @@ internal static class Program
                 "F-M445: arming replaces the moment instead of comparing against it (last order wins)");
             Check(!sched.Contains("_postprocessDeferredUntil", StringComparison.Ordinal),
                 "F-M445: the old lock-busy deferral field is gone — it only delayed a due anchor");
-            Check(sched.Contains("config.UploadEnabled && _postprocessArmUtc != DateTime.MinValue", StringComparison.Ordinal),
+            Check(sched.Contains("config.IsUploadEnabled(SubtitleProvider.Subdl) && _postprocessArmUtc != DateTime.MinValue", StringComparison.Ordinal),
                 "F-M445: the fire needs upload enabled and an armed moment, nothing else");
             Check(!sched.Contains("RandomPostprocessTime", StringComparison.Ordinal)
                   && !sched.Contains("UploadPostprocessInterval", StringComparison.Ordinal)

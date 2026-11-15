@@ -17,6 +17,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Jellyfin.Plugin.SubdlScribe.Configuration;
 
 namespace Jellyfin.Plugin.SubdlScribe.Api;
 
@@ -344,7 +345,7 @@ public class SubdlQuota : ControllerBase
             // ersetzen"): the postprocessing has exactly ONE wording — "manual". Whether the upload switch
             // is off or the cadence sits on Manual, the fact is the same: it does not run by itself, and
             // its button does. No "off" for this worker.
-            if (!config.UploadEnabled || manual(postKey, config))
+            if (!config.IsUploadEnabled(SubtitleProvider.Subdl) || manual(postKey, config))
             {
                 notes.Add("upload postprocessing manual");
             }

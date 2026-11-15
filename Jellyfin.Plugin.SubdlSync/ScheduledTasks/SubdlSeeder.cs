@@ -28,6 +28,7 @@ using Microsoft.Extensions.Logging;
 
 using Jellyfin.Plugin.SubdlScribe.Language;
 using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubdlScribe.Configuration;
 
 namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
 
@@ -364,7 +365,7 @@ public sealed class SubdlSeeder
                 // by the dispatcher when SubDL has no download allowance left — so a spent limit
                 // keeps items out of the queue the way switching the direction off does.
                 if (dir != SubdlEventDispatcher.CycleDirection.UploadOnly
-                    && config.DownloadEnabled
+                    && config.IsDownloadEnabled(SubtitleProvider.Subdl)
                     && downloadAllowed
                     && IsDownloadTodo(item, mediaPath, config))
                 {
@@ -372,7 +373,7 @@ public sealed class SubdlSeeder
                 }
 
                 if (dir != SubdlEventDispatcher.CycleDirection.DownloadOnly
-                    && config.UploadEnabled && IsUploadTodo(item, mediaPath, config))
+                    && config.IsUploadEnabled(SubtitleProvider.Subdl) && IsUploadTodo(item, mediaPath, config))
                 {
                     snapshot.Upload.Add(Clone(qi));
                 }

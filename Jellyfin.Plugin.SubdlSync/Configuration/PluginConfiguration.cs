@@ -139,6 +139,21 @@ public enum LogLevelMode
 }
 
 /// <summary>
+/// F-M477 (operator order 15.11.2026): the subtitle source a switch talks about. The plugin serves
+/// exactly one source today (SubDL); tvsubtitles.net is named here because its switches exist and
+/// must state that no provider is wired in — a switch that silently does nothing is worse than none
+/// (same reasoning as F-M366).
+/// </summary>
+public enum SubtitleProvider
+{
+    /// <summary>SubDL.com — the only source the pipelines talk to.</summary>
+    Subdl,
+
+    /// <summary>tvsubtitles.net — switches exist, no provider is wired in yet.</summary>
+    TvSubtitles,
+}
+
+/// <summary>
 /// Plugin configuration for Sub Scribe (F-M18 – F-M22, F-M24a-c, F-M28-F-M30, F-M34/M35).
 /// </summary>
     
@@ -320,8 +335,28 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>
     /// Gets or sets a value indicating whether the upload pipeline is enabled.
     /// Master switch for ALL upload runs (scheduled, manual trigger, on-arrival). Default: off (opt-in).
+    /// <para>
+    /// F-M477 (operator order 15.11.2026): this is the LEGACY value. The switches are split per provider
+    /// (<see cref="SubdlUploadEnabled"/>, <see cref="TvSubtitlesUploadEnabled"/>); the two are nullable so
+    /// "the operator never touched the split" stays distinguishable from "the operator said off". While a
+    /// per-provider value is null, this one answers — a configuration file written before the split keeps
+    /// meaning exactly what it meant. <see cref="IsUploadEnabled"/> is the only reader.
+    /// </para>
     /// </summary>
     public bool UploadEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the SubDL upload switch. Null = not decided yet, the legacy
+    /// <see cref="UploadEnabled"/> answers instead (F-M477).
+    /// </summary>
+    public bool? SubdlUploadEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the tvsubtitles.net upload switch. Null = not decided yet. There is no provider
+    /// wired in for this source, so the effective value is always false (F-M478) — the switch is shown
+    /// so the page does not have to pretend the choice exists twice.
+    /// </summary>
+    public bool? TvSubtitlesUploadEnabled { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether F-M372 is on: a season that is complete (every aired
@@ -339,8 +374,25 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>
     /// Gets or sets a value indicating whether the download pipeline is enabled (F-M41).
     /// Default true so the plugin works out of the box; users may disable it.
+    /// <para>
+    /// F-M477: the LEGACY value, exactly like <see cref="UploadEnabled"/> — the per-provider switches
+    /// (<see cref="SubdlDownloadEnabled"/>, <see cref="TvSubtitlesDownloadEnabled"/>) answer first, and
+    /// this one answers while they are null. <see cref="IsDownloadEnabled"/> is the only reader.
+    /// </para>
     /// </summary>
     public bool DownloadEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the SubDL download switch. Null = not decided yet, the legacy
+    /// <see cref="DownloadEnabled"/> answers instead (F-M477).
+    /// </summary>
+    public bool? SubdlDownloadEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the tvsubtitles.net download switch. Null = not decided yet; there is no provider
+    /// wired in, so the effective value is always false (F-M478).
+    /// </summary>
+    public bool? TvSubtitlesDownloadEnabled { get; set; }
 
     /// <summary>Gets or sets the target languages, e.g. "EN, FR, ES" (F-M42). Empty = download disabled. (user decision 08.09.2026, Arabic added 30.09.2026): default AR, EN, ES, FR, HI, ZH (alphabetical) — DE/RU/PT were removed deliberately (DE is uploaded by hand, RU/PT have thin coverage).</summary>
     public string DownloadLanguages { get; set; } = "AR, EN, ES, FR, HI, ZH";
@@ -760,6 +812,60 @@ public class PluginConfiguration : BasePluginConfiguration
     /// 'und' stream is removed from the upload set (skip, logged). Default: on.
     /// </summary>
     public bool UploadResolveUnd { get; set; } = true;
+
+    #endregion
+
+    #region Provider switches (F-M477/F-M478)
+
+    /// <summary>
+    /// F-M477 (operator order 15.11.2026): is the DOWNLOAD direction on for this source?
+    /// The per-provider switch answers; while it is null the legacy <see cref="DownloadEnabled"/>
+    /// answers, so a configuration written before the split keeps its meaning.
+    /// A source with no provider wired in is always off (F-M478) — see <see cref="HasProvider"/>.
+    /// </summary>
+    /// <param name="provider">The subtitle source asked about.</param>
+    /// <returns>True when the download direction runs for this source.</returns>
+    public bool IsDownloadEnabled(SubtitleProvider provider) => provider switch
+    {
+        SubtitleProvider.Subdl => HasProvider(provider) && (SubdlDownloadEnabled ?? DownloadEnabled),
+        SubtitleProvider.TvSubtitles => HasProvider(provider) && (TvSubtitlesDownloadEnabled ?? false),
+        _ => false,
+    };
+
+    /// <summary>
+    /// F-M477: is the UPLOAD direction on for this source? Same answering order as
+    /// <see cref="IsDownloadEnabled"/>: provider switch first, legacy <see cref="UploadEnabled"/> as fallback.
+    /// </summary>
+    /// <param name="provider">The subtitle source asked about.</param>
+    /// <returns>True when the upload direction runs for this source.</returns>
+    public bool IsUploadEnabled(SubtitleProvider provider) => provider switch
+    {
+        SubtitleProvider.Subdl => HasProvider(provider) && (SubdlUploadEnabled ?? UploadEnabled),
+        SubtitleProvider.TvSubtitles => HasProvider(provider) && (TvSubtitlesUploadEnabled ?? false),
+        _ => false,
+    };
+
+    /// <summary>
+    /// F-M478: does a provider exist for this source? SubDL is the only one wired in; tvsubtitles.net
+    /// has switches but no client, no pipeline branch and no route. The page states this instead of
+    /// offering a choice that does nothing.
+    /// </summary>
+    /// <param name="provider">The subtitle source asked about.</param>
+    /// <returns>True when the source can actually be served.</returns>
+    public static bool HasProvider(SubtitleProvider provider) => provider == SubtitleProvider.Subdl;
+
+    /// <summary>
+    /// F-M478: the operator-facing reason a switch is inert, or null when it works. The page prints it
+    /// under the switch; the worker-off note uses the same sentence so there is one wording, not two.
+    /// </summary>
+    /// <param name="provider">The subtitle source asked about.</param>
+    /// <returns>The reason, or null when the source is wired in.</returns>
+    public static string? MissingProviderReason(SubtitleProvider provider) => provider switch
+    {
+        SubtitleProvider.TvSubtitles => "tvsubtitles.net — kein Anbieter verbaut: der Schalter ist sichtbar, "
+            + "aber es gibt weder einen Abruf noch einen Upload für diese Quelle.",
+        _ => null,
+    };
 
     #endregion
 

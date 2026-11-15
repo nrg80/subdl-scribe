@@ -48,7 +48,7 @@ public static class WorkerOffState
 
         if (string.Equals(workerKey, WorkerRunRegistry.DownloadWorkerKey, StringComparison.Ordinal))
         {
-            return !config.DownloadEnabled
+            return !config.IsDownloadEnabled(SubtitleProvider.Subdl)
                 || NoLibraries(config)
                 || NoTargetLanguages(config)
                 || MissingCredential(config);
@@ -56,7 +56,7 @@ public static class WorkerOffState
 
         if (string.Equals(workerKey, WorkerRunRegistry.UploadWorkerKey, StringComparison.Ordinal))
         {
-            return !config.UploadEnabled
+            return !config.IsUploadEnabled(SubtitleProvider.Subdl)
                 || NoLibraries(config)
                 || MissingCredential(config);
         }
@@ -66,7 +66,7 @@ public static class WorkerOffState
             // F-M445 (operator decision 02.11.2026): the postprocessing has no cadence of its own any
             // more — it is armed by every finished upload run. It is therefore exactly as far "off" as
             // the upload direction is: no uploads means nothing to resolve.
-            return !config.UploadEnabled;
+            return !config.IsUploadEnabled(SubtitleProvider.Subdl);
         }
 
         return false;

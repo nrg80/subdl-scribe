@@ -50,6 +50,33 @@ Check("postprocessing is never off while upload runs", !Off(PP, _ => { }));
 Check("postprocessing stays ON when no library is selected — it reads /user/mySubtitles",
     !WorkerOffState.Applies(PP, Mutate(c => c.SelectedLibraries.Clear())));
 
+// --- F-M477: die Schalter sind je Anbieter und Richtung getrennt -----------------
+// Der Alt-Wert antwortet nur, solange der Anbieterschalter ungesetzt (null) ist. Genau diese
+// Reihenfolge macht die Umstellung ohne Migration richtig: eine Datei von vor der Trennung
+// bedeutet weiter, was sie bedeutete.
+Check("SubDL-Download folgt dem Anbieterschalter, wenn er gesetzt ist",
+    !Mutate(c => { c.DownloadEnabled = true; c.SubdlDownloadEnabled = false; }).IsDownloadEnabled(SubtitleProvider.Subdl));
+Check("SubDL-Download bleibt an, auch wenn der Alt-Wert aus ist — der neue Schalter gewinnt",
+    Mutate(c => { c.DownloadEnabled = false; c.SubdlDownloadEnabled = true; }).IsDownloadEnabled(SubtitleProvider.Subdl));
+Check("der Alt-Wert antwortet, solange der Anbieterschalter ungesetzt ist",
+    !Mutate(c => { c.DownloadEnabled = false; c.SubdlDownloadEnabled = null; }).IsDownloadEnabled(SubtitleProvider.Subdl)
+    && Mutate(c => { c.DownloadEnabled = true; c.SubdlDownloadEnabled = null; }).IsDownloadEnabled(SubtitleProvider.Subdl));
+Check("SubDL-Upload folgt dem Anbieterschalter, wenn er gesetzt ist",
+    !Mutate(c => { c.UploadEnabled = true; c.SubdlUploadEnabled = false; }).IsUploadEnabled(SubtitleProvider.Subdl));
+Check("der Alt-Wert des Uploads antwortet, solange der Anbieterschalter ungesetzt ist",
+    !Mutate(c => { c.UploadEnabled = false; c.SubdlUploadEnabled = null; }).IsUploadEnabled(SubtitleProvider.Subdl));
+// F-M478: tvsubtitles.net hat Schalter, aber keinen Anbieter — beide Richtungen sind aus,
+// egal was in der Konfiguration steht, und der Grund ist benannt statt still.
+Check("tvsubtitles ist in beiden Richtungen aus, auch mit gesetztem Schalter",
+    !Mutate(c => { c.TvSubtitlesDownloadEnabled = true; c.TvSubtitlesUploadEnabled = true; }).IsDownloadEnabled(SubtitleProvider.TvSubtitles)
+    && !Mutate(c => { c.TvSubtitlesDownloadEnabled = true; c.TvSubtitlesUploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.TvSubtitles));
+Check("tvsubtitles nennt seinen Grund, SubDL hat keinen",
+    PluginConfiguration.MissingProviderReason(SubtitleProvider.TvSubtitles) is { Length: > 20 }
+    && PluginConfiguration.MissingProviderReason(SubtitleProvider.Subdl) is null);
+Check("der tote Schalter ist kein Anbieter, SubDL schon",
+    !PluginConfiguration.HasProvider(SubtitleProvider.TvSubtitles)
+    && PluginConfiguration.HasProvider(SubtitleProvider.Subdl));
+
 // --- the lamps are NOT repainted (operator: note it, do not grey the row) ---
 var gate = Mutate(c => c.UploadEnabled = false);
 Check("the lamp override is gone from the registry", typeof(WorkerRunRegistry.Outcome).GetField("Off") == null);
@@ -132,7 +159,7 @@ Check("the quota answer carries the notes in its local block",
     quota.Contains("var offEntries = StatusNotes();") && quota.Contains("notes = offEntries"));
 Check("the notes list is built from the shared gates",
     quota.Contains("WorkerOffState.Applies") && quota.Contains("WorkerOffState.IsManualOnly") && quota.Contains("StatusNotes()"));
-Check("postprocessing has ONE wording - manual, never off", quota.Contains("!config.UploadEnabled || manual(postKey, config)"));
+Check("postprocessing has ONE wording - manual, never off", quota.Contains("!config.IsUploadEnabled(SubtitleProvider.Subdl) || manual(postKey, config)"));
 Check("the wording is the operator's seven phrases", quota.Contains("\"download off\"") && quota.Contains("\"upload off\"") && quota.Contains("\"download manual\"") && quota.Contains("\"upload manual\"")
     && !quota.Contains("\"upload postprocessing off\"")
     && quota.Contains("\"upload postprocessing manual\"") && quota.Contains("\"database refresh manual\"") && quota.Contains("\"oshash refresh manual\""));

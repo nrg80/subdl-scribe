@@ -1205,7 +1205,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         // re-arms it ("the last order wins"). Upload switched off means nothing is armed at all: the
         // postprocessing resolves rejected uploads, work that only exists while the direction is on
         // (F-M291).
-        if (config.UploadEnabled && _postprocessArmUtc != DateTime.MinValue)
+        if (config.IsUploadEnabled(SubtitleProvider.Subdl) && _postprocessArmUtc != DateTime.MinValue)
         {
             if (nowUtc >= _postprocessArmUtc)
             {
@@ -1296,8 +1296,8 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             // QueueScheduledTask then drops the fire silently. Test this BEFORE the
             // marker is consumed so the slot stays claimable for the next tick.
             // Checked for both directions, since either may be missing.
-            if ((config.DownloadEnabled && !IsTaskRegistered<SubdlDownloadTask>())
-                || (config.UploadEnabled && !IsTaskRegistered<SubdlUploadTask>()))
+            if ((config.IsDownloadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<SubdlDownloadTask>())
+                || (config.IsUploadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<SubdlUploadTask>()))
             {
                 return; // marker NOT set → fires on a later tick
             }
@@ -1317,8 +1317,8 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             // the cycle via the dispatcher (seed → down → up). The per-direction
             // task queueing stays as the delivery mechanism — both tasks forward
             // to TriggerCycle, which is idempotent (one cycle at a time).
-            bool downloadJoins = config.DownloadEnabled;
-            bool uploadJoins = config.UploadEnabled;
+            bool downloadJoins = config.IsDownloadEnabled(SubtitleProvider.Subdl);
+            bool uploadJoins = config.IsUploadEnabled(SubtitleProvider.Subdl);
 
             if (downloadJoins)
             {
@@ -1356,8 +1356,8 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             // F-M212: catch-up queueing needs the same registration guard as the
             // regular fire — an early-startup miss would otherwise set _catchUpFired
             // and drop the cycle for the whole day.
-            if ((config.DownloadEnabled && !IsTaskRegistered<SubdlDownloadTask>())
-                || (config.UploadEnabled && !IsTaskRegistered<SubdlUploadTask>()))
+            if ((config.IsDownloadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<SubdlDownloadTask>())
+                || (config.IsUploadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<SubdlUploadTask>()))
             {
                 return; // retry on a later tick
             }
@@ -1367,8 +1367,8 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             LogUtil.Normal(_logger, 
                 "[SubDL] Refetch catch-up: missed anchor window — queueing one cycle (F-M156).");
 
-            bool downloadJoins = config.DownloadEnabled;
-            bool uploadJoins = config.UploadEnabled;
+            bool downloadJoins = config.IsDownloadEnabled(SubtitleProvider.Subdl);
+            bool uploadJoins = config.IsUploadEnabled(SubtitleProvider.Subdl);
 
             if (downloadJoins)
             {
