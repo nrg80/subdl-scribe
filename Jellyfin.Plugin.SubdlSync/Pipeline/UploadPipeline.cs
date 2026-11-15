@@ -2277,6 +2277,7 @@ public sealed class UploadPipeline : IPackFiller
         }
 
         UploadResult result;
+        var vonZweiter = false;
         if (darfSubdl)
         {
             result = await _api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired, framerate).ConfigureAwait(false);
@@ -2296,6 +2297,7 @@ public sealed class UploadPipeline : IPackFiller
                 // F-M488: die Id der Quelle reist im Ergebnis mit und wird vom Aufrufer in das eigene
                 // Feld geschrieben — hier fehlen mediaHash und SubPos, dort sind sie im Griff.
                 result = zweite;
+                vonZweiter = true;
             }
             else if (!result.SkippedItem)
             {
@@ -2381,17 +2383,33 @@ public sealed class UploadPipeline : IPackFiller
                     Registry.MarkSidecar(contentHashEarly, mediaHash ?? contentHashEarly, lang, hearingImpaired, forced,
                         SubtitleStatus.Uploaded, subdlId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         fileName: Path.GetFileName(loosePath), path: loosePath,
-                        // F-M488: eigenes Feld je Quelle und Richtung.
-                        subdlUploadId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        tvSubtitlesUploadId: result.SourceId);
+                        // F-M488: eigenes Feld je Quelle und Richtung. Liefert die Quelle keine Id,
+                        // vergeben wir eine eigene (Präfix own:) — ein Upload ohne Kennzeichen wäre von
+                        // einem, der nie stattfand, nicht zu unterscheiden.
+                        // Nur die Quelle bekommt ihr Kennzeichen, die den Upload wirklich genommen hat.
+                        subdlUploadId: vonZweiter
+                            ? null
+                            : uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                                ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.Subdl, contentHashEarly, releaseName, DateTime.UtcNow),
+                        tvSubtitlesUploadId: vonZweiter
+                            ? result.SourceId
+                                ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.TvSubtitles, contentHashEarly, releaseName, DateTime.UtcNow)
+                            : null);
                 }
                 else
                 {
                     Registry.MarkEmbed(mediaHash, subPos, lang, hearingImpaired,
                         SubtitleStatus.Uploaded, contentHash: contentHashEarly,
                         subdlId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        subdlUploadId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        tvSubtitlesUploadId: result.SourceId);
+                        // Nur die Quelle bekommt ihr Kennzeichen, die den Upload wirklich genommen hat.
+                        subdlUploadId: vonZweiter
+                            ? null
+                            : uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                                ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.Subdl, contentHashEarly, releaseName, DateTime.UtcNow),
+                        tvSubtitlesUploadId: vonZweiter
+                            ? result.SourceId
+                                ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.TvSubtitles, contentHashEarly, releaseName, DateTime.UtcNow)
+                            : null);
                 }
             });
 

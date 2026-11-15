@@ -124,12 +124,15 @@ Download schreibt sie beim Speichern mit (`Provenance.Name(cand.Provider)` plus 
 | `SubdlDownloadId` | Download von SubDL | die SubDL-Eintrags-Id des Treffers |
 | `SubdlUploadId` | Upload zu SubDL | die Id aus der Antwort des Uploads |
 | `TvSubtitlesDownloadId` | Download von tvsubtitles.net | die Untertitel-Id der Seite (z. B. `170678`) |
-| `TvSubtitlesUploadId` | Upload zu tvsubtitles.net | **zurückgelesen** von der Folgenseite nach dem Senden |
+| `TvSubtitlesUploadId` | Upload zu tvsubtitles.net | **zurückgelesen** von der Folgenseite; fehlt sie, eine **eigene** Id (`own:…`) |
 
 Für SubDL war nichts Neues nötig — die Id steht schon in der Antwort, sie wird nur zusätzlich in ihr
 eigenes Feld geschrieben. tvsubtitles.net antwortet auf den Upload **ohne** Id, deshalb wird sie
-danach von der Folgenseite gelesen (Sprache und Release müssen passen). Findet der Rückleser nichts,
-bleibt das Feld leer: eine erfundene Id wäre schlimmer als keine, weil der Store sie verbürgen würde.
+danach von der Folgenseite gelesen (Sprache und Release müssen passen). **Findet der Rückleser nichts,
+vergibt das Plugin eine eigene Id:** `own:<quelle>:<Zeitstempel>:<8 Hex>`. Das Präfix macht sie
+unverwechselbar mit einer Id der Seite, und der Store kann damit sagen „dieser Upload ist passiert,
+sein Ziel ist unser eigene Kennzeichen" statt „unbekannt". Gesetzt wird nur das Feld der Quelle, die
+den Upload wirklich genommen hat.
 
 Schema 11, in `sidecars` **und** `embeds`, per `ALTER TABLE` nachgezogen; geschrieben wird nur, was
 bekannt ist, und ein leerer Wert löscht keine vorhandene Angabe.

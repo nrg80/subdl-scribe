@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("seasonpackrun")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+365b48d64c900b47eebc0c4eb31e5da24ae47896")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2e99014dd1fc55afd22779f20ad95438f88be0ef")]
 [assembly: System.Reflection.AssemblyProductAttribute("seasonpackrun")]
 [assembly: System.Reflection.AssemblyTitleAttribute("seasonpackrun")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

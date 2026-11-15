@@ -304,10 +304,24 @@ internal static class Program
             downloadSource.Contains("subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null", StringComparison.Ordinal)
             && downloadSource.Contains("tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null", StringComparison.Ordinal));
         Check("the upload writes SubDL's id into SubDL's field",
-            uploadSource.Contains("subdlUploadId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture)", StringComparison.Ordinal));
+            uploadSource.Contains("subdlUploadId: vonZweiter", StringComparison.Ordinal)
+            && uploadSource.Contains("uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture)", StringComparison.Ordinal));
         Check("the second source's upload id is carried in the result and stored in its own field",
-            uploadSource.Contains("tvSubtitlesUploadId: result.SourceId", StringComparison.Ordinal))
-            ;
+            uploadSource.Contains("tvSubtitlesUploadId: vonZweiter", StringComparison.Ordinal)
+            && uploadSource.Contains("result.SourceId", StringComparison.Ordinal));
+        var ownId = Provenance.OwnUploadId(SubtitleProvider.TvSubtitles, "abc123", "The.Middle.S02E24.720p", new DateTime(2026, 11, 15, 14, 30, 12, DateTimeKind.Utc));
+        Check("a missing id is replaced by our own, unmistakably prefixed",
+            ownId.StartsWith("own:tvsubtitles:20261115T143012Z:", StringComparison.Ordinal)
+            && Provenance.IsOwnUploadId(ownId)
+            && !Provenance.IsOwnUploadId("170678"));
+        Check("the minted id is reproducible for the same input and differs for another subtitle",
+            ownId == Provenance.OwnUploadId(SubtitleProvider.TvSubtitles, "abc123", "The.Middle.S02E24.720p", new DateTime(2026, 11, 15, 14, 30, 12, DateTimeKind.Utc))
+            && ownId != Provenance.OwnUploadId(SubtitleProvider.TvSubtitles, "def456", "The.Middle.S02E24.720p", new DateTime(2026, 11, 15, 14, 30, 12, DateTimeKind.Utc)));
+        Check("only the source that took the upload gets its mark",
+            uploadSource.Contains("var vonZweiter = false;", StringComparison.Ordinal)
+            && uploadSource.Contains("subdlUploadId: vonZweiter", StringComparison.Ordinal)
+            && uploadSource.Contains("tvSubtitlesUploadId: vonZweiter", StringComparison.Ordinal)
+            && uploadSource.Contains("vonZweiter = true;", StringComparison.Ordinal));
         Check("the id is read back from the episode page, never invented",
             File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/TvSubtitlesClient.cs"))
                 .Contains("public async Task<string?> FindUploadedIdAsync(", StringComparison.Ordinal)

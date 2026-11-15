@@ -178,7 +178,7 @@
     },
     "T207": {
       "suite": "endpoints",
-      "checks": 6
+      "checks": 9
     }
   }
 }

@@ -85,6 +85,40 @@ public static class Provenance
     }
 
     /// <summary>
+    /// F-M488 (operator decision 15.11.2026: "aber dann vergeben wir eine upload id"): an upload always
+    /// gets a mark. When the source reports its own id, that id is used. When it does not — tvsubtitles.net
+    /// answers the upload without one — the plugin mints its own, prefixed <c>own:</c> so nobody ever
+    /// mistakes it for an id of the site. That is the difference between "we uploaded it and know where"
+    /// and "we uploaded it and only know that it happened": both are recorded, neither is guessed.
+    /// </summary>
+    /// <param name="provider">The source that took the upload.</param>
+    /// <param name="contentHash">The subtitle's content hash — it names the text we sent.</param>
+    /// <param name="release">The release name the upload used.</param>
+    /// <param name="utcNow">The moment of the upload (passed in, so a test can pin it).</param>
+    /// <returns>A minted id, always prefixed <c>own:</c>.</returns>
+    public static string OwnUploadId(
+        SubtitleProvider provider, string contentHash, string release, DateTime utcNow)
+    {
+        var seed = contentHash + "|" + release + "|" + utcNow.ToString("yyyyMMddTHHmmssZ", System.Globalization.CultureInfo.InvariantCulture);
+        var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(seed));
+        var hex = Convert.ToHexString(bytes, 0, 4).ToLowerInvariant();
+        return string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            "own:{0}:{1}:{2}",
+            Name(provider),
+            utcNow.ToString("yyyyMMddTHHmmssZ", System.Globalization.CultureInfo.InvariantCulture),
+            hex);
+    }
+
+    /// <summary>
+    /// F-M488: true when a stored upload id is one of ours (minted), not the site's.
+    /// </summary>
+    /// <param name="uploadId">The stored value.</param>
+    /// <returns>True for a minted id.</returns>
+    public static bool IsOwnUploadId(string? uploadId) =>
+        uploadId is not null && uploadId.StartsWith("own:", StringComparison.Ordinal);
+
+    /// <summary>
     /// F-M487: the sentence a refused cross-source upload is logged with — the same wording in the log
     /// and in the store's reason, so a looked-up row explains itself.
     /// </summary>
