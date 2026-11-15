@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.385"
+version: "12.1.12.391"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -29,6 +29,12 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.391: the tvsubtitles client maps ISO language codes onto the site's own codes (el/gre becomes gr, cze cs, zho cn, jpn jp, and so on), so uploads in those languages are no longer refused — F-M502.
+  v12.1.12.390: the plugin keeps the tvsubtitles show number next to the TMDb and IMDb ids (store schema 13) and creates a missing show from the TMDb title, year and season count after a narrow name comparison (case, "&"/"and", whitespace) — F-M501.
+  v12.1.12.389: the upload path asks which source holds a subtitle before it settles it, so one endpoint no longer blocks the other (F-M499, F-M500); subtitles downloaded from a source are never uploaded anywhere (no reup, no cross-contamination); the tvsubtitles upload sends the hearing-impaired flag and maps the release name onto the site's rip values.
+  v12.1.12.388: the upload pipeline only skips a media file once every enabled upload source has its mark, so the second endpoint is no longer dropped after the first has taken the subtitle (F-M499).
+  v12.1.12.387: the upload queue asks per source, so the second endpoint still gets its own attempt after the first one has taken the subtitle (F-M499); the tvsubtitles upload sends the hearing-impaired flag.
+  v12.1.12.386: the tvsubtitles upload maps the release name onto the site's seven rip values (WEB-DL becomes WEB); before, every episode was refused with "rip must be one of …" (F-M498).
   v12.1.12.385: both download endpoints are asked in the configured order and the second one gets its own attempt — the candidate lists are merged instead of replaced, the ranking leads with the source, and a refused correction no longer ends the hunt for the other source; the upload walks the same chain, asking each source's switch before its start and keeping the provenance gate per source (F-M494/F-M495).
   v12.1.12.384: the queue fills for the direction instead of for SubDL — with SubDL switched off (or its allowance spent) a tvsubtitles run still queues its episodes (F-M492).
   v12.1.12.383: the direction gates ask the direction, not SubDL — with SubDL switched off and tvsubtitles on the download runs instead of being skipped as disabled (F-M492).

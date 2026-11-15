@@ -94,6 +94,113 @@ public sealed class TvSubtitlesClient
         };
 
     /// <summary>
+    /// F-M502 (Operator-Anweisung 15.11.2026: „Aber halt tvst spezifisch. Das andere mapping ist subdl
+    /// spezifisch."): die Bruecke von ISO- auf die Kuerzel der Seite, und zwar AUSSCHLIESSLICH hier.
+    /// <para>
+    /// Gemessen am 15.11.2026: die Tabelle oben ist vollstaendig — die Seite kennt genau diese 24
+    /// Kuerzel —, aber vier davon sind NICHT ISO: <c>gr</c> statt <c>el</c>/<c>ell</c>/<c>gre</c>
+    /// (Griechisch), <c>cz</c> statt <c>cs</c>/<c>ces</c>/<c>cze</c> (Tschechisch), <c>cn</c> statt
+    /// <c>zh</c>/<c>zho</c>/<c>chi</c> (Chinesisch), <c>jp</c> statt <c>ja</c>/<c>jpn</c> (Japanisch).
+    /// Jellyfin liefert Sprachen als DREI-Buchstaben-Codes (<c>gre</c>, <c>cze</c>, <c>chi</c>,
+    /// <c>jpn</c>), die Konfiguration und die Zielsprachen teils als ZWEI-Buchstaben-Codes
+    /// (<c>el</c>, <c>cs</c>, <c>zh</c>, <c>ja</c>) — beide Formen landeten vorher in der Pruefung von
+    /// <see cref="BuildUpload"/> und der Upload wurde mit „language must be one of the site's codes"
+    /// abgelehnt. Deshalb die vier Abweichungen in beiden Formen, dazu die gaengigen
+    /// ISO-639-2-Formen (/B und /T) der uebrigen Seiten-Sprachen.
+    /// </para>
+    /// <para>
+    /// Was hier ABSICHTLICH NICHT passiert: keine gemeinsame Tabelle mit SubDL (Operator-Anweisung
+    /// oben — SubDL bildet in <see cref="SubdlApiClient"/> ab), kein Raten ausserhalb der Liste
+    /// (unbekannt heisst null), und die Seiten-Kuerzel selbst bleiben unveraendert gueltig.
+    /// </para>
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> LanguageAliases =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            // Die vier Abweichungen der Seite, in jeder gaengigen ISO-Schreibweise.
+            ["el"] = "gr",
+            ["ell"] = "gr",
+            ["gre"] = "gr",
+            ["cs"] = "cz",
+            ["ces"] = "cz",
+            ["cze"] = "cz",
+            ["zh"] = "cn",
+            ["zho"] = "cn",
+            ["chi"] = "cn",
+            ["ja"] = "jp",
+            ["jpn"] = "jp",
+
+            // Die uebrigen Seiten-Sprachen in ISO-639-2/B und /T.
+            ["uk"] = "ua",
+            ["eng"] = "en",
+            ["spa"] = "es",
+            ["fra"] = "fr",
+            ["fre"] = "fr",
+            ["deu"] = "de",
+            ["ger"] = "de",
+            ["pob"] = "br",
+            ["rus"] = "ru",
+            ["ukr"] = "ua",
+            ["ita"] = "it",
+            ["ara"] = "ar",
+            ["hun"] = "hu",
+            ["pol"] = "pl",
+            ["tur"] = "tr",
+            ["nld"] = "nl",
+            ["dut"] = "nl",
+            ["por"] = "pt",
+            ["swe"] = "sv",
+            ["dan"] = "da",
+            ["fin"] = "fi",
+            ["kor"] = "ko",
+            ["bul"] = "bg",
+            ["ron"] = "ro",
+            ["rum"] = "ro",
+        };
+
+    /// <summary>
+    /// F-M502: der Sprachcode, den die Seite versteht — aus einem ISO-Code, einem Seiten-Kuerzel oder
+    /// einer Angabe mit Region/Skript (<c>pt-BR</c>, <c>zh-Hans</c>).
+    /// <para>
+    /// Gross-/Kleinschreibung zaehlt nicht. Die Region entscheidet nur dort, wo die Seite die Sprache
+    /// danach trennt: <c>pt-BR</c> ist brasilianisches Portugiesisch (<c>br</c>), waehrend <c>pt-PT</c>
+    /// und <c>pt</c> europaesisches Portugiesisch (<c>pt</c>) bleiben. Bei allen anderen Sprachen
+    /// faellt die Region weg (<c>zh-Hans</c>/<c>zh-CN</c> → <c>cn</c>).
+    /// </para>
+    /// </summary>
+    /// <param name="code">Der ankommende Code, in beliebiger Schreibweise.</param>
+    /// <returns>Ein Kuerzel aus <see cref="Languages"/>, oder null — dann ist die Sprache der Seite
+    /// unbekannt und wird nicht geraten.</returns>
+    public static string? SiteLanguage(string? code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return null;
+        }
+
+        // Ein Schraegstrich kommt in Tags vor ("pt_BR"); die Seite kennt nur den Bindestrich.
+        var text = code.Trim().ToLowerInvariant().Replace('_', '-');
+
+        // Die eine Stelle, an der die REGION die Sprache ist: brasilianisches Portugiesisch.
+        // Muss vor der Grundcode-Reduktion stehen, sonst faellt "pt-br" auf europaesisches "pt".
+        if (string.Equals(text, "pt-br", StringComparison.Ordinal))
+        {
+            return "br";
+        }
+
+        var dash = text.IndexOf('-', StringComparison.Ordinal);
+        var baseCode = dash > 0 ? text[..dash] : text;
+
+        if (LanguageAliases.TryGetValue(baseCode, out var mapped))
+        {
+            return mapped;
+        }
+
+        // Das Kuerzel der Seite selbst (en, de, br, gr, cz, cn, jp, ua …) ist bereits das Ziel.
+        return Languages.ContainsKey(baseCode) ? baseCode : null;
+    }
+
+    /// <summary>
     /// F-M480: the rip select of the upload form, plus the empty value. Anything else is refused
     /// before the request is built — the form ignores an unknown value and stores an empty rip.
     /// </summary>
@@ -124,6 +231,64 @@ public sealed class TvSubtitlesClient
     private static readonly Regex Flag = new(
         "images/flags/([a-z]{1,6})\\.gif", RegexOptions.CultureInvariant);
 
+    /// <summary>
+    /// F-M498: die Seite kennt genau sieben Rip-Werte (WEB, HDTV, HEVC, DVDRip, DVDSCR, BDRip,
+    /// BluRay). Release-Namen schreiben das aber anders — "WEB-DL", "WEBRip", "BRRip", "x265",
+    /// "Blu-Ray". Gemessen 15.11.2026 im scharfen Lauf: jede Folge wurde mit
+    /// "refused: rip must be one of …" abgelehnt, weil "WEB-DL" durchgereicht wurde und die
+    /// Vorpruefung den Wert zu Recht verwarf. Die Zuordnung nimmt den ERSTEN Treffer, Quelle vor
+    /// Codec: "WEB-DL x265" ist WEB, nicht HEVC. Findet sich nichts, bleibt das Feld leer — das
+    /// ist ein erlaubter Wert, die Seite speichert dann keinen Rip.
+    /// </summary>
+    /// <param name="quality">Qualitaets-/Release-Angabe, wie sie im Dateinamen steht.</param>
+    /// <returns>Ein Wert aus <see cref="Rips"/>.</returns>
+    public static string RipFromQuality(string? quality)
+    {
+        var q = (quality ?? string.Empty).ToUpperInvariant();
+
+        // Reihenfolge ist Absicht: erst die Quellen, dann der Codec als Rueckfall.
+        if (q.Contains("DVDSCR", StringComparison.Ordinal))
+        {
+            return "DVDSCR";
+        }
+
+        if (q.Contains("DVDRIP", StringComparison.Ordinal) || q.Contains("DVD-R", StringComparison.Ordinal))
+        {
+            return "DVDRip";
+        }
+
+        if (q.Contains("BDRIP", StringComparison.Ordinal) || q.Contains("BD-RIP", StringComparison.Ordinal)
+            || q.Contains("BRRIP", StringComparison.Ordinal) || q.Contains("BR-RIP", StringComparison.Ordinal))
+        {
+            return "BDRip";
+        }
+
+        if (q.Contains("BLURAY", StringComparison.Ordinal) || q.Contains("BLU-RAY", StringComparison.Ordinal)
+            || q.Contains("BDREMUX", StringComparison.Ordinal))
+        {
+            return "BluRay";
+        }
+
+        if (q.Contains("HDTV", StringComparison.Ordinal))
+        {
+            return "HDTV";
+        }
+
+        if (q.Contains("WEB", StringComparison.Ordinal))
+        {
+            // WEB-DL, WEBRip, WEB = dieselbe Schublade der Seite.
+            return "WEB";
+        }
+
+        if (q.Contains("HEVC", StringComparison.Ordinal) || q.Contains("X265", StringComparison.Ordinal)
+            || q.Contains("H.265", StringComparison.Ordinal) || q.Contains("H265", StringComparison.Ordinal))
+        {
+            return "HEVC";
+        }
+
+        return string.Empty;
+    }
+
     private static readonly Regex RipCell = new(
         "title=\"rip\">\\s*<img[^>]*>\\s*([^<]+)", RegexOptions.CultureInvariant);
 
@@ -139,6 +304,12 @@ public sealed class TvSubtitlesClient
         "var s\\d+= *'([^']*)';", RegexOptions.CultureInvariant);
 
     private static readonly Regex TagStripper = new("<[^>]+>", RegexOptions.CultureInvariant);
+
+    // F-M501: die beiden Angleichungen der Namenssuche — "und" als eigenes Wort, und jede Folge von
+    // Leerraum als ein Leerzeichen.
+    private static readonly Regex WordUnd = new(@"\bund\b", RegexOptions.CultureInvariant);
+
+    private static readonly Regex WhitespaceRun = new(@"\s+", RegexOptions.CultureInvariant);
 
     private readonly HttpClient _http;
 
@@ -204,32 +375,70 @@ public sealed class TvSubtitlesClient
     }
 
     /// <summary>
-    /// F-M480: the id of a show by name — exact match first (case-insensitive), then the first name
-    /// that contains the search text, so "The Middle" finds "The Middle" and not "The Middle Man".
+    /// F-M501 (Operator-Entscheidung 15.11.2026, nachgeschärft: „Doch Ähnlichkeitssuche. Aber
+    /// groß/Kleinschreibung. And = und. Leerzeichen mehr oder weniger. Ähnlichkeit eng halten“): der
+    /// Name, auf den zwei Seriennamen verglichen werden — und die EINZIGEN drei Angleichungen, die
+    /// erlaubt sind.
+    /// <list type="bullet">
+    /// <item><description>Groß-/Kleinschreibung zählt nicht.</description></item>
+    /// <item><description><c>&amp;</c>, <c>and</c> und <c>und</c> gelten als dasselbe Wort — als Wort,
+    /// nicht als Buchstabenfolge: „Rundschau“ wird nicht zu „Randschau“.</description></item>
+    /// <item><description>Mehrere oder fehlende Leerzeichen zählen nicht; jede Folge von Leerraum wird
+    /// zu einem einzelnen Leerzeichen.</description></item>
+    /// </list>
+    /// <para>
+    /// Was hier ABSICHTLICH NICHT passiert: führende Artikel werden nicht entfernt („The Middle“ bleibt
+    /// „The Middle“), es gibt keinen Teilstring-Treffer („The Middle“ findet „The Middle Man“ nicht) und
+    /// kein Ähnlichkeitsmaß (kein Levenshtein, keine Token-Quote, keine Jahres-Toleranz). Genau diese
+    /// Grenze hält Doppeleinträge draußen: eine Schreibweise, die nur „ähnlich“ ist, ist eine andere
+    /// Serie.
+    /// </para>
+    /// </summary>
+    /// <param name="name">Der Name, wie er geschrieben steht.</param>
+    /// <returns>Der Vergleichsschlüssel; leer, wenn der Name leer war.</returns>
+    public static string NormalizeShowName(string? name)
+    {
+        var text = (name ?? string.Empty).Trim().ToLowerInvariant();
+        if (text.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        // "&" ist ein Wort fuer sich: aus "Rick&Morty" wird "rick and morty".
+        text = text.Replace("&", " and ", StringComparison.Ordinal);
+
+        // "und" NUR als eigenes Wort — sonst wuerde aus "Rundschau" ein "Randschau".
+        text = WordUnd.Replace(text, "and");
+
+        // Leerraum: eine Folge wird zu einem Leerzeichen, aussen bleibt nichts stehen.
+        return WhitespaceRun.Replace(text, " ").Trim();
+    }
+
+    /// <summary>
+    /// F-M501: der Name einer Serie, so eng verglichen, wie es die Seite erlaubt — die drei
+    /// Angleichungen aus <see cref="NormalizeShowName"/> und sonst Gleichheit.
+    /// <para>
+    /// Die frühere „enthält“-Stufe ist WEG (Operator-Entscheidung 15.11.2026: „Ähnlichkeit eng halten“,
+    /// „Tmdb titel führt auch für Doppeleinträge“). Sie war der Grund, warum ein TMDb-Titel, den die
+    /// Seite anders schreibt, still auf einen NAMENSÄHNLICHEN Doppeleintrag zeigte — und damit auf die
+    /// falsche Serie, deren Nummer dann im Store gestanden hätte.
+    /// </para>
     /// </summary>
     /// <param name="shows">The show map.</param>
-    /// <param name="name">The name to look for.</param>
-    /// <returns>The id, or null when the site does not carry the show.</returns>
+    /// <param name="name">The name to look for — in practice the TMDb title.</param>
+    /// <returns>The id, or null when no show carries exactly this name (after the three adjustments).</returns>
     public static int? ResolveShow(IReadOnlyDictionary<int, string> shows, string name)
     {
         ArgumentNullException.ThrowIfNull(shows);
-        if (string.IsNullOrWhiteSpace(name))
+        var wanted = NormalizeShowName(name);
+        if (wanted.Length == 0)
         {
             return null;
         }
 
-        var wanted = name.Trim().ToLowerInvariant();
         foreach (var pair in shows)
         {
-            if (pair.Key > 0 && string.Equals(pair.Value.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase))
-            {
-                return pair.Key;
-            }
-        }
-
-        foreach (var pair in shows)
-        {
-            if (pair.Key > 0 && pair.Value.ToLowerInvariant().Contains(wanted, StringComparison.Ordinal))
+            if (pair.Key > 0 && string.Equals(NormalizeShowName(pair.Value), wanted, StringComparison.Ordinal))
             {
                 return pair.Key;
             }
@@ -418,10 +627,14 @@ public sealed class TvSubtitlesClient
         }
 
         var entries = await EntriesAsync(page.Value, cancellationToken).ConfigureAwait(false);
-        var wanted = (language ?? string.Empty).Trim().ToLowerInvariant();
+
+        // F-M502: beide Seiten durch die Bruecke — der gesuchte Code kann ISO sein, der Eintrag traegt
+        // das Kuerzel der Flagge. Nur wenn eine Seite unbekannt bleibt, gilt der rohe Wert.
+        var wanted = SiteLanguage(language) ?? (language ?? string.Empty).Trim().ToLowerInvariant();
         foreach (var entry in entries)
         {
-            var sameLanguage = string.Equals(entry.Language.Trim().ToLowerInvariant(), wanted, StringComparison.OrdinalIgnoreCase);
+            var entryLanguage = SiteLanguage(entry.Language) ?? entry.Language.Trim().ToLowerInvariant();
+            var sameLanguage = string.Equals(entryLanguage, wanted, StringComparison.Ordinal);
             var sameRelease = !string.IsNullOrWhiteSpace(release)
                 && (string.Equals(entry.Release.Trim(), release.Trim(), StringComparison.OrdinalIgnoreCase)
                     || entry.Release.Contains(release.Trim(), StringComparison.OrdinalIgnoreCase));
@@ -695,9 +908,13 @@ public sealed class TvSubtitlesClient
             problems.Add("episode must be 0.." + MaxEpisode.ToString(CultureInfo.InvariantCulture));
         }
 
-        if (string.IsNullOrEmpty(language) || !Languages.ContainsKey(language))
+        // F-M502: die Pruefung laeuft ueber die Bruecke, nicht ueber die Tabelle — ein ISO-Code
+        // (gre, cze, chi, jpn, deu …) oder ein Code mit Region (pt-BR) wird auf das Kuerzel der Seite
+        // gezogen. Was die Bruecke nicht kennt, ist unbekannt und wird nicht geraten.
+        var siteLanguage = SiteLanguage(language);
+        if (siteLanguage is null)
         {
-            problems.Add("language must be one of the site's codes: " +
+            problems.Add("language must be one of the site's codes (ISO codes are mapped): " +
                 string.Join(", ", Languages.Keys.OrderBy(k => k, StringComparer.Ordinal)));
         }
 
@@ -726,7 +943,9 @@ public sealed class TvSubtitlesClient
 
         if (problems.Count > 0)
         {
-            throw new ArgumentException(string.Join("; ", problems), nameof(showId));
+            // F-M498: der Text prueft den ganzen Payload, nicht showId — der Parametername stand
+            // falsch und haengte sich an jede Meldung an ("rip must be one of … (Parameter 'showId')").
+            throw new ArgumentException(string.Join("; ", problems), "upload");
         }
 
         var fields = new List<KeyValuePair<string, string>>
@@ -734,7 +953,7 @@ public sealed class TvSubtitlesClient
             new("tvshow", showId.ToString(CultureInfo.InvariantCulture)),
             new("season", season.ToString(CultureInfo.InvariantCulture)),
             new("episode", episode.ToString(CultureInfo.InvariantCulture)),
-            new("lang", language),
+            new("lang", siteLanguage!),
             new("rip", ripValue),
             new("release", release?.Trim() ?? string.Empty),
             new("comment", Comment(tmdbId, imdbId, commentExtra)),
@@ -748,20 +967,34 @@ public sealed class TvSubtitlesClient
 
         if (hearingImpaired)
         {
+            // F-M498: "hi" ist im Formular ein Kontrollkaestchen mit value="1" (am 15.11.2026 am
+            // echten /add.html abgelesen). Ein nicht angehaktes Kaestchen wird gar nicht gesendet —
+            // deshalb hier nur bei true, und niemals "hi=0": die Seite kennt keinen Gegenwert.
             fields.Add(new KeyValuePair<string, string>("hi", "1"));
         }
 
-        return new TvSubtitlesUpload(fields, name, data!, Languages[language].Name, Languages[language].Iso3);
+        // F-M502: die Sprache des Eintrags kommt von der Flagge und ist schon ein Seiten-Kuerzel; der
+        // gesuchte Code kann dagegen ISO sein ("gre"). Beide laufen deshalb durch dieselbe Bruecke —
+        // sonst faende die Ruecklesung einen Eintrag nicht, den der Upload gerade angelegt hat.
+        return new TvSubtitlesUpload(
+            fields, name, data!,
+            Languages[siteLanguage!].Name, Languages[siteLanguage!].Iso3);
     }
 
     /// <summary>
     /// F-M480: builds the payload that creates a new show (<c>/add-tvshow1.php</c>). The page itself asks
     /// to check first — "Before adding new TV-Show please check if it already exist" — so a caller
     /// resolves the name through <see cref="ResolveShow"/> before it gets here.
+    /// <para>
+    /// F-M501: die Staffelzahl ist auf <see cref="MaxSeason"/> (1–22) begrenzt, weil die Seite genau so
+    /// viele kennt — ihr Auswahlfeld bietet 1..22. Die frühere Grenze 1..100 war unsere eigene Prüfung
+    /// und liess einen Wert durch, den das Formular stillschweigend auf seinen letzten Eintrag zieht:
+    /// eine Serie mit 30 Staffeln wäre als 22-Staffel-Serie angelegt worden.
+    /// </para>
     /// </summary>
     /// <param name="name">The show name.</param>
     /// <param name="year">Year of first broadcast, four digits.</param>
-    /// <param name="seasons">Number of seasons, 1–100.</param>
+    /// <param name="seasons">Number of seasons, 1–22 (the page's own range).</param>
     /// <returns>The finished form payload.</returns>
     public static TvSubtitlesAddShow BuildAddShow(string name, int year, int seasons)
     {
@@ -776,9 +1009,9 @@ public sealed class TvSubtitlesClient
             problems.Add("year must be four digits (1900..2100)");
         }
 
-        if (seasons < 1 || seasons > 100)
+        if (seasons < 1 || seasons > MaxSeason)
         {
-            problems.Add("seasons must be 1..100");
+            problems.Add("seasons must be 1.." + MaxSeason.ToString(CultureInfo.InvariantCulture));
         }
 
         if (problems.Count > 0)

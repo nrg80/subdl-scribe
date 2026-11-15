@@ -916,6 +916,72 @@ public sealed class ContentHashRegistry : IDisposable
     }
 
     /// <summary>
+    /// F-M499: dieselbe Frage wie <see cref="ArePositionsTerminal"/>, aber JE QUELLE. "Erledigt" heisst
+    /// hier "fuer DIESE Quelle erledigt": die Terminalzeile allein liest <c>Status=Uploaded</c> und damit
+    /// "irgendwo hochgeladen" — gemessen am 15.11.2026 hielt genau das den Seeder davon ab, die zweite
+    /// Quelle ueberhaupt in die Queue zu legen (27 SubDL-Uploads, danach "0 upload queued").
+    /// </summary>
+    /// <param name="mediaHash">Parent media hash.</param>
+    /// <param name="positions">Stream positions to check.</param>
+    /// <param name="provider">The source in question.</param>
+    /// <returns>True when all positions are terminal FOR THIS SOURCE.</returns>
+    public bool ArePositionsTerminalFor(string? mediaHash, IEnumerable<int> positions, SubtitleProvider provider)
+    {
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return false;
+        }
+
+        var need = positions.Where(p => p >= 0).Distinct().ToList();
+        if (need.Count == 0)
+        {
+            return false;
+        }
+
+        return need.All(p => IsEmbedTerminalFor(mediaHash, p, provider));
+    }
+
+    /// <summary>
+    /// F-M499: ist diese Spur fuer DIESE Quelle erledigt? Zwei Antworten zaehlen, und nur eine davon ist
+    /// quellenabhaengig:
+    /// <para>
+    /// (1) <c>rejected</c> gilt fuer JEDE Quelle — die Ablehnung ist ein Urteil ueber den Untertitel
+    /// (Struktur, Laufzeit, Sprachpruefung), nicht ueber den Endpunkt, und wird vor jeder Quellenwahl
+    /// geschrieben. Sie hier quellenweise zu lesen wuerde die Spur fuer die andere Quelle ewig offen
+    /// halten. (2) Alles andere kommt aus der eigenen Marke der Quelle (F-M488/F-M490) — gefragt ueber
+    /// <see cref="IsUploadedTo"/>, damit es nur EINE Leseregel fuer "diese Quelle hat ihn" gibt.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaHash">Parent media hash.</param>
+    /// <param name="subPos">Stream position.</param>
+    /// <param name="provider">The source in question.</param>
+    /// <returns>True when this source has nothing left to do for this track.</returns>
+    public bool IsEmbedTerminalFor(string? mediaHash, int subPos, SubtitleProvider provider)
+    {
+        var track = GetEmbed(mediaHash, subPos);
+        if (track == null)
+        {
+            return false;
+        }
+
+        if (track.Status == SubtitleStatus.Rejected)
+        {
+            return true;
+        }
+
+        // F-M500 (Operator-Anweisung 15.11.2026: "Herkunft subdl: nie zurueck zu subdl, nie zu tvst"):
+        // ein bekannter FUND geht nirgends hoch — weder zurueck zur eigenen Quelle noch zur anderen. Fuer
+        // JEDE Quelle ist diese Spur damit erledigt; sonst stellte der Seeder sie in jedem Lauf erneut hin
+        // und die Pipeline koennte ihr Urteil nie loswerden. Kosten: ein Zeilenzugriff (Sidecar per Hash).
+        if (!string.IsNullOrEmpty(track.ContentHash) && GetOrigin(track.ContentHash).Origin is not null)
+        {
+            return true;
+        }
+
+        return IsUploadedTo(mediaHash, track.Language, track.HearingImpaired ?? false, provider);
+    }
+
+    /// <summary>
     /// True when this (file, language, HI) pair already went up. Pair-level by design: it answers
     /// "do I still need to upload this language for this file", which is what the self-echo guard
     /// and the collector ask. Individual stream verdicts are read per position instead.
@@ -1021,6 +1087,30 @@ public sealed class ContentHashRegistry : IDisposable
 
         return _db.Embeds.Find(x => x.MediaHash == mediaHash
                 && (x.Status == SubtitleStatus.Uploaded || x.Status == SubtitleStatus.Rejected))
+            .Select(x => x.Language + "|" + x.HearingImpaired)
+            .Distinct()
+            .Count();
+    }
+
+    /// <summary>
+    /// F-M499: wie <see cref="CountKnownPairs"/>, aber JE QUELLE. Ein Paar zaehlt als bekannt, wenn es
+    /// VERWORFEN ist (quellenneutral, siehe <see cref="IsEmbedTerminalFor"/>) oder wenn DIESE Quelle ihre
+    /// eigene Marke darauf hat. Die quellenblinde Fassung liest <c>Status=Uploaded</c> und laesst damit
+    /// einen SubDL-Upload die zweite Quelle als "fertig" erscheinen.
+    /// </summary>
+    /// <param name="mediaHash">Parent media hash.</param>
+    /// <param name="provider">The source in question.</param>
+    /// <returns>Count of distinct pairs this source is done with.</returns>
+    public int CountKnownPairsFor(string? mediaHash, SubtitleProvider provider)
+    {
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return 0;
+        }
+
+        return _db.Embeds.Find(x => x.MediaHash == mediaHash)
+            .Where(x => x.Status == SubtitleStatus.Rejected
+                || IsUploadedTo(mediaHash, x.Language, x.HearingImpaired ?? false, provider))
             .Select(x => x.Language + "|" + x.HearingImpaired)
             .Distinct()
             .Count();
@@ -1378,6 +1468,37 @@ public sealed class ContentHashRegistry : IDisposable
     public bool IsSidecarUploaded(string? contentHash)
         => GetSidecar(contentHash)?.Status == SubtitleStatus.Uploaded;
 
+    /// <summary>
+    /// F-M499: hat DIESE Quelle diesen Inhalt schon? Dieselben Marken wie <see cref="IsUploadedTo"/>
+    /// (F-M488/F-M490), nur auf eine einzelne Sidecar-Zeile angewendet — die Zeile IST der Inhalt, ihr
+    /// Schluessel der Content-Hash. Die quellenblinde <see cref="IsSidecarUploaded"/> liest
+    /// <c>Status=Uploaded</c> und haelt damit die zweite Quelle aus der Queue.
+    /// <para>
+    /// Fuer SubDL zaehlt zusaetzlich die Altzeile: <c>SubdlId</c> plus <c>Uploaded</c> ist der einzige
+    /// Beleg aus Schema 11 (F-M489) — <c>SubdlId</c> allein genuegt nicht, weil der Download es auch schreibt.
+    /// </para>
+    /// </summary>
+    /// <param name="contentHash">Content hash of the sidecar.</param>
+    /// <param name="provider">The source in question.</param>
+    /// <returns>True when this source already has this content.</returns>
+    public bool IsSidecarUploadedTo(string? contentHash, SubtitleProvider provider)
+    {
+        var row = GetSidecar(contentHash);
+        if (row == null)
+        {
+            return false;
+        }
+
+        if (provider == SubtitleProvider.TvSubtitles)
+        {
+            return row.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(row.TvSubtitlesUploadId);
+        }
+
+        return row.SubdlUploadedAt != null
+            || !string.IsNullOrEmpty(row.SubdlUploadId)
+            || (row.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(row.SubdlId));
+    }
+
     /// <summary>Recorded rejection reason for this content, else null.</summary>
     /// <param name="contentHash">Content hash.</param>
     /// <returns>Reason or null.</returns>
@@ -1642,6 +1763,11 @@ public sealed class ContentHashRegistry : IDisposable
     /// Global on purpose, like <see cref="IsContentKnown"/>: a file rewrite moves the media hash, the
     /// accepted row stays behind under the previous identity, and the text is still the same text.
     /// </para>
+    /// <para>
+    /// F-M500: quellenblind, und das bleibt sie — sie beantwortet "liegt dieser Text irgendwo oben", nicht
+    /// "hat DIESE Quelle ihn". Im Upload-Pfad wird sie deshalb nicht mehr gelesen; dort lautet die Frage
+    /// <see cref="IsContentUploadedFor"/>.
+    /// </para>
     /// </summary>
     /// <param name="contentHash">Content hash.</param>
     /// <returns>True when an uploaded row for this content exists.</returns>
@@ -1664,6 +1790,93 @@ public sealed class ContentHashRegistry : IDisposable
     }
 
     /// <summary>
+    /// F-M500: hat DIESE Quelle diesen Inhalt schon? Die quellenweise Fassung von
+    /// <see cref="IsContentUploaded"/> — dieselbe Frage, aber mit der Quelle im Urteil.
+    /// <para>
+    /// Gemessen 15.11.2026, 16:24 im scharfen Lauf: 27 eingebettete FR-Spuren endeten als
+    /// "identical subtitle already uploaded earlier (F-M298)", weil der Inhalt bei SubDL lag. tvsubtitles
+    /// bekam auf diesen Dateien nie einen Versuch, und der Lauf meldete "0 uploaded | 34 rejected,
+    /// 61 stream(s) skipped". Die Frage war quellenblind: "hochgeladen" heisst hier "von DIESER Quelle
+    /// hochgeladen" — die Gegenrichtung (Herkunft) entscheidet weiterhin das Tor im Uploader (F-M487),
+    /// nicht diese Frage.
+    /// </para>
+    /// <para>
+    /// Fuer SubDL werden dieselben drei Belege gelesen wie in <see cref="IsUploadedTo"/> (F-M488/F-M490):
+    /// Zeitstempel, eigene Id, und die Altzeile aus Schema 11 (<c>Uploaded</c> plus <c>SubdlId</c>). Dazu
+    /// kommt die <c>Uploaded</c>-Zeile OHNE jede Quellenmarke: so sehen die Settles von vor F-M500 und die
+    /// Pack-Zeilen aus, und vor der Zwei-Quellen-Kette (F-M495) war SubDL das einzige Ziel — sie zaehlt
+    /// deshalb als SubDL-Beleg, damit dieser Inhalt nicht ein zweites Mal zu SubDL geht. Fuer tvsubtitles
+    /// zaehlt eine markenlose Zeile NICHT: dort waere sie der Fehler selbst, und tvst soll seinen Versuch
+    /// bekommen. Neue Settles schreiben ihre Marke (F-M500), damit die Blindstelle nicht nachwaechst.
+    /// </para>
+    /// </summary>
+    /// <param name="contentHash">Content hash of the text.</param>
+    /// <param name="provider">The source in question.</param>
+    /// <returns>True when that source already holds this content.</returns>
+    public bool IsContentUploadedFor(string? contentHash, SubtitleProvider provider)
+    {
+        if (string.IsNullOrEmpty(contentHash))
+        {
+            return false;
+        }
+
+        // Fuer tvsubtitles zaehlt NUR seine eigene Marke. Eine Uploaded-Zeile ohne Marke ist dort kein
+        // Beleg: sie stammt aus der Zeit vor der Zwei-Quellen-Kette und damit von SubDL. Sie hier
+        // mitzaehlen wuerde genau den Defekt fortschreiben, der gemessen wurde — tvst bekaeme nie einen Versuch.
+        if (provider == SubtitleProvider.TvSubtitles)
+        {
+            return _db.Embeds.Exists(x => x.ContentHash == contentHash
+                    && (x.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.TvSubtitlesUploadId)))
+                || _db.Sidecars.Exists(x => x.ContentHash == contentHash
+                    && (x.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.TvSubtitlesUploadId)));
+        }
+
+        return _db.Embeds.Exists(x => x.ContentHash == contentHash
+                && (x.SubdlUploadedAt != null
+                    || !string.IsNullOrEmpty(x.SubdlUploadId)
+                    || (x.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(x.SubdlId))
+                    || UploadedWithoutSourceMark(x)))
+            || _db.Sidecars.Exists(x => x.ContentHash == contentHash
+                && (x.SubdlUploadedAt != null
+                    || !string.IsNullOrEmpty(x.SubdlUploadId)
+                    || (x.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(x.SubdlId))
+                    || UploadedWithoutSourceMark(x)));
+    }
+
+    /// <summary>
+    /// F-M500: haelt irgendeine ANDERE Quelle diesen Inhalt? Die Frage der Queue (F-M499): ein Upload bei
+    /// der anderen Quelle ist kein Erledigt-Grund fuer diese. Die Herkunft bleibt davon unberuehrt.
+    /// </summary>
+    /// <param name="contentHash">Content hash of the text.</param>
+    /// <param name="provider">The source that is asking.</param>
+    /// <returns>True when another source already holds this content.</returns>
+    public bool IsContentUploadedForAnotherSource(string? contentHash, SubtitleProvider provider)
+        => Enum.GetValues<SubtitleProvider>()
+            .Any(other => other != provider && IsContentUploadedFor(contentHash, other));
+
+    /// <summary>F-M500: <c>Uploaded</c>-Zeile ohne jede Quellenmarke — "irgendwo hochgeladen", Quelle unbekannt.</summary>
+    /// <param name="row">Embed row.</param>
+    /// <returns>True when the row claims an upload without naming the source.</returns>
+    private static bool UploadedWithoutSourceMark(EmbedTrackEntity row)
+        => row.Status == SubtitleStatus.Uploaded
+            && row.SubdlUploadedAt == null
+            && row.TvSubtitlesUploadedAt == null
+            && string.IsNullOrEmpty(row.SubdlUploadId)
+            && string.IsNullOrEmpty(row.TvSubtitlesUploadId)
+            && string.IsNullOrEmpty(row.SubdlId);
+
+    /// <summary>F-M500: dasselbe fuer Sidecar-Zeilen.</summary>
+    /// <param name="row">Sidecar row.</param>
+    /// <returns>True when the row claims an upload without naming the source.</returns>
+    private static bool UploadedWithoutSourceMark(SidecarEntity row)
+        => row.Status == SubtitleStatus.Uploaded
+            && row.SubdlUploadedAt == null
+            && row.TvSubtitlesUploadedAt == null
+            && string.IsNullOrEmpty(row.SubdlUploadId)
+            && string.IsNullOrEmpty(row.TvSubtitlesUploadId)
+            && string.IsNullOrEmpty(row.SubdlId);
+
+    /// <summary>
     /// F-M298: records the verdict for a SKIPPED candidate. The state is derived from the CONTENT and
     /// not from the reason alone: <c>duplicate-content</c> means "SubDL already holds this text", and
     /// <see cref="IsContentKnown"/> answers that for a REJECTED row exactly as it does for an uploaded
@@ -1672,6 +1885,13 @@ public sealed class ContentHashRegistry : IDisposable
     /// re-extracted and re-rejected on every later run (prod 06.10.2026: Lanterns S01E08, 39 streams,
     /// 0 uploaded against 39 rejected, after a container tag write moved the media hash and carried the
     /// accepted rows onto the new identity).
+    /// <para>
+    /// F-M500: das Urteil nimmt die QUELLE mit. Uebergeben wird, WELCHE Quellen den Inhalt nachweislich
+    /// halten (<see cref="IsContentUploadedFor"/>); nur sie bekommen die <c>Uploaded</c>-Zeile mit ihrer
+    /// eigenen Marke. Eine Quelle, die ihn NICHT hat, wird dadurch nicht erledigt — sie behaelt ihren
+    /// offenen Versuch, und der Aufrufer entscheidet, ob der Kandidat weiter an die Kette geht. Ohne
+    /// Quellenbeleg bleibt es bei der quellenneutralen Ablehnung, wie bisher.
+    /// </para>
     /// <para>
     /// Every skip path goes through here so the rule lives once instead of at each call site.
     /// </para>
@@ -1684,28 +1904,44 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="forced">Forced flag.</param>
     /// <param name="contentHash">Content hash of the skipped text.</param>
     /// <param name="reason">Reject reason reported by the gate or by SubDL.</param>
+    /// <param name="settledSources">F-M500: the sources that demonstrably hold this content, and only those.</param>
     /// <param name="fileName">Sidecar file name.</param>
     /// <param name="path">Sidecar full path.</param>
     /// <returns>True when the row was settled as UPLOADED — in that case nothing was rejected.</returns>
     public bool RecordSkippedContent(string? mediaHash, bool isLoose, int subPos, string lang,
         bool hearingImpaired, bool forced, string? contentHash, string? reason,
+        IEnumerable<SubtitleProvider> settledSources,
         string? fileName = null, string? path = null)
     {
-        bool settledAsUploaded = RejectReason.DuplicateContent == reason && IsContentUploaded(contentHash);
+        // F-M500: die Quelle wird nicht behauptet, sondern geprueft — wer hier steht, hat den Inhalt wirklich.
+        var quellen = (settledSources ?? Array.Empty<SubtitleProvider>())
+            .Distinct()
+            .Where(quelle => IsContentUploadedFor(contentHash, quelle))
+            .ToList();
+
+        // F-M500: WELCHE Gruende ein Inhaltsurteil sind, entscheidet der Aufrufer (eine QA-Ablehnung ist
+        // keine). Hier zaehlt nur noch der Beleg: wer genannt ist, hat den Inhalt wirklich.
+        bool settledAsUploaded = quellen.Count > 0;
+
+        // F-M490: die Marke JE QUELLE — nur fuer die Quelle, die den Inhalt haelt; die andere bleibt offen.
+        DateTime? subdlAt = settledAsUploaded && quellen.Contains(SubtitleProvider.Subdl) ? DateTime.UtcNow : null;
+        DateTime? tvAt = settledAsUploaded && quellen.Contains(SubtitleProvider.TvSubtitles) ? DateTime.UtcNow : null;
 
         if (isLoose)
         {
             MarkSidecar(contentHash, mediaHash ?? string.Empty, lang, hearingImpaired, forced,
                 settledAsUploaded ? SubtitleStatus.Uploaded : SubtitleStatus.Rejected,
                 reason: settledAsUploaded ? null : reason,
-                fileName: fileName, path: path);
+                fileName: fileName, path: path,
+                subdlUploadedAt: subdlAt, tvSubtitlesUploadedAt: tvAt);
         }
         else
         {
             MarkEmbed(mediaHash, subPos, lang, hearingImpaired,
                 settledAsUploaded ? SubtitleStatus.Uploaded : SubtitleStatus.Rejected,
                 contentHash: contentHash,
-                reason: settledAsUploaded ? null : reason);
+                reason: settledAsUploaded ? null : reason,
+                subdlUploadedAt: subdlAt, tvSubtitlesUploadedAt: tvAt);
         }
 
         return settledAsUploaded;
@@ -1844,6 +2080,62 @@ public sealed class ContentHashRegistry : IDisposable
     /// <returns>True when complete.</returns>
     public bool IsSubtitlesUploaded(string? mediaHash)
         => !string.IsNullOrEmpty(mediaHash) && _db.Media.FindById(mediaHash)?.SubtitlesUploadedAt != null;
+
+    /// <summary>
+    /// F-M499 (gemessen 15.11.2026, 16:17 im scharfen Lauf): dieselbe Frage wie
+    /// <see cref="IsSubtitlesUploaded"/>, aber JE QUELLE — "fertig" heisst hier "fuer DIESE Quelle
+    /// fertig".
+    /// <para>
+    /// Der Anlass: der Seeder hatte nach dem ersten Teil von F-M499 27 Folgen quellenweise in die
+    /// Queue gelegt, und die Pipeline warf sie alle wieder weg mit
+    /// "[SubDL] SKIP {File} — upload file-complete". Die Dateimarke stand von den SubDL-Uploads,
+    /// tvsubtitles hatte auf diesen Dateien noch keine einzige Spur und bekam so nie seinen Versuch;
+    /// der Lauf endete mit "0 uploaded". Die quellenblinde Frage war also im Pipeline-Kopf genau
+    /// derselbe Defekt, den F-M499 in der Queue schon behoben hatte.
+    /// </para>
+    /// <para>
+    /// Die Marke selbst bleibt quellenblind, denn sie beschreibt die DATEI und nicht den Endpunkt: sie
+    /// sagt "alle Spuren sind erledigt", nicht "wer sie erledigt hat". Deshalb wird sie hier nur als
+    /// Vorbedingung gelesen, und die Quellenfrage wird darunter an den Spuren entschieden — ueber
+    /// <see cref="IsEmbedTerminalFor"/>, also mit derselben Regel wie der Upload selbst (eigene Marke
+    /// der Quelle, Ablehnung quellenneutral). So gibt es auch hier nur EINE Leseregel fuer "diese
+    /// Quelle hat ihn", und die Ablehnung bleibt ein Urteil ueber den Untertitel, das keine Quelle
+    /// ewig offen haelt.
+    /// </para>
+    /// <para>
+    /// Ohne Spurbeleg (Datei ohne eingebettete Untertitel) bleibt die Antwort <c>false</c>: die Marke
+    /// laesst sich dann auf keine Quelle abbilden, und "nicht ueberspringen" ist die vorsichtige
+    /// Seite — der Lauf arbeitet das Item, und die Kette entscheidet dort je Quelle, statt die Datei
+    /// auf Verdacht fuer alle zu erledigen.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaHash">Media hash.</param>
+    /// <param name="provider">The source in question (F-M499).</param>
+    /// <returns>True when this source has nothing left to do on this file.</returns>
+    public bool IsSubtitlesUploadedFor(string? mediaHash, SubtitleProvider provider)
+    {
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return false;
+        }
+
+        // Die Marke sagt "diese Datei ist fertig" — ohne sie ist nichts zu ueberspringen, und der
+        // teure Weg (Spuren lesen) faellt damit fuer den Normalfall weg.
+        if (_db.Media.FindById(mediaHash)?.SubtitlesUploadedAt == null)
+        {
+            return false;
+        }
+
+        var tracks = _db.Embeds.Find(x => x.MediaHash == mediaHash).ToList();
+        if (tracks.Count == 0)
+        {
+            return false; // kein Spurbeleg, an dem sich die Marke auf eine Quelle abbilden liesse
+        }
+
+        // Dieselbe Frage, die auch die Kette je Spur stellt: hat DIESE Quelle diese Spur erledigt?
+        // Kosten: eine Zeilenlesung je Spur — einmal je Item im Kopf des Laufs, nicht je Kandidat.
+        return tracks.All(track => IsEmbedTerminalFor(mediaHash, track.SubPos, provider));
+    }
 
     // ------------------------------------------------- the download mark is GONE
     //

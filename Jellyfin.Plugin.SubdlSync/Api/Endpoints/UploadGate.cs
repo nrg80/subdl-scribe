@@ -21,7 +21,8 @@ namespace Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
 /// Two independent reasons can forbid a source, and both must be answered per source, not per run:
 /// </para>
 /// <list type="bullet">
-/// <item><description>the switch is off or the provenance belongs to the other source (F-M487);</description></item>
+/// <item><description>the switch is off, or the provenance is KNOWN at all (F-M487, verschaerft: ein
+/// Download geht nirgends hoch — weder zurueck zur eigenen Quelle noch zur anderen);</description></item>
 /// <item><description>that source ALREADY has this subtitle — its own upload mark is in the store
 /// (F-M488). A re-upload to the same source is exactly as unwanted as a cross-source upload.</description></item>
 /// </list>
@@ -59,8 +60,10 @@ public static class UploadGate
         // Why not — the most specific answer wins, because it is the one that explains the row.
         if (!subdlSwitched && !tvSwitched)
         {
-            var known = Provenance.Parse(origin);
-            return new UploadGateResult(false, false, known is null ? "no-upload-source" : "cross-source");
+            // F-M500 (Operator-Anweisung 15.11.2026): eine BEKANNTE Herkunft sperrt BEIDE Quellen — nicht
+            // nur die fremde. Der Grund nennt sie, statt nur "cross-source" zu sagen.
+            return new UploadGateResult(false, false,
+                Provenance.OriginBlockedReason(origin) ?? "no-upload-source");
         }
 
         var already = (subdlSwitched ? "subdl" : string.Empty) + (tvSwitched && subdlSwitched ? "+" : string.Empty)

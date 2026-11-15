@@ -175,6 +175,20 @@ public class MediaEntity
     /// <summary>TMDb ID. For series this is the SHOW id, never an episode or season id.</summary>
     public string? TmdbId { get; set; }
 
+    /// <summary>
+    /// F-M501 (Operator-Anweisung 15.11.2026: „Tvst Seriennummer in den Store, gleiche Ebene wie tvshow
+    /// id von tmdb und tmdb“): die Nummer, unter der die Serie bei tvsubtitles.net geführt wird —
+    /// dieselbe Ebene wie <see cref="TmdbId"/> und <see cref="ImdbId"/>, weil sie dieselbe Frage
+    /// beantwortet: welche Serie IST diese Datei.
+    /// <para>
+    /// Sie wird EINMAL ermittelt (exakter TMDb-Titel in der Serienliste der Seite oder, wenn die Serie
+    /// dort fehlt, nach dem Anlegen) und danach gelesen statt neu gesucht. Null heißt „noch nicht
+    /// ermittelt“ — nie „keine Nummer vorhanden“: die Auflösung schreibt nur, was sie wirklich gesehen
+    /// hat, und ein Fehlschlag lässt das Feld leer.
+    /// </para>
+    /// </summary>
+    public string? TvstShowId { get; set; }
+
     /// <summary>SubDL release ID (sd_id) when known.</summary>
     public string? SdId { get; set; }
 

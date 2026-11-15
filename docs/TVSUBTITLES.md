@@ -65,13 +65,32 @@ Beispiel der Seite selbst: `Supernatural.S04E09.HDTV.XviD-NoTV.avi` → Serie Su
 Staffel 4, Folge 9, Rip HDTV, Release NoTV.
 
 **Sprachkürzel sind die der Seite:** `en es fr de br ru ua it gr ar hu pl tr nl pt sv da fi ko cn jp
-bg cz ro`. Ein ISO-Kürzel, das die Auswahlliste nicht kennt (`pt-BR`), lässt das Formular auf seinen
-ersten Eintrag zurückfallen — der Upload landet dann als Englisch. Der Client prüft deshalb gegen
-die Tabelle und schickt kein unbekanntes Kürzel.
+bg cz ro` — vier davon sind **kein ISO** (`gr`, `cz`, `cn`, `jp`). Ein Kürzel, das die Auswahlliste
+nicht kennt, lässt das Formular auf seinen ersten Eintrag zurückfallen — der Upload landet dann als
+Englisch. Der Client prüft deshalb gegen die Tabelle und schickt kein unbekanntes Kürzel.
+
+**ISO wird abgebildet, und zwar nur hier (F-M502):** `TvSubtitlesClient.SiteLanguage` zieht einen
+ankommenden Code auf das Kürzel der Seite — `el`/`ell`/`gre` → `gr`, `cs`/`ces`/`cze` → `cz`,
+`zh`/`zho`/`chi` → `cn`, `ja`/`jpn` → `jp` (die vier Abweichungen in beiden Schreibweisen), dazu die
+ISO-639-2-Formen der übrigen Seiten-Sprachen (`deu`/`ger` → `de`, `fra`/`fre` → `fr`, `spa` → `es`,
+`pob` → `br`, `ukr` → `ua`, `nld`/`dut` → `nl`, `ron`/`rum` → `ro` …). Groß-/Kleinschreibung zählt
+nicht, Region und Skript fallen weg (`zh-Hans` → `cn`, `ja-JP` → `jp`) — **außer** `pt-BR`/`pt_BR`:
+das ist brasilianisches Portugiesisch (`br`), während `pt` und `pt-PT` bei `pt` bleiben. Unbekannt
+heißt `null` (kein Raten) und wird mit einer Zeile abgelehnt. Dieselbe Brücke benutzen die Prüfung in
+`BuildUpload`, das Feld `lang` und die Rücklesung `FindUploadedIdAsync`; der Dateiname behält seine
+ISO3-Endung aus der Tabelle (`gre`, `cze`, `chi`, `jpn`, `pob`, `rum`). Eine gemeinsame Tabelle mit
+SubDL gibt es **nicht** — SubDL bildet in `SubdlApiClient` ab.
 
 **Serie neu anlegen:** `POST /add-tvshow1.php` (Formular `/add-tvshow.php`) mit `name`, `year_s`
-(Jahr der Erstausstrahlung), `seasons` (Anzahl), `go=1`. Die Seite selbst sagt: „Before adding new
-TV-Show please check if it already exist" — deshalb erst `ResolveShow`, dann anlegen.
+(Jahr der Erstausstrahlung), `seasons` (Anzahl, 1–22 — weiter reicht das Auswahlfeld der Seite nicht),
+`go=1`. Die Seite selbst sagt: „Before adding new TV-Show please check if it already exist" — deshalb
+erst `ResolveShow`, dann anlegen.
+
+**Wer anlegt, steht fest (F-M501):** `TvstShowResolver` — und zwar **nur** mit dem TMDb-Titel, dem
+TMDb-Erstausstrahlungsjahr und der TMDb-Staffelzahl (auf 1..22 begrenzt). Die Nummer der Serie steht
+danach in `MediaEntity.TvstShowId` auf derselben Ebene wie `TmdbId`/`ImdbId` und wird beim nächsten Mal
+gelesen statt gesucht. Angelegt wird **höchstens einmal je Medium und Lauf**, und nur, wenn die Seite
+vorher sauber geantwortet hat; im Trockenlauf nie.
 
 ## Grenzen und offene Punkte
 
@@ -94,7 +113,8 @@ mit der lebenden Seite.
 | Methode | Zweck |
 |---|---|
 | `ShowsAsync()` | `id → Name` aus der Auswahlliste (~2.769 Serien) |
-| `ResolveShow(shows, name)` | Id zu einem Namen; exakter Treffer schlägt „enthält" |
+| `ResolveShow(shows, name)` | Id zu einem Namen, **eng verglichen** (F-M501): Groß-/Kleinschreibung, `&` = `and` = `und`, Leerraum — sonst Gleichheit. Kein Teilstring, kein Ähnlichkeitsmaß |
+| `NormalizeShowName(name)` | der Vergleichsschlüssel selbst (F-M501) — die drei Angleichungen, nachprüfbar |
 | `SeasonsAsync(showId)` | Staffelnummern, die eine Seite haben |
 | `EpisodePagesAsync(showId, season)` | Seiten-Ids einer Staffel, ohne Dubletten |
 | `EpisodeLabelAsync(pageId)` | `(Staffel, Folge)` aus der Überschrift der Folgenseite |
@@ -104,7 +124,7 @@ mit der lebenden Seite.
 | `BuildUpload(...)` | Feldliste prüfen und bauen; sendet nichts |
 | `BuildUploadBody(upload)` | Multipart-Rumpf und Boundary, byte-genau |
 | `UploadAsync(upload, dryRun)` | senden; **ohne `dryRun: false` verlässt nichts den Prozess** |
-| `BuildAddShow(name, year, seasons)` / `AddShowAsync(...)` | Serie anlegen (Trockenlauf ist die Vorgabe) |
+| `BuildAddShow(name, year, seasons)` / `AddShowAsync(...)` | Serie anlegen; `seasons` 1–22 (F-M501), Trockenlauf ist die Vorgabe |
 | `IsZip(bytes)` | Zip oder HTML — die Seite antwortet in beiden Formen |
 
 Live-Probe (nur lesend, nicht Teil der Prüfungen):

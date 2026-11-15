@@ -168,6 +168,16 @@ public sealed class UploadPipeline : IPackFiller
     private readonly GlobalRateLimiter _limiter;
 
     /// <summary>
+    /// F-M501: der Client der zweiten Quelle und die Auflösung ihrer Seriennummer. Beide leben so lange
+    /// wie die Pipeline, weil die Anlege-Sperre EINEN LAUF lang gilt (<see cref="Api.Endpoints.TvstShowResolver.BeginRun"/>):
+    /// ein je Aufruf neuer Auflöser würde dieselbe Serie bei jeder Folge erneut anzulegen versuchen.
+    /// </summary>
+    private readonly Api.TvSubtitlesClient _tvstClient;
+
+    /// <summary>F-M501: die Seriennummer-Auflösung der zweiten Quelle (gespeichert → eng gesucht → angelegt).</summary>
+    private readonly Api.Endpoints.TvstShowResolver _tvstShows;
+
+    /// <summary>
     /// F-M389: one item per (series IMDb id, season) that this run worked — the way into a season
     /// whose episodes are NOT all in the queue. Jellyfin stores the SERIES id on the series, never
     /// on the episode, so the season is found through an episode rather than by a provider query.
@@ -316,6 +326,10 @@ public sealed class UploadPipeline : IPackFiller
         // the OshashCache property. Read-only shares keep their cache,
         // library folders stay clean.
         _ffmpegPath = FfmpegTools.ResolvePath(config, logger);
+
+        // F-M501: EIN Client und EIN Auflöser für den ganzen Lauf — siehe die Feldbemerkungen oben.
+        _tvstClient = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        _tvstShows = new Api.Endpoints.TvstShowResolver(_tvstClient, logger);
     }
 
     /// <summary>
@@ -333,6 +347,10 @@ public sealed class UploadPipeline : IPackFiller
         // against state this run is about to change, and the run's own end sets the new moment — so the
         // order is cancelled here and armed again in the finally below.
         ScheduledTasks.SubdlSchedulerCoordinator.Instance?.CancelUploadPostprocessing("upload run started");
+
+        // F-M501: die Anlege-Sperre der tvst-Serienauflösung gilt je Lauf, nicht je Prozess — hier ist
+        // der Anfang des Laufs, also hier wird sie geleert.
+        _tvstShows.BeginRun();
 
         // F-M247: record that this run was a dry run. It does the searching and the QA, so its
         // summary fills up with numbers, but it writes nothing to SubDL — the statistics must
@@ -663,14 +681,45 @@ public sealed class UploadPipeline : IPackFiller
             // F-M88c: FIRST check — if this media file is already upload-complete, skip it
             // entirely without touching the OSHash cache, ffprobe, streams, or directory listings.
             // MediaHashFor is deliberately NOT called here for settled files.
+            //
+            // F-M499 (gemessen 15.11.2026, 16:17 im scharfen Lauf): "upload-complete" war hier
+            // QUELLENBLIND gelesen — die Dateimarke stand von den SubDL-Uploads, tvsubtitles hatte auf
+            // denselben Dateien noch keine Spur, und die Pipeline warf die 27 vom Seeder quellenweise
+            // eingereihten Folgen alle wieder weg ("[SubDL] SKIP {File} — upload file-complete",
+            // Laufende "0 uploaded"). Dieselbe Frage, die F-M499 in der Queue je Quelle stellt, gilt
+            // im Kopf des Laufs: uebersprungen wird nur, wenn KEINE Quelle mehr offen ist.
+            //
+            // Die Quellen sind dieselben, die auch die Kette anlaufen laesst (Schalter UND
+            // Konfiguration, im Trockenlauf nur der Schalter — F-M496). Ein Lauf ohne eingeschaltete
+            // Quelle ueberspringt nichts: dann gibt es keine Marke, die als "fertig" gelten duerfte.
             string? earlyHash = Registry.GetMediaHash(mediaPath);
-            if (Registry.IsSubtitlesUploaded(earlyHash))
+            var quellen = UploadSources();
+            var offeneQuellen = quellen
+                .Where(quelle => !Registry.IsSubtitlesUploadedFor(earlyHash, quelle))
+                .ToList();
+            if (quellen.Count > 0 && offeneQuellen.Count == 0)
             {
                 summary.SkippedItems++;
                 summary.FilesSkipped++;
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] SKIP {File} — upload file-complete", Path.GetFileName(mediaPath));
+                LogUtil.PerItem(
+                    _config.LogMode,
+                    _logger,
+                    "[SubDL] SKIP {File} — upload file-complete for every upload source ({Sources})",
+                    Path.GetFileName(mediaPath),
+                    string.Join(", ", quellen.Select(Api.Endpoints.Provenance.Name)));
 
                 continue;
+            }
+
+            if (offeneQuellen.Count > 0)
+            {
+                // Der Grund gehoert in den Lauf: eine Datei, die fuer eine Quelle fertig ist, ist es
+                // fuer die andere nicht, und genau diese Zeile fehlte, als der Lauf "0 uploaded" sagte.
+                LogUtil.Detail(
+                    _logger,
+                    "[SubDL] {File} — still open: {Sources} (F-M499)",
+                    Path.GetFileName(mediaPath),
+                    string.Join(", ", offeneQuellen.Select(Api.Endpoints.Provenance.Name)));
             }
 
             // F-M60 REMOVED (operator order 08.10.2026: "Dann bitte file-retry weg in code und gui.
@@ -1069,11 +1118,16 @@ public sealed class UploadPipeline : IPackFiller
                     // The registry decides that on the CONTENT (see RecordSkippedContent) — replaying a
                     // stale reject over content that is demonstrably uploaded is what kept the position
                     // due and made the file re-extract on every run.
+                    //
+                    // F-M500 (gemessen 15.11.2026, 16:24): "schon hochgeladen" nimmt die QUELLE mit. Lag
+                    // der Inhalt bei SubDL, ist die Spur fuer SubDL erledigt und fuer tvsubtitles offen —
+                    // dann faellt der Kandidat hier DURCH statt weggeworfen zu werden, und die Kette
+                    // fragt je Quelle (ihr Herkunftstor bleibt davor unangetastet, F-M487).
                     string? rejectedContentHash = Registry.GetEmbed(mediaHash, subPos)?.ContentHash;
-                    bool settledNow = Registry.RecordSkippedContent(
+                    var (settleVerdict, settleOpen) = SettleDuplicateContent(
                         mediaHash, false, subPos, lang, streamHi, false, rejectedContentHash, rejectReason);
 
-                    if (settledNow)
+                    if (settleVerdict == ContentSettle.Settled)
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
                             "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
@@ -1082,13 +1136,23 @@ public sealed class UploadPipeline : IPackFiller
                         continue;
                     }
 
-                    summary.SkippedStreams++;
-                    summary.RejectedCandidates++; // F-M286
-                    // Known reject for THIS position — carry the original reason forward verbatim
-                    // instead of replacing it with a generic note, so the cause stays readable.
-                    LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(mediaPath), lang, ExplainReject(rejectReason));
+                    if (settleVerdict == ContentSettle.DueForAnotherSource)
+                    {
+                        // Kein neues Urteil, kein Reject: die Spur wird neu gelesen und geht an die Kette.
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL] REPLAY {File} s{Pos} [{Lang}] — rejected as duplicate-content earlier, still open for {Sources} (F-M500)",
+                            Path.GetFileName(mediaPath), subPos, lang, settleOpen);
+                    }
+                    else
+                    {
+                        summary.SkippedStreams++;
+                        summary.RejectedCandidates++; // F-M286
+                        // Known reject for THIS position — carry the original reason forward verbatim
+                        // instead of replacing it with a generic note, so the cause stays readable.
+                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(mediaPath), lang, ExplainReject(rejectReason));
 
-                    continue;
+                        continue;
+                    }
                 }
 
                 // F-M5: take the text from the one-pass extraction. Hit ffmpeg again only
@@ -1222,11 +1286,15 @@ public sealed class UploadPipeline : IPackFiller
                     // F-M298: `duplicate-content` is only a verdict while the content is NOT already up.
                     // The registry decides that on the CONTENT (see RecordSkippedContent). A sidecar is
                     // keyed by its content, so the question is asked about exactly the bytes rejected.
-                    bool looseSettled = Registry.RecordSkippedContent(
+                    //
+                    // F-M500: und sie fragt JE QUELLE — liegt der Inhalt bei SubDL, ist die Datei fuer
+                    // SubDL erledigt und fuer tvsubtitles offen; dann faellt sie hier durch und die Kette
+                    // entscheidet je Quelle (Herkunftstor unveraendert, F-M487).
+                    var (looseSettle, looseOpen) = SettleDuplicateContent(
                         mediaHash, true, -1, looseLang, looseHi, looseForced, looseHashProbe, looseReject,
                         fileName: Path.GetFileName(loosePath), path: loosePath);
 
-                    if (looseSettled)
+                    if (looseSettle == ContentSettle.Settled)
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
                             "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
@@ -1235,11 +1303,20 @@ public sealed class UploadPipeline : IPackFiller
                         continue;
                     }
 
-                    summary.SkippedStreams++;
-                    summary.RejectedCandidates++; // F-M286
-                    LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(loosePath), looseLang, ExplainReject(looseReject));
+                    if (looseSettle == ContentSettle.DueForAnotherSource)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL] REPLAY {File} [{Lang}] — rejected as duplicate-content earlier, still open for {Sources} (F-M500)",
+                            Path.GetFileName(loosePath), looseLang, looseOpen);
+                    }
+                    else
+                    {
+                        summary.SkippedStreams++;
+                        summary.RejectedCandidates++; // F-M286
+                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(loosePath), looseLang, ExplainReject(looseReject));
 
-                    continue;
+                        continue;
+                    }
                 }
 
                 try
@@ -1366,19 +1443,37 @@ public sealed class UploadPipeline : IPackFiller
                     // run (prod 06.10.2026: Lanterns S01E08, 39 streams, 0 uploaded / 39 rejected after a
                     // container tag write moved the media hash). The registry settles this on the CONTENT
                     // and reports whether it recorded an upload instead of a reject.
-                    bool qaSettledAsUploaded = Registry.RecordSkippedContent(
+                    //
+                    // F-M500 (gemessen 15.11.2026, 16:24): das Urteil nimmt die QUELLE mit. Liegt der
+                    // Inhalt bei SubDL und tvsubtitles hat ihn noch nicht, ist der Kandidat NICHT
+                    // erledigt — er geht mit seiner Sprache an die Kette, und dort entscheidet das
+                    // unveraenderte Herkunftstor (F-M487), ob die offene Quelle ihn nehmen darf.
+                    var (qaSettle, qaOpen) = SettleDuplicateContent(
                         mediaHash, cand.IsLoose, cand.SubPos, cand.Lang, cand.HearingImpaired, cand.Forced,
                         contentHash, qaReject,
                         fileName: cand.IsLoose ? Path.GetFileName(cand.LoosePath) : null,
                         path: cand.IsLoose ? cand.LoosePath : null);
 
-                    if (qaSettledAsUploaded)
+                    if (qaSettle == ContentSettle.Settled)
                     {
                         summary.SkippedStreams++;
                         LogUtil.PerItem(_config.LogMode, _logger,
                             "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
                             Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang);
 
+                        continue;
+                    }
+
+                    if (qaSettle == ContentSettle.DueForAnotherSource)
+                    {
+                        // Dieselbe Sprache, eine Quelle ohne den Inhalt: der Kandidat laeuft weiter.
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL] DUE {File} [{Lang}] — content already up elsewhere, still open for {Sources} (F-M500)",
+                            Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang, qaOpen);
+
+                        qaSurvivors.Add(correctedLang != null
+                            ? (cand.IsLoose, cand.Stream, cand.SubPos, cand.LoosePath, correctedLang, cand.Srt, cand.HearingImpaired, cand.Forced)
+                            : cand);
                         continue;
                     }
 
@@ -1494,7 +1589,7 @@ public sealed class UploadPipeline : IPackFiller
                             neutralName, cand.Lang, Api.Endpoints.Provenance.Name(quelle),
                             Api.Endpoints.Provenance.MayUploadTo(dryHerkunft, quelle)
                                 ? "already-uploaded:" + Api.Endpoints.Provenance.Name(quelle)
-                                : "cross-source");
+                                : Api.Endpoints.Provenance.OriginBlockedReason(dryHerkunft) ?? "no-upload-source");
                         continue;
                     }
 
@@ -1672,18 +1767,35 @@ public sealed class UploadPipeline : IPackFiller
                         string skipReason = RejectReason.DuplicateRemote == result.Reason
                             ? RejectReason.DuplicateRemote
                             : result.Reason ?? RejectReason.CandidateRejected;
-                        bool skipSettled = Registry.RecordSkippedContent(
+                        // F-M500: auch hier fragt "schon hochgeladen" je Quelle. Die Kette hat alle Quellen
+                        // gefragt; hat eine den Inhalt, bekommt SIE ihre Marke, und die andere bleibt offen
+                        // statt quellenneutral abgelehnt zu werden.
+                        var (skipSettle, skipOpen) = SettleDuplicateContent(
                             mediaHash, cand.IsLoose, cand.SubPos, cand.Lang, cand.HearingImpaired, cand.Forced,
                             skippedContentHash, skipReason,
                             fileName: cand.IsLoose ? Path.GetFileName(cand.LoosePath) : null,
-                            path: cand.IsLoose ? cand.LoosePath : null);
+                            path: cand.IsLoose ? cand.LoosePath : null,
+                            settleOnAnySkipReason: true);
 
-                        if (skipSettled)
+                        if (skipSettle == ContentSettle.Settled)
                         {
                             summary.SkippedStreams++;
                             LogUtil.PerItem(_config.LogMode, _logger,
                                 "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
                                 Path.GetFileName(fileName), cand.Lang);
+
+                            break;
+                        }
+
+                        if (skipSettle == ContentSettle.DueForAnotherSource)
+                        {
+                            // Keine Ablehnung: der Inhalt liegt bei einer Quelle, die andere hatte in DIESEM
+                            // Lauf keinen Versuch (Herkunft, Schalter oder Ausfall). Die Spur bleibt fuer sie
+                            // offen, statt quellenneutral verworfen zu werden (F-M500).
+                            summary.SkippedStreams++;
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL] DUE {File} [{Lang}] — content already up elsewhere, still open for {Sources} (F-M500)",
+                                Path.GetFileName(fileName), cand.Lang, skipOpen);
 
                             break;
                         }
@@ -2061,6 +2173,8 @@ public sealed class UploadPipeline : IPackFiller
             "und-detection-failed (F-M74)" => "untagged stream: language could not be detected",
             "no-imdb" => "item has no IMDb id — cannot upload",
             "no-season-ep" => "item has no season/episode numbers — cannot upload",
+            "second-source-no-tmdb-id" => "no TMDb id, so there is no leading title for tvsubtitles.net (F-M501)",
+            "second-source-no-series-record" => "TMDb answered no series record, so name and year are unknown (F-M501)",
             _ => reason
         };
     }
@@ -2347,11 +2461,12 @@ public sealed class UploadPipeline : IPackFiller
             return UploadResult.Skipped(gate.SkipReason);
         }
 
-        if (!darfSubdl && Api.Endpoints.Provenance.Parse(herkunft) is not null)
+        // F-M500 (Operator-Anweisung 15.11.2026): eine bekannte Herkunft sperrt beide Quellen. Die Zeile
+        // nennt sie, damit im Lauf steht, WOHER der Text kommt und warum er nirgends hochgeht.
+        if (Api.Endpoints.Provenance.OriginBlockedReason(herkunft) is { } herkunftGesperrt)
         {
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL] {Name} [{Lang}] — {Reason}",
-                neutralName, lang, Api.Endpoints.Provenance.CrossSourceReason(herkunft!, Configuration.SubtitleProvider.Subdl));
+                "[SubDL] {Name} [{Lang}] — {Reason}", neutralName, lang, herkunftGesperrt);
         }
 
         // F-M495 (Operator-Anweisung 15.11.2026): beide Endpunkte werden hintereinander gefragt, in der
@@ -2393,7 +2508,7 @@ public sealed class UploadPipeline : IPackFiller
             }
 
             // F-M489/F-M495: die beiden Tore gelten JE QUELLE — „diese Quelle hat ihn schon" (F-M488)
-            // und die Herkunft (F-M487, MayUploadTo: bekannt = nur zur eigenen Quelle, unbekannt =
+            // und die Herkunft (F-M487, verschaerft 15.11.2026: bekannt = NIRGENDS hin, unbekannt =
             // ueberallhin). Ein verbotenes Ziel wird uebersprungen und im Log genannt; die Kette laeuft
             // weiter, das Tor wird also nicht abgeschafft, sondern je Quelle gefragt.
             if (quelle == Configuration.SubtitleProvider.Subdl ? !darfSubdl : !darfZweite)
@@ -2403,7 +2518,7 @@ public sealed class UploadPipeline : IPackFiller
                     neutralName, lang, Api.Endpoints.Provenance.Name(quelle),
                     Api.Endpoints.Provenance.MayUploadTo(herkunft, quelle)
                         ? "already-uploaded:" + Api.Endpoints.Provenance.Name(quelle)
-                        : "cross-source");
+                        : Api.Endpoints.Provenance.OriginBlockedReason(herkunft) ?? "no-upload-source");
                 continue;
             }
 
@@ -2416,7 +2531,7 @@ public sealed class UploadPipeline : IPackFiller
                 else
                 {
                     zweiteErgebnis = await SendToSecondSourceAsync(
-                        srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, hearingImpaired, ct)
+                        srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, hearingImpaired, mediaHash, ct)
                         .ConfigureAwait(false);
                 }
             }
@@ -4919,31 +5034,66 @@ public sealed class UploadPipeline : IPackFiller
     // Kept as a comment for history until the next cleanup.
 
     /// <summary>
-    /// F-M485: sends one subtitle to the second source (tvsubtitles.net). The series name comes from the
-    /// media file's own name through the same parser the download uses — the source has no id index, so
-    /// a name is all it can resolve.
+    /// F-M485: sends one subtitle to the second source (tvsubtitles.net).
+    /// <para>
+    /// F-M501 (Operator-Anweisung 15.11.2026): Name und Jahr kommen jetzt aus TMDb und die
+    /// Seriennummer aus dem Store — nicht mehr aus dem Dateinamen. Der Name aus dem Dateinamen war eine
+    /// Vermutung über eine Schreibweise (der Uploader hat ihn getippt), und die Nummer der Serie wurde
+    /// bei jedem Aufruf neu gesucht, weshalb der Store sie nie lernen konnte. Die Reihenfolge steht in
+    /// <see cref="Api.Endpoints.TvstShowResolver"/>: gespeicherte Nummer → eng verglichener TMDb-Titel →
+    /// anlegen und erneut suchen. Fehlt am Ende die Nummer, wird tvst übersprungen; die Kette laeuft
+    /// weiter, denn die andere Quelle bekommt ihren Versuch unabhaengig davon.
+    /// </para>
     /// </summary>
     private async Task<UploadResult> SendToSecondSourceAsync(
         string srtContent, string neutralName, string lang, string releaseName, string quality,
         string? imdbId, string? tmdbId, bool isSeries, int season, int episode, bool hearingImpaired,
-        CancellationToken ct)
+        string? mediaHash, CancellationToken ct)
     {
         if (!isSeries || season <= 0 || episode <= 0)
         {
             return UploadResult.Skipped("second-source-episodes-only");
         }
 
-        var client = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        // F-M501: ohne TMDb-Kennung gibt es keinen fuehrenden Titel — dann wird nicht geraten.
+        if (string.IsNullOrWhiteSpace(tmdbId))
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[tvsubtitles] {Name} [{Lang}] — skipped: no TMDb id, so there is no leading title (F-M501)",
+                neutralName, lang);
+            return UploadResult.Skipped("second-source-no-tmdb-id");
+        }
+
+        var series = await _tmdb.SeriesInfoAsync(tmdbId!, ct).ConfigureAwait(false);
+        if (series is null)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[tvsubtitles] {Name} [{Lang}] — skipped: TMDb answered no series record for {Tmdb} (F-M501)",
+                neutralName, lang, tmdbId);
+            return UploadResult.Skipped("second-source-no-series-record");
+        }
+
+        var show = await _tvstShows
+            .ResolveForMediaAsync(Registry, mediaHash, series, _config.DryRun, ct)
+            .ConfigureAwait(false);
+        if (!show.Resolved)
+        {
+            // F-M501: KEIN Blocker. Die Zeile nennt den Grund (Status), damit im Lauf steht, warum tvst
+            // fuer dieses Medium nichts bekommt, und die Kette laeuft weiter.
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[tvsubtitles] {Name} [{Lang}] — skipped: no show id ({Status}) (F-M501)",
+                neutralName, lang, show.Status);
+            return UploadResult.Skipped("second-source-show-" + show.Status);
+        }
+
         // F-M496 (Operator-Anweisung 15.11.2026): der eigene Schalter der Quelle wird dem Endpunkt
         // mitgegeben, statt `false` zu stehen. F-M483 hat den Endpunkt genau dafuer gebaut ("a dry run
         // builds the same body and sends nothing — which is also the default, so a mis-wired caller
         // cannot upload by accident"); die Kette prueft den Trockenlauf vorher selbst, hier steht die
         // zweite Tuer.
-        var endpoint = new Api.Endpoints.TvSubtitlesUploadEndpoint(client, dryRun: _config.DryRun);
-        var parsed = Pipeline.MediaNameParser.Parse(Path.GetFileNameWithoutExtension(releaseName));
-        var showName = parsed.Title ?? Path.GetFileNameWithoutExtension(releaseName);
+        var endpoint = new Api.Endpoints.TvSubtitlesUploadEndpoint(_tvstClient, dryRun: _config.DryRun);
         var ticket = new Api.Endpoints.UploadTicket(
-            showName,
+            series.Name,
             imdbId,
             tmdbId,
             season,
@@ -4951,11 +5101,15 @@ public sealed class UploadPipeline : IPackFiller
             lang,
             neutralName,
             System.Text.Encoding.UTF8.GetBytes(srtContent),
-            quality,
+            // F-M498: die Seite kennt nur sieben Rip-Werte; "WEB-DL" aus dem Release-Namen wird
+            // hier auf "WEB" gezogen, sonst lehnt sie jede Folge ab.
+            TvSubtitlesClient.RipFromQuality(quality),
             Path.GetFileNameWithoutExtension(releaseName),
             hearingImpaired,
             DoubleEpisode: false,
-            SeasonPack: false);
+            SeasonPack: false,
+            // F-M501: die aufgeloeste Nummer — der Endpunkt holt die Serienliste damit gar nicht erst.
+            TvstShowId: show.ShowId);
 
         var answer = await endpoint.SendAsync(ticket, ct).ConfigureAwait(false);
         LogUtil.PerItem(_config.LogMode, _logger,
@@ -4981,6 +5135,29 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="provider">Die Quelle, die hochladen soll.</param>
     /// <returns>Wahr, wenn diese Quelle per Upload-Schalter freigeschaltet ist.</returns>
     private bool SourceAllowed(Configuration.SubtitleProvider provider) => _config.IsUploadEnabled(provider);
+
+    /// <summary>
+    /// F-M499 (gemessen 15.11.2026, 16:17): die Quellen, die in DIESEM Lauf wirklich antreten — die
+    /// Doppelfrage „Schalter UND Konfiguration", die auch die Kette vor dem Start jeder Quelle stellt
+    /// (<see cref="SourceAllowed"/>, F-M477, und <see cref="Configuration.PluginConfiguration.IsConfiguredForUpload"/>,
+    /// F-M497).
+    /// <para>
+    /// Sie steht hier EINMAL, weil der Kopf des Laufs sie fuer die Frage „ist diese Datei fuer alle
+    /// Quellen fertig" braucht und die Kette fuer die Frage „wer bekommt diesen Untertitel". Zwei
+    /// Aufzaehlungen derselben Bedingung waeren zwei Wahrheiten: der Kopf koennte eine Datei als
+    /// fertig weglegen, weil eine Quelle fehlt, die die Kette sehr wohl fragen wuerde.
+    /// </para>
+    /// <para>
+    /// Im Trockenlauf gilt die Konfigurationsfrage NICHT (F-M496): er macht keinen Aufruf und braucht
+    /// deshalb keine Zugangsdaten — er zeigt nur, was ein echter Lauf taete.
+    /// </para>
+    /// </summary>
+    /// <returns>Die Quellen dieses Laufs, in der Reihenfolge, in der sie angetreten werden.</returns>
+    private List<Configuration.SubtitleProvider> UploadSources() =>
+        UploadSourceOrder()
+            .Where(SourceAllowed)
+            .Where(quelle => _config.DryRun || _config.IsConfiguredForUpload(quelle))
+            .ToList();
 
     /// <summary>
     /// F-M496 (Operator-Anweisung 15.11.2026): die Reihenfolge, in der die Kette die Quellen fragt —
@@ -5013,4 +5190,115 @@ public sealed class UploadPipeline : IPackFiller
             Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.Subdl),
             Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles))
         .SkipReason is null;
+
+    /// <summary>
+    /// F-M500: was ein Settle-Urteil fuer den Kandidaten bedeutet.
+    /// </summary>
+    private enum ContentSettle
+    {
+        /// <summary>Kein Quellenbeleg fuer den Inhalt: die Ablehnung wird geschrieben (quellenneutral, F-M499).</summary>
+        Reject,
+
+        /// <summary>Der Inhalt liegt bei mindestens einer Quelle, und keine offene Quelle darf ihn mehr nehmen.</summary>
+        Settled,
+
+        /// <summary>
+        /// Der Inhalt liegt bei einer Quelle, aber eine andere darf ihn nehmen und hat ihn nicht — der
+        /// Kandidat ist NICHT erledigt und geht weiter an die Kette.
+        /// </summary>
+        DueForAnotherSource
+    }
+
+    /// <summary>
+    /// F-M500 (gemessen 15.11.2026, 16:24 im scharfen Lauf): entscheidet, was ein Skip-/Settle-Grund mit
+    /// einem Kandidaten macht — und zwar JE QUELLE.
+    /// <para>
+    /// Der Anlass: 27 eingebettete FR-Spuren endeten als
+    /// <c>"identical subtitle already uploaded earlier (F-M298)"</c>, weil der Inhalt bei SubDL lag;
+    /// tvsubtitles bekam auf diesen Dateien nie einen Versuch, der Lauf meldete
+    /// <c>"0 uploaded | 34 rejected, 61 stream(s) skipped"</c>. Das Urteil "schon hochgeladen" war
+    /// quellenblind — es las <c>Status=Uploaded</c> und damit "irgendwo hochgeladen".
+    /// </para>
+    /// <para>
+    /// Die Regel steht hier EINMAL, weil alle vier Stellen (Reject-Replay eingebettet und Sidecar,
+    /// QA-Dedupe, Skip der Kette) dieselbe Frage stellen. Sie schreibt in jedem Fall genau eine Zeile:
+    /// liegt der Inhalt bei Quellen, wird die Spur <c>uploaded</c> mit DIESER Quelle ihrer Marke
+    /// (F-M488/F-M490) — eine Quelle ohne den Inhalt bleibt offen. Liegt er nirgends, bleibt es bei der
+    /// quellenneutralen Ablehnung (F-M499: eine Ablehnung ist ein Urteil ueber den Untertitel, nicht
+    /// ueber den Endpunkt).
+    /// </para>
+    /// <para>
+    /// "Offen" heisst: eingeschaltet und konfiguriert (<see cref="UploadSources"/>, F-M496/F-M497),
+    /// ohne den Inhalt, UND die Herkunft erlaubt diese Quelle (<see cref="Api.Endpoints.Provenance.MayUploadTo"/>,
+    /// F-M487). Das Herkunftstor wird hier nur GELESEN, nicht nachgebaut: ein von SubDL heruntergeladener
+    /// Untertitel bleibt bei tvsubtitles <c>cross-source</c> und bekommt keinen Versuch — auch nicht auf
+    /// diesem Weg.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaHash">Parent media hash.</param>
+    /// <param name="isLoose">True for a sidecar, false for an embedded position.</param>
+    /// <param name="subPos">Embedded stream position.</param>
+    /// <param name="lang">Language code.</param>
+    /// <param name="hearingImpaired">HI variant.</param>
+    /// <param name="forced">Forced flag.</param>
+    /// <param name="contentHash">Content hash of the text.</param>
+    /// <param name="reason">Skip reason as reported.</param>
+    /// <param name="fileName">Sidecar file name.</param>
+    /// <param name="path">Sidecar full path.</param>
+    /// <returns>Das Urteil und — bei <see cref="ContentSettle.DueForAnotherSource"/> — die offenen Quellen.</returns>
+    /// <param name="settleOnAnySkipReason">
+    /// True an der Stelle, an der die Kette den Kandidaten fallenlaesst: dort ist der Grund ein SKIP-Grund
+    /// (<c>already-uploaded:…</c>, <c>cross-source</c>, <c>not-configured</c>) und kein Urteil ueber den
+    /// Untertitel — er darf eine nachweislich hochgeladene Spur nicht als abgelehnt ueberschreiben.
+    /// <c>duplicate-remote</c> bleibt ausgenommen: das ist das Urteil des Servers und quellenneutral.
+    /// </param>
+    private (ContentSettle Verdict, string Open) SettleDuplicateContent(
+        string? mediaHash, bool isLoose, int subPos, string lang, bool hearingImpaired, bool forced,
+        string? contentHash, string? reason, string? fileName = null, string? path = null,
+        bool settleOnAnySkipReason = false)
+    {
+        void WriteReject() => Registry.MarkAndFlush(() => Registry.RecordSkippedContent(
+            mediaHash, isLoose, subPos, lang, hearingImpaired, forced, contentHash, reason,
+            Array.Empty<Configuration.SubtitleProvider>(),
+            fileName: fileName, path: path));
+
+        // Nur "duplicate-content" ist ein Urteil ueber den INHALT ("wir haben diesen Text schon").
+        // Jede andere Ablehnung — auch die des Servers (duplicate-remote) — bleibt quellenneutral.
+        // Am Ende der Kette dagegen ist der Grund ein SKIP-Grund und kein Urteil: dort zaehlt der Beleg.
+        bool inhaltSurteil = reason == RejectReason.DuplicateContent
+            || (settleOnAnySkipReason && reason != RejectReason.DuplicateRemote);
+        if (!inhaltSurteil || string.IsNullOrEmpty(contentHash))
+        {
+            WriteReject();
+            return (ContentSettle.Reject, string.Empty);
+        }
+
+        var quellen = UploadSources();
+        // Ohne eingeschaltete Quelle gibt es keine offene: dann zaehlt jeder Beleg im Bestand, damit ein
+        // Lauf mit abgeschaltetem Upload den Inhalt nicht als "nirgends hochgeladen" ablehnt.
+        var beleg = (quellen.Count > 0 ? quellen : UploadSourceOrder().ToList())
+            .Where(quelle => Registry.IsContentUploadedFor(contentHash, quelle))
+            .ToList();
+
+        if (beleg.Count == 0)
+        {
+            WriteReject();
+            return (ContentSettle.Reject, string.Empty);
+        }
+
+        // Dieselbe Herkunft, die auch die Kette liest (F-M487) — hier nur als Frage "darf diese Quelle ihn".
+        string? herkunft = Registry.GetOrigin(contentHash).Origin;
+        var offen = quellen
+            .Where(quelle => !beleg.Contains(quelle) && Api.Endpoints.Provenance.MayUploadTo(herkunft, quelle))
+            .ToList();
+
+        var belegte = beleg.ToList();
+        Registry.MarkAndFlush(() => Registry.RecordSkippedContent(
+            mediaHash, isLoose, subPos, lang, hearingImpaired, forced, contentHash, reason, belegte,
+            fileName: fileName, path: path));
+
+        return offen.Count == 0
+            ? (ContentSettle.Settled, string.Empty)
+            : (ContentSettle.DueForAnotherSource, string.Join(", ", offen.Select(Api.Endpoints.Provenance.Name)));
+    }
 }

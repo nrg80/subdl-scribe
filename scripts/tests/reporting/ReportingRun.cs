@@ -179,7 +179,9 @@ internal static class ReportingRun
               && db.Contains("EnsureReportColumns();", StringComparison.Ordinal),
             "an upgraded data file gets the report columns (EnsureCreated never alters a table)");
         // F-M486/F-M488/F-M490: 10 provenance, 11 the four own marks, 12 the per-source upload times.
-        Check(db.Contains("CurrentSchemaVersion = 12", StringComparison.Ordinal)
+        // F-M501: 13 carries media.TvstShowId — der Marker wird mit jeder Spalte gehoben, die ein
+        // aelterer Build beim Schreiben verlieren wuerde.
+        Check(db.Contains("CurrentSchemaVersion = 13", StringComparison.Ordinal)
               && db.Contains("ALTER TABLE sidecars ADD COLUMN Origin", StringComparison.Ordinal)
               && db.Contains("ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId", StringComparison.Ordinal),
             "the schema version is bumped with the columns (11 carries source and direction marks)");

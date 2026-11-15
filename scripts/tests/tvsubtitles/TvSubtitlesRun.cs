@@ -58,6 +58,90 @@ internal static class Program
             TvSubtitlesClient.Rips.Count == 8 && TvSubtitlesClient.Rips.Contains("BluRay")
             && TvSubtitlesClient.Rips.Contains(string.Empty));
 
+        // ---- 1b. ISO -> the site's codes, and ONLY here (F-M502) --------------------------------
+        // Die Seite kennt vier Kuerzel, die kein ISO sind (gr/cz/cn/jp). Jellyfin liefert
+        // Drei-Buchstaben-Codes, die Konfiguration teils Zwei-Buchstaben-Codes; beide muessen auf
+        // das Kuerzel der Seite fallen, sonst lehnt BuildUpload den Upload ab.
+        Check("the four deviations map in both spellings (F-M502)",
+            TvSubtitlesClient.SiteLanguage("el") == "gr" && TvSubtitlesClient.SiteLanguage("ell") == "gr"
+            && TvSubtitlesClient.SiteLanguage("gre") == "gr"
+            && TvSubtitlesClient.SiteLanguage("cs") == "cz" && TvSubtitlesClient.SiteLanguage("ces") == "cz"
+            && TvSubtitlesClient.SiteLanguage("cze") == "cz"
+            && TvSubtitlesClient.SiteLanguage("zh") == "cn" && TvSubtitlesClient.SiteLanguage("zho") == "cn"
+            && TvSubtitlesClient.SiteLanguage("chi") == "cn"
+            && TvSubtitlesClient.SiteLanguage("ja") == "jp" && TvSubtitlesClient.SiteLanguage("jpn") == "jp",
+            "found: el/ell/gre→" + TvSubtitlesClient.SiteLanguage("gre")
+            + ", cs/ces/cze→" + TvSubtitlesClient.SiteLanguage("cze")
+            + ", zh/zho/chi→" + TvSubtitlesClient.SiteLanguage("chi")
+            + ", ja/jpn→" + TvSubtitlesClient.SiteLanguage("jpn"));
+        Check("the other page languages map from their ISO-639-2 forms (F-M502)",
+            TvSubtitlesClient.SiteLanguage("eng") == "en"
+            && TvSubtitlesClient.SiteLanguage("spa") == "es"
+            && TvSubtitlesClient.SiteLanguage("fra") == "fr" && TvSubtitlesClient.SiteLanguage("fre") == "fr"
+            && TvSubtitlesClient.SiteLanguage("deu") == "de" && TvSubtitlesClient.SiteLanguage("ger") == "de"
+            && TvSubtitlesClient.SiteLanguage("por") == "pt" && TvSubtitlesClient.SiteLanguage("pob") == "br"
+            && TvSubtitlesClient.SiteLanguage("rus") == "ru" && TvSubtitlesClient.SiteLanguage("ukr") == "ua"
+            && TvSubtitlesClient.SiteLanguage("ita") == "it" && TvSubtitlesClient.SiteLanguage("ara") == "ar"
+            && TvSubtitlesClient.SiteLanguage("hun") == "hu" && TvSubtitlesClient.SiteLanguage("pol") == "pl"
+            && TvSubtitlesClient.SiteLanguage("tur") == "tr"
+            && TvSubtitlesClient.SiteLanguage("nld") == "nl" && TvSubtitlesClient.SiteLanguage("dut") == "nl"
+            && TvSubtitlesClient.SiteLanguage("swe") == "sv" && TvSubtitlesClient.SiteLanguage("dan") == "da"
+            && TvSubtitlesClient.SiteLanguage("fin") == "fi" && TvSubtitlesClient.SiteLanguage("kor") == "ko"
+            && TvSubtitlesClient.SiteLanguage("bul") == "bg"
+            && TvSubtitlesClient.SiteLanguage("ron") == "ro" && TvSubtitlesClient.SiteLanguage("rum") == "ro",
+            "found: ukr→" + TvSubtitlesClient.SiteLanguage("ukr")
+            + ", dut→" + TvSubtitlesClient.SiteLanguage("dut")
+            + ", rum→" + TvSubtitlesClient.SiteLanguage("rum"));
+        Check("the site's own codes stay what they are (F-M502)",
+            TvSubtitlesClient.Languages.Keys.All(k => TvSubtitlesClient.SiteLanguage(k) == k),
+            "a code the page carries must not be rewritten");
+        Check("case does not matter (F-M502)",
+            TvSubtitlesClient.SiteLanguage("DE") == "de"
+            && TvSubtitlesClient.SiteLanguage("DeU") == "de"
+            && TvSubtitlesClient.SiteLanguage("GRE") == "gr"
+            && TvSubtitlesClient.SiteLanguage("Pt-Br") == "br"
+            && TvSubtitlesClient.SiteLanguage("  jpn  ") == "jp");
+        Check("a region or script suffix is reduced to the base code — except pt-BR (F-M502)",
+            TvSubtitlesClient.SiteLanguage("pt-BR") == "br"
+            && TvSubtitlesClient.SiteLanguage("pt_BR") == "br"
+            && TvSubtitlesClient.SiteLanguage("pt-PT") == "pt"
+            && TvSubtitlesClient.SiteLanguage("zh-Hans") == "cn"
+            && TvSubtitlesClient.SiteLanguage("zh_CN") == "cn"
+            && TvSubtitlesClient.SiteLanguage("ja-JP") == "jp"
+            && TvSubtitlesClient.SiteLanguage("es-419") == "es",
+            "found: pt-BR→" + TvSubtitlesClient.SiteLanguage("pt-BR")
+            + ", pt-PT→" + TvSubtitlesClient.SiteLanguage("pt-PT")
+            + ", zh-Hans→" + TvSubtitlesClient.SiteLanguage("zh-Hans"));
+        Check("an unknown code yields null instead of a guess (F-M502)",
+            TvSubtitlesClient.SiteLanguage("xx") is null
+            && TvSubtitlesClient.SiteLanguage("klingon") is null
+            && TvSubtitlesClient.SiteLanguage("zz-ZZ") is null
+            && TvSubtitlesClient.SiteLanguage(string.Empty) is null
+            && TvSubtitlesClient.SiteLanguage("   ") is null
+            && TvSubtitlesClient.SiteLanguage(null) is null);
+        var langData = Encoding.UTF8.GetBytes("1\n00:00:01,000 --> 00:00:02,000\nhello\n");
+        var greek = Build(lang: "gre", data: langData);
+        var german = Build(lang: "deu", data: langData);
+        Check("BuildUpload checks the language through the mapping and sends the site's code (F-M502)",
+            greek!.Fields.Single(f => f.Key == "lang").Value == "gr"
+            && greek.LanguageName == "greek" && greek.Iso3 == "gre"
+            && german!.Fields.Single(f => f.Key == "lang").Value == "de"
+            && german.LanguageName == "german" && german.Iso3 == "ger");
+        var refusal = Refusal(() => Build(lang: "xx", data: langData));
+        Check("an unmapped language is refused with the site's list, in one line (F-M502)",
+            refusal is not null
+            && refusal.Contains("language must be one of the site's codes", StringComparison.Ordinal)
+            && refusal.Contains("gr", StringComparison.Ordinal)
+            && refusal.Contains("cz", StringComparison.Ordinal),
+            "found: " + (refusal ?? "<no refusal>"));
+        var isoName = Build(lang: "gre", fileName: "The Middle - 2x24.gre.srt", data: langData)!;
+        var (isoBody, _) = TvSubtitlesClient.BuildUploadBody(isoName);
+        Check("the upload's file name keeps its ISO3 ending from the table (F-M502)",
+            isoName.FileName == "The Middle - 2x24.gre.srt"
+            && isoName.Iso3 == TvSubtitlesClient.Languages["gr"].Iso3
+            && Encoding.UTF8.GetString(isoBody)
+                .Contains("filename=\"The Middle - 2x24.gre.srt\"", StringComparison.Ordinal));
+
         // ---- 2. the comment carries the ids, the author stays out -------------------------------
         Check("the comment names the ids and then the client that wrote it",
             TvSubtitlesClient.Comment(1422, "tt1442464")
@@ -80,7 +164,12 @@ internal static class Program
         Check("show id 0 is refused (no series at all)", Refused(() => Build(showId: 0, data: data)));
         Check("season 0 and 23 are refused", Refused(() => Build(season: 0, data: data)) && Refused(() => Build(season: 23, data: data)));
         Check("episode -1 and 101 are refused", Refused(() => Build(episode: -1, data: data)) && Refused(() => Build(episode: 101, data: data)));
-        Check("an ISO language the select does not carry is refused", Refused(() => Build(lang: "pt-BR", data: data)));
+        // F-M502: ein ISO-Code wird nicht mehr abgelehnt, sondern abgebildet (gre → gr, pt-BR → br);
+        // abgelehnt wird nur, was die Bruecke nicht kennt.
+        Check("an unknown language is refused, an ISO code is not (F-M502)",
+            Refused(() => { _ = Build(lang: "xx", data: data); })
+            && Refused(() => { _ = Build(lang: string.Empty, data: data); })
+            && !Refused(() => { _ = Build(lang: "gre", data: data); }));
         Check("an unknown rip is refused", Refused(() => Build(rip: "HDTV.XviD", data: data)));
         Check("an upload without any id is refused — the comment would be empty",
             Refused(() => TvSubtitlesClient.BuildUpload(
@@ -149,11 +238,17 @@ internal static class Program
         Check("the show select parses into id -> name", shows.Count >= 8 && shows.ContainsKey(512),
             "parsed " + shows.Count + " entries");
         Check("the show resolves by name", TvSubtitlesClient.ResolveShow(shows, "the middle") == 512);
-        Check("an exact name beats a name that merely contains the text (Malcolm in the Middle is 422)",
-            TvSubtitlesClient.ResolveShow(shows, "The Middle") == 512
-            && TvSubtitlesClient.ResolveShow(shows, "Malcolm in the Middle") == 422);
-        Check("an unknown show resolves to null, not to some near match",
-            TvSubtitlesClient.ResolveShow(shows, "Nope-Nope-Nope") is null);
+        // F-M501: der Vergleich ist eng — Gross/Kleinschreibung und Leerraum zaehlen nicht, sonst gilt
+        // Gleichheit. Die fruehere "enthaelt"-Stufe ist weg: "The Middle" findet NICHT
+        // "Malcolm in the Middle" und nicht "The Middle Man".
+        Check("the name comparison is narrow: case and whitespace only (F-M501)",
+            TvSubtitlesClient.ResolveShow(shows, "  The   MIDDLE ") == 512
+            && TvSubtitlesClient.ResolveShow(shows, "Malcolm in the Middle") == 422
+            && TvSubtitlesClient.ResolveShow(shows, "The Middle") == 512);
+        Check("an unknown show resolves to null, and no substring matches (F-M501)",
+            TvSubtitlesClient.ResolveShow(shows, "Nope-Nope-Nope") is null
+            && TvSubtitlesClient.ResolveShow(shows, "Middle") is null
+            && TvSubtitlesClient.ResolveShow(shows, "The Middle Ma") is null);
 
         var seasons = TvSubtitlesClient.ParseSeasons(Fixture("tvshow-512.html"), 512);
         Check("the show page yields its nine seasons, ascending",
@@ -306,6 +401,21 @@ internal static class Program
         catch (ArgumentException)
         {
             return true;
+        }
+    }
+
+    /// <summary>F-M502: die Meldung einer Ablehnung, oder null wenn nichts abgelehnt wurde — damit
+    /// eine Pruefung auch den TEXT lesen kann und nicht nur, DASS abgelehnt wurde.</summary>
+    private static string? Refusal(Action action)
+    {
+        try
+        {
+            action();
+            return null;
+        }
+        catch (ArgumentException ex)
+        {
+            return ex.Message;
         }
     }
 

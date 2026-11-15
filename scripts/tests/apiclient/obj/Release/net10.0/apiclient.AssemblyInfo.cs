@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("apiclientrun")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("12.1.11.5")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("12.1.11.5+ff3cdf332f6137a1cddb786bb7d841b17ca80869")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("12.1.11.5+9df28adfb341240d8f282b09ae953196501b9f6a")]
 [assembly: System.Reflection.AssemblyProductAttribute("apiclientrun")]
 [assembly: System.Reflection.AssemblyTitleAttribute("apiclientrun")]
 [assembly: System.Reflection.AssemblyVersionAttribute("12.1.11.5")]

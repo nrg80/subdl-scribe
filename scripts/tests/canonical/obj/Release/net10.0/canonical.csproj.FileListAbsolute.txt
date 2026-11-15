@@ -6,7 +6,6 @@
 /opt/data/subdl-scribe/scripts/tests/canonical/bin/Release/net10.0/Jellyfin.Plugin.SubdlSync.dll
 /opt/data/subdl-scribe/scripts/tests/canonical/bin/Release/net10.0/LanguageDetection.dll
 /opt/data/subdl-scribe/scripts/tests/canonical/bin/Release/net10.0/Jellyfin.Plugin.SubdlSync.pdb
-/opt/data/subdl-scribe/scripts/tests/canonical/bin/Release/net10.0/Jellyfin.Plugin.SubdlSync.xml
 /opt/data/subdl-scribe/scripts/tests/canonical/obj/Release/net10.0/canonical.csproj.AssemblyReference.cache
 /opt/data/subdl-scribe/scripts/tests/canonical/obj/Release/net10.0/canonical.GeneratedMSBuildEditorConfig.editorconfig
 /opt/data/subdl-scribe/scripts/tests/canonical/obj/Release/net10.0/canonical.AssemblyInfoInputs.cache

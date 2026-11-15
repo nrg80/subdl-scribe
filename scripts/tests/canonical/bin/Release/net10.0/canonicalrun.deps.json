@@ -6,19 +6,19 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v10.0": {
-      "canonicalrun/1.0.0": {
+      "canonicalrun/12.1.11.5": {
         "dependencies": {
-          "Jellyfin.Plugin.SubdlSync": "12.1.12.380"
+          "Jellyfin.Plugin.SubdlSync": "12.1.12.388"
         },
         "runtime": {
           "canonicalrun.dll": {}
         }
       },
-      "Jellyfin.Plugin.SubdlSync/12.1.12.380": {
+      "Jellyfin.Plugin.SubdlSync/12.1.12.388": {
         "runtime": {
           "Jellyfin.Plugin.SubdlSync.dll": {
-            "assemblyVersion": "12.1.12.380",
-            "fileVersion": "12.1.12.380"
+            "assemblyVersion": "12.1.12.388",
+            "fileVersion": "12.1.12.388"
           }
         }
       },
@@ -33,12 +33,12 @@
     }
   },
   "libraries": {
-    "canonicalrun/1.0.0": {
+    "canonicalrun/12.1.11.5": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
     },
-    "Jellyfin.Plugin.SubdlSync/12.1.12.380": {
+    "Jellyfin.Plugin.SubdlSync/12.1.12.388": {
       "type": "reference",
       "serviceable": false,
       "sha512": ""

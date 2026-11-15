@@ -66,13 +66,20 @@ public static class Provenance
     }
 
     /// <summary>
-    /// F-M487: may this subtitle go to that source?
+    /// F-M487 (verschaerft durch Operator-Anweisung 15.11.2026: "Herkunft subdl: nie zurueck zu subdl, nie
+    /// zu tvst"): darf dieser Untertitel zu jener Quelle?
     /// <para>
-    /// UNKNOWN provenance is allowed everywhere — a hand copy, an embedded track or an older row says
-    /// nothing about where it came from, and refusing those would stop the plugin from uploading the
-    /// operator's own files. A KNOWN provenance is allowed at its own source only: a subtitle fetched
-    /// from tvsubtitles.net never becomes a SubDL upload, and a SubDL download never goes back out to
-    /// tvsubtitles.net. That is the whole rule, and it is deliberately this short.
+    /// UNBEKANNTE Herkunft ist ueberall erlaubt — eine Handkopie, eine eingebettete Spur oder eine alte
+    /// Zeile sagt nichts darueber, woher der Text kommt, und sie abzuweisen hiesse, die eigenen Dateien des
+    /// Operators nicht mehr zu veroeffentlichen. Eine BEKANNTE Herkunft ist NIRGENDS mehr erlaubt: was von
+    /// SubDL heruntergeladen wurde, geht weder zurueck zu SubDL (Reup) noch zu tvsubtitles.net
+    /// (Kreuzkontamination), und ein tvst-Download genauso wenig in die eine wie in die andere Richtung.
+    /// Ein Download ist ein Fund, kein eigener Kandidat — er wird nicht veroeffentlicht.
+    /// </para>
+    /// <para>
+    /// Der Parameter <paramref name="target"/> bleibt in der Signatur, weil jeder Aufrufer die Frage JE
+    /// QUELLE stellt und der Grund im Log je Quelle genannt wird; die Antwort haengt seit der
+    /// Verschaerfung nur noch an der Herkunft.
     /// </para>
     /// </summary>
     /// <param name="origin">The stored provenance (null/empty = not known).</param>
@@ -80,9 +87,20 @@ public static class Provenance
     /// <returns>True when the upload may go there.</returns>
     public static bool MayUploadTo(string? origin, SubtitleProvider target)
     {
-        var known = Parse(origin);
-        return known is null || known.Value == target;
+        _ = target;
+        return Parse(origin) is null;
     }
+
+    /// <summary>
+    /// F-M500: der Satz, mit dem eine gesperrte Herkunft im Log steht — er nennt WOHER der Text kommt und
+    /// warum er nirgends mehr hochgeht. <c>null</c>, wenn die Herkunft unbekannt ist (dann sperrt nichts).
+    /// </summary>
+    /// <param name="origin">The stored provenance (null/empty = not known).</param>
+    /// <returns>The sentence for the log, or null.</returns>
+    public static string? OriginBlockedReason(string? origin)
+        => Parse(origin) is { } bekannt
+            ? "origin:" + Name(bekannt) + " — downloaded there, never uploaded"
+            : null;
 
     /// <summary>
     /// F-M488 (operator decision 15.11.2026: "aber dann vergeben wir eine upload id"): an upload always

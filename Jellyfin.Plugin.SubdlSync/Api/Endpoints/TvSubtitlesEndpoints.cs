@@ -49,21 +49,17 @@ public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
 
     /// <summary>
     /// F-M483: the site's language code for a two-letter language. SubDL speaks ISO-ish codes, the site
-    /// has its own set (F-M480) — the bridge is this method, and it is deliberately the only place that
-    /// knows both vocabularies.
+    /// has its own set (F-M480).
+    /// <para>
+    /// F-M502: die Abbildung selbst steht seit der Operator-Anweisung vom 15.11.2026 („Aber halt tvst
+    /// spezifisch. Das andere mapping ist subdl spezifisch.") in
+    /// <see cref="TvSubtitlesClient.SiteLanguage"/> und wird hier nur durchgereicht — eine zweite
+    /// Tabelle an dieser Stelle waere genau die gemeinsame Zuordnung, die es nicht geben soll.
+    /// </para>
     /// </summary>
     /// <param name="language">Two-letter language, any case.</param>
     /// <returns>The site's code, or null when the site has no such language.</returns>
-    public static string? SiteLanguage(string? language)
-    {
-        if (string.IsNullOrWhiteSpace(language))
-        {
-            return null;
-        }
-
-        var code = language.Trim().ToLowerInvariant();
-        return TvSubtitlesClient.Languages.ContainsKey(code) ? code : null;
-    }
+    public static string? SiteLanguage(string? language) => TvSubtitlesClient.SiteLanguage(language);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<SubtitleHit>> SearchAsync(
@@ -174,14 +170,23 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
                 Provider, false, "tvsubtitles.net has no language '" + ticket.Language + "'", 0, null, _dryRun);
         }
 
-        if (string.IsNullOrWhiteSpace(ticket.ShowName))
+        if (string.IsNullOrWhiteSpace(ticket.ShowName) && ticket.TvstShowId is not > 0)
         {
             return new EndpointAnswer(
                 Provider, false, "a show name is needed — this source has no id index", 0, null, _dryRun);
         }
 
-        var shows = await _client.ShowsAsync(cancellationToken).ConfigureAwait(false);
-        var showId = TvSubtitlesClient.ResolveShow(shows, ticket.ShowName);
+        // F-M501: die Nummer aus dem Store führt. Steht sie im Ticket, wird die Serienliste weder
+        // geholt noch durchsucht — die Auflösung hat sie bereits geprüft und geschrieben. Nur ohne
+        // Nummer (direkter Aufruf, ältere Zeile) wird der Name gesucht, und dann mit demselben engen
+        // Vergleich wie dort (kein „enthält“).
+        int? showId = ticket.TvstShowId is > 0 ? ticket.TvstShowId : null;
+        if (showId is null)
+        {
+            var shows = await _client.ShowsAsync(cancellationToken).ConfigureAwait(false);
+            showId = TvSubtitlesClient.ResolveShow(shows, ticket.ShowName!);
+        }
+
         if (showId is null)
         {
             return new EndpointAnswer(

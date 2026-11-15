@@ -61,3 +61,4 @@
 /opt/data/subdl-scribe/scripts/tests/archivecache/obj/Release/net10.0/archivecacherun.pdb
 /opt/data/subdl-scribe/scripts/tests/archivecache/obj/Release/net10.0/archivecache.genruntimeconfig.cache
 /opt/data/subdl-scribe/scripts/tests/archivecache/obj/Release/net10.0/ref/archivecacherun.dll
+/opt/data/subdl-scribe/scripts/tests/archivecache/bin/Release/net10.0/Jellyfin.Plugin.SubdlSync.xml

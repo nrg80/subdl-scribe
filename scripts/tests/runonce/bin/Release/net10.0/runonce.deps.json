@@ -6,9 +6,9 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v10.0": {
-      "runonce/1.0.0": {
+      "runonce/12.1.11.5": {
         "dependencies": {
-          "Jellyfin.Plugin.SubdlSync": "12.1.12.380",
+          "Jellyfin.Plugin.SubdlSync": "12.1.12.388",
           "MediaBrowser.Common": "12.2.0.0",
           "MediaBrowser.Controller": "12.2.0.0",
           "MediaBrowser.Model": "12.2.0.0",
@@ -26,11 +26,11 @@
           "runonce.dll": {}
         }
       },
-      "Jellyfin.Plugin.SubdlSync/12.1.12.380": {
+      "Jellyfin.Plugin.SubdlSync/12.1.12.388": {
         "runtime": {
           "Jellyfin.Plugin.SubdlSync.dll": {
-            "assemblyVersion": "12.1.12.380",
-            "fileVersion": "12.1.12.380"
+            "assemblyVersion": "12.1.12.388",
+            "fileVersion": "12.1.12.388"
           }
         }
       },
@@ -381,12 +381,12 @@
     }
   },
   "libraries": {
-    "runonce/1.0.0": {
+    "runonce/12.1.11.5": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
     },
-    "Jellyfin.Plugin.SubdlSync/12.1.12.380": {
+    "Jellyfin.Plugin.SubdlSync/12.1.12.388": {
       "type": "reference",
       "serviceable": false,
       "sha512": ""

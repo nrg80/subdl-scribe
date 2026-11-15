@@ -224,18 +224,33 @@
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(System.String,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
             <summary>
-            F-M487: may this subtitle go to that source?
+            F-M487 (verschaerft durch Operator-Anweisung 15.11.2026: "Herkunft subdl: nie zurueck zu subdl, nie
+            zu tvst"): darf dieser Untertitel zu jener Quelle?
             <para>
-            UNKNOWN provenance is allowed everywhere — a hand copy, an embedded track or an older row says
-            nothing about where it came from, and refusing those would stop the plugin from uploading the
-            operator's own files. A KNOWN provenance is allowed at its own source only: a subtitle fetched
-            from tvsubtitles.net never becomes a SubDL upload, and a SubDL download never goes back out to
-            tvsubtitles.net. That is the whole rule, and it is deliberately this short.
+            UNBEKANNTE Herkunft ist ueberall erlaubt — eine Handkopie, eine eingebettete Spur oder eine alte
+            Zeile sagt nichts darueber, woher der Text kommt, und sie abzuweisen hiesse, die eigenen Dateien des
+            Operators nicht mehr zu veroeffentlichen. Eine BEKANNTE Herkunft ist NIRGENDS mehr erlaubt: was von
+            SubDL heruntergeladen wurde, geht weder zurueck zu SubDL (Reup) noch zu tvsubtitles.net
+            (Kreuzkontamination), und ein tvst-Download genauso wenig in die eine wie in die andere Richtung.
+            Ein Download ist ein Fund, kein eigener Kandidat — er wird nicht veroeffentlicht.
+            </para>
+            <para>
+            Der Parameter <paramref name="target"/> bleibt in der Signatur, weil jeder Aufrufer die Frage JE
+            QUELLE stellt und der Grund im Log je Quelle genannt wird; die Antwort haengt seit der
+            Verschaerfung nur noch an der Herkunft.
             </para>
             </summary>
             <param name="origin">The stored provenance (null/empty = not known).</param>
             <param name="target">The source that would take the upload.</param>
             <returns>True when the upload may go there.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.OriginBlockedReason(System.String)">
+            <summary>
+            F-M500: der Satz, mit dem eine gesperrte Herkunft im Log steht — er nennt WOHER der Text kommt und
+            warum er nirgends mehr hochgeht. <c>null</c>, wenn die Herkunft unbekannt ist (dann sperrt nichts).
+            </summary>
+            <param name="origin">The stored provenance (null/empty = not known).</param>
+            <returns>The sentence for the log, or null.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.OwnUploadId(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider,System.String,System.String,System.DateTime)">
             <summary>
@@ -466,8 +481,13 @@
             <param name="HearingImpaired">True for the SDH variant.</param>
             <param name="DoubleEpisode">True for a double episode.</param>
             <param name="SeasonPack">True when this is a season pack — only the pipeline builds those.</param>
+            <param name="TvstShowId">
+            F-M501: die Nummer der Serie bei tvsubtitles.net, wenn der Store sie kennt. Ist sie gesetzt, benutzt
+            der Endpunkt SIE und holt die Serienliste gar nicht erst — der Titel im Ticket ist dann nur noch
+            Text für Kommentar und Log.
+            </param>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.#ctor(System.String,System.String,System.String,System.Int32,System.Int32,System.String,System.String,System.Byte[],System.String,System.String,System.Boolean,System.Boolean,System.Boolean)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.#ctor(System.String,System.String,System.String,System.Int32,System.Int32,System.String,System.String,System.Byte[],System.String,System.String,System.Boolean,System.Boolean,System.Boolean,System.Nullable{System.Int32})">
             <summary>
             F-M483: what to send. One ticket serves both sources; a field a source cannot use is refused by
             that source's endpoint with a reason instead of being silently dropped.
@@ -485,6 +505,11 @@
             <param name="HearingImpaired">True for the SDH variant.</param>
             <param name="DoubleEpisode">True for a double episode.</param>
             <param name="SeasonPack">True when this is a season pack — only the pipeline builds those.</param>
+            <param name="TvstShowId">
+            F-M501: die Nummer der Serie bei tvsubtitles.net, wenn der Store sie kennt. Ist sie gesetzt, benutzt
+            der Endpunkt SIE und holt die Serienliste gar nicht erst — der Titel im Ticket ist dann nur noch
+            Text für Kommentar und Log.
+            </param>
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.ShowName">
             <summary>Series title — tvsubtitles.net resolves its show id from it.</summary>
@@ -524,6 +549,13 @@
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.SeasonPack">
             <summary>True when this is a season pack — only the pipeline builds those.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.TvstShowId">
+            <summary>
+            F-M501: die Nummer der Serie bei tvsubtitles.net, wenn der Store sie kennt. Ist sie gesetzt, benutzt
+            der Endpunkt SIE und holt die Serienliste gar nicht erst — der Titel im Ticket ist dann nur noch
+            Text für Kommentar und Log.
+            </summary>
         </member>
         <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.EndpointAnswer">
             <summary>
@@ -663,6 +695,152 @@
             <param name="direction">The direction asked about.</param>
             <returns>The sentence.</returns>
         </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolver">
+            <summary>
+            F-M501 (Operator-Anweisung 15.11.2026): die Nummer der Serie bei tvsubtitles.net — ermittelt,
+            gespeichert, wiederverwendet.
+            <para>
+            WARUM ES DIESE KLASSE GIBT. Der tvst-Upload braucht eine Seriennummer, und bis hierher löste der
+            Endpunkt sie bei JEDEM Aufruf neu aus dem DATEINAMEN (<c>MediaNameParser</c>, dann
+            <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ResolveShow(System.Collections.Generic.IReadOnlyDictionary{System.Int32,System.String},System.String)"/> mit „enthält“-Stufe). Beides ist eine Vermutung über
+            eine Schreibweise: der Dateiname trägt, was der Uploader getippt hat, und „enthält“ trifft bei
+            „The Middle“ auch „Malcolm in the Middle“. Die Nummer stand nirgends, also konnte sie auch nicht
+            gelernt werden — und eine Serie, die die Seite nicht führt, wurde nie angelegt, weshalb der Upload
+            für sie dauerhaft mit „show not on tvsubtitles.net“ endete.
+            </para>
+            <para>
+            DIE REIHENFOLGE IST FEST UND KURZ (Operator-Entscheidung: „Tmdb titel führt“, „Tmdb titel führt auch
+            für Doppeleinträge“):
+            <list type="number">
+            <item><description>
+            Steht <see cref="P:Jellyfin.Plugin.SubdlScribe.Data.MediaEntity.TvstShowId"/> am Medium, wird SIE benutzt — kein Netzzugriff zur Suche,
+            kein Vergleich, keine Anlage. Die Nummer ist bewiesen worden, als sie geschrieben wurde.
+            </description></item>
+            <item><description>
+            Sonst wird der TMDb-Titel in der Serienliste der Seite gesucht — eng verglichen: Groß-/Kleinschreibung
+            egal, <c>&amp;</c>/<c>and</c>/<c>und</c> gleich, Leerraum normalisiert, sonst Gleichheit
+            (<see cref="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.NormalizeShowName(System.String)"/>). Kein Teilstring-Treffer, kein Ähnlichkeitsmaß.
+            Ein Treffer wird ins Medium geschrieben und benutzt.
+            </description></item>
+            <item><description>
+            Kein Treffer: die Serie wird angelegt — Name und Jahr aus TMDb, Staffelzahl aus TMDb auf 1..22
+            begrenzt (weiter reicht das Formular der Seite nicht). Danach wird die Liste ERNEUT geholt und mit
+            demselben engen Vergleich gesucht; erst wenn die Nummer dort steht, wird sie geschrieben. Eine unklare
+            Antwort der Seite (Timeout, unparsbare Seite) wird einmal nachgefragt; bleibt es unklar, wird NICHTS
+            geschrieben, eine Zeile protokolliert und tvst für dieses Medium übersprungen.
+            </description></item>
+            </list>
+            </para>
+            <para>
+            ANLEGEN HÖCHSTENS EINMAL JE MEDIUM UND LAUF. Ein Lauf, der eine Serie nicht anlegen kann, darf sie
+            nicht bei jeder Folge erneut versuchen: die Seite ist ein Formular, kein Idempotenz-Versprechen, und
+            ein Fehlschlag wiederholt sich in derselben Sekunde nicht anders. <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolver.BeginRun"/> leert die
+            Sperre zu Beginn eines Laufs.
+            </para>
+            <para>
+            NICHTS HIERAN BLOCKIERT DIE KETTE. Jeder Ausgang ist ein Ergebnis, kein Wurf: fehlt die Nummer,
+            überspringt der Aufrufer tvst und SubDL bekommt seinen Versuch wie zuvor. Im Trockenlauf wird
+            nichts angelegt und nichts geschrieben.
+            </para>
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolver._createAttempted">
+            <summary>
+            F-M501: die Medien, für die dieser Lauf das Anlegen schon versucht hat. Der Schlüssel ist das
+            Medium (media hash), nicht der Titel: zwei Folgen derselben Serie sind zwei Medien und legen
+            dieselbe Serie NICHT zweimal an — gefunden wird sie beim zweiten Mal in der Liste.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolver.#ctor(Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient,Microsoft.Extensions.Logging.ILogger)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolver"/> class.
+            </summary>
+            <param name="client">Der tvsubtitles.net-Client (Seitenliste und Anlage).</param>
+            <param name="logger">Optionaler Logger — er nennt den Grund, wenn nichts geschrieben wurde.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolver.BeginRun">
+            <summary>F-M501: beginnt einen Lauf — die Anlege-Sperre gilt je Lauf, nicht je Prozess.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolver.ResolveForMediaAsync(Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry,System.String,Jellyfin.Plugin.SubdlScribe.Api.TmdbSeriesInfo,System.Boolean,System.Threading.CancellationToken)">
+            <summary>
+            F-M501: die Nummer der Serie für dieses Medium — in der festgelegten Reihenfolge (gespeichert →
+            exakt in der Liste → anlegen und erneut exakt suchen).
+            </summary>
+            <param name="registry">Der Store, aus dem die gespeicherte Nummer kommt und in den die neue geht.</param>
+            <param name="mediaHash">Medium (OSHash); null heißt „kein Medium bekannt“ — dann wird nichts geschrieben.</param>
+            <param name="series">Der TMDb-Datensatz, dessen Titel führt.</param>
+            <param name="dryRun">True: nichts anlegen, nichts schreiben.</param>
+            <param name="ct">Cancellation token.</param>
+            <returns>Das Ergebnis; <see cref="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolution.Resolved"/> false heißt „tvst überspringen“.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolver.ShowsOrNullAsync(System.Threading.CancellationToken)">
+            <summary>
+            F-M501: die Serienliste der Seite — einmal, bei unklarer Antwort (<c>null</c>, leere Liste,
+            Ausnahme, Timeout) ein zweites Mal. Danach ist die Antwort, was sie ist.
+            </summary>
+            <param name="ct">Cancellation token.</param>
+            <returns>Die Liste, oder null wenn sie auch beim zweiten Versuch unklar blieb.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolver.Persist(Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry,System.String,System.Int32)">
+            <summary>
+            F-M501: schreibt die Nummer ins Medium — und nur dorthin, nur wenn sie wirklich gesehen wurde.
+            </summary>
+            <param name="registry">Der Store.</param>
+            <param name="mediaHash">Medium; null heißt „kein Medium bekannt“, dann bleibt es beim Benutzen.</param>
+            <param name="showId">Die gesehene Nummer.</param>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowStatus">
+            <summary>
+            F-M501: die Ausgänge der Serienauflösung — je einer eine Entscheidung des Aufrufers.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowStatus.Stored">
+            <summary>Die Nummer stand am Medium (F-M501 a).</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowStatus.Found">
+            <summary>Der TMDb-Titel stand exakt in der Serienliste; die Nummer wurde gespeichert (F-M501 b).</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowStatus.Created">
+            <summary>Die Serie wurde angelegt und danach exakt wiedergefunden (F-M501 c).</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowStatus.WouldCreate">
+            <summary>Der Trockenlauf hätte angelegt — er hat es nicht getan und nichts geschrieben.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowStatus.Unclear">
+            <summary>Die Seite antwortete unklar (zweimal): nichts geschrieben, tvst übersprungen.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowStatus.NoTitle">
+            <summary>Der TMDb-Datensatz trug keinen brauchbaren Titel.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowStatus.NoYear">
+            <summary>TMDb nennt kein Erstausstrahlungsjahr — die Seite verlangt eines beim Anlegen.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowStatus.CreateAlreadyTried">
+            <summary>Das Anlegen wurde in diesem Lauf für dieses Medium schon einmal versucht.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolution">
+            <summary>
+            F-M501: was die Auflösung ergeben hat.
+            </summary>
+            <param name="ShowId">Die Nummer der Serie, oder null.</param>
+            <param name="Status">Einer der Werte aus <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowStatus"/>.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolution.#ctor(System.Nullable{System.Int32},System.String)">
+            <summary>
+            F-M501: was die Auflösung ergeben hat.
+            </summary>
+            <param name="ShowId">Die Nummer der Serie, oder null.</param>
+            <param name="Status">Einer der Werte aus <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowStatus"/>.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolution.ShowId">
+            <summary>Die Nummer der Serie, oder null.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolution.Status">
+            <summary>Einer der Werte aus <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowStatus"/>.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolution.Resolved">
+            <summary>Gets a value indicating whether eine Nummer vorliegt, mit der der Upload arbeiten kann.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesDownloadEndpoint">
             <summary>
             F-M483: the tvsubtitles.net download endpoint. The source has no id index, so the series is resolved
@@ -690,8 +868,13 @@
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesDownloadEndpoint.SiteLanguage(System.String)">
             <summary>
             F-M483: the site's language code for a two-letter language. SubDL speaks ISO-ish codes, the site
-            has its own set (F-M480) — the bridge is this method, and it is deliberately the only place that
-            knows both vocabularies.
+            has its own set (F-M480).
+            <para>
+            F-M502: die Abbildung selbst steht seit der Operator-Anweisung vom 15.11.2026 („Aber halt tvst
+            spezifisch. Das andere mapping ist subdl spezifisch.") in
+            <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.SiteLanguage(System.String)"/> und wird hier nur durchgereicht — eine zweite
+            Tabelle an dieser Stelle waere genau die gemeinsame Zuordnung, die es nicht geben soll.
+            </para>
             </summary>
             <param name="language">Two-letter language, any case.</param>
             <returns>The site's code, or null when the site has no such language.</returns>
@@ -736,7 +919,8 @@
             Two independent reasons can forbid a source, and both must be answered per source, not per run:
             </para>
             <list type="bullet">
-            <item><description>the switch is off or the provenance belongs to the other source (F-M487);</description></item>
+            <item><description>the switch is off, or the provenance is KNOWN at all (F-M487, verschaerft: ein
+            Download geht nirgends hoch — weder zurueck zur eigenen Quelle noch zur anderen);</description></item>
             <item><description>that source ALREADY has this subtitle — its own upload mark is in the store
             (F-M488). A re-upload to the same source is exactly as unwanted as a cross-source upload.</description></item>
             </list>
@@ -2549,6 +2733,67 @@
              <returns>(imdbId, tmdbId) — corrected/filled or (null,null) when unresolvable.</returns>
              F-M28a: cross-checks and corrects Jellyfin's ids via TMDb whenever a key is configured.
         </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TmdbImdbResolver.SeriesInfoAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            F-M501 (Operator-Anweisung 15.11.2026: „Tmdb titel führt.“): der TMDb-Serien-Datensatz, auf dem
+            die tvst-Auflösung beruht — Titel, Erstausstrahlungsjahr und Staffelzahl, alles aus EINER Antwort
+            von <c>/tv/{id}</c>.
+            <para>
+            Warum es diesen Zugriff braucht: bis hierher las die Kette den Seriennamen aus dem DATEINAMEN
+            (<c>MediaNameParser</c>), und der ist eine Vermutung über eine Schreibweise. Der TMDb-Name ist
+            der Name, den die Serie trägt — er entscheidet, ob die Seite sie schon führt, ob ein Eintrag
+            angelegt werden muss und wie er heißt.
+            </para>
+            <para>
+            Der Datensatz wird gecacht wie die übrigen Antworten (ein Lauf fragt dieselbe Serie für jede
+            Folge). Ein Fehlschlag ist kein Fehler, sondern null: dann wird tvst für dieses Medium
+            übersprungen und die Kette läuft weiter.
+            </para>
+            </summary>
+            <param name="tmdbId">TMDb-Serien-id (tvshow, nie eine Episoden-id).</param>
+            <param name="ct">Cancellation token.</param>
+            <returns>Der Datensatz, oder null wenn TMDb nicht antwortet oder nichts hergibt.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.TmdbSeriesInfo">
+            <summary>
+            F-M501: der TMDb-Serien-Datensatz, mit dem die tvst-Auflösung arbeitet — Name, Originaltitel,
+            Erstausstrahlungsjahr und Staffelzahl.
+            <para>
+            Bewusst ein eigener, kleiner Datensatz statt eines Verweises auf das JSON: die Auflösung braucht
+            genau diese vier Angaben, und was sie nicht braucht, darf sie auch nicht versehentlich benutzen.
+            </para>
+            </summary>
+            <param name="Name">Der TMDb-Titel der Serie — er führt bei Suche, Anlage und Vergleich.</param>
+            <param name="OriginalName">Der Originaltitel, nur zur Diagnose (er wird NICHT gesucht).</param>
+            <param name="FirstAirYear">Erstausstrahlungsjahr, null wenn TMDb keines nennt.</param>
+            <param name="Seasons">Staffelzahl laut TMDb, null wenn TMDb keine nennt.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TmdbSeriesInfo.#ctor(System.String,System.String,System.Nullable{System.Int32},System.Nullable{System.Int32})">
+            <summary>
+            F-M501: der TMDb-Serien-Datensatz, mit dem die tvst-Auflösung arbeitet — Name, Originaltitel,
+            Erstausstrahlungsjahr und Staffelzahl.
+            <para>
+            Bewusst ein eigener, kleiner Datensatz statt eines Verweises auf das JSON: die Auflösung braucht
+            genau diese vier Angaben, und was sie nicht braucht, darf sie auch nicht versehentlich benutzen.
+            </para>
+            </summary>
+            <param name="Name">Der TMDb-Titel der Serie — er führt bei Suche, Anlage und Vergleich.</param>
+            <param name="OriginalName">Der Originaltitel, nur zur Diagnose (er wird NICHT gesucht).</param>
+            <param name="FirstAirYear">Erstausstrahlungsjahr, null wenn TMDb keines nennt.</param>
+            <param name="Seasons">Staffelzahl laut TMDb, null wenn TMDb keine nennt.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TmdbSeriesInfo.Name">
+            <summary>Der TMDb-Titel der Serie — er führt bei Suche, Anlage und Vergleich.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TmdbSeriesInfo.OriginalName">
+            <summary>Der Originaltitel, nur zur Diagnose (er wird NICHT gesucht).</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TmdbSeriesInfo.FirstAirYear">
+            <summary>Erstausstrahlungsjahr, null wenn TMDb keines nennt.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TmdbSeriesInfo.Seasons">
+            <summary>Staffelzahl laut TMDb, null wenn TMDb keine nennt.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.SubdlScribe.Api.TransientRetryHandler">
             <summary>
             F-M235: tolerates a transport timeout three times before giving up, and never
@@ -2692,11 +2937,62 @@
             The value is (name as written on the page, three-letter code used in file names).
             </summary>
         </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.LanguageAliases">
+            <summary>
+            F-M502 (Operator-Anweisung 15.11.2026: „Aber halt tvst spezifisch. Das andere mapping ist subdl
+            spezifisch."): die Bruecke von ISO- auf die Kuerzel der Seite, und zwar AUSSCHLIESSLICH hier.
+            <para>
+            Gemessen am 15.11.2026: die Tabelle oben ist vollstaendig — die Seite kennt genau diese 24
+            Kuerzel —, aber vier davon sind NICHT ISO: <c>gr</c> statt <c>el</c>/<c>ell</c>/<c>gre</c>
+            (Griechisch), <c>cz</c> statt <c>cs</c>/<c>ces</c>/<c>cze</c> (Tschechisch), <c>cn</c> statt
+            <c>zh</c>/<c>zho</c>/<c>chi</c> (Chinesisch), <c>jp</c> statt <c>ja</c>/<c>jpn</c> (Japanisch).
+            Jellyfin liefert Sprachen als DREI-Buchstaben-Codes (<c>gre</c>, <c>cze</c>, <c>chi</c>,
+            <c>jpn</c>), die Konfiguration und die Zielsprachen teils als ZWEI-Buchstaben-Codes
+            (<c>el</c>, <c>cs</c>, <c>zh</c>, <c>ja</c>) — beide Formen landeten vorher in der Pruefung von
+            <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.BuildUpload(System.Int32,System.Int32,System.Int32,System.String,System.String,System.Byte[],System.String,System.String,System.Nullable{System.Int64},System.String,System.String,System.Boolean,System.Boolean)"/> und der Upload wurde mit „language must be one of the site's codes"
+            abgelehnt. Deshalb die vier Abweichungen in beiden Formen, dazu die gaengigen
+            ISO-639-2-Formen (/B und /T) der uebrigen Seiten-Sprachen.
+            </para>
+            <para>
+            Was hier ABSICHTLICH NICHT passiert: keine gemeinsame Tabelle mit SubDL (Operator-Anweisung
+            oben — SubDL bildet in <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.SubdlApiClient"/> ab), kein Raten ausserhalb der Liste
+            (unbekannt heisst null), und die Seiten-Kuerzel selbst bleiben unveraendert gueltig.
+            </para>
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.SiteLanguage(System.String)">
+            <summary>
+            F-M502: der Sprachcode, den die Seite versteht — aus einem ISO-Code, einem Seiten-Kuerzel oder
+            einer Angabe mit Region/Skript (<c>pt-BR</c>, <c>zh-Hans</c>).
+            <para>
+            Gross-/Kleinschreibung zaehlt nicht. Die Region entscheidet nur dort, wo die Seite die Sprache
+            danach trennt: <c>pt-BR</c> ist brasilianisches Portugiesisch (<c>br</c>), waehrend <c>pt-PT</c>
+            und <c>pt</c> europaesisches Portugiesisch (<c>pt</c>) bleiben. Bei allen anderen Sprachen
+            faellt die Region weg (<c>zh-Hans</c>/<c>zh-CN</c> → <c>cn</c>).
+            </para>
+            </summary>
+            <param name="code">Der ankommende Code, in beliebiger Schreibweise.</param>
+            <returns>Ein Kuerzel aus <see cref="F:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.Languages"/>, oder null — dann ist die Sprache der Seite
+            unbekannt und wird nicht geraten.</returns>
+        </member>
         <member name="F:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.Rips">
             <summary>
             F-M480: the rip select of the upload form, plus the empty value. Anything else is refused
             before the request is built — the form ignores an unknown value and stores an empty rip.
             </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.RipFromQuality(System.String)">
+            <summary>
+            F-M498: die Seite kennt genau sieben Rip-Werte (WEB, HDTV, HEVC, DVDRip, DVDSCR, BDRip,
+            BluRay). Release-Namen schreiben das aber anders — "WEB-DL", "WEBRip", "BRRip", "x265",
+            "Blu-Ray". Gemessen 15.11.2026 im scharfen Lauf: jede Folge wurde mit
+            "refused: rip must be one of …" abgelehnt, weil "WEB-DL" durchgereicht wurde und die
+            Vorpruefung den Wert zu Recht verwarf. Die Zuordnung nimmt den ERSTEN Treffer, Quelle vor
+            Codec: "WEB-DL x265" ist WEB, nicht HEVC. Findet sich nichts, bleibt das Feld leer — das
+            ist ein erlaubter Wert, die Seite speichert dann keinen Rip.
+            </summary>
+            <param name="quality">Qualitaets-/Release-Angabe, wie sie im Dateinamen steht.</param>
+            <returns>Ein Wert aus <see cref="F:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.Rips"/>.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.#ctor(System.Net.Http.HttpClient)">
             <summary>
@@ -2721,14 +3017,44 @@
             <returns>Show id to name. A page without the select yields an empty map — the caller decides
             whether that is an error, so the parser never throws on a truncated page.</returns>
         </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.NormalizeShowName(System.String)">
+            <summary>
+            F-M501 (Operator-Entscheidung 15.11.2026, nachgeschärft: „Doch Ähnlichkeitssuche. Aber
+            groß/Kleinschreibung. And = und. Leerzeichen mehr oder weniger. Ähnlichkeit eng halten“): der
+            Name, auf den zwei Seriennamen verglichen werden — und die EINZIGEN drei Angleichungen, die
+            erlaubt sind.
+            <list type="bullet">
+            <item><description>Groß-/Kleinschreibung zählt nicht.</description></item>
+            <item><description><c>&amp;</c>, <c>and</c> und <c>und</c> gelten als dasselbe Wort — als Wort,
+            nicht als Buchstabenfolge: „Rundschau“ wird nicht zu „Randschau“.</description></item>
+            <item><description>Mehrere oder fehlende Leerzeichen zählen nicht; jede Folge von Leerraum wird
+            zu einem einzelnen Leerzeichen.</description></item>
+            </list>
+            <para>
+            Was hier ABSICHTLICH NICHT passiert: führende Artikel werden nicht entfernt („The Middle“ bleibt
+            „The Middle“), es gibt keinen Teilstring-Treffer („The Middle“ findet „The Middle Man“ nicht) und
+            kein Ähnlichkeitsmaß (kein Levenshtein, keine Token-Quote, keine Jahres-Toleranz). Genau diese
+            Grenze hält Doppeleinträge draußen: eine Schreibweise, die nur „ähnlich“ ist, ist eine andere
+            Serie.
+            </para>
+            </summary>
+            <param name="name">Der Name, wie er geschrieben steht.</param>
+            <returns>Der Vergleichsschlüssel; leer, wenn der Name leer war.</returns>
+        </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ResolveShow(System.Collections.Generic.IReadOnlyDictionary{System.Int32,System.String},System.String)">
             <summary>
-            F-M480: the id of a show by name — exact match first (case-insensitive), then the first name
-            that contains the search text, so "The Middle" finds "The Middle" and not "The Middle Man".
+            F-M501: der Name einer Serie, so eng verglichen, wie es die Seite erlaubt — die drei
+            Angleichungen aus <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.NormalizeShowName(System.String)"/> und sonst Gleichheit.
+            <para>
+            Die frühere „enthält“-Stufe ist WEG (Operator-Entscheidung 15.11.2026: „Ähnlichkeit eng halten“,
+            „Tmdb titel führt auch für Doppeleinträge“). Sie war der Grund, warum ein TMDb-Titel, den die
+            Seite anders schreibt, still auf einen NAMENSÄHNLICHEN Doppeleintrag zeigte — und damit auf die
+            falsche Serie, deren Nummer dann im Store gestanden hätte.
+            </para>
             </summary>
             <param name="shows">The show map.</param>
-            <param name="name">The name to look for.</param>
-            <returns>The id, or null when the site does not carry the show.</returns>
+            <param name="name">The name to look for — in practice the TMDb title.</param>
+            <returns>The id, or null when no show carries exactly this name (after the three adjustments).</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.SeasonsAsync(System.Int32,System.Threading.CancellationToken)">
             <summary>
@@ -2911,10 +3237,16 @@
             F-M480: builds the payload that creates a new show (<c>/add-tvshow1.php</c>). The page itself asks
             to check first — "Before adding new TV-Show please check if it already exist" — so a caller
             resolves the name through <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ResolveShow(System.Collections.Generic.IReadOnlyDictionary{System.Int32,System.String},System.String)"/> before it gets here.
+            <para>
+            F-M501: die Staffelzahl ist auf <see cref="F:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.MaxSeason"/> (1–22) begrenzt, weil die Seite genau so
+            viele kennt — ihr Auswahlfeld bietet 1..22. Die frühere Grenze 1..100 war unsere eigene Prüfung
+            und liess einen Wert durch, den das Formular stillschweigend auf seinen letzten Eintrag zieht:
+            eine Serie mit 30 Staffeln wäre als 22-Staffel-Serie angelegt worden.
+            </para>
             </summary>
             <param name="name">The show name.</param>
             <param name="year">Year of first broadcast, four digits.</param>
-            <param name="seasons">Number of seasons, 1–100.</param>
+            <param name="seasons">Number of seasons, 1–22 (the page's own range).</param>
             <returns>The finished form payload.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.UploadAsync(Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUpload,System.Boolean,System.Threading.CancellationToken)">
@@ -4139,6 +4471,20 @@
         <member name="P:Jellyfin.Plugin.SubdlScribe.Data.MediaEntity.TmdbId">
             <summary>TMDb ID. For series this is the SHOW id, never an episode or season id.</summary>
         </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Data.MediaEntity.TvstShowId">
+            <summary>
+            F-M501 (Operator-Anweisung 15.11.2026: „Tvst Seriennummer in den Store, gleiche Ebene wie tvshow
+            id von tmdb und tmdb“): die Nummer, unter der die Serie bei tvsubtitles.net geführt wird —
+            dieselbe Ebene wie <see cref="P:Jellyfin.Plugin.SubdlScribe.Data.MediaEntity.TmdbId"/> und <see cref="P:Jellyfin.Plugin.SubdlScribe.Data.MediaEntity.ImdbId"/>, weil sie dieselbe Frage
+            beantwortet: welche Serie IST diese Datei.
+            <para>
+            Sie wird EINMAL ermittelt (exakter TMDb-Titel in der Serienliste der Seite oder, wenn die Serie
+            dort fehlt, nach dem Anlegen) und danach gelesen statt neu gesucht. Null heißt „noch nicht
+            ermittelt“ — nie „keine Nummer vorhanden“: die Auflösung schreibt nur, was sie wirklich gesehen
+            hat, und ein Fehlschlag lässt das Feld leer.
+            </para>
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Data.MediaEntity.SdId">
             <summary>SubDL release ID (sd_id) when known.</summary>
         </member>
@@ -4883,6 +5229,20 @@
             <summary>
             F-M466: adds the pack fingerprint column. A table that already carries it is left alone, so
             the pass runs on every start and costs one PRAGMA.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext.EnsureMediaColumns">
+            <summary>
+            F-M501 (Schema 13): zieht <c>media.TvstShowId</c> auf einem Bestand nach, der die Spalte noch
+            nicht kennt.
+            <para>
+            <c>EnsureCreated</c> baut ein Schema nur bei einer NEUEN Datei und ändert eine bestehende Tabelle
+            nie — ohne diesen Schritt liefe jede Abfrage auf einem aufgerüsteten Datenbestand gegen eine
+            Tabelle ohne die Spalte, und der Fehler landete mitten im Upload-Lauf. SQLite kennt kein
+            „ADD COLUMN IF NOT EXISTS“, deshalb ist jedes <c>ALTER</c> an die Spaltenliste der Tabelle
+            gebunden. Ein Fehlschlag wird protokolliert und geschluckt: eine fehlende Spalte darf den
+            Plugin-Start nicht verhindern.
+            </para>
             </summary>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext.EnsureStatusColumns">
@@ -8084,6 +8444,16 @@
         <member name="P:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.Registry">
             <summary>Always use the current Plugin.Instance registry so a DB reset is respected.</summary>
         </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline._tvstClient">
+            <summary>
+            F-M501: der Client der zweiten Quelle und die Auflösung ihrer Seriennummer. Beide leben so lange
+            wie die Pipeline, weil die Anlege-Sperre EINEN LAUF lang gilt (<see cref="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolver.BeginRun"/>):
+            ein je Aufruf neuer Auflöser würde dieselbe Serie bei jeder Folge erneut anzulegen versuchen.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline._tvstShows">
+            <summary>F-M501: die Seriennummer-Auflösung der zweiten Quelle (gespeichert → eng gesucht → angelegt).</summary>
+        </member>
         <member name="F:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline._seasonAnchors">
             <summary>
             F-M389: one item per (series IMDb id, season) that this run worked — the way into a season
@@ -8661,11 +9031,18 @@
             handled by PipelineRunLock (24 h / dead PID), so no separate semaphore is needed.
             </summary>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.SendToSecondSourceAsync(System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.Boolean,System.Int32,System.Int32,System.Boolean,System.Threading.CancellationToken)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.SendToSecondSourceAsync(System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.Boolean,System.Int32,System.Int32,System.Boolean,System.String,System.Threading.CancellationToken)">
             <summary>
-            F-M485: sends one subtitle to the second source (tvsubtitles.net). The series name comes from the
-            media file's own name through the same parser the download uses — the source has no id index, so
-            a name is all it can resolve.
+            F-M485: sends one subtitle to the second source (tvsubtitles.net).
+            <para>
+            F-M501 (Operator-Anweisung 15.11.2026): Name und Jahr kommen jetzt aus TMDb und die
+            Seriennummer aus dem Store — nicht mehr aus dem Dateinamen. Der Name aus dem Dateinamen war eine
+            Vermutung über eine Schreibweise (der Uploader hat ihn getippt), und die Nummer der Serie wurde
+            bei jedem Aufruf neu gesucht, weshalb der Store sie nie lernen konnte. Die Reihenfolge steht in
+            <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvstShowResolver"/>: gespeicherte Nummer → eng verglichener TMDb-Titel →
+            anlegen und erneut suchen. Fehlt am Ende die Nummer, wird tvst übersprungen; die Kette laeuft
+            weiter, denn die andere Quelle bekommt ihren Versuch unabhaengig davon.
+            </para>
             </summary>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.SourceAllowed(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
@@ -8681,6 +9058,25 @@
              </summary>
              <param name="provider">Die Quelle, die hochladen soll.</param>
              <returns>Wahr, wenn diese Quelle per Upload-Schalter freigeschaltet ist.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.UploadSources">
+            <summary>
+            F-M499 (gemessen 15.11.2026, 16:17): die Quellen, die in DIESEM Lauf wirklich antreten — die
+            Doppelfrage „Schalter UND Konfiguration", die auch die Kette vor dem Start jeder Quelle stellt
+            (<see cref="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.SourceAllowed(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>, F-M477, und <see cref="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.IsConfiguredForUpload(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>,
+            F-M497).
+            <para>
+            Sie steht hier EINMAL, weil der Kopf des Laufs sie fuer die Frage „ist diese Datei fuer alle
+            Quellen fertig" braucht und die Kette fuer die Frage „wer bekommt diesen Untertitel". Zwei
+            Aufzaehlungen derselben Bedingung waeren zwei Wahrheiten: der Kopf koennte eine Datei als
+            fertig weglegen, weil eine Quelle fehlt, die die Kette sehr wohl fragen wuerde.
+            </para>
+            <para>
+            Im Trockenlauf gilt die Konfigurationsfrage NICHT (F-M496): er macht keinen Aufruf und braucht
+            deshalb keine Zugangsdaten — er zeigt nur, was ein echter Lauf taete.
+            </para>
+            </summary>
+            <returns>Die Quellen dieses Laufs, in der Reihenfolge, in der sie angetreten werden.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.UploadSourceOrder">
             <summary>
@@ -8703,6 +9099,68 @@
             <param name="language">Language code.</param>
             <param name="hearingImpaired">HI flag of the pair.</param>
             <returns>True when at least one enabled source does not have it yet.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.ContentSettle">
+            <summary>
+            F-M500: was ein Settle-Urteil fuer den Kandidaten bedeutet.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.ContentSettle.Reject">
+            <summary>Kein Quellenbeleg fuer den Inhalt: die Ablehnung wird geschrieben (quellenneutral, F-M499).</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.ContentSettle.Settled">
+            <summary>Der Inhalt liegt bei mindestens einer Quelle, und keine offene Quelle darf ihn mehr nehmen.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.ContentSettle.DueForAnotherSource">
+            <summary>
+            Der Inhalt liegt bei einer Quelle, aber eine andere darf ihn nehmen und hat ihn nicht — der
+            Kandidat ist NICHT erledigt und geht weiter an die Kette.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.SettleDuplicateContent(System.String,System.Boolean,System.Int32,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean)">
+            <summary>
+            F-M500 (gemessen 15.11.2026, 16:24 im scharfen Lauf): entscheidet, was ein Skip-/Settle-Grund mit
+            einem Kandidaten macht — und zwar JE QUELLE.
+            <para>
+            Der Anlass: 27 eingebettete FR-Spuren endeten als
+            <c>"identical subtitle already uploaded earlier (F-M298)"</c>, weil der Inhalt bei SubDL lag;
+            tvsubtitles bekam auf diesen Dateien nie einen Versuch, der Lauf meldete
+            <c>"0 uploaded | 34 rejected, 61 stream(s) skipped"</c>. Das Urteil "schon hochgeladen" war
+            quellenblind — es las <c>Status=Uploaded</c> und damit "irgendwo hochgeladen".
+            </para>
+            <para>
+            Die Regel steht hier EINMAL, weil alle vier Stellen (Reject-Replay eingebettet und Sidecar,
+            QA-Dedupe, Skip der Kette) dieselbe Frage stellen. Sie schreibt in jedem Fall genau eine Zeile:
+            liegt der Inhalt bei Quellen, wird die Spur <c>uploaded</c> mit DIESER Quelle ihrer Marke
+            (F-M488/F-M490) — eine Quelle ohne den Inhalt bleibt offen. Liegt er nirgends, bleibt es bei der
+            quellenneutralen Ablehnung (F-M499: eine Ablehnung ist ein Urteil ueber den Untertitel, nicht
+            ueber den Endpunkt).
+            </para>
+            <para>
+            "Offen" heisst: eingeschaltet und konfiguriert (<see cref="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.UploadSources"/>, F-M496/F-M497),
+            ohne den Inhalt, UND die Herkunft erlaubt diese Quelle (<see cref="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(System.String,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>,
+            F-M487). Das Herkunftstor wird hier nur GELESEN, nicht nachgebaut: ein von SubDL heruntergeladener
+            Untertitel bleibt bei tvsubtitles <c>cross-source</c> und bekommt keinen Versuch — auch nicht auf
+            diesem Weg.
+            </para>
+            </summary>
+            <param name="mediaHash">Parent media hash.</param>
+            <param name="isLoose">True for a sidecar, false for an embedded position.</param>
+            <param name="subPos">Embedded stream position.</param>
+            <param name="lang">Language code.</param>
+            <param name="hearingImpaired">HI variant.</param>
+            <param name="forced">Forced flag.</param>
+            <param name="contentHash">Content hash of the text.</param>
+            <param name="reason">Skip reason as reported.</param>
+            <param name="fileName">Sidecar file name.</param>
+            <param name="path">Sidecar full path.</param>
+            <returns>Das Urteil und — bei <see cref="F:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.ContentSettle.DueForAnotherSource"/> — die offenen Quellen.</returns>
+            <param name="settleOnAnySkipReason">
+            True an der Stelle, an der die Kette den Kandidaten fallenlaesst: dort ist der Grund ein SKIP-Grund
+            (<c>already-uploaded:…</c>, <c>cross-source</c>, <c>not-configured</c>) und kein Urteil ueber den
+            Untertitel — er darf eine nachweislich hochgeladene Spur nicht als abgelehnt ueberschreiben.
+            <c>duplicate-remote</c> bleibt ausgenommen: das ist das Urteil des Servers und quellenneutral.
+            </param>
         </member>
         <member name="T:Jellyfin.Plugin.SubdlScribe.Plugin">
             <summary>
@@ -10496,6 +10954,35 @@
             <param name="positions">Stream positions to check.</param>
             <returns>True when all positions are terminal.</returns>
         </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ArePositionsTerminalFor(System.String,System.Collections.Generic.IEnumerable{System.Int32},Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M499: dieselbe Frage wie <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ArePositionsTerminal(System.String,System.Collections.Generic.IEnumerable{System.Int32})"/>, aber JE QUELLE. "Erledigt" heisst
+            hier "fuer DIESE Quelle erledigt": die Terminalzeile allein liest <c>Status=Uploaded</c> und damit
+            "irgendwo hochgeladen" — gemessen am 15.11.2026 hielt genau das den Seeder davon ab, die zweite
+            Quelle ueberhaupt in die Queue zu legen (27 SubDL-Uploads, danach "0 upload queued").
+            </summary>
+            <param name="mediaHash">Parent media hash.</param>
+            <param name="positions">Stream positions to check.</param>
+            <param name="provider">The source in question.</param>
+            <returns>True when all positions are terminal FOR THIS SOURCE.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsEmbedTerminalFor(System.String,System.Int32,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M499: ist diese Spur fuer DIESE Quelle erledigt? Zwei Antworten zaehlen, und nur eine davon ist
+            quellenabhaengig:
+            <para>
+            (1) <c>rejected</c> gilt fuer JEDE Quelle — die Ablehnung ist ein Urteil ueber den Untertitel
+            (Struktur, Laufzeit, Sprachpruefung), nicht ueber den Endpunkt, und wird vor jeder Quellenwahl
+            geschrieben. Sie hier quellenweise zu lesen wuerde die Spur fuer die andere Quelle ewig offen
+            halten. (2) Alles andere kommt aus der eigenen Marke der Quelle (F-M488/F-M490) — gefragt ueber
+            <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsUploadedTo(System.String,System.String,System.Boolean,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>, damit es nur EINE Leseregel fuer "diese Quelle hat ihn" gibt.
+            </para>
+            </summary>
+            <param name="mediaHash">Parent media hash.</param>
+            <param name="subPos">Stream position.</param>
+            <param name="provider">The source in question.</param>
+            <returns>True when this source has nothing left to do for this track.</returns>
+        </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsUploaded(System.String,System.String,System.Boolean)">
             <summary>
             True when this (file, language, HI) pair already went up. Pair-level by design: it answers
@@ -10545,6 +11032,17 @@
             </summary>
             <param name="mediaHash">Parent media hash.</param>
             <returns>Count of distinct pairs with a verdict.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.CountKnownPairsFor(System.String,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M499: wie <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.CountKnownPairs(System.String)"/>, aber JE QUELLE. Ein Paar zaehlt als bekannt, wenn es
+            VERWORFEN ist (quellenneutral, siehe <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsEmbedTerminalFor(System.String,System.Int32,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>) oder wenn DIESE Quelle ihre
+            eigene Marke darauf hat. Die quellenblinde Fassung liest <c>Status=Uploaded</c> und laesst damit
+            einen SubDL-Upload die zweite Quelle als "fertig" erscheinen.
+            </summary>
+            <param name="mediaHash">Parent media hash.</param>
+            <param name="provider">The source in question.</param>
+            <returns>Count of distinct pairs this source is done with.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.LanguagesInSeason(System.String,System.Int32)">
             <summary>
@@ -10655,6 +11153,21 @@
             <summary>True when this exact content was uploaded.</summary>
             <param name="contentHash">Content hash.</param>
             <returns>True when uploaded.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsSidecarUploadedTo(System.String,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M499: hat DIESE Quelle diesen Inhalt schon? Dieselben Marken wie <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsUploadedTo(System.String,System.String,System.Boolean,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>
+            (F-M488/F-M490), nur auf eine einzelne Sidecar-Zeile angewendet — die Zeile IST der Inhalt, ihr
+            Schluessel der Content-Hash. Die quellenblinde <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsSidecarUploaded(System.String)"/> liest
+            <c>Status=Uploaded</c> und haelt damit die zweite Quelle aus der Queue.
+            <para>
+            Fuer SubDL zaehlt zusaetzlich die Altzeile: <c>SubdlId</c> plus <c>Uploaded</c> ist der einzige
+            Beleg aus Schema 11 (F-M489) — <c>SubdlId</c> allein genuegt nicht, weil der Download es auch schreibt.
+            </para>
+            </summary>
+            <param name="contentHash">Content hash of the sidecar.</param>
+            <param name="provider">The source in question.</param>
+            <returns>True when this source already has this content.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.SidecarRejectedReason(System.String)">
             <summary>Recorded rejection reason for this content, else null.</summary>
@@ -10775,6 +11288,11 @@
             Global on purpose, like <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsContentKnown(System.String)"/>: a file rewrite moves the media hash, the
             accepted row stays behind under the previous identity, and the text is still the same text.
             </para>
+            <para>
+            F-M500: quellenblind, und das bleibt sie — sie beantwortet "liegt dieser Text irgendwo oben", nicht
+            "hat DIESE Quelle ihn". Im Upload-Pfad wird sie deshalb nicht mehr gelesen; dort lautet die Frage
+            <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsContentUploadedFor(System.String,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>.
+            </para>
             </summary>
             <param name="contentHash">Content hash.</param>
             <returns>True when an uploaded row for this content exists.</returns>
@@ -10786,7 +11304,52 @@
             <param name="contentHash">Content hash of the canonical text.</param>
             <returns>The uploaded embedded row, or null.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.RecordSkippedContent(System.String,System.Boolean,System.Int32,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsContentUploadedFor(System.String,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M500: hat DIESE Quelle diesen Inhalt schon? Die quellenweise Fassung von
+            <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsContentUploaded(System.String)"/> — dieselbe Frage, aber mit der Quelle im Urteil.
+            <para>
+            Gemessen 15.11.2026, 16:24 im scharfen Lauf: 27 eingebettete FR-Spuren endeten als
+            "identical subtitle already uploaded earlier (F-M298)", weil der Inhalt bei SubDL lag. tvsubtitles
+            bekam auf diesen Dateien nie einen Versuch, und der Lauf meldete "0 uploaded | 34 rejected,
+            61 stream(s) skipped". Die Frage war quellenblind: "hochgeladen" heisst hier "von DIESER Quelle
+            hochgeladen" — die Gegenrichtung (Herkunft) entscheidet weiterhin das Tor im Uploader (F-M487),
+            nicht diese Frage.
+            </para>
+            <para>
+            Fuer SubDL werden dieselben drei Belege gelesen wie in <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsUploadedTo(System.String,System.String,System.Boolean,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/> (F-M488/F-M490):
+            Zeitstempel, eigene Id, und die Altzeile aus Schema 11 (<c>Uploaded</c> plus <c>SubdlId</c>). Dazu
+            kommt die <c>Uploaded</c>-Zeile OHNE jede Quellenmarke: so sehen die Settles von vor F-M500 und die
+            Pack-Zeilen aus, und vor der Zwei-Quellen-Kette (F-M495) war SubDL das einzige Ziel — sie zaehlt
+            deshalb als SubDL-Beleg, damit dieser Inhalt nicht ein zweites Mal zu SubDL geht. Fuer tvsubtitles
+            zaehlt eine markenlose Zeile NICHT: dort waere sie der Fehler selbst, und tvst soll seinen Versuch
+            bekommen. Neue Settles schreiben ihre Marke (F-M500), damit die Blindstelle nicht nachwaechst.
+            </para>
+            </summary>
+            <param name="contentHash">Content hash of the text.</param>
+            <param name="provider">The source in question.</param>
+            <returns>True when that source already holds this content.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsContentUploadedForAnotherSource(System.String,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M500: haelt irgendeine ANDERE Quelle diesen Inhalt? Die Frage der Queue (F-M499): ein Upload bei
+            der anderen Quelle ist kein Erledigt-Grund fuer diese. Die Herkunft bleibt davon unberuehrt.
+            </summary>
+            <param name="contentHash">Content hash of the text.</param>
+            <param name="provider">The source that is asking.</param>
+            <returns>True when another source already holds this content.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.UploadedWithoutSourceMark(Jellyfin.Plugin.SubdlScribe.Data.EmbedTrackEntity)">
+            <summary>F-M500: <c>Uploaded</c>-Zeile ohne jede Quellenmarke — "irgendwo hochgeladen", Quelle unbekannt.</summary>
+            <param name="row">Embed row.</param>
+            <returns>True when the row claims an upload without naming the source.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.UploadedWithoutSourceMark(Jellyfin.Plugin.SubdlScribe.Data.SidecarEntity)">
+            <summary>F-M500: dasselbe fuer Sidecar-Zeilen.</summary>
+            <param name="row">Sidecar row.</param>
+            <returns>True when the row claims an upload without naming the source.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.RecordSkippedContent(System.String,System.Boolean,System.Int32,System.String,System.Boolean,System.Boolean,System.String,System.String,System.Collections.Generic.IEnumerable{Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider},System.String,System.String)">
             <summary>
             F-M298: records the verdict for a SKIPPED candidate. The state is derived from the CONTENT and
             not from the reason alone: <c>duplicate-content</c> means "SubDL already holds this text", and
@@ -10796,6 +11359,13 @@
             re-extracted and re-rejected on every later run (prod 06.10.2026: Lanterns S01E08, 39 streams,
             0 uploaded against 39 rejected, after a container tag write moved the media hash and carried the
             accepted rows onto the new identity).
+            <para>
+            F-M500: das Urteil nimmt die QUELLE mit. Uebergeben wird, WELCHE Quellen den Inhalt nachweislich
+            halten (<see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsContentUploadedFor(System.String,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>); nur sie bekommen die <c>Uploaded</c>-Zeile mit ihrer
+            eigenen Marke. Eine Quelle, die ihn NICHT hat, wird dadurch nicht erledigt — sie behaelt ihren
+            offenen Versuch, und der Aufrufer entscheidet, ob der Kandidat weiter an die Kette geht. Ohne
+            Quellenbeleg bleibt es bei der quellenneutralen Ablehnung, wie bisher.
+            </para>
             <para>
             Every skip path goes through here so the rule lives once instead of at each call site.
             </para>
@@ -10808,6 +11378,7 @@
             <param name="forced">Forced flag.</param>
             <param name="contentHash">Content hash of the skipped text.</param>
             <param name="reason">Reject reason reported by the gate or by SubDL.</param>
+            <param name="settledSources">F-M500: the sources that demonstrably hold this content, and only those.</param>
             <param name="fileName">Sidecar file name.</param>
             <param name="path">Sidecar full path.</param>
             <returns>True when the row was settled as UPLOADED — in that case nothing was rejected.</returns>
@@ -10869,6 +11440,39 @@
             <summary>True when the embedded subtitle side of this file is complete.</summary>
             <param name="mediaHash">Media hash.</param>
             <returns>True when complete.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsSubtitlesUploadedFor(System.String,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M499 (gemessen 15.11.2026, 16:17 im scharfen Lauf): dieselbe Frage wie
+            <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsSubtitlesUploaded(System.String)"/>, aber JE QUELLE — "fertig" heisst hier "fuer DIESE Quelle
+            fertig".
+            <para>
+            Der Anlass: der Seeder hatte nach dem ersten Teil von F-M499 27 Folgen quellenweise in die
+            Queue gelegt, und die Pipeline warf sie alle wieder weg mit
+            "[SubDL] SKIP {File} — upload file-complete". Die Dateimarke stand von den SubDL-Uploads,
+            tvsubtitles hatte auf diesen Dateien noch keine einzige Spur und bekam so nie seinen Versuch;
+            der Lauf endete mit "0 uploaded". Die quellenblinde Frage war also im Pipeline-Kopf genau
+            derselbe Defekt, den F-M499 in der Queue schon behoben hatte.
+            </para>
+            <para>
+            Die Marke selbst bleibt quellenblind, denn sie beschreibt die DATEI und nicht den Endpunkt: sie
+            sagt "alle Spuren sind erledigt", nicht "wer sie erledigt hat". Deshalb wird sie hier nur als
+            Vorbedingung gelesen, und die Quellenfrage wird darunter an den Spuren entschieden — ueber
+            <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.IsEmbedTerminalFor(System.String,System.Int32,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>, also mit derselben Regel wie der Upload selbst (eigene Marke
+            der Quelle, Ablehnung quellenneutral). So gibt es auch hier nur EINE Leseregel fuer "diese
+            Quelle hat ihn", und die Ablehnung bleibt ein Urteil ueber den Untertitel, das keine Quelle
+            ewig offen haelt.
+            </para>
+            <para>
+            Ohne Spurbeleg (Datei ohne eingebettete Untertitel) bleibt die Antwort <c>false</c>: die Marke
+            laesst sich dann auf keine Quelle abbilden, und "nicht ueberspringen" ist die vorsichtige
+            Seite — der Lauf arbeitet das Item, und die Kette entscheidet dort je Quelle, statt die Datei
+            auf Verdacht fuer alle zu erledigen.
+            </para>
+            </summary>
+            <param name="mediaHash">Media hash.</param>
+            <param name="provider">The source in question (F-M499).</param>
+            <returns>True when this source has nothing left to do on this file.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.OpenPairs(System.String,System.Collections.Generic.IEnumerable{Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef},System.Collections.Generic.IEnumerable{System.String},System.Boolean,System.Boolean)">
             <summary>
@@ -13509,21 +14113,57 @@
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSeeder.IsUploadTodo(MediaBrowser.Controller.Entities.BaseItem,System.String,Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration)">
             <summary>
-            True when the upload pipeline would actually work on this media file.
-            Mirrors the file-level fast paths (): fully settled embedded
-            streams or a complete known-pairs set without loose sidecars → skip.
-            Loose sidecars keep the item as todo — the pipeline owns their checks.
+            True when the upload pipeline would actually work on this media file FOR AT LEAST ONE SOURCE.
+            <para>
+            F-M499 (gemessen 15.11.2026, 16:04): hier wurde "schon hochgeladen" QUELLENBLIND gefragt —
+            <c>ArePositionsTerminal</c> und <c>CountKnownPairs</c> lesen <c>Status=Uploaded</c>, und das heisst
+            "irgendwo hochgeladen". Ein Lauf, der 27 eingebettete FR-Spuren ueber SubDL hochgeladen hatte, fand
+            danach jede Spur erledigt, reihte 0 Folgen ein ("scan finished (upload) — 0 upload queued"), und
+            der zweite Endpunkt bekam seinen eigenen Versuch nie. Jetzt wird JE QUELLE gefragt: das Item ist
+            todo, sobald EINE Quelle ihre eigene Marke noch nicht hat (F-M488/F-M490).
+            </para>
+            <para>
+            Die Sprache bleibt Sache der Quelle: hier wird keine Sprach- oder Codec-Zuordnung entschieden
+            (Nutzer-Anweisung 15.11.2026: "Aber halt tvst spezifisch. Das andere mapping ist subdl
+            spezifisch."). tvst bildet in seinem Client ab, SubDL in seinem — die Kette fragt dort.
+            </para>
             </summary>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSeeder.SidecarsNeedWork(System.Collections.Generic.List{System.ValueTuple{System.String,System.String,System.Boolean,System.Boolean}},System.String)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSeeder.UploadSources(Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration)">
             <summary>
-            True when any loose sidecar still needs the upload pipeline: neither
-            uploaded, nor rejected, nor content-hash already known. The hash check
+            F-M499: die Quellen, die im Upload wirklich antreten — dieselbe Doppelfrage, die die Kette vor
+            dem Start jeder Quelle stellt (<see cref="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.IsUploadEnabled(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>
+            und <see cref="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.IsConfiguredForUpload(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>), hier fuer die Queue.
+            </summary>
+            <param name="config">Configuration to read the two switches from.</param>
+            <returns>The sources that may take part in this upload direction.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSeeder.UploadTodoFor(MediaBrowser.Controller.Entities.BaseItem,System.String,Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            True when the upload pipeline would actually work on this media file FOR THIS SOURCE.
+            Mirrors the file-level fast paths (): fully settled embedded
+            streams — settled FOR THIS SOURCE — or a complete known-pairs set without loose sidecars → skip.
+            Loose sidecars keep the item as todo — the pipeline owns their checks.
+            </summary>
+            <param name="item">Jellyfin item.</param>
+            <param name="mediaPath">Media file path.</param>
+            <param name="config">Configuration (same reader as the queue gate).</param>
+            <param name="quelle">The source this answer is about.</param>
+            <returns>True when this source still has something to do here.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSeeder.SidecarsNeedWork(System.Collections.Generic.List{System.ValueTuple{System.String,System.String,System.Boolean,System.Boolean}},System.String,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            True when any loose sidecar still needs the upload pipeline FOR THIS SOURCE: neither
+            uploaded to this source, nor rejected, nor content-hash already known. The hash check
             mirrors the uploader's F-M17c final net (user request 13.09.2026:
             seeder decides sidecars via content hashes). File reads only happen
             for sidecars that pass the registry lookups — settled items cost two
             dictionary hits and no I/O.
             </summary>
+            <param name="loose">Loose sidecars beside the media file.</param>
+            <param name="mediaHash">Parent media hash.</param>
+            <param name="quelle">The source this answer is about (F-M499).</param>
+            <returns>True when this source still has work on a sidecar here.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSeeder.OpenPairsOf(MediaBrowser.Controller.Entities.BaseItem,System.String,System.Collections.Generic.List{System.String},System.Boolean)">
             <summary>

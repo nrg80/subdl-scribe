@@ -632,12 +632,80 @@ public sealed class SubdlSeeder
     }
 
     /// <summary>
-    /// True when the upload pipeline would actually work on this media file.
-    /// Mirrors the file-level fast paths (): fully settled embedded
-    /// streams or a complete known-pairs set without loose sidecars → skip.
-    /// Loose sidecars keep the item as todo — the pipeline owns their checks.
+    /// True when the upload pipeline would actually work on this media file FOR AT LEAST ONE SOURCE.
+    /// <para>
+    /// F-M499 (gemessen 15.11.2026, 16:04): hier wurde "schon hochgeladen" QUELLENBLIND gefragt —
+    /// <c>ArePositionsTerminal</c> und <c>CountKnownPairs</c> lesen <c>Status=Uploaded</c>, und das heisst
+    /// "irgendwo hochgeladen". Ein Lauf, der 27 eingebettete FR-Spuren ueber SubDL hochgeladen hatte, fand
+    /// danach jede Spur erledigt, reihte 0 Folgen ein ("scan finished (upload) — 0 upload queued"), und
+    /// der zweite Endpunkt bekam seinen eigenen Versuch nie. Jetzt wird JE QUELLE gefragt: das Item ist
+    /// todo, sobald EINE Quelle ihre eigene Marke noch nicht hat (F-M488/F-M490).
+    /// </para>
+    /// <para>
+    /// Die Sprache bleibt Sache der Quelle: hier wird keine Sprach- oder Codec-Zuordnung entschieden
+    /// (Nutzer-Anweisung 15.11.2026: "Aber halt tvst spezifisch. Das andere mapping ist subdl
+    /// spezifisch."). tvst bildet in seinem Client ab, SubDL in seinem — die Kette fragt dort.
+    /// </para>
     /// </summary>
     private bool IsUploadTodo(BaseItem item, string mediaPath, Configuration.PluginConfiguration config)
+    {
+        try
+        {
+            // F-M499: nur Quellen, die auch wirklich antreten — Schalter UND Konfiguration (F-M497).
+            // Eine Quelle, die die Kette ohnehin ueberspringt, darf die Queue nicht fuellen.
+            foreach (var quelle in UploadSources(config))
+            {
+                if (UploadTodoFor(item, mediaPath, config, quelle))
+                {
+                    return true;
+                }
+            }
+
+            return false; // jede angetretene Quelle hat ihre Marke (oder die Spur ist ohnehin verworfen)
+        }
+        catch
+        {
+            return true; // prefilter failure → treat as todo (pipeline decides)
+        }
+    }
+
+    /// <summary>
+    /// F-M499: die Quellen, die im Upload wirklich antreten — dieselbe Doppelfrage, die die Kette vor
+    /// dem Start jeder Quelle stellt (<see cref="Configuration.PluginConfiguration.IsUploadEnabled"/>
+    /// und <see cref="Configuration.PluginConfiguration.IsConfiguredForUpload"/>), hier fuer die Queue.
+    /// </summary>
+    /// <param name="config">Configuration to read the two switches from.</param>
+    /// <returns>The sources that may take part in this upload direction.</returns>
+    private static List<Configuration.SubtitleProvider> UploadSources(Configuration.PluginConfiguration config)
+    {
+        var quellen = new List<Configuration.SubtitleProvider>();
+        foreach (var quelle in Enum.GetValues<Configuration.SubtitleProvider>())
+        {
+            if (config.IsUploadEnabled(quelle) && config.IsConfiguredForUpload(quelle))
+            {
+                quellen.Add(quelle);
+            }
+        }
+
+        return quellen;
+    }
+
+    /// <summary>
+    /// True when the upload pipeline would actually work on this media file FOR THIS SOURCE.
+    /// Mirrors the file-level fast paths (): fully settled embedded
+    /// streams — settled FOR THIS SOURCE — or a complete known-pairs set without loose sidecars → skip.
+    /// Loose sidecars keep the item as todo — the pipeline owns their checks.
+    /// </summary>
+    /// <param name="item">Jellyfin item.</param>
+    /// <param name="mediaPath">Media file path.</param>
+    /// <param name="config">Configuration (same reader as the queue gate).</param>
+    /// <param name="quelle">The source this answer is about.</param>
+    /// <returns>True when this source still has something to do here.</returns>
+    private bool UploadTodoFor(
+        BaseItem item,
+        string mediaPath,
+        Configuration.PluginConfiguration config,
+        Configuration.SubtitleProvider quelle)
     {
         try
         {
@@ -668,7 +736,7 @@ public sealed class SubdlSeeder
                     return true;
                 }
 
-                return SidecarsNeedWork(looseOnly, looseHash);
+                return SidecarsNeedWork(looseOnly, looseHash, quelle);
             }
 
             string? mediaHash = registry.GetMediaHash(mediaPath);
@@ -679,23 +747,28 @@ public sealed class SubdlSeeder
 
             // Parity: settled positions skip the embedded walk. Loose sidecars
             // DO keep their own checks — but those are pure registry lookups
-            // (IsUploaded / RejectedReason per language, zero I/O), so the seeder
+            // (IsUploadedTo / RejectedReason per language, zero I/O), so the seeder
             // runs them here too (user request 13.09.2026: seeder decides the
-            // sidecars directly). Only a sidecar that is neither uploaded nor
-            // rejected keeps the item as todo.
-            if (registry.ArePositionsTerminal(mediaHash, textStreams.Select(s => allSubs.FindIndex(x => x == s))))
+            // sidecars directly). Only a sidecar that is neither uploaded (to THIS
+            // source) nor rejected keeps the item as todo.
+            // F-M499: "settled" heisst "fuer DIESE Quelle erledigt" — eine Terminalzeile liest
+            // Status=Uploaded und damit "irgendwo hochgeladen"; ArePositionsTerminalFor fragt die
+            // eigene Marke der Quelle (F-M488/F-M490) und laesst eine verworfene Spur fuer alle gelten.
+            if (registry.ArePositionsTerminalFor(mediaHash, textStreams.Select(s => allSubs.FindIndex(x => x == s)), quelle))
             {
                 var loose = Pipeline.UploadPipeline.FindLooseSrts(mediaPath);
-                if (!SidecarsNeedWork(loose, mediaHash))
+                if (!SidecarsNeedWork(loose, mediaHash, quelle))
                 {
-                    return false; // embedded settled + every sidecar uploaded/rejected/hash-known
+                    return false; // embedded settled for this source + every sidecar uploaded/rejected/hash-known
                 }
 
                 return true;
             }
 
-            // Parity: distinct (language, HI) pairs fully known + no loose
-            // sidecars → nothing to do.
+            // Parity: distinct (language, HI) pairs fully known — FOR THIS SOURCE — plus no loose
+            // sidecars → nothing to do. The mapping below is SubDL's own and stays untouched (user
+            // order 15.11.2026: tvst maps in its client, SubDL in its client, no shared table); the
+            // net is a cheap "everything known" answer, never a language decision.
             if (Pipeline.UploadPipeline.FindLooseSrts(mediaPath).Count == 0)
             {
                 var needed = new HashSet<string>(StringComparer.Ordinal);
@@ -713,7 +786,7 @@ public sealed class SubdlSeeder
                     }
                 }
 
-                if (registry.CountKnownPairs(mediaHash) >= needed.Count + untagged)
+                if (registry.CountKnownPairsFor(mediaHash, quelle) >= needed.Count + untagged)
                 {
                     return false;
                 }
@@ -728,24 +801,31 @@ public sealed class SubdlSeeder
     }
 
     /// <summary>
-    /// True when any loose sidecar still needs the upload pipeline: neither
-    /// uploaded, nor rejected, nor content-hash already known. The hash check
+    /// True when any loose sidecar still needs the upload pipeline FOR THIS SOURCE: neither
+    /// uploaded to this source, nor rejected, nor content-hash already known. The hash check
     /// mirrors the uploader's F-M17c final net (user request 13.09.2026:
     /// seeder decides sidecars via content hashes). File reads only happen
     /// for sidecars that pass the registry lookups — settled items cost two
     /// dictionary hits and no I/O.
     /// </summary>
-    private bool SidecarsNeedWork(List<(string Path, string Lang, bool HearingImpaired, bool Forced)> loose, string mediaHash)
+    /// <param name="loose">Loose sidecars beside the media file.</param>
+    /// <param name="mediaHash">Parent media hash.</param>
+    /// <param name="quelle">The source this answer is about (F-M499).</param>
+    /// <returns>True when this source still has work on a sidecar here.</returns>
+    private bool SidecarsNeedWork(
+        List<(string Path, string Lang, bool HearingImpaired, bool Forced)> loose,
+        string mediaHash,
+        Configuration.SubtitleProvider quelle)
     {
         var db = Plugin.Instance!.SharedDbContext;
         var registry = new Registry.ContentHashRegistry(db);
 
         foreach (var (loosePath, looseLang, looseHi, _) in loose)
         {
-            // F-M489: je Quelle fragen, nicht "irgendwo hochgeladen" — ein tvst-Upload darf das Paar
-            // nicht aus dem SubDL-Lauf halten.
-            if (registry.IsUploadedTo(mediaHash, looseLang, looseHi, Configuration.SubtitleProvider.Subdl)
-                && registry.IsUploadedTo(mediaHash, looseLang, looseHi, Configuration.SubtitleProvider.TvSubtitles))
+            // F-M489/F-M499: je Quelle fragen, nicht "irgendwo hochgeladen" — ein tvst-Upload darf das
+            // Paar nicht aus dem SubDL-Lauf halten (und umgekehrt). Vorher stand hier ein UND ueber
+            // beide Quellen; seit F-M499 laeuft die Frage ohnehin JE Quelle, also zaehlt nur ihre.
+            if (registry.IsUploadedTo(mediaHash, looseLang, looseHi, quelle))
             {
                 continue;
             }
@@ -763,7 +843,18 @@ public sealed class SubdlSeeder
             }
 
             string looseHash = Registry.ContentHashRegistry.ComputeHash(looseContent);
-            if (registry.IsSidecarUploaded(looseHash) || registry.SidecarRejectedReason(looseHash) != null)
+            // F-M499: auch der Inhalt wird JE QUELLE gefragt — "irgendwo hochgeladen" haelt die zweite
+            // Quelle sonst aus der Queue. Eine ABLEHNUNG bleibt quellenneutral: sie ist ein Urteil
+            // ueber den Untertitel, nicht ueber den Endpunkt.
+            if (registry.IsSidecarUploadedTo(looseHash, quelle) || registry.SidecarRejectedReason(looseHash) != null)
+            {
+                continue;
+            }
+
+            // F-M500: ein bekannter Fund (Download von einer der beiden Seiten) ist keine Upload-Arbeit —
+            // fuer KEINE Quelle. Ohne diese Zeile reihte der Seeder ihn in jedem Lauf wieder ein, obwohl das
+            // Herkunftstor ihn ohnehin sperrt.
+            if (registry.GetOrigin(looseHash).Origin is not null)
             {
                 continue;
             }
@@ -771,7 +862,13 @@ public sealed class SubdlSeeder
             try
             {
                 string content = File.ReadAllText(loosePath);
-                if (registry.IsContentKnown(Registry.ContentHashRegistry.ComputeHash(content)))
+                // F-M500: die Inhaltsfrage nimmt die QUELLE mit. Ein Upload bei der ANDEREN Quelle haelt
+                // diese sonst aus der Queue — genau der Defekt von F-M499, eine Ebene tiefer. Bekannt OHNE
+                // Quellenbeleg (nur ein Download) bleibt ein Skip: diesen Text hat der Lauf nicht zu
+                // veroeffentlichen, und das Herkunftstor wuerde ihn ohnehin nur zur eigenen Quelle lassen.
+                string contentHashProbe = Registry.ContentHashRegistry.ComputeHash(content);
+                if (registry.IsContentKnown(contentHashProbe)
+                    && !registry.IsContentUploadedForAnotherSource(contentHashProbe, quelle))
                 {
                     continue;
                 }

@@ -105,10 +105,16 @@ def main():
           "the running cycle's direction is an argument, not a gate (F-M177)")
 
     # Both legs reachable, and download runs before upload (the F-M177 order).
-    dl = body.find("if (followUpDown && config.DownloadEnabled)")
-    ul = body.find("if (followUpUp && config.UploadEnabled)")
-    check("the download leg is guarded by followUpDown", dl >= 0, "if (followUpDown && config.DownloadEnabled)")
-    check("the upload leg is guarded by followUpUp", ul >= 0, "if (followUpUp && config.UploadEnabled)")
+    #
+    # The direction switch is asked through the ANY-question since F-M492 (operator order 15.11.2026):
+    # a per-source toggle means "is the DIRECTION on" can no longer be read from SubDL's switch alone —
+    # switching SubDL off and tvsubtitles on would make the whole direction look disabled. The check
+    # follows the code here (AnyDownloadEnabled/AnyUploadEnabled), not the other way round: the rule it
+    # guards is unchanged, only the question that carries it.
+    dl = body.find("if (followUpDown && config.AnyDownloadEnabled)")
+    ul = body.find("if (followUpUp && config.AnyUploadEnabled)")
+    check("the download leg is guarded by followUpDown", dl >= 0, "if (followUpDown && config.AnyDownloadEnabled)")
+    check("the upload leg is guarded by followUpUp", ul >= 0, "if (followUpUp && config.AnyUploadEnabled)")
     check("download runs before upload", dl >= 0 and ul >= 0 and dl < ul,
           "download at %d, upload at %d" % (dl, ul))
 
@@ -170,9 +176,15 @@ def main():
     check("a nonsensical spacing never waits",
           "if (minutes <= 0)" in src,
           "guard only — the GUI floor is 5 minutes")
+    # F-M475 (operator finding 15.11.2026): the retry is a SCHEDULED FIRE, not an in-process timer.
+    # The timer re-ran the arrival cycle (deferred 03:38 → fired 03:53 → "no arrivals collected — no
+    # run"), so it is gone; the fire keeps the direction, shows on the status line and survives a
+    # restart. The check names the arming call that replaced the timer.
     check("the retry is re-armed, so the arrival is not lost",
-          "_scanDeferTimer.Change(TimeSpan.FromMinutes(minutes)" in src,
-          "one-shot timer — a later trigger moves the retry further out")
+          "ScheduleScanDeferFire(upload: false, fireAt, minutes)" in src
+          and "ScheduleScanDeferFire(upload: true, fireAt, minutes)" in src
+          and "_scanDeferTimer" not in src,
+          "the retry is the direction's scheduled fire (F-M475), not a timer")
     check("a deferred seed neither scanned nor failed",
           'library scan running — retry in {0} min' in src,
           "grey row: the work is pending, not switched off")

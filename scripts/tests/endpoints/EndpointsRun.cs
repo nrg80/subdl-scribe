@@ -263,11 +263,22 @@ internal static class Program
             && Provenance.Parse("SubDL") == SubtitleProvider.Subdl
             && Provenance.Parse(null) is null
             && Provenance.Parse("  ") is null);
-        Check("a tvsubtitles find never goes to SubDL, and the other way round",
+        // F-M500 (Operator-Anweisung 15.11.2026, verschaerft): eine BEKANNTE Herkunft geht NIRGENDS hoch —
+        // nicht zurueck zur eigenen Quelle (Reup) und nicht zur anderen (Kreuzkontamination). Vorher galt
+        // "bekannt = nur zur eigenen Quelle"; das ist aufgehoben.
+        Check("a tvsubtitles find goes nowhere — not to SubDL and not back to tvsubtitles",
             !Provenance.MayUploadTo("tvsubtitles", SubtitleProvider.Subdl)
+            && !Provenance.MayUploadTo("tvsubtitles", SubtitleProvider.TvSubtitles)
             && !Provenance.MayUploadTo("subdl", SubtitleProvider.TvSubtitles)
-            && Provenance.MayUploadTo("tvsubtitles", SubtitleProvider.TvSubtitles)
-            && Provenance.MayUploadTo("subdl", SubtitleProvider.Subdl));
+            && !Provenance.MayUploadTo("subdl", SubtitleProvider.Subdl));
+        Check("the origin is named in the reason the run logs",
+            Provenance.OriginBlockedReason("subdl") is { } subdlSatz
+            && subdlSatz.Contains("origin:subdl", StringComparison.Ordinal)
+            && subdlSatz.Contains("never uploaded", StringComparison.Ordinal)
+            && Provenance.OriginBlockedReason("tvsubtitles") is { } tvSatz
+            && tvSatz.Contains("origin:tvsubtitles", StringComparison.Ordinal)
+            && Provenance.OriginBlockedReason(null) is null,
+            (Provenance.OriginBlockedReason("subdl") ?? "-") + " | " + (Provenance.OriginBlockedReason("tvsubtitles") ?? "-"));
         Check("unknown provenance stays allowed everywhere — a hand copy or an embedded track",
             Provenance.MayUploadTo(null, SubtitleProvider.Subdl)
             && Provenance.MayUploadTo(null, SubtitleProvider.TvSubtitles)
@@ -289,8 +300,10 @@ internal static class Program
                 .Contains("public string? OriginId { get; set; }", StringComparison.Ordinal)
             && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
                 .Contains("ALTER TABLE sidecars ADD COLUMN Origin TEXT NULL;", StringComparison.Ordinal)
+            // F-M501: der Marker steht auf 13 (media.TvstShowId kam dazu); die Pruefung fragt den
+            // AKTUELLEN Stand, weil ein stehengebliebener Marker die Migration nicht mehr anzeigt.
             && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
-                .Contains("CurrentSchemaVersion = 12", StringComparison.Ordinal));
+                .Contains("CurrentSchemaVersion = 13", StringComparison.Ordinal));
 
         // ---- 10. eigene Kennzeichen je Quelle und Richtung (F-M488) ---------------------------
         var entities = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"));
@@ -301,7 +314,7 @@ internal static class Program
             && entities.Contains("public string? TvSubtitlesDownloadId { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public string? TvSubtitlesUploadId { get; set; }", StringComparison.Ordinal));
         Check("schema 11 adds them to sidecars AND embeds",
-            dbc.Contains("CurrentSchemaVersion = 12", StringComparison.Ordinal)
+            dbc.Contains("CurrentSchemaVersion = 13", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId TEXT NULL;", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE embeds ADD COLUMN TvSubtitlesDownloadId TEXT NULL;", StringComparison.Ordinal));
         Check("the download writes the field of its own source",
@@ -341,11 +354,14 @@ internal static class Program
         Check("both already have it: nothing runs, and the reason names both",
             UploadGate.Decide(true, true, null, true, true) is { Subdl: false, TvSubtitles: false, SkipReason: "already-uploaded:subdl+tvsubtitles" });
         Check("a SubDL upload does not block tvsubtitles and a tvst upload does not block SubDL",
-            UploadGate.Decide(true, true, "subdl", true, false).SkipReason == "already-uploaded:subdl"
-            && UploadGate.Decide(true, true, "tvsubtitles", false, true).SkipReason == "already-uploaded:tvsubtitles");
-        Check("cross-source stays refused before the reup question is even asked",
-            UploadGate.Decide(true, true, "tvsubtitles", false, false) is { Subdl: false, TvSubtitles: true, SkipReason: null }
-            && UploadGate.Decide(true, true, "subdl", false, false) is { Subdl: true, TvSubtitles: false, SkipReason: null });
+            UploadGate.Decide(true, true, origin: null, true, false) is { Subdl: false, TvSubtitles: true, SkipReason: null }
+            && UploadGate.Decide(true, true, origin: null, false, true) is { Subdl: true, TvSubtitles: false, SkipReason: null }
+            && UploadGate.Decide(true, true, origin: null, true, true).SkipReason == "already-uploaded:subdl+tvsubtitles");
+        Check("a known origin is refused at BOTH sources, with the origin named as the reason (F-M500)",
+            UploadGate.Decide(true, true, "tvsubtitles", false, false) is { Subdl: false, TvSubtitles: false } tvTor
+            && tvTor.SkipReason == "origin:tvsubtitles — downloaded there, never uploaded"
+            && UploadGate.Decide(true, true, "subdl", false, false) is { Subdl: false, TvSubtitles: false } sdTor
+            && sdTor.SkipReason == "origin:subdl — downloaded there, never uploaded");
         Check("switches off mean nothing runs",
             UploadGate.Decide(false, false, null, false, false).SkipReason == "no-upload-source");
         Check("the pipeline asks per source, through the one gate — twice, never inline",
@@ -359,7 +375,7 @@ internal static class Program
         Check("each source has its own uploaded timestamp, sidecars and embeds alike",
             entities.Contains("public DateTime? SubdlUploadedAt { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public DateTime? TvSubtitlesUploadedAt { get; set; }", StringComparison.Ordinal)
-            && dbc.Contains("CurrentSchemaVersion = 12", StringComparison.Ordinal)
+            && dbc.Contains("CurrentSchemaVersion = 13", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE sidecars ADD COLUMN SubdlUploadedAt TEXT NULL;", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;", StringComparison.Ordinal));
         Check("the timestamp is set for the source that took the upload, never for the other",
@@ -458,7 +474,7 @@ internal static class Program
             && !uploadSource.Contains("_config.IsUploadEnabled(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal));
         Check("the provenance gate still decides PER SOURCE — a refused source is skipped, the chain runs on (F-M495)",
             uploadSource.Contains("if (quelle == Configuration.SubtitleProvider.Subdl ? !darfSubdl : !darfZweite)", StringComparison.Ordinal)
-            && uploadSource.Contains("\"cross-source\"", StringComparison.Ordinal)
+            && uploadSource.Contains("Api.Endpoints.Provenance.OriginBlockedReason(herkunft)", StringComparison.Ordinal)
             && uploadSource.Contains("Api.Endpoints.Provenance.MayUploadTo(herkunft, quelle)", StringComparison.Ordinal)
             && uploadSource.Contains("Api.Endpoints.UploadGate.Decide(", StringComparison.Ordinal));
 
@@ -490,7 +506,7 @@ internal static class Program
             && uploadSource.Contains("[SubDL] DRY-RUN would upload {Name} [{Lang}]", StringComparison.Ordinal)
             && uploadSource.Contains("foreach (var quelle in UploadSourceOrder())", StringComparison.Ordinal)
             && uploadSource.Contains("if (!SourceAllowed(quelle))", StringComparison.Ordinal)
-            && uploadSource.Contains("TvSubtitlesUploadEndpoint(client, dryRun: _config.DryRun)", StringComparison.Ordinal),
+            && uploadSource.Contains("TvSubtitlesUploadEndpoint(_tvstClient, dryRun: _config.DryRun)", StringComparison.Ordinal),
             "tvst line @" + dryLineTvst + ", dry block @" + dryBlockStart + ", call @" + secondSourceCall);
 
         // ---- 17. TMDb ist die einzige Pflicht, SubDL faellt ohne Konfiguration aus der Kette (F-M497) --
@@ -521,6 +537,554 @@ internal static class Program
                 "if (!_config.IsConfiguredForDownload(Configuration.SubtitleProvider.Subdl))", StringComparison.Ordinal)
             && downloadSource.Contains(
                 "\"[SubDL-D] {File} — SubDL skipped — not configured (required for SubDL only)\"", StringComparison.Ordinal));
+
+        // --- Abschnitt 16: Rip-Zuordnung fuer den tvst-Upload (F-M498) ---
+        // Gemessen 15.11.2026 im scharfen Lauf: die Seite lehnt jede Folge mit "rip must be one of
+        // WEB, HDTV, HEVC, DVDRip, DVDSCR, BDRip, BluRay" ab, weil der Release-Name "WEB-DL" sagt.
+        var tvClientSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/TvSubtitlesClient.cs"));
+        Check("der Release-Name wird auf einen der sieben Rip-Werte gezogen (F-M498)",
+            tvClientSource.Contains("public static string RipFromQuality(string? quality)", StringComparison.Ordinal)
+            && tvClientSource.Contains("return \"WEB\";", StringComparison.Ordinal)
+            && tvClientSource.Contains("return \"HEVC\";", StringComparison.Ordinal)
+            && tvClientSource.Contains("return \"BDRip\";", StringComparison.Ordinal)
+            && tvClientSource.Contains("return \"BluRay\";", StringComparison.Ordinal));
+
+        Check("der Endpunkt bekommt den Rip durch die Zuordnung, nicht den rohen N amen (F-M498)",
+            uploadSource.Contains("TvSubtitlesClient.RipFromQuality(quality)", StringComparison.Ordinal));
+
+        Check("das Hearing-impaired-Kaestchen wird gesendet, wenn der Untertitel es ist (F-M498)",
+            tvClientSource.Contains("new KeyValuePair<string, string>(\"hi\", \"1\")", StringComparison.Ordinal)
+            && tvClientSource.Contains("if (hearingImpaired)", StringComparison.Ordinal));
+
+        Check("die Fehlermeldung nennt nicht mehr den falschen Parameter (F-M498)",
+            !tvClientSource.Contains("nameof(showId));", StringComparison.Ordinal));
+
+        // --- Abschnitt 17: die Upload-Queue fragt je Quelle, nicht quellenblind (F-M499) ---
+        // Gemessen 15.11.2026, 16:04: nach 27 SubDL-Uploads reihte der Seeder 0 Folgen ein
+        // ("scan finished (upload) — 0 upload queued"), weil "schon hochgeladen" aus Status=Uploaded
+        // gelesen wurde — also "irgendwo hochgeladen". Der zweite Endpunkt bekam nie seinen Versuch.
+        Check("die Upload-Queue fragt je Quelle statt quellenblind (F-M499)",
+            seederSource.Contains("UploadTodoFor(item, mediaPath, config, quelle)", StringComparison.Ordinal)
+            && seederSource.Contains("registry.ArePositionsTerminalFor(mediaHash", StringComparison.Ordinal)
+            && seederSource.Contains("registry.CountKnownPairsFor(mediaHash, quelle)", StringComparison.Ordinal)
+            && seederSource.Contains("registry.IsSidecarUploadedTo(looseHash, quelle)", StringComparison.Ordinal)
+            && !seederSource.Contains("registry.ArePositionsTerminal(mediaHash", StringComparison.Ordinal)
+            && !seederSource.Contains("registry.CountKnownPairs(mediaHash)", StringComparison.Ordinal)
+            && !seederSource.Contains("registry.IsSidecarUploaded(looseHash)", StringComparison.Ordinal));
+
+        Check("der Helfer nimmt nur eingeschaltete UND konfigurierte Quellen, und die Marke liest EINE Regel (F-M499)",
+            seederSource.Contains("foreach (var quelle in UploadSources(config))", StringComparison.Ordinal)
+            && seederSource.Contains(
+                "if (config.IsUploadEnabled(quelle) && config.IsConfiguredForUpload(quelle))",
+                StringComparison.Ordinal)
+            && registrySource.Contains(
+                "public bool ArePositionsTerminalFor(string? mediaHash, IEnumerable<int> positions, SubtitleProvider provider)",
+                StringComparison.Ordinal)
+            && registrySource.Contains(
+                "public int CountKnownPairsFor(string? mediaHash, SubtitleProvider provider)",
+                StringComparison.Ordinal)
+            && registrySource.Contains(
+                "public bool IsSidecarUploadedTo(string? contentHash, SubtitleProvider provider)",
+                StringComparison.Ordinal)
+            && registrySource.Contains(
+                "return IsUploadedTo(mediaHash, track.Language, track.HearingImpaired ?? false, provider);",
+                StringComparison.Ordinal));
+
+        // --- Abschnitt 18: auch der KOPF des Laufs fragt je Quelle (F-M499) ---------------------
+        // Gemessen 15.11.2026, 16:17 im scharfen Lauf: der Seeder hatte nach Abschnitt 17 27 Folgen
+        // quellenweise eingereiht, und die Pipeline warf sie alle mit "[SubDL] SKIP {File} — upload
+        // file-complete" wieder weg — die Dateimarke stand von den SubDL-Uploads. Ergebnis "0 uploaded".
+        Check("die Pipeline ueberspringt nur, wenn ALLE eingeschalteten und konfigurierten Quellen fertig sind (F-M499)",
+            uploadSource.Contains("Registry.IsSubtitlesUploadedFor(earlyHash, quelle)", StringComparison.Ordinal)
+            && uploadSource.Contains("if (quellen.Count > 0 && offeneQuellen.Count == 0)", StringComparison.Ordinal)
+            && uploadSource.Contains(
+                "private List<Configuration.SubtitleProvider> UploadSources() =>", StringComparison.Ordinal)
+            && uploadSource.Contains(
+                "_config.DryRun || _config.IsConfiguredForUpload(quelle)", StringComparison.Ordinal)
+            // Die blinde Frage darf im Kopf des Laufs nicht mehr stehen — sie war der Defekt.
+            && !uploadSource.Contains("IsSubtitlesUploaded(", StringComparison.Ordinal));
+
+        Check("das quellenweise Gegenstueck der Dateimarke existiert und filtert auf die Quelle (F-M499)",
+            registrySource.Contains(
+                "public bool IsSubtitlesUploadedFor(string? mediaHash, SubtitleProvider provider)",
+                StringComparison.Ordinal)
+            && registrySource.Contains(
+                "tracks.All(track => IsEmbedTerminalFor(mediaHash, track.SubPos, provider))",
+                StringComparison.Ordinal)
+            // dieselbe Leseregel wie im Upload selbst: eigene Marke der Quelle, Ablehnung quellenneutral
+            && registrySource.Contains(
+                "return IsUploadedTo(mediaHash, track.Language, track.HearingImpaired ?? false, provider);",
+                StringComparison.Ordinal));
+
+        // --- Abschnitt 19: auch das SETTLE-Urteil fragt je Quelle (F-M500) ----------------------
+        // Gemessen 15.11.2026, 16:24 im scharfen Lauf: 27 eingebettete FR-Spuren endeten als
+        // "identical subtitle already uploaded earlier (F-M298)", weil der Inhalt bei SubDL lag —
+        // tvsubtitles bekam nie einen Versuch, der Lauf meldete "0 uploaded | 34 rejected". Das Urteil
+        // "schon hochgeladen" las Status=Uploaded und damit "irgendwo hochgeladen".
+        Check("das Settle-Urteil nimmt die Quelle mit — vier Stellen, EINE Regel (F-M500)",
+            registrySource.Contains("public bool IsContentUploadedFor(string? contentHash, SubtitleProvider provider)", StringComparison.Ordinal)
+            && registrySource.Contains("public bool RecordSkippedContent(string? mediaHash, bool isLoose, int subPos, string lang,", StringComparison.Ordinal)
+            && registrySource.Contains("IEnumerable<SubtitleProvider> settledSources,", StringComparison.Ordinal)
+            && registrySource.Contains("Where(quelle => IsContentUploadedFor(contentHash, quelle))", StringComparison.Ordinal)
+            && uploadSource.Contains("private (ContentSettle Verdict, string Open) SettleDuplicateContent(", StringComparison.Ordinal)
+            && System.Text.RegularExpressions.Regex.Matches(uploadSource, @"SettleDuplicateContent\(").Count >= 5
+            // die Zeile wird nur noch aus der EINEN Regel heraus geschrieben (zwei Aufrufe: Ablehnung/Settle)
+            && System.Text.RegularExpressions.Regex.Matches(uploadSource, @"Registry\.RecordSkippedContent\(").Count == 2);
+
+        Check("nur der Quellenbeleg schreibt die Marke — tvst zaehlt keine markenlose Zeile (F-M500)",
+            registrySource.Contains("settledAsUploaded && quellen.Contains(SubtitleProvider.Subdl) ? DateTime.UtcNow : null", StringComparison.Ordinal)
+            && registrySource.Contains("settledAsUploaded && quellen.Contains(SubtitleProvider.TvSubtitles) ? DateTime.UtcNow : null", StringComparison.Ordinal)
+            // fuer tvsubtitles NUR seine eigene Marke: die markenlose Alt-/Pack-Zeile zaehlt nur bei SubDL
+            && System.Text.RegularExpressions.Regex.Matches(registrySource, @"UploadedWithoutSourceMark\(x\)").Count == 2);
+
+        // Der Umbau wird nicht nur gelesen, sondern gefahren: ein Inhalt bei SubDL darf tvst nicht
+        // erledigen, zweimal bei derselben Quelle bleibt blockiert, und die Herkunft bleibt das Tor.
+        string settleRoot = Path.Combine(Path.GetTempPath(), "endpoints-settle-" + Environment.ProcessId);
+        try
+        {
+            if (Directory.Exists(settleRoot))
+            {
+                Directory.Delete(settleRoot, true);
+            }
+
+            Directory.CreateDirectory(settleRoot);
+            using (var settleDb = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(Path.Combine(settleRoot, "db"), null))
+            {
+                var settleReg = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(settleDb, null, null);
+
+                const string fileA = "aaaa1111bbbb2222";
+                const string fileB = "cccc3333dddd4444";
+                const string de = "DE";
+                string textDe = "1\n00:00:01,000 --> 00:00:03,000\nEin Satz.\n\n";
+                string hashDe = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(textDe);
+
+                // Der Inhalt liegt bei SubDL (Marke der Quelle, F-M490), unter ANDERER Dateiidentitaet.
+                settleReg.EnsureMedia(fileB, "tt7654321", "/data/movies2/film.mkv");
+                settleReg.MarkEmbed(fileB, 0, de, false, Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Uploaded,
+                    contentHash: hashDe, subdlUploadedAt: DateTime.UtcNow);
+                settleReg.EnsureMedia(fileA, "tt1234567", "/data/movies2/folge.mkv");
+
+                Check("derselbe Inhalt bei SubDL erledigt tvsubtitles NICHT (F-M500)",
+                    settleReg.IsContentUploadedFor(hashDe, SubtitleProvider.Subdl)
+                    && !settleReg.IsContentUploadedFor(hashDe, SubtitleProvider.TvSubtitles)
+                    && settleReg.IsContentUploadedForAnotherSource(hashDe, SubtitleProvider.TvSubtitles),
+                    "subdl=" + settleReg.IsContentUploadedFor(hashDe, SubtitleProvider.Subdl)
+                    + " tvst=" + settleReg.IsContentUploadedFor(hashDe, SubtitleProvider.TvSubtitles));
+
+                // Zweimal bei DERSELBEN Quelle bleibt blockiert: der zweite SubDL-Versuch wird wieder
+                // als "schon hochgeladen" verbucht und schreibt KEINE Ablehnung.
+                bool settleSubdl = settleReg.RecordSkippedContent(fileA, false, 7, de, false, false, hashDe,
+                    Jellyfin.Plugin.SubdlScribe.Data.RejectReason.DuplicateContent,
+                    new[] { SubtitleProvider.Subdl });
+                bool settleTwice = settleReg.RecordSkippedContent(fileA, false, 7, de, false, false, hashDe,
+                    Jellyfin.Plugin.SubdlScribe.Data.RejectReason.DuplicateContent,
+                    new[] { SubtitleProvider.Subdl });
+                var rowA = settleReg.GetEmbed(fileA, 7);
+                Check("zweimal bei derselben Quelle bleibt blockiert — ohne Ablehnung (F-M500)",
+                    settleSubdl && settleTwice
+                    && rowA?.Status == Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Uploaded
+                    && rowA?.Reason is null
+                    && settleReg.IsUploadedTo(fileA, de, false, SubtitleProvider.Subdl)
+                    // die andere Quelle ist auf DIESER Spur weiterhin offen
+                    && !settleReg.IsUploadedTo(fileA, de, false, SubtitleProvider.TvSubtitles),
+                    "settled=" + settleSubdl + "/" + settleTwice + " status=" + rowA?.Status + " grund=" + (rowA?.Reason ?? "-"));
+
+                // Ohne Quellenbeleg (nur eine Ablehnung im Bestand) bleibt es bei der Ablehnung, und die
+                // ist quellenneutral: sie haelt BEIDE Quellen — wie festgelegt (F-M499).
+                string textFr = "1\n00:00:04,000 --> 00:00:06,000\nUne phrase.\n\n";
+                string hashFr = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(textFr);
+                settleReg.MarkEmbed(fileA, 8, "FR", false, Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Rejected,
+                    contentHash: hashFr, reason: Jellyfin.Plugin.SubdlScribe.Data.RejectReason.DuplicateRemote);
+                bool noEvidence = settleReg.RecordSkippedContent(fileA, false, 8, "FR", false, true, hashFr,
+                    Jellyfin.Plugin.SubdlScribe.Data.RejectReason.DuplicateContent,
+                    Array.Empty<SubtitleProvider>());
+                var rowFr = settleReg.GetEmbed(fileA, 8);
+                Check("ohne Quellenbeleg bleibt die Ablehnung quellenneutral (F-M499/F-M500)",
+                    !noEvidence
+                    && rowFr?.Status == Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Rejected
+                    && rowFr?.Reason == Jellyfin.Plugin.SubdlScribe.Data.RejectReason.DuplicateContent);
+
+                // Das Herkunftstor steht VOR diesem Weg und wird hier nicht weicher. Drei Faelle, wie
+                // festgelegt (Operator 15.11.2026: "externe Quellen duerfen zu beiden hochgeladen werden"):
+                // unbekannt/extern -> beide, subdl -> nur SubDL, tvsubtitles -> nur tvsubtitles.
+                var torUnbekannt = UploadGate.Decide(true, true, origin: null, false, false);
+                var markenText = "1\n00:00:20,000 --> 00:00:22,000\nZwei Marken.\n\n";
+                string markenHash = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(markenText);
+                settleReg.EnsureMedia("eeee5555ffff6666", "tt9999999", "/data/movies2/beide.mkv");
+                settleReg.MarkEmbed("eeee5555ffff6666", 0, de, false,
+                    Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Uploaded, contentHash: markenHash,
+                    subdlUploadId: "sd-1", subdlUploadedAt: DateTime.UtcNow);
+                settleReg.MarkEmbed("eeee5555ffff6666", 0, de, false,
+                    Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Uploaded, contentHash: markenHash,
+                    tvSubtitlesUploadId: "tv-1", tvSubtitlesUploadedAt: DateTime.UtcNow);
+                var beideRow = settleReg.GetEmbed("eeee5555ffff6666", 0);
+                Check("unbekannte/externe Herkunft: BEIDE Quellen duerfen hochladen, jede mit eigener Marke (F-M487/F-M500)",
+                    torUnbekannt.Subdl && torUnbekannt.TvSubtitles && torUnbekannt.SkipReason is null
+                    && Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(null, SubtitleProvider.Subdl)
+                    && Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(null, SubtitleProvider.TvSubtitles)
+                    // beide Marken stehen nebeneinander auf DERSELBEN Zeile — die Kette schreibt je Quelle
+                    && beideRow?.SubdlUploadId == "sd-1" && beideRow?.TvSubtitlesUploadId == "tv-1"
+                    && settleReg.IsUploadedTo("eeee5555ffff6666", de, false, SubtitleProvider.Subdl)
+                    && settleReg.IsUploadedTo("eeee5555ffff6666", de, false, SubtitleProvider.TvSubtitles)
+                    && uploadSource.Contains("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal),
+                    "subdl=" + torUnbekannt.Subdl + " tvst=" + torUnbekannt.TvSubtitles);
+
+                // Gesperrte Herkuenfte: ein Download ist ein Fund, kein eigener Kandidat — er geht NIRGENDS
+                // hoch (Operator 15.11.2026: "Herkunft subdl: nie zurueck zu subdl, nie zu tvst").
+                string textHer = "1\n00:00:09,000 --> 00:00:11,000\nHerkunft.\n\n";
+                string hashHer = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(textHer);
+                settleReg.MarkDownloaded(hashHer, fileA, de, false,
+                    origin: Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.Name(SubtitleProvider.Subdl),
+                    fileName: "folge.de.srt", path: "/data/movies2/folge.de.srt");
+                string? herkunft = settleReg.GetOrigin(hashHer).Origin;
+                var torSubdl = UploadGate.Decide(true, true, herkunft, false, false);
+                Check("Herkunft=subdl: weder zu SubDL (kein Reup) noch zu tvsubtitles (F-M487 verschaerft)",
+                    herkunft == "subdl"
+                    && !torSubdl.Subdl && !torSubdl.TvSubtitles
+                    && torSubdl.SkipReason == "origin:subdl — downloaded there, never uploaded"
+                    && !Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(herkunft, SubtitleProvider.Subdl)
+                    && !Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(herkunft, SubtitleProvider.TvSubtitles)
+                    && !settleReg.IsContentUploadedFor(hashHer, SubtitleProvider.TvSubtitles)
+                    // der Settle-Weg fragt genau dieses Tor, bevor er einen Kandidaten weiterlaufen laesst
+                    && uploadSource.Contains("Api.Endpoints.Provenance.MayUploadTo(herkunft, quelle)", StringComparison.Ordinal)
+                    && uploadSource.Contains("string? herkunft = Registry.GetOrigin(contentHash).Origin;", StringComparison.Ordinal),
+                    "herkunft=" + (herkunft ?? "-") + " subdl=" + torSubdl.Subdl + " tvst=" + torSubdl.TvSubtitles);
+
+                string textHer2 = "1\n00:00:12,000 --> 00:00:14,000\nAndere Herkunft.\n\n";
+                string hashHer2 = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(textHer2);
+                settleReg.MarkDownloaded(hashHer2, fileA, de, false,
+                    origin: Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.Name(SubtitleProvider.TvSubtitles),
+                    fileName: "folge2.de.srt", path: "/data/movies2/folge2.de.srt");
+                string? herkunftTv = settleReg.GetOrigin(hashHer2).Origin;
+                var torTv = UploadGate.Decide(true, true, herkunftTv, false, false);
+                Check("Herkunft=tvsubtitles: weder zu tvsubtitles (kein Reup) noch zu SubDL (F-M487 verschaerft)",
+                    herkunftTv == "tvsubtitles"
+                    && !torTv.Subdl && !torTv.TvSubtitles
+                    && torTv.SkipReason == "origin:tvsubtitles — downloaded there, never uploaded"
+                    && !Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(herkunftTv, SubtitleProvider.Subdl)
+                    && !Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(herkunftTv, SubtitleProvider.TvSubtitles)
+                    && !settleReg.IsContentUploadedFor(hashHer2, SubtitleProvider.Subdl)
+                    && !settleReg.IsContentUploadedFor(hashHer2, SubtitleProvider.TvSubtitles),
+                    "herkunft=" + (herkunftTv ?? "-") + " subdl=" + torTv.Subdl + " tvst=" + torTv.TvSubtitles);
+
+                // Ein bekannter Fund ist keine Upload-Arbeit mehr: die Spur ist fuer JEDE Quelle erledigt,
+                // sonst reihte der Seeder sie in jedem Lauf erneut ein (Operator: nie zurueck, nie hinueber).
+                settleReg.MarkEmbed(fileA, 9, "IT", false,
+                    Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Observed, contentHash: hashHer);
+                string textFrei = "1\n00:00:30,000 --> 00:00:32,000\nOhne Herkunft.\n\n";
+                string hashFrei = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(textFrei);
+                settleReg.MarkEmbed(fileA, 10, "IT", false,
+                    Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Observed, contentHash: hashFrei);
+                Check("ein Download ist fuer BEIDE Quellen erledigt — die Spur bleibt nicht ewig offen (F-M500)",
+                    settleReg.IsEmbedTerminalFor(fileA, 9, SubtitleProvider.Subdl)
+                    && settleReg.IsEmbedTerminalFor(fileA, 9, SubtitleProvider.TvSubtitles)
+                    // Negativkontrolle: ohne bekannte Herkunft ist die Spur NICHT terminal — die Regel greift nur dort
+                    && !settleReg.IsEmbedTerminalFor(fileA, 10, SubtitleProvider.Subdl)
+                    && !settleReg.IsEmbedTerminalFor(fileA, 10, SubtitleProvider.TvSubtitles)
+                    && seederSource.Contains("if (registry.GetOrigin(looseHash).Origin is not null)", StringComparison.Ordinal));
+
+                // Die Queue fragt dieselbe Sache je Quelle (F-M500 im Seeder): ein Upload bei der anderen
+                // Quelle haelt die zweite nicht mehr aus der Queue.
+                Check("die Queue liest \"bekannt\" nicht mehr quellenblind (F-M500)",
+                    seederSource.Contains("registry.IsContentUploadedForAnotherSource(contentHashProbe, quelle)", StringComparison.Ordinal)
+                    && !seederSource.Contains("if (registry.IsContentKnown(Registry.ContentHashRegistry.ComputeHash(content)))", StringComparison.Ordinal));
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(settleRoot))
+                {
+                    Directory.Delete(settleRoot, true);
+                }
+            }
+            catch (IOException)
+            {
+                // liegen gebliebene Datei: kein Grund, die Suite rot zu machen
+            }
+        }
+
+        // --- Abschnitt 20: die tvst-Seriennummer im Store und die Anlage fehlender Serien (F-M501) ---
+        // Operator-Anweisung 15.11.2026: "Tmdb titel fuehrt.", "Tmdb titel fuehrt auch fuer
+        // Doppeleintraege.", nachgeschaerft "Doch Aehnlichkeitssuche. Aber gross/Kleinschreibung. And =
+        // und. Leerzeichen mehr oder weniger. Aehnlichkeit eng halten". Also: Name normalisieren und
+        // dann auf GLEICHHEIT vergleichen — kein Teilstring, kein Aehnlichkeitsmass, kein
+        // Artikel-Abschneiden.
+        var namen = new Dictionary<int, string>
+        {
+            [512] = "The Middle",
+            [422] = "Malcolm in the Middle",
+            [701] = "The Middle Man",
+            [700] = "Rick & Morty",
+        };
+        Check("tvst vergleicht eng: Gross/Kleinschreibung und Leerraum zaehlen nicht (F-M501)",
+            TvSubtitlesClient.ResolveShow(namen, "the middle") == 512
+            && TvSubtitlesClient.ResolveShow(namen, "  The   Middle ") == 512
+            && TvSubtitlesClient.NormalizeShowName("The   Middle") == "the middle",
+            "the middle=" + TvSubtitlesClient.ResolveShow(namen, "the middle")
+            + " doppelraum=" + TvSubtitlesClient.ResolveShow(namen, "  The   Middle "));
+
+        Check("tvst vergleicht eng: & = and = und (F-M501)",
+            TvSubtitlesClient.ResolveShow(namen, "Rick and Morty") == 700
+            && TvSubtitlesClient.ResolveShow(namen, "Rick und Morty") == 700
+            && TvSubtitlesClient.ResolveShow(namen, "rick&morty") == 700
+            // "und" nur als Wort: aus "Rundschau" darf kein "Randschau" werden
+            && TvSubtitlesClient.NormalizeShowName("Rundschau") == "rundschau",
+            "and=" + TvSubtitlesClient.ResolveShow(namen, "Rick and Morty"));
+
+        Check("tvst vergleicht eng: kein Teilstring, kein Artikel-Abschneiden (F-M501)",
+            // "The Middle" findet NICHT "The Middle Man" und NICHT "Malcolm in the Middle"
+            TvSubtitlesClient.ResolveShow(namen, "The Middle") == 512
+            // die fruehere "enthaelt"-Stufe haette hier 701 geliefert
+            && TvSubtitlesClient.ResolveShow(namen, "Middle") is null
+            && TvSubtitlesClient.ResolveShow(namen, "Middle Man") is null
+            && TvSubtitlesClient.ResolveShow(namen, "the middle man") == 701,
+            "Middle=" + (TvSubtitlesClient.ResolveShow(namen, "Middle")?.ToString() ?? "-"));
+
+        // Der TMDb-Serien-Datensatz, auf dem die Aufloesung beruht (Titel, Jahr, Staffelzahl).
+        var tmdbInfo = await new TmdbImdbResolver(
+                new HttpClient(new JsonHandler(
+                    "{\"name\":\"The Middle\",\"original_name\":\"The Middle\"," +
+                    "\"first_air_date\":\"2009-09-30\",\"number_of_seasons\":9}")),
+                "test-key")
+            .SeriesInfoAsync("999001", CancellationToken.None).ConfigureAwait(false);
+        Check("der TMDb-Serien-Datensatz traegt Titel, Erstausstrahlungsjahr und Staffelzahl (F-M501)",
+            tmdbInfo is { Name: "The Middle", FirstAirYear: 2009, Seasons: 9 },
+            tmdbInfo is null ? "kein Datensatz" : tmdbInfo.Name + "/" + tmdbInfo.FirstAirYear + "/" + tmdbInfo.Seasons);
+
+        string tvstRoot = Path.Combine(Path.GetTempPath(), "endpoints-tvst-" + Environment.ProcessId);
+        try
+        {
+            if (Directory.Exists(tvstRoot))
+            {
+                Directory.Delete(tvstRoot, true);
+            }
+
+            Directory.CreateDirectory(tvstRoot);
+            using (var tvstDb = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(Path.Combine(tvstRoot, "db"), null))
+            {
+                var tvstReg = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(tvstDb, null, null);
+                var mitte = new TmdbSeriesInfo("The Middle", "The Middle", 2009, 9);
+
+                // (a) Die gespeicherte Nummer fuehrt: kein Netz, kein Vergleich, keine Anlage.
+                tvstReg.EnsureMedia("aaaa000000000001", patch: m => m.TvstShowId = "512");
+                var handlerGespeichert = new TvstSiteHandler(512, "The Middle");
+                var aufloeserGespeichert = new TvstShowResolver(
+                    new TvSubtitlesClient(new HttpClient(handlerGespeichert)));
+                var gespeichert = await aufloeserGespeichert
+                    .ResolveForMediaAsync(tvstReg, "aaaa000000000001", mitte, dryRun: false, CancellationToken.None)
+                    .ConfigureAwait(false);
+                Check("eine gespeicherte TvstShowId verhindert Suche UND Anlage (F-M501)",
+                    gespeichert.Resolved && gespeichert.ShowId == 512
+                    && gespeichert.Status == TvstShowStatus.Stored
+                    && handlerGespeichert.Gets == 0 && handlerGespeichert.Posts == 0,
+                    "id=" + gespeichert.ShowId + " status=" + gespeichert.Status
+                    + " gets=" + handlerGespeichert.Gets + " posts=" + handlerGespeichert.Posts);
+
+                // (b) Ein Treffer in der Liste: die Nummer wird geschrieben und benutzt, ohne Anlage.
+                var handlerVorhanden = new TvstSiteHandler(512, "The Middle");
+                var aufloeserVorhanden = new TvstShowResolver(
+                    new TvSubtitlesClient(new HttpClient(handlerVorhanden)));
+                var vorhanden = await aufloeserVorhanden
+                    .ResolveForMediaAsync(tvstReg, "aaaa000000000002", mitte, dryRun: false, CancellationToken.None)
+                    .ConfigureAwait(false);
+                Check("der TMDb-Titel findet die Serie eng verglichen und schreibt die Nummer ins Medium (F-M501)",
+                    vorhanden.Resolved && vorhanden.ShowId == 512 && vorhanden.Status == TvstShowStatus.Found
+                    && tvstReg.GetMedia("aaaa000000000002")?.TvstShowId == "512"
+                    && handlerVorhanden.Posts == 0 && handlerVorhanden.Gets == 1,
+                    "status=" + vorhanden.Status + " store=" + (tvstReg.GetMedia("aaaa000000000002")?.TvstShowId ?? "-"));
+
+                // (c) Kein Treffer: genau EINE Anlage, danach wird erneut gesucht und erst dann geschrieben.
+                var neu = new TmdbSeriesInfo("Beispielserie Test", "Beispielserie Test", 2026, 3);
+                var handlerNeu = new TvstSiteHandler(512, "The Middle") { AddAfterPost = (9001, "Beispielserie Test") };
+                var aufloeserNeu = new TvstShowResolver(new TvSubtitlesClient(new HttpClient(handlerNeu)));
+                var angelegt = await aufloeserNeu
+                    .ResolveForMediaAsync(tvstReg, "aaaa000000000003", neu, dryRun: false, CancellationToken.None)
+                    .ConfigureAwait(false);
+                Check("ohne Treffer wird genau einmal angelegt und danach erneut gesucht (F-M501)",
+                    angelegt.Resolved && angelegt.ShowId == 9001 && angelegt.Status == TvstShowStatus.Created
+                    && handlerNeu.Posts == 1 && handlerNeu.Gets == 2
+                    && tvstReg.GetMedia("aaaa000000000003")?.TvstShowId == "9001",
+                    "status=" + angelegt.Status + " posts=" + handlerNeu.Posts + " gets=" + handlerNeu.Gets);
+
+                Check("die Anlage traegt Name, Jahr und Staffelzahl aus TMDb (F-M501)",
+                    handlerNeu.LastBody is string rumpf
+                    && rumpf.Contains("name=\"name\"\r\n\r\nBeispielserie Test", StringComparison.Ordinal)
+                    && rumpf.Contains("name=\"year_s\"\r\n\r\n2026", StringComparison.Ordinal)
+                    && rumpf.Contains("name=\"seasons\"\r\n\r\n3", StringComparison.Ordinal),
+                    handlerNeu.LastBody is null ? "kein Rumpf" : "Rumpf ohne die drei Felder");
+
+                // Staffelzahl: die Seite kennt nur 1..22 — 30 wird auf 22 gezogen, "keine Angabe" auf 1.
+                var handlerViele = new TvstSiteHandler(512, "The Middle") { AddAfterPost = (9002, "Viele Staffeln") };
+                var aufloeserViele = new TvstShowResolver(new TvSubtitlesClient(new HttpClient(handlerViele)));
+                await aufloeserViele.ResolveForMediaAsync(
+                        tvstReg, "aaaa000000000004", new TmdbSeriesInfo("Viele Staffeln", null, 2001, 30),
+                        dryRun: false, CancellationToken.None)
+                    .ConfigureAwait(false);
+                var handlerOhne = new TvstSiteHandler(512, "The Middle") { AddAfterPost = (9003, "Ohne Angabe") };
+                var aufloeserOhne = new TvstShowResolver(new TvSubtitlesClient(new HttpClient(handlerOhne)));
+                await aufloeserOhne.ResolveForMediaAsync(
+                        tvstReg, "aaaa000000000005", new TmdbSeriesInfo("Ohne Angabe", null, 2001, null),
+                        dryRun: false, CancellationToken.None)
+                    .ConfigureAwait(false);
+                Check("die Staffelzahl wird auf 1..22 begrenzt, und BuildAddShow weist 23 ab (F-M501)",
+                    handlerViele.LastBody!.Contains("name=\"seasons\"\r\n\r\n22", StringComparison.Ordinal)
+                    && handlerOhne.LastBody!.Contains("name=\"seasons\"\r\n\r\n1", StringComparison.Ordinal)
+                    && TvSubtitlesClient.MaxSeason == 22
+                    && Throws(() => TvSubtitlesClient.BuildAddShow("XY", 2026, 23))
+                    && !Throws(() => TvSubtitlesClient.BuildAddShow("XY", 2026, 22)),
+                    "30->" + (handlerViele.LastBody!.Contains("seasons\"\r\n\r\n22", StringComparison.Ordinal) ? "22" : "?"));
+
+                // (d) Die Anlage scheitert: nichts wird geschrieben, die Kette laeuft weiter (Skipped, kein Wurf).
+                var handlerKaputt = new TvstSiteHandler(512, "The Middle") { PostStatus = 500 };
+                var aufloeserKaputt = new TvstShowResolver(new TvSubtitlesClient(new HttpClient(handlerKaputt)));
+                var kaputt = await aufloeserKaputt
+                    .ResolveForMediaAsync(
+                        tvstReg, "aaaa000000000006", new TmdbSeriesInfo("Beispielserie Test", null, 2026, 3),
+                        dryRun: false, CancellationToken.None)
+                    .ConfigureAwait(false);
+                Check("eine gescheiterte Anlage blockiert die Kette nicht und schreibt nichts (F-M501)",
+                    !kaputt.Resolved && kaputt.Status == TvstShowStatus.Unclear
+                    && tvstReg.GetMedia("aaaa000000000006")?.TvstShowId is null
+                    && handlerKaputt.Posts == 1
+                    // die Kette antwortet mit Skipped (die andere Quelle bekommt ihren Versuch), nicht mit Failed
+                    && uploadSource.Contains("return UploadResult.Skipped(\"second-source-show-\" + show.Status)", StringComparison.Ordinal),
+                    "status=" + kaputt.Status + " posts=" + handlerKaputt.Posts);
+
+                // Anlegen hoechstens einmal je Medium und Lauf: derselbe Fehlschlag wird NICHT wiederholt.
+                var zweiterVersuch = await aufloeserKaputt
+                    .ResolveForMediaAsync(
+                        tvstReg, "aaaa000000000006", new TmdbSeriesInfo("Beispielserie Test", null, 2026, 3),
+                        dryRun: false, CancellationToken.None)
+                    .ConfigureAwait(false);
+                Check("ein Fehlschlag legt nicht bei jeder Folge erneut an (F-M501)",
+                    !zweiterVersuch.Resolved
+                    && zweiterVersuch.Status == TvstShowStatus.CreateAlreadyTried
+                    && handlerKaputt.Posts == 1,
+                    "status=" + zweiterVersuch.Status + " posts=" + handlerKaputt.Posts);
+
+                // (e) Trockenlauf: nichts anlegen, nichts schreiben.
+                var handlerTrocken = new TvstSiteHandler(512, "The Middle");
+                var aufloeserTrocken = new TvstShowResolver(new TvSubtitlesClient(new HttpClient(handlerTrocken)));
+                var trocken = await aufloeserTrocken
+                    .ResolveForMediaAsync(
+                        tvstReg, "aaaa000000000007", new TmdbSeriesInfo("Beispielserie Test", null, 2026, 3),
+                        dryRun: true, CancellationToken.None)
+                    .ConfigureAwait(false);
+                Check("der Trockenlauf legt nichts an und schreibt nichts (F-M501)",
+                    !trocken.Resolved && trocken.Status == TvstShowStatus.WouldCreate
+                    && handlerTrocken.Posts == 0
+                    && tvstReg.GetMedia("aaaa000000000007")?.TvstShowId is null,
+                    "status=" + trocken.Status + " posts=" + handlerTrocken.Posts);
+
+                // (f) Unklare Seite: einmal nachfragen, dann NICHT schreiben und tvst ueberspringen.
+                var handlerLeer = new TvstSiteHandler(512, "The Middle") { EmptyList = true };
+                var aufloeserLeer = new TvstShowResolver(new TvSubtitlesClient(new HttpClient(handlerLeer)));
+                var leer = await aufloeserLeer
+                    .ResolveForMediaAsync(
+                        tvstReg, "aaaa000000000008", new TmdbSeriesInfo("Beispielserie Test", null, 2026, 3),
+                        dryRun: false, CancellationToken.None)
+                    .ConfigureAwait(false);
+                Check("eine unklare Serienliste wird einmal nachgefragt, dann wird nicht geschrieben (F-M501)",
+                    !leer.Resolved && leer.Status == TvstShowStatus.Unclear
+                    && handlerLeer.Gets == 2 && handlerLeer.Posts == 0
+                    && tvstReg.GetMedia("aaaa000000000008")?.TvstShowId is null,
+                    "status=" + leer.Status + " gets=" + handlerLeer.Gets);
+
+                // (g) Der Endpunkt mit Nummer im Ticket: die Serienliste wird gar nicht erst geholt.
+                var handlerEndpunkt = new TvstSiteHandler(512, "The Middle");
+                var endpunkt = new TvSubtitlesUploadEndpoint(
+                    new TvSubtitlesClient(new HttpClient(handlerEndpunkt)), dryRun: false);
+                var antwort = await endpunkt.SendAsync(
+                        new UploadTicket(
+                            "Ein Name, den die Seite NICHT fuehrt", "tt1442464", "1422", 2, 24, "de",
+                            "folge.srt", Encoding.UTF8.GetBytes("1\n00:00:01,000 --> 00:00:03,000\nSatz.\n"),
+                            "WEB", "The.Middle.S02E24", false, false, false, TvstShowId: 512),
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                // Die EINE Serienliste danach ist die Ruecklesung der eigenen Upload-Id (F-M488) — sie
+                // kommt NACH dem Upload. Vor dem Upload wird nicht gesucht: die Nummer steht im Ticket,
+                // obwohl der Name im Ticket eine Schreibweise ist, die die Seite nicht fuehrt.
+                Check("mit TvstShowId im Ticket sucht der Endpunkt vor dem Upload nicht (F-M501)",
+                    antwort.Ok && handlerEndpunkt.Uploads == 1
+                    && handlerEndpunkt.Order.FirstOrDefault() == "UPLOAD"
+                    && handlerEndpunkt.Order.Count(x => x == "UPLOAD") == 1
+                    && handlerEndpunkt.LastUploadBody!.Contains("tvshow\"\r\n\r\n512", StringComparison.Ordinal),
+                    "ok=" + antwort.Ok + " folge=" + string.Join(",", handlerEndpunkt.Order));
+
+                // Die Kette selbst: kein Dateiname mehr als Serienname, die Nummer geht ins Ticket.
+                Check("die Upload-Kette loest ueber TMDb und den Store auf, nicht ueber den Dateinamen (F-M501)",
+                    uploadSource.Contains("var series = await _tmdb.SeriesInfoAsync(tmdbId!, ct)", StringComparison.Ordinal)
+                    && uploadSource.Contains(
+                        ".ResolveForMediaAsync(Registry, mediaHash, series, _config.DryRun, ct)", StringComparison.Ordinal)
+                    && uploadSource.Contains("TvstShowId: show.ShowId", StringComparison.Ordinal)
+                    && uploadSource.Contains("_tvstShows.BeginRun()", StringComparison.Ordinal)
+                    // der alte Weg (Serienname aus dem Dateinamen) steht im tvst-Zweig nicht mehr
+                    && !uploadSource.Contains(
+                        "var parsed = Pipeline.MediaNameParser.Parse(Path.GetFileNameWithoutExtension(releaseName))",
+                        StringComparison.Ordinal));
+
+            // (h) Die Migration selbst: eine Datei aus Schema 12 (media ohne TvstShowId) wird beim
+            // Oeffnen um die Spalte erweitert, der Bestand bleibt lesbar.
+            string legacyDir = Path.Combine(tvstRoot, "legacy");
+            Directory.CreateDirectory(legacyDir);
+            string legacyFile = Path.Combine(legacyDir, "subdl-scribe.sqlite");
+            using (var conn = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + legacyFile))
+            {
+                await conn.OpenAsync().ConfigureAwait(false);
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText =
+                    "CREATE TABLE meta (Id TEXT PRIMARY KEY, SchemaVersion INTEGER, PluginVersion TEXT, "
+                    + "JellyfinVersion TEXT, Updated TEXT);"
+                    + "INSERT INTO meta VALUES ('db', 12, '12.1.12.389', '10.11.0', '2026-11-15');"
+                    + "CREATE TABLE media (Id TEXT PRIMARY KEY, Path TEXT, JellyfinItemId TEXT, ImdbId TEXT, "
+                    + "TmdbId TEXT, SdId TEXT, IsSeries INTEGER, Season INTEGER, Episode INTEGER, "
+                    + "LanguagesAvailable TEXT, SubtitlesUploadedAt TEXT, LastSearchUtc TEXT, "
+                    + "LastSearchLanguages TEXT, LastSeen TEXT);"
+                    // Jede Spalte, die das Modell NICHT nullen kann, bekommt einen Wert — sonst
+                    // scheitert schon das Lesen des Bestands, und die Pruefung misse die Migration.
+                    + "INSERT INTO media (Id, Path, JellyfinItemId, ImdbId, TmdbId, SdId, IsSeries, Season, "
+                    + "Episode, LanguagesAvailable, SubtitlesUploadedAt, LastSearchUtc, LastSearchLanguages, "
+                    + "LastSeen) VALUES ('aaaa000000000009', '/data/serien/folge.mkv', 'jf-1', 'tt1442464', "
+                    + "'1422', NULL, 1, 2, 24, 'DE', NULL, NULL, NULL, '2026-11-15T00:00:00');";
+                await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+
+            using (var legacyDb = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(legacyDir, null))
+            {
+                var bestand = legacyDb.Media.FindById("aaaa000000000009");
+                // Der Wert wird VOR dem Schreiben festgehalten: EF haelt eine Zeile im Kontext und
+                // liefert beim zweiten Lesen DIESELBE Instanz — die nach dem Patch "512" traegt.
+                string? vorherTvst = bestand?.TvstShowId;
+                legacyDb.EnsureMedia("aaaa000000000009", patch: m => m.TvstShowId = "512");
+                var nachher = legacyDb.Media.FindById("aaaa000000000009");
+                Check("Schema 12 -> 13: die Spalte wird beim Start nachgezogen, der Bestand bleibt gueltig (F-M501)",
+                    bestand is { ImdbId: "tt1442464", TmdbId: "1422" }
+                    && vorherTvst is null
+                    && nachher?.TvstShowId == "512"
+                    && legacyDb.Meta.FindById("db")?.SchemaVersion == 13,
+                    "bestand=" + (bestand?.ImdbId ?? "-") + "/" + (bestand?.TmdbId ?? "-")
+                    + "/tvst=" + (vorherTvst ?? "<null>")
+                    + " nachher=" + (nachher?.TvstShowId ?? "-")
+                    + " marker=" + legacyDb.Meta.FindById("db")?.SchemaVersion);
+            }
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(tvstRoot))
+                {
+                    Directory.Delete(tvstRoot, true);
+                }
+            }
+            catch (IOException)
+            {
+                // liegen gebliebene Datei: kein Grund, die Suite rot zu machen
+            }
+        }
 
         Console.WriteLine();
         if (_failures > 0)
@@ -554,6 +1118,133 @@ internal static class Program
 
     /// <summary>Schreibt in einen Strom im nicht-async Helfer.</summary>
     private static void WriteAll(System.IO.Stream stream, byte[] bytes) => stream.Write(bytes, 0, bytes.Length);
+
+    /// <summary>F-M501: laeuft der Aufruf in eine Ausnahme? (Fuer die Grenzen von BuildAddShow.)</summary>
+    private static bool Throws(Action action)
+    {
+        try
+        {
+            action();
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// F-M501: die Seiten von tvsubtitles.net, die die Aufloesung braucht — die Serienliste unter
+    /// <c>/add.html</c> und das Anlege-Formular unter <c>/add-tvshow1.php</c>. Die Liste ist
+    /// veraenderlich, damit "erst anlegen, dann erneut suchen" wirklich geprueft wird und nicht nur
+    /// behauptet. Die Zaehler sind der Beweis fuer "kein Netzzugriff" bzw. "genau einmal angelegt".
+    /// </summary>
+    private sealed class TvstSiteHandler : HttpMessageHandler
+    {
+        private readonly List<(int Id, string Name)> _shows = new();
+
+        public TvstSiteHandler(int id, string name) => _shows.Add((id, name));
+
+        /// <summary>GETs auf die Serienliste.</summary>
+        public int Gets { get; private set; }
+
+        /// <summary>POSTs auf das Anlege-Formular.</summary>
+        public int Posts { get; private set; }
+
+        /// <summary>POSTs auf das Upload-Formular.</summary>
+        public int Uploads { get; private set; }
+
+        /// <summary>Der Rumpf der letzten Anlage.</summary>
+        public string? LastBody { get; private set; }
+
+        /// <summary>Der Rumpf des letzten Uploads.</summary>
+        public string? LastUploadBody { get; private set; }
+
+        /// <summary>Antwortet die Seite auf die Anlage mit diesem Status?</summary>
+        public int PostStatus { get; set; } = 200;
+
+        /// <summary>Wird die Serie nach erfolgreicher Anlage in die Liste aufgenommen?</summary>
+        public (int Id, string Name)? AddAfterPost { get; set; }
+
+        /// <summary>Antwortet die Seite ohne Auswahlfeld (unparsbare/leere Liste)?</summary>
+        public bool EmptyList { get; set; }
+
+        /// <summary>Die Anfragen in ihrer Reihenfolge — "GET", "POST" (Anlage) oder "UPLOAD".</summary>
+        public List<string> Order { get; } = new();
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            _ = body;
+
+            if (request.Method == HttpMethod.Post
+                && request.RequestUri!.AbsolutePath.EndsWith("add-tvshow1.php", StringComparison.Ordinal))
+            {
+                Order.Add("POST");
+                Posts++;
+                LastBody = body;
+                if (PostStatus is < 200 or >= 300)
+                {
+                    return new HttpResponseMessage((HttpStatusCode)PostStatus);
+                }
+
+                if (AddAfterPost is { } add)
+                {
+                    _shows.Add(add);
+                }
+
+                return Html("<html><body>ok</body></html>");
+            }
+
+            if (request.Method == HttpMethod.Post)
+            {
+                Order.Add("UPLOAD");
+                Uploads++;
+                LastUploadBody = body;
+                return Html("<html><body>ok</body></html>");
+            }
+
+            Order.Add("GET");
+            Gets++;
+            if (EmptyList)
+            {
+                return Html("<html><body><p>kein Formular</p></body></html>");
+            }
+
+            var sb = new StringBuilder("<select name=\"tvshow\" size=\"1\">");
+            sb.Append("<option value=\"0\">- Select TV-Show -</option>");
+            foreach (var (id, name) in _shows)
+            {
+                sb.Append("<option value=\"").Append(id).Append("\">").Append(name).Append("</option>");
+            }
+
+            sb.Append("</select>");
+            return Html("<html><body>" + sb + "</body></html>");
+        }
+
+        private static HttpResponseMessage Html(string body) => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "text/html"),
+        };
+    }
+
+    /// <summary>F-M501: eine feste JSON-Antwort fuer den TMDb-Serien-Datensatz.</summary>
+    private sealed class JsonHandler : HttpMessageHandler
+    {
+        private readonly string _json;
+
+        public JsonHandler(string json) => _json = json;
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(_json, Encoding.UTF8, "application/json"),
+            });
+    }
 
     private static void Check(string what, bool ok, string? detail = null)
     {

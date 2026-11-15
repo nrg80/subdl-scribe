@@ -1196,4 +1196,139 @@ public sealed class TmdbImdbResolver
         return (resolvedImdb, resolvedTmdb);
     }
 
+    /// <summary>
+    /// F-M501 (Operator-Anweisung 15.11.2026: „Tmdb titel führt.“): der TMDb-Serien-Datensatz, auf dem
+    /// die tvst-Auflösung beruht — Titel, Erstausstrahlungsjahr und Staffelzahl, alles aus EINER Antwort
+    /// von <c>/tv/{id}</c>.
+    /// <para>
+    /// Warum es diesen Zugriff braucht: bis hierher las die Kette den Seriennamen aus dem DATEINAMEN
+    /// (<c>MediaNameParser</c>), und der ist eine Vermutung über eine Schreibweise. Der TMDb-Name ist
+    /// der Name, den die Serie trägt — er entscheidet, ob die Seite sie schon führt, ob ein Eintrag
+    /// angelegt werden muss und wie er heißt.
+    /// </para>
+    /// <para>
+    /// Der Datensatz wird gecacht wie die übrigen Antworten (ein Lauf fragt dieselbe Serie für jede
+    /// Folge). Ein Fehlschlag ist kein Fehler, sondern null: dann wird tvst für dieses Medium
+    /// übersprungen und die Kette läuft weiter.
+    /// </para>
+    /// </summary>
+    /// <param name="tmdbId">TMDb-Serien-id (tvshow, nie eine Episoden-id).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Der Datensatz, oder null wenn TMDb nicht antwortet oder nichts hergibt.</returns>
+    public async Task<TmdbSeriesInfo?> SeriesInfoAsync(string tmdbId, CancellationToken ct)
+    {
+        if (!IsConfigured || AuthBroken || string.IsNullOrWhiteSpace(tmdbId))
+        {
+            return null;
+        }
+
+        var key = ("tv:" + tmdbId, true);
+        lock (_cache)
+        {
+            if (_cache.TryGetValue(key, out var cached))
+            {
+                // "name|original|year|seasons"; ein leerer Treffer wird als leerer String abgelegt.
+                var parts = cached?.Split('|');
+                if (parts is { Length: 4 } && parts[0].Length > 0)
+                {
+                    return new TmdbSeriesInfo(
+                        parts[0],
+                        parts[1].Length > 0 ? parts[1] : null,
+                        int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var y) ? y : null,
+                        int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var s) ? s : null);
+                }
+
+                if (cached is null or "")
+                {
+                    return null;
+                }
+            }
+        }
+
+        TmdbSeriesInfo? info = null;
+        try
+        {
+            string url = TmdbUrl($"tv/{Uri.EscapeDataString(tmdbId)}");
+            using var req = BuildTmdbRequest(url);
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            TraceCall("GET", url, (int)resp.StatusCode);
+            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                HandleAuthFailure();
+            }
+            else if (resp.IsSuccessStatusCode)
+            {
+                using var doc = await JsonDocument.ParseAsync(
+                    await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false), cancellationToken: ct)
+                    .ConfigureAwait(false);
+                var root = doc.RootElement;
+                string? name = null;
+                string? original = null;
+                if (root.TryGetProperty("name", out var nameEl) && nameEl.ValueKind == JsonValueKind.String)
+                {
+                    name = nameEl.GetString();
+                }
+
+                if (root.TryGetProperty("original_name", out var origEl) && origEl.ValueKind == JsonValueKind.String)
+                {
+                    original = origEl.GetString();
+                }
+
+                int? year = null;
+                if (root.TryGetProperty("first_air_date", out var dateEl) && dateEl.ValueKind == JsonValueKind.String)
+                {
+                    var raw = dateEl.GetString();
+                    if (raw is { Length: >= 4 }
+                        && int.TryParse(raw.AsSpan(0, 4), NumberStyles.None, CultureInfo.InvariantCulture, out var y))
+                    {
+                        year = y;
+                    }
+                }
+
+                int? seasons = null;
+                if (root.TryGetProperty("number_of_seasons", out var seasonsEl) && seasonsEl.ValueKind == JsonValueKind.Number)
+                {
+                    seasons = seasonsEl.GetInt32();
+                }
+
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    info = new TmdbSeriesInfo(name!.Trim(), original, year, seasons);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace?.Invoke($"[TMDB] series record failed ({tmdbId}): {ex.Message}");
+        }
+
+        lock (_cache)
+        {
+            _cache[key] = info is null
+                ? string.Empty
+                : string.Join(
+                    "|",
+                    info.Name,
+                    info.OriginalName ?? string.Empty,
+                    info.FirstAirYear?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    info.Seasons?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+        }
+
+        return info;
+    }
+
 }
+
+/// <summary>
+/// F-M501: der TMDb-Serien-Datensatz, mit dem die tvst-Auflösung arbeitet — Name, Originaltitel,
+/// Erstausstrahlungsjahr und Staffelzahl.
+/// <para>
+/// Bewusst ein eigener, kleiner Datensatz statt eines Verweises auf das JSON: die Auflösung braucht
+/// genau diese vier Angaben, und was sie nicht braucht, darf sie auch nicht versehentlich benutzen.
+/// </para>
+/// </summary>
+/// <param name="Name">Der TMDb-Titel der Serie — er führt bei Suche, Anlage und Vergleich.</param>
+/// <param name="OriginalName">Der Originaltitel, nur zur Diagnose (er wird NICHT gesucht).</param>
+/// <param name="FirstAirYear">Erstausstrahlungsjahr, null wenn TMDb keines nennt.</param>
+/// <param name="Seasons">Staffelzahl laut TMDb, null wenn TMDb keine nennt.</param>
+public sealed record TmdbSeriesInfo(string Name, string? OriginalName, int? FirstAirYear, int? Seasons);

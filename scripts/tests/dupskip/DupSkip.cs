@@ -32,6 +32,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using Jellyfin.Plugin.SubdlScribe.Configuration;
 using Jellyfin.Plugin.SubdlScribe.Data;
 using Jellyfin.Plugin.SubdlScribe.Registry;
 
@@ -79,7 +80,8 @@ internal static class DupSkip
         Console.WriteLine();
         Console.WriteLine("Schritt 3  Inhalt bekannt (IsContentKnown) = " + reg.IsContentKnown(contentHash));
         bool settled = reg.RecordSkippedContent(
-            newHash, false, 0, lang, false, false, contentHash, RejectReason.DuplicateContent);
+            newHash, false, 0, lang, false, false, contentHash, RejectReason.DuplicateContent,
+            new[] { SubtitleProvider.Subdl });
 
         string statusAfter = reg.GetEmbed(newHash, 0)?.Status ?? "<keine Zeile>";
         Console.WriteLine("           RecordSkippedContent -> settled=" + settled + ", Status danach=" + statusAfter);
@@ -98,7 +100,8 @@ internal static class DupSkip
             contentHash: otherHash, reason: RejectReason.DuplicateRemote);
 
         bool otherSettled = reg.RecordSkippedContent(
-            newHash, false, 4, "DE", false, false, otherHash, RejectReason.DuplicateContent);
+            newHash, false, 4, "DE", false, false, otherHash, RejectReason.DuplicateContent,
+            new[] { SubtitleProvider.Subdl });
 
         string otherStatus = reg.GetEmbed(newHash, 4)?.Status ?? "<keine Zeile>";
         string otherReason = reg.GetEmbed(newHash, 4)?.Reason ?? "<kein Grund>";

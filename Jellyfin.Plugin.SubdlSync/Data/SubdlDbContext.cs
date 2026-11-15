@@ -99,7 +99,12 @@ public sealed class SubdlDbContext : IDisposable
     // document store, named subdl-scribe.sqlite (F-M326). An older build opening this file finds no
     // document header and reports a broken store; the marker is what makes that loud instead of
     // silent. The old file is imported once on first start and kept as a .bak (F-M327).
-    public const int CurrentSchemaVersion = 12;
+    // F-M501 (15.11.2026): raised to 13. The MEDIA record gained `TvstShowId` — die Nummer der Serie
+    // bei tvsubtitles.net, auf derselben Ebene wie TmdbId und ImdbId. Die Spalte wird beim Start
+    // nachgezogen (EnsureMediaColumns), ein Bestand bleibt also gueltig und lesbar; der Marker wandert
+    // mit, weil ein aelterer Build das Feld nicht kennt und es beim Schreiben stillschweigend
+    // verlieren wuerde.
+    public const int CurrentSchemaVersion = 13;
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
@@ -125,6 +130,7 @@ public sealed class SubdlDbContext : IDisposable
         EnsureReportColumns();
         EnsureStatusColumns();
         EnsurePackColumns();
+        EnsureMediaColumns();
         _db.ConfigurePragmas();
 
         Meta = new SubdlSet<MetaEntity>(_db, e => e.Id);
@@ -414,6 +420,51 @@ public sealed class SubdlDbContext : IDisposable
         catch (Exception ex)
         {
             _logger?.LogWarning("[SubDL] could not add the pack columns (continuing): {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// F-M501 (Schema 13): zieht <c>media.TvstShowId</c> auf einem Bestand nach, der die Spalte noch
+    /// nicht kennt.
+    /// <para>
+    /// <c>EnsureCreated</c> baut ein Schema nur bei einer NEUEN Datei und ändert eine bestehende Tabelle
+    /// nie — ohne diesen Schritt liefe jede Abfrage auf einem aufgerüsteten Datenbestand gegen eine
+    /// Tabelle ohne die Spalte, und der Fehler landete mitten im Upload-Lauf. SQLite kennt kein
+    /// „ADD COLUMN IF NOT EXISTS“, deshalb ist jedes <c>ALTER</c> an die Spaltenliste der Tabelle
+    /// gebunden. Ein Fehlschlag wird protokolliert und geschluckt: eine fehlende Spalte darf den
+    /// Plugin-Start nicht verhindern.
+    /// </para>
+    /// </summary>
+    private void EnsureMediaColumns()
+    {
+        try
+        {
+            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var cmd = _db.Database.GetDbConnection().CreateCommand())
+            {
+                if (cmd.Connection!.State != System.Data.ConnectionState.Open)
+                {
+                    cmd.Connection.Open();
+                }
+
+                cmd.CommandText = "PRAGMA table_info(media);";
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    existing.Add(reader.GetString(1));
+                }
+            }
+
+            const string Name = "TvstShowId";
+            if (!existing.Contains(Name))
+            {
+                _db.Database.ExecuteSqlRaw("ALTER TABLE media ADD COLUMN TvstShowId TEXT NULL;");
+                LogUtil.Normal(_logger, "[SubDL] data file: column {Column} added to media.", Name);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("[SubDL] could not add the media columns (continuing): {Msg}", ex.Message);
         }
     }
 

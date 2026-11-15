@@ -61,9 +61,17 @@
       "args": [
         "<root>"
       ]
+    },
+    "followup": {
+      "python": "scripts/tests/followup/check.py",
+      "file": "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlEventDispatcher.cs"
     }
   },
   "tests": {
+    "T154": {
+      "suite": "followup",
+      "checks": 25
+    },
     "T176": {
       "suite": "reporting",
       "checks": 4
@@ -174,7 +182,7 @@
     },
     "T206": {
       "suite": "endpoints",
-      "checks": 7
+      "checks": 8
     },
     "T207": {
       "suite": "endpoints",
@@ -223,6 +231,30 @@
     "T218": {
       "suite": "gui-structure",
       "checks": 1
+    },
+    "T219": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T220": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T221": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T222": {
+      "suite": "endpoints",
+      "checks": 10
+    },
+    "T223": {
+      "suite": "endpoints",
+      "checks": 16
+    },
+    "T224": {
+      "suite": "tvsubtitles",
+      "checks": 9
     }
   }
 }

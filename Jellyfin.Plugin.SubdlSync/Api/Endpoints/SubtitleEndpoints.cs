@@ -94,6 +94,11 @@ public sealed record SubtitlePayload(string FileName, byte[] Data, string Langua
 /// <param name="HearingImpaired">True for the SDH variant.</param>
 /// <param name="DoubleEpisode">True for a double episode.</param>
 /// <param name="SeasonPack">True when this is a season pack — only the pipeline builds those.</param>
+/// <param name="TvstShowId">
+/// F-M501: die Nummer der Serie bei tvsubtitles.net, wenn der Store sie kennt. Ist sie gesetzt, benutzt
+/// der Endpunkt SIE und holt die Serienliste gar nicht erst — der Titel im Ticket ist dann nur noch
+/// Text für Kommentar und Log.
+/// </param>
 public sealed record UploadTicket(
     string? ShowName,
     string? ImdbId,
@@ -107,7 +112,8 @@ public sealed record UploadTicket(
     string? Release,
     bool HearingImpaired,
     bool DoubleEpisode,
-    bool SeasonPack);
+    bool SeasonPack,
+    int? TvstShowId = null);
 
 /// <summary>
 /// F-M483: what an upload endpoint answers. <paramref name="Ok"/> false plus a
