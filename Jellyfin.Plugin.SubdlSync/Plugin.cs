@@ -425,7 +425,8 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// and the catalogue therefore say the same thing; the catalogue reads it from build.yaml, and a
     /// Jellyfin with the plugin installed copies this text into its own meta.json at install time —
     /// so a card without the sentence would hide it exactly where the plugin is in use.
-    public override string Description => "Sub Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key. Created by AI under the directions of the maintainer.";
+    public override string Description =>
+        "Sub Scribe brings subtitles to Jellyfin from SubDL.com and tvsubtitles.net: it downloads what is missing and uploads your own. Each source has its own switches, nothing goes back to the other source, the order is yours. A TMDb API Key is required, SubDL is optional. Created by AI under the directions of the maintainer.";
 
     /// <summary>
     /// Gets the current plugin instance.

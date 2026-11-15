@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("anchorgaterun")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("12.1.11.5")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("12.1.11.5+8fabd21ccdf44e28363757f177df671e96de8944")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("12.1.11.5+dca4e606df2b6866fcf1b5c091d5d7aabff8fd03")]
 [assembly: System.Reflection.AssemblyProductAttribute("anchorgaterun")]
 [assembly: System.Reflection.AssemblyTitleAttribute("anchorgaterun")]
 [assembly: System.Reflection.AssemblyVersionAttribute("12.1.11.5")]

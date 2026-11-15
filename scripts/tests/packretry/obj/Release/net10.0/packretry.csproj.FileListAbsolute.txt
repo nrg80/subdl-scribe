@@ -61,4 +61,3 @@
 /opt/data/subdl-scribe/scripts/tests/packretry/obj/Release/net10.0/packretryrun.pdb
 /opt/data/subdl-scribe/scripts/tests/packretry/obj/Release/net10.0/packretry.genruntimeconfig.cache
 /opt/data/subdl-scribe/scripts/tests/packretry/obj/Release/net10.0/ref/packretryrun.dll
-/opt/data/subdl-scribe/scripts/tests/packretry/bin/Release/net10.0/Jellyfin.Plugin.SubdlSync.xml

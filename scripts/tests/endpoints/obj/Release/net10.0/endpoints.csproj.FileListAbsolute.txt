@@ -89,4 +89,3 @@
 /opt/data/subdl-scribe/scripts/tests/endpoints/bin/Release/net10.0/runtimes/win-arm64/native/e_sqlite3.dll
 /opt/data/subdl-scribe/scripts/tests/endpoints/bin/Release/net10.0/runtimes/win-x64/native/e_sqlite3.dll
 /opt/data/subdl-scribe/scripts/tests/endpoints/bin/Release/net10.0/runtimes/win-x86/native/e_sqlite3.dll
-/opt/data/subdl-scribe/scripts/tests/endpoints/bin/Release/net10.0/Jellyfin.Plugin.SubdlSync.xml

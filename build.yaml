@@ -16,14 +16,11 @@ framework: "net10.0"
 owner: "nrg80"
 overview: "Sync subtitles with SubDL and tvsubtitles.net — download missing and upload new subtitles."
 description: >
-  Sub Scribe brings subtitles to Jellyfin from two sources — SubDL.com and
-  tvsubtitles.net: it downloads missing subtitles for the languages and
-  libraries you pick and uploads your own. Each source has its own download
-  and upload switch, a subtitle never goes back to the other source, and the
-  download order is yours to choose. A TMDb API key is required. SubDL is
-  optional: without a SubDL API key (downloads) or login (uploads) that source
-  is skipped and the other one keeps running. Created by AI under the
-  directions of the maintainer.
+  Sub Scribe brings subtitles to Jellyfin from SubDL.com and tvsubtitles.net: it
+  downloads what is missing and uploads your own. Each source has its own
+  switches, nothing goes back to the other source, the order is yours. A TMDb API
+  Key is required, SubDL is optional. Created by AI under the directions of the
+  maintainer.
 category: "Subtitles"
 artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
