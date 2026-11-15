@@ -1,6 +1,6 @@
-# SubDL Scribe
+# Sub Scribe
 
-SubDL Scribe keeps your Jellyfin library subtitled and gives back to [SubDL](https://subdl.com). It
+Sub Scribe keeps your Jellyfin library subtitled and gives back to [SubDL](https://subdl.com). It
 **downloads** missing subtitles for the languages and libraries you select, **synchronizes them to the
 audio track**, and **uploads** the subtitle tracks already embedded in your own media files.
 
@@ -13,7 +13,7 @@ Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 The plugin page in one piece — libraries you opt in, target languages, quota and connection
 status, statistics, and when each worker last ran (credentials masked):
 
-![The SubDL Scribe settings page](docs/images/config-general.png)
+![The Sub Scribe settings page](docs/images/config-general.png)
 
 **Download** — what gets fetched, when a run happens, and the quality gates a subtitle has to pass
 before it is saved:
@@ -41,7 +41,7 @@ before it is saved:
    https://raw.githubusercontent.com/nrg80/subdl-scribe/main/manifest.json
    ```
 
-3. Open **Dashboard → Plugins → All**, find **SubDL Scribe** and install it.
+3. Open **Dashboard → Plugins → All**, find **Sub Scribe** and install it.
 4. Restart Jellyfin.
 
 ### Manual
@@ -50,7 +50,7 @@ before it is saved:
 2. Create a folder for the plugin under your Jellyfin `plugins/` directory and extract the ZIP into it:
 
    ```
-   /var/lib/jellyfin/plugins/SubDL Scribe/
+   /var/lib/jellyfin/plugins/Sub Scribe/
    ├── Jellyfin.Plugin.SubdlSync.dll
    ├── LanguageDetection.dll
    ├── build.yaml
@@ -64,7 +64,7 @@ before it is saved:
 
 ## Quick start
 
-Open **Dashboard → Plugins → SubDL Scribe** and fill in:
+Open **Dashboard → Plugins → Sub Scribe** and fill in:
 
 1. **SubDL API key.**
 2. **SubDL username and password.**
@@ -77,7 +77,7 @@ Save.
 ## Upload (off by default)
 
 Uploads the subtitle tracks embedded in your media files to SubDL, through **your own** SubDL
-account — enable it under **Dashboard → Plugins → SubDL Scribe → Upload → Upload enabled**. Quality
+account — enable it under **Dashboard → Plugins → Sub Scribe → Upload → Upload enabled**. Quality
 gates and duplicate protection apply here exactly as on the download side.
 
 ## Build

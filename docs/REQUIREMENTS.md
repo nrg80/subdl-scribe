@@ -1,4 +1,4 @@
-# Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
+# Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
 **Status:** Implementation — v12.1.12.380.
@@ -901,9 +901,9 @@ In beiden Richtungen: der Refetch-Stempel, the (now removed) file-retry counter,
 
 **F-M184:** **Duplicate handling delegated to postprocessing:** the upload path does not search SubDL for duplicates before uploading. A duplicate upload is accepted by the API ("sent for review"), resolves to `rejected` on the SubDL dashboard, and the postprocessing job deletes that entry and marks the local row `remote-duplicate`. This removes one search call per item from the daily search quota; the cost is one upload per duplicate. A local self-echo guard (registry, per media/language pair) still prevents uploading the same pair twice.
 
-**F-M227:** **Every plugin task appears under one heading in the dashboard.** Only `SubDL Postprocessing` reported the category `SubDL Scribe`; the other four reported the default category, so the dashboard split the plugin's work across two groups. Rule: every task this plugin schedules reports `Category => "SubDL Scribe"`; a new task must not inherit a Jellyfin category.
+**F-M227:** **Every plugin task appears under one heading in the dashboard.** Only `SubDL Postprocessing` reported the category `Sub Scribe`; the other four reported the default category, so the dashboard split the plugin's work across two groups. Rule: every task this plugin schedules reports `Category => "Sub Scribe"`; a new task must not inherit a Jellyfin category.
 
-**F-M223:** **Every name the user sees says SubDL Scribe — the ASSEMBLY name is the one thing that must NOT follow.** Jellyfin's logger derives its category from the type, so the namespace says SubDL Scribe. Die Namen der eingebetteten Ressourcen wandern mit dem Namespace (Seite und ihr Skript sowie das Literal, das sie liest), und alle drei müssen gemeinsam wechseln, sonst lädt die Konfigurationsseite nicht. **the assembly name stays the assembly name** — Jellyfin derives the plugin data folder and the configuration file from it, so renaming would orphan the credentials, the state database and the run history. The assembly name is a persistence key, not branding. Free text follows (postprocessing the category, console tags, reset dialog, GPL headers); API routes stay the plugin's own routes.
+**F-M223:** **Every name the user sees says Sub Scribe — the ASSEMBLY name is the one thing that must NOT follow.** Jellyfin's logger derives its category from the type, so the namespace says Sub Scribe. Die Namen der eingebetteten Ressourcen wandern mit dem Namespace (Seite und ihr Skript sowie das Literal, das sie liest), und alle drei müssen gemeinsam wechseln, sonst lädt die Konfigurationsseite nicht. **the assembly name stays the assembly name** — Jellyfin derives the plugin data folder and the configuration file from it, so renaming would orphan the credentials, the state database and the run history. The assembly name is a persistence key, not branding. Free text follows (postprocessing the category, console tags, reset dialog, GPL headers); API routes stay the plugin's own routes.
 
 **F-M210:** **Every scheduled job is driven by its OWN setting.** Database refresh, OSHash refresh and upload postprocessing each carry their own cadence setting and their own diced anchor, and must fire on them regardless of any other job's setting. **One exception, and it is not a return to the old coupling:** postprocessing additionally requires the upload direction to be ON (F-M291) — not another *job's* setting but the direction it works for, since with upload off it has no subject at all. the cycle interval governs **only** the automatic pipeline cycles; `Manual` and `OnArrival` there suppress those cycles and nothing else. A job must never sit behind an early return belonging to a different job's configuration.
 
@@ -1092,7 +1092,7 @@ The request body is buffered once and the request rebuilt per attempt.
 
 The give-up line names the server as not answering in time, never as a caller cancel, and the retry lines are routed into the run's log channel.
 
-**F-M221:** **The plugin card states the defaults and the two required keys in the same sentence as what the plugin does.** Card text (all carriers, F-M220): *"SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key."* Order: what it does, both things the user picks (languages AND libraries — F-M42 pre-fills a list, it is not a commitment), download on by default, upload off by default and enabled by choice (F-M41), then the keys. Do not write non-ASCII characters as `\uXXXX` escapes in the plugin description literal: the F-M220 guard compares source text, and an escape is six characters where the YAML carries one.
+**F-M221:** **The plugin card states the defaults and the two required keys in the same sentence as what the plugin does.** Card text (all carriers, F-M220): *"Sub Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key."* Order: what it does, both things the user picks (languages AND libraries — F-M42 pre-fills a list, it is not a commitment), download on by default, upload off by default and enabled by choice (F-M41), then the keys. Do not write non-ASCII characters as `\uXXXX` escapes in the plugin description literal: the F-M220 guard compares source text, and an escape is six characters where the YAML carries one.
 
 **F-M24b [B1]:** **Credentials never in logs:** password/API key/token are never written at any log level (redaction before writing, also in Debug)
 
@@ -1768,7 +1768,7 @@ The line under the Workers list names, per worker and in list order, its stored 
 **F-M341:** **Jede Zahl in der Korrekturzeile trägt einen Dezimalpunkt, unabhängig von der Sprache des Hosts.** Werkzeuge lesen diese Zeile; ein Komma bricht den Leser.
 ## 16. Non-Goals
 
-- N-1: Standalone downloader app or separate downloader plugin — integrated in SubDL Scribe.
+- N-1: Standalone downloader app or separate downloader plugin — integrated in Sub Scribe.
 - N-3: Transcoding/opening bitmap subtitles
 - N-5: Changes to Jellyfin core
 
@@ -1853,7 +1853,7 @@ Every functional requirement (F-M*) carries at least one automated test case: a 
 
 **T41:** Every plugin line carries its level marker at every setting (F-M226)
 
-**T42:** Every task the plugin registers reports the SubDL Scribe category (F-M227)
+**T42:** Every task the plugin registers reports the Sub Scribe category (F-M227)
 
 **T43:** Required markers render in the accent colour with no stray space (F-M228)
 

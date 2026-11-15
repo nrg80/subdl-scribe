@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+# This file is part of Sub Scribe (https://github.com/nrg80/subdl-scribe)
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# SubDL Scribe is free software: you can redistribute it and/or modify it
+# Sub Scribe is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
 # Free Software Foundation, either version 3 of the License, or (at your
 # option) any later version.
-# SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+# Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 # warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 # See the GNU General Public License for more details.
 
-# Release SubDL Scribe — the ONE supported release path.
+# Release Sub Scribe — the ONE supported release path.
 #
 # We build locally, verify the artifact, and upload exactly one ZIP. The CI
 # workflows only build and test; they never touch a release. See
@@ -322,7 +322,7 @@ fi
 
 git add manifest.json
 # NO identity override (fixed 03.10.2026). This line used to force
-# "SubDL Scribe <noreply@localhost>" on the release commit, so every release produced
+# "Sub Scribe <noreply@localhost>" on the release commit, so every release produced
 # one commit that belongs to nobody: GitHub counted it for no account, the contributor
 # list showed a name next to the maintainer's, and 13 commits carried an author the
 # user never wrote. The commit now inherits the repository's own identity, which is the
@@ -333,7 +333,7 @@ git push --quiet origin "$BRANCH"
 
 # --- 5. tag, and check what the TAG carries ---------------------------------
 say "Tag $TAG"
-git tag -a "$TAG" -m "SubDL Scribe $VER"
+git tag -a "$TAG" -m "Sub Scribe $VER"
 # Tag first, release second: the release can then never point at a tag the
 # server does not know. And check the TAGGED build.yaml, not the working tree —
 # a tag left behind on an older commit is exactly how v12.1.12.80 shipped

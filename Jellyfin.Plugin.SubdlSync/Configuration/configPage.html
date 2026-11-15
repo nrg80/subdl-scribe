@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-  This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+  This file is part of Sub Scribe (https://github.com/nrg80/subdl-scribe)
   SPDX-License-Identifier: GPL-3.0-or-later
 
-  SubDL Scribe is free software: you can redistribute it and/or modify it
+  Sub Scribe is free software: you can redistribute it and/or modify it
   under the terms of the GNU General Public License as published by the
   Free Software Foundation, either version 3 of the License, or (at your
   option) any later version.
-  SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+  Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
   warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   See the GNU General Public License for more details.
 -->
@@ -16,7 +16,7 @@
 <head>
     <meta charset="utf-8">
 
-    <title>SubDL Scribe</title>
+    <title>Sub Scribe</title>
 </head>
 <body>
     <div id="SubdlSyncConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
@@ -985,10 +985,10 @@
             }
 
             function subdlInitConfigPage() {
-                console.log('[SubDL Scribe] pageinit called');
+                console.log('[Sub Scribe] pageinit called');
                 if (typeof Dashboard !== 'undefined' && Dashboard.showLoadingMsg) { try { Dashboard.showLoadingMsg(); } catch (err) { /* non-fatal */ } }
                 ApiClient.getPluginConfiguration(SubdlSyncConfig.pluginUniqueId).then(function (config) {
-                    console.log('[SubDL Scribe] config loaded');
+                    console.log('[Sub Scribe] config loaded');
                     document.querySelector('#Username').value = config.Username || '';
                         document.querySelector('#Password').value = config.Password || '';
                         document.querySelector('#ApiKey').value = config.ApiKey || '';
@@ -1268,10 +1268,10 @@ workers.forEach(function (w) {
                             jobs.forEach(function (job) {
                                 var fn = job[1];
                                 if (typeof fn !== 'function') {
-                                    console.log('[SubDL Scribe] refresh: ' + job[0] + ' loader not available');
+                                    console.log('[Sub Scribe] refresh: ' + job[0] + ' loader not available');
                                     return;
                                 }
-                                try { fn(); } catch (e) { console.error('[SubDL Scribe] refresh failed: ' + job[0], e); }
+                                try { fn(); } catch (e) { console.error('[Sub Scribe] refresh failed: ' + job[0], e); }
                             });
                         };
                         window.subdlReloadEverything = subdlReloadEverything;
@@ -1288,9 +1288,9 @@ workers.forEach(function (w) {
                         subdlPopulateLibraries(config);
                         subdlLoadQuota();
                         subdlLoadStatus();
-                        console.log('[SubDL Scribe] init complete');
+                        console.log('[Sub Scribe] init complete');
                     }).catch(function (err) {
-                        console.error('[SubDL Scribe] init failed', err);
+                        console.error('[Sub Scribe] init failed', err);
                         if (typeof Dashboard !== 'undefined' && Dashboard.hideLoadingMsg) { try { Dashboard.hideLoadingMsg(); } catch (e) { /* non-fatal */ } }
                         var box = document.querySelector('#SubdlStatusBox');
                         if (box) {
@@ -1467,7 +1467,7 @@ workers.forEach(function (w) {
                         try { Dashboard.alert(msg); return; } catch (e) {}
                     }
                     if (typeof alert === 'function') { alert(msg); }
-                    else { console.log('[SubDL Scribe] notify:', msg); }
+                    else { console.log('[Sub Scribe] notify:', msg); }
                 }
 
                 function subdlStopTask(name) {
@@ -1482,7 +1482,7 @@ workers.forEach(function (w) {
                             subdlNotify('Stop failed: ' + name + ' (' + (r && r.error ? r.error : 'unknown') + ')');
                         }
                     }).catch(function (err) {
-                        console.error('[SubDL Scribe] stop failed', name, err);
+                        console.error('[Sub Scribe] stop failed', name, err);
                         subdlNotify('Stop failed — plugin not reachable: ' + name);
                     });
                 }
@@ -1520,9 +1520,9 @@ workers.forEach(function (w) {
                 document.querySelector('#RunDownloadNow').addEventListener('click', function () { subdlStartTask('SubDL/TMDB — Subtitle Download'); });
                 // Operator order 08.10.2026: the two refresh tasks get a manual button under their
                 // own description. Same helper the run buttons use, so the task NAME is the only
-                // difference — these two are "SubDL Scribe — …", not "SubDL/TMDB — …".
-                document.querySelector('#RunDatabaseRefreshNow').addEventListener('click', function () { subdlStartTask('SubDL Scribe — Database Refresh'); });
-                document.querySelector('#RunOshashRefreshNow').addEventListener('click', function () { subdlStartTask('SubDL Scribe — OSHash Cache Refresh'); });
+                // difference — these two are "Sub Scribe — …", not "SubDL/TMDB — …".
+                document.querySelector('#RunDatabaseRefreshNow').addEventListener('click', function () { subdlStartTask('Sub Scribe — Database Refresh'); });
+                document.querySelector('#RunOshashRefreshNow').addEventListener('click', function () { subdlStartTask('Sub Scribe — OSHash Cache Refresh'); });
                 // F-M295 (08.10.2026): the TASK, not the endpoint — only the task writes the status row.
                 // Name must match SubdlPostprocessTask.Name exactly; a mismatch answers "Task not found".
                 document.querySelector('#RunPostprocessNow').addEventListener('click', function () { subdlStartTask('SubDL Postprocessing'); });

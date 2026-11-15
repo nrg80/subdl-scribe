@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/subdl-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
@@ -139,7 +139,7 @@ public enum LogLevelMode
 }
 
 /// <summary>
-/// Plugin configuration for SubDL Scribe (F-M18 – F-M22, F-M24a-c, F-M28-F-M30, F-M34/M35).
+/// Plugin configuration for Sub Scribe (F-M18 – F-M22, F-M24a-c, F-M28-F-M30, F-M34/M35).
 /// </summary>
     
 public class PluginConfiguration : BasePluginConfiguration

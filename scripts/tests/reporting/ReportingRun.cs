@@ -1,10 +1,10 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/subdl-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
 // Software Foundation, either version 3 of the License, or (at your option) any
-// later version. SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even
+// later version. Sub Scribe is distributed WITHOUT ANY WARRANTY; without even
 // the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 //
@@ -73,7 +73,7 @@ internal static class ReportingRun
         Check(empty.StartsWith("Package 3767750-8689923 ('Breaking.Bad.S04E01.Box.Cutter.WEB-DL', EN) downloads with 0 bytes.",
                 StringComparison.Ordinal),
             "an empty answer is named with the byte count, not described");
-        Check(empty.Contains("Automated report by SubDL Scribe (Jellyfin plugin) v12.1.12.343, account midevildynasty.", StringComparison.Ordinal),
+        Check(empty.Contains("Automated report by Sub Scribe (Jellyfin plugin) v12.1.12.343, account midevildynasty.", StringComparison.Ordinal),
             "the attribution carries plugin version and account");
         Check(!empty.Contains("attempt", StringComparison.OrdinalIgnoreCase)
               && !empty.Contains("please", StringComparison.OrdinalIgnoreCase)

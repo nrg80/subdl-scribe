@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/subdl-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
@@ -73,7 +73,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
     }
 
     /// <inheritdoc />
-    public string Name => "SubDL Scribe — Database Refresh";
+    public string Name => "Sub Scribe — Database Refresh";
 
     /// <inheritdoc />
     public string Key => "SubdlSyncDatabaseRefreshTask";
@@ -84,7 +84,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
     /// <inheritdoc />
     // F-M227: every task this plugin schedules reports ONE category, so the dashboard shows one
     // group instead of splitting the plugin's work.
-    public string Category => "SubDL Scribe";
+    public string Category => "Sub Scribe";
 
     /// <inheritdoc />
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()

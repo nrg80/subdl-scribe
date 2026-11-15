@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deploy a built SubDL Scribe version into the test Jellyfin instance — SAFELY.
+# Deploy a built Sub Scribe version into the test Jellyfin instance — SAFELY.
 #
 # Order is mandatory and inherited from deploy-safe.sh: stop -> wait until really gone -> swap ->
 # start. Replacing the DLL while Jellyfin runs leaves the process with a file that no longer matches
@@ -14,7 +14,7 @@ ZIP="${2:?usage: deploy-jf-test.sh <version> <zip>}"
 
 ROOT=/opt/data/subdl-scribe
 PLUGINS=/opt/data/jf-test/data/plugins
-TGT="$PLUGINS/SubDL Scribe_$VER"
+TGT="$PLUGINS/Sub Scribe_$VER"
 PATTERN='jellyfin.*--datadir /opt/data/jf-test/data'
 
 [ -f "$ZIP" ] || { echo "ABORT: zip not found: $ZIP"; exit 1; }
@@ -66,7 +66,7 @@ echo "  gestoppt, kein Prozess mehr aktiv"
 
 echo
 echo "=== 3. Alte Installationen entfernen (gleiche GUID — sonst doppelt geladen) ==="
-for d in "$PLUGINS"/"SubDL Scribe"_*; do
+for d in "$PLUGINS"/"Sub Scribe"_*; do
     [ -d "$d" ] || continue
     if [ "$d" != "$TGT" ]; then
         echo "  entferne: $(basename "$d")"
@@ -113,7 +113,7 @@ meta = {
     "changelog": json.loads(changelog),
     "description": catalogue["description"],
     "guid": "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b",
-    "name": "SubDL Scribe",
+    "name": "Sub Scribe",
     "overview": catalogue["overview"],
     "owner": "nrg80",
     "targetAbi": catalogue["targetAbi"],

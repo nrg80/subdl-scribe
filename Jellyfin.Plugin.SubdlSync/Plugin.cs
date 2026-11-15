@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/subdl-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
@@ -30,7 +30,7 @@ using Jellyfin.Plugin.SubdlScribe.Pipeline;
 namespace Jellyfin.Plugin.SubdlScribe;
 
 /// <summary>
-/// Main plugin entry point for SubDL Scribe (upload + download pipelines).
+/// Main plugin entry point for Sub Scribe (upload + download pipelines).
 /// </summary>
 public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPages
 {
@@ -407,7 +407,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     }
 
     /// <inheritdoc />
-    public override string Name => "SubDL Scribe";
+    public override string Name => "Sub Scribe";
 
     /// <inheritdoc />
     public override Guid Id => Guid.Parse("7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"); // matches build.yaml — stable plugin identity
@@ -425,7 +425,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// and the catalogue therefore say the same thing; the catalogue reads it from build.yaml, and a
     /// Jellyfin with the plugin installed copies this text into its own meta.json at install time —
     /// so a card without the sentence would hide it exactly where the plugin is in use.
-    public override string Description => "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key. Created by AI under the directions of the maintainer.";
+    public override string Description => "Sub Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key. Created by AI under the directions of the maintainer.";
 
     /// <summary>
     /// Gets the current plugin instance.

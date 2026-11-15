@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+# This file is part of Sub Scribe (https://github.com/nrg80/subdl-scribe)
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# SubDL Scribe is free software: you can redistribute it and/or modify it
+# Sub Scribe is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
 # Free Software Foundation, either version 3 of the License, or (at your
 # option) any later version.
-# SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+# Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 # warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 # See the GNU General Public License for more details.
 
@@ -1308,8 +1308,8 @@ def main():
     # that schedules a job, so a button that also touched `PruneMode`/`OshashRefresh` would be a
     # second, hidden scheduler.
     for btn_id, task_name, cfg_id in [
-        ("RunDatabaseRefreshNow", "SubDL Scribe — Database Refresh", "PruneMode"),
-        ("RunOshashRefreshNow", "SubDL Scribe — OSHash Cache Refresh", "OshashRefresh"),
+        ("RunDatabaseRefreshNow", "Sub Scribe — Database Refresh", "PruneMode"),
+        ("RunOshashRefreshNow", "Sub Scribe — OSHash Cache Refresh", "OshashRefresh"),
     ]:
         check(f"the {cfg_id} section carries a manual run button",
               f'id="{btn_id}"' in html,

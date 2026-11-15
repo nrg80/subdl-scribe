@@ -1,4 +1,4 @@
-# Releasing SubDL Scribe
+# Releasing Sub Scribe
 
 ## The release
 
@@ -130,14 +130,14 @@ API calls to still reach GitHub; a real test release must go to a different `REP
 
 ## Installing
 
-Dashboard → plugins → all → SubDL Scribe → install → restart Jellyfin.
+Dashboard → plugins → all → Sub Scribe → install → restart Jellyfin.
 
 Versions older than the current one are installable from their release page only.
 
 ## Deploying to the test bench
 
 `scripts/deploy-jf-test.sh <version> <zip>` stops the test Jellyfin, removes every other
-`SubDL Scribe_*` folder (one GUID — two copies would both load), unpacks the ZIP, writes `meta.json`
+`Sub Scribe_*` folder (one GUID — two copies would both load), unpacks the ZIP, writes `meta.json`
 and starts the instance again. The order is mandatory: replacing the DLL while Jellyfin runs leaves the
 process holding a file that no longer matches the loaded assembly, and .NET compiles methods lazily, so
 a method first reached during SHUTDOWN is read off disk then and the runtime dies with
