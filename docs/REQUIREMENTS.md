@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "SubDL Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.379.
+**Status:** Implementation — v12.1.12.380.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -12,10 +12,10 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 13 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 93 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 94 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 2 requirements
- - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M379–F-M448 und F-M475
+ - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M379–F-M448 und F-M475, F-M476
 - [4. Download Pipeline](#4-download-pipeline) — 84 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 32 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
@@ -365,6 +365,8 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M448 [P]:** **Ein Seed-Lauf, der auf einen laufenden Bibliotheks-Scan trifft, wird vertagt statt ausgeführt.** Maß der Vertagung ist der Job-Abstand (Default **15 min**, einstellbar **5–120 min**). Wartelisten, Scan-Zeitstempel und die Merkliste der während des Laufs eingetroffenen Items (F-M233) bleiben unverändert; nach Ablauf der Wartezeit wird der Lauf erneut angestoßen. Die Statuszeile führt die Wartezeit als `deferred` mit „library scan running — retry in <N> min". Als laufend gelten Bibliotheks-Scan und Medien-Aktualisierung.
 
 **F-M475 [D]:** **Ein Aufschub ist ein Termin der Richtung, kein Timer — und er nennt seinen Grund.** Trifft ein Seed-Lauf auf einen laufenden Bibliotheks-Scan (F-M448), wird die Wartezeit als geplanter Lauf der betroffenen Richtung eingetragen: Zeitpunkt = jetzt + Job-Abstand, ohne Zufallszuschlag. Eingetragen wird nur die Richtung, die der Zyklus angefordert hat; ein Lauf über beide Richtungen trägt beide ein. Ein bereits eingetragener **späterer** Termin derselben Richtung wird durch den früheren ersetzt — der frühere Versuch gewinnt; ein bereits früherer Termin bleibt unangetastet, es wird nichts nach hinten geschoben. Der Termin überlebt einen Neustart, weil er zusammen mit seinem Grund in der Termindatei liegt; der Grund wird als Kurzzeichen geführt (`quota`, `respaced`, `overload`, `scan<Minuten>`), weil die Termindatei an Komma und Doppelpunkt trennt. Die Statuszeile nennt neben dem nächsten Versuch den Grund **dieses Termins**, nicht die Ursache des letzten Laufs; ein abgelaufener Termin ist kein offener Termin. Das gilt für **jeden** der sieben Arbeiter: die beiden Richtungen (Download, Upload) führen ihren Grund als Kurzzeichen, die drei Wartungs-Termine (Database, OSHash, Nachlauf) führen `lockbusy`, weil sie nur aus einem belegten Lauf-Lock warten; Auto-Sync und Seeder haben keinen eigenen Termin. Ein Termin ohne Kurzzeichen zeigt den Text des letzten Laufs.
+
+**F-M476 [D]:** **Der HI-Pool wird abgelaufen, und er trägt die Hauptspur, wenn die reguläre Quelle erschöpft ist.** Der Pool der hörgeschädigten Fassungen wird nicht mit einem Griff gelesen, sondern in der Rangfolge aus F-M474 abgelaufen: je Kandidat die verbrannte Liste, der Abruf, die Tore und die Anpassung; der erste gespeicherte Kandidat beendet den Ablauf, eine Ablehnung nennt ihren Kandidaten und der Ablauf geht weiter. Vorzeitig endet er nur an der Tagesgrenze des Anbieters, die als Aufschub gilt. Endet der reguläre Ablauf einer Sprache ohne Speichern — Pack erschöpft, Pack verworfen, keine Bytes —, wird derselbe Pool als Quelle der **Hauptspur** abgelaufen; die Datei behält ihre SDH-Zeilen, trägt das Kennzeichen der hörgeschädigten Fassung im Namen und `hi = true` im Store, und ihr Speichern gilt als Speichern der Sprache, die damit nicht als nicht verfügbar gilt. Beide Wege sind eine Umsetzung. Den Pool gibt es nur bei eingeschaltetem HI-Schalter; ist er aus, wird er nicht gesucht und es gibt nichts abzulaufen.
 
 **F-M379:** **Der Pack-Name trägt die SDH-Variante.** Ein SDH-Pack nennt sie im Namen, weil nur der Name in Archiv, Mitgliedsdatei und Eintragstitel sichtbar ist.
 
@@ -2089,6 +2091,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 **T196:** Der Lauf reiht die Bibliothek mit „nach neuen und aktualisierten Dateien suchen" ein: nur bei gespeicherten Dateien, je Bibliothek einmal, kein vollständiger Scan; der Schalter vor den Quality Gates kann es abschalten. **8 Prüfungen im Lauf, 4 in der Oberfläche.**
 
 **T198:** Ein Aufschub des Seed-Laufs ist ein Termin der Richtung: er ersetzt einen späteren Termin derselben Richtung, schiebt einen früheren nicht nach hinten, steht in der Terminliste, aus der die Statuszeile ihre Zeitpunkte liest, überlebt mit seinem Grund einen Neustart, und die Statuszeile nennt den Grund des Termins statt der Zeile des letzten Laufs; kein Timer im Speicher trägt die Wartezeit, und ein Termin, der gerade verbraucht wird, nennt seinen Grund trotz abgelaufener Frist. Dasselbe gilt für die drei Wartungs-Termine (Database, OSHash, Nachlauf): Sie nennen ihren Grund, ein gewöhnliches Armen löscht den alten Grund, und ein Kurzzeichen ohne Termin wird nicht angezeigt. **29 Prüfungen.**
+
+**T201:** Der HI-Pool ist eine Rangliste, kein Einzelgriff: Er wird abgelaufen, ein Duplikat beendet ihn nicht, ein gespeicherter Kandidat schon; derselbe Ablauf bedient die Variante neben einer gespeicherten Hauptspur und den Rückfall, wenn der reguläre Ablauf ohne Speichern endet, und der Rückfall steht vor der Meldung „nicht verfügbar" und zählt als Speichern der Sprache. Beide Aufrufe hängen am HI-Schalter, eine gespeicherte Datei trägt das Kennzeichen im Namen und `hi = true` im Store, ihre SDH-Zeilen bleiben stehen, und der Ablauf ordnet nach Preis und Reichweite vor dem Textscore. **20 Prüfungen.**
 
 **T197:** Die Rangfolge der Kandidaten richtet sich nach Preis und Reichweite: vier Stufen, Gratis vor bezahlt, Staffelpack vor Einzelfassung bei gleichem Preis, Pack ohne die Folge bleibt draußen; die Cache-Prüfung geht über die Eintrags-Id; die Rangfolge gilt auch für das Nachfassen und die HI-Variante. **6 Prüfungen.**
 

@@ -1747,6 +1747,398 @@ public sealed class DownloadPipeline : IDisposable
             //                     (language, structure, min-cues, runtime, FPS) is a verdict on the
             //                     candidate, not a pull the Auto-Sync worked on — the walk moves on
             //                     (F-M320).
+            // F-M476 (operator finding 16.11.2026): the hearing-impaired pool is WALKED, and it also
+            // carries the main track when the regular pool ran dry.
+            //
+            // Two defects it repairs, both visible in one run of The Middle S02:
+            //  * the pool was a single grab (FirstOrDefault) — one candidate, and if it turned out to
+            //    be a duplicate or failed a gate, the pool was closed for that language although more
+            //    uploads were listed;
+            //  * the block sat INSIDE the "a subtitle was saved" branch, so an episode whose pack
+            //    produced no usable file never touched its hearing-impaired pool at all (E03: three
+            //    English single-episode uploads in the pool, episode marked "language not available").
+            //
+            // The switch decides whether this exists: with DownloadHearingImpaired off the pool is not
+            // searched, so there is nothing to walk and nothing to fall back to.
+            //
+            // The files stay as they are — SDH lines are NOT stripped. A file taken as the main track
+            // carries the same HI marker in its name and hi=true in the store, so a reader can always
+            // tell what it has.
+            async Task<bool> RunHiPoolAsync(bool asMainTrack)
+            {
+                var hiWalk = hiCandidates
+                    .Where(c => c.Language == lang && !string.IsNullOrEmpty(c.Url))
+                    .OrderByDescending(c => CandidateRank(c, season, episode))
+                    .ThenByDescending(c => Score(c, videoBase))
+                    .ThenByDescending(c => c.DownloadCount)
+                    .ToList();
+                if (hiWalk.Count == 0)
+                {
+                    // F-M255: the HI pool had no usable entry for this language — previously
+                    // indistinguishable from "the pool was empty".
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] HI reject {File} [{Lang}]: no usable candidate in the HI pool ({N} in pool)",
+                        Path.GetFileName(mediaPath), lang, hiCandidates.Count(c => c.Language == lang));
+                    return false;
+                }
+
+                // Same two facts the main walk uses, computed here because the fallback runs after the
+                // candidate walk and must not inherit a decision made for a different candidate.
+                string hiAudioMap = "0:a:0";
+                var hiAudioChoice = Qa.AudioTrackChoice.Choose(_mediaSourceManager.GetMediaStreams(item.Id), lang);
+                if (_config.QaDownloadAudioTrackByLanguage && hiAudioChoice.TrackCount > 0)
+                {
+                    hiAudioMap = "0:a:" + hiAudioChoice.Position.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+
+                string? hiFfmpeg = _config.QaDownloadAutoSync ? FfmpegTools.ResolvePath(_config, _logger) : null;
+                string hiTargetDir = Path.GetDirectoryName(mediaPath) ?? ".";
+                bool hiSaved = false;
+                foreach (var hi in hiWalk)
+                {
+                    if (hiSaved || ct.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                            // F-M26: the HI variant is a SECOND real download for this item, so it
+                            // carries the transfer pause (main subtitle → HI variant). The local cap that
+                            // used to skip the fetch (F-M20) is gone — nothing here can refuse it any more,
+                            // because the plugin holds no budget of its own. Only SubDL can say no.
+                            {
+                            // (16.09.2026): pause between two real downloads
+                            // (main subtitle → HI variant) = the steered rate-limit
+                            // interval (3600/cap). Bare API calls stay on
+                            // MinCallPauseSec; failed/skipped candidates get no
+                            // Transfer pause (transaction semantics intact).
+                            // F-M310: the main subtitle was aligned in exactly this gap, so that
+                            // measured time comes off the pause. Both pauses carry it, because both
+                            // gaps contain an alignment — this one the main track's, the next one the
+                            // HI track's. Floor 0.
+                            await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
+                            // F-M464: the SDH fetch carries its own outcome — no reset, no state on
+                            // the client, nothing a later request could overwrite.
+                            DownloadOutcome hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
+                            var hiBytes = CorrectInvisibleCues(hiDl.Content);
+
+                            // F-M455/F-M460: an empty answer is asked once more after ten seconds,
+                            // here as well. The SDH pool is where the uploaders put their own cuts,
+                            // so a single empty answer is even less of a verdict than on the main
+                            // track.
+                            bool hiEmptyAnswer = hiDl.GenuineEmpty;
+                            if ((hiBytes == null || hiBytes.Length < 100)
+                                && hiEmptyAnswer
+                                && _emptyRetried.Add("hi|" + lang + "|" + hi.Url))
+                            {
+                                LogUtil.PerItem(_config.LogMode, _logger,
+                                    "[SubDL-D] {File} [{Lang}] — SDH: empty answer from {Release}, asking once more in 10 s (F-M455)",
+                                    Path.GetFileName(mediaPath), lang, hi.ReleaseName);
+                                await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+                                _watchdog?.Heartbeat();
+                                _api.ResetRateLimitFlag();
+                                hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
+                                hiBytes = CorrectInvisibleCues(hiDl.Content);
+                            }
+
+                            var hiStats = hiBytes != null && hiBytes.Length >= 100 ? Qa.QaGates.ParseSrt(DecodeSrt(hiBytes)) : null;
+                            bool hiStructureOk = hiStats != null
+                                && hiStats.Monotonic
+                                && hiStats.MinCueMs > 100
+                                && hiStats.MaxCueMs < 600_000;
+                            bool hiBytesUsable = hiBytes != null && hiBytes.Length >= 100;
+                            string? hiRuntimeReason = null;
+                            bool hiRuntimeOk = false;
+                            if (hiBytesUsable)
+                            {
+                                hiRuntimeOk = RuntimeMatches(item, hiBytes!, out hiRuntimeReason);
+                            }
+                            if (hiBytesUsable && hiStructureOk && hiRuntimeOk)
+                            {
+                                // F-M296: the HI variant goes through the SAME auto-sync as the
+                                // regular one. Leaving it out would have produced the absurd case
+                                // of a corrected main subtitle beside an uncorrected HI file of
+                                // the same episode. The HI pool is exactly where the drift gate
+                                // measured its findings (all 38 measured HI files drifted), so
+                                // this is the case the sync more often CANNOT fix — and then it
+                                // writes nothing and says so.
+                                byte[] hiWriteBytes = hiBytes!;
+                                string hiContent = DecodeSrt(hiBytes!);
+                                string? hiUnsync = null;
+                                // F-M321: the HI refusal was "no proven gain" — best version already.
+                                bool hiGoodAsDownloaded = false;
+                                if (_config.QaDownloadAutoSync)
+                                {
+                                    // F-M307: the HI variant goes through the SAME correction as
+                                    // the main track — one implementation, both tracks, so the two
+                                    // cannot drift apart. The HI pool is where the drift lives,
+                                    // and the fit's own deploy rule decides per file.
+                                    Qa.AutoSyncWorker.Outcome hiSync = await SyncMeasuredAsync(
+                                        mediaPath, hiContent, hiAudioMap, hiFfmpeg, summary, ct).ConfigureAwait(false);
+                                    if (hiSync.Applied)
+                                    {
+                                        hiUnsync = hiContent;
+                                        hiWriteBytes = ContentHashRegistry.EncodeCanonical(hiSync.Corrected);
+                                        hiContent = hiSync.Corrected;
+                                        // F-M309: the HI track is a subtitle the run fitted too, so it
+                                        // counts. Without this the counter under-reported exactly the
+                                        // pool where the drift lives (all 38 measured HI files drifted).
+                                        summary.FittedToAudio++;
+                                        LogUtil.PerItem(_config.LogMode, _logger,
+                                            "[SubDL-D] HI auto-sync {Reason} for {File} [{Lang}] ({Release})",
+                                            hiSync.Reason, Path.GetFileName(mediaPath), lang, hi.ReleaseName);
+                                    }
+                                    else
+                                    {
+                                        // F-M321: the HI track follows the main track's rule — a
+                                        // "no proven gain" file needs no correction, so it is the good
+                                        // version and takes the upper range (01, 02 …), with its original
+                                        // at 99. The HI pool is where the drift lives, so this is the
+                                        // branch that fires most often.
+                                        hiGoodAsDownloaded = hiSync.AlreadyGood;
+                                        if (hiSync.IsBroken)
+                                        {
+                                            summary.AutoSyncFailed++;
+                                        }
+
+                                        if (_config.LogMode >= LogLevelMode.Verbose)
+                                        {
+                                            LogUtil.PerItem(_config.LogMode, _logger,
+                                                "[SubDL-D] HI auto-sync not applied for {File} [{Lang}]: {Reason} ({Release})",
+                                                Path.GetFileName(mediaPath), lang, hiSync.Reason, hi.ReleaseName);
+                                        }
+                                    }
+                                }
+
+                                string hiHash = ContentHashRegistry.ComputeHash(hiContent);
+                                if (!Registry.IsContentKnown(hiHash))
+                                {
+                                    if (!_config.DownloadDryRun)
+                                    {
+                                        // F-M317 (operator order 08.10.2026): the HI variant follows the
+                                        // SAME rule as the main track — aligned 01, 02, 03 … upward, not
+                                        // aligned 99, 98, 97 … downward. The HI pool is where the drift
+                                        // lives, so it is the pool most likely to land in the reserved
+                                        // block; leaving this branch on the old rule would put a corrected
+                                        // HI file at 01 beside an unaligned one at 01 as well.
+                                        // F-M260: the shared builder, not a hand-written
+                                        // concatenation — the same rule the reader parses.
+                                        bool hiAligned = hiUnsync != null || hiGoodAsDownloaded;
+                                        string? hiPath;
+                                        if (hiAligned)
+                                        {
+                                            hiPath = SidecarNaming.Build(
+                                                mediaPath, lang, hearingImpaired: true, hiCorrectedSlotCount + 1);
+                                        }
+                                        else
+                                        {
+                                            System.Collections.Generic.HashSet<string>? hiSlotNames =
+                                                SidecarNamesInDirectory(hiTargetDir);
+                                            hiPath = hiSlotNames == null
+                                                ? null
+                                                : SidecarNaming.PlanOriginalTarget(
+                                                    mediaPath, lang, hearingImpaired: true, hiSlotNames);
+                                        }
+
+                                        if (hiPath == null)
+                                        {
+                                            // Every reserved slot taken, or the directory could not be
+                                            // listed. Refusing is the safe direction — an invented name
+                                            // would overwrite an unprocessed file already kept — and it is
+                                            // counted, because this is the one path where a fetched
+                                            // subtitle is not written at all.
+                                            summary.RejectedCandidates++;
+                                            LogUtil.PerItem(_config.LogMode, _logger,
+                                                "[SubDL-D] HI SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 51–99; nothing written ({Release})",
+                                                Path.GetFileName(mediaPath), lang, hi.ReleaseName);
+                                        }
+                                        else
+                                        {
+                                        await AtomicWriteAsync(hiPath, hiWriteBytes, ct).ConfigureAwait(false);
+                                        if (hiAligned)
+                                        {
+                                            hiCorrectedSlotCount++;
+                                        }
+                                        else
+                                        {
+                                            // F-M452: same rule for the variant — the kept original is not
+                                            // evidence, so the release is remembered instead of refetched.
+                                            _qaFails.RecordSkippedCandidates(
+                                                item.Id.ToString(), lang, new[] { hi.SubdlId },
+                                                reason: "original kept — alignment refused", kind: "original");
+                                        }
+
+                                        // F-M315: the HI track's original is kept the same way — a loose
+                                        // sidecar in the reserved block, carried with the `.sdh` marker so
+                                        // it sits on the variant's own name space, and locked against
+                                        // upload by a Rejected row on its content. Canonical bytes, so the
+                                        // row and the file describe the same sequence (see the main path).
+                                        //
+                                        // It is NOT marked forced: an unsynchronized original is not a
+                                        // forced subtitle (F-M315).
+                                        // F-M321: for a "no proven gain" HI file both files are the
+                                        // original — the 99 write reuses the array that went to 01, so the
+                                        // two are byte-identical. Symmetric to the main track.
+                                        if (hiUnsync != null || hiGoodAsDownloaded)
+                                        {
+                                            System.Collections.Generic.HashSet<string>? hiNames = SidecarNamesInDirectory(hiTargetDir);
+                                            string? hiOriginalPath = hiNames == null
+                                                ? null
+                                                : SidecarNaming.PlanOriginalTarget(mediaPath, lang, hearingImpaired: true, hiNames);
+
+                                            if (hiOriginalPath == null)
+                                            {
+                                                LogUtil.PerItem(_config.LogMode, _logger,
+                                                    "[SubDL-D] HI original NOT kept for {File} [{Lang}] — no free slot in the reserved range 51–99",
+                                                    Path.GetFileName(mediaPath), lang);
+                                            }
+                                            else
+                                            {
+                                                try
+                                                {
+                                                    string hiOriginalHash = hiGoodAsDownloaded
+                                                        ? hiHash
+                                                        : ContentHashRegistry.ComputeHash(hiUnsync!);
+                                                    await AtomicWriteAsync(
+                                                        hiOriginalPath,
+                                                        hiGoodAsDownloaded ? hiWriteBytes : ContentHashRegistry.EncodeCanonical(hiUnsync!),
+                                                        ct).ConfigureAwait(false);
+
+                                                    // Same row as the HI corrected file (see the main path).
+                                                    Registry.MarkAndFlush(() => Registry.MarkDownloaded(
+                                                        hiOriginalHash, mediaHash, lang, true,
+                                                        fileName: Path.GetFileName(hiOriginalPath), path: hiOriginalPath));
+
+                                                    if (_config.LogMode >= LogLevelMode.Verbose)
+                                                    {
+                                                        LogUtil.PerItem(_config.LogMode, _logger,
+                                                            "[SubDL-D] HI original kept as {Path} — locked against upload (F-M315)",
+                                                            Path.GetFileName(hiOriginalPath));
+                                                    }
+                                                }
+                                                catch (Exception ex)
+                                                {
+                                                    _logger.LogWarning(ex,
+                                                        "[SubDL-D] could not keep the unsynchronized HI original for {File}",
+                                                        Path.GetFileName(hiPath));
+                                                }
+                                            }
+                                        }
+
+                                        Registry.MarkAndFlush(() => Registry.MarkDownloaded(
+                                            hiHash, mediaHash, lang, true, hi.SubdlId,
+                                            Path.GetFileName(hiPath), hiPath));
+                                        _qaFails.RecordSuccess(item.Id.ToString(), lang); // HI save resets the pair counter too
+                                        summary.Downloaded++;
+                                        RememberSavedLibrary(item, hiPath); // F-M473
+                                        ReportOutcome(item, ItemOutcome.Done);
+                                        hiSaved = true;
+                                        if (_config.LogMode >= LogLevelMode.Verbose)
+                                        {
+                                            LogUtil.PerItem(_config.LogMode, _logger,(asMainTrack
+                                                ? "[SubDL-D] SAVED HI as main track {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"
+                                                : "[SubDL-D] SAVED HI variant {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"),
+                                                Path.GetFileName(hiPath), lang, hi.ReleaseName,
+                                                string.IsNullOrEmpty(hi.OriginalName) ? "—" : hi.OriginalName,
+                                                string.IsNullOrEmpty(hi.Author) ? "—" : hi.Author,
+                                                resolvedImdb ?? "—", resolvedTmdb ?? "—");
+                                        }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Safety, not a promise: the dry run never reaches the fetch
+                                        // (it breaks before it, F-M22). If that ever changes, this
+                                        // guard still stops the HI file from being written.
+                                        LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] DRY-RUN would save HI variant for {File} [{Lang}]", Path.GetFileName(mediaPath), lang);
+                                    }
+                                }
+                                else
+                                {
+                                    // F-M286: fetched and discarded — the bytes were spent on the
+                                    // request, so this belongs in the same number as the main-path
+                                    // rejects. It was the largest single hole: seven of nine discards
+                                    // in the audited run exited here and counted nothing.
+                                    summary.RejectedCandidates++;
+                                    // F-M255: fetched, but the content is already known — a distinct
+                                    // outcome that previously looked exactly like "not saved".
+                                    LogUtil.PerItem(_config.LogMode, _logger,
+                                        "[SubDL-D] HI reject {File} [{Lang}]: content already known ({Release})",
+                                        Path.GetFileName(mediaPath), lang, hi.ReleaseName);
+                                }
+                            }
+                            else
+                            {
+                                // F-M255: the HI fetch was thrown away by a gate, with the measured
+                                // value — four silent exits produced the "14 searches, 1 file" picture
+                                // that could not be explained from the log at all.
+                                // F-M286: fetched and threw the bytes away in a gate — same spend,
+                                // same counter. One increment for every reason in this branch.
+                                summary.RejectedCandidates++;
+                                string hiRejectReason = !hiBytesUsable
+                                    ? (hiBytes == null
+                                        ? "no bytes (" + hiDl.Label + ")"
+                                        : "only " + hiBytes.Length + " bytes (" + hiDl.Label + ")")
+                                    : !hiStructureOk
+                                        ? (hiStats == null
+                                            ? "structure: no parsable cues"
+                                            : $"structure: monotonic={hiStats.Monotonic} min={hiStats.MinCueMs}ms max={hiStats.MaxCueMs}ms")
+                                        : "runtime: " + (hiRuntimeReason ?? "no match");
+                                LogUtil.PerItem(_config.LogMode, _logger,
+                                    "[SubDL-D] HI reject {File} [{Lang}]: {Reason} ({Release})",
+                                    Path.GetFileName(mediaPath), lang, hiRejectReason, hi.ReleaseName);
+
+                                // F-M460 (operator order 10.11.2026): the SDH walk measures the SAME
+                                // verdicts as the main track — a cue running over the whole film, a
+                                // span 763 s off the runtime — and said nothing, because only the main
+                                // path filed reports. Measured that morning: two of the run's four
+                                // rejects were exactly this (Ratatouille EN structure, DE runtime).
+                                // Same categories, same wording, same switch. Filed HERE and not at run
+                                // end, because the end-of-language flush only runs when nothing was
+                                // saved — and the main subtitle usually IS saved, which is how these
+                                // two findings died.
+                                string? hiFinding = hiBytes == null
+                                    ? null // F-M456: nothing delivered, nothing measured — not a finding
+                                    : BrokenSubtitleReports.FindingFromGateFailure(hiRejectReason);
+                                if (_config.ReportBrokenSubtitles
+                                    && hiFinding != null
+                                    && !string.IsNullOrEmpty(hi.SubdlId))
+                                {
+                                    // F-M450: the same rule as the main path — a pack report names
+                                    // the file the gate measured. Here the name is the entry the
+                                    // resolution actually took (hiDl.Member), because the SDH walk
+                                    // asks the archive by episode, not by listed name.
+                                    if (!string.IsNullOrWhiteSpace(hiDl.Member))
+                                    {
+                                        hiFinding += " ('" + hiDl.Member + "')";
+                                    }
+
+                                    _qaFails.RecordSkippedCandidates(
+                                        item.Id.ToString(), lang, new[] { hi.SubdlId },
+                                        RejectReason.CandidateRejected,
+                                        new Dictionary<string, ReportFacts>
+                                        {
+                                            [hi.SubdlId] = new ReportFacts(hi.NId, hiFinding, hi.ReleaseName)
+                                        },
+                                        "qa");
+
+                                    foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                                    {
+                                        if (row.ReportedUtc == null
+                                            && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                            && string.Equals(row.SubdlId, hi.SubdlId, StringComparison.Ordinal))
+                                        {
+                                            QueueReport(row);
+                                        }
+                                    }
+                                }
+                            }
+                }
+
+                }
+                return hiSaved;
+            }
+
+
             //   correctedSaved  — candidates whose correction WAS applied. Only these end the walk
             //                     (F-M319): an unprocessed file is a fallback, never a "best".
             int refusalsThisRun = 0;
@@ -2576,351 +2968,7 @@ public sealed class DownloadPipeline : IDisposable
                     // header flag can be false while every file inside it is true.
                     if (_config.DownloadHearingImpaired && !effectiveHi)
                     {
-                        var hi = hiCandidates.Where(c => c.Language == lang)
-                            .OrderByDescending(c => CandidateRank(c, season, episode))
-                            .ThenByDescending(c => Score(c, videoBase))
-                            .ThenByDescending(c => c.DownloadCount)
-                            .FirstOrDefault();
-                        if (hi == null || string.IsNullOrEmpty(hi.Url))
-                        {
-                            // F-M255: the HI pool had no usable entry for this language — previously
-                            // indistinguishable from "the pool was empty".
-                            LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL-D] HI reject {File} [{Lang}]: no usable candidate in the HI pool ({N} in pool)",
-                                Path.GetFileName(mediaPath), lang, hiCandidates.Count(c => c.Language == lang));
-                        }
-                        else
-                        {
-                            // F-M26: the HI variant is a SECOND real download for this item, so it
-                            // carries the transfer pause (main subtitle → HI variant). The local cap that
-                            // used to skip the fetch (F-M20) is gone — nothing here can refuse it any more,
-                            // because the plugin holds no budget of its own. Only SubDL can say no.
-                            {
-                            // (16.09.2026): pause between two real downloads
-                            // (main subtitle → HI variant) = the steered rate-limit
-                            // interval (3600/cap). Bare API calls stay on
-                            // MinCallPauseSec; failed/skipped candidates get no
-                            // Transfer pause (transaction semantics intact).
-                            // F-M310: the main subtitle was aligned in exactly this gap, so that
-                            // measured time comes off the pause. Both pauses carry it, because both
-                            // gaps contain an alignment — this one the main track's, the next one the
-                            // HI track's. Floor 0.
-                            await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
-                            // F-M464: the SDH fetch carries its own outcome — no reset, no state on
-                            // the client, nothing a later request could overwrite.
-                            DownloadOutcome hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
-                            var hiBytes = CorrectInvisibleCues(hiDl.Content);
-
-                            // F-M455/F-M460: an empty answer is asked once more after ten seconds,
-                            // here as well. The SDH pool is where the uploaders put their own cuts,
-                            // so a single empty answer is even less of a verdict than on the main
-                            // track.
-                            bool hiEmptyAnswer = hiDl.GenuineEmpty;
-                            if ((hiBytes == null || hiBytes.Length < 100)
-                                && hiEmptyAnswer
-                                && _emptyRetried.Add("hi|" + lang + "|" + hi.Url))
-                            {
-                                LogUtil.PerItem(_config.LogMode, _logger,
-                                    "[SubDL-D] {File} [{Lang}] — SDH: empty answer from {Release}, asking once more in 10 s (F-M455)",
-                                    Path.GetFileName(mediaPath), lang, hi.ReleaseName);
-                                await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
-                                _watchdog?.Heartbeat();
-                                _api.ResetRateLimitFlag();
-                                hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
-                                hiBytes = CorrectInvisibleCues(hiDl.Content);
-                            }
-
-                            var hiStats = hiBytes != null && hiBytes.Length >= 100 ? Qa.QaGates.ParseSrt(DecodeSrt(hiBytes)) : null;
-                            bool hiStructureOk = hiStats != null
-                                && hiStats.Monotonic
-                                && hiStats.MinCueMs > 100
-                                && hiStats.MaxCueMs < 600_000;
-                            bool hiBytesUsable = hiBytes != null && hiBytes.Length >= 100;
-                            string? hiRuntimeReason = null;
-                            bool hiRuntimeOk = false;
-                            if (hiBytesUsable)
-                            {
-                                hiRuntimeOk = RuntimeMatches(item, hiBytes!, out hiRuntimeReason);
-                            }
-                            if (hiBytesUsable && hiStructureOk && hiRuntimeOk)
-                            {
-                                // F-M296: the HI variant goes through the SAME auto-sync as the
-                                // regular one. Leaving it out would have produced the absurd case
-                                // of a corrected main subtitle beside an uncorrected HI file of
-                                // the same episode. The HI pool is exactly where the drift gate
-                                // measured its findings (all 38 measured HI files drifted), so
-                                // this is the case the sync more often CANNOT fix — and then it
-                                // writes nothing and says so.
-                                byte[] hiWriteBytes = hiBytes!;
-                                string hiContent = DecodeSrt(hiBytes!);
-                                string? hiUnsync = null;
-                                // F-M321: the HI refusal was "no proven gain" — best version already.
-                                bool hiGoodAsDownloaded = false;
-                                if (_config.QaDownloadAutoSync)
-                                {
-                                    // F-M307: the HI variant goes through the SAME correction as
-                                    // the main track — one implementation, both tracks, so the two
-                                    // cannot drift apart. The HI pool is where the drift lives,
-                                    // and the fit's own deploy rule decides per file.
-                                    Qa.AutoSyncWorker.Outcome hiSync = await SyncMeasuredAsync(
-                                        mediaPath, hiContent, audioMap, ffmpegForDrift, summary, ct).ConfigureAwait(false);
-                                    if (hiSync.Applied)
-                                    {
-                                        hiUnsync = hiContent;
-                                        hiWriteBytes = ContentHashRegistry.EncodeCanonical(hiSync.Corrected);
-                                        hiContent = hiSync.Corrected;
-                                        // F-M309: the HI track is a subtitle the run fitted too, so it
-                                        // counts. Without this the counter under-reported exactly the
-                                        // pool where the drift lives (all 38 measured HI files drifted).
-                                        summary.FittedToAudio++;
-                                        LogUtil.PerItem(_config.LogMode, _logger,
-                                            "[SubDL-D] HI auto-sync {Reason} for {File} [{Lang}] ({Release})",
-                                            hiSync.Reason, Path.GetFileName(mediaPath), lang, hi.ReleaseName);
-                                    }
-                                    else
-                                    {
-                                        // F-M321: the HI track follows the main track's rule — a
-                                        // "no proven gain" file needs no correction, so it is the good
-                                        // version and takes the upper range (01, 02 …), with its original
-                                        // at 99. The HI pool is where the drift lives, so this is the
-                                        // branch that fires most often.
-                                        hiGoodAsDownloaded = hiSync.AlreadyGood;
-                                        if (hiSync.IsBroken)
-                                        {
-                                            summary.AutoSyncFailed++;
-                                        }
-
-                                        if (_config.LogMode >= LogLevelMode.Verbose)
-                                        {
-                                            LogUtil.PerItem(_config.LogMode, _logger,
-                                                "[SubDL-D] HI auto-sync not applied for {File} [{Lang}]: {Reason} ({Release})",
-                                                Path.GetFileName(mediaPath), lang, hiSync.Reason, hi.ReleaseName);
-                                        }
-                                    }
-                                }
-
-                                string hiHash = ContentHashRegistry.ComputeHash(hiContent);
-                                if (!Registry.IsContentKnown(hiHash))
-                                {
-                                    if (!_config.DownloadDryRun)
-                                    {
-                                        // F-M317 (operator order 08.10.2026): the HI variant follows the
-                                        // SAME rule as the main track — aligned 01, 02, 03 … upward, not
-                                        // aligned 99, 98, 97 … downward. The HI pool is where the drift
-                                        // lives, so it is the pool most likely to land in the reserved
-                                        // block; leaving this branch on the old rule would put a corrected
-                                        // HI file at 01 beside an unaligned one at 01 as well.
-                                        // F-M260: the shared builder, not a hand-written
-                                        // concatenation — the same rule the reader parses.
-                                        bool hiAligned = hiUnsync != null || hiGoodAsDownloaded;
-                                        string? hiPath;
-                                        if (hiAligned)
-                                        {
-                                            hiPath = SidecarNaming.Build(
-                                                mediaPath, lang, hearingImpaired: true, hiCorrectedSlotCount + 1);
-                                        }
-                                        else
-                                        {
-                                            System.Collections.Generic.HashSet<string>? hiSlotNames =
-                                                SidecarNamesInDirectory(targetDir);
-                                            hiPath = hiSlotNames == null
-                                                ? null
-                                                : SidecarNaming.PlanOriginalTarget(
-                                                    mediaPath, lang, hearingImpaired: true, hiSlotNames);
-                                        }
-
-                                        if (hiPath == null)
-                                        {
-                                            // Every reserved slot taken, or the directory could not be
-                                            // listed. Refusing is the safe direction — an invented name
-                                            // would overwrite an unprocessed file already kept — and it is
-                                            // counted, because this is the one path where a fetched
-                                            // subtitle is not written at all.
-                                            summary.RejectedCandidates++;
-                                            LogUtil.PerItem(_config.LogMode, _logger,
-                                                "[SubDL-D] HI SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 51–99; nothing written ({Release})",
-                                                Path.GetFileName(mediaPath), lang, hi.ReleaseName);
-                                        }
-                                        else
-                                        {
-                                        await AtomicWriteAsync(hiPath, hiWriteBytes, ct).ConfigureAwait(false);
-                                        if (hiAligned)
-                                        {
-                                            hiCorrectedSlotCount++;
-                                        }
-                                        else
-                                        {
-                                            // F-M452: same rule for the variant — the kept original is not
-                                            // evidence, so the release is remembered instead of refetched.
-                                            _qaFails.RecordSkippedCandidates(
-                                                item.Id.ToString(), lang, new[] { hi.SubdlId },
-                                                reason: "original kept — alignment refused", kind: "original");
-                                        }
-
-                                        // F-M315: the HI track's original is kept the same way — a loose
-                                        // sidecar in the reserved block, carried with the `.sdh` marker so
-                                        // it sits on the variant's own name space, and locked against
-                                        // upload by a Rejected row on its content. Canonical bytes, so the
-                                        // row and the file describe the same sequence (see the main path).
-                                        //
-                                        // It is NOT marked forced: an unsynchronized original is not a
-                                        // forced subtitle (F-M315).
-                                        // F-M321: for a "no proven gain" HI file both files are the
-                                        // original — the 99 write reuses the array that went to 01, so the
-                                        // two are byte-identical. Symmetric to the main track.
-                                        if (hiUnsync != null || hiGoodAsDownloaded)
-                                        {
-                                            System.Collections.Generic.HashSet<string>? hiNames = SidecarNamesInDirectory(targetDir);
-                                            string? hiOriginalPath = hiNames == null
-                                                ? null
-                                                : SidecarNaming.PlanOriginalTarget(mediaPath, lang, hearingImpaired: true, hiNames);
-
-                                            if (hiOriginalPath == null)
-                                            {
-                                                LogUtil.PerItem(_config.LogMode, _logger,
-                                                    "[SubDL-D] HI original NOT kept for {File} [{Lang}] — no free slot in the reserved range 51–99",
-                                                    Path.GetFileName(mediaPath), lang);
-                                            }
-                                            else
-                                            {
-                                                try
-                                                {
-                                                    string hiOriginalHash = hiGoodAsDownloaded
-                                                        ? hiHash
-                                                        : ContentHashRegistry.ComputeHash(hiUnsync!);
-                                                    await AtomicWriteAsync(
-                                                        hiOriginalPath,
-                                                        hiGoodAsDownloaded ? hiWriteBytes : ContentHashRegistry.EncodeCanonical(hiUnsync!),
-                                                        ct).ConfigureAwait(false);
-
-                                                    // Same row as the HI corrected file (see the main path).
-                                                    Registry.MarkAndFlush(() => Registry.MarkDownloaded(
-                                                        hiOriginalHash, mediaHash, lang, true,
-                                                        fileName: Path.GetFileName(hiOriginalPath), path: hiOriginalPath));
-
-                                                    if (_config.LogMode >= LogLevelMode.Verbose)
-                                                    {
-                                                        LogUtil.PerItem(_config.LogMode, _logger,
-                                                            "[SubDL-D] HI original kept as {Path} — locked against upload (F-M315)",
-                                                            Path.GetFileName(hiOriginalPath));
-                                                    }
-                                                }
-                                                catch (Exception ex)
-                                                {
-                                                    _logger.LogWarning(ex,
-                                                        "[SubDL-D] could not keep the unsynchronized HI original for {File}",
-                                                        Path.GetFileName(hiPath));
-                                                }
-                                            }
-                                        }
-
-                                        Registry.MarkAndFlush(() => Registry.MarkDownloaded(
-                                            hiHash, mediaHash, lang, true, hi.SubdlId,
-                                            Path.GetFileName(hiPath), hiPath));
-                                        _qaFails.RecordSuccess(item.Id.ToString(), lang); // HI save resets the pair counter too
-                                        summary.Downloaded++;
-                                        RememberSavedLibrary(item, hiPath); // F-M473
-                                        ReportOutcome(item, ItemOutcome.Done);
-                                        if (_config.LogMode >= LogLevelMode.Verbose)
-                                        {
-                                            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] SAVED HI variant {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})",
-                                                Path.GetFileName(hiPath), lang, hi.ReleaseName,
-                                                string.IsNullOrEmpty(hi.OriginalName) ? "—" : hi.OriginalName,
-                                                string.IsNullOrEmpty(hi.Author) ? "—" : hi.Author,
-                                                resolvedImdb ?? "—", resolvedTmdb ?? "—");
-                                        }
-                                        }
-                                    }
-                                    else
-                                    {
-                                        // Safety, not a promise: the dry run never reaches the fetch
-                                        // (it breaks before it, F-M22). If that ever changes, this
-                                        // guard still stops the HI file from being written.
-                                        LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] DRY-RUN would save HI variant for {File} [{Lang}]", Path.GetFileName(mediaPath), lang);
-                                    }
-                                }
-                                else
-                                {
-                                    // F-M286: fetched and discarded — the bytes were spent on the
-                                    // request, so this belongs in the same number as the main-path
-                                    // rejects. It was the largest single hole: seven of nine discards
-                                    // in the audited run exited here and counted nothing.
-                                    summary.RejectedCandidates++;
-                                    // F-M255: fetched, but the content is already known — a distinct
-                                    // outcome that previously looked exactly like "not saved".
-                                    LogUtil.PerItem(_config.LogMode, _logger,
-                                        "[SubDL-D] HI reject {File} [{Lang}]: content already known ({Release})",
-                                        Path.GetFileName(mediaPath), lang, hi.ReleaseName);
-                                }
-                            }
-                            else
-                            {
-                                // F-M255: the HI fetch was thrown away by a gate, with the measured
-                                // value — four silent exits produced the "14 searches, 1 file" picture
-                                // that could not be explained from the log at all.
-                                // F-M286: fetched and threw the bytes away in a gate — same spend,
-                                // same counter. One increment for every reason in this branch.
-                                summary.RejectedCandidates++;
-                                string hiRejectReason = !hiBytesUsable
-                                    ? (hiBytes == null
-                                        ? "no bytes (" + hiDl.Label + ")"
-                                        : "only " + hiBytes.Length + " bytes (" + hiDl.Label + ")")
-                                    : !hiStructureOk
-                                        ? (hiStats == null
-                                            ? "structure: no parsable cues"
-                                            : $"structure: monotonic={hiStats.Monotonic} min={hiStats.MinCueMs}ms max={hiStats.MaxCueMs}ms")
-                                        : "runtime: " + (hiRuntimeReason ?? "no match");
-                                LogUtil.PerItem(_config.LogMode, _logger,
-                                    "[SubDL-D] HI reject {File} [{Lang}]: {Reason} ({Release})",
-                                    Path.GetFileName(mediaPath), lang, hiRejectReason, hi.ReleaseName);
-
-                                // F-M460 (operator order 10.11.2026): the SDH walk measures the SAME
-                                // verdicts as the main track — a cue running over the whole film, a
-                                // span 763 s off the runtime — and said nothing, because only the main
-                                // path filed reports. Measured that morning: two of the run's four
-                                // rejects were exactly this (Ratatouille EN structure, DE runtime).
-                                // Same categories, same wording, same switch. Filed HERE and not at run
-                                // end, because the end-of-language flush only runs when nothing was
-                                // saved — and the main subtitle usually IS saved, which is how these
-                                // two findings died.
-                                string? hiFinding = hiBytes == null
-                                    ? null // F-M456: nothing delivered, nothing measured — not a finding
-                                    : BrokenSubtitleReports.FindingFromGateFailure(hiRejectReason);
-                                if (_config.ReportBrokenSubtitles
-                                    && hiFinding != null
-                                    && !string.IsNullOrEmpty(hi.SubdlId))
-                                {
-                                    // F-M450: the same rule as the main path — a pack report names
-                                    // the file the gate measured. Here the name is the entry the
-                                    // resolution actually took (hiDl.Member), because the SDH walk
-                                    // asks the archive by episode, not by listed name.
-                                    if (!string.IsNullOrWhiteSpace(hiDl.Member))
-                                    {
-                                        hiFinding += " ('" + hiDl.Member + "')";
-                                    }
-
-                                    _qaFails.RecordSkippedCandidates(
-                                        item.Id.ToString(), lang, new[] { hi.SubdlId },
-                                        RejectReason.CandidateRejected,
-                                        new Dictionary<string, ReportFacts>
-                                        {
-                                            [hi.SubdlId] = new ReportFacts(hi.NId, hiFinding, hi.ReleaseName)
-                                        },
-                                        "qa");
-
-                                    foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
-                                    {
-                                        if (row.ReportedUtc == null
-                                            && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
-                                            && string.Equals(row.SubdlId, hi.SubdlId, StringComparison.Ordinal))
-                                        {
-                                            QueueReport(row);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                        await RunHiPoolAsync(asMainTrack: false).ConfigureAwait(false);
                     }
 
                     // F-M319 (operator order 08.10.2026): the walk ends after the FIRST corrected file.
@@ -3007,6 +3055,14 @@ public sealed class DownloadPipeline : IDisposable
                             Path.GetFileName(mediaPath), lang, qaRejectedReleases.Count);
                     }
                 }
+            }
+
+            // F-M476: the regular pool ended without a proven save. Before the language is declared
+            // unavailable, the hearing-impaired pool gets its turn as a MAIN track — the same walk, the
+            // same gates, the same fit; the files keep their SDH lines and carry the HI marker.
+            if (!savedAny && _config.DownloadHearingImpaired)
+            {
+                savedAny = await RunHiPoolAsync(asMainTrack: true).ConfigureAwait(false);
             }
 
             if (savedAny)

@@ -46,6 +46,11 @@
       "args": [
         "<root>"
       ]
+    },
+    "hipool": {
+      "args": [
+        "<root>"
+      ]
     }
   },
   "tests": {
@@ -140,6 +145,10 @@
     "T198": {
       "suite": "stopfire",
       "checks": 29
+    },
+    "T201": {
+      "suite": "hipool",
+      "checks": 20
     }
   }
 }
