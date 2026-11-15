@@ -137,6 +137,20 @@ den Upload wirklich genommen hat.
 Schema 11, in `sidecars` **und** `embeds`, per `ALTER TABLE` nachgezogen; geschrieben wird nur, was
 bekannt ist, und ein leerer Wert löscht keine vorhandene Angabe.
 
+## Kein Reup, je Quelle (F-M489)
+
+„Schon hochgeladen" wird aus dem **eigenen Kennzeichen der Quelle** gelesen, nicht aus `Status=Uploaded`
+(das heißt nur „irgendwo hochgeladen"). Damit: kein Reup von SubDL auf SubDL, kein Reup von tvst auf tvst —
+und trotzdem blockiert keine Quelle die andere.
+
+Die Entscheidung fällt an einer Stelle, `UploadGate.Decide(Schalter, Herkunft, hat-SubDL-ihn, hat-tvst-ihn)`,
+und wird an drei Stellen benutzt: Sammelstufe für eingebettete Spuren, Sammelstufe für lose Dateien, Upload
+selbst. Gründe im Log: `already-uploaded:subdl`, `already-uploaded:tvsubtitles`,
+`already-uploaded:subdl+tvsubtitles`, `cross-source`, `no-upload-source`.
+
+Altzeilen ohne eigenes Kennzeichen gelten für SubDL als hochgeladen, wenn `SubdlId` **und**
+`Status=Uploaded` stehen — sonst ginge nach dem Upgrade jeder alte Upload ein zweites Mal hinaus.
+
 ## Der nächste Schritt (nicht Teil dieses Schnitts)
 
 `Wired = true` für tvsubtitles setzen heißt: die Pipelines rufen den Katalog statt des SubDL-Clients.

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Hermes Agent")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("12.1.12.380")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("12.1.12.380+2e99014dd1fc55afd22779f20ad95438f88be0ef")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("12.1.12.380+f26605185e6c6827dd18a6fb2a33b9bc0e89df3c")]
 [assembly: System.Reflection.AssemblyProductAttribute("Jellyfin.Plugin.SubdlSync")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Jellyfin.Plugin.SubdlSync")]
 [assembly: System.Reflection.AssemblyVersionAttribute("12.1.12.380")]

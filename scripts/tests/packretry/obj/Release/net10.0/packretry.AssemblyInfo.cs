@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("packretryrun")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2e99014dd1fc55afd22779f20ad95438f88be0ef")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f26605185e6c6827dd18a6fb2a33b9bc0e89df3c")]
 [assembly: System.Reflection.AssemblyProductAttribute("packretryrun")]
 [assembly: System.Reflection.AssemblyTitleAttribute("packretryrun")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

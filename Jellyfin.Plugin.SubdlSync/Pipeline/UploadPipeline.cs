@@ -1043,7 +1043,7 @@ public sealed class UploadPipeline : IPackFiller
                 // F-M4/F-M61: dedup — (media content hash, language) pair already uploaded?
                 // F-M71: HI variants have their own key space — a normal upload never blocks an SDH variant.
                 bool streamHi = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream);
-                if (Registry.IsUploaded(mediaHash, lang, streamHi))
+                if (!AnyUploadSourceStillWants(mediaHash, lang, streamHi))
                 {
                     // Pair already up. This position is NOT uploaded by itself, so it does not get
                     // an uploaded verdict of its own; it is recorded as rejected-by-self-echo, which
@@ -1196,7 +1196,7 @@ public sealed class UploadPipeline : IPackFiller
                 // that keeps a QA-rejected sidecar out of the queue. Adding a second check for this one
                 // reason would read the file twice and make the lock look like a special case.
 
-                if (Registry.IsUploaded(mediaHash, looseLang, looseHi))
+                if (!AnyUploadSourceStillWants(mediaHash, looseLang, looseHi))
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] Loose SRT already uploaded — skipping: {File} ({Lang}{Hi})", Path.GetFileName(loosePath), looseLang, looseHi ? ",HI" : "");
                     continue;
@@ -1511,7 +1511,16 @@ public sealed class UploadPipeline : IPackFiller
                 // the remote check blind to our own fresh uploads). The
                 // collector already consults the same registry entry (lines
                 // 576/659); this closes the in-run gap between collect and mark.
-                if (Registry.IsUploaded(mediaHash, cand.Lang, cand.HearingImpaired))
+                // F-M489: nicht mehr "irgendwo hochgeladen", sondern je Quelle gefragt. Sonst blockierte
+                // ein tvst-Upload den SubDL-Upload und umgekehrt; und ein Reup auf dieselbe Quelle muss
+                // genauso ausbleiben wie ein Quellenwechsel.
+                var gateFrueh = Api.Endpoints.UploadGate.Decide(
+                    _config.IsUploadEnabled(Configuration.SubtitleProvider.Subdl),
+                    _config.IsUploadEnabled(Configuration.SubtitleProvider.TvSubtitles),
+                    Registry.GetOrigin(contentHash).Origin,
+                    Registry.IsUploadedTo(mediaHash, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.Subdl),
+                    Registry.IsUploadedTo(mediaHash, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.TvSubtitles));
+                if (gateFrueh.SkipReason is not null)
                 {
                     summary.SkippedStreams++;
                     summary.RejectedCandidates++; // F-M286
@@ -1529,7 +1538,7 @@ public sealed class UploadPipeline : IPackFiller
                             SubtitleStatus.Rejected, contentHash: contentHash, reason: RejectReason.SelfEcho));
                     }
 
-                    LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — pair already uploaded (registry, self-echo guard)", Path.GetFileName(fileName), cand.Lang);
+                    LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason} (registry gate)", gateFrueh.SkipReason, Path.GetFileName(fileName), cand.Lang);
 
                     continue;
                 }
@@ -2265,10 +2274,24 @@ public sealed class UploadPipeline : IPackFiller
         // from the store by its content hash; a known provenance may only go back to its OWN source.
         // Unknown provenance (hand copy, embedded track, older row) stays allowed everywhere.
         var herkunft = Registry.GetOrigin(contentHashEarly).Origin;
-        bool darfSubdl = _config.IsUploadEnabled(Configuration.SubtitleProvider.Subdl)
-            && Api.Endpoints.Provenance.MayUploadTo(herkunft, Configuration.SubtitleProvider.Subdl);
-        bool darfZweite = _config.IsUploadEnabled(Configuration.SubtitleProvider.TvSubtitles)
-            && Api.Endpoints.Provenance.MayUploadTo(herkunft, Configuration.SubtitleProvider.TvSubtitles);
+        // F-M489: die Entscheidung fuer BEIDE Quellen an einer Stelle — Schalter, Herkunft (F-M487) und
+        // "diese Quelle hat ihn schon" (F-M488). Ein Reup auf dieselbe Quelle ist genauso unerwuenscht
+        // wie eine Kreuzkontamination, und SubDLs alter Status darf tvsubtitles nicht blockieren.
+        var gate = Api.Endpoints.UploadGate.Decide(
+            _config.IsUploadEnabled(Configuration.SubtitleProvider.Subdl),
+            _config.IsUploadEnabled(Configuration.SubtitleProvider.TvSubtitles),
+            herkunft,
+            Registry.IsUploadedTo(mediaHash, lang, hearingImpaired, Configuration.SubtitleProvider.Subdl),
+            Registry.IsUploadedTo(mediaHash, lang, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles));
+        bool darfSubdl = gate.Subdl;
+        bool darfZweite = gate.TvSubtitles;
+        if (gate.SkipReason is not null)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] {Name} [{Lang}] — skipped: {Reason}",
+                neutralName, lang, gate.SkipReason);
+            return UploadResult.Skipped(gate.SkipReason);
+        }
+
         if (!darfSubdl && Api.Endpoints.Provenance.Parse(herkunft) is not null)
         {
             LogUtil.PerItem(_config.LogMode, _logger,
@@ -4811,4 +4834,23 @@ public sealed class UploadPipeline : IPackFiller
             "[tvsubtitles] id of our upload: {Id}", answer.Id ?? "not readable");
         return answer.Ok ? UploadResult.Success(answer.Id) : UploadResult.Failed(answer.Reason ?? "second-source-refused");
     }
+
+    /// <summary>
+    /// F-M489: has ANY upload source still to get this pair? Asked per source, because a tvst upload must
+    /// not keep the pair out of a SubDL upload and vice versa. Provenance is unknown at collection time
+    /// without hashing the content, and unknown provenance is allowed everywhere (F-M487) — that is the
+    /// safe direction here: it can only make the pair look MORE in need, never less.
+    /// </summary>
+    /// <param name="mediaHash">Parent media hash.</param>
+    /// <param name="language">Language code.</param>
+    /// <param name="hearingImpaired">HI flag of the pair.</param>
+    /// <returns>True when at least one enabled source does not have it yet.</returns>
+    private bool AnyUploadSourceStillWants(string? mediaHash, string language, bool hearingImpaired) =>
+        Api.Endpoints.UploadGate.Decide(
+            _config.IsUploadEnabled(Configuration.SubtitleProvider.Subdl),
+            _config.IsUploadEnabled(Configuration.SubtitleProvider.TvSubtitles),
+            origin: null,
+            Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.Subdl),
+            Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles))
+        .SkipReason is null;
 }

@@ -737,7 +737,10 @@ public sealed class SubdlSeeder
 
         foreach (var (loosePath, looseLang, looseHi, _) in loose)
         {
-            if (registry.IsUploaded(mediaHash, looseLang, looseHi))
+            // F-M489: je Quelle fragen, nicht "irgendwo hochgeladen" — ein tvst-Upload darf das Paar
+            // nicht aus dem SubDL-Lauf halten.
+            if (registry.IsUploadedTo(mediaHash, looseLang, looseHi, Configuration.SubtitleProvider.Subdl)
+                && registry.IsUploadedTo(mediaHash, looseLang, looseHi, Configuration.SubtitleProvider.TvSubtitles))
             {
                 continue;
             }

@@ -278,8 +278,8 @@ internal static class Program
             && downloadSource.Contains("cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url", StringComparison.Ordinal));
         Check("the upload reads the origin from the store before it picks an endpoint",
             uploadSource.Contains("Registry.GetOrigin(contentHashEarly)", StringComparison.Ordinal)
-            && uploadSource.Contains("Provenance.MayUploadTo(herkunft, Configuration.SubtitleProvider.Subdl)", StringComparison.Ordinal)
-            && uploadSource.Contains("Provenance.MayUploadTo(herkunft, Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal));
+            && uploadSource.Contains("UploadGate.Decide(", StringComparison.Ordinal)
+            && uploadSource.Contains("herkunft,", StringComparison.Ordinal));
         Check("the store schema carries the two columns and a migration step",
             File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"))
                 .Contains("public string? OriginId { get; set; }", StringComparison.Ordinal)
@@ -327,6 +327,29 @@ internal static class Program
                 .Contains("public async Task<string?> FindUploadedIdAsync(", StringComparison.Ordinal)
             && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/UploadResult.cs"))
                 .Contains("public string? SourceId { get; init; }", StringComparison.Ordinal));
+
+        // ---- 11. Reup und Kreuzkontamination (F-M489) -----------------------------------------
+        var g = UploadGate.Decide(subdlSwitch: true, tvSubtitlesSwitch: true, origin: null, subdlAlready: false, tvSubtitlesAlready: false);
+        Check("nothing uploaded yet and both switches on: both sources may run", g.Subdl && g.TvSubtitles && g.SkipReason is null);
+        Check("no reup on tvsubtitles: that source already has it",
+            UploadGate.Decide(true, true, null, false, true) is { Subdl: true, TvSubtitles: false, SkipReason: null });
+        Check("no reup on SubDL: that source already has it",
+            UploadGate.Decide(true, true, null, true, false) is { Subdl: false, TvSubtitles: true, SkipReason: null });
+        Check("both already have it: nothing runs, and the reason names both",
+            UploadGate.Decide(true, true, null, true, true) is { Subdl: false, TvSubtitles: false, SkipReason: "already-uploaded:subdl+tvsubtitles" });
+        Check("a SubDL upload does not block tvsubtitles and a tvst upload does not block SubDL",
+            UploadGate.Decide(true, true, "subdl", true, false).SkipReason == "already-uploaded:subdl"
+            && UploadGate.Decide(true, true, "tvsubtitles", false, true).SkipReason == "already-uploaded:tvsubtitles");
+        Check("cross-source stays refused before the reup question is even asked",
+            UploadGate.Decide(true, true, "tvsubtitles", false, false) is { Subdl: false, TvSubtitles: true, SkipReason: null }
+            && UploadGate.Decide(true, true, "subdl", false, false) is { Subdl: true, TvSubtitles: false, SkipReason: null });
+        Check("switches off mean nothing runs",
+            UploadGate.Decide(false, false, null, false, false).SkipReason == "no-upload-source");
+        Check("the pipeline asks per source, through the one gate — twice, never inline",
+            uploadSource.Contains("UploadGate.Decide(", StringComparison.Ordinal)
+            && uploadSource.Split("UploadGate.Decide(").Length - 1 >= 2
+            && uploadSource.Contains("Registry.IsUploadedTo(mediaHash, lang, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
+            && !uploadSource.Contains("Registry.IsUploaded(mediaHash, cand.Lang", StringComparison.Ordinal));
 
         Console.WriteLine();
         if (_failures > 0)

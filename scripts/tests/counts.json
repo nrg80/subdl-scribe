@@ -179,6 +179,10 @@
     "T207": {
       "suite": "endpoints",
       "checks": 9
+    },
+    "T208": {
+      "suite": "endpoints",
+      "checks": 8
     }
   }
 }

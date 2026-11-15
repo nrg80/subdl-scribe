@@ -15,6 +15,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using Jellyfin.Plugin.SubdlScribe.Configuration;
 using Jellyfin.Plugin.SubdlScribe.Data;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
@@ -922,6 +923,55 @@ public sealed class ContentHashRegistry : IDisposable
             && x.Language == language
             && x.HearingImpaired == hearingImpaired
             && x.Status == SubtitleStatus.Uploaded);
+    }
+
+    /// <summary>
+    /// F-M489: does THIS source already have this subtitle? Answered from the source's own upload mark
+    /// (F-M488) — not from <see cref="SubtitleStatus.Uploaded"/>, which says "uploaded somewhere" and
+    /// would let one source's upload block the other.
+    /// <para>
+    /// A row from before schema 11 has no own mark; for SubDL its <c>SubdlId</c> plus the uploaded status
+    /// is the only trace there is, so it counts as uploaded — otherwise every old upload would be sent a
+    /// second time after the upgrade. <c>SubdlId</c> ALONE is not enough: downloads write it too.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaHash">Parent media hash.</param>
+    /// <param name="language">Language code.</param>
+    /// <param name="hearingImpaired">HI flag of the pair.</param>
+    /// <param name="provider">The source in question.</param>
+    /// <returns>True when that source already has the subtitle.</returns>
+    public bool IsUploadedTo(string? mediaHash, string language, bool hearingImpaired, SubtitleProvider provider)
+    {
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return false;
+        }
+
+        // Beide Ablagen zaehlen: eingebettete Spuren UND lose Sidecars tragen ihre Kennzeichen (F-M488).
+        if (provider == SubtitleProvider.TvSubtitles)
+        {
+            return _db.Embeds.Exists(x => x.MediaHash == mediaHash
+                    && x.Language == language
+                    && x.HearingImpaired == hearingImpaired
+                    && x.TvSubtitlesUploadId != null
+                    && x.TvSubtitlesUploadId != string.Empty)
+                || _db.Sidecars.Exists(x => x.MediaHash == mediaHash
+                    && x.Language == language
+                    && x.HearingImpaired == hearingImpaired
+                    && x.TvSubtitlesUploadId != null
+                    && x.TvSubtitlesUploadId != string.Empty);
+        }
+
+        return _db.Embeds.Exists(x => x.MediaHash == mediaHash
+                && x.Language == language
+                && x.HearingImpaired == hearingImpaired
+                && ((x.SubdlUploadId != null && x.SubdlUploadId != string.Empty)
+                    || (x.Status == SubtitleStatus.Uploaded && x.SubdlId != null && x.SubdlId != string.Empty)))
+            || _db.Sidecars.Exists(x => x.MediaHash == mediaHash
+                && x.Language == language
+                && x.HearingImpaired == hearingImpaired
+                && ((x.SubdlUploadId != null && x.SubdlUploadId != string.Empty)
+                    || (x.Status == SubtitleStatus.Uploaded && x.SubdlId != null && x.SubdlId != string.Empty)));
     }
 
     /// <summary>
