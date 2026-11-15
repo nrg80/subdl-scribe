@@ -6,7 +6,7 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v10.0": {
-      "archivecacherun/12.1.11.5": {
+      "archivecacherun/1.0.0": {
         "dependencies": {
           "Jellyfin.Plugin.SubdlSync": "12.1.12.380",
           "MediaBrowser.Common": "12.2.0.0",
@@ -325,7 +325,7 @@
     }
   },
   "libraries": {
-    "archivecacherun/12.1.11.5": {
+    "archivecacherun/1.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

@@ -51,6 +51,11 @@
       "args": [
         "<root>"
       ]
+    },
+    "tvsubtitles": {
+      "args": [
+        "<root>"
+      ]
     }
   },
   "tests": {
@@ -153,6 +158,10 @@
     "T202": {
       "suite": "offstate",
       "checks": 8
+    },
+    "T203": {
+      "suite": "tvsubtitles",
+      "checks": 39
     }
   }
 }

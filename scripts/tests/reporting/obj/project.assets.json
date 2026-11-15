@@ -1001,7 +1001,7 @@
     "/opt/data/home/.nuget/packages/": {}
   },
   "project": {
-    "version": "12.1.11.5",
+    "version": "1.0.0",
     "restore": {
       "projectUniqueName": "/opt/data/subdl-scribe/scripts/tests/reporting/reporting.csproj",
       "projectName": "reportingrun",

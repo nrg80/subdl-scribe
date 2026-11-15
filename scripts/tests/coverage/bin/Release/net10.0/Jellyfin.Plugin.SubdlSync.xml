@@ -2049,6 +2049,384 @@
             and a copy of the buffered body.
             </summary>
         </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient">
+            <summary>
+            F-M480 (operator order 15.11.2026): the tvsubtitles.net client — the second source, and the only
+            one that is reached by reading its web pages rather than by an API. The site has NO API: <c>/api*</c>,
+            <c>/xmlrpc.php</c> and <c>api.tvsubtitles.net</c> all answer 404/DNS (measured 15.11.2026), only
+            <c>/rss.xml</c> exists and carries no per-episode data.
+            <para>
+            The path is fixed and it is the site's own navigation:
+            <c>/add.html</c> (show list) → <c>/tvshow-&lt;id&gt;.html</c> (seasons) →
+            <c>/tvshow-&lt;id&gt;-&lt;season&gt;.html</c> (episode pages) → <c>/episode-&lt;id&gt;.html</c> (entries) →
+            <c>/subtitle-&lt;id&gt;.html</c> → <c>/download-&lt;id&gt;.html</c> (the file name sits in JavaScript
+            fragments) → the ZIP under <c>files/</c>.
+            </para>
+            <para>
+            WHAT THIS CLASS IS AND IS NOT: it is the source's method surface — resolve, list, fetch, build an
+            upload, send an upload. It is NOT wired into the pipelines: the switches for this source report
+            "kein Anbieter verbaut" (F-M478) until a caller exists. Keeping the client separate from the
+            wiring is the point: the protocol can be tested against captured pages without a download run.
+            </para>
+            <para>
+            Every parser is static and takes the HTML as a string, so the suites can drive them with the
+            captured pages under <c>scripts/tests/tvsubtitles/fixtures</c> instead of the live site.
+            </para>
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.BaseUrl">
+            <summary>The site root. https only — the http endpoint redirects.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.MaxSeason">
+            <summary>Maximum season number the upload form accepts (its own select offers 1–22).</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.MaxEpisode">
+            <summary>Maximum episode number the upload form accepts (its own select offers 0–100).</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.Languages">
+            <summary>
+            F-M480: the language codes are the SITE's abbreviations, not ISO 639-1 — Portuguese is <c>pt</c>,
+            Brazilian Portuguese is <c>br</c>, Chinese is <c>cn</c>, Japanese is <c>jp</c>, Greek is <c>gr</c>,
+            Czech is <c>cz</c>. Sending an ISO code the select does not offer makes the form fall back to its
+            first entry (the upload lands as English), so the codes are kept verbatim from the page.
+            The value is (name as written on the page, three-letter code used in file names).
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.Rips">
+            <summary>
+            F-M480: the rip select of the upload form, plus the empty value. Anything else is refused
+            before the request is built — the form ignores an unknown value and stores an empty rip.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.#ctor(System.Net.Http.HttpClient)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient"/> class.
+            </summary>
+            <param name="http">The HttpClient to use. <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.SubdlApiClient.NewHttpClient(System.Nullable{System.TimeSpan})"/> gives one
+            that identifies itself as this plugin; a caller may pass its own for a test.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ShowsAsync(System.Threading.CancellationToken)">
+            <summary>
+            F-M480: the show list of the upload form — id → name. This is the only place the site names its
+            shows, so it answers both "which id is this series" and "does the series exist at all".
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Show id to name, in page order.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ParseShows(System.String)">
+            <summary>
+            F-M480: parses the tvshow select out of the upload page.
+            </summary>
+            <param name="html">The page source.</param>
+            <returns>Show id to name. A page without the select yields an empty map — the caller decides
+            whether that is an error, so the parser never throws on a truncated page.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ResolveShow(System.Collections.Generic.IReadOnlyDictionary{System.Int32,System.String},System.String)">
+            <summary>
+            F-M480: the id of a show by name — exact match first (case-insensitive), then the first name
+            that contains the search text, so "The Middle" finds "The Middle" and not "The Middle Man".
+            </summary>
+            <param name="shows">The show map.</param>
+            <param name="name">The name to look for.</param>
+            <returns>The id, or null when the site does not carry the show.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.SeasonsAsync(System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            F-M480: the seasons that actually have a page for this show.
+            </summary>
+            <param name="showId">The show id.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Ascending season numbers.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ParseSeasons(System.String,System.Int32)">
+            <summary>
+            F-M480: parses the season numbers out of a show page.
+            </summary>
+            <param name="html">The page source.</param>
+            <param name="showId">The show id the page belongs to.</param>
+            <returns>Ascending season numbers, without duplicates.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.EpisodePagesAsync(System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            F-M480: the page ids of one season's episodes, in page order. They are NOT episode numbers —
+            the label comes from the page itself (<see cref="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.EpisodeLabelAsync(System.Int32,System.Threading.CancellationToken)"/>), because the season list
+            runs newest first.
+            </summary>
+            <param name="showId">The show id.</param>
+            <param name="season">The season number.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Episode page ids, deduplicated.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ParseEpisodePages(System.String)">
+            <summary>
+            F-M480: parses the episode page ids out of a season page.
+            </summary>
+            <param name="html">The page source.</param>
+            <returns>Page ids in page order, deduplicated.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.EpisodeLabelAsync(System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            F-M480: (season, episode) as the episode page states it in its heading.
+            </summary>
+            <param name="pageId">The episode page id.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Season and episode, each 0 when the page does not say.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ParseEpisodeLabel(System.String)">
+            <summary>
+            F-M480: parses the "2x24" out of an episode page heading, falling back to the first such pair
+            anywhere on the page (the heading markup has changed once already).
+            </summary>
+            <param name="html">The page source.</param>
+            <returns>Season and episode, each 0 when the page does not say.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.EntriesAsync(System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            F-M480: the subtitles offered for one episode page.
+            </summary>
+            <param name="pageId">The episode page id.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The entries in page order.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ParseEntries(System.String)">
+            <summary>
+            F-M480: parses the entries of an episode page.
+            <para>
+            The language is NOT in the text — the only trustworthy carrier is the flag image, and it must be
+            read per BLOCK (from one subtitle anchor up to the next), because a bare search finds the flag of
+            the following entry and mislabels the current one. Entries without a flag are skipped: an entry
+            whose language is unknown cannot be matched against a target language.
+            </para>
+            </summary>
+            <param name="html">The page source.</param>
+            <returns>The entries in page order.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ParseDownloadFileName(System.String)">
+            <summary>
+            F-M480: the file name behind the download link. It is not in the link — the download page builds
+            it in JavaScript from numbered fragments, which are concatenated in order.
+            </summary>
+            <param name="html">The source of <c>/download-&lt;id&gt;.html</c>.</param>
+            <returns>The path under the site root, e.g. <c>files/The Middle_2x24_HDTV.FEVER.en.zip</c>,
+            or null when the page carries no fragment.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.IsZip(System.Byte[])">
+            <summary>
+            F-M480: is this payload a ZIP already? The site serves the archive straight from the download
+            URL in one of its two shapes; the local header ("PK\u0003\u0004") is what tells them apart
+            without trusting a content type the site does not always set.
+            </summary>
+            <param name="payload">The bytes that came back.</param>
+            <returns>True for a ZIP archive.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.DownloadAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            F-M480: fetches one subtitle and returns the first <c>.srt</c> out of the ZIP.
+            <para>
+            The bytes are handed over UNTOUCHED: the site serves UTF-8 next to cp1250, cp1251, cp1253,
+            cp1254 and cp1256 depending on the language, and guessing here would repeat the codepage defect
+            that made Russian, Greek and Arabic unreadable in the library on 15.11.2026. Decoding is the
+            pipeline's business, not the transport's.
+            </para>
+            </summary>
+            <param name="subtitleId">The entry's subtitle id.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The member name inside the ZIP and the raw bytes.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.Comment(System.Nullable{System.Int64},System.String,System.String)">
+            <summary>
+            F-M480: the comment field of an upload — the TMDb and IMDb ids, because the site has no field
+            for them and the operator wants them carried (order 15.11.2026). The author field stays empty.
+            </summary>
+            <param name="tmdbId">The TMDb id, when known.</param>
+            <param name="imdbId">The IMDb id, when known.</param>
+            <param name="extra">Optional trailing text.</param>
+            <returns>The comment line, e.g. <c>TMDB 1422 / IMDb tt1442464</c>.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.BuildUpload(System.Int32,System.Int32,System.Int32,System.String,System.String,System.Byte[],System.String,System.String,System.Nullable{System.Int64},System.String,System.String,System.Boolean,System.Boolean)">
+            <summary>
+            F-M480/F-M481: builds the upload form's field list and validates it against what the page
+            accepts. Nothing is sent here.
+            </summary>
+            <param name="showId">The show id from <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ShowsAsync(System.Threading.CancellationToken)"/> — 0 is not accepted (see remarks).</param>
+            <param name="season">1–22.</param>
+            <param name="episode">0–100.</param>
+            <param name="language">A code from <see cref="F:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.Languages"/>.</param>
+            <param name="fileName">File name sent in the part; must end in .srt or .zip.</param>
+            <param name="data">The bytes of the subtitle.</param>
+            <param name="rip">A value from <see cref="F:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.Rips"/>, empty allowed.</param>
+            <param name="release">Free text (release group), empty allowed.</param>
+            <param name="tmdbId">TMDb id — the comment carries the ids, so at least one id is required.</param>
+            <param name="imdbId">IMDb id.</param>
+            <param name="commentExtra">Optional trailing comment text.</param>
+            <param name="doubleEpisode">True for a double episode ("double"=1).</param>
+            <param name="hearingImpaired">True for the SDH variant ("hi"=1).</param>
+            <returns>The finished upload payload.</returns>
+            <remarks>
+            The site's select has a "0 = none" entry; an upload with tvshow=0 is filed under no series at
+            all and cannot be found again, so 0 is refused here. The AUTHOR field is deliberately not part
+            of the payload: the operator asked for it to stay empty, and an absent multipart part is the only
+            way to guarantee that whatever the page pre-fills is not overridden.
+            </remarks>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.BuildAddShow(System.String,System.Int32,System.Int32)">
+            <summary>
+            F-M480: builds the payload that creates a new show (<c>/add-tvshow1.php</c>). The page itself asks
+            to check first — "Before adding new TV-Show please check if it already exist" — so a caller
+            resolves the name through <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ResolveShow(System.Collections.Generic.IReadOnlyDictionary{System.Int32,System.String},System.String)"/> before it gets here.
+            </summary>
+            <param name="name">The show name.</param>
+            <param name="year">Year of first broadcast, four digits.</param>
+            <param name="seasons">Number of seasons, 1–100.</param>
+            <returns>The finished form payload.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.UploadAsync(Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUpload,System.Boolean,System.Threading.CancellationToken)">
+            <summary>
+            F-M480: sends the upload. Without <paramref name="dryRun"/> false nothing leaves the process —
+            the body is built either way, so a dry run measures exactly what a real one would send.
+            </summary>
+            <param name="upload">The payload from <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.BuildUpload(System.Int32,System.Int32,System.Int32,System.String,System.String,System.Byte[],System.String,System.String,System.Nullable{System.Int64},System.String,System.String,System.Boolean,System.Boolean)"/>.</param>
+            <param name="dryRun">True (default) builds the body and sends nothing.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The result, including the byte count and the response text.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.AddShowAsync(Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesAddShow,System.Boolean,System.Threading.CancellationToken)">
+            <summary>
+            F-M480: sends the "create show" form. Dry run is the default, exactly like the upload.
+            </summary>
+            <param name="addShow">The payload from <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.BuildAddShow(System.String,System.Int32,System.Int32)"/>.</param>
+            <param name="dryRun">True (default) builds the body and sends nothing.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The result, including the byte count and the response text.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.BuildUploadBody(Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUpload)">
+            <summary>
+            F-M480: builds the multipart body of an upload and hands back the boundary with it. Exposed so a
+            suite can assert the exact bytes without a network call.
+            </summary>
+            <param name="upload">The payload.</param>
+            <returns>The body and its boundary.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry">
+            <summary>
+            F-M480: one subtitle offered on an episode page.
+            </summary>
+            <param name="SubtitleId">The id used by <c>/subtitle-&lt;id&gt;.html</c> and <c>/download-&lt;id&gt;.html</c>.</param>
+            <param name="Language">The site's language code, taken from the flag image.</param>
+            <param name="Rip">The rip cell's text, empty when the entry has none.</param>
+            <param name="Release">The release cell's text, empty when the entry has none.</param>
+            <param name="Age">The timestamp the page shows, as written.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry.#ctor(System.String,System.String,System.String,System.String,System.String)">
+            <summary>
+            F-M480: one subtitle offered on an episode page.
+            </summary>
+            <param name="SubtitleId">The id used by <c>/subtitle-&lt;id&gt;.html</c> and <c>/download-&lt;id&gt;.html</c>.</param>
+            <param name="Language">The site's language code, taken from the flag image.</param>
+            <param name="Rip">The rip cell's text, empty when the entry has none.</param>
+            <param name="Release">The release cell's text, empty when the entry has none.</param>
+            <param name="Age">The timestamp the page shows, as written.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry.SubtitleId">
+            <summary>The id used by <c>/subtitle-&lt;id&gt;.html</c> and <c>/download-&lt;id&gt;.html</c>.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry.Language">
+            <summary>The site's language code, taken from the flag image.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry.Rip">
+            <summary>The rip cell's text, empty when the entry has none.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry.Release">
+            <summary>The release cell's text, empty when the entry has none.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry.Age">
+            <summary>The timestamp the page shows, as written.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUpload">
+            <summary>
+            F-M480: a finished upload payload — the form's fields, the file and the two derived names.
+            </summary>
+            <param name="Fields">The form fields in the order the page sends them.</param>
+            <param name="FileName">The file name in the multipart part.</param>
+            <param name="Data">The subtitle bytes.</param>
+            <param name="LanguageName">The language as the page spells it.</param>
+            <param name="Iso3">The three-letter code used in file names.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUpload.#ctor(System.Collections.Generic.IReadOnlyList{System.Collections.Generic.KeyValuePair{System.String,System.String}},System.String,System.Byte[],System.String,System.String)">
+            <summary>
+            F-M480: a finished upload payload — the form's fields, the file and the two derived names.
+            </summary>
+            <param name="Fields">The form fields in the order the page sends them.</param>
+            <param name="FileName">The file name in the multipart part.</param>
+            <param name="Data">The subtitle bytes.</param>
+            <param name="LanguageName">The language as the page spells it.</param>
+            <param name="Iso3">The three-letter code used in file names.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUpload.Fields">
+            <summary>The form fields in the order the page sends them.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUpload.FileName">
+            <summary>The file name in the multipart part.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUpload.Data">
+            <summary>The subtitle bytes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUpload.LanguageName">
+            <summary>The language as the page spells it.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUpload.Iso3">
+            <summary>The three-letter code used in file names.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesAddShow">
+            <summary>
+            F-M480: the "create show" payload.
+            </summary>
+            <param name="Fields">The form fields (name, year_s, seasons, go).</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesAddShow.#ctor(System.Collections.Generic.IReadOnlyList{System.Collections.Generic.KeyValuePair{System.String,System.String}})">
+            <summary>
+            F-M480: the "create show" payload.
+            </summary>
+            <param name="Fields">The form fields (name, year_s, seasons, go).</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesAddShow.Fields">
+            <summary>The form fields (name, year_s, seasons, go).</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUploadResult">
+            <summary>
+            F-M480: what an upload did — or what it would have sent, in a dry run.
+            </summary>
+            <param name="Sent">False in a dry run; nothing left the process.</param>
+            <param name="Status">The HTTP status, null in a dry run.</param>
+            <param name="Response">The response text with tags and whitespace collapsed, null in a dry run.</param>
+            <param name="BodyBytes">The size of the multipart body that was (or would be) sent.</param>
+            <param name="Boundary">The multipart boundary used.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUploadResult.#ctor(System.Boolean,System.Nullable{System.Int32},System.String,System.Int32,System.String)">
+            <summary>
+            F-M480: what an upload did — or what it would have sent, in a dry run.
+            </summary>
+            <param name="Sent">False in a dry run; nothing left the process.</param>
+            <param name="Status">The HTTP status, null in a dry run.</param>
+            <param name="Response">The response text with tags and whitespace collapsed, null in a dry run.</param>
+            <param name="BodyBytes">The size of the multipart body that was (or would be) sent.</param>
+            <param name="Boundary">The multipart boundary used.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUploadResult.Sent">
+            <summary>False in a dry run; nothing left the process.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUploadResult.Status">
+            <summary>The HTTP status, null in a dry run.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUploadResult.Response">
+            <summary>The response text with tags and whitespace collapsed, null in a dry run.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUploadResult.BodyBytes">
+            <summary>The size of the multipart body that was (or would be) sent.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesUploadResult.Boundary">
+            <summary>The multipart boundary used.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.SubdlScribe.Api.UploadResult">
             <summary>
             Result of a single subtitle upload attempt.
