@@ -103,6 +103,19 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     private DateTime? _recoveryFireDownloadUtc;
     private DateTime? _recoveryFireUploadUtc;
 
+    // F-M475 (operator finding 15.11.2026, "defer um 15 min taucht nirgendwo auf, stattdessen defer
+    // auf den alten anchor"): every pending fire carries WHY it waits. Until now the moment and the
+    // reason were read from two different places — the moment from the fire, the reason from the
+    // worker row — so a fresh deferral was printed with the PREVIOUS run's cause (live 15.11.2026
+    // 03:49: fire at 04:24 for a quota reset, while the real wait was the library scan that had
+    // just deferred the seed by 15 min).
+    //
+    // A TOKEN, not a sentence: the fire file is a hand-rolled {"download":"…","upload":"…"} pair that
+    // LoadRecoveryFires splits on ',' and ':' — a sentence containing either character would break
+    // the parser. The readable text is built from the token in PendingFireReason.
+    private string? _recoveryFireDownloadWhy;
+    private string? _recoveryFireUploadWhy;
+
     // F-M156 (20.09.2026): one-time global catch-up. If any anchor window is
     // missed, queue exactly one catch-up run. It does NOT stack per missed slot.
     // Reset when a regular anchor fire runs again.
@@ -124,6 +137,14 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     // reschedule is NOT bound to the 30-min anchor window anymore.
     private DateTime _pruneDeferredUntil = DateTime.MinValue;
     private DateTime _oshashDeferredUntil = DateTime.MinValue;
+    // F-M475 (operator order 15.11.2026, "das sollte längst so sein"): every slot's pending moment
+    // carries its own reason token, not just the two direction fires. Without it the status line paired
+    // a fresh attempt with the PREVIOUS run's cause — the defect the download deferral showed live on
+    // 15.11.2026 ("defer um 15 min taucht nirgendwo auf, stattdessen defer auf den alten anchor").
+    // Tokens only: the state file splits on ',' and ':'.
+    private string? _refreshFireWhy;
+    private string? _oshashFireWhy;
+    private string? _postprocessFireWhy;
 
     /// <summary>
     /// (user decision 25.09.2026: stop rescheduling at the limit): every
@@ -278,12 +299,14 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             was = _recoveryFireUploadUtc;
             had = was.HasValue;
             _recoveryFireUploadUtc = null;
+            _recoveryFireUploadWhy = null;
         }
         else
         {
             was = _recoveryFireDownloadUtc;
             had = was.HasValue;
             _recoveryFireDownloadUtc = null;
+            _recoveryFireDownloadWhy = null;
         }
 
         if (!had)
@@ -338,7 +361,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         // problem) gets a SHORT recovery window so the retry happens soon, not
         // tomorrow night. Same dedup (one pending fire per direction, first-wins);
         // a pending quota fire is NOT overwritten by an overload fire and vice versa.
-        ScheduleRecoveryFireInternal(upload, resetUtc, overload: false, alreadyJittered: false);
+        ScheduleRecoveryFireInternal(upload, resetUtc, overload: false, alreadyJittered: false, why: "quota");
     }
 
     /// <summary>
@@ -375,10 +398,14 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     /// </summary>
     /// <param name="fireAtUtc">The moment (UTC) the postprocessing is due.</param>
     /// <param name="reason">Where the order came from — for the log.</param>
-    public void ArmUploadPostprocessingAt(DateTime fireAtUtc, string reason)
+    /// <param name="why">F-M475: the reason TOKEN for the status line, or null for a normal arming.</param>
+    public void ArmUploadPostprocessingAt(DateTime fireAtUtc, string reason, string? why = null)
     {
         var previous = _postprocessArmUtc;
         _postprocessArmUtc = fireAtUtc;
+        // A normal arming (an upload run just finished) has nothing to explain — the token is cleared,
+        // so an old lock-busy note cannot stick to a fresh order (F-M475).
+        _postprocessFireWhy = why;
         _stateDirty = true;
         ResetReschedule("postprocess");
         LogUtil.Normal(
@@ -404,6 +431,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
 
         var cancelled = _postprocessArmUtc;
         _postprocessArmUtc = DateTime.MinValue;
+        _postprocessFireWhy = null;
         _stateDirty = true;
         LogUtil.Normal(
             _logger,
@@ -430,7 +458,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             return;
         }
 
-        ArmUploadPostprocessingAt(fireAtUtc, "lock-busy/rate-limit re-fire");
+        ArmUploadPostprocessingAt(fireAtUtc, "lock-busy/rate-limit re-fire", why: "lockbusy");
     }
 
     public void ScheduleRefreshFire(DateTime fireAtUtc)
@@ -446,6 +474,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         if (_pruneDeferredUntil == DateTime.MinValue || fireAtUtc < _pruneDeferredUntil)
         {
             _pruneDeferredUntil = fireAtUtc;
+            _refreshFireWhy = "lockbusy";
             _stateDirty = true;
             LogUtil.Normal(_logger, "[SubDL] Database refresh re-fire scheduled at {FireAt:yyyy-MM-dd HH:mm} UTC.", fireAtUtc);
         }
@@ -461,6 +490,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         if (_oshashDeferredUntil == DateTime.MinValue || fireAtUtc < _oshashDeferredUntil)
         {
             _oshashDeferredUntil = fireAtUtc;
+            _oshashFireWhy = "lockbusy";
             _stateDirty = true;
             LogUtil.Normal(_logger, "[SubDL] OSHash refresh re-fire scheduled at {FireAt:yyyy-MM-dd HH:mm} UTC.", fireAtUtc);
         }
@@ -487,8 +517,176 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             return false;
         }
 
-        ScheduleRecoveryFireInternal(upload, fireAtUtc, overload: false, alreadyJittered: true);
+        ScheduleRecoveryFireInternal(upload, fireAtUtc, overload: false, alreadyJittered: true, why: "respaced");
         return true;
+    }
+
+    /// <summary>
+    /// F-M475: arms the retry a library-scan deferral needs — exactly <c>now + JobSpacingMinutes</c>,
+    /// no jitter, on the direction that was deferred.
+    /// <para>
+    /// Replaces the in-process timer the scan deferral used until now. That timer re-ran the
+    /// ARRIVAL cycle (<c>TimerFiredAsync</c>), so with no arrivals it did nothing at all (measured
+    /// 15.11.2026: deferred 03:38:10, timer fired 03:53:10, cycle start "event", "no arrivals
+    /// collected — no run", download task still on its 03:38 run), it was invisible to the status
+    /// line (which reads pending fires), and it died with the process.
+    /// </para>
+    /// <para>
+    /// The SOONER attempt wins: a pending quota fire may sit hours in the future while the scan it
+    /// waited for is already gone, so an earlier scan retry replaces it. A fire that is already
+    /// earlier than the new one is kept — nothing is pushed back.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction: upload vs download.</param>
+    /// <param name="fireAtUtc">The moment (UTC) the deferred direction may try again.</param>
+    /// <param name="minutes">The spacing that produced the moment — carried into the reason text.</param>
+    /// <returns>True when this call armed the fire; false when an earlier one was already pending.</returns>
+    public bool ScheduleScanDeferFire(bool upload, DateTime fireAtUtc, int minutes)
+    {
+        var existing = upload ? _recoveryFireUploadUtc : _recoveryFireDownloadUtc;
+        if (existing.HasValue && existing.Value <= fireAtUtc)
+        {
+            LogUtil.Detail(
+                _logger,
+                "[SubDL] Scan defer ({Direction}): fire at {Existing:yyyy-MM-dd HH:mm} UTC is already sooner — keeping it (F-M475).",
+                upload ? "upload" : "download",
+                existing.Value);
+            return false;
+        }
+
+        if (upload)
+        {
+            _recoveryFireUploadUtc = fireAtUtc;
+            _recoveryFireUploadWhy = "scan" + minutes.ToString(CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            _recoveryFireDownloadUtc = fireAtUtc;
+            _recoveryFireDownloadWhy = "scan" + minutes.ToString(CultureInfo.InvariantCulture);
+        }
+
+        PersistRecoveryFires();
+        if (existing.HasValue)
+        {
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] Scan defer ({Direction}): fire moved from {Previous:yyyy-MM-dd HH:mm} UTC to {FireAt:yyyy-MM-dd HH:mm} UTC — the sooner attempt wins (F-M475).",
+                upload ? "upload" : "download",
+                existing.Value,
+                fireAtUtc);
+        }
+        else
+        {
+            LogUtil.Normal(
+                _logger,
+                "[SubDL] Scan defer ({Direction}): fire armed for {FireAt:yyyy-MM-dd HH:mm} UTC — retry in {Min} min (F-M475).",
+                upload ? "upload" : "download",
+                fireAtUtc,
+                minutes);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// F-M475: the token that says why a direction's fire waits, or null when none is pending.
+    /// Tokens are <c>quota</c>, <c>respaced</c>, <c>overload</c> and <c>scan&lt;minutes&gt;</c>.
+    /// </summary>
+    /// <param name="upload">Direction: upload vs download.</param>
+    /// <returns>The stored token, or null.</returns>
+    public string? GetPendingFireWhy(bool upload)
+    {
+        var when = upload ? _recoveryFireUploadUtc : _recoveryFireDownloadUtc;
+        if (!when.HasValue || DateTime.UtcNow >= when.Value)
+        {
+            return null; // an elapsed deadline is not a pending fire (F-M368)
+        }
+
+        return upload ? _recoveryFireUploadWhy : _recoveryFireDownloadWhy;
+    }
+
+    /// <summary>
+    /// F-M475: the sentence the status line prints next to a pending attempt. The reason belongs to
+    /// the MOMENT, not to the last run — pairing a fresh deferral with the previous run's cause was
+    /// the defect this requirement fixes.
+    /// </summary>
+    /// <param name="upload">Direction: upload vs download.</param>
+    /// <returns>The reason text, or null when no fire is pending.</returns>
+    public string? PendingFireReason(bool upload)
+    {
+        var why = GetPendingFireWhy(upload);
+        if (string.IsNullOrEmpty(why))
+        {
+            // A fire from an older state file carries no token — say that it is a retry, not why.
+            return (upload ? _recoveryFireUploadUtc : _recoveryFireDownloadUtc).HasValue
+                ? "retry scheduled (reason not recorded)"
+                : null;
+        }
+
+        return ReasonText(upload ? "upload" : "download", why);
+    }
+
+    /// <summary>
+    /// F-M475: the reason of the pending attempt for one of the maintenance slots, or null when nothing
+    /// is pending for it. Same clock rule as <see cref="PendingFireReason"/>: an elapsed deadline is not
+    /// a pending attempt (F-M368), so its reason is not offered either.
+    /// </summary>
+    /// <param name="slot">"refresh" (database), "oshash", or "postprocess".</param>
+    /// <returns>The sentence, or null.</returns>
+    public string? PendingMaintenanceReason(string slot)
+    {
+        var nowUtc = DateTime.UtcNow;
+        switch (slot)
+        {
+            case "refresh":
+                return _pruneDeferredUntil != DateTime.MinValue && nowUtc < _pruneDeferredUntil
+                    ? ReasonText("database", _refreshFireWhy)
+                    : null;
+            case "oshash":
+                return _oshashDeferredUntil != DateTime.MinValue && nowUtc < _oshashDeferredUntil
+                    ? ReasonText("oshash", _oshashFireWhy)
+                    : null;
+            case "postprocess":
+                return _postprocessArmUtc != DateTime.MinValue && nowUtc < _postprocessArmUtc
+                    ? ReasonText("upload", _postprocessFireWhy)
+                    : null;
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// F-M475: renders a stored reason token. Pure and clock-free on purpose: the moment a fire is
+    /// CONSUMED has already passed when the tick reads it, and <see cref="PendingFireReason"/> answers
+    /// "nothing pending" for an elapsed deadline (F-M368). Measured on the bench 15.11.2026: the scan
+    /// deferral armed at 04:02:31 and fired at 04:07:35, and the log said "retry scheduled (reason not
+    /// recorded)" because the reason was fetched through the status accessor.
+    /// </summary>
+    /// <param name="direction">"download" or "upload" — used in the quota wording.</param>
+    /// <param name="why">The stored token, or null.</param>
+    /// <returns>The sentence, or null when there is no token.</returns>
+    private static string? ReasonText(string direction, string? why)
+    {
+        if (string.IsNullOrEmpty(why))
+        {
+            return null;
+        }
+
+        if (why.StartsWith("scan", StringComparison.Ordinal))
+        {
+            return "library scan running — retry in " + why["scan".Length..] + " min";
+        }
+
+        return why switch
+        {
+            "quota" => direction + " quota/rate limit — rescheduled",
+            "respaced" => "rate limit or lock busy — rescheduled",
+            // The maintenance slots (database refresh, OSHash refresh, upload postprocessing) defer for
+            // exactly one cause — a run lock that was busy (F-M475).
+            "lockbusy" => "run lock busy — rescheduled",
+            "overload" => "SubDL was overloaded (service_busy) — rescheduled",
+            _ => "retry scheduled (" + why + ")"
+        };
     }
 
     /// <summary>
@@ -601,10 +799,10 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
 
     private void ScheduleRecoveryFire(bool upload, DateTime fireAtUtc, bool overload)
     {
-        ScheduleRecoveryFireInternal(upload, fireAtUtc, overload, alreadyJittered: false);
+        ScheduleRecoveryFireInternal(upload, fireAtUtc, overload, alreadyJittered: false, why: "overload");
     }
 
-    private void ScheduleRecoveryFireInternal(bool upload, DateTime fireAtUtc, bool overload, bool alreadyJittered)
+    private void ScheduleRecoveryFireInternal(bool upload, DateTime fireAtUtc, bool overload, bool alreadyJittered, string why)
     {
         // F-M65 (user decision 09.09.2026): one recovery fire per direction, not one
         // per run — if a direction already has a pending recovery fire, keep the
@@ -644,10 +842,12 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         if (upload)
         {
             _recoveryFireUploadUtc = fireAt;
+            _recoveryFireUploadWhy = why;
         }
         else
         {
             _recoveryFireDownloadUtc = fireAt;
+            _recoveryFireDownloadWhy = why;
         }
 
         PersistRecoveryFires();
@@ -834,10 +1034,12 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 return;
             }
 
+            var downReason = ReasonText("download", _recoveryFireDownloadWhy) ?? "quota window has reset";
             _recoveryFireDownloadUtc = null;
+            _recoveryFireDownloadWhy = null;
             ResetReschedule("download"); // really fired — clear the 16x counter
             PersistRecoveryFires();
-            LogUtil.Normal(_logger, "[SubDL] Recovery fire: download — quota window has reset; queueing download run (F-M65).");
+            LogUtil.Normal(_logger, "[SubDL] Recovery fire: download — {Reason}; queueing download run (F-M65, F-M475).", downReason);
             _taskManager.QueueScheduledTask<SubdlDownloadTask>(new TaskOptions());
             return;
         }
@@ -858,10 +1060,12 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 return;
             }
 
+            var upReason = ReasonText("upload", _recoveryFireUploadWhy) ?? "quota window has reset";
             _recoveryFireUploadUtc = null;
+            _recoveryFireUploadWhy = null;
             ResetReschedule("upload"); // really fired — clear the 16x counter
             PersistRecoveryFires();
-            LogUtil.Normal(_logger, "[SubDL] Recovery fire: upload — quota window has reset; queueing upload run (F-M65).");
+            LogUtil.Normal(_logger, "[SubDL] Recovery fire: upload — {Reason}; queueing upload run (F-M65, F-M475).", upReason);
             _taskManager.QueueScheduledTask<SubdlUploadTask>(new TaskOptions());
             return;
         }
@@ -929,6 +1133,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                     _lastPruneMarker = refreshMarker;
                     _stateDirty = true;
                     _pruneDeferredUntil = DateTime.MinValue;
+                    _refreshFireWhy = null; // fired — the reason goes with the moment (F-M475)
                     _stateDirty = true;
                     ResetReschedule("refresh"); // fired — clear the 16x counter
                     LogUtil.Normal(_logger, "[SubDL] Database refresh fire at {Anchor:yyyy-MM-dd HH:mm} local ({Mode}).", (DateTime)refreshAnchor, config.PruneMode);
@@ -941,6 +1146,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                     if (TryCountReschedule("refresh", "lock-busy anchor"))
                     {
                         _pruneDeferredUntil = nowUtc.AddMinutes(Math.Max(1, config.JobSpacingMinutes));
+                        _refreshFireWhy = "lockbusy";
                         _stateDirty = true;
                         LogUtil.Normal(_logger, "[SubDL] Database refresh deferred to {Until:HH:mm} local (lock busy).", _pruneDeferredUntil.ToLocalTime());
                     }
@@ -975,6 +1181,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                     _lastOshashMarker = osMarker;
                     _stateDirty = true;
                     _oshashDeferredUntil = DateTime.MinValue;
+                    _oshashFireWhy = null; // fired — the reason goes with the moment (F-M475)
                     _stateDirty = true;
                     ResetReschedule("oshash"); // fired — clear the 16x counter
                     LogUtil.Normal(_logger, "[SubDL] OSHash-refresh fire at {Anchor:yyyy-MM-dd HH:mm} local.", (DateTime)osAnchor);
@@ -985,6 +1192,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                     if (TryCountReschedule("oshash", "lock-busy anchor"))
                     {
                         _oshashDeferredUntil = nowUtc.AddMinutes(Math.Max(1, config.JobSpacingMinutes));
+                        _oshashFireWhy = "lockbusy";
                         _stateDirty = true;
                         LogUtil.Normal(_logger, "[SubDL] OSHash-refresh deferred to {Until:HH:mm} local (lock busy).", _oshashDeferredUntil.ToLocalTime());
                     }
@@ -1010,11 +1218,12 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 if (!Pipeline.PipelineRunLock.IsFree(_logger))
                 {
                     // Busy lock: push the order forward by the job spacing instead of probing every tick.
-                    ArmUploadPostprocessingAt(nowUtc.AddMinutes(config.JobSpacingMinutes), "run lock busy");
+                    ArmUploadPostprocessingAt(nowUtc.AddMinutes(config.JobSpacingMinutes), "run lock busy", why: "lockbusy");
                 }
                 else
                 {
                     _postprocessArmUtc = DateTime.MinValue;
+                    _postprocessFireWhy = null; // fired — the reason goes with the moment (F-M475)
                     _stateDirty = true;
                     ResetReschedule("postprocess");
                     LogUtil.Normal(
@@ -1189,10 +1398,12 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             if (upload)
             {
                 _recoveryFireUploadUtc = null;
+                _recoveryFireUploadWhy = null;
             }
             else
             {
                 _recoveryFireDownloadUtc = null;
+                _recoveryFireDownloadWhy = null;
             }
 
             PersistRecoveryFires();
@@ -1390,11 +1601,15 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     {
         try
         {
+            // F-M475: the reason token travels with the moment, so a restart keeps both. Tokens carry
+            // no ',' and no ':' — LoadRecoveryFires splits on exactly those.
             var payload = string.Format(
                 CultureInfo.InvariantCulture,
-                "{{\"download\":\"{0}\",\"upload\":\"{1}\"}}",
+                "{{\"download\":\"{0}\",\"upload\":\"{1}\",\"downloadWhy\":\"{2}\",\"uploadWhy\":\"{3}\"}}",
                 _recoveryFireDownloadUtc?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty,
-                _recoveryFireUploadUtc?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty);
+                _recoveryFireUploadUtc?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty,
+                _recoveryFireDownloadUtc.HasValue ? (_recoveryFireDownloadWhy ?? string.Empty) : string.Empty,
+                _recoveryFireUploadUtc.HasValue ? (_recoveryFireUploadWhy ?? string.Empty) : string.Empty);
             File.WriteAllText(Path.Combine(_configDirectory, RecoveryFile), payload);
         }
         catch (Exception ex)
@@ -1428,6 +1643,22 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 var raw = kv[1].Trim().Trim('"', '}');
                 if (string.IsNullOrWhiteSpace(raw))
                 {
+                    continue;
+                }
+
+                // F-M475: the reason tokens come first — their keys also contain "download"/"upload",
+                // so a date parse on them would be skipped anyway, but the ORDER must be explicit.
+                if (kv[0].Contains("Why", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (kv[0].Contains("download", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _recoveryFireDownloadWhy = string.IsNullOrWhiteSpace(raw) ? null : raw;
+                    }
+                    else if (kv[0].Contains("upload", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _recoveryFireUploadWhy = string.IsNullOrWhiteSpace(raw) ? null : raw;
+                    }
+
                     continue;
                 }
 
@@ -1476,7 +1707,10 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 "{{\"refresh\":\"{0}\",\"oshash\":\"{1}\",\"postprocess\":\"{2}\",\"fired\":\"{3}\","
                 // F-M445: "postprocessDefer" keeps its field name — it now carries the ARMED moment
                 // rather than a lock-busy deferral, so an existing state file keeps working.
-                + "\"catchup\":{4},\"refreshDefer\":\"{5}\",\"oshashDefer\":\"{6}\",\"postprocessDefer\":\"{7}\",\"refetchDefer\":\"{8}\"}}",
+                + "\"catchup\":{4},\"refreshDefer\":\"{5}\",\"oshashDefer\":\"{6}\",\"postprocessDefer\":\"{7}\",\"refetchDefer\":\"{8}\","
+                // F-M475: the reason tokens travel with their moments, so a restart does not turn a
+                // named retry into an anonymous one.
+                + "\"refreshWhy\":\"{9}\",\"oshashWhy\":\"{10}\",\"postprocessWhy\":\"{11}\"}}",
                 _lastPruneMarker ?? string.Empty,
                 _lastOshashMarker ?? string.Empty,
                 string.Empty, // F-M445: no postprocessing marker any more — the armed moment decides
@@ -1485,7 +1719,10 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 _pruneDeferredUntil.ToString("O", CultureInfo.InvariantCulture),
                 _oshashDeferredUntil.ToString("O", CultureInfo.InvariantCulture),
                 _postprocessArmUtc.ToString("O", CultureInfo.InvariantCulture),
-                _refetchDeferredUntil.ToString("O", CultureInfo.InvariantCulture));
+                _refetchDeferredUntil.ToString("O", CultureInfo.InvariantCulture),
+                _refreshFireWhy ?? string.Empty,
+                _oshashFireWhy ?? string.Empty,
+                _postprocessFireWhy ?? string.Empty);
             File.WriteAllText(Path.Combine(_configDirectory, SchedulerStateFile), payload);
             _stateDirty = false;
         }
@@ -1554,6 +1791,11 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             var armed = ParseInstant(fields, "postprocessDefer");
             _postprocessArmUtc = armed == DateTime.MinValue ? DateTime.MinValue : AnchorJobGate.NormalizeDeadline(armed);
             _refetchDeferredUntil = ParseInstant(fields, "refetchDefer");
+            // F-M475: a token without its moment would be a stray note — take it only when the moment
+            // came back too, and drop it when the file has none (older state file).
+            _refreshFireWhy = _pruneDeferredUntil == DateTime.MinValue ? null : ParseToken(fields, "refreshWhy");
+            _oshashFireWhy = _oshashDeferredUntil == DateTime.MinValue ? null : ParseToken(fields, "oshashWhy");
+            _postprocessFireWhy = _postprocessArmUtc == DateTime.MinValue ? null : ParseToken(fields, "postprocessWhy");
 
             LogUtil.Normal(_logger,
                 "[SubDL] Scheduler state restored from disk: refresh {Refresh}, oshash {Oshash}, postprocessing armed for {Pp}, refetch slot {Fired}, catch-up {CatchUp}.",
@@ -1568,6 +1810,16 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             _logger.LogWarning("[SubDL] Scheduler-state reload failed: {Msg}", ex.Message);
         }
     }
+
+    /// <summary>
+    /// F-M475: reads one reason token. Kept separate from <see cref="ParseInstant"/> because a token is
+    /// text: parsing it as a date would fail and quietly leave the field empty.
+    /// </summary>
+    /// <param name="fields">The parsed state file.</param>
+    /// <param name="key">The field name.</param>
+    /// <returns>The token, or null when absent or blank.</returns>
+    private static string? ParseToken(Dictionary<string, string> fields, string key)
+        => fields.TryGetValue(key, out var raw) && !string.IsNullOrWhiteSpace(raw) ? raw : null;
 
     /// <summary>Reads one UTC instant written in round-trip format; MinValue when absent
     /// or unparseable, which is the "no deferral pending" value the due-tests expect.</summary>

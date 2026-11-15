@@ -70,7 +70,6 @@ public sealed class SubdlEventDispatcher : IDisposable
 
     // F-M448 (operator order 05.11.2026): a seed that meets a running library scan waits instead of
     // scanning. One-shot timer — a second trigger simply moves the retry further out.
-    private Timer? _scanDeferTimer;
     private readonly object _lock = new();
 
     // F-M111 (user decision 12.09.2026): event-scoped seeding — the dispatcher
@@ -925,6 +924,10 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// respacing interval default 15 min haben wir bereits") — one knob for "the thing I was waiting
     /// for is still busy", not a second one that could disagree with it.
     /// </para>
+    /// <para>
+    /// F-M475: the wait is armed as the DIRECTION's scheduled fire (persisted, visible on the status
+    /// line), not as an in-process timer — see the notes at the arming site.
+    /// </para>
     /// </summary>
     private bool TryDeferForLibraryScan(PluginConfiguration config, string reason, CycleDirection dir)
     {
@@ -941,13 +944,40 @@ public sealed class SubdlEventDispatcher : IDisposable
 
         LogUtil.Normal(_logger, "[SubDL-Seed] library scan running — seed deferred {Min} min ({Reason}, dir {Dir}).", minutes, reason, dir);
         // GREY: the seed did not scan and did not fail — it waited for a scan it cannot see into.
-        RecordSeeder(Registry.WorkerRunRegistry.Outcome.Deferred,
-            string.Format(System.Globalization.CultureInfo.InvariantCulture, "library scan running — retry in {0} min", minutes));
+        var scanDetail = string.Format(System.Globalization.CultureInfo.InvariantCulture, "library scan running — retry in {0} min", minutes);
+        RecordSeeder(Registry.WorkerRunRegistry.Outcome.Deferred, scanDetail);
 
-        lock (_lock)
+        // F-M475 (operator finding 15.11.2026): the retry is a SCHEDULED FIRE, not a timer.
+        // What stood here was an in-process timer that re-ran the ARRIVAL cycle: with no arrivals it
+        // did nothing (measured 15.11.2026: deferred 03:38:10 → timer fired 03:53:10 → cycle start
+        // "event", "no arrivals collected — no run", the download task still on its 03:38 run while
+        // the scan was long done). The fire keeps the direction, shows up in the status line and
+        // survives a restart; the timer did none of the three, because GetPendingFires only knows
+        // the coordinator's own fires and a Timer is disposed with the process.
+        var fireAt = DateTime.UtcNow.AddMinutes(minutes);
+        var coord = SubdlSchedulerCoordinator.Instance;
+        bool armedDown = dir != CycleDirection.UploadOnly
+            && coord?.ScheduleScanDeferFire(upload: false, fireAt, minutes) == true;
+        bool armedUp = dir != CycleDirection.DownloadOnly
+            && coord?.ScheduleScanDeferFire(upload: true, fireAt, minutes) == true;
+        if (!armedDown && !armedUp)
         {
-            _scanDeferTimer ??= new Timer(_ => _ = TimerFiredAsync(), null, Timeout.Infinite, Timeout.Infinite);
-            _scanDeferTimer.Change(TimeSpan.FromMinutes(minutes), Timeout.InfiniteTimeSpan);
+            // Nothing armed means an EARLIER attempt is already pending — that one wins, so the
+            // deferral is not lost. Only a missing coordinator (shutdown) leaves nothing behind,
+            // and then there is nothing left to defer.
+            LogUtil.Detail(_logger, "[SubDL-Seed] scan defer: an earlier fire is already pending ({Dir}) — nothing to arm (F-M475).", dir);
+        }
+
+        // The reason belongs to the moment: the status line pairs the pending fire with this text,
+        // so it no longer prints the previous run's cause beside a fresh attempt (F-M475).
+        if (dir != CycleDirection.UploadOnly)
+        {
+            SetDirectionOutcome(upload: false, Registry.WorkerRunRegistry.Outcome.Deferred, scanDetail);
+        }
+
+        if (dir != CycleDirection.DownloadOnly)
+        {
+            SetDirectionOutcome(upload: true, Registry.WorkerRunRegistry.Outcome.Deferred, scanDetail);
         }
 
         return true;
@@ -2554,7 +2584,6 @@ public sealed class SubdlEventDispatcher : IDisposable
     {
         _libraryManager.ItemAdded -= OnItemAdded;
         _debounceTimer?.Dispose();
-        _scanDeferTimer?.Dispose();
         _cts.Cancel();
         _cts.Dispose();
         if (Instance == this)

@@ -95,6 +95,130 @@ Check("the row's time column reads Started (that is why the cancellation must st
 Check("the row is written AFTER the cancellation is persisted",
     cancels.IndexOf("PersistRecoveryFires()", StringComparison.Ordinal) < cancels.IndexOf("CancelledRow(upload)", StringComparison.Ordinal), "order vs persist");
 
+// --- F-M475 (operator finding 15.11.2026): a library-scan deferral is a SCHEDULED FIRE ----------
+// "defer um 15 min taucht nirgendwo auf, stattdessen defer auf den alten anchor". What the user saw:
+// the page paired a FRESH attempt with the PREVIOUS run's cause, because the reason came from the
+// worker row while the moment came from the fire, and the 15-minute wait was an in-process timer that
+// re-ran the ARRIVAL cycle (measured live: fired 03:53:10 into "event — no arrivals collected — no
+// run" while the deferred download never resumed).
+string dir2 = Path.Combine(Path.GetTempPath(), "scandefer-" + Guid.NewGuid().ToString("N")[..8]);
+Directory.CreateDirectory(dir2);
+var c2 = new SubdlSchedulerCoordinator(null, new TestPaths(dir2), NullLogger<SubdlSchedulerCoordinator>.Instance);
+var t0 = DateTime.UtcNow;
+
+c2.ScheduleRecoveryFireAt(upload: false, t0.AddMinutes(180));
+Check("a later fire is pending before the scan defer", c2.GetPendingFireUtc(upload: false) > t0.AddMinutes(170),
+    c2.GetPendingFireUtc(upload: false)?.ToString("O") ?? "none");
+
+bool armedScan = c2.ScheduleScanDeferFire(upload: false, t0.AddMinutes(15), 15);
+Check("the scan defer arms although a fire was pending — the sooner attempt wins",
+    armedScan && c2.GetPendingFireUtc(upload: false) <= t0.AddMinutes(16),
+    $"armed={armedScan}, fire={c2.GetPendingFireUtc(upload: false):O}");
+Check("the scan defer shows up where the status line reads its moments (GetPendingFires)",
+    c2.GetPendingFires().ContainsKey("SubdlSyncDownloadTask"), string.Join(",", c2.GetPendingFires().Keys));
+Check("the reason travels WITH the moment — not the previous run's cause",
+    c2.PendingFireReason(upload: false) == "library scan running — retry in 15 min",
+    c2.PendingFireReason(upload: false) ?? "null");
+Check("the reason is stored as a token (no comma, no colon — the fire file is split on those)",
+    c2.GetPendingFireWhy(upload: false) == "scan15", c2.GetPendingFireWhy(upload: false) ?? "null");
+
+bool armedLater = c2.ScheduleScanDeferFire(upload: false, t0.AddMinutes(45), 45);
+Check("a scan defer never pushes an earlier attempt back", !armedLater
+    && c2.PendingFireReason(upload: false) == "library scan running — retry in 15 min",
+    $"armed={armedLater}, reason={c2.PendingFireReason(upload: false)}");
+Check("a download-only defer leaves the upload direction alone",
+    !c2.GetPendingFires().ContainsKey("SubdlSyncUploadTask"), string.Join(",", c2.GetPendingFires().Keys));
+
+var c3 = new SubdlSchedulerCoordinator(null, new TestPaths(dir2), NullLogger<SubdlSchedulerCoordinator>.Instance);
+Check("moment AND reason survive a restart (the timer did not)",
+    c3.GetPendingFires().ContainsKey("SubdlSyncDownloadTask")
+    && c3.PendingFireReason(upload: false) == "library scan running — retry in 15 min",
+    c3.PendingFireReason(upload: false) ?? "null");
+
+c3.ScheduleRecoveryFireAt(upload: true, DateTime.UtcNow.AddMinutes(30));
+Check("a respaced fire names itself and does not borrow the quota wording",
+    c3.PendingFireReason(upload: true) == "rate limit or lock busy — rescheduled",
+    c3.PendingFireReason(upload: true) ?? "null");
+
+string disp = File.ReadAllText(Path.Combine("/opt/data/subdl-scribe", "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlEventDispatcher.cs"));
+Check("the scan defer no longer runs an in-process timer", !disp.Contains("_scanDeferTimer", StringComparison.Ordinal), "timer still present");
+int td = disp.IndexOf("private bool TryDeferForLibraryScan", StringComparison.Ordinal);
+string deferBody = td < 0 ? string.Empty : disp.Substring(td, Math.Min(4000, disp.Length - td));
+Check("the deferral arms the direction's own scheduled fire", deferBody.Contains("ScheduleScanDeferFire", StringComparison.Ordinal), "arming call");
+Check("each direction is armed only when the cycle asked for it",
+    deferBody.Contains("dir != CycleDirection.UploadOnly", StringComparison.Ordinal)
+    && deferBody.Contains("dir != CycleDirection.DownloadOnly", StringComparison.Ordinal), "direction guards");
+string quotaSvc = File.ReadAllText(Path.Combine("/opt/data/subdl-scribe", "Jellyfin.Plugin.SubdlSync", "Api", "SubdlQuotaService.cs"));
+Check("the status line takes the reason from the pending fire, not from the worker row",
+    quotaSvc.Contains("fireReason ?? row!.Detail", StringComparison.Ordinal), "row detail still wins");
+Check("the reason token is persisted next to the moment",
+    src.Contains("downloadWhy", StringComparison.Ordinal) && src.Contains("uploadWhy", StringComparison.Ordinal), "persist keys");
+Check("the fire log names the actual reason instead of claiming a quota reset",
+    src.Contains("Recovery fire: download — {Reason}", StringComparison.Ordinal), "log text");
+// Bench 15.11.2026: the fire armed at 04:02:31 and fired at 04:07:35, and the log said "retry scheduled
+// (reason not recorded)" — the reason had been fetched through the STATUS accessor, which answers
+// "nothing pending" for an elapsed deadline (F-M368). A consumed fire must still be able to say why.
+Check("a fire that is being consumed reads its reason WITHOUT the elapsed-deadline guard",
+    src.Contains("ReasonText(\"download\", _recoveryFireDownloadWhy)", StringComparison.Ordinal)
+    && src.Contains("ReasonText(\"upload\", _recoveryFireUploadWhy)", StringComparison.Ordinal), "consumption reads the token");
+Check("the status accessor still refuses an elapsed deadline (F-M368 stays intact)",
+    src.Contains("if (!when.HasValue || DateTime.UtcNow >= when.Value)", StringComparison.Ordinal), "elapsed guard");
+
+// --- F-M475: the SAME rule for the maintenance slots -------------------------------------------
+// Operator order 15.11.2026: "das sollte längst so sein". Database refresh, OSHash refresh and the
+// upload postprocessing defer for one cause — a busy run lock — and they wore the previous run's text
+// beside a fresh moment just like the direction rows did.
+string dir3 = Path.Combine(Path.GetTempPath(), "maintfire-" + Guid.NewGuid().ToString("N")[..8]);
+Directory.CreateDirectory(dir3);
+var c4 = new SubdlSchedulerCoordinator(null, new TestPaths(dir3), NullLogger<SubdlSchedulerCoordinator>.Instance);
+Check("nothing pending, no reason — for every maintenance slot",
+    c4.PendingMaintenanceReason("refresh") == null
+    && c4.PendingMaintenanceReason("oshash") == null
+    && c4.PendingMaintenanceReason("postprocess") == null, "one of them already had a note");
+
+c4.ScheduleRefreshFire(DateTime.UtcNow.AddMinutes(180));
+c4.ScheduleOshashFire(DateTime.UtcNow.AddMinutes(180));
+c4.SchedulePostprocessFire(DateTime.UtcNow.AddMinutes(180));
+Check("a deferred database refresh names its cause",
+    c4.PendingMaintenanceReason("refresh") == "run lock busy — rescheduled", c4.PendingMaintenanceReason("refresh") ?? "null");
+Check("a deferred oshash refresh names its cause",
+    c4.PendingMaintenanceReason("oshash") == "run lock busy — rescheduled", c4.PendingMaintenanceReason("oshash") ?? "null");
+Check("a deferred postprocessing order names its cause",
+    c4.PendingMaintenanceReason("postprocess") == "run lock busy — rescheduled", c4.PendingMaintenanceReason("postprocess") ?? "null");
+
+c4.ArmUploadPostprocessingAt(DateTime.UtcNow.AddMinutes(200), "upload run finished");
+Check("a normal arming clears the old note — a fresh order carries no lock-busy text",
+    c4.PendingMaintenanceReason("postprocess") == null, c4.PendingMaintenanceReason("postprocess") ?? "null");
+
+// The loader is fed a state file directly: the writer runs once per tick, so a round trip through it
+// would make this check depend on the tick clock rather than on the code under test.
+var statePath = Path.Combine(dir3, "scheduler-state.json");
+File.WriteAllText(
+    statePath,
+    "{\"refresh\":\"\",\"oshash\":\"\",\"postprocess\":\"\",\"fired\":\"\",\"catchup\":false,"
+    + "\"refreshDefer\":\"" + DateTime.UtcNow.AddMinutes(120).ToString("O") + "\","
+    + "\"oshashDefer\":\"" + DateTime.UtcNow.AddMinutes(120).ToString("O") + "\","
+    + "\"postprocessDefer\":\"\",\"refetchDefer\":\"\","
+    + "\"refreshWhy\":\"lockbusy\",\"oshashWhy\":\"lockbusy\",\"postprocessWhy\":\"\"}");
+var c5 = new SubdlSchedulerCoordinator(null, new TestPaths(dir3), NullLogger<SubdlSchedulerCoordinator>.Instance);
+Check("the maintenance reasons survive a restart with their moments",
+    c5.PendingMaintenanceReason("refresh") == "run lock busy — rescheduled"
+    && c5.PendingMaintenanceReason("oshash") == "run lock busy — rescheduled",
+    $"{c5.PendingMaintenanceReason("refresh") ?? "null"} / {c5.PendingMaintenanceReason("oshash") ?? "null"}");
+Check("a token whose moment did not come back is not shown",
+    c5.PendingMaintenanceReason("postprocess") == null, c5.PendingMaintenanceReason("postprocess") ?? "null");
+
+c5.ScheduleRefreshFire(DateTime.UtcNow.AddMinutes(-5));
+Check("an elapsed maintenance moment has no reason (F-M368 stays intact)",
+    c5.PendingMaintenanceReason("refresh") == null, c5.PendingMaintenanceReason("refresh") ?? "null");
+Check("the three maintenance workers are mapped to their slots",
+    quotaSvc.Contains("SubdlSyncDatabaseRefreshTask", StringComparison.Ordinal)
+    && quotaSvc.Contains("SubdlSyncOshashRefreshTask", StringComparison.Ordinal)
+    && quotaSvc.Contains("SubDLPostprocessTask", StringComparison.Ordinal), "mapping missing");
+Check("the maintenance tokens are persisted next to their moments",
+    src.Contains("refreshWhy", StringComparison.Ordinal) && src.Contains("oshashWhy", StringComparison.Ordinal)
+    && src.Contains("postprocessWhy", StringComparison.Ordinal), "persist keys");
+
 Console.WriteLine();
 Console.WriteLine(f == 0 ? ">>> STOPFIRE OK" : $">>> STOPFIRE {f} FAILURE(S)");
 return f == 0 ? 0 : 1;

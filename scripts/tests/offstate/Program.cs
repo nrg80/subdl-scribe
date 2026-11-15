@@ -149,8 +149,14 @@ Check("the deferral note carries a BROKEN worker's outcome, not just 'deferred'"
     quota.Contains("Outcome.Failed") && quota.Contains("\"last run failed\""));
 Check("the broken worker's own cause travels with it",
     quota.Contains("string.IsNullOrWhiteSpace(row!.Detail) ? string.Empty : \": \" + row.Detail.Trim()"));
-Check("a deferred row still passes its detail through unchanged",
-    quota.Contains("reason = row!.Detail ?? string.Empty;"));
+// F-M475 (operator finding 15.11.2026): the reason belongs to the PENDING attempt, not to the row.
+// A fresh deferral must not wear the previous run's cause — live 15.11.2026: the scan deferral was
+// printed as "download quota/rate limit — rescheduled — next attempt 4:24 AM". The row's detail stays
+// the fallback for a fire that carries no token (an older state file, or a foreign failure).
+Check("a deferred row names the reason of the PENDING attempt and falls back to the row's detail",
+    quota.Contains("reason = fireReason ?? row!.Detail ?? string.Empty;"));
+Check("a pending attempt without a row still says why it waits",
+    quota.Contains("else if (hasFire)") && quota.Contains("reason = fireReason ?? string.Empty;"));
 Check("a failure keeps its note WITHOUT a pending fire (no early return)",
     !quota.Contains("if (fires.Count == 0)")
     && quota.Contains("if (!hasFire && !isFailed)"));

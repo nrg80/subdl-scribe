@@ -137,6 +137,52 @@ public class SubdlQuota : ControllerBase
     /// </para>
     /// </summary>
     /// <returns>The deferred workers, each with its short name, cause and due moment; empty when nothing is deferred.</returns>
+    /// <summary>
+    /// F-M475: the reason of the PENDING attempt that belongs to this worker, or null when the worker
+    /// has no pending fire (or is not one of the two directions). Kept out of the note loop so the loop
+    /// itself stays direction-blind — every worker runs through the same pass (F-M436).
+    /// </summary>
+    /// <param name="coord">The scheduler, or null while the plugin is still starting.</param>
+    /// <param name="workerKey">The worker's key.</param>
+    /// <returns>The reason text, or null.</returns>
+    private static string? PendingReasonForWorker(ScheduledTasks.SubdlSchedulerCoordinator? coord, string workerKey)
+    {
+        if (coord == null)
+        {
+            return null;
+        }
+
+        if (string.Equals(workerKey, Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.DownloadWorkerKey, StringComparison.Ordinal))
+        {
+            return coord.PendingFireReason(upload: false);
+        }
+
+        if (string.Equals(workerKey, Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.UploadWorkerKey, StringComparison.Ordinal))
+        {
+            return coord.PendingFireReason(upload: true);
+        }
+
+        // F-M475 (operator order 15.11.2026, "das sollte laengst so sein"): the maintenance slots carry
+        // their reason the same way. They deferred for one cause only — a busy run lock — but they used
+        // to print the previous run's text beside a fresh moment, exactly like the direction rows did.
+        if (string.Equals(workerKey, "SubdlSyncDatabaseRefreshTask", StringComparison.Ordinal))
+        {
+            return coord.PendingMaintenanceReason("refresh");
+        }
+
+        if (string.Equals(workerKey, "SubdlSyncOshashRefreshTask", StringComparison.Ordinal))
+        {
+            return coord.PendingMaintenanceReason("oshash");
+        }
+
+        if (string.Equals(workerKey, "SubDLPostprocessTask", StringComparison.Ordinal))
+        {
+            return coord.PendingMaintenanceReason("postprocess");
+        }
+
+        return null;
+    }
+
     private static object LocalRateLimitState()
     {
         var entries = new System.Collections.Generic.List<object>();
@@ -184,6 +230,15 @@ public class SubdlQuota : ControllerBase
                     continue;
                 }
 
+                // F-M475 (operator finding 15.11.2026, "defer um 15 min taucht nirgendwo auf,
+                // stattdessen defer auf den alten anchor"): the reason is taken from the PENDING FIRE,
+                // not from the worker row. The row is the last run's verdict and — by design, F-M436 —
+                // keeps its text until the next successful run; pairing it with a fresh moment printed
+                // "download quota/rate limit — rescheduled — next attempt 4:24 AM" while the real wait
+                // was the library scan that had just deferred the seed by 15 minutes. The direction
+                // mapping lives in the helper, so this loop stays direction-blind (F-M436).
+                var fireReason = PendingReasonForWorker(coord, worker.Key);
+
                 var reason = string.Empty;
                 if (isFailed)
                 {
@@ -197,7 +252,14 @@ public class SubdlQuota : ControllerBase
                              Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Deferred,
                              StringComparison.Ordinal))
                 {
-                    reason = row!.Detail ?? string.Empty;
+                    // The pending attempt's own reason wins over the row's stored text (F-M475).
+                    reason = fireReason ?? row!.Detail ?? string.Empty;
+                }
+                else if (hasFire)
+                {
+                    // No direction row was written (F-M365: nothing ran, so nothing to record), but an
+                    // attempt is pending — it still has to say why (F-M475).
+                    reason = fireReason ?? string.Empty;
                 }
 
                 // F-M470 (operator 11.11.2026, "wieso wird postprocessing jetzt 2x gemeldet?"): the armed
