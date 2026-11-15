@@ -755,52 +755,44 @@ public class PluginConfiguration : BasePluginConfiguration
     }
 
     /// <summary>
-    /// F-M19/F-M203: the four credentials the plugin cannot run without, in ONE place
-    /// so both pipelines and the settings page answer the same question.
+    /// F-M497 (operator order 15.11.2026: „Pflichtkonfiguration ist tmdb key. Wenn subdl nich
+    /// konfiguriert -> skip subdl upload/download. Kennzeichnung als required for subdl"): the ONE
+    /// credential the plugin cannot run without, in ONE place so both pipelines and the settings page
+    /// answer the same question.
     /// <para>
-    /// They are not alternatives: the SubDL login pair authenticates the UPLOAD (its
-    /// three steps carry a Bearer token from /login), the SubDL API key authenticates
-    /// search, file download and the quota read, and the TMDb key is what resolves and
-    /// corrects the ids in both directions. A missing one is not a degraded mode, it is
-    /// a run that cannot do its job — so the run is refused up front with the field
-    /// named, instead of failing later at the first call that needs it.
+    /// Only the TMDb key is mandatory. It is what resolves and corrects the ids the store, the ranking
+    /// and tvsubtitles.net's upload comment are all keyed on, in both directions and for both sources —
+    /// without it neither direction can do its job, so the run is refused up front with the field named
+    /// instead of failing later at the first call that needs it.
     /// </para>
     /// </summary>
     /// <remarks>
-    /// F-M492 (operator order 15.11.2026, found by the testbench run): the question is now asked
-    /// <b>per source and direction</b>, because the credentials do not belong to the plugin, they belong
-    /// to what the run is going to do. A run that only asks tvsubtitles.net never logs in to SubDL, so
+    /// F-M492 (operator order 15.11.2026, found by the testbench run): the question was already asked
+    /// <b>per source and direction</b>, because credentials do not belong to the plugin, they belong to
+    /// what the run is going to do. A run that only asks tvsubtitles.net never logs in to SubDL, so
     /// demanding the SubDL login pair refused a run that could have worked — measured on jf-test: two
     /// cycles died on credentials that the configured sources never needed.
+    /// <para>
+    /// F-M497 narrows that to its end: SubDL's own credentials are a SOURCE question, not a run
+    /// question. A missing API key or login pair no longer refuses anything — the source simply does
+    /// not take part (<see cref="IsConfiguredForUpload"/>, <see cref="IsConfiguredForDownload"/>) and
+    /// the run says so in one line. The refusal that remains is the TMDb key alone.
+    /// </para>
+    /// <para>
+    /// F-M496 and this rule do not contradict each other. The dry run makes no API call at all, so it
+    /// NEEDS no credentials and is never refused for missing ones — that is what it means for a dry run
+    /// to walk the same decision path: it is not asked to log in. Live, a source that is not configured
+    /// does not take part. One rule about needing (dry run: nothing) and one about taking part (both
+    /// modes, live binding), and the second one is the general one.
+    /// </para>
     /// </remarks>
-    /// <returns>The human-readable labels of every missing credential; empty when complete.</returns>
+    /// <returns>The human-readable labels of every missing MANDATORY credential; empty when complete.</returns>
     public List<string> MissingCredentials()
     {
         var missing = new List<string>();
 
-        // The SubDL API key authenticates the SEARCH, the file fetch and the quota read — that is the
-        // download direction and nothing else. The login pair authenticates the UPLOAD (its three steps
-        // carry a Bearer token from /login), so it is only required when an upload is switched on.
-        if (IsDownloadEnabled(SubtitleProvider.Subdl) && string.IsNullOrWhiteSpace(ApiKey))
-        {
-            missing.Add("SubDL API key");
-        }
-
-        if (IsUploadEnabled(SubtitleProvider.Subdl))
-        {
-            if (string.IsNullOrWhiteSpace(Username))
-            {
-                missing.Add("SubDL email");
-            }
-
-            if (string.IsNullOrWhiteSpace(Password))
-            {
-                missing.Add("SubDL password");
-            }
-        }
-
-        // The TMDb key is the one both sources and both directions need: it resolves and corrects the ids
-        // the store, the ranking and tvsubtitles.net's upload comment are all keyed on.
+        // F-M497: the only mandatory key. See the remarks above for why nothing else is demanded here,
+        // and for how that stands beside the dry-run rule (F-M496).
         if (string.IsNullOrWhiteSpace(TmdbApiKey))
         {
             missing.Add("TMDb API key (v3)");
@@ -808,6 +800,41 @@ public class PluginConfiguration : BasePluginConfiguration
 
         return missing;
     }
+
+    /// <summary>
+    /// F-M497: is this source configured for the UPLOAD direction?
+    /// <para>
+    /// The SubDL login pair authenticates the upload (its three steps carry a Bearer token from
+    /// /login); tvsubtitles.net takes no credentials at all, so there is nothing to configure. This is
+    /// the second half of "may this source take part" — <see cref="IsUploadEnabled"/> is the first —
+    /// and the pipelines ask both, right before a source starts.
+    /// </para>
+    /// </summary>
+    /// <param name="provider">The subtitle source asked about.</param>
+    /// <returns>True when this source has what its upload path needs.</returns>
+    public bool IsConfiguredForUpload(SubtitleProvider provider) => provider switch
+    {
+        SubtitleProvider.Subdl => !string.IsNullOrWhiteSpace(Username) && !string.IsNullOrWhiteSpace(Password),
+        SubtitleProvider.TvSubtitles => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// F-M497: is this source configured for the DOWNLOAD direction?
+    /// <para>
+    /// The SubDL API key authenticates the search, the file fetch and the quota read — the download
+    /// direction and nothing else. Without it SubDL cannot search, so the source steps aside instead of
+    /// taking the run down with a 403 on its first call.
+    /// </para>
+    /// </summary>
+    /// <param name="provider">The subtitle source asked about.</param>
+    /// <returns>True when this source has what its download path needs.</returns>
+    public bool IsConfiguredForDownload(SubtitleProvider provider) => provider switch
+    {
+        SubtitleProvider.Subdl => !string.IsNullOrWhiteSpace(ApiKey),
+        SubtitleProvider.TvSubtitles => true,
+        _ => false,
+    };
 
     /// <summary>
     /// Gets or sets the REQUIRED TMDB API key (v3), the TMDb-authoritative source for

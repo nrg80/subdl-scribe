@@ -3772,25 +3772,63 @@
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.MissingCredentials">
             <summary>
-            F-M19/F-M203: the four credentials the plugin cannot run without, in ONE place
-            so both pipelines and the settings page answer the same question.
+            F-M497 (operator order 15.11.2026: „Pflichtkonfiguration ist tmdb key. Wenn subdl nich
+            konfiguriert -> skip subdl upload/download. Kennzeichnung als required for subdl"): the ONE
+            credential the plugin cannot run without, in ONE place so both pipelines and the settings page
+            answer the same question.
             <para>
-            They are not alternatives: the SubDL login pair authenticates the UPLOAD (its
-            three steps carry a Bearer token from /login), the SubDL API key authenticates
-            search, file download and the quota read, and the TMDb key is what resolves and
-            corrects the ids in both directions. A missing one is not a degraded mode, it is
-            a run that cannot do its job — so the run is refused up front with the field
-            named, instead of failing later at the first call that needs it.
+            Only the TMDb key is mandatory. It is what resolves and corrects the ids the store, the ranking
+            and tvsubtitles.net's upload comment are all keyed on, in both directions and for both sources —
+            without it neither direction can do its job, so the run is refused up front with the field named
+            instead of failing later at the first call that needs it.
             </para>
             </summary>
             <remarks>
-            F-M492 (operator order 15.11.2026, found by the testbench run): the question is now asked
-            <b>per source and direction</b>, because the credentials do not belong to the plugin, they belong
-            to what the run is going to do. A run that only asks tvsubtitles.net never logs in to SubDL, so
+            F-M492 (operator order 15.11.2026, found by the testbench run): the question was already asked
+            <b>per source and direction</b>, because credentials do not belong to the plugin, they belong to
+            what the run is going to do. A run that only asks tvsubtitles.net never logs in to SubDL, so
             demanding the SubDL login pair refused a run that could have worked — measured on jf-test: two
             cycles died on credentials that the configured sources never needed.
+            <para>
+            F-M497 narrows that to its end: SubDL's own credentials are a SOURCE question, not a run
+            question. A missing API key or login pair no longer refuses anything — the source simply does
+            not take part (<see cref="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.IsConfiguredForUpload(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>, <see cref="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.IsConfiguredForDownload(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/>) and
+            the run says so in one line. The refusal that remains is the TMDb key alone.
+            </para>
+            <para>
+            F-M496 and this rule do not contradict each other. The dry run makes no API call at all, so it
+            NEEDS no credentials and is never refused for missing ones — that is what it means for a dry run
+            to walk the same decision path: it is not asked to log in. Live, a source that is not configured
+            does not take part. One rule about needing (dry run: nothing) and one about taking part (both
+            modes, live binding), and the second one is the general one.
+            </para>
             </remarks>
-            <returns>The human-readable labels of every missing credential; empty when complete.</returns>
+            <returns>The human-readable labels of every missing MANDATORY credential; empty when complete.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.IsConfiguredForUpload(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M497: is this source configured for the UPLOAD direction?
+            <para>
+            The SubDL login pair authenticates the upload (its three steps carry a Bearer token from
+            /login); tvsubtitles.net takes no credentials at all, so there is nothing to configure. This is
+            the second half of "may this source take part" — <see cref="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.IsUploadEnabled(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)"/> is the first —
+            and the pipelines ask both, right before a source starts.
+            </para>
+            </summary>
+            <param name="provider">The subtitle source asked about.</param>
+            <returns>True when this source has what its upload path needs.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.IsConfiguredForDownload(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M497: is this source configured for the DOWNLOAD direction?
+            <para>
+            The SubDL API key authenticates the search, the file fetch and the quota read — the download
+            direction and nothing else. Without it SubDL cannot search, so the source steps aside instead of
+            taking the run down with a 403 on its first call.
+            </para>
+            </summary>
+            <param name="provider">The subtitle source asked about.</param>
+            <returns>True when this source has what its download path needs.</returns>
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.TmdbApiKey">
             <summary>
@@ -8643,6 +8681,16 @@
              </summary>
              <param name="provider">Die Quelle, die hochladen soll.</param>
              <returns>Wahr, wenn diese Quelle per Upload-Schalter freigeschaltet ist.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.UploadSourceOrder">
+            <summary>
+            F-M496 (Operator-Anweisung 15.11.2026): die Reihenfolge, in der die Kette die Quellen fragt —
+            die konfigurierte Download-Reihenfolge, denn eine eigene Einstellung fuer den Upload gibt es
+            nicht (F-M495). Sie steht hier EINMAL, weil der Trockenlauf sie ebenfalls braucht: zwei
+            Aufzaehlungen derselben Reihenfolge waeren zwei Wahrheiten, und der Trockenlauf wuerde sie
+            irgendwann anders erzaehlen als der echte Lauf sie nimmt.
+            </summary>
+            <returns>Die Quellen in der Reihenfolge, in der sie angetreten werden.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.AnyUploadSourceStillWants(System.String,System.String,System.Boolean)">
             <summary>

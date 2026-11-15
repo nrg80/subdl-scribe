@@ -1457,7 +1457,60 @@ public sealed class UploadPipeline : IPackFiller
 
                 string neutralName = BuildNeutralName(
                     isSeries, imdbId!, season, episode, cand.Lang, ContentHashRegistry.ComputeHash(cand.Srt), cand.HearingImpaired);
-                LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] DRY-RUN would upload {Name}", neutralName);
+
+                // F-M496 (Operator-Anweisung 15.11.2026): der Trockenlauf spielt die KETTE durch, nicht
+                // mehr ein einzelnes Ziel. Hier stand bis jetzt EINE Zeile "[SubDL] DRY-RUN would
+                // upload …" — sie verschwieg, dass seit F-M495 zwei Endpunkte hintereinander gefragt
+                // werden, und damit auch den zweiten Schalter. Jetzt bekommt jede Quelle ihre eigene
+                // Zeile, in derselben Reihenfolge, in der die Kette sie fragen würde, und erst NACHDEM
+                // ihr Toggle (und — live — ihre Konfiguration) gefragt wurden. Kein API-Aufruf, kein
+                // Login: der Lauf endet hier, bevor irgendein Endpunkt angefasst wird.
+                string dryHash = ContentHashRegistry.ComputeHash(cand.Srt);
+                var dryHerkunft = Registry.GetOrigin(dryHash).Origin;
+                var dryGate = Api.Endpoints.UploadGate.Decide(
+                    SourceAllowed(Configuration.SubtitleProvider.Subdl),
+                    SourceAllowed(Configuration.SubtitleProvider.TvSubtitles),
+                    dryHerkunft,
+                    Registry.IsUploadedTo(mediaHash!, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.Subdl),
+                    Registry.IsUploadedTo(mediaHash!, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.TvSubtitles));
+                foreach (var quelle in UploadSourceOrder())
+                {
+                    // F-M496: der Toggle JE QUELLE, vor ihrer Zeile — dieselbe Frage, die die Kette
+                    // unmittelbar vor ihrem Start stellt (SourceAllowed). Aus heisst: diese Quelle
+                    // taucht im Bericht nicht auf, die andere schon.
+                    if (!SourceAllowed(quelle))
+                    {
+                        continue;
+                    }
+
+                    // F-M496 (Operator-Anweisung: „ein Trockenlauf braucht keine Zugangsdaten"): eine
+                    // Quelle, die NUR die Konfiguration nicht hat, wird im Trockenlauf trotzdem
+                    // gezeigt — er macht keinen Aufruf und verlangt deshalb nichts. Live faellt sie
+                    // aus der Kette (F-M497); der Trockenlauf sagt, was passieren WUERDE.
+                    if (quelle == Configuration.SubtitleProvider.Subdl ? !dryGate.Subdl : !dryGate.TvSubtitles)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL] {Name} [{Lang}] — source {Source} skipped: {Reason}",
+                            neutralName, cand.Lang, Api.Endpoints.Provenance.Name(quelle),
+                            Api.Endpoints.Provenance.MayUploadTo(dryHerkunft, quelle)
+                                ? "already-uploaded:" + Api.Endpoints.Provenance.Name(quelle)
+                                : "cross-source");
+                        continue;
+                    }
+
+                    if (quelle == Configuration.SubtitleProvider.Subdl)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] DRY-RUN would upload {Name} [{Lang}]", neutralName, cand.Lang);
+                    }
+                    else
+                    {
+                        // F-M496: der tvst-Zweig hatte keinen eigenen Trockenlauf-Schutz. Der Ausstieg
+                        // weiter unten (UploadSrtContentAsync) deckte die Kette nur als Ganzes ab und
+                        // sagte nichts ueber diese Quelle; hier steht die Zeile VOR jedem Aufruf —
+                        // auch vor dem Show-Abruf, den der Endpunkt sonst schon im Trockenlauf macht.
+                        LogUtil.PerItem(_config.LogMode, _logger,"[tvsubtitles] DRY-RUN would upload {Name} [{Lang}]", neutralName, cand.Lang);
+                    }
+                }
             }
 
             progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
@@ -2250,7 +2303,9 @@ public sealed class UploadPipeline : IPackFiller
         // per item by the caller; anything outside SubDL's table is "0" (default/unknown), which is
         // what shipped before, so an unusual rate cannot become a wrong claim.
 
-        // F-M22: dry run — no API calls
+        // F-M22: dry run — no API calls. F-M496: the CHAIN's own dry-run line is per source and sits
+        // in the batch block above (before this method is even reached); this guard stays as the last
+        // door, so a caller that arrives here in dry mode still sends nothing.
         if (_config.DryRun)
         {
             LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] DRY-RUN would upload {Name} [{Lang}]", neutralName, lang);
@@ -2307,9 +2362,7 @@ public sealed class UploadPipeline : IPackFiller
         // hat, steht danach in IHREM Id-/Zeitstempel-Feld, und beide Felder koennen gesetzt sein. Die
         // Reihenfolge ist die konfigurierte Download-Reihenfolge — eine eigene Einstellung fuer den
         // Upload gibt es nicht (Operator: keine neue GUI-Option).
-        var quellenReihenfolge = _config.DownloadOrder == Configuration.PluginConfiguration.DownloadSourceOrder.SubdlFirst
-            ? new[] { Configuration.SubtitleProvider.Subdl, Configuration.SubtitleProvider.TvSubtitles }
-            : new[] { Configuration.SubtitleProvider.TvSubtitles, Configuration.SubtitleProvider.Subdl };
+        var quellenReihenfolge = UploadSourceOrder();
 
         UploadResult? subdlErgebnis = null;
         UploadResult? zweiteErgebnis = null;
@@ -2321,6 +2374,20 @@ public sealed class UploadPipeline : IPackFiller
             {
                 LogUtil.PerItem(_config.LogMode, _logger,
                     "[SubDL] {Name} [{Lang}] — source {Source} skipped: that source is switched off",
+                    neutralName, lang, Api.Endpoints.Provenance.Name(quelle));
+                continue;
+            }
+
+            // F-M497 (Operator-Anweisung 15.11.2026): „Wenn subdl nich konfiguriert -> skip subdl
+            // upload". Die zweite Frage neben dem Schalter: HAT diese Quelle, was ihr Upload braucht?
+            // Fehlt sie, ist das kein Fehler und kein Blocker mehr (MissingCredentials kennt nur noch
+            // den TMDb-Schluessel) — die Quelle faellt aus der Kette, die andere laeuft weiter, und der
+            // Grund steht einmal im Log. Im Trockenlauf gilt die Frage NICHT: er macht keinen Aufruf
+            // und braucht deshalb keine Zugangsdaten (F-M496) — er zeigt, was ein echter Lauf taete.
+            if (!_config.DryRun && !_config.IsConfiguredForUpload(quelle))
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[SubDL] {Name} [{Lang}] — source {Source} skipped — not configured (required for SubDL only)",
                     neutralName, lang, Api.Endpoints.Provenance.Name(quelle));
                 continue;
             }
@@ -4867,7 +4934,12 @@ public sealed class UploadPipeline : IPackFiller
         }
 
         var client = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
-        var endpoint = new Api.Endpoints.TvSubtitlesUploadEndpoint(client, dryRun: false);
+        // F-M496 (Operator-Anweisung 15.11.2026): der eigene Schalter der Quelle wird dem Endpunkt
+        // mitgegeben, statt `false` zu stehen. F-M483 hat den Endpunkt genau dafuer gebaut ("a dry run
+        // builds the same body and sends nothing — which is also the default, so a mis-wired caller
+        // cannot upload by accident"); die Kette prueft den Trockenlauf vorher selbst, hier steht die
+        // zweite Tuer.
+        var endpoint = new Api.Endpoints.TvSubtitlesUploadEndpoint(client, dryRun: _config.DryRun);
         var parsed = Pipeline.MediaNameParser.Parse(Path.GetFileNameWithoutExtension(releaseName));
         var showName = parsed.Title ?? Path.GetFileNameWithoutExtension(releaseName);
         var ticket = new Api.Endpoints.UploadTicket(
@@ -4909,6 +4981,19 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="provider">Die Quelle, die hochladen soll.</param>
     /// <returns>Wahr, wenn diese Quelle per Upload-Schalter freigeschaltet ist.</returns>
     private bool SourceAllowed(Configuration.SubtitleProvider provider) => _config.IsUploadEnabled(provider);
+
+    /// <summary>
+    /// F-M496 (Operator-Anweisung 15.11.2026): die Reihenfolge, in der die Kette die Quellen fragt —
+    /// die konfigurierte Download-Reihenfolge, denn eine eigene Einstellung fuer den Upload gibt es
+    /// nicht (F-M495). Sie steht hier EINMAL, weil der Trockenlauf sie ebenfalls braucht: zwei
+    /// Aufzaehlungen derselben Reihenfolge waeren zwei Wahrheiten, und der Trockenlauf wuerde sie
+    /// irgendwann anders erzaehlen als der echte Lauf sie nimmt.
+    /// </summary>
+    /// <returns>Die Quellen in der Reihenfolge, in der sie angetreten werden.</returns>
+    private Configuration.SubtitleProvider[] UploadSourceOrder() =>
+        _config.DownloadOrder == Configuration.PluginConfiguration.DownloadSourceOrder.SubdlFirst
+            ? new[] { Configuration.SubtitleProvider.Subdl, Configuration.SubtitleProvider.TvSubtitles }
+            : new[] { Configuration.SubtitleProvider.TvSubtitles, Configuration.SubtitleProvider.Subdl };
 
     /// <summary>
     /// F-M489: has ANY upload source still to get this pair? Asked per source, because a tvst upload must

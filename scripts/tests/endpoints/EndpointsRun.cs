@@ -410,10 +410,13 @@ internal static class Program
         // ---- 14. Quellenabhaengige Vorpruefungen und Herkunft an jeder Ablage (F-M492/F-M493) -----
         var cfgSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"));
         var dispatcherSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlEventDispatcher.cs"));
-        Check("the SubDL API key is only demanded when SubDL downloads, the login pair only when SubDL uploads",
-            cfgSource.Contains("if (IsDownloadEnabled(SubtitleProvider.Subdl) && string.IsNullOrWhiteSpace(ApiKey))", StringComparison.Ordinal)
-            && cfgSource.Contains("if (IsUploadEnabled(SubtitleProvider.Subdl))", StringComparison.Ordinal)
-            && !cfgSource.Contains("if (string.IsNullOrWhiteSpace(Username))\n        {\n            missing.Add(\"SubDL email\");\n        }\n\n        if (string.IsNullOrWhiteSpace(Password))", StringComparison.Ordinal));
+        Check("the only demanded credential is the TMDb key — SubDL's pair is a source question (F-M492/F-M497)",
+            cfgSource.Contains("if (string.IsNullOrWhiteSpace(TmdbApiKey))", StringComparison.Ordinal)
+            && !cfgSource.Contains("missing.Add(\"SubDL API key\")", StringComparison.Ordinal)
+            && !cfgSource.Contains("missing.Add(\"SubDL email\")", StringComparison.Ordinal)
+            && !cfgSource.Contains("missing.Add(\"SubDL password\")", StringComparison.Ordinal)
+            && cfgSource.Contains("public bool IsConfiguredForUpload(SubtitleProvider provider)", StringComparison.Ordinal)
+            && cfgSource.Contains("public bool IsConfiguredForDownload(SubtitleProvider provider)", StringComparison.Ordinal));
         Check("a cycle that does not ask SubDL is not held by the SubDL counters",
             dispatcherSource.Contains("if (!config.IsDownloadEnabled(Configuration.SubtitleProvider.Subdl))", StringComparison.Ordinal));
         Check("a spent SubDL quota does not hold a cycle that still has tvsubtitles",
@@ -441,7 +444,8 @@ internal static class Program
 
         // ---- 15. Upload: beide Endpunkte hintereinander (F-M495) --------------------------------
         Check("the upload walks BOTH sources in the configured order — no single target any more",
-            uploadSource.Contains("var quellenReihenfolge = _config.DownloadOrder == Configuration.PluginConfiguration.DownloadSourceOrder.SubdlFirst", StringComparison.Ordinal)
+            uploadSource.Contains("var quellenReihenfolge = UploadSourceOrder();", StringComparison.Ordinal)
+            && uploadSource.Contains("_config.DownloadOrder == Configuration.PluginConfiguration.DownloadSourceOrder.SubdlFirst", StringComparison.Ordinal)
             && uploadSource.Contains("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal)
             && uploadSource.Contains("bool subdlGenommen = subdlErgebnis is { Ok: true };", StringComparison.Ordinal)
             && uploadSource.Contains("bool zweiteGenommen = zweiteErgebnis is { Ok: true };", StringComparison.Ordinal)
@@ -457,6 +461,66 @@ internal static class Program
             && uploadSource.Contains("\"cross-source\"", StringComparison.Ordinal)
             && uploadSource.Contains("Api.Endpoints.Provenance.MayUploadTo(herkunft, quelle)", StringComparison.Ordinal)
             && uploadSource.Contains("Api.Endpoints.UploadGate.Decide(", StringComparison.Ordinal));
+
+        // ---- 16. Trockenlauf: eine Zeile je Quelle, keine Zugangsdaten (F-M496) -----------------
+        // Der Trockenlauf stand als EIN Ausstieg vor der Kette: eine Zeile fuer zwei Endpunkte, und
+        // MissingCredentials verlangte fuer ihn Benutzername und Passwort, obwohl er keinen einzigen
+        // Aufruf macht. Beides ist gemessen (jf-test, 15.11.2026) und beides wird hier festgehalten.
+        var trockenOhneLogin = Conf(c =>
+        {
+            c.DryRun = true;
+            c.UploadEnabled = true;
+            c.SubdlUploadEnabled = true;
+            c.TvSubtitlesUploadEnabled = true;
+            c.Username = string.Empty;
+            c.Password = string.Empty;
+        });
+        Check("a dry run is not refused for missing SubDL credentials (F-M496)",
+            trockenOhneLogin.MissingCredentials().Count == 0
+            && uploadSource.Contains("if (!_config.DryRun && !_config.IsConfiguredForUpload(quelle))", StringComparison.Ordinal),
+            "missing=" + string.Join(",", trockenOhneLogin.MissingCredentials()));
+
+        var dryLineTvst = uploadSource.IndexOf("[tvsubtitles] DRY-RUN would upload {Name} [{Lang}]", StringComparison.Ordinal);
+        var dryBlockStart = uploadSource.IndexOf("if (_config.DryRun)", StringComparison.Ordinal);
+        var secondSourceCall = uploadSource.IndexOf("await SendToSecondSourceAsync(", StringComparison.Ordinal);
+        Check("the tvst branch has its own dry-run guard BEFORE its call — one line per source (F-M496)",
+            dryLineTvst > 0 && dryBlockStart > 0 && secondSourceCall > 0
+            && dryLineTvst > dryBlockStart
+            && dryLineTvst < secondSourceCall
+            && uploadSource.Contains("[SubDL] DRY-RUN would upload {Name} [{Lang}]", StringComparison.Ordinal)
+            && uploadSource.Contains("foreach (var quelle in UploadSourceOrder())", StringComparison.Ordinal)
+            && uploadSource.Contains("if (!SourceAllowed(quelle))", StringComparison.Ordinal)
+            && uploadSource.Contains("TvSubtitlesUploadEndpoint(client, dryRun: _config.DryRun)", StringComparison.Ordinal),
+            "tvst line @" + dryLineTvst + ", dry block @" + dryBlockStart + ", call @" + secondSourceCall);
+
+        // ---- 17. TMDb ist die einzige Pflicht, SubDL faellt ohne Konfiguration aus der Kette (F-M497) --
+        var ohneTmdb = Conf(c => { c.TmdbApiKey = string.Empty; });
+        var ohneSubdlKonfig = Conf(c =>
+        {
+            c.UploadEnabled = true;
+            c.DownloadEnabled = true;
+            c.Username = string.Empty;
+            c.Password = string.Empty;
+            c.ApiKey = string.Empty;
+        });
+        Check("missing TMDb blocks the run, missing SubDL configuration does not (F-M497)",
+            ohneTmdb.MissingCredentials().Contains("TMDb API key (v3)")
+            && ohneSubdlKonfig.MissingCredentials().Count == 0,
+            "ohne Tmdb=" + string.Join(",", ohneTmdb.MissingCredentials())
+            + " ohne SubDL=" + string.Join(",", ohneSubdlKonfig.MissingCredentials()));
+
+        Check("SubDL without its credentials steps aside instead of blocking — both directions (F-M497)",
+            !ohneSubdlKonfig.IsConfiguredForUpload(SubtitleProvider.Subdl)
+            && ohneSubdlKonfig.IsConfiguredForUpload(SubtitleProvider.TvSubtitles)
+            && !ohneSubdlKonfig.IsConfiguredForDownload(SubtitleProvider.Subdl)
+            && ohneSubdlKonfig.IsConfiguredForDownload(SubtitleProvider.TvSubtitles)
+            && uploadSource.Contains(
+                "\"[SubDL] {Name} [{Lang}] — source {Source} skipped — not configured (required for SubDL only)\"",
+                StringComparison.Ordinal)
+            && downloadSource.Contains(
+                "if (!_config.IsConfiguredForDownload(Configuration.SubtitleProvider.Subdl))", StringComparison.Ordinal)
+            && downloadSource.Contains(
+                "\"[SubDL-D] {File} — SubDL skipped — not configured (required for SubDL only)\"", StringComparison.Ordinal));
 
         Console.WriteLine();
         if (_failures > 0)

@@ -3387,6 +3387,19 @@ public sealed class DownloadPipeline : IDisposable
         string langs = string.Join(",", missing);
         var noHi = new List<SubtitleCandidate>();
 
+        // F-M497 (Operator-Anweisung 15.11.2026: „Wenn subdl nich konfiguriert -> skip subdl
+        // download"): ohne API-Schluessel gibt es keine SubDL-Suche. Sie faellt aus der Kette, statt
+        // den Lauf mit einem 403 auf ihrem ersten Aufruf zu beenden (das war der alte Reflex: der
+        // Schluessel fehlte, also starb der ganze Lauf). Die andere Quelle laeuft weiter; die Zeile
+        // nennt den Grund genau einmal pro Datei.
+        if (!_config.IsConfiguredForDownload(Configuration.SubtitleProvider.Subdl))
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[SubDL-D] {File} — SubDL skipped — not configured (required for SubDL only)",
+                filename);
+            return (new List<SubtitleCandidate>(), false, 0, new List<SubtitleCandidate>());
+        }
+
         // ---- Main: v1 id search (episode-exact, server-side verified) ----
         // (15.09.2026): v2 id-search ignores season/episode server-side
         // (live: BCS S02E01 query returned 30 candidates incl. S06 packs and
@@ -3661,6 +3674,14 @@ public sealed class DownloadPipeline : IDisposable
         if (!SourceAllowed(cand.Provider))
         {
             return new CandidateAttempt(null, null, DownloadOutcome.None("source-off"));
+        }
+
+        // F-M497: die zweite Tuer derselben Frage — eine Quelle ohne Konfiguration (SubDL ohne
+        // API-Schluessel bzw. ohne Login-Paar) wird nicht abgerufen, auch nicht aus einer Liste, die
+        // noch aus einer frueheren Konfiguration stammt.
+        if (!_config.IsConfiguredForDownload(cand.Provider))
+        {
+            return new CandidateAttempt(null, null, DownloadOutcome.None("source-unconfigured"));
         }
 
 

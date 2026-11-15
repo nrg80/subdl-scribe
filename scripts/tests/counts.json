@@ -207,6 +207,22 @@
     "T214": {
       "suite": "endpoints",
       "checks": 3
+    },
+    "T215": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T216": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T217": {
+      "suite": "gui-structure",
+      "checks": 1
+    },
+    "T218": {
+      "suite": "gui-structure",
+      "checks": 1
     }
   }
 }

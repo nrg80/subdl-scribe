@@ -42,7 +42,6 @@
 /opt/data/subdl-scribe/scripts/tests/seasonpack/bin/Release/net10.0/ICU4N.dll
 /opt/data/subdl-scribe/scripts/tests/seasonpack/bin/Release/net10.0/Polly.Core.dll
 /opt/data/subdl-scribe/scripts/tests/seasonpack/bin/Release/net10.0/Jellyfin.Plugin.SubdlSync.pdb
-/opt/data/subdl-scribe/scripts/tests/seasonpack/bin/Release/net10.0/Jellyfin.Plugin.SubdlSync.xml
 /opt/data/subdl-scribe/scripts/tests/seasonpack/bin/Release/net10.0/MediaBrowser.Common.xml
 /opt/data/subdl-scribe/scripts/tests/seasonpack/bin/Release/net10.0/MediaBrowser.Controller.xml
 /opt/data/subdl-scribe/scripts/tests/seasonpack/bin/Release/net10.0/MediaBrowser.Model.xml

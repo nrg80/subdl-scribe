@@ -1673,6 +1673,47 @@ def main():
           "one pack instead of one upload per episode. Default: on. An episode that already went up on its own"
           in html)
 
+    # ---- F-M497 (Operator-Anweisung 15.11.2026: „Pflichtkonfiguration ist tmdb key … Kennzeichnung
+    # als required for subdl"): Pflicht ist ALLEIN der TMDb-Schlüssel. Die drei SubDL-Felder sagen
+    # „Required for SubDL only", damit ein Bediener nicht glaubt, er müsse ein Konto haben; der
+    # TMDb-Schlüssel steht als Required da. Die Feld-IDs bleiben, was sie waren — eine Umbenennung
+    # würde gespeicherte Konfigurationen und jedes Skript brechen.
+    # Die Seite wird hier eigens gelesen: `page_src` entsteht weiter unten, der Block steht aber
+    # vor der Ausgabe der Ergebnisse (sonst erscheinen seine Pruefungen nicht im Bericht).
+    page_src_f497 = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))), "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"),
+        encoding="utf-8").read()
+
+    def _section(heading):
+        """Der Block einer Überschrift: von ihr bis zur nächsten <h3> — unabhängig von der Reihenfolge."""
+        start = page_src_f497.index(heading)
+        nxt = page_src_f497.find('<h3>', start + len(heading))
+        return page_src_f497[start:nxt if nxt != -1 else len(page_src_f497)]
+
+    subdl_block = _section('<h3>SubDL Account')
+    tmdb_block = _section('<h3>TMDb (')
+    check("F-M497: the SubDL fields are marked 'Required for SubDL only', the TMDb key as Required",
+          "Required for SubDL only" in subdl_block
+          and subdl_block.count("Required for SubDL only") >= 3
+          and 'id="Username"' in subdl_block and 'id="Password"' in subdl_block and 'id="ApiKey"' in subdl_block
+          and 'subdl-required">Required</span>' in tmdb_block
+          and "the one mandatory key" in tmdb_block
+          and 'id="TmdbApiKey"' in tmdb_block,
+          "F-M497: SubDL ist optional (required for SubDL only), TMDb ist Pflicht")
+
+    # ---- F-M497 (Nachtrag des Nutzers: „Tmdb confi dann auch vor subdl konfi in der gui"): die
+    # Pflicht steht VOR der optionalen Quelle — wer die Seite liest, sieht zuerst, was er haben MUSS.
+    # Nur die beiden Blöcke sind getauscht; geladen und gespeichert wird über die Feld-IDs
+    # (querySelector('#…')), die von ihrer Position nichts wissen — der Tausch darf dort nichts ändern.
+    check("F-M497: the TMDb block stands BEFORE the SubDL account block",
+          page_src_f497.index('<h3>TMDb (') < page_src_f497.index('<h3>SubDL Account')
+          and page_src_f497.index('id="TmdbApiKey"') < page_src_f497.index('id="Username"')
+          and "document.querySelector('#TmdbApiKey').value = config.TmdbApiKey || '';" in page_src_f497
+          and "config.TmdbApiKey = tmdbKey;" in page_src_f497
+          and "document.querySelector('#Username').value = config.Username || '';" in page_src_f497
+          and "config.Username = document.querySelector('#Username').value;" in page_src_f497,
+          "F-M497: TMDb zuerst, SubDL danach — die ID-Bindungen bleiben")
+
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         line = "  %s %s" % ("OK  " if ok else "FAIL", name)

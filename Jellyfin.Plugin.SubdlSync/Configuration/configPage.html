@@ -88,29 +88,37 @@
                             </div>
                         </div>
 
-                        <h3>SubDL Account (<span class="subdl-required">Required</span>)</h3>
+                        <!-- F-M497: der TMDb-Schluessel ist die EINZIGE Pflicht — ohne ihn startet keine
+                             Richtung, und die Seite sagt das ausdruecklich. -->
+                        <h3>TMDb (<span class="subdl-required">Required</span>)</h3>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="TmdbApiKey">TMDb API key (v3)</label>
+                            <input id="TmdbApiKey" name="TmdbApiKey" type="password" is="emby-input" autocomplete="new-password" required />
+                            <div class="fieldDescription">Required — the one mandatory key: without it neither download nor upload starts. Resolves IMDb / TMDb ids for upload and download. Register at <a href="https://www.themoviedb.org" target="_blank" rel="noopener">themoviedb.org</a>, then request a free key at <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org/settings/api</a>.</div>
+                        </div>
+
+                        <!-- F-M497 (Operator-Anweisung 15.11.2026: "Pflichtkonfiguration ist tmdb key …
+                             Kennzeichnung als required for subdl"): die SubDL-Felder sind NICHT mehr
+                             Pflicht — sie gehoeren zu EINER Quelle. Fehlt eines, faellt SubDL aus der
+                             Kette und tvsubtitles.net laeuft weiter; der Hinweis unter jedem Feld sagt
+                             das. Die IDs der Felder bleiben unveraendert. -->
+                        <h3>SubDL Account (<span class="subdl-required">Required for SubDL only</span>)</h3>
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="Username">SubDL email</label>
                             <input id="Username" name="Username" type="text" is="emby-input" required />
-                            <div class="fieldDescription">Login email of your SubDL account. Register free at <a href="https://subdl.com" target="_blank" rel="noopener">subdl.com</a>, then get your API key from the account panel.</div>
+                            <div class="fieldDescription">Required for SubDL only. Login email of your SubDL account. Register free at <a href="https://subdl.com" target="_blank" rel="noopener">subdl.com</a>, then get your API key from the account panel. Leave the SubDL fields empty to run on tvsubtitles.net alone.</div>
                         </div>
 
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="Password">SubDL password</label>
                             <input id="Password" name="Password" type="password" is="emby-input" autocomplete="new-password" required />
+                            <div class="fieldDescription">Required for SubDL only — the upload logs in with this pair. Without it SubDL is skipped, for upload as for download.</div>
                         </div>
 
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="ApiKey">SubDL API key</label>
                             <input id="ApiKey" name="ApiKey" type="password" is="emby-input" autocomplete="new-password" required />
-                            <div class="fieldDescription">Free key, created in your account panel &mdash; documented at <a href="https://subdl.com/api-doc" target="_blank" rel="noopener">subdl.com/api-doc</a>.</div>
-                        </div>
-
-                        <h3>TMDb (<span class="subdl-required">Required</span>)</h3>
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="TmdbApiKey">TMDb API key (v3)</label>
-                            <input id="TmdbApiKey" name="TmdbApiKey" type="password" is="emby-input" autocomplete="new-password" required />
-                            <div class="fieldDescription">Resolves IMDb / TMDb ids for upload and download. Register at <a href="https://www.themoviedb.org" target="_blank" rel="noopener">themoviedb.org</a>, then request a free key at <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org/settings/api</a>.</div>
+                            <div class="fieldDescription">Required for SubDL only. Free key, created in your account panel &mdash; documented at <a href="https://subdl.com/api-doc" target="_blank" rel="noopener">subdl.com/api-doc</a>. Without it SubDL is skipped, for download as for upload.</div>
                         </div>
 
                         

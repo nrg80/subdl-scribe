@@ -35,7 +35,8 @@ Check("ready postprocessing is NOT off", !WorkerOffState.Applies(PP, ok));
 Check("download off when the toggle is off", Off(DL, c => c.DownloadEnabled = false));
 Check("download off when no library is selected", Off(DL, c => c.SelectedLibraries.Clear()));
 Check("download off when the language list is empty", Off(DL, c => c.DownloadLanguages = "  , ,"));
-Check("download off when a credential is missing", Off(DL, c => c.ApiKey = " "));
+Check("download off when the MANDATORY credential is missing — and NOT for a missing SubDL key, because tvsubtitles still runs (F-M497)",
+    Off(DL, c => c.TmdbApiKey = "") && !Off(DL, c => c.ApiKey = " "));
 
 // --- upload: three hard stops, and NO language condition --------------------
 Check("upload off when the toggle is off", Off(UL, c => c.UploadEnabled = false));
