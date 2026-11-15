@@ -48,7 +48,7 @@ public static class WorkerOffState
 
         if (string.Equals(workerKey, WorkerRunRegistry.DownloadWorkerKey, StringComparison.Ordinal))
         {
-            return !config.IsDownloadEnabled(SubtitleProvider.Subdl)
+            return !config.AnyDownloadEnabled
                 || NoLibraries(config)
                 || NoTargetLanguages(config)
                 || MissingCredential(config);
@@ -56,7 +56,7 @@ public static class WorkerOffState
 
         if (string.Equals(workerKey, WorkerRunRegistry.UploadWorkerKey, StringComparison.Ordinal))
         {
-            return !config.IsUploadEnabled(SubtitleProvider.Subdl)
+            return !config.AnyUploadEnabled
                 || NoLibraries(config)
                 || MissingCredential(config);
         }

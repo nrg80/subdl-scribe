@@ -856,6 +856,21 @@ public class PluginConfiguration : BasePluginConfiguration
     };
 
     /// <summary>
+    /// Gets a value indicating whether the DOWNLOAD direction runs at all — for ANY source.
+    /// F-M492 (operator order 15.11.2026): the tasks and the cycle gates used to ask this question of
+    /// SubDL alone, so switching SubDL off and tvsubtitles on made the whole direction look disabled and
+    /// the run was skipped with "Download pipeline disabled" although a source wanted to work.
+    /// </summary>
+    public bool AnyDownloadEnabled =>
+        Array.Exists(Enum.GetValues<SubtitleProvider>(), IsDownloadEnabled);
+
+    /// <summary>
+    /// Gets a value indicating whether the UPLOAD direction runs at all — for ANY source (F-M492).
+    /// </summary>
+    public bool AnyUploadEnabled =>
+        Array.Exists(Enum.GetValues<SubtitleProvider>(), IsUploadEnabled);
+
+    /// <summary>
     /// F-M477: is the UPLOAD direction on for this source? Same answering order as
     /// <see cref="IsDownloadEnabled"/>: provider switch first, legacy <see cref="UploadEnabled"/> as fallback.
     /// </summary>

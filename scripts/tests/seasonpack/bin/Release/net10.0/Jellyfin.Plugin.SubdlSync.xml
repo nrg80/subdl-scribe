@@ -3829,6 +3829,19 @@
             <param name="provider">The subtitle source asked about.</param>
             <returns>True when the download direction runs for this source.</returns>
         </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.AnyDownloadEnabled">
+            <summary>
+            Gets a value indicating whether the DOWNLOAD direction runs at all — for ANY source.
+            F-M492 (operator order 15.11.2026): the tasks and the cycle gates used to ask this question of
+            SubDL alone, so switching SubDL off and tvsubtitles on made the whole direction look disabled and
+            the run was skipped with "Download pipeline disabled" although a source wanted to work.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.AnyUploadEnabled">
+            <summary>
+            Gets a value indicating whether the UPLOAD direction runs at all — for ANY source (F-M492).
+            </summary>
+        </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.IsUploadEnabled(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
             <summary>
             F-M477: is the UPLOAD direction on for this source? Same answering order as

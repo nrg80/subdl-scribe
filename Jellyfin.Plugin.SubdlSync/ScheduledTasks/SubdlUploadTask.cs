@@ -88,7 +88,7 @@ public class SubdlUploadTask : IScheduledTask
         // marks itself when its own run begins (SubdlEventDispatcher.MarkDirectionRunning); this
         // task only records the outcome it waited for.
         var config = plugin.Configuration;
-        if (!config.IsUploadEnabled(SubtitleProvider.Subdl))
+        if (!config.AnyUploadEnabled)
         {
             // F-M366: no row for a direction that ran nothing — the lamps have no "disabled".
             LogUtil.Normal(_logger, "[SubDL] Upload inactive (UploadEnabled=false) — run skipped, no worker row (F-M366).");

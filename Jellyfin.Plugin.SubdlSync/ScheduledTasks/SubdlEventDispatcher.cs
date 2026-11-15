@@ -298,8 +298,8 @@ public sealed class SubdlEventDispatcher : IDisposable
         // cycle when the direction actually wants on-arrival. If only ONE
         // direction listens, the cycle is scoped to that direction; the other
         // direction still gets its regular anchor runs.
-        bool upArr = config.IsUploadEnabled(SubtitleProvider.Subdl) && config.UploadOnArrival;
-        bool downArr = config.IsDownloadEnabled(SubtitleProvider.Subdl) && config.DownloadOnArrival;
+        bool upArr = config.AnyUploadEnabled && config.UploadOnArrival;
+        bool downArr = config.AnyDownloadEnabled && config.DownloadOnArrival;
         if (!upArr && !downArr)
         {
             LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[SubDL-Dispatch] Event ignored — on-arrival disabled for both directions: {Name}", e.Item.Name);
@@ -1018,7 +1018,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         // SAME kind of gate here — both mean "this direction does no work this cycle": no queue
         // fill, no run, items stay due, and the direction still writes its own row.
         bool heldByAllowance = !upload && _downloadAllowanceHeld != null;
-        if (upload ? !config.IsUploadEnabled(SubtitleProvider.Subdl) : (!config.IsDownloadEnabled(SubtitleProvider.Subdl) || heldByAllowance))
+        if (upload ? !config.AnyUploadEnabled : (!config.AnyDownloadEnabled || heldByAllowance))
         {
             if (heldByAllowance)
             {
@@ -1101,7 +1101,7 @@ public sealed class SubdlEventDispatcher : IDisposable
 
         LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger, "[SubDL-Dispatch] during-cycle arrivals pending — one follow-up reseed.");
 
-        if (followUpDown && config.IsDownloadEnabled(SubtitleProvider.Subdl))
+        if (followUpDown && config.AnyDownloadEnabled)
         {
             if (!await SeedAndMaybeRunAsync(trigger, onlyLibs, config, upload: false, scopedOnly: true, precheck: true, onlyItems: followUpItems).ConfigureAwait(false))
             {
@@ -1109,7 +1109,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
         }
 
-        if (followUpUp && config.IsUploadEnabled(SubtitleProvider.Subdl))
+        if (followUpUp && config.AnyUploadEnabled)
         {
             if (!await SeedAndMaybeRunAsync(trigger, onlyLibs, config, upload: true, scopedOnly: true, precheck: true, onlyItems: followUpItems).ConfigureAwait(false))
             {
@@ -1252,7 +1252,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             return;
         }
 
-        bool enabled = upload ? config.IsUploadEnabled(SubtitleProvider.Subdl) : config.IsDownloadEnabled(SubtitleProvider.Subdl);
+        bool enabled = upload ? config.AnyUploadEnabled : config.AnyDownloadEnabled;
         if (!enabled)
         {
             return;
@@ -2144,7 +2144,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             LogUtil.Normal(
                 _logger,
                 "[SubDL-Dispatch] download ran nothing this cycle ({Why}) — no worker row (F-M366).",
-                config.IsDownloadEnabled(SubtitleProvider.Subdl) ? "run never began" : "switched off");
+                config.AnyDownloadEnabled ? "run never began" : "switched off");
         }
 
         if (dir != CycleDirection.DownloadOnly && !_dirRowWrittenUp)
@@ -2152,7 +2152,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             LogUtil.Normal(
                 _logger,
                 "[SubDL-Dispatch] upload ran nothing this cycle ({Why}) — no worker row (F-M366).",
-                config.IsUploadEnabled(SubtitleProvider.Subdl) ? "run never began" : "switched off");
+                config.AnyUploadEnabled ? "run never began" : "switched off");
         }
     }
 

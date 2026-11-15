@@ -404,6 +404,14 @@ internal static class Program
             markCalls >= 4 && originArgs == markCalls);
         Check("the run-end line names the downloads that did not pass the significance",
             downloadSource.Contains("{NotSignificant} downloaded without significance", StringComparison.Ordinal));
+        var taskSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlDownloadTask.cs"));
+        var offStateSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/WorkerOffState.cs"));
+        Check("the download task asks whether ANY source downloads, not whether SubDL does",
+            taskSource.Contains("if (!config.AnyDownloadEnabled)", StringComparison.Ordinal)
+            && !taskSource.Contains("IsDownloadEnabled(SubtitleProvider.Subdl)", StringComparison.Ordinal));
+        Check("the off-state of a direction is asked for the direction, not for SubDL",
+            offStateSource.Contains("return !config.AnyDownloadEnabled", StringComparison.Ordinal)
+            && offStateSource.Contains("return !config.AnyUploadEnabled", StringComparison.Ordinal));
 
         Console.WriteLine();
         if (_failures > 0)

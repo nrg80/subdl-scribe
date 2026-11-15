@@ -1091,7 +1091,7 @@ def main():
         # into the same wall, and prod had 1144 items already queued.
         check("the RUN is refused at the same place as the download switch",
               "heldByAllowance" in disp_src
-              and "!config.IsDownloadEnabled(SubtitleProvider.Subdl) || heldByAllowance" in disp_src,
+              and "!config.AnyDownloadEnabled || heldByAllowance" in disp_src,
               "gating only the fill still walks what earlier cycles queued")
         # F-M365 superseded the deferred row: a held-back download writes NO row (a row would have
         # to invent a time for work that did not happen) and says why in the log instead.

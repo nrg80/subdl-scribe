@@ -104,7 +104,7 @@ public class SubdlDownloadTask : IScheduledTask
         // marks itself when its own run begins (SubdlEventDispatcher.MarkDirectionRunning); this
         // task only records the outcome it waited for.
         var config = plugin.Configuration;
-        if (!config.IsDownloadEnabled(SubtitleProvider.Subdl))
+        if (!config.AnyDownloadEnabled)
         {
             // F-M366 (operator decision 20.10.2026: "Wir haben kein disabled in der Ampel").
             // The lamps know run/ok/fail/cancel/skip/defer — a disabled direction rendered as a
