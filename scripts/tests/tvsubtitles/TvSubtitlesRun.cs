@@ -59,12 +59,20 @@ internal static class Program
             && TvSubtitlesClient.Rips.Contains(string.Empty));
 
         // ---- 2. the comment carries the ids, the author stays out -------------------------------
-        Check("the comment is TMDb and IMDb in that order",
-            TvSubtitlesClient.Comment(1422, "tt1442464") == "TMDB 1422 / IMDb tt1442464");
-        Check("one id is enough, and an unknown id stays out",
-            TvSubtitlesClient.Comment(1422, null) == "TMDB 1422"
-            && TvSubtitlesClient.Comment(null, "tt1442464") == "IMDb tt1442464"
-            && TvSubtitlesClient.Comment(null, null) == string.Empty);
+        Check("the comment names the ids and then the client that wrote it",
+            TvSubtitlesClient.Comment(1422, "tt1442464")
+                == "TMDB 1422 / IMDb tt1442464 / " + TvSubtitlesClient.ClientTag,
+            "found: " + TvSubtitlesClient.Comment(1422, "tt1442464"));
+        Check("the client tag carries the running version, read from the assembly",
+            TvSubtitlesClient.ClientTag.StartsWith("Sub Scribe ", StringComparison.Ordinal)
+            && TvSubtitlesClient.ClientTag.Length > "Sub Scribe ".Length
+            && TvSubtitlesClient.ClientTag != "Sub Scribe 0.0.0.0");
+        Check("one id is enough, an unknown id stays out, the client tag never does",
+            TvSubtitlesClient.Comment(1422, null) == "TMDB 1422 / " + TvSubtitlesClient.ClientTag
+            && TvSubtitlesClient.Comment(null, "tt1442464") == "IMDb tt1442464 / " + TvSubtitlesClient.ClientTag
+            && TvSubtitlesClient.Comment(null, null) == TvSubtitlesClient.ClientTag);
+        Check("an extra text sits between the ids and the client tag",
+            TvSubtitlesClient.Comment(1422, null, "recheck") == "TMDB 1422 / recheck / " + TvSubtitlesClient.ClientTag);
 
         // ---- 3. the upload refuses what the form would silently swallow -------------------------
         var data = Encoding.UTF8.GetBytes("1\n00:00:01,000 --> 00:00:02,000\nhello\n");
@@ -89,7 +97,8 @@ internal static class Program
             !upload.Fields.Any(f => f.Key == "author"),
             "an absent part is the only way to keep whatever the page pre-fills");
         Check("the ids land in the comment field, the release stays its own field",
-            upload.Fields.Single(f => f.Key == "comment").Value == "TMDB 1422 / IMDb tt1442464"
+            upload.Fields.Single(f => f.Key == "comment").Value
+                == "TMDB 1422 / IMDb tt1442464 / " + TvSubtitlesClient.ClientTag
             && upload.Fields.Single(f => f.Key == "release").Value == "FEVER");
         var flags = BuildOk(data, doubleEpisode: true, hearingImpaired: true)!;
         Check("double episode and hearing-impaired are appended as \"1\" and only when set",

@@ -161,7 +161,7 @@
     },
     "T203": {
       "suite": "tvsubtitles",
-      "checks": 39
+      "checks": 41
     }
   }
 }

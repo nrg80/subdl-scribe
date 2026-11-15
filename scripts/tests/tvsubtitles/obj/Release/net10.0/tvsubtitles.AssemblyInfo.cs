@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("tvsubtitlesrun")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c4bad8aa2e4be4a2bf62ffe1e2135e9c29fc3351")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2be9adefb96059fdac36a8cc35f4345097c04a67")]
 [assembly: System.Reflection.AssemblyProductAttribute("tvsubtitlesrun")]
 [assembly: System.Reflection.AssemblyTitleAttribute("tvsubtitlesrun")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

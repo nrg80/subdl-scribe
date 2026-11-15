@@ -526,13 +526,22 @@ public sealed class TvSubtitlesClient
     }
 
     /// <summary>
-    /// F-M480: the comment field of an upload — the TMDb and IMDb ids, because the site has no field
-    /// for them and the operator wants them carried (order 15.11.2026). The author field stays empty.
+    /// F-M481 (operator order 15.11.2026): the tag this client writes into the comment — the plugin name
+    /// and the version that is actually running, read from the assembly so a build cannot carry a stale
+    /// number. The uploader uses it to tell which client put a subtitle there.
+    /// </summary>
+    public static string ClientTag { get; } =
+        "Sub Scribe " + (typeof(TvSubtitlesClient).Assembly.GetName().Version?.ToString() ?? "0.0.0.0");
+
+    /// <summary>
+    /// F-M481: the comment field of an upload — the TMDb and IMDb ids plus this client's tag, because the
+    /// site has no field for either and the operator wants both carried (order 15.11.2026: "Comment soll
+    /// auch den Client neben den ids enthalten"). The author field stays empty.
     /// </summary>
     /// <param name="tmdbId">The TMDb id, when known.</param>
     /// <param name="imdbId">The IMDb id, when known.</param>
-    /// <param name="extra">Optional trailing text.</param>
-    /// <returns>The comment line, e.g. <c>TMDB 1422 / IMDb tt1442464</c>.</returns>
+    /// <param name="extra">Optional text, placed between the ids and the client tag.</param>
+    /// <returns>The comment line, e.g. <c>TMDB 1422 / IMDb tt1442464 / Sub Scribe 12.1.12.380</c>.</returns>
     public static string Comment(long? tmdbId, string? imdbId, string? extra = null)
     {
         var parts = new List<string>();
@@ -551,6 +560,9 @@ public sealed class TvSubtitlesClient
             parts.Add(extra.Trim());
         }
 
+        // Always last, so the line ends with who wrote it — and never absent, which is also why the
+        // "no id at all" refusal below stays: an empty id list would leave a comment that names only us.
+        parts.Add(ClientTag);
         return string.Join(" / ", parts);
     }
 

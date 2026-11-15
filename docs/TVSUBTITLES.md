@@ -57,7 +57,7 @@ Formulars auf `/add.html`:
 | `release` | Freitext (Release-Gruppe, z. B. `FEVER`) |
 | `hi` | `1` bei hörgeschädigter Fassung (nur setzen, wenn zutreffend) |
 | `upfile` | Datei, `.srt` oder `.zip` |
-| `comment` | **trägt hier die Kennungen**: `TMDB 1422 / IMDb tt1442464` |
+| `comment` | **trägt hier die Kennungen und den Client**: `TMDB 1422 / IMDb tt1442464 / Sub Scribe 12.1.12.380` |
 | `go` | versteckt, `1` |
 | `author` | **wird nicht mitgeschickt** — ein fehlender Teil ist der einzige Weg, eine Vorbelegung der Seite nicht zu überschreiben |
 
@@ -99,7 +99,7 @@ mit der lebenden Seite.
 | `EpisodeLabelAsync(pageId)` | `(Staffel, Folge)` aus der Überschrift der Folgenseite |
 | `EntriesAsync(pageId)` | Einträge: `SubtitleId`, `Language`, `Rip`, `Release`, `Age` |
 | `DownloadAsync(subtitleId)` | `(Dateiname, Bytes)` — erstes `.srt` aus dem Zip |
-| `Comment(tmdbId, imdbId, extra)` | Kommentarzeile `TMDB … / IMDb …` |
+| `Comment(tmdbId, imdbId, extra)` | Kommentarzeile `TMDB … / IMDb … / Sub Scribe <Version>` |
 | `BuildUpload(...)` | Feldliste prüfen und bauen; sendet nichts |
 | `BuildUploadBody(upload)` | Multipart-Rumpf und Boundary, byte-genau |
 | `UploadAsync(upload, dryRun)` | senden; **ohne `dryRun: false` verlässt nichts den Prozess** |

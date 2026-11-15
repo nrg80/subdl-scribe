@@ -2233,15 +2233,23 @@
             <param name="cancellationToken">Cancellation token.</param>
             <returns>The member name inside the ZIP and the raw bytes.</returns>
         </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ClientTag">
+            <summary>
+            F-M481 (operator order 15.11.2026): the tag this client writes into the comment — the plugin name
+            and the version that is actually running, read from the assembly so a build cannot carry a stale
+            number. The uploader uses it to tell which client put a subtitle there.
+            </summary>
+        </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.Comment(System.Nullable{System.Int64},System.String,System.String)">
             <summary>
-            F-M480: the comment field of an upload — the TMDb and IMDb ids, because the site has no field
-            for them and the operator wants them carried (order 15.11.2026). The author field stays empty.
+            F-M481: the comment field of an upload — the TMDb and IMDb ids plus this client's tag, because the
+            site has no field for either and the operator wants both carried (order 15.11.2026: "Comment soll
+            auch den Client neben den ids enthalten"). The author field stays empty.
             </summary>
             <param name="tmdbId">The TMDb id, when known.</param>
             <param name="imdbId">The IMDb id, when known.</param>
-            <param name="extra">Optional trailing text.</param>
-            <returns>The comment line, e.g. <c>TMDB 1422 / IMDb tt1442464</c>.</returns>
+            <param name="extra">Optional text, placed between the ids and the client tag.</param>
+            <returns>The comment line, e.g. <c>TMDB 1422 / IMDb tt1442464 / Sub Scribe 12.1.12.380</c>.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.BuildUpload(System.Int32,System.Int32,System.Int32,System.String,System.String,System.Byte[],System.String,System.String,System.Nullable{System.Int64},System.String,System.String,System.Boolean,System.Boolean)">
             <summary>
