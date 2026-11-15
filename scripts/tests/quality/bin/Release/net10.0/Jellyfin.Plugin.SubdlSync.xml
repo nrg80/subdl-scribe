@@ -190,6 +190,521 @@
             <param name="route">Route name to record.</param>
             <returns>The outcome.</returns>
         </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance">
+            <summary>
+            F-M486/F-M487 (operator order 15.11.2026: "Kreuzkontamination bitte verhindern — ein Download von
+            tvst soll nicht bei subdl hochgeladen werden und umgekehrt"): the provenance of a subtitle — which
+            source it came from — and the one rule that keeps the two sources apart.
+            <para>
+            The store carries the provenance per subtitle (<c>Origin</c>, <c>OriginId</c>, schema 10). It is the
+            only place the fact survives: the file on disk says nothing about where it came from, and a content
+            hash names the TEXT, not its origin.
+            </para>
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.Subdl">
+            <summary>The value written for SubDL.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.TvSubtitles">
+            <summary>The value written for tvsubtitles.net.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.Name(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M486: the store value for a source.
+            </summary>
+            <param name="provider">The source.</param>
+            <returns>The value the store keeps.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.Parse(System.String)">
+            <summary>
+            F-M486: the source a stored value names, or null when the row does not say.
+            </summary>
+            <param name="origin">The stored value.</param>
+            <returns>The source, or null.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(System.String,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M487: may this subtitle go to that source?
+            <para>
+            UNKNOWN provenance is allowed everywhere — a hand copy, an embedded track or an older row says
+            nothing about where it came from, and refusing those would stop the plugin from uploading the
+            operator's own files. A KNOWN provenance is allowed at its own source only: a subtitle fetched
+            from tvsubtitles.net never becomes a SubDL upload, and a SubDL download never goes back out to
+            tvsubtitles.net. That is the whole rule, and it is deliberately this short.
+            </para>
+            </summary>
+            <param name="origin">The stored provenance (null/empty = not known).</param>
+            <param name="target">The source that would take the upload.</param>
+            <returns>True when the upload may go there.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.CrossSourceReason(System.String,Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+            <summary>
+            F-M487: the sentence a refused cross-source upload is logged with — the same wording in the log
+            and in the store's reason, so a looked-up row explains itself.
+            </summary>
+            <param name="origin">The stored provenance.</param>
+            <param name="target">The source that was refused.</param>
+            <returns>The reason line.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlDownloadEndpoint">
+            <summary>
+            F-M483: the SubDL download endpoint — a thin wrapper, not a rewrite. It calls exactly the client
+            methods the pipeline called before (search, then file fetch) and translates their types into the
+            neutral ones. Nothing about routes, quotas or caching moves: those stay in the pipeline, which is
+            what "den rest des plugins gleich lassen" means.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlDownloadEndpoint.#ctor(Jellyfin.Plugin.SubdlScribe.Api.SubdlApiClient)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlDownloadEndpoint"/> class.
+            </summary>
+            <param name="client">The SubDL API client.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlDownloadEndpoint.Provider">
+            <inheritdoc />
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlDownloadEndpoint.Wired">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlDownloadEndpoint.Map(Jellyfin.Plugin.SubdlScribe.Api.SubtitleCandidate)">
+            <summary>
+            F-M483: maps a SubDL candidate onto the neutral hit. Pure, so the mapping is testable without a
+            network call — and so a changed candidate field is one edit, not a hunt.
+            </summary>
+            <param name="candidate">The candidate as the client returned it.</param>
+            <returns>The neutral hit.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlDownloadEndpoint.SearchAsync(Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleQuery,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlDownloadEndpoint.FetchAsync(Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlUploadEndpoint">
+            <summary>
+            F-M483: the SubDL upload endpoint. It covers the SINGLE subtitle, which is what the neutral ticket
+            describes; a season pack needs the pipeline's own pack building (F-M372) and is refused with a
+            reason rather than silently sent as a single file.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlUploadEndpoint.#ctor(Jellyfin.Plugin.SubdlScribe.Api.SubdlApiClient)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlUploadEndpoint"/> class.
+            </summary>
+            <param name="client">The SubDL API client.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlUploadEndpoint.Provider">
+            <inheritdoc />
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlUploadEndpoint.Wired">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubdlUploadEndpoint.SendAsync(Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleDirection">
+            <summary>
+            F-M483 (operator order 15.11.2026: "im Prinzip möchte ich jetzt 2 download endpoints und 2 upload
+            endpoints einführen und den rest des plugins gleich lassen"): the direction an endpoint serves.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleDirection.Download">
+            <summary>Fetching a subtitle from the source.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleDirection.Upload">
+            <summary>Sending a subtitle to the source.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleQuery">
+            <summary>
+            F-M483: what to look for — provider-neutral, so a caller does not have to know which source answers.
+            Not every source can use every field: SubDL works on IMDb/TMDb ids, tvsubtitles.net only on names.
+            </summary>
+            <param name="ShowName">Series title, needed by sources that have no id index.</param>
+            <param name="ImdbId">IMDb id, when known.</param>
+            <param name="TmdbId">TMDb id, when known.</param>
+            <param name="Season">Season number.</param>
+            <param name="Episode">Episode number.</param>
+            <param name="Language">Target language, site-independent (two-letter, upper or lower case).</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleQuery.#ctor(System.String,System.String,System.String,System.Int32,System.Int32,System.String)">
+            <summary>
+            F-M483: what to look for — provider-neutral, so a caller does not have to know which source answers.
+            Not every source can use every field: SubDL works on IMDb/TMDb ids, tvsubtitles.net only on names.
+            </summary>
+            <param name="ShowName">Series title, needed by sources that have no id index.</param>
+            <param name="ImdbId">IMDb id, when known.</param>
+            <param name="TmdbId">TMDb id, when known.</param>
+            <param name="Season">Season number.</param>
+            <param name="Episode">Episode number.</param>
+            <param name="Language">Target language, site-independent (two-letter, upper or lower case).</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleQuery.ShowName">
+            <summary>Series title, needed by sources that have no id index.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleQuery.ImdbId">
+            <summary>IMDb id, when known.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleQuery.TmdbId">
+            <summary>TMDb id, when known.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleQuery.Season">
+            <summary>Season number.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleQuery.Episode">
+            <summary>Episode number.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleQuery.Language">
+            <summary>Target language, site-independent (two-letter, upper or lower case).</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit">
+            <summary>
+            F-M483: one offer a source has for a query. <paramref name="Id"/> is the source's own handle — a
+            URL for SubDL, a subtitle id for tvsubtitles.net — and is only meaningful to the endpoint that
+            produced it.
+            </summary>
+            <param name="Provider">The source this hit came from.</param>
+            <param name="Id">The source's handle, passed back to <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IDownloadEndpoint.FetchAsync(Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit,System.Threading.CancellationToken)"/>.</param>
+            <param name="Language">Language as the source spells it.</param>
+            <param name="Rip">Rip/quality cell, empty when the source has none.</param>
+            <param name="Release">Release name, empty when the source has none.</param>
+            <param name="FullSeason">True when the offer covers a whole season.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit.#ctor(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider,System.String,System.String,System.String,System.String,System.Boolean)">
+            <summary>
+            F-M483: one offer a source has for a query. <paramref name="Id"/> is the source's own handle — a
+            URL for SubDL, a subtitle id for tvsubtitles.net — and is only meaningful to the endpoint that
+            produced it.
+            </summary>
+            <param name="Provider">The source this hit came from.</param>
+            <param name="Id">The source's handle, passed back to <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IDownloadEndpoint.FetchAsync(Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit,System.Threading.CancellationToken)"/>.</param>
+            <param name="Language">Language as the source spells it.</param>
+            <param name="Rip">Rip/quality cell, empty when the source has none.</param>
+            <param name="Release">Release name, empty when the source has none.</param>
+            <param name="FullSeason">True when the offer covers a whole season.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit.Provider">
+            <summary>The source this hit came from.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit.Id">
+            <summary>The source's handle, passed back to <see cref="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IDownloadEndpoint.FetchAsync(Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit,System.Threading.CancellationToken)"/>.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit.Language">
+            <summary>Language as the source spells it.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit.Rip">
+            <summary>Rip/quality cell, empty when the source has none.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit.Release">
+            <summary>Release name, empty when the source has none.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit.FullSeason">
+            <summary>True when the offer covers a whole season.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitlePayload">
+            <summary>
+            F-M483: the file an endpoint delivers — name and bytes, nothing decoded. The transport never
+            touches the encoding (F-M482): the bytes are whatever the source served.
+            </summary>
+            <param name="FileName">The member name the source (or its archive) carries.</param>
+            <param name="Data">The subtitle bytes.</param>
+            <param name="Language">Language as the source spells it.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitlePayload.#ctor(System.String,System.Byte[],System.String)">
+            <summary>
+            F-M483: the file an endpoint delivers — name and bytes, nothing decoded. The transport never
+            touches the encoding (F-M482): the bytes are whatever the source served.
+            </summary>
+            <param name="FileName">The member name the source (or its archive) carries.</param>
+            <param name="Data">The subtitle bytes.</param>
+            <param name="Language">Language as the source spells it.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitlePayload.FileName">
+            <summary>The member name the source (or its archive) carries.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitlePayload.Data">
+            <summary>The subtitle bytes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitlePayload.Language">
+            <summary>Language as the source spells it.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket">
+            <summary>
+            F-M483: what to send. One ticket serves both sources; a field a source cannot use is refused by
+            that source's endpoint with a reason instead of being silently dropped.
+            </summary>
+            <param name="ShowName">Series title — tvsubtitles.net resolves its show id from it.</param>
+            <param name="ImdbId">IMDb id — the comment field of tvsubtitles.net carries it, SubDL requires it.</param>
+            <param name="TmdbId">TMDb id, same role.</param>
+            <param name="Season">Season number.</param>
+            <param name="Episode">Episode number.</param>
+            <param name="Language">Target language (two-letter).</param>
+            <param name="FileName">File name to store the subtitle under.</param>
+            <param name="Data">The subtitle bytes.</param>
+            <param name="Rip">Rip/quality, when the source has such a field.</param>
+            <param name="Release">Release name.</param>
+            <param name="HearingImpaired">True for the SDH variant.</param>
+            <param name="DoubleEpisode">True for a double episode.</param>
+            <param name="SeasonPack">True when this is a season pack — only the pipeline builds those.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.#ctor(System.String,System.String,System.String,System.Int32,System.Int32,System.String,System.String,System.Byte[],System.String,System.String,System.Boolean,System.Boolean,System.Boolean)">
+            <summary>
+            F-M483: what to send. One ticket serves both sources; a field a source cannot use is refused by
+            that source's endpoint with a reason instead of being silently dropped.
+            </summary>
+            <param name="ShowName">Series title — tvsubtitles.net resolves its show id from it.</param>
+            <param name="ImdbId">IMDb id — the comment field of tvsubtitles.net carries it, SubDL requires it.</param>
+            <param name="TmdbId">TMDb id, same role.</param>
+            <param name="Season">Season number.</param>
+            <param name="Episode">Episode number.</param>
+            <param name="Language">Target language (two-letter).</param>
+            <param name="FileName">File name to store the subtitle under.</param>
+            <param name="Data">The subtitle bytes.</param>
+            <param name="Rip">Rip/quality, when the source has such a field.</param>
+            <param name="Release">Release name.</param>
+            <param name="HearingImpaired">True for the SDH variant.</param>
+            <param name="DoubleEpisode">True for a double episode.</param>
+            <param name="SeasonPack">True when this is a season pack — only the pipeline builds those.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.ShowName">
+            <summary>Series title — tvsubtitles.net resolves its show id from it.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.ImdbId">
+            <summary>IMDb id — the comment field of tvsubtitles.net carries it, SubDL requires it.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.TmdbId">
+            <summary>TMDb id, same role.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.Season">
+            <summary>Season number.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.Episode">
+            <summary>Episode number.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.Language">
+            <summary>Target language (two-letter).</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.FileName">
+            <summary>File name to store the subtitle under.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.Data">
+            <summary>The subtitle bytes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.Rip">
+            <summary>Rip/quality, when the source has such a field.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.Release">
+            <summary>Release name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.HearingImpaired">
+            <summary>True for the SDH variant.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.DoubleEpisode">
+            <summary>True for a double episode.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket.SeasonPack">
+            <summary>True when this is a season pack — only the pipeline builds those.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.EndpointAnswer">
+            <summary>
+            F-M483: what an upload endpoint answers. <paramref name="Ok"/> false plus a
+            <paramref name="Reason"/> is a refusal the caller can log; it is never an exception for a case the
+            caller could have known about.
+            </summary>
+            <param name="Provider">The source that answered.</param>
+            <param name="Ok">True when the source took the subtitle (or, in a dry run, would have).</param>
+            <param name="Reason">The refusal or skip reason, null on success.</param>
+            <param name="Bytes">Size of the body that was (or would be) sent.</param>
+            <param name="Answer">The source's own answer text, when it gave one.</param>
+            <param name="DryRun">True when nothing left the process.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.EndpointAnswer.#ctor(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider,System.Boolean,System.String,System.Int32,System.String,System.Boolean)">
+            <summary>
+            F-M483: what an upload endpoint answers. <paramref name="Ok"/> false plus a
+            <paramref name="Reason"/> is a refusal the caller can log; it is never an exception for a case the
+            caller could have known about.
+            </summary>
+            <param name="Provider">The source that answered.</param>
+            <param name="Ok">True when the source took the subtitle (or, in a dry run, would have).</param>
+            <param name="Reason">The refusal or skip reason, null on success.</param>
+            <param name="Bytes">Size of the body that was (or would be) sent.</param>
+            <param name="Answer">The source's own answer text, when it gave one.</param>
+            <param name="DryRun">True when nothing left the process.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.EndpointAnswer.Provider">
+            <summary>The source that answered.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.EndpointAnswer.Ok">
+            <summary>True when the source took the subtitle (or, in a dry run, would have).</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.EndpointAnswer.Reason">
+            <summary>The refusal or skip reason, null on success.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.EndpointAnswer.Bytes">
+            <summary>Size of the body that was (or would be) sent.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.EndpointAnswer.Answer">
+            <summary>The source's own answer text, when it gave one.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.EndpointAnswer.DryRun">
+            <summary>True when nothing left the process.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IDownloadEndpoint">
+            <summary>
+            F-M483: ONE download endpoint. Two implementations exist — SubDL and tvsubtitles.net — and the
+            pipelines talk to this shape instead of to a concrete client.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IDownloadEndpoint.Provider">
+            <summary>Gets the source this endpoint serves.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IDownloadEndpoint.Wired">
+            <summary>Gets a value indicating whether the endpoint is wired into the pipeline's run loop.
+            An endpoint can exist and still not be wired (F-M484) — the switches say so.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IDownloadEndpoint.SearchAsync(Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleQuery,System.Threading.CancellationToken)">
+            <summary>Looks for offers for this query.</summary>
+            <param name="query">What to look for.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The offers in the source's order; empty when it has none.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IDownloadEndpoint.FetchAsync(Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit,System.Threading.CancellationToken)">
+            <summary>Fetches the file behind a hit.</summary>
+            <param name="hit">The hit this endpoint produced.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The payload, or null when the source delivered nothing usable.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IUploadEndpoint">
+            <summary>
+            F-M483: ONE upload endpoint. Two implementations exist — SubDL and tvsubtitles.net.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IUploadEndpoint.Provider">
+            <summary>Gets the source this endpoint serves.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IUploadEndpoint.Wired">
+            <summary>Gets a value indicating whether the endpoint is wired into the pipeline's run loop.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IUploadEndpoint.SendAsync(Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket,System.Threading.CancellationToken)">
+            <summary>Sends one subtitle.</summary>
+            <param name="ticket">What to send.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The answer; a refusal is Ok=false with a reason, not an exception.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleEndpointCatalog">
+            <summary>
+            F-M483/F-M484: the list of endpoints the run may use, decided by the four switches (F-M477) and by
+            what is actually wired. Deliberately a plain object, not a container registration: the pipelines
+            stay as they are, they only ask which endpoints are available.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleEndpointCatalog.#ctor(System.Collections.Generic.IReadOnlyList{Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IDownloadEndpoint},System.Collections.Generic.IReadOnlyList{Jellyfin.Plugin.SubdlScribe.Api.Endpoints.IUploadEndpoint})">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleEndpointCatalog"/> class.
+            </summary>
+            <param name="downloads">All implemented download endpoints.</param>
+            <param name="uploads">All implemented upload endpoints.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleEndpointCatalog.AllDownloads">
+            <summary>Gets every implemented download endpoint, switched on or not.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleEndpointCatalog.AllUploads">
+            <summary>Gets every implemented upload endpoint, switched on or not.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleEndpointCatalog.EnabledDownloads(Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration)">
+            <summary>
+            F-M484: the download endpoints that may run now — the switch is on AND the endpoint is wired.
+            </summary>
+            <param name="config">The live configuration.</param>
+            <returns>The usable endpoints.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleEndpointCatalog.EnabledUploads(Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration)">
+            <summary>
+            F-M484: the upload endpoints that may run now.
+            </summary>
+            <param name="config">The live configuration.</param>
+            <returns>The usable endpoints.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleEndpointCatalog.Refused(Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration,Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleDirection)">
+            <summary>
+            F-M484: the endpoints that are implemented but refused, each with the sentence the page shows.
+            This is the same "no silent switch" rule as F-M366/F-M478 in one place, so the GUI, the worker
+            note and a log line cannot tell three different stories.
+            </summary>
+            <param name="config">The live configuration.</param>
+            <param name="direction">Which direction to explain.</param>
+            <returns>Provider and reason, for every endpoint that does not run.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleEndpointCatalog.NotWiredReason(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider,Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleDirection)">
+            <summary>
+            F-M484: why an implemented endpoint is not in the run — the wording the page and the worker note share.
+            </summary>
+            <param name="provider">The source.</param>
+            <param name="direction">The direction asked about.</param>
+            <returns>The sentence.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesDownloadEndpoint">
+            <summary>
+            F-M483: the tvsubtitles.net download endpoint. The source has no id index, so the series is resolved
+            by NAME out of its show list, then the season's episode pages are walked until one states the wanted
+            season and episode. That walk is the price of a source without an API — it is bounded by the season
+            (at most 22 pages) and stops at the first match.
+            <para>
+            WIRED = false (F-M484): the endpoint exists and is tested, but the pipeline's run loop still calls
+            SubDL only. Nothing is gained by claiming otherwise in the GUI.
+            </para>
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesDownloadEndpoint.#ctor(Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesDownloadEndpoint"/> class.
+            </summary>
+            <param name="client">The tvsubtitles.net client.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesDownloadEndpoint.Provider">
+            <inheritdoc />
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesDownloadEndpoint.Wired">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesDownloadEndpoint.SiteLanguage(System.String)">
+            <summary>
+            F-M483: the site's language code for a two-letter language. SubDL speaks ISO-ish codes, the site
+            has its own set (F-M480) — the bridge is this method, and it is deliberately the only place that
+            knows both vocabularies.
+            </summary>
+            <param name="language">Two-letter language, any case.</param>
+            <returns>The site's code, or null when the site has no such language.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesDownloadEndpoint.SearchAsync(Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleQuery,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesDownloadEndpoint.FetchAsync(Jellyfin.Plugin.SubdlScribe.Api.Endpoints.SubtitleHit,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesUploadEndpoint">
+            <summary>
+            F-M483: the tvsubtitles.net upload endpoint. The site is written by a form, so the ticket is turned
+            into the form's fields (F-M481) and sent as multipart. A dry run builds the same body and sends
+            nothing — which is also the default, so a mis-wired caller cannot upload by accident.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesUploadEndpoint.#ctor(Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient,System.Boolean)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesUploadEndpoint"/> class.
+            </summary>
+            <param name="client">The tvsubtitles.net client.</param>
+            <param name="dryRun">True (default) builds the request and sends nothing. The plugin's own
+            DryRun switch is passed in here — it is not read inside, so the endpoint stays testable.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesUploadEndpoint.Provider">
+            <inheritdoc />
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesUploadEndpoint.Wired">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesUploadEndpoint.SendAsync(Jellyfin.Plugin.SubdlScribe.Api.Endpoints.UploadTicket,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
         <member name="T:Jellyfin.Plugin.SubdlScribe.Api.GlobalRateLimiter">
             <summary>
             The pacing rhythm shared by the upload AND the download pipeline (F-M20/F-M26).
@@ -1174,6 +1689,13 @@
         </member>
         <member name="T:Jellyfin.Plugin.SubdlScribe.Api.SubtitleCandidate">
             <summary>A SubDL search candidate (verified fields, see subdl-api-search-fields.md).</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.SubtitleCandidate.Provider">
+            <summary>
+            Gets or sets the source this candidate came from (F-M485). Default SubDL, so every existing
+            construction keeps its meaning; a candidate from tvsubtitles.net carries its own provider and is
+            fetched by that source's endpoint instead of SubDL's routes.
+            </summary>
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Api.SubtitleCandidate.ReleaseName">
             <summary>Gets or sets the release name (scoring basis).</summary>
@@ -2233,15 +2755,23 @@
             <param name="cancellationToken">Cancellation token.</param>
             <returns>The member name inside the ZIP and the raw bytes.</returns>
         </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ClientTag">
+            <summary>
+            F-M481 (operator order 15.11.2026): the tag this client writes into the comment — the plugin name
+            and the version that is actually running, read from the assembly so a build cannot carry a stale
+            number. The uploader uses it to tell which client put a subtitle there.
+            </summary>
+        </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.Comment(System.Nullable{System.Int64},System.String,System.String)">
             <summary>
-            F-M480: the comment field of an upload — the TMDb and IMDb ids, because the site has no field
-            for them and the operator wants them carried (order 15.11.2026). The author field stays empty.
+            F-M481: the comment field of an upload — the TMDb and IMDb ids plus this client's tag, because the
+            site has no field for either and the operator wants both carried (order 15.11.2026: "Comment soll
+            auch den Client neben den ids enthalten"). The author field stays empty.
             </summary>
             <param name="tmdbId">The TMDb id, when known.</param>
             <param name="imdbId">The IMDb id, when known.</param>
-            <param name="extra">Optional trailing text.</param>
-            <returns>The comment line, e.g. <c>TMDB 1422 / IMDb tt1442464</c>.</returns>
+            <param name="extra">Optional text, placed between the ids and the client tag.</param>
+            <returns>The comment line, e.g. <c>TMDB 1422 / IMDb tt1442464 / Sub Scribe 12.1.12.380</c>.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.BuildUpload(System.Int32,System.Int32,System.Int32,System.String,System.String,System.Byte[],System.String,System.String,System.Nullable{System.Int64},System.String,System.String,System.Boolean,System.Boolean)">
             <summary>
@@ -3499,6 +4029,21 @@
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.SubdlId">
             <summary>SubDL upload or download id this verdict refers to, when known.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.Origin">
+            <summary>
+            F-M486 (operator order 15.11.2026): where this subtitle CAME FROM — <c>subdl</c> or
+            <c>tvsubtitles</c>. Null means "this row does not say" (an older row, or a file nobody fetched),
+            which is why it is never guessed. This value is what keeps the two sources apart: a subtitle
+            fetched from one source is never uploaded to the other (F-M487).
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.OriginId">
+            <summary>
+            F-M486: the source's OWN id for this subtitle — the tvsubtitles.net subtitle id (for example
+            <c>170678</c>) or the SubDL entry id. Together with <see cref="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.Origin"/> it names the original
+            exactly, so a later check can quote it instead of describing it.
+            </summary>
         </member>
         <member name="T:Jellyfin.Plugin.SubdlScribe.Data.EmbedTrackEntity">
             <summary>
@@ -5054,6 +5599,17 @@
             Uses the same API client, registry and language mapper as the upload pipeline (F-M37).
             </summary>
         </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline._endpoints">
+            <summary>
+            F-M485 (operator order 15.11.2026: "beide upload und download bitte individuell schaltbar über
+            die toggles"): the download endpoints this run may use. Built from the same clients the pipeline
+            already holds, so the constructor stays as it is — SubDL is the source it always was, and
+            tvsubtitles.net joins only when its switch is on.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline._tvDownload">
+            <summary>The tvsubtitles.net download endpoint, or null when the source cannot be reached.</summary>
+        </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.Registry">
             <summary>Always use the current Plugin.Instance registry so a DB reset is respected.</summary>
         </member>
@@ -5394,6 +5950,13 @@
             </summary>
             <param name="raw">Payload as fetched.</param>
             <returns>Corrected payload, or null when nothing was fetched.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.ForeignCandidatesAsync(System.String,System.Boolean,System.Int32,System.Int32,System.String,System.Threading.CancellationToken)">
+            <summary>
+            F-M485: fragt die zweite Quelle nach dieser Sprache und gibt ihre Treffer als Kandidaten
+            zurück — mit ihrem Anbieter, damit der Abruf weiß, wen er fragen muss. Leer, wenn der Schalter
+            aus ist, kein Serienname bekannt ist oder die Quelle nichts hat.
+            </summary>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadPipeline.CandidateRank(Jellyfin.Plugin.SubdlScribe.Api.SubtitleCandidate,System.Int32,System.Int32)">
             <summary>
@@ -7847,6 +8410,13 @@
             handled by PipelineRunLock (24 h / dead PID), so no separate semaphore is needed.
             </summary>
         </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.SendToSecondSourceAsync(System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.Boolean,System.Int32,System.Int32,System.Boolean,System.Threading.CancellationToken)">
+            <summary>
+            F-M485: sends one subtitle to the second source (tvsubtitles.net). The series name comes from the
+            media file's own name through the same parser the download uses — the source has no id index, so
+            a name is all it can resolve.
+            </summary>
+        </member>
         <member name="T:Jellyfin.Plugin.SubdlScribe.Plugin">
             <summary>
             Main plugin entry point for Sub Scribe (upload + download pipelines).
@@ -9696,7 +10266,7 @@
             <param name="season">Season number.</param>
             <returns>Language and HI variant, unordered.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
             <summary>
             Records a sidecar verdict, keyed by content hash.
             <para>
@@ -9717,12 +10287,15 @@
             <param name="subdlId">SubDL id when known.</param>
             <param name="fileName">File name for diagnostics.</param>
             <param name="path">Full path for diagnostics.</param>
+            <param name="origin">F-M486: the source this subtitle came from (<c>subdl</c>/<c>tvsubtitles</c>),
+            or null when nobody said. Written only when non-empty — a null must never overwrite a fact.</param>
+            <param name="originId">F-M486: the source's own id for this subtitle, written under the same rule.</param>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ObserveSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String)">
             <summary>
             F-M259: records what a loose subtitle FILE is, without touching a verdict.
             <para>
-            The sidecar half of <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ObserveEmbed(System.String,System.Int32,System.String,System.Boolean,System.Boolean)"/>, and the same gap: <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String)"/> is
+            The sidecar half of <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ObserveEmbed(System.String,System.Int32,System.String,System.Boolean,System.Boolean)"/>, and the same gap: <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String)"/> is
             the area's only writer and only the upload and download pipelines call it, both behind their
             own switch (upload is off by default). A <c>.srt</c> beside the media that no plugin run ever
             moved — written by another tool, kept from before the registry existed, or simply never
@@ -9732,7 +10305,7 @@
             </para>
             <para>
             A verdict is never overwritten here, for the same reason as on the embedded side:
-            <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String)"/> sets <c>Status</c> unconditionally, so observing through it would
+            <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String)"/> sets <c>Status</c> unconditionally, so observing through it would
             erase an uploader's or downloader's verdict. A fresh row is created as
             <see cref="F:Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Observed"/>.
             </para>
@@ -9940,7 +10513,7 @@
             <param name="contentHash">Content hash.</param>
             <returns>True when a remote duplicate is recorded.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkDownloaded(System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkDownloaded(System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.String)">
             <summary>
             Records a subtitle fetched from SubDL. Stored as a sidecar: once downloaded the file IS a
             sidecar on disk, so it belongs in the same area rather than a parallel one.
@@ -9952,6 +10525,14 @@
             <param name="subdlId">SubDL release id.</param>
             <param name="fileName">Written file name.</param>
             <param name="path">Written path.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.GetOrigin(System.String)">
+            <summary>
+            F-M486/F-M487: the provenance of a subtitle the plugin knows by its content hash. Empty strings
+            mean "this row does not say" — a file that came from a hand copy or an older build.
+            </summary>
+            <param name="contentHash">The subtitle's normalized content hash (the row key).</param>
+            <returns>Source name and the source's own id.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.RecordRejectedCandidate(System.String,System.String,System.String,System.String)">
             <summary>

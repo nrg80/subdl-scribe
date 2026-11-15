@@ -1043,9 +1043,13 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="subdlId">SubDL id when known.</param>
     /// <param name="fileName">File name for diagnostics.</param>
     /// <param name="path">Full path for diagnostics.</param>
+    /// <param name="origin">F-M486: the source this subtitle came from (<c>subdl</c>/<c>tvsubtitles</c>),
+    /// or null when nobody said. Written only when non-empty — a null must never overwrite a fact.</param>
+    /// <param name="originId">F-M486: the source's own id for this subtitle, written under the same rule.</param>
     public void MarkSidecar(string? contentHash, string mediaHash, string language, bool hearingImpaired,
                             bool forced, string status, string? reason = null, string? subdlId = null,
-                            string? fileName = null, string? path = null)
+                            string? fileName = null, string? path = null, string? origin = null,
+                            string? originId = null)
     {
         if (string.IsNullOrEmpty(contentHash))
         {
@@ -1070,6 +1074,18 @@ public sealed class ContentHashRegistry : IDisposable
         if (!string.IsNullOrEmpty(subdlId))
         {
             existing.SubdlId = subdlId;
+        }
+
+        // F-M486: nur schreiben, wenn jemand die Herkunft kennt. Ein leerer Wert darf keine Angabe
+        // löschen — sonst machte ein späterer Schreiber aus „tvsubtitles" wieder „unbekannt".
+        if (!string.IsNullOrEmpty(origin))
+        {
+            existing.Origin = origin;
+        }
+
+        if (!string.IsNullOrEmpty(originId))
+        {
+            existing.OriginId = originId;
         }
 
         if (!string.IsNullOrEmpty(fileName))
@@ -1605,9 +1621,28 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="fileName">Written file name.</param>
     /// <param name="path">Written path.</param>
     public void MarkDownloaded(string contentHash, string mediaHash, string language, bool hearingImpaired = false,
-                               string? subdlId = null, string? fileName = null, string? path = null)
+                               string? subdlId = null, string? fileName = null, string? path = null,
+                               string? origin = null, string? originId = null)
         => MarkSidecar(contentHash, mediaHash, language, hearingImpaired, forced: false,
-                       SubtitleStatus.Downloaded, reason: null, subdlId: subdlId, fileName: fileName, path: path);
+                       SubtitleStatus.Downloaded, reason: null, subdlId: subdlId, fileName: fileName, path: path,
+                       origin: origin, originId: originId);
+
+    /// <summary>
+    /// F-M486/F-M487: the provenance of a subtitle the plugin knows by its content hash. Empty strings
+    /// mean "this row does not say" — a file that came from a hand copy or an older build.
+    /// </summary>
+    /// <param name="contentHash">The subtitle's normalized content hash (the row key).</param>
+    /// <returns>Source name and the source's own id.</returns>
+    public (string? Origin, string? OriginId) GetOrigin(string? contentHash)
+    {
+        if (string.IsNullOrEmpty(contentHash))
+        {
+            return (null, null);
+        }
+
+        var row = _db.Sidecars.FindById(contentHash);
+        return (row?.Origin, row?.OriginId);
+    }
 
     // ------------------------------------------- rejected download candidates (area 4)
 

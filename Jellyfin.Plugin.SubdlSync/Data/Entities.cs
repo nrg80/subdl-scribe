@@ -279,6 +279,21 @@ public abstract class SubtitleState
 
     /// <summary>SubDL upload or download id this verdict refers to, when known.</summary>
     public string? SubdlId { get; set; }
+
+    /// <summary>
+    /// F-M486 (operator order 15.11.2026): where this subtitle CAME FROM — <c>subdl</c> or
+    /// <c>tvsubtitles</c>. Null means "this row does not say" (an older row, or a file nobody fetched),
+    /// which is why it is never guessed. This value is what keeps the two sources apart: a subtitle
+    /// fetched from one source is never uploaded to the other (F-M487).
+    /// </summary>
+    public string? Origin { get; set; }
+
+    /// <summary>
+    /// F-M486: the source's OWN id for this subtitle — the tvsubtitles.net subtitle id (for example
+    /// <c>170678</c>) or the SubDL entry id. Together with <see cref="Origin"/> it names the original
+    /// exactly, so a later check can quote it instead of describing it.
+    /// </summary>
+    public string? OriginId { get; set; }
 }
 
 /// <summary>

@@ -67,15 +67,21 @@ Check("der Alt-Wert des Uploads antwortet, solange der Anbieterschalter ungesetz
     !Mutate(c => { c.UploadEnabled = false; c.SubdlUploadEnabled = null; }).IsUploadEnabled(SubtitleProvider.Subdl));
 // F-M478: tvsubtitles.net hat Schalter, aber keinen Anbieter — beide Richtungen sind aus,
 // egal was in der Konfiguration steht, und der Grund ist benannt statt still.
-Check("tvsubtitles ist in beiden Richtungen aus, auch mit gesetztem Schalter",
-    !Mutate(c => { c.TvSubtitlesDownloadEnabled = true; c.TvSubtitlesUploadEnabled = true; }).IsDownloadEnabled(SubtitleProvider.TvSubtitles)
-    && !Mutate(c => { c.TvSubtitlesDownloadEnabled = true; c.TvSubtitlesUploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.TvSubtitles));
-Check("tvsubtitles nennt seinen Grund, SubDL hat keinen",
+// F-M485: die zweite Quelle ist eingebunden — ihr Schalter wirkt jetzt, und zwar je Richtung.
+Check("der tvsubtitles-Schalter schaltet beide Richtungen einzeln",
+    Mutate(c => { c.TvSubtitlesDownloadEnabled = true; c.TvSubtitlesUploadEnabled = false; }).IsDownloadEnabled(SubtitleProvider.TvSubtitles)
+    && !Mutate(c => { c.TvSubtitlesDownloadEnabled = true; c.TvSubtitlesUploadEnabled = false; }).IsUploadEnabled(SubtitleProvider.TvSubtitles)
+    && Mutate(c => { c.TvSubtitlesDownloadEnabled = false; c.TvSubtitlesUploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.TvSubtitles)
+    && !Mutate(c => { c.TvSubtitlesDownloadEnabled = false; c.TvSubtitlesUploadEnabled = true; }).IsDownloadEnabled(SubtitleProvider.TvSubtitles));
+Check("tvsubtitles nennt seine Grenzen, SubDL hat keine zu nennen",
     PluginConfiguration.MissingProviderReason(SubtitleProvider.TvSubtitles) is { Length: > 20 }
     && PluginConfiguration.MissingProviderReason(SubtitleProvider.Subdl) is null);
-Check("der tote Schalter ist kein Anbieter, SubDL schon",
-    !PluginConfiguration.HasProvider(SubtitleProvider.TvSubtitles)
+Check("beide Quellen sind Anbieter (F-M485: tvsubtitles ist eingebunden)",
+    PluginConfiguration.HasProvider(SubtitleProvider.TvSubtitles)
     && PluginConfiguration.HasProvider(SubtitleProvider.Subdl));
+Check("ohne gesetzten Schalter bleibt tvsubtitles aus, auch wenn der Alt-Wert an ist",
+    !Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; }).IsDownloadEnabled(SubtitleProvider.TvSubtitles)
+    && !Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.TvSubtitles));
 
 // --- the lamps are NOT repainted (operator: note it, do not grey the row) ---
 var gate = Mutate(c => c.UploadEnabled = false);

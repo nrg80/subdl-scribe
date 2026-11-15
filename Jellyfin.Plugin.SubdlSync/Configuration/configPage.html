@@ -391,10 +391,10 @@
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
-                                <input id="TvSubtitlesUploadEnabled" name="TvSubtitlesUploadEnabled" type="checkbox" is="emby-checkbox" disabled="disabled" />
+                                <input id="TvSubtitlesUploadEnabled" name="TvSubtitlesUploadEnabled" type="checkbox" is="emby-checkbox" />
                                 <span>Upload enabled — tvsubtitles.net</span>
                             </label>
-                            <div class="fieldDescription" id="TvSubtitlesUploadReason">tvsubtitles.net — Endpunkte stehen (Abruf und Upload), sind aber noch nicht in den Lauf eingebunden: der Schalter hat noch keine Wirkung.</div>
+                            <div class="fieldDescription" id="TvSubtitlesUploadReason">tvsubtitles.net — eigener Abruf und eigener Upload, gesteuert von diesen zwei Schaltern. Staffelpacks und der HI-Pool bleiben bei SubDL.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -478,10 +478,10 @@
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
-                                <input id="TvSubtitlesDownloadEnabled" name="TvSubtitlesDownloadEnabled" type="checkbox" is="emby-checkbox" disabled="disabled" />
+                                <input id="TvSubtitlesDownloadEnabled" name="TvSubtitlesDownloadEnabled" type="checkbox" is="emby-checkbox" />
                                 <span>Download enabled — tvsubtitles.net</span>
                             </label>
-                            <div class="fieldDescription" id="TvSubtitlesDownloadReason">tvsubtitles.net — Endpunkte stehen (Abruf und Upload), sind aber noch nicht in den Lauf eingebunden: der Schalter hat noch keine Wirkung.</div>
+                            <div class="fieldDescription" id="TvSubtitlesDownloadReason">tvsubtitles.net — eigener Abruf und eigener Upload, gesteuert von diesen zwei Schaltern. Staffelpacks und der HI-Pool bleiben bei SubDL.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -1686,8 +1686,8 @@ workers.forEach(function (w) {
                         config.UploadOnArrival = document.querySelector('#UploadOnArrival').checked;
                         config.UploadSeasonPacks = document.querySelector('#UploadSeasonPacks').checked;
                         config.SubdlUploadEnabled = document.querySelector('#SubdlUploadEnabled').checked;
-                        // F-M478: the source has no provider, so its switch cannot be switched on — keep it false.
-                        config.TvSubtitlesUploadEnabled = false;
+                        // F-M485: the second source is wired, so its switch is stored as the operator set it.
+                        config.TvSubtitlesUploadEnabled = document.querySelector('#TvSubtitlesUploadEnabled').checked;
                         config.DryRun = document.querySelector('#DryRun').checked;
                         config.LogMode = document.querySelector('#LogMode').value;
                         config.OshashRefresh = document.querySelector('#OshashRefresh').value;
@@ -1704,8 +1704,8 @@ workers.forEach(function (w) {
                         config.SkipDirPatterns = document.querySelector('#SkipDirs').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
                         config.SkipFilePatterns = document.querySelector('#SkipFiles').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
                         config.SubdlDownloadEnabled = document.querySelector('#SubdlDownloadEnabled').checked;
-                        // F-M478: no provider for this source — the switch stays off whatever the markup says.
-                        config.TvSubtitlesDownloadEnabled = false;
+                        // F-M485: the second source is wired — the switch is stored as the operator set it.
+                        config.TvSubtitlesDownloadEnabled = document.querySelector('#TvSubtitlesDownloadEnabled').checked;
                         config.DownloadLanguages = document.querySelector('#DownloadLanguagesDisplay').value;
                         config.DownloadOnlyMissing = document.querySelector('#DownloadOnlyMissing').checked;
                         config.DownloadHearingImpaired = document.querySelector('#DownloadHearingImpaired').checked;

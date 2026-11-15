@@ -216,6 +216,17 @@ public sealed class DownloadPipeline : IDisposable
     private readonly ILibraryManager _libraryManager;
     private readonly IMediaSourceManager _mediaSourceManager;
     private readonly SubdlApiClient _api;
+
+    /// <summary>
+    /// F-M485 (operator order 15.11.2026: "beide upload und download bitte individuell schaltbar über
+    /// die toggles"): the download endpoints this run may use. Built from the same clients the pipeline
+    /// already holds, so the constructor stays as it is — SubDL is the source it always was, and
+    /// tvsubtitles.net joins only when its switch is on.
+    /// </summary>
+    private readonly Api.Endpoints.SubtitleEndpointCatalog _endpoints;
+
+    /// <summary>The tvsubtitles.net download endpoint, or null when the source cannot be reached.</summary>
+    private readonly Api.Endpoints.IDownloadEndpoint? _tvDownload;
     /// <summary>Always use the current Plugin.Instance registry so a DB reset is respected.</summary>
     private ContentHashRegistry Registry => Plugin.Instance?.Registry ?? throw new InvalidOperationException("Plugin not initialized");
     private readonly TmdbImdbResolver _tmdb;
@@ -410,6 +421,14 @@ public sealed class DownloadPipeline : IDisposable
         _limiter = limiter;
         _searchTracker = searchTracker;
         _qaFails = qaFails;
+
+        // F-M485: the second download source. Its client is built here and not injected, so the
+        // pipeline's constructor — and everyone who calls it — stays exactly as it was.
+        var tvClient = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        _tvDownload = new Api.Endpoints.TvSubtitlesDownloadEndpoint(tvClient);
+        _endpoints = new Api.Endpoints.SubtitleEndpointCatalog(
+            new[] { (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.SubdlDownloadEndpoint(api), _tvDownload },
+            new[] { (Api.Endpoints.IUploadEndpoint)new Api.Endpoints.SubdlUploadEndpoint(api) });
     }
 
     /// <summary>Gets the effective target languages (F-M42), parsed from config, ordered, deduped.</summary>
@@ -1638,6 +1657,24 @@ public sealed class DownloadPipeline : IDisposable
         {
             ct.ThrowIfCancellationRequested();
             var langCands = candidates.Where(c => c.Language == lang).ToList();
+
+            // F-M485: bevor eine Sprache als „nicht verfügbar" gilt, bekommt die zweite Quelle ihre
+            // Gelegenheit — aber nur, wenn ihr Schalter an ist. Die Treffer laufen danach durch
+            // dieselbe Rangfolge, dieselben Tore, denselben Fit und dieselbe Ablage wie ein
+            // SubDL-Treffer; sie sind nur woandersher.
+            if (langCands.Count == 0 && _config.IsDownloadEnabled(Configuration.SubtitleProvider.TvSubtitles))
+            {
+                var fremd = await ForeignCandidatesAsync(title, isSeries, season, episode, lang, ct).ConfigureAwait(false);
+                if (fremd.Count > 0)
+                {
+                    candidates.AddRange(fremd);
+                    langCands = candidates.Where(c => c.Language == lang).ToList();
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[tvsubtitles-D] {File} [{Lang}] — {N} candidate(s) from the second source",
+                        Path.GetFileName(mediaPath), lang, fremd.Count);
+                }
+            }
+
             if (langCands.Count == 0)
             {
                 summary.NotAvailable++;
@@ -2896,7 +2933,11 @@ public sealed class DownloadPipeline : IDisposable
                     // for a variant that was already on disk, run after run.
                     Registry.MarkAndFlush(() => Registry.MarkDownloaded(
                         contentHash, mediaHash, lang, effectiveHi, cand.SubdlId,
-                        Path.GetFileName(targetPath), targetPath));
+                        Path.GetFileName(targetPath), targetPath,
+                        // F-M486: die Herkunft wandert in den Store — Quelle und deren eigene Id.
+                        // Ohne sie wüsste ein späterer Upload nicht, wohin dieser Fund gehört (F-M487).
+                        Api.Endpoints.Provenance.Name(cand.Provider),
+                        cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url));
                     _qaFails.RecordSuccess(item.Id.ToString(), lang); // A real save resets the QA counter
                     summary.Downloaded++;
                     RememberSavedLibrary(item, targetPath); // F-M473
@@ -3430,9 +3471,71 @@ public sealed class DownloadPipeline : IDisposable
         return System.Text.Encoding.UTF8.GetBytes(ContentHashRegistry.NormalizeSrt(DecodeSrt(raw)));
     }
 
+    /// <summary>
+    /// F-M485: fragt die zweite Quelle nach dieser Sprache und gibt ihre Treffer als Kandidaten
+    /// zurück — mit ihrem Anbieter, damit der Abruf weiß, wen er fragen muss. Leer, wenn der Schalter
+    /// aus ist, kein Serienname bekannt ist oder die Quelle nichts hat.
+    /// </summary>
+    private async Task<List<SubtitleCandidate>> ForeignCandidatesAsync(
+        string title, bool isSeries, int season, int episode, string lang, CancellationToken ct)
+    {
+        var leer = new List<SubtitleCandidate>();
+        if (_tvDownload is null || !isSeries || string.IsNullOrWhiteSpace(title))
+        {
+            // Ohne Staffel/Folge und ohne Titel hat diese Quelle nichts, wonach sie suchen könnte:
+            // sie hat keinen Id-Index (F-M480).
+            return leer;
+        }
+
+        try
+        {
+            var hits = await _tvDownload.SearchAsync(
+                new Api.Endpoints.SubtitleQuery(title, null, null, season, episode, lang), ct).ConfigureAwait(false);
+
+            return hits.Select(h => new SubtitleCandidate
+            {
+                Provider = Configuration.SubtitleProvider.TvSubtitles,
+                ReleaseName = h.Release.Length > 0 ? h.Release : "tvsubtitles " + h.Rip,
+                Language = lang.ToUpperInvariant(),
+                Url = h.Id,
+                Season = season,
+                Episode = episode,
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            // Die zweite Quelle ist ein Zusatz, kein Muss: ein Fehler dort darf den Lauf nicht kippen.
+            _logger.LogWarning("[tvsubtitles-D] search failed for {Title} S{Season}E{Episode} [{Lang}]: {Error}",
+                title, season, episode, lang, ex.Message);
+            return leer;
+        }
+    }
+
     private async Task<CandidateAttempt> DownloadCandidateRawAsync(
         SubtitleCandidate cand, int season, int episode, CancellationToken ct)
     {
+        // F-M485: ein Kandidat der zweiten Quelle wird bei seinem eigenen Endpunkt geholt — die
+        // SubDL-Routen (Archiv, Cache, v2) gelten nur für SubDL.
+        if (cand.Provider != Configuration.SubtitleProvider.Subdl)
+        {
+            if (_tvDownload is null)
+            {
+                return new CandidateAttempt(null, null, DownloadOutcome.None("no-second-source"));
+            }
+
+            var fremd = await _tvDownload.FetchAsync(
+                new Api.Endpoints.SubtitleHit(
+                    cand.Provider, cand.Url, cand.Language, string.Empty, cand.ReleaseName, false), ct)
+                .ConfigureAwait(false);
+
+            return fremd is null
+                ? new CandidateAttempt(null, null, DownloadOutcome.None("second-source-empty"))
+                : new CandidateAttempt(
+                    fremd.Data,
+                    null,
+                    new DownloadOutcome { Status = 200, Bytes = fremd.Data.Length, Route = "tvsubtitles", Content = fremd.Data });
+        }
+
         // F-M464: the verdict of this attempt travels WITH the attempt (CandidateAttempt.Outcome).
         // A candidate that is thrown away before any request carries status 0, which reads "no
         // request made" — it can never quote what the previous candidate's request answered.

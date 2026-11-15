@@ -2256,7 +2256,53 @@ public sealed class UploadPipeline : IPackFiller
         // tmdb_id is the SubDL-recommended field; imdb_id rides along too. The API-side
         // precedence rule (tmdb empty → imdb only; both → both) lives in the client —
         // here we simply forward what JF metadata provided.
-        var result = await _api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired, framerate).ConfigureAwait(false);
+        // F-M485 (operator order 15.11.2026: "beide upload und download bitte individuell schaltbar
+        // über die toggles"): the UPLOAD follows its switches. SubDL is called exactly as before when
+        // its switch is on — including the response body the caller reads below, which is why this is
+        // not folded into a generic call. The second source joins only when its switch is on, and only
+        // when SubDL is off or did not take the subtitle.
+        // F-M487 (operator order 15.11.2026): no cross-contamination. The subtitle's provenance is read
+        // from the store by its content hash; a known provenance may only go back to its OWN source.
+        // Unknown provenance (hand copy, embedded track, older row) stays allowed everywhere.
+        var herkunft = Registry.GetOrigin(contentHashEarly).Origin;
+        bool darfSubdl = _config.IsUploadEnabled(Configuration.SubtitleProvider.Subdl)
+            && Api.Endpoints.Provenance.MayUploadTo(herkunft, Configuration.SubtitleProvider.Subdl);
+        bool darfZweite = _config.IsUploadEnabled(Configuration.SubtitleProvider.TvSubtitles)
+            && Api.Endpoints.Provenance.MayUploadTo(herkunft, Configuration.SubtitleProvider.TvSubtitles);
+        if (!darfSubdl && Api.Endpoints.Provenance.Parse(herkunft) is not null)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[SubDL] {Name} [{Lang}] — {Reason}",
+                neutralName, lang, Api.Endpoints.Provenance.CrossSourceReason(herkunft!, Configuration.SubtitleProvider.Subdl));
+        }
+
+        UploadResult result;
+        if (darfSubdl)
+        {
+            result = await _api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired, framerate).ConfigureAwait(false);
+        }
+        else
+        {
+            result = UploadResult.Skipped("subdl-off");
+        }
+
+        if (!result.Ok && darfZweite)
+        {
+            var zweite = await SendToSecondSourceAsync(
+                srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, hearingImpaired, ct)
+                .ConfigureAwait(false);
+            if (zweite.Ok)
+            {
+                result = zweite;
+            }
+            else if (!result.SkippedItem)
+            {
+                // SubDL hat es versucht und nicht genommen — der Grund der zweiten Quelle ist der
+                // einzige, der noch etwas erklärt.
+                result = UploadResult.Failed(zweite.Reason ?? "second-source-refused");
+            }
+        }
+
         if (result.Ok)
         {
             // F-M17y/F-M184: SubDL returns "sent for review" for every upload. The final
@@ -4695,5 +4741,47 @@ public sealed class UploadPipeline : IPackFiller
 
     // F-M17y: pending upload attempt model removed; metadata lives in the registry.
     // Kept as a comment for history until the next cleanup.
-}
 
+    /// <summary>
+    /// F-M485: sends one subtitle to the second source (tvsubtitles.net). The series name comes from the
+    /// media file's own name through the same parser the download uses — the source has no id index, so
+    /// a name is all it can resolve.
+    /// </summary>
+    private async Task<UploadResult> SendToSecondSourceAsync(
+        string srtContent, string neutralName, string lang, string releaseName, string quality,
+        string? imdbId, string? tmdbId, bool isSeries, int season, int episode, bool hearingImpaired,
+        CancellationToken ct)
+    {
+        if (!isSeries || season <= 0 || episode <= 0)
+        {
+            return UploadResult.Skipped("second-source-episodes-only");
+        }
+
+        var client = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        var endpoint = new Api.Endpoints.TvSubtitlesUploadEndpoint(client, dryRun: false);
+        var parsed = Pipeline.MediaNameParser.Parse(Path.GetFileNameWithoutExtension(releaseName));
+        var showName = parsed.Title ?? Path.GetFileNameWithoutExtension(releaseName);
+        var ticket = new Api.Endpoints.UploadTicket(
+            showName,
+            imdbId,
+            tmdbId,
+            season,
+            episode,
+            lang,
+            neutralName,
+            System.Text.Encoding.UTF8.GetBytes(srtContent),
+            quality,
+            Path.GetFileNameWithoutExtension(releaseName),
+            hearingImpaired,
+            DoubleEpisode: false,
+            SeasonPack: false);
+
+        var answer = await endpoint.SendAsync(ticket, ct).ConfigureAwait(false);
+        LogUtil.PerItem(_config.LogMode, _logger,
+            "[tvsubtitles] {Name} [{Lang}] — {Result}{Reason}",
+            neutralName, lang,
+            answer.Ok ? "sent" : "refused",
+            string.IsNullOrEmpty(answer.Reason) ? string.Empty : ": " + answer.Reason);
+        return answer.Ok ? UploadResult.Success() : UploadResult.Failed(answer.Reason ?? "second-source-refused");
+    }
+}

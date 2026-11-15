@@ -74,11 +74,8 @@ internal static class Program
         Check("there are two upload endpoints, one per source",
             catalog.AllUploads.Count == 2
             && catalog.AllUploads.Select(e => e.Provider).Distinct().Count() == 2);
-        Check("SubDL is wired in both directions, tvsubtitles in neither (yet)",
-            catalog.AllDownloads.Single(e => e.Provider == SubtitleProvider.Subdl).Wired
-            && catalog.AllUploads.Single(e => e.Provider == SubtitleProvider.Subdl).Wired
-            && !catalog.AllDownloads.Single(e => e.Provider == SubtitleProvider.TvSubtitles).Wired
-            && !catalog.AllUploads.Single(e => e.Provider == SubtitleProvider.TvSubtitles).Wired);
+        Check("both sources are wired in both directions (F-M485)",
+            catalog.AllDownloads.All(e => e.Wired) && catalog.AllUploads.All(e => e.Wired));
 
         // ---- 2. the catalog obeys switches AND wiring ------------------------------------------
         var aus = Conf(c => { c.DownloadEnabled = false; c.UploadEnabled = false; });
@@ -103,19 +100,56 @@ internal static class Program
             c.TvSubtitlesDownloadEnabled = true;
             c.TvSubtitlesUploadEnabled = true;
         });
-        Check("even with the tvsubtitles switches ON it stays out — it is not wired",
-            catalog.EnabledDownloads(tvAn).All(e => e.Provider == SubtitleProvider.Subdl)
-            && catalog.EnabledUploads(tvAn).All(e => e.Provider == SubtitleProvider.Subdl));
+        Check("the tvsubtitles switches now pull the second endpoint in, each on its own",
+            catalog.EnabledDownloads(tvAn).Count == 2 && catalog.EnabledUploads(tvAn).Count == 2,
+            "downloads=" + catalog.EnabledDownloads(tvAn).Count + " uploads=" + catalog.EnabledUploads(tvAn).Count);
+
+        var tvNurDownload = Conf(c =>
+        {
+            c.DownloadEnabled = false;
+            c.UploadEnabled = false;
+            c.TvSubtitlesDownloadEnabled = true;
+            c.TvSubtitlesUploadEnabled = false;
+        });
+        Check("tvsubtitles download alone runs while both SubDL directions stay off",
+            catalog.EnabledDownloads(tvNurDownload).Count == 1
+            && catalog.EnabledDownloads(tvNurDownload)[0].Provider == SubtitleProvider.TvSubtitles
+            && catalog.EnabledUploads(tvNurDownload).Count == 0);
+
+        var tvNurUpload = Conf(c =>
+        {
+            c.DownloadEnabled = false;
+            c.UploadEnabled = false;
+            c.TvSubtitlesDownloadEnabled = false;
+            c.TvSubtitlesUploadEnabled = true;
+        });
+        Check("tvsubtitles upload alone runs while everything else is off",
+            catalog.EnabledUploads(tvNurUpload).Count == 1
+            && catalog.EnabledUploads(tvNurUpload)[0].Provider == SubtitleProvider.TvSubtitles
+            && catalog.EnabledDownloads(tvNurUpload).Count == 0);
+
+        var nurSubdlUpload = Conf(c =>
+        {
+            c.DownloadEnabled = false;
+            c.UploadEnabled = true;
+            c.TvSubtitlesUploadEnabled = false;
+        });
+        Check("SubDL upload alone stays alone", catalog.EnabledUploads(nurSubdlUpload).Count == 1
+            && catalog.EnabledUploads(nurSubdlUpload)[0].Provider == SubtitleProvider.Subdl);
 
         // ---- 3. the refusal names its reason, in the page's words ------------------------------
-        var refusedDown = catalog.Refused(beide, SubtitleDirection.Download);
-        var refusedUp = catalog.Refused(beide, SubtitleDirection.Upload);
-        Check("the unwired endpoint is listed as refused, not silently missing",
-            refusedDown.Count == 1 && refusedDown[0].Provider == SubtitleProvider.TvSubtitles
-            && refusedUp.Count == 1 && refusedUp[0].Provider == SubtitleProvider.TvSubtitles);
-        Check("the refusal sentence is the one the config page prints",
-            refusedDown[0].Reason == PluginConfiguration.MissingProviderReason(SubtitleProvider.TvSubtitles)
-            && refusedDown[0].Reason.Contains("nicht in den Lauf eingebunden", StringComparison.Ordinal));
+        var refusedDown = catalog.Refused(tvAn, SubtitleDirection.Download);
+        var refusedUp = catalog.Refused(tvAn, SubtitleDirection.Upload);
+        Check("with both switches on nothing is refused", refusedDown.Count == 0 && refusedUp.Count == 0);
+        var tvAus = Conf(c => { c.DownloadEnabled = true; c.TvSubtitlesDownloadEnabled = false; });
+        var refusedTvAus = catalog.Refused(tvAus, SubtitleDirection.Download);
+        Check("a source whose switch is off is listed as refused, not silently missing",
+            refusedTvAus.Count == 1 && refusedTvAus[0].Provider == SubtitleProvider.TvSubtitles
+            && refusedTvAus[0].Reason == "switched off");
+        Check("the sentence for a source is the one the config page prints",
+            PluginConfiguration.MissingProviderReason(SubtitleProvider.TvSubtitles) is { Length: > 20 }
+            && PluginConfiguration.MissingProviderReason(SubtitleProvider.TvSubtitles)!
+                .Contains("Staffelpacks", StringComparison.Ordinal));
         Check("a wired endpoint that is switched off says so",
             catalog.Refused(aus, SubtitleDirection.Download)
                 .Any(r => r.Provider == SubtitleProvider.Subdl && r.Reason == "switched off"));
@@ -197,6 +231,62 @@ internal static class Program
         var angemeldet = await subdlUpload.SendAsync(ticket).ConfigureAwait(false);
         Check("without a session the refusal is readable, not an exception",
             !angemeldet.Ok && angemeldet.Reason!.Contains("Not logged in", StringComparison.Ordinal));
+
+        // ---- 8. die Einbindung in den Lauf: Quelltext-Bindung (F-M485) -----------------------
+        var root2 = args.Length > 0 ? args[0] : "/opt/data/subdl-scribe";
+        var downloadSource = File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
+        var uploadSource = File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        Check("the download pipeline asks the second source exactly where a language would be given up",
+            downloadSource.Contains("IsDownloadEnabled(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
+            && downloadSource.Contains("ForeignCandidatesAsync(title, isSeries, season, episode, lang, ct)", StringComparison.Ordinal),
+            "the fallback sits in the language loop, before \"not available\"");
+        Check("a foreign candidate is fetched from its own endpoint, not over SubDL's routes",
+            downloadSource.Contains("cand.Provider != Configuration.SubtitleProvider.Subdl", StringComparison.Ordinal)
+            && downloadSource.Contains("Route = \"tvsubtitles\"", StringComparison.Ordinal));
+        Check("the upload pipeline sends to the second source only when its switch is on and SubDL did not take it",
+            uploadSource.Contains("IsUploadEnabled(Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal)
+            && uploadSource.Contains("SendToSecondSourceAsync(", StringComparison.Ordinal));
+        Check("the SubDL upload call itself is untouched — the response body the caller reads stays",
+            uploadSource.Contains("_api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired, framerate)", StringComparison.Ordinal));
+        Check("the second source never breaks the run — its errors are warnings",
+            downloadSource.Contains("[tvsubtitles-D] search failed for", StringComparison.Ordinal));
+
+        // ---- 9. Herkunft und Kreuzkontamination (F-M486/F-M487) -------------------------------
+        Check("the store value names the source, and parses back",
+            Provenance.Name(SubtitleProvider.Subdl) == "subdl"
+            && Provenance.Name(SubtitleProvider.TvSubtitles) == "tvsubtitles"
+            && Provenance.Parse("tvsubtitles") == SubtitleProvider.TvSubtitles
+            && Provenance.Parse("SubDL") == SubtitleProvider.Subdl
+            && Provenance.Parse(null) is null
+            && Provenance.Parse("  ") is null);
+        Check("a tvsubtitles find never goes to SubDL, and the other way round",
+            !Provenance.MayUploadTo("tvsubtitles", SubtitleProvider.Subdl)
+            && !Provenance.MayUploadTo("subdl", SubtitleProvider.TvSubtitles)
+            && Provenance.MayUploadTo("tvsubtitles", SubtitleProvider.TvSubtitles)
+            && Provenance.MayUploadTo("subdl", SubtitleProvider.Subdl));
+        Check("unknown provenance stays allowed everywhere — a hand copy or an embedded track",
+            Provenance.MayUploadTo(null, SubtitleProvider.Subdl)
+            && Provenance.MayUploadTo(null, SubtitleProvider.TvSubtitles)
+            && Provenance.MayUploadTo(string.Empty, SubtitleProvider.Subdl));
+        Check("the refusal sentence names both sides",
+            Provenance.CrossSourceReason("tvsubtitles", SubtitleProvider.Subdl)
+                .Contains("tvsubtitles", StringComparison.Ordinal)
+            && Provenance.CrossSourceReason("tvsubtitles", SubtitleProvider.Subdl)
+                .Contains("subdl", StringComparison.Ordinal));
+        Check("the download records the origin and the source's own id in the store",
+            downloadSource.Contains("Api.Endpoints.Provenance.Name(cand.Provider)", StringComparison.Ordinal)
+            && downloadSource.Contains("cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url", StringComparison.Ordinal));
+        Check("the upload reads the origin from the store before it picks an endpoint",
+            uploadSource.Contains("Registry.GetOrigin(contentHashEarly)", StringComparison.Ordinal)
+            && uploadSource.Contains("Provenance.MayUploadTo(herkunft, Configuration.SubtitleProvider.Subdl)", StringComparison.Ordinal)
+            && uploadSource.Contains("Provenance.MayUploadTo(herkunft, Configuration.SubtitleProvider.TvSubtitles)", StringComparison.Ordinal));
+        Check("the store schema carries the two columns and a migration step",
+            File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"))
+                .Contains("public string? OriginId { get; set; }", StringComparison.Ordinal)
+            && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
+                .Contains("ALTER TABLE sidecars ADD COLUMN Origin TEXT NULL;", StringComparison.Ordinal)
+            && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
+                .Contains("CurrentSchemaVersion = 10", StringComparison.Ordinal));
 
         Console.WriteLine();
         if (_failures > 0)

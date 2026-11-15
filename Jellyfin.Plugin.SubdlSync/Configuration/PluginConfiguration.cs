@@ -852,7 +852,8 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     /// <param name="provider">The subtitle source asked about.</param>
     /// <returns>True when the source can actually be served.</returns>
-    public static bool HasProvider(SubtitleProvider provider) => provider == SubtitleProvider.Subdl;
+    public static bool HasProvider(SubtitleProvider provider) =>
+        provider is SubtitleProvider.Subdl or SubtitleProvider.TvSubtitles;
 
     /// <summary>
     /// F-M478: the operator-facing reason a switch is inert, or null when it works. The page prints it
@@ -862,8 +863,8 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <returns>The reason, or null when the source is wired in.</returns>
     public static string? MissingProviderReason(SubtitleProvider provider) => provider switch
     {
-        SubtitleProvider.TvSubtitles => "tvsubtitles.net — Endpunkte stehen (Abruf und Upload), sind aber noch "
-            + "nicht in den Lauf eingebunden: der Schalter hat noch keine Wirkung.",
+        SubtitleProvider.TvSubtitles => "tvsubtitles.net — eigener Abruf und eigener Upload, gesteuert von "
+            + "diesen zwei Schaltern. Staffelpacks und der HI-Pool bleiben bei SubDL.",
         _ => null,
     };
 

@@ -162,15 +162,19 @@
     },
     "T202": {
       "suite": "offstate",
-      "checks": 8
+      "checks": 10
     },
     "T203": {
       "suite": "tvsubtitles",
       "checks": 41
     },
-    "T204": {
+    "T205": {
       "suite": "endpoints",
-      "checks": 28
+      "checks": 37
+    },
+    "T206": {
+      "suite": "endpoints",
+      "checks": 7
     }
   }
 }

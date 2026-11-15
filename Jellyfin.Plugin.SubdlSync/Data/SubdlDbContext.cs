@@ -99,7 +99,7 @@ public sealed class SubdlDbContext : IDisposable
     // document store, named subdl-scribe.sqlite (F-M326). An older build opening this file finds no
     // document header and reports a broken store; the marker is what makes that loud instead of
     // silent. The old file is imported once on first start and kept as a .bak (F-M327).
-    public const int CurrentSchemaVersion = 9;
+    public const int CurrentSchemaVersion = 10;
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
@@ -322,6 +322,45 @@ public sealed class SubdlDbContext : IDisposable
         catch (Exception ex)
         {
             _logger?.LogWarning("[SubDL] could not add the report columns (continuing): {Msg}", ex.Message);
+        }
+
+        // F-M486 (schema 10): Herkunft je Untertitel. Ohne sie kann der Upload nicht wissen, ob er
+        // einen tvsubtitles-Fund gerade zu SubDL schickt (F-M487) — die Spalte ist die einzige Stelle,
+        // an der diese Herkunft überlebt.
+        foreach (var (table, column, ddl) in new[]
+                 {
+                     ("sidecars", "Origin", "ALTER TABLE sidecars ADD COLUMN Origin TEXT NULL;"),
+                     ("sidecars", "OriginId", "ALTER TABLE sidecars ADD COLUMN OriginId TEXT NULL;"),
+                     ("embeds", "Origin", "ALTER TABLE embeds ADD COLUMN Origin TEXT NULL;"),
+                     ("embeds", "OriginId", "ALTER TABLE embeds ADD COLUMN OriginId TEXT NULL;")
+                 })
+        {
+            try
+            {
+                var exists = false;
+                using var cmd = _db.Database.GetDbConnection().CreateCommand();
+                cmd.CommandText = "PRAGMA table_info(" + table + ");";
+                _db.Database.OpenConnection();
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                    {
+                        exists = true;
+                    }
+                }
+
+                _db.Database.CloseConnection();
+                if (!exists)
+                {
+                    _db.Database.ExecuteSqlRaw(ddl);
+                    LogUtil.Normal(_logger, "[SubDL] data file: column {Column} added to {Table}.", column, table);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("[SubDL] could not add {Column} to {Table} (continuing): {Msg}", column, table, ex.Message);
+            }
         }
     }
 

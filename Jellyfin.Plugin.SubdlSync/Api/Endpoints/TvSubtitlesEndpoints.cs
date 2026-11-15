@@ -44,7 +44,7 @@ public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
     public SubtitleProvider Provider => SubtitleProvider.TvSubtitles;
 
     /// <inheritdoc />
-    public bool Wired => false;
+    public bool Wired => true;
 
     /// <summary>
     /// F-M483: the site's language code for a two-letter language. SubDL speaks ISO-ish codes, the site
@@ -149,7 +149,7 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
     public SubtitleProvider Provider => SubtitleProvider.TvSubtitles;
 
     /// <inheritdoc />
-    public bool Wired => false;
+    public bool Wired => true;
 
     /// <inheritdoc />
     public async Task<EndpointAnswer> SendAsync(

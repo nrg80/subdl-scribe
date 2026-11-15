@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("coveragerun")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c9acaaa41e75a19edd604553c50ea4de85fb7846")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4fdf2ac5493aef450dc639771fee675c5e397ca0")]
 [assembly: System.Reflection.AssemblyProductAttribute("coveragerun")]
 [assembly: System.Reflection.AssemblyTitleAttribute("coveragerun")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

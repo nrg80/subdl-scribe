@@ -92,6 +92,31 @@ Sie fährt die tvsubtitles-Seite über einen gefälschten HTTP-Handler gegen die
 `scripts/tests/tvsubtitles/fixtures` — von der Serienliste bis zum Zip — und prüft die SubDL-Seite
 über ihre reine Abbildung und ihre Ablehnungen.
 
+## Herkunft im Store und keine Kreuzkontamination (F-M486/F-M487)
+
+Jeder Untertitel trägt seit Schema 10 zwei Felder im Store (`sidecars` **und** `embeds`):
+
+| Feld | Inhalt |
+|---|---|
+| `Origin` | `subdl` oder `tvsubtitles` |
+| `OriginId` | die **eigene Id der Quelle** — tvsubtitles-Untertitel-Id (z. B. `170678`) oder SubDL-Eintrags-Id |
+
+**Ist ein tvst-Fund eindeutig identifizierbar?** Ja. Die Id benennt den Eintrag auf der Seite, der
+Inhalt-Hash benennt den Text, beide zusammen sind eindeutig — die Id wird im Store abgelegt, nicht nur
+im Log. `null` heißt „diese Zeile sagt nichts" (Altzeile, Handkopie, eingebettete Spur) und wird nie
+geraten; ein Schreiber ohne Kenntnis löscht eine vorhandene Angabe nicht.
+
+**Die Kreuzregel** (`Provenance.MayUploadTo`, eine Stelle, nicht zwei):
+
+- Herkunft **bekannt** → nur die **eigene** Quelle nimmt den Upload. Ein tvst-Fund geht nie zu SubDL,
+  ein SubDL-Fund nie zu tvst.
+- Herkunft **unbekannt** → jeder Endpunkt erlaubt. Sonst könnte der Betreiber seine eigenen Dateien
+  nicht mehr hochladen.
+- Die Ablehnung landet im Log: `cross-source: subtitle came from tvsubtitles, not uploading it to subdl`.
+
+Der Upload liest die Herkunft vor der Endpunktwahl über den Inhalt-Hash (`Registry.GetOrigin`), der
+Download schreibt sie beim Speichern mit (`Provenance.Name(cand.Provider)` plus die Id der Quelle).
+
 ## Der nächste Schritt (nicht Teil dieses Schnitts)
 
 `Wired = true` für tvsubtitles setzen heißt: die Pipelines rufen den Katalog statt des SubDL-Clients.

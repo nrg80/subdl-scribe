@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("statefilerun")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c4bad8aa2e4be4a2bf62ffe1e2135e9c29fc3351")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4fdf2ac5493aef450dc639771fee675c5e397ca0")]
 [assembly: System.Reflection.AssemblyProductAttribute("statefilerun")]
 [assembly: System.Reflection.AssemblyTitleAttribute("statefilerun")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

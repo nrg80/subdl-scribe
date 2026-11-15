@@ -80,9 +80,10 @@ TV-Show please check if it already exist" — deshalb erst `ResolveShow`, dann a
 - **Kein Login sichtbar.** `/login.html`, `/upload.html`, `/panel.html` → 404. Ob `/add1.php` ohne
   Anmeldung annimmt, ist **ungeprüft**: ein leerer POST antwortet mit HTTP 200 und leerem Rumpf, ein
   Captcha war nicht sichtbar. Der erste echte Upload muss deshalb beobachtet werden.
-- **Der Client ist nicht in die Pipelines eingebunden.** Die Schalter dieser Quelle melden
-  „kein Anbieter verbaut" (F-M478). Das ist Absicht: das Protokoll ist jetzt prüfbar, ohne dass ein
-  Download-Lauf davon abhängt.
+- **Der Client ist inzwischen eingebunden** (F-M485): die zwei Schalter steuern Abruf und Upload
+  wirklich, und die Herkunft jedes Funds steht mit der Id der Quelle im Store (F-M486), damit ein
+  tvst-Fund nie zu SubDL hochgeladen wird (F-M487). Grenzen bleiben: **Staffelpacks und der HI-Pool
+  sind SubDL-Sache**, diese Quelle kann nur Einzelfolgen.
 
 ## Methoden
 

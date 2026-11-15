@@ -20,6 +20,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.SubdlScribe.Configuration;
 
 namespace Jellyfin.Plugin.SubdlScribe.Api;
 
@@ -2425,6 +2426,13 @@ public sealed class SubdlApiClient
 /// <summary>A SubDL search candidate (verified fields, see subdl-api-search-fields.md).</summary>
 public sealed class SubtitleCandidate
 {
+    /// <summary>
+    /// Gets or sets the source this candidate came from (F-M485). Default SubDL, so every existing
+    /// construction keeps its meaning; a candidate from tvsubtitles.net carries its own provider and is
+    /// fetched by that source's endpoint instead of SubDL's routes.
+    /// </summary>
+    public SubtitleProvider Provider { get; set; } = SubtitleProvider.Subdl;
+
     /// <summary>Gets or sets the release name (scoring basis).</summary>
     public string ReleaseName { get; set; } = string.Empty;
 
