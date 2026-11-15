@@ -60,6 +60,13 @@ public class DownloadRunSummary
     /// <summary>Gets or sets the number of downloaded subtitles.</summary>
     public int Downloaded { get; set; }
 
+    /// <summary>
+    /// F-M491: downloads that were kept but did NOT pass the alignment significance while auto-sync is on.
+    /// The file exists, so it is a download; it is not a success, so the pair stays open (F-M452) and a
+    /// later candidate gets its chance.
+    /// </summary>
+    public int DownloadedWithoutSignificance { get; set; }
+
     /// <summary>Gets or sets the number of failed downloads.</summary>
     public int Failed { get; set; }
 
@@ -1662,16 +1669,30 @@ public sealed class DownloadPipeline : IDisposable
             // Gelegenheit — aber nur, wenn ihr Schalter an ist. Die Treffer laufen danach durch
             // dieselbe Rangfolge, dieselben Tore, denselben Fit und dieselbe Ablage wie ein
             // SubDL-Treffer; sie sind nur woandersher.
-            if (langCands.Count == 0 && _config.IsDownloadEnabled(Configuration.SubtitleProvider.TvSubtitles))
+            // F-M491: die Reihenfolge aus der GUI entscheidet, wer ZUERST gefragt wird. Steht
+            // tvsubtitles vorn, ersetzen seine Treffer die SubDL-Kandidaten (statt sich hinter sie zu
+            // stellen); hat die Seite nichts, bleibt SubDL der Rückfall — genau umgekehrt zum Default.
+            var tvZuerst = _config.DownloadOrder == Configuration.PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst;
+            if ((tvZuerst || langCands.Count == 0) && _config.IsDownloadEnabled(Configuration.SubtitleProvider.TvSubtitles))
             {
                 var fremd = await ForeignCandidatesAsync(title, isSeries, season, episode, lang, ct).ConfigureAwait(false);
                 if (fremd.Count > 0)
                 {
-                    candidates.AddRange(fremd);
-                    langCands = candidates.Where(c => c.Language == lang).ToList();
+                    if (tvZuerst)
+                    {
+                        // Nur die Treffer der zuerst gefragten Quelle — der Rest des Laufs (Rangfolge,
+                        // Tore, Fit, Ablage) bleibt derselbe.
+                        langCands = fremd;
+                    }
+                    else
+                    {
+                        candidates.AddRange(fremd);
+                        langCands = candidates.Where(c => c.Language == lang).ToList();
+                    }
+
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[tvsubtitles-D] {File} [{Lang}] — {N} candidate(s) from the second source",
-                        Path.GetFileName(mediaPath), lang, fremd.Count);
+                        "[tvsubtitles-D] {File} [{Lang}] — {N} candidate(s), source order {Order}",
+                        Path.GetFileName(mediaPath), lang, fremd.Count, tvZuerst ? "tvsubtitles-first" : "fallback");
                 }
             }
 
@@ -2942,7 +2963,21 @@ public sealed class DownloadPipeline : IDisposable
                         subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null,
                         tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null));
                     _qaFails.RecordSuccess(item.Id.ToString(), lang); // A real save resets the QA counter
-                    summary.Downloaded++;
+
+                    // F-M491 (operator order 15.11.2026: "ein gefundenes und die signifikanz erfüllendes
+                    // (bei auto sync, sonst nur heruntergeladen) gibt als erfolgreich heruntergeladen"):
+                    // mit Auto-Sync ist nur eine Fassung erfolgreich, die die Signifikanz bestanden hat.
+                    // Eine behaltene Originalfassung ist heruntergeladen — die Datei liegt ja —, aber
+                    // nicht erfolgreich; das Paar bleibt damit offen (F-M452). Ist Auto-Sync aus, gibt es
+                    // keinen Fit und damit keinen Unterschied: jeder Abruf zählt.
+                    if (!_config.QaDownloadAutoSync || alignedForNaming)
+                    {
+                        summary.Downloaded++;
+                    }
+                    else
+                    {
+                        summary.DownloadedWithoutSignificance++;
+                    }
                     RememberSavedLibrary(item, targetPath); // F-M473
                     ReportOutcome(item, ItemOutcome.Done);
                     // F-M472: this save came out of a season pack, and the archive holding the other

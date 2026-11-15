@@ -369,6 +369,23 @@ internal static class Program
             registrySource.Contains("if (subdlUploadedAt.HasValue)", StringComparison.Ordinal)
             && registrySource.Contains("if (tvSubtitlesUploadedAt.HasValue)", StringComparison.Ordinal));
 
+        // ---- 13. Reihenfolge und Erfolgsbegriff (F-M491) --------------------------------------
+        Check("the download order is a setting, default SubDL first",
+            downloadSource.Contains("DownloadOrder", StringComparison.Ordinal)
+            && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"))
+                .Contains("DownloadSourceOrder.SubdlFirst;", StringComparison.Ordinal));
+        Check("the GUI offers the order under downloads and saves the chosen value",
+            File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"))
+                .Contains("id=\"DownloadOrder\"", StringComparison.Ordinal)
+            && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"))
+                .Contains("config.DownloadOrder =", StringComparison.Ordinal));
+        Check("with tvsubtitles first its hits REPLACE the SubDL candidates, they do not queue behind them",
+            downloadSource.Contains("langCands = fremd;", StringComparison.Ordinal)
+            && downloadSource.Contains("tvZuerst || langCands.Count == 0", StringComparison.Ordinal));
+        Check("a kept original is a download but not a success while auto-sync is on",
+            downloadSource.Contains("if (!_config.QaDownloadAutoSync || alignedForNaming)", StringComparison.Ordinal)
+            && downloadSource.Contains("summary.DownloadedWithoutSignificance++;", StringComparison.Ordinal));
+
         Console.WriteLine();
         if (_failures > 0)
         {

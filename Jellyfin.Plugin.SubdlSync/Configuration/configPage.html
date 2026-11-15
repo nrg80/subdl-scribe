@@ -484,6 +484,15 @@
                             <div class="fieldDescription" id="TvSubtitlesDownloadReason">tvsubtitles.net — eigener Abruf und eigener Upload, gesteuert von diesen zwei Schaltern. Staffelpacks und der HI-Pool bleiben bei SubDL.</div>
                         </div>
 
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="DownloadOrder">Download order</label>
+                            <select id="DownloadOrder" name="DownloadOrder" is="emby-select-withcolor" class="emby-select-withcolor emby-select">
+                                <option value="SubdlFirst">SubDL first, tvsubtitles.net as fallback</option>
+                                <option value="TvSubtitlesFirst">tvsubtitles.net first, SubDL as fallback</option>
+                            </select>
+                            <div class="fieldDescription">Which source is asked first for a missing language. The other one is only asked when the first has nothing. Default: SubDL first.</div>
+                        </div>
+
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="DownloadOnArrival" name="DownloadOnArrival" type="checkbox" is="emby-checkbox" />
@@ -1070,6 +1079,9 @@
                             config.SubdlDownloadEnabled === null || config.SubdlDownloadEnabled === undefined
                                 ? !!config.DownloadEnabled : !!config.SubdlDownloadEnabled;
                         document.querySelector('#TvSubtitlesDownloadEnabled').checked = !!config.TvSubtitlesDownloadEnabled;
+                        document.querySelector('#DownloadOrder').value = config.DownloadOrder === 'TvSubtitlesFirst'
+                            ? 'TvSubtitlesFirst'
+                            : 'SubdlFirst';
                         subdlPopulateLangList(config);
                         document.querySelector('#DownloadLanguagesDisplay').value = (config.DownloadLanguages || '');
                         document.querySelector('#DownloadOnlyMissing').checked = config.DownloadOnlyMissing;
@@ -1706,6 +1718,9 @@ workers.forEach(function (w) {
                         config.SubdlDownloadEnabled = document.querySelector('#SubdlDownloadEnabled').checked;
                         // F-M485: the second source is wired — the switch is stored as the operator set it.
                         config.TvSubtitlesDownloadEnabled = document.querySelector('#TvSubtitlesDownloadEnabled').checked;
+                        config.DownloadOrder = document.querySelector('#DownloadOrder').value === 'TvSubtitlesFirst'
+                            ? 'TvSubtitlesFirst'
+                            : 'SubdlFirst';
                         config.DownloadLanguages = document.querySelector('#DownloadLanguagesDisplay').value;
                         config.DownloadOnlyMissing = document.querySelector('#DownloadOnlyMissing').checked;
                         config.DownloadHearingImpaired = document.querySelector('#DownloadHearingImpaired').checked;

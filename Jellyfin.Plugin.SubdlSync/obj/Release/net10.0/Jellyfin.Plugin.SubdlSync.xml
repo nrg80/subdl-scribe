@@ -3425,6 +3425,12 @@
             wired in, so the effective value is always false (F-M478).
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadOrder">
+            <summary>
+            Gets or sets which download source is asked first (F-M491). Default: SubDL first — that is the
+            behaviour every run had before the second source existed.
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadLanguages">
             <summary>Gets or sets the target languages, e.g. "EN, FR, ES" (F-M42). Empty = download disabled. (user decision 08.09.2026, Arabic added 30.09.2026): default AR, EN, ES, FR, HI, ZH (alphabetical) — DE/RU/PT were removed deliberately (DE is uploaded by hand, RU/PT have thin coverage).</summary>
         </member>
@@ -3823,7 +3829,7 @@
             <param name="provider">The subtitle source asked about.</param>
             <returns>True when the upload direction runs for this source.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.HasProvider(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
+        <member name="T:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadSourceOrder">
             <summary>
             F-M478: does a provider exist for this source? SubDL is the only one wired in; tvsubtitles.net
             has switches but no client, no pipeline branch and no route. The page states this instead of
@@ -3831,6 +3837,17 @@
             </summary>
             <param name="provider">The subtitle source asked about.</param>
             <returns>True when the source can actually be served.</returns>
+            <summary>
+            F-M491 (operator order 15.11.2026: "wir brauchen eine einstellbare Reihenfolge unter downloads
+            gui ... erst subdl dann tvst oder umgekehrt"): which of the two download sources is asked FIRST.
+            The other one stays as the fallback for a language the first could not serve.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadSourceOrder.SubdlFirst">
+            <summary>SubDL first, tvsubtitles.net when SubDL has nothing (the default).</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst">
+            <summary>tvsubtitles.net first, SubDL when the site has nothing.</summary>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration.MissingProviderReason(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider)">
             <summary>
@@ -5607,6 +5624,13 @@
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadRunSummary.Downloaded">
             <summary>Gets or sets the number of downloaded subtitles.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadRunSummary.DownloadedWithoutSignificance">
+            <summary>
+            F-M491: downloads that were kept but did NOT pass the alignment significance while auto-sync is on.
+            The file exists, so it is a download; it is not a success, so the pair stays open (F-M452) and a
+            later candidate gets its chance.
+            </summary>
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Pipeline.DownloadRunSummary.Failed">
             <summary>Gets or sets the number of failed downloads.</summary>

@@ -394,6 +394,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool? TvSubtitlesDownloadEnabled { get; set; }
 
+    /// <summary>
+    /// Gets or sets which download source is asked first (F-M491). Default: SubDL first — that is the
+    /// behaviour every run had before the second source existed.
+    /// </summary>
+    public DownloadSourceOrder DownloadOrder { get; set; } = DownloadSourceOrder.SubdlFirst;
+
     /// <summary>Gets or sets the target languages, e.g. "EN, FR, ES" (F-M42). Empty = download disabled. (user decision 08.09.2026, Arabic added 30.09.2026): default AR, EN, ES, FR, HI, ZH (alphabetical) — DE/RU/PT were removed deliberately (DE is uploaded by hand, RU/PT have thin coverage).</summary>
     public string DownloadLanguages { get; set; } = "AR, EN, ES, FR, HI, ZH";
 
@@ -852,6 +858,20 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     /// <param name="provider">The subtitle source asked about.</param>
     /// <returns>True when the source can actually be served.</returns>
+    /// <summary>
+    /// F-M491 (operator order 15.11.2026: "wir brauchen eine einstellbare Reihenfolge unter downloads
+    /// gui ... erst subdl dann tvst oder umgekehrt"): which of the two download sources is asked FIRST.
+    /// The other one stays as the fallback for a language the first could not serve.
+    /// </summary>
+    public enum DownloadSourceOrder
+    {
+        /// <summary>SubDL first, tvsubtitles.net when SubDL has nothing (the default).</summary>
+        SubdlFirst = 0,
+
+        /// <summary>tvsubtitles.net first, SubDL when the site has nothing.</summary>
+        TvSubtitlesFirst = 1,
+    }
+
     public static bool HasProvider(SubtitleProvider provider) =>
         provider is SubtitleProvider.Subdl or SubtitleProvider.TvSubtitles;
 

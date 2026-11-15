@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("stopfire")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0f59bd4720fc7cc58c4438ac8ff97e08851a614c")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+354c8919fed241958435fe6f9eece1edb262ec79")]
 [assembly: System.Reflection.AssemblyProductAttribute("stopfire")]
 [assembly: System.Reflection.AssemblyTitleAttribute("stopfire")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

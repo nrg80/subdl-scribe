@@ -137,6 +137,18 @@ den Upload wirklich genommen hat.
 Schema 11, in `sidecars` **und** `embeds`, per `ALTER TABLE` nachgezogen; geschrieben wird nur, was
 bekannt ist, und ein leerer Wert löscht keine vorhandene Angabe.
 
+## Reihenfolge und Erfolgsbegriff (F-M491)
+
+Unter Downloads steht die Reihenfolge: **SubDL first** (Default) oder **tvsubtitles.net first**. Steht tvst
+vorn, **ersetzen** seine Treffer die SubDL-Kandidaten statt sich hinter sie zu stellen; hat die Seite für
+die Sprache nichts, bleibt SubDL der Rückfall. Rangfolge, Tore, Fit, Ablage und Herkunft sind für beide
+Reihenfolgen derselbe Code.
+
+**Erfolgreich heruntergeladen** heißt bei eingeschaltetem Auto-Sync: die Fassung hat die **Signifikanz
+bestanden** (`alignedForNaming`). Eine behaltene Originalfassung ist **heruntergeladen, nicht erfolgreich**
+(`DownloadedWithoutSignificance`) — die Datei liegt, das Paar bleibt offen (F-M452). Ist Auto-Sync aus,
+gibt es keinen Fit und damit keinen Unterschied: jeder Abruf zählt.
+
 ## „Hochgeladen" je Quelle (F-M490)
 
 Zwei eigene Zeitstempel, `SubdlUploadedAt` und `TvSubtitlesUploadedAt` (Schema 12, in `sidecars` **und**
