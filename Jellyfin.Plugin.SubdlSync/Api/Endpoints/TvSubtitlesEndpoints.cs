@@ -16,6 +16,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
 
@@ -132,6 +133,7 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
 {
     private readonly TvSubtitlesClient _client;
     private readonly bool _dryRun;
+    private readonly ILogger? _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TvSubtitlesUploadEndpoint"/> class.
@@ -139,10 +141,12 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
     /// <param name="client">The tvsubtitles.net client.</param>
     /// <param name="dryRun">True (default) builds the request and sends nothing. The plugin's own
     /// DryRun switch is passed in here — it is not read inside, so the endpoint stays testable.</param>
-    public TvSubtitlesUploadEndpoint(TvSubtitlesClient client, bool dryRun = true)
+    /// <param name="logger">Optional logger — it only ever says why an id could not be read back.</param>
+    public TvSubtitlesUploadEndpoint(TvSubtitlesClient client, bool dryRun = true, ILogger? logger = null)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _dryRun = dryRun;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -212,12 +216,34 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
 
         var result = await _client.UploadAsync(upload, _dryRun, cancellationToken).ConfigureAwait(false);
         var ok = !_dryRun && result.Status is >= 200 and < 300;
+
+        // F-M488: the site does not answer the upload with an id, so the id is read back from the
+        // episode page afterwards. Best effort with a short leash: an upload that went through must not
+        // be reported as failed because the read-back did not work.
+        string? id = null;
+        if (ok)
+        {
+            try
+            {
+                using var leash = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                leash.CancelAfter(TimeSpan.FromSeconds(60));
+                id = await _client.FindUploadedIdAsync(
+                    ticket.ShowName, ticket.Season, ticket.Episode, ticket.Language, ticket.Release, leash.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning("[tvsubtitles] upload id could not be read back: {Error}", ex.Message);
+            }
+        }
+
         return new EndpointAnswer(
             Provider,
             _dryRun || ok,
             _dryRun ? null : (ok ? null : "HTTP " + result.Status),
             result.BodyBytes,
             result.Response,
-            !result.Sent);
+            !result.Sent,
+            id);
     }
 }

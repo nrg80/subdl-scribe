@@ -117,6 +117,23 @@ geraten; ein Schreiber ohne Kenntnis löscht eine vorhandene Angabe nicht.
 Der Upload liest die Herkunft vor der Endpunktwahl über den Inhalt-Hash (`Registry.GetOrigin`), der
 Download schreibt sie beim Speichern mit (`Provenance.Name(cand.Provider)` plus die Id der Quelle).
 
+## Vier Kennzeichen, je Quelle und Richtung eines (F-M488)
+
+| Feld | Wann es gefüllt wird | Woher der Wert kommt |
+|---|---|---|
+| `SubdlDownloadId` | Download von SubDL | die SubDL-Eintrags-Id des Treffers |
+| `SubdlUploadId` | Upload zu SubDL | die Id aus der Antwort des Uploads |
+| `TvSubtitlesDownloadId` | Download von tvsubtitles.net | die Untertitel-Id der Seite (z. B. `170678`) |
+| `TvSubtitlesUploadId` | Upload zu tvsubtitles.net | **zurückgelesen** von der Folgenseite nach dem Senden |
+
+Für SubDL war nichts Neues nötig — die Id steht schon in der Antwort, sie wird nur zusätzlich in ihr
+eigenes Feld geschrieben. tvsubtitles.net antwortet auf den Upload **ohne** Id, deshalb wird sie
+danach von der Folgenseite gelesen (Sprache und Release müssen passen). Findet der Rückleser nichts,
+bleibt das Feld leer: eine erfundene Id wäre schlimmer als keine, weil der Store sie verbürgen würde.
+
+Schema 11, in `sidecars` **und** `embeds`, per `ALTER TABLE` nachgezogen; geschrieben wird nur, was
+bekannt ist, und ein leerer Wert löscht keine vorhandene Angabe.
+
 ## Der nächste Schritt (nicht Teil dieses Schnitts)
 
 `Wired = true` für tvsubtitles setzen heißt: die Pipelines rufen den Katalog statt des SubDL-Clients.

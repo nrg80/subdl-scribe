@@ -2937,7 +2937,10 @@ public sealed class DownloadPipeline : IDisposable
                         // F-M486: die Herkunft wandert in den Store — Quelle und deren eigene Id.
                         // Ohne sie wüsste ein späterer Upload nicht, wohin dieser Fund gehört (F-M487).
                         Api.Endpoints.Provenance.Name(cand.Provider),
-                        cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url));
+                        cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url,
+                        // F-M488: und zusätzlich in das eigene Feld der Quelle und Richtung.
+                        subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null,
+                        tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null));
                     _qaFails.RecordSuccess(item.Id.ToString(), lang); // A real save resets the QA counter
                     summary.Downloaded++;
                     RememberSavedLibrary(item, targetPath); // F-M473

@@ -294,6 +294,25 @@ public abstract class SubtitleState
     /// exactly, so a later check can quote it instead of describing it.
     /// </summary>
     public string? OriginId { get; set; }
+
+    /// <summary>
+    /// F-M488 (operator order 15.11.2026): the four marks are separate fields, one per source AND
+    /// direction, so a row says by itself what happened where — no reading of <see cref="Status"/> and
+    /// no guessing. <c>SubdlDownloadId</c> is the SubDL entry the subtitle was fetched from.
+    /// </summary>
+    public string? SubdlDownloadId { get; set; }
+
+    /// <summary>F-M488: the SubDL id the uploaded subtitle got.</summary>
+    public string? SubdlUploadId { get; set; }
+
+    /// <summary>F-M488: the tvsubtitles.net subtitle id the subtitle was fetched from (e.g. <c>170678</c>).</summary>
+    public string? TvSubtitlesDownloadId { get; set; }
+
+    /// <summary>
+    /// F-M488: the tvsubtitles.net subtitle id our own upload got, read back from the episode page after
+    /// the send. Null means the id could not be read back — it is never filled with a guess.
+    /// </summary>
+    public string? TvSubtitlesUploadId { get; set; }
 }
 
 /// <summary>

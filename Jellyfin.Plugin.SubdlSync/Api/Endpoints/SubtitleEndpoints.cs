@@ -126,7 +126,13 @@ public sealed record EndpointAnswer(
     string? Reason,
     int Bytes,
     string? Answer,
-    bool DryRun);
+    bool DryRun,
+    /// <summary>
+    /// F-M488: the source's own id for what this answer is about — the new upload's subtitle id at
+    /// tvsubtitles.net. Null when the source does not hand one back or it could not be read back; a
+    /// guessed id is worse than none, because the store would then vouch for it.
+    /// </summary>
+    string? Id = null);
 
 /// <summary>
 /// F-M483: ONE download endpoint. Two implementations exist — SubDL and tvsubtitles.net — and the

@@ -31,6 +31,20 @@ public class UploadResult
     public System.Text.Json.JsonDocument? Response { get; init; }
 
     /// <summary>
+    /// F-M488: the id the SOURCE gave our upload, when it gave one. SubDL fills it from its response,
+    /// the second source from the read-back of its episode page. Null means "no id known" — it is never
+    /// guessed, because the store would then vouch for a row that does not exist.
+    /// </summary>
+    public string? SourceId { get; init; }
+
+    /// <summary>
+    /// Creates a success result carrying the source's own id for the upload.
+    /// </summary>
+    /// <param name="sourceId">The id the source reported, or null.</param>
+    /// <returns>The result.</returns>
+    public static UploadResult Success(string? sourceId) => new() { Ok = true, SourceId = sourceId };
+
+    /// <summary>
     /// Creates a success result.
     /// </summary>
     public static UploadResult Success() => new() { Ok = true };

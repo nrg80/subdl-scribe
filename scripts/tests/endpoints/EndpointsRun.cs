@@ -286,7 +286,33 @@ internal static class Program
             && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
                 .Contains("ALTER TABLE sidecars ADD COLUMN Origin TEXT NULL;", StringComparison.Ordinal)
             && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
-                .Contains("CurrentSchemaVersion = 10", StringComparison.Ordinal));
+                .Contains("CurrentSchemaVersion = 11", StringComparison.Ordinal));
+
+        // ---- 10. eigene Kennzeichen je Quelle und Richtung (F-M488) ---------------------------
+        var entities = File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"));
+        var dbc = File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"));
+        Check("four own fields exist, one per source and direction",
+            entities.Contains("public string? SubdlDownloadId { get; set; }", StringComparison.Ordinal)
+            && entities.Contains("public string? SubdlUploadId { get; set; }", StringComparison.Ordinal)
+            && entities.Contains("public string? TvSubtitlesDownloadId { get; set; }", StringComparison.Ordinal)
+            && entities.Contains("public string? TvSubtitlesUploadId { get; set; }", StringComparison.Ordinal));
+        Check("schema 11 adds them to sidecars AND embeds",
+            dbc.Contains("CurrentSchemaVersion = 11", StringComparison.Ordinal)
+            && dbc.Contains("ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId TEXT NULL;", StringComparison.Ordinal)
+            && dbc.Contains("ALTER TABLE embeds ADD COLUMN TvSubtitlesDownloadId TEXT NULL;", StringComparison.Ordinal));
+        Check("the download writes the field of its own source",
+            downloadSource.Contains("subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null", StringComparison.Ordinal)
+            && downloadSource.Contains("tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null", StringComparison.Ordinal));
+        Check("the upload writes SubDL's id into SubDL's field",
+            uploadSource.Contains("subdlUploadId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture)", StringComparison.Ordinal));
+        Check("the second source's upload id is carried in the result and stored in its own field",
+            uploadSource.Contains("tvSubtitlesUploadId: result.SourceId", StringComparison.Ordinal))
+            ;
+        Check("the id is read back from the episode page, never invented",
+            File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/TvSubtitlesClient.cs"))
+                .Contains("public async Task<string?> FindUploadedIdAsync(", StringComparison.Ordinal)
+            && File.ReadAllText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/UploadResult.cs"))
+                .Contains("public string? SourceId { get; init; }", StringComparison.Ordinal));
 
         Console.WriteLine();
         if (_failures > 0)

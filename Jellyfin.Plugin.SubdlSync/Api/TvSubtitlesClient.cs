@@ -386,6 +386,80 @@ public sealed class TvSubtitlesClient
     }
 
     /// <summary>
+    /// F-M488 (operator order 15.11.2026): reads back which subtitle id our own upload got. The site
+    /// does not answer the upload with an id, so the only honest way to know it is to look at the
+    /// episode page afterwards and pick the entry that matches language and release.
+    /// <para>
+    /// Returns null when nothing matches — an id that was not seen is never invented, because the store
+    /// would then vouch for a row that does not exist.
+    /// </para>
+    /// </summary>
+    /// <param name="showName">Series name as the site spells it.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="language">Two-letter language code.</param>
+    /// <param name="release">The release name we uploaded under.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The subtitle id, or null.</returns>
+    public async Task<string?> FindUploadedIdAsync(
+        string showName, int season, int episode, string language, string release,
+        CancellationToken cancellationToken = default)
+    {
+        var showId = ResolveShow(await ShowsAsync(cancellationToken).ConfigureAwait(false), showName);
+        if (showId is null)
+        {
+            return null;
+        }
+
+        var page = await FindEpisodePageAsync(showId.Value, season, episode, cancellationToken).ConfigureAwait(false);
+        if (page is null)
+        {
+            return null;
+        }
+
+        var entries = await EntriesAsync(page.Value, cancellationToken).ConfigureAwait(false);
+        var wanted = (language ?? string.Empty).Trim().ToLowerInvariant();
+        foreach (var entry in entries)
+        {
+            var sameLanguage = string.Equals(entry.Language.Trim().ToLowerInvariant(), wanted, StringComparison.OrdinalIgnoreCase);
+            var sameRelease = !string.IsNullOrWhiteSpace(release)
+                && (string.Equals(entry.Release.Trim(), release.Trim(), StringComparison.OrdinalIgnoreCase)
+                    || entry.Release.Contains(release.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (sameLanguage && sameRelease)
+            {
+                return entry.SubtitleId;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// F-M488: the episode page id for one episode — the season's pages are walked, because the page ids
+    /// are NOT episode numbers (F-M480).
+    /// </summary>
+    /// <param name="showId">Show id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The page id, or null.</returns>
+    public async Task<int?> FindEpisodePageAsync(
+        int showId, int season, int episode, CancellationToken cancellationToken = default)
+    {
+        var pages = await EpisodePagesAsync(showId, season, cancellationToken).ConfigureAwait(false);
+        foreach (var page in pages)
+        {
+            var label = await EpisodeLabelAsync(page, cancellationToken).ConfigureAwait(false);
+            if (label.Season == season && label.Episode == episode)
+            {
+                return page;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// F-M480: parses the entries of an episode page.
     /// <para>
     /// The language is NOT in the text — the only trustworthy carrier is the flag image, and it must be

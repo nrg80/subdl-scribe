@@ -178,10 +178,11 @@ internal static class ReportingRun
         Check(db.Contains("ALTER TABLE rejected_candidates ADD COLUMN NId", StringComparison.Ordinal)
               && db.Contains("EnsureReportColumns();", StringComparison.Ordinal),
             "an upgraded data file gets the report columns (EnsureCreated never alters a table)");
-        // F-M486: 10 carries the provenance columns (Origin/OriginId); 9 carried the pack fingerprint.
-        Check(db.Contains("CurrentSchemaVersion = 10", StringComparison.Ordinal)
-              && db.Contains("ALTER TABLE sidecars ADD COLUMN Origin", StringComparison.Ordinal),
-            "the schema version is bumped with the columns (10 carries the subtitle provenance)");
+        // F-M486/F-M488: 10 brought the provenance columns (Origin/OriginId), 11 the four own marks.
+        Check(db.Contains("CurrentSchemaVersion = 11", StringComparison.Ordinal)
+              && db.Contains("ALTER TABLE sidecars ADD COLUMN Origin", StringComparison.Ordinal)
+              && db.Contains("ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId", StringComparison.Ordinal),
+            "the schema version is bumped with the columns (11 carries source and direction marks)");
 
         string api = Read(plugin, "Api/SubdlApiClient.cs");
         Check(api.Contains("\"subtitlePage\"", StringComparison.Ordinal) && api.Contains("c.NId = page[(slash + 1)..]", StringComparison.Ordinal),

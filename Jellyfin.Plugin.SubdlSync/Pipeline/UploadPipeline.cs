@@ -2293,6 +2293,8 @@ public sealed class UploadPipeline : IPackFiller
                 .ConfigureAwait(false);
             if (zweite.Ok)
             {
+                // F-M488: die Id der Quelle reist im Ergebnis mit und wird vom Aufrufer in das eigene
+                // Feld geschrieben — hier fehlen mediaHash und SubPos, dort sind sie im Griff.
                 result = zweite;
             }
             else if (!result.SkippedItem)
@@ -2378,13 +2380,18 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     Registry.MarkSidecar(contentHashEarly, mediaHash ?? contentHashEarly, lang, hearingImpaired, forced,
                         SubtitleStatus.Uploaded, subdlId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        fileName: Path.GetFileName(loosePath), path: loosePath);
+                        fileName: Path.GetFileName(loosePath), path: loosePath,
+                        // F-M488: eigenes Feld je Quelle und Richtung.
+                        subdlUploadId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        tvSubtitlesUploadId: result.SourceId);
                 }
                 else
                 {
                     Registry.MarkEmbed(mediaHash, subPos, lang, hearingImpaired,
                         SubtitleStatus.Uploaded, contentHash: contentHashEarly,
-                        subdlId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                        subdlId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        subdlUploadId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        tvSubtitlesUploadId: result.SourceId);
                 }
             });
 
@@ -4782,6 +4789,8 @@ public sealed class UploadPipeline : IPackFiller
             neutralName, lang,
             answer.Ok ? "sent" : "refused",
             string.IsNullOrEmpty(answer.Reason) ? string.Empty : ": " + answer.Reason);
-        return answer.Ok ? UploadResult.Success() : UploadResult.Failed(answer.Reason ?? "second-source-refused");
+        LogUtil.PerItem(_config.LogMode, _logger,
+            "[tvsubtitles] id of our upload: {Id}", answer.Id ?? "not readable");
+        return answer.Ok ? UploadResult.Success(answer.Id) : UploadResult.Failed(answer.Reason ?? "second-source-refused");
     }
 }

@@ -99,7 +99,7 @@ public sealed class SubdlDbContext : IDisposable
     // document store, named subdl-scribe.sqlite (F-M326). An older build opening this file finds no
     // document header and reports a broken store; the marker is what makes that loud instead of
     // silent. The old file is imported once on first start and kept as a .bak (F-M327).
-    public const int CurrentSchemaVersion = 10;
+    public const int CurrentSchemaVersion = 11;
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
@@ -332,7 +332,17 @@ public sealed class SubdlDbContext : IDisposable
                      ("sidecars", "Origin", "ALTER TABLE sidecars ADD COLUMN Origin TEXT NULL;"),
                      ("sidecars", "OriginId", "ALTER TABLE sidecars ADD COLUMN OriginId TEXT NULL;"),
                      ("embeds", "Origin", "ALTER TABLE embeds ADD COLUMN Origin TEXT NULL;"),
-                     ("embeds", "OriginId", "ALTER TABLE embeds ADD COLUMN OriginId TEXT NULL;")
+                     ("embeds", "OriginId", "ALTER TABLE embeds ADD COLUMN OriginId TEXT NULL;"),
+
+                     // F-M488 (schema 11): vier eigene Kennzeichen, je Quelle und Richtung eines.
+                     ("sidecars", "SubdlDownloadId", "ALTER TABLE sidecars ADD COLUMN SubdlDownloadId TEXT NULL;"),
+                     ("sidecars", "SubdlUploadId", "ALTER TABLE sidecars ADD COLUMN SubdlUploadId TEXT NULL;"),
+                     ("sidecars", "TvSubtitlesDownloadId", "ALTER TABLE sidecars ADD COLUMN TvSubtitlesDownloadId TEXT NULL;"),
+                     ("sidecars", "TvSubtitlesUploadId", "ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId TEXT NULL;"),
+                     ("embeds", "SubdlDownloadId", "ALTER TABLE embeds ADD COLUMN SubdlDownloadId TEXT NULL;"),
+                     ("embeds", "SubdlUploadId", "ALTER TABLE embeds ADD COLUMN SubdlUploadId TEXT NULL;"),
+                     ("embeds", "TvSubtitlesDownloadId", "ALTER TABLE embeds ADD COLUMN TvSubtitlesDownloadId TEXT NULL;"),
+                     ("embeds", "TvSubtitlesUploadId", "ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadId TEXT NULL;")
                  })
         {
             try

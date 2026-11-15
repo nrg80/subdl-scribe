@@ -517,7 +517,7 @@
             <param name="Answer">The source's own answer text, when it gave one.</param>
             <param name="DryRun">True when nothing left the process.</param>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.EndpointAnswer.#ctor(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider,System.Boolean,System.String,System.Int32,System.String,System.Boolean)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.EndpointAnswer.#ctor(Jellyfin.Plugin.SubdlScribe.Configuration.SubtitleProvider,System.Boolean,System.String,System.Int32,System.String,System.Boolean,System.String)">
             <summary>
             F-M483: what an upload endpoint answers. <paramref name="Ok"/> false plus a
             <paramref name="Reason"/> is a refusal the caller can log; it is never an exception for a case the
@@ -688,13 +688,14 @@
             nothing — which is also the default, so a mis-wired caller cannot upload by accident.
             </summary>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesUploadEndpoint.#ctor(Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient,System.Boolean)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesUploadEndpoint.#ctor(Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient,System.Boolean,Microsoft.Extensions.Logging.ILogger)">
             <summary>
             Initializes a new instance of the <see cref="T:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesUploadEndpoint"/> class.
             </summary>
             <param name="client">The tvsubtitles.net client.</param>
             <param name="dryRun">True (default) builds the request and sends nothing. The plugin's own
             DryRun switch is passed in here — it is not read inside, so the endpoint stays testable.</param>
+            <param name="logger">Optional logger — it only ever says why an id could not be read back.</param>
         </member>
         <member name="P:Jellyfin.Plugin.SubdlScribe.Api.Endpoints.TvSubtitlesUploadEndpoint.Provider">
             <inheritdoc />
@@ -2710,6 +2711,35 @@
             <param name="cancellationToken">Cancellation token.</param>
             <returns>The entries in page order.</returns>
         </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.FindUploadedIdAsync(System.String,System.Int32,System.Int32,System.String,System.String,System.Threading.CancellationToken)">
+            <summary>
+            F-M488 (operator order 15.11.2026): reads back which subtitle id our own upload got. The site
+            does not answer the upload with an id, so the only honest way to know it is to look at the
+            episode page afterwards and pick the entry that matches language and release.
+            <para>
+            Returns null when nothing matches — an id that was not seen is never invented, because the store
+            would then vouch for a row that does not exist.
+            </para>
+            </summary>
+            <param name="showName">Series name as the site spells it.</param>
+            <param name="season">Season number.</param>
+            <param name="episode">Episode number.</param>
+            <param name="language">Two-letter language code.</param>
+            <param name="release">The release name we uploaded under.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The subtitle id, or null.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.FindEpisodePageAsync(System.Int32,System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            F-M488: the episode page id for one episode — the season's pages are walked, because the page ids
+            are NOT episode numbers (F-M480).
+            </summary>
+            <param name="showId">Show id.</param>
+            <param name="season">Season number.</param>
+            <param name="episode">Episode number.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The page id, or null.</returns>
+        </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesClient.ParseEntries(System.String)">
             <summary>
             F-M480: parses the entries of an episode page.
@@ -2975,6 +3005,20 @@
             <summary>
             Optional raw response payload from the SubDL uploadSubtitle call.
             </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Api.UploadResult.SourceId">
+            <summary>
+            F-M488: the id the SOURCE gave our upload, when it gave one. SubDL fills it from its response,
+            the second source from the read-back of its episode page. Null means "no id known" — it is never
+            guessed, because the store would then vouch for a row that does not exist.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Api.UploadResult.Success(System.String)">
+            <summary>
+            Creates a success result carrying the source's own id for the upload.
+            </summary>
+            <param name="sourceId">The id the source reported, or null.</param>
+            <returns>The result.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.SubdlScribe.Api.UploadResult.Success">
             <summary>
@@ -4043,6 +4087,25 @@
             F-M486: the source's OWN id for this subtitle — the tvsubtitles.net subtitle id (for example
             <c>170678</c>) or the SubDL entry id. Together with <see cref="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.Origin"/> it names the original
             exactly, so a later check can quote it instead of describing it.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.SubdlDownloadId">
+            <summary>
+            F-M488 (operator order 15.11.2026): the four marks are separate fields, one per source AND
+            direction, so a row says by itself what happened where — no reading of <see cref="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.Status"/> and
+            no guessing. <c>SubdlDownloadId</c> is the SubDL entry the subtitle was fetched from.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.SubdlUploadId">
+            <summary>F-M488: the SubDL id the uploaded subtitle got.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.TvSubtitlesDownloadId">
+            <summary>F-M488: the tvsubtitles.net subtitle id the subtitle was fetched from (e.g. <c>170678</c>).</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.SubdlScribe.Data.SubtitleState.TvSubtitlesUploadId">
+            <summary>
+            F-M488: the tvsubtitles.net subtitle id our own upload got, read back from the episode page after
+            the send. Null means the id could not be read back — it is never filled with a guess.
             </summary>
         </member>
         <member name="T:Jellyfin.Plugin.SubdlScribe.Data.EmbedTrackEntity">
@@ -10033,7 +10096,7 @@
             <summary>Removes media records whose file is gone from disk, with their subtitles.</summary>
             <returns>Counts of removed rows.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkEmbed(System.String,System.Int32,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkEmbed(System.String,System.Int32,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String,System.String)">
             <summary>
             Records an embedded track verdict. The key is (media hash, position), so re-marking the same
             stream always updates its own row.
@@ -10052,13 +10115,13 @@
             <summary>
             F-M257: records what a track IS (language, HI at this position) without touching a verdict.
             <para>
-            The embedded area's only writer used to be <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkEmbed(System.String,System.Int32,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean)"/>, called exclusively by the
+            The embedded area's only writer used to be <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkEmbed(System.String,System.Int32,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String,System.String)"/>, called exclusively by the
             upload pipeline — so on a default install (<c>UploadEnabled=false</c>) the area stayed empty
             and every registry reader of it answered from nothing. The seeder scans every item anyway and
             holds the streams in its hand; this method lets that fact be recorded where the readers look.
             </para>
             <para>
-            A verdict, once written, is never overwritten here: <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkEmbed(System.String,System.Int32,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean)"/> sets
+            A verdict, once written, is never overwritten here: <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkEmbed(System.String,System.Int32,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String,System.String)"/> sets
             <c>Status</c>/<c>Reason</c> unconditionally, so calling it from an observer would erase an
             uploader's "uploaded"/"rejected" verdict with an observation. A fresh row is created as
             <see cref="F:Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Observed"/>, which no terminality check counts.
@@ -10266,7 +10329,7 @@
             <param name="season">Season number.</param>
             <returns>Language and HI variant, unordered.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
             <summary>
             Records a sidecar verdict, keyed by content hash.
             <para>
@@ -10295,7 +10358,7 @@
             <summary>
             F-M259: records what a loose subtitle FILE is, without touching a verdict.
             <para>
-            The sidecar half of <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ObserveEmbed(System.String,System.Int32,System.String,System.Boolean,System.Boolean)"/>, and the same gap: <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String)"/> is
+            The sidecar half of <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ObserveEmbed(System.String,System.Int32,System.String,System.Boolean,System.Boolean)"/>, and the same gap: <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String)"/> is
             the area's only writer and only the upload and download pipelines call it, both behind their
             own switch (upload is off by default). A <c>.srt</c> beside the media that no plugin run ever
             moved — written by another tool, kept from before the registry existed, or simply never
@@ -10305,7 +10368,7 @@
             </para>
             <para>
             A verdict is never overwritten here, for the same reason as on the embedded side:
-            <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String)"/> sets <c>Status</c> unconditionally, so observing through it would
+            <see cref="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkSidecar(System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String)"/> sets <c>Status</c> unconditionally, so observing through it would
             erase an uploader's or downloader's verdict. A fresh row is created as
             <see cref="F:Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Observed"/>.
             </para>
@@ -10513,7 +10576,7 @@
             <param name="contentHash">Content hash.</param>
             <returns>True when a remote duplicate is recorded.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkDownloaded(System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.String)">
+        <member name="M:Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.MarkDownloaded(System.String,System.String,System.String,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String)">
             <summary>
             Records a subtitle fetched from SubDL. Stored as a sidecar: once downloaded the file IS a
             sidecar on disk, so it belongs in the same area rather than a parallel one.

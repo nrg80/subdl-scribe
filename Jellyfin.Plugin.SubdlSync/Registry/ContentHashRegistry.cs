@@ -484,7 +484,8 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="forced">F-M284: true when the track is forced (never counts as coverage).</param>
     public void MarkEmbed(string? mediaHash, int subPos, string language, bool hearingImpaired,
                           string status, string? contentHash = null, string? reason = null, string? subdlId = null,
-                          bool forced = false)
+                          bool forced = false, string? subdlUploadId = null, string? tvSubtitlesUploadId = null,
+                          string? subdlDownloadId = null, string? tvSubtitlesDownloadId = null)
     {
         if (string.IsNullOrEmpty(mediaHash) || subPos < 0)
         {
@@ -514,6 +515,27 @@ public sealed class ContentHashRegistry : IDisposable
         if (!string.IsNullOrEmpty(subdlId))
         {
             existing.SubdlId = subdlId;
+        }
+
+        // F-M488: die vier Kennzeichen, gleiche Regel wie bei den Sidecars — nur schreiben, wenn bekannt.
+        if (!string.IsNullOrEmpty(subdlUploadId))
+        {
+            existing.SubdlUploadId = subdlUploadId;
+        }
+
+        if (!string.IsNullOrEmpty(tvSubtitlesUploadId))
+        {
+            existing.TvSubtitlesUploadId = tvSubtitlesUploadId;
+        }
+
+        if (!string.IsNullOrEmpty(subdlDownloadId))
+        {
+            existing.SubdlDownloadId = subdlDownloadId;
+        }
+
+        if (!string.IsNullOrEmpty(tvSubtitlesDownloadId))
+        {
+            existing.TvSubtitlesDownloadId = tvSubtitlesDownloadId;
         }
 
         _db.Embeds.Upsert(existing);
@@ -1049,7 +1071,9 @@ public sealed class ContentHashRegistry : IDisposable
     public void MarkSidecar(string? contentHash, string mediaHash, string language, bool hearingImpaired,
                             bool forced, string status, string? reason = null, string? subdlId = null,
                             string? fileName = null, string? path = null, string? origin = null,
-                            string? originId = null)
+                            string? originId = null, string? subdlDownloadId = null,
+                            string? subdlUploadId = null, string? tvSubtitlesDownloadId = null,
+                            string? tvSubtitlesUploadId = null)
     {
         if (string.IsNullOrEmpty(contentHash))
         {
@@ -1086,6 +1110,28 @@ public sealed class ContentHashRegistry : IDisposable
         if (!string.IsNullOrEmpty(originId))
         {
             existing.OriginId = originId;
+        }
+
+        // F-M488: die vier Kennzeichen, je Quelle und Richtung eines. Gleiche Regel wie oben — ohne
+        // Kenntnis wird nichts geschrieben, und ein leerer Wert löscht keine Angabe.
+        if (!string.IsNullOrEmpty(subdlDownloadId))
+        {
+            existing.SubdlDownloadId = subdlDownloadId;
+        }
+
+        if (!string.IsNullOrEmpty(subdlUploadId))
+        {
+            existing.SubdlUploadId = subdlUploadId;
+        }
+
+        if (!string.IsNullOrEmpty(tvSubtitlesDownloadId))
+        {
+            existing.TvSubtitlesDownloadId = tvSubtitlesDownloadId;
+        }
+
+        if (!string.IsNullOrEmpty(tvSubtitlesUploadId))
+        {
+            existing.TvSubtitlesUploadId = tvSubtitlesUploadId;
         }
 
         if (!string.IsNullOrEmpty(fileName))
@@ -1622,10 +1668,12 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="path">Written path.</param>
     public void MarkDownloaded(string contentHash, string mediaHash, string language, bool hearingImpaired = false,
                                string? subdlId = null, string? fileName = null, string? path = null,
-                               string? origin = null, string? originId = null)
+                               string? origin = null, string? originId = null,
+                               string? subdlDownloadId = null, string? tvSubtitlesDownloadId = null)
         => MarkSidecar(contentHash, mediaHash, language, hearingImpaired, forced: false,
                        SubtitleStatus.Downloaded, reason: null, subdlId: subdlId, fileName: fileName, path: path,
-                       origin: origin, originId: originId);
+                       origin: origin, originId: originId, subdlDownloadId: subdlDownloadId,
+                       tvSubtitlesDownloadId: tvSubtitlesDownloadId);
 
     /// <summary>
     /// F-M486/F-M487: the provenance of a subtitle the plugin knows by its content hash. Empty strings
