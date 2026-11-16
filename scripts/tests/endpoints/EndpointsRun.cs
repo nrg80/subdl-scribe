@@ -1062,6 +1062,16 @@ internal static class Program
                     && uploadSource.Contains("public int SettledItems { get; set; }", StringComparison.Ordinal)
                     && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries", StringComparison.Ordinal));
 
+                // ---- F-M544: die Medienart am Dateikopf kommt vom Item, nicht aus dem Raten --------
+                Check("F-M544: the head of the run reads the media kind from the item",
+                    uploadSource.Contains("bool? medienart = item switch", StringComparison.Ordinal)
+                    && uploadSource.Contains("Episode => true,", StringComparison.Ordinal)
+                    && uploadSource.Contains("Movie => false,", StringComparison.Ordinal)
+                    && uploadSource.Contains("var quellen = UploadSources(medienart);", StringComparison.Ordinal));
+                Check("F-M544: an unknown kind keeps the cautious reading of F-M509",
+                    uploadSource.Contains("_ => (bool?)null,", StringComparison.Ordinal)
+                    && uploadSource.Split("UploadSources(isSeries: null)").Length - 1 == 1);
+
                 // ---- F-M541: eine Datei mit lauter verworfenen Spuren endet vor dem ffmpeg-Lauf -----
                 int i541 = uploadSource.IndexOf("every text stream was rejected earlier", StringComparison.Ordinal);
                 Check("F-M541: a file whose text streams were all rejected ends before the ffmpeg pass",

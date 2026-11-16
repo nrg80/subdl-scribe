@@ -726,8 +726,22 @@ public sealed class UploadPipeline : IPackFiller
             // wird deshalb nicht geraten: ohne sie bleiben beide Adressen der Familie stehen, und eine
             // Datei gilt erst als fertig, wenn BEIDE sie haben. Das kann nur zu einem Item zu viel im Lauf
             // fuehren, nie zu einem weggelassenen — die Kette selbst fragt danach mit der echten Medienart.
+            // F-M544 (16.11.2026): die Medienart steht am Item — sie wird hier gelesen, nicht geraten.
+            // F-M509 liess ohne Medienart beide Adressen der Familie offen („lieber eine Zeile zu viel"),
+            // gemessen am 16.11. kostete das den ganzen Bestand: 80 der 92 Dateien mit offener Quelle
+            // standen als „still open: tvsubtitles, moviesubtitles" im Log — Serien, fuer die
+            // moviesubtitles.org nie eine Marke bekommt, weil wir Serien dort nicht hochladen. Diese
+            // Dateien wurden damit nie „fertig" und kehrten in jeden Zyklus zurueck. Jetzt entscheidet
+            // das Item: Episode ⇒ Serie, Movie ⇒ Film; alles andere bleibt unbekannt und behaelt die
+            // vorsichtige Lesart von F-M509.
+            bool? medienart = item switch
+            {
+                Episode => true,
+                Movie => false,
+                _ => (bool?)null,
+            };
             string? earlyHash = Registry.GetMediaHash(mediaPath);
-            var quellen = UploadSources(isSeries: null);
+            var quellen = UploadSources(medienart);
             var offeneQuellen = quellen
                 .Where(quelle => !Registry.IsSubtitlesUploadedFor(earlyHash, quelle))
                 .ToList();

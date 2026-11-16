@@ -420,6 +420,10 @@
     "T264": {
       "suite": "tvsubtitles",
       "checks": 4
+    },
+    "T265": {
+      "suite": "endpoints",
+      "checks": 2
     }
   }
 }
