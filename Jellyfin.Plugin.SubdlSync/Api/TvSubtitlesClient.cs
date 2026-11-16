@@ -764,6 +764,55 @@ public sealed class TvSubtitlesClient
     /// <param name="release">The release name we uploaded under.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The subtitle id, or null.</returns>
+    /// <summary>
+    /// F-M533: files a "Report bad" for one subtitle on tvsubtitles.net. The form lives on
+    /// <c>report_bad.php</c> (multipart, fields <c>message</c>, <c>go=1</c>, <c>sid</c>) and is the
+    /// site's own reporting channel — there is no API and no public comment field.
+    /// <para>
+    /// The answer is read defensively: a 429 counts as "deferred" (the caller may keep the finding),
+    /// a page without a thank-you counts as failed. Nothing here may break a run — the entry is
+    /// dropped anyway.
+    /// </para>
+    /// </summary>
+    /// <param name="subtitleId">The site's subtitle id (sid).</param>
+    /// <param name="message">Report text.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Accepted, deferred (rate limited) or failed.</returns>
+    public async Task<SubdlReportOutcome> ReportBadAsync(
+        string subtitleId, string message, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(subtitleId) || string.IsNullOrWhiteSpace(message))
+        {
+            return SubdlReportOutcome.Failed;
+        }
+
+        string url = BaseUrl + "/report_bad.php";
+        using var content = new MultipartFormDataContent();
+        content.Add(new StringContent(subtitleId.Trim()), "sid");
+        content.Add(new StringContent("1"), "go");
+        content.Add(new StringContent(message), "message");
+
+        DebugTrace?.Invoke(SiteTrace.Call("POST", url));
+        using var response = await _http.PostAsync(url, content, cancellationToken).ConfigureAwait(false);
+        LastStatus = (int)response.StatusCode;
+        DebugTrace?.Invoke(SiteTrace.Response("POST", url, LastStatus));
+
+        if ((int)response.StatusCode == 429)
+        {
+            return SubdlReportOutcome.Deferred;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            return SubdlReportOutcome.Failed;
+        }
+
+        string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return body.Contains("thank", StringComparison.OrdinalIgnoreCase)
+            ? SubdlReportOutcome.Accepted
+            : SubdlReportOutcome.Failed;
+    }
+
     public async Task<string?> FindUploadedIdAsync(
         string showName, int season, int episode, string language, string release,
         CancellationToken cancellationToken = default)

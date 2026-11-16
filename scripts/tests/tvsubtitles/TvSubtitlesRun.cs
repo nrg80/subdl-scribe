@@ -668,6 +668,42 @@ internal static class Program
             && dlQuelle.Contains("&& !_config.DryRun", StringComparison.Ordinal));
 
         Console.WriteLine();
+        // ---- F-M533: Robustheit und Meldeweg der Seite ------------------------------------------
+        var gut = new Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry("123", "de", "WEB", "FTMVHD", "3 days");
+        Check("F-M533: a documented entry is not a finding",
+            Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks.CheckEntry(gut).Count == 0);
+
+        var falscheSprache = new Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry("123", "xx", "WEB", "", "3 days");
+        Check("F-M533: an unknown language code is a finding",
+            Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks.CheckEntry(falscheSprache)
+                .Any(f => f.Path == "language"));
+
+        var falscherRip = new Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry("123", "de", "WEB-DL", "", "3 days");
+        Check("F-M533: a rip outside the site's seven values is a finding",
+            Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks.CheckEntry(falscherRip)
+                .Any(f => f.Path == "rip"));
+
+        Check("F-M533: an empty rip is allowed (the site's own normal case)",
+            Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks
+                .CheckEntry(new Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry("123", "de", "", "", ""))
+                .Count == 0);
+
+        Check("F-M533: an episode label outside 1–22 / 0–100 is a finding",
+            Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks.CheckEpisodeLabel(26, 5)
+                .Any(f => f.Path == "season")
+            && Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks.CheckEpisodeLabel(3, 140)
+                .Any(f => f.Path == "episode"));
+        Check("F-M533: a normal episode label is not a finding",
+            Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks.CheckEpisodeLabel(3, 9).Count == 0);
+
+        string tvstClient = await File.ReadAllTextAsync(
+            System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "TvSubtitlesClient.cs"))
+            .ConfigureAwait(false);
+        Check("F-M533: the site's own report form is the channel (report_bad.php, sid + message)",
+            tvstClient.Contains("/report_bad.php", StringComparison.Ordinal)
+            && tvstClient.Contains("\"sid\"", StringComparison.Ordinal)
+            && tvstClient.Contains("ReportBadAsync", StringComparison.Ordinal));
+
         if (_failures > 0)
         {
 

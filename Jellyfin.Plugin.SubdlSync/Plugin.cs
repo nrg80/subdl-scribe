@@ -51,7 +51,11 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         // without this, the stale-detection path has to discover that the hard way.
         Pipeline.PipelineRunLock.ClearOnStartup(
             _loggerFactory?.CreateLogger("SubDL-Lock")
-            ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+                ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+
+        // F-M533: die tvst-Befunde melden ueber denselben Weg wie alles andere — eine Meldestelle.
+        var tvstLog = _loggerFactory?.CreateLogger("SubDL-Tvst");
+        Api.TvstMetadataChecks.OnMessage = msg => tvstLog?.LogInformation("{Msg}", msg);
         // Stats period start defaults to plugin install/first start —
         // the GUI "since" always shows a real date until "Reset statistics" re-sets it.
     }

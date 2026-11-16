@@ -62,4 +62,30 @@ public static class MetadataMismatchReports
 
         return new ReportText(BrokenSubtitleReports.CategoryMetadata, comment);
     }
+
+    /// <summary>
+    /// F-M533: the same text for a finding that names a SITE rather than a subtitle — an episode page
+    /// whose season/episode label the site's own form would refuse.
+    /// </summary>
+    /// <param name="finding">The wrong field.</param>
+    /// <param name="site">Site name for the third line.</param>
+    /// <param name="version">Plugin version.</param>
+    /// <returns>Category and comment.</returns>
+    public static ReportText BuildSite(FieldShapeFinding? finding, string site, string? version)
+    {
+        if (finding == null)
+        {
+            return new ReportText(BrokenSubtitleReports.CategoryMetadata, string.Empty);
+        }
+
+        string comment =
+            "Metadata format mismatch.\n"
+            + "Attribute: " + finding.Path + " (documented: " + finding.Documented
+            + ", received: " + finding.Received + ")\n"
+            + "Site: " + site + "\n\n"
+            + "Automated report by Sub Scribe (Jellyfin plugin) v"
+            + (string.IsNullOrWhiteSpace(version) ? "unknown" : version.Trim()) + ".";
+
+        return new ReportText(BrokenSubtitleReports.CategoryMetadata, comment);
+    }
 }

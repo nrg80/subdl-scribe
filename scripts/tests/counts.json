@@ -380,6 +380,10 @@
     "T254": {
       "suite": "seasonpack",
       "checks": 5
+    },
+    "T255": {
+      "suite": "tvsubtitles",
+      "checks": 7
     }
   }
 }

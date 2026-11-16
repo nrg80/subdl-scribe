@@ -41,6 +41,13 @@ public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
     public TvSubtitlesDownloadEndpoint(TvSubtitlesClient client) =>
         _client = client ?? throw new ArgumentNullException(nameof(client));
 
+    /// <summary>
+    /// F-M533: how many entries of the LAST search were dropped because a field contradicted the
+    /// site's own vocabulary — the operator's rule (17.11.2026): report it, drop the entry, keep the
+    /// run going.
+    /// </summary>
+    public int LastRejectedByFormat { get; private set; }
+
     /// <inheritdoc />
     public SubtitleProvider Provider => SubtitleProvider.TvSubtitles;
 
@@ -78,6 +85,7 @@ public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
 
         // F-M523: was diese Suche auflöst, gilt nur für sie. Der alte Wert darf nie weiterleben.
         _client.LastResolvedShowId = null;
+        LastRejectedByFormat = 0;
 
         var shows = await _client.ShowsAsync(cancellationToken).ConfigureAwait(false);
         var showId = TvSubtitlesClient.ResolveShow(shows, query.ShowName);
@@ -96,17 +104,45 @@ public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
         foreach (var page in pages)
         {
             var (season, episode) = await _client.EpisodeLabelAsync(page, cancellationToken).ConfigureAwait(false);
+
+            // F-M533: eine Staffel/Folge-Angabe ausserhalb der Werte, die das Formular kennt, ist ein
+            // Falscheintrag der Seite — melden und die Seite ueberspringen, nicht raten.
+            if (await TvstMetadataChecks.EmitAsync(
+                    _client, TvstMetadataChecks.CheckEpisodeLabel(season, episode), null, null, cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                LastRejectedByFormat++;
+                continue;
+            }
+
             if (season != query.Season || episode != query.Episode)
             {
                 continue;
             }
 
             var entries = await _client.EntriesAsync(page, cancellationToken).ConfigureAwait(false);
-            return entries
-                .Where(e => string.Equals(e.Language, language, StringComparison.Ordinal))
-                .Select(e => new SubtitleHit(
-                    SubtitleProvider.TvSubtitles, e.SubtitleId, e.Language, e.Rip, e.Release, false))
-                .ToList();
+            var hits = new List<SubtitleHit>();
+            foreach (var e in entries)
+            {
+                if (!string.Equals(e.Language, language, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var falsch = TvstMetadataChecks.CheckEntry(e);
+                if (falsch.Count > 0)
+                {
+                    await TvstMetadataChecks.EmitAsync(_client, falsch, e.SubtitleId, e.Release, cancellationToken)
+                        .ConfigureAwait(false);
+                    LastRejectedByFormat++;
+                    continue;
+                }
+
+                hits.Add(new SubtitleHit(
+                    SubtitleProvider.TvSubtitles, e.SubtitleId, e.Language, e.Rip, e.Release, false));
+            }
+
+            return hits;
         }
 
         return Array.Empty<SubtitleHit>();

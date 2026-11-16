@@ -235,6 +235,9 @@ public sealed class DownloadPipeline : IDisposable
     /// </summary>
     private readonly Api.Endpoints.SubtitleEndpointCatalog _endpoints;
 
+    /// <summary>F-M533: Eintraege, die eine Fremdquelle wegen einer falschen Feldangabe verworfen hat.</summary>
+    private int _tvstFormatRejected;
+
     /// <summary>
     /// F-M507: der Client der dritten Quelle und der Auflöser, der ihre Filmnummer in den Store legt.
     /// Beide hängen am selben Katalog-Eintrag wie der Endpunkt: der Auflöser sucht, der Endpunkt holt.
@@ -805,6 +808,8 @@ public sealed class DownloadPipeline : IDisposable
         // F-M286: {Rejected} names what was FETCHED AND THROWN AWAY. Without it a run that spent
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
+        summary.RejectedCandidates += _tvstFormatRejected; // F-M533
+
         LogUtil.Normal(_logger, 
             "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {NotSignificant} downloaded without significance | {Rejected} rejected after fetch | {NoCand} no candidates | {Ai} AI uploader filtered | {Reported} reported ({ReportsDeferred} deferred) | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
             summary.Downloaded,
@@ -4010,6 +4015,14 @@ public sealed class DownloadPipeline : IDisposable
         try
         {
             var hits = await endpoint.SearchAsync(abfrage, ct).ConfigureAwait(false);
+
+            // F-M533: hat die tvst-Naht Eintraege wegen einer falschen Feldangabe verworfen, gehoert
+            // die Zahl in dieselbe Schlusszeile wie bei SubDL (F-M529). Diese Methode fuehrt keine
+            // Zusammenfassung, deshalb sammelt das Feld und die Schlusszeile addiert.
+            if (endpoint is Api.Endpoints.TvSubtitlesDownloadEndpoint tvstNaht)
+            {
+                _tvstFormatRejected += tvstNaht.LastRejectedByFormat;
+            }
 
             // F-M523: die Seriennummer, die die Suche gerade aufgelöst hat, geht in den Store — der
             // Download schrieb sie bisher nie, deshalb holte jeder Lauf die Serienliste erneut. Derselbe

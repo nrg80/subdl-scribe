@@ -1898,8 +1898,10 @@ def main():
     # Schalter selbst — nicht in einer Liste weiter unten, wo man ihn beim Suchen nicht liest.
     # Nur die eindeutigen Faelle sind markiert; alles andere wirkt auf beide Quellen (TMDb, Sprachen,
     # Qualitaetspruefungen, Auto-Abgleich, Bibliotheks-Refresh) und bleibt ohne Merker.
+    # F-M533: ReportBrokenSubtitles ist NICHT mehr SubDL-only — derselbe Schalter meldet jetzt auch
+    # an tvsubtitles.net (eigene Meldeform "Report bad"), deshalb traegt er keinen Merker mehr.
     subdl_only = ("UploadContinueAfterLimit", "UploadSeasonPacks", "DownloadContinueAfterLimit",
-                  "DownloadHearingImpaired", "AllowAiTranslatedSubs", "ReportBrokenSubtitles",
+                  "DownloadHearingImpaired", "AllowAiTranslatedSubs",
                   "DownloadArchiveCacheDays", "DownloadArchiveCacheMaxMb")
     for cid in subdl_only:
         # Der Merker steht mal hinter dem Kaestchen (Checkbox), mal im Label DAVOR (Zahlenfeld) —
@@ -1919,7 +1921,7 @@ def main():
           '</span> <span class="src-badge' not in page_src,
           "%d kaputte Ketten" % page_src.count('</span> <span class="src-badge'))
     for cid in ("UploadContinueAfterLimit", "UploadSeasonPacks", "DownloadContinueAfterLimit",
-                "DownloadHearingImpaired", "AllowAiTranslatedSubs", "ReportBrokenSubtitles"):
+                "DownloadHearingImpaired", "AllowAiTranslatedSubs"):
         pos = page_src.find('id="%s"' % cid)
         check("F-M527: %s keeps the marker nested inside its label text" % cid,
               pos > 0 and 'SubDL only</span></span>' in page_src[pos:pos + 700])
@@ -1931,8 +1933,15 @@ def main():
     check("F-M526: no marker claims a tvst-only setting that does not exist",
           page_src.count("src-tvst") == 1)  # nur die CSS-Klasse, kein gesetztes Abzeichen
 
-    # F-M525: `failed` stand hier oben und wurde VOR diesen Pruefungen berechnet — alles danach war
-    # fuer die Zusammenfassung unsichtbar. Die Zaehlung gehoert ans Ende.
+    # F-M533: der Melde-Schalter wirkt auf BEIDE Quellen und darf keinen Quellenmerker tragen.
+    check("F-M533: the report switch carries no source marker any more",
+          page_src.count('>SubDL only</span>') == 7,
+          "%d Abzeichen (erwartet 7 nach dem Melde-Schalter)" % page_src.count('>SubDL only</span>'))
+    check("F-M533: the report switch is named without a source",
+          "<span>Report broken subtitles</span>" in page_src)
+
+    # Die Zaehlung gehoert ans ENDE: stand sie mitten in der Datei, waren alle spaeteren Pruefungen
+    # fuer die Zusammenfassung unsichtbar (F-M525 — zehn rote Pruefungen bei "326/326 OK").
     failed = [r for r in results if not r[1]]
 
     print(">>> GUI-STRUKTUR %s: %d/%d Pruefungen bestanden"
