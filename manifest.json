@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.427",
-        "changelog": "v12.1.12.427: a series is no longer measured against moviesubtitles.org at the head of the run — the item names the media kind, so a finished series can actually become \"complete\".",
+        "version": "12.1.12.428",
+        "changelog": "v12.1.12.428: the TMDb store is really attached on the normal start path (it was not) and heals itself if a context appears without it.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.427-dev/Jellyfin.Plugin.SubdlSync_12.1.12.427.zip",
-        "checksum": "94f2ee1c2c87b5fe72dc55f11f4d1928",
-        "timestamp": "2026-11-16T14:46:41Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.428-dev/Jellyfin.Plugin.SubdlSync_12.1.12.428.zip",
+        "checksum": "a38c4fb06b49284eac1950586187d087",
+        "timestamp": "2026-11-16T15:08:19Z"
       }
     ]
   }
