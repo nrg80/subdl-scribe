@@ -27,6 +27,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -588,9 +589,50 @@ internal static class Program
             && episode05.Any(e => e.Language == "ro"),
             string.Join(",", episode05.Select(e => e.Language)));
 
+        // ---- F-M522: die Serienliste wird einmal je Lauf geholt ----------------------------------
+        // Gemessen auf prod am 16.11.2026: ein Download-Lauf fragte /add.html 53 mal nach einer Liste,
+        // die sich waehrend des Laufs nicht aendern kann. Der Zwischenspeicher haengt am Client, und ein
+        // Client lebt einen Lauf lang — mehr soll er nicht.
+        string listenHtml = await File.ReadAllTextAsync(
+            Path.Combine(_fixtures, "add-tvshow-select.html")).ConfigureAwait(false);
+        var cacheHandler = new CountingHandler { ReplyBody = listenHtml };
+        var cacheClient = new TvSubtitlesClient(new HttpClient(cacheHandler));
+        var liste1 = await cacheClient.ShowsAsync().ConfigureAwait(false);
+        var liste2 = await cacheClient.ShowsAsync().ConfigureAwait(false);
+        Check(
+            "F-M522: the show list is fetched once and answered from memory the second time",
+            liste1.Count > 0 && liste2.Count == liste1.Count && cacheHandler.Requests == 1,
+            "Eintraege " + liste1.Count + ", Anfragen " + cacheHandler.Requests.ToString(CultureInfo.InvariantCulture));
+
+        var leerHandler = new CountingHandler { ReplyBody = "<html><body>kein select</body></html>" };
+        var leerClient = new TvSubtitlesClient(new HttpClient(leerHandler));
+        await leerClient.ShowsAsync().ConfigureAwait(false);
+        await leerClient.ShowsAsync().ConfigureAwait(false);
+        Check(
+            "F-M522: an empty answer is never remembered — one bad page must not decide the whole run",
+            leerHandler.Requests == 2,
+            "Anfragen " + leerHandler.Requests.ToString(CultureInfo.InvariantCulture));
+
+        // Ein echtes Anlegen aendert die Liste: der Speicher faellt, die naechste Frage geht wieder raus.
+        var neuHandler = new CountingHandler { ReplyBody = listenHtml, ReplyStatus = HttpStatusCode.OK };
+        var neuClient = new TvSubtitlesClient(new HttpClient(neuHandler));
+        await neuClient.ShowsAsync().ConfigureAwait(false);
+        var anlegen = new TvSubtitlesAddShow(new[]
+        {
+            new KeyValuePair<string, string>("tvshow", "The Middle"),
+            new KeyValuePair<string, string>("submit", "Add"),
+        });
+        await neuClient.AddShowAsync(anlegen, dryRun: false).ConfigureAwait(false);
+        await neuClient.ShowsAsync().ConfigureAwait(false);
+        Check(
+            "F-M522: adding a show drops the remembered list, so its new id is seen",
+            neuHandler.Requests == 3,
+            "Anfragen " + neuHandler.Requests.ToString(CultureInfo.InvariantCulture));
+
         Console.WriteLine();
         if (_failures > 0)
         {
+
             Console.WriteLine($">>> TVSUBTITLES: {_failures} von {_checks} Pruefungen fehlgeschlagen");
             return 1;
         }

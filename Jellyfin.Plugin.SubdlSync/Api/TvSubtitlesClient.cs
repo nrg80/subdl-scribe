@@ -362,6 +362,24 @@ public sealed class TvSubtitlesClient
     public int LastStatus { get; private set; }
 
     /// <summary>
+    /// F-M522: the show list, remembered for as long as this client lives — one fetch per run instead of
+    /// one per search. Measured on prod, 16.11.2026: a single download run asked <c>/add.html</c> 53 times
+    /// for a list that cannot change within a run.
+    /// <para>
+    /// A client instance is per run (the pipelines build one), so "remembered here" means "cached for this
+    /// run" and nothing outlives it. The cache is dropped the moment a show is actually added
+    /// (<see cref="AddShowAsync"/>): that is the one event inside a run that makes the list different, and
+    /// the caller that added the show looks for its new id immediately afterwards.
+    /// </para>
+    /// <para>
+    /// An EMPTY answer is never stored: a truncated page yields an empty map (see
+    /// <see cref="ParseShows"/>), and keeping that would turn one bad answer into a whole run of
+    /// "no such series".
+    /// </para>
+    /// </summary>
+    private IReadOnlyDictionary<int, string>? _showsCache;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="TvSubtitlesClient"/> class.
     /// </summary>
     /// <param name="http">The HttpClient to use. <see cref="SubdlApiClient.NewHttpClient"/> gives one
@@ -384,8 +402,19 @@ public sealed class TvSubtitlesClient
     /// <returns>Show id to name, in page order.</returns>
     public async Task<IReadOnlyDictionary<int, string>> ShowsAsync(CancellationToken cancellationToken = default)
     {
+        if (_showsCache is not null)
+        {
+            return _showsCache;
+        }
+
         var html = await GetStringAsync(BaseUrl + "/add.html", null, cancellationToken).ConfigureAwait(false);
-        return ParseShows(html);
+        var shows = ParseShows(html);
+        if (shows.Count > 0)
+        {
+            _showsCache = shows;
+        }
+
+        return shows;
     }
 
     /// <summary>
@@ -1228,6 +1257,10 @@ public sealed class TvSubtitlesClient
         request.Content = new ByteArrayContent(body);
         request.Content.Headers.ContentType =
             System.Net.Http.Headers.MediaTypeHeaderValue.Parse("multipart/form-data; boundary=" + boundary);
+
+        // F-M522: a real add changes the list, so the remembered copy is stale from here on. A dry run
+        // never gets this far, which keeps the rule "a dry run changes nothing" intact.
+        _showsCache = null;
 
         DebugTrace?.Invoke(SiteTrace.Call("POST", AddShowPostUrl));
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);

@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.403"
+version: "12.1.12.404"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.404: The tvsubtitles show list is now fetched once per run instead of once per search — a single download run asked /add.html 53 times; the list is dropped when a show is actually added.
   v12.1.12.403: Both addresses of the tvst family now write their requests and answers to the log (Debug, both directions), and the run summary names the status each source answered with — before, tvsubtitles and moviesubtitles were silent, so "asked" could not be proven.
   v12.1.12.402: The tvst family is one source with one switch per direction — the two addresses stay data fields and TMDb decides which one is asked; the page says that in one line instead of two switch pairs.
   v12.1.12.401: sidecars from the reserved original block (slot 50-99) are no longer uploaded - they are the unsynchronized copies a correction keeps beside its result - and the upload comment carries the TMDb and IMDb ids only.
