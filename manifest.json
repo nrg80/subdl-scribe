@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.439",
-        "changelog": "v12.1.12.439: every TMDb answer is cached in one place — 916 repeated requests a day were made because 4 of 13 call sites forgot the store.",
+        "version": "12.1.12.440",
+        "changelog": "v12.1.12.440: the head knows loose sidecars too — 292 files were dropped every cycle while a sidecar waited for a source.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.439-dev/Jellyfin.Plugin.SubdlSync_12.1.12.439.zip",
-        "checksum": "907ae675d5b410133df2d09d9924a124",
-        "timestamp": "2026-11-16T20:28:22Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.440-dev/Jellyfin.Plugin.SubdlSync_12.1.12.440.zip",
+        "checksum": "8bc12d262bb64a052c2aaa9851f018ec",
+        "timestamp": "2026-11-16T20:46:23Z"
       }
     ]
   }
