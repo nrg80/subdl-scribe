@@ -111,7 +111,7 @@ public sealed class ScribeDbContext : IDisposable
     // Gegenseite (`MsubMovieId`, dieselbe Ebene wie TvstShowId). Nachgezogen beim Start
     // (EnsureReportColumns/EnsureMediaColumns), Bestandszeilen bleiben unangetastet und lesen die neuen
     // Felder als null.
-    public const int CurrentSchemaVersion = 14;
+    public const int CurrentSchemaVersion = 15;
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
@@ -494,6 +494,13 @@ public sealed class ScribeDbContext : IDisposable
                  {
                      ("TvstShowId", "ALTER TABLE media ADD COLUMN TvstShowId TEXT NULL;"),
                      ("MsubMovieId", "ALTER TABLE media ADD COLUMN MsubMovieId TEXT NULL;"),
+
+                     // F-M557/F-M562 (schema 15): der Zugeh-Stempel JE QUELLE plus die Spursignatur, zu
+                     // der er gehoert. Eine globale Marke gibt es weiter, sie entscheidet aber nichts mehr.
+                     ("CompleteSubdl", "ALTER TABLE media ADD COLUMN CompleteSubdl TEXT NULL;"),
+                     ("CompleteTvSubtitles", "ALTER TABLE media ADD COLUMN CompleteTvSubtitles TEXT NULL;"),
+                     ("CompleteMsub", "ALTER TABLE media ADD COLUMN CompleteMsub TEXT NULL;"),
+                     ("CompleteSignature", "ALTER TABLE media ADD COLUMN CompleteSignature TEXT NULL;"),
                  })
         {
             try

@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.440.
+**Status:** Implementation — v12.1.12.441.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -2451,6 +2451,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
+
+**T277:** Die Vollständigkeit je Quelle aus Kapitel 3.4 in `endpoints`: Schema **15** trägt die vier Medien-Spalten (`CompleteSubdl`, `CompleteTvSubtitles`, `CompleteMsub`, `CompleteSignature`); `IsCompleteFor`/`MarkCompleteFor`/`SignatureOf` existieren, und „fertig" verlangt Stempel **und** gleiche Signatur; die Abrechnung `SettlementFor` liest Ablehnungen mit (`x.Status == SubtitleStatus.Rejected`) und der Kopf setzt den Stempel erst nach `offen.Count == 0`; Kopf und Einreiher stellen dieselbe Frage (`IsCompleteFor`). **4 Prüfungen** in `endpoints` (232 → 236).
 
 **T275:** Die TMDb-Ablage von F-M555 in `endpoints`: der Handler existiert und legt ab bzw. liest, er fasst nur `api.themoviedb.org` an, der Schlüssel trägt keinen `api_key` und das Präfix `url:`, und er sitzt in **beiden** HTTP-Ketten. **3 Prüfungen** in `endpoints` (227 → 230).
 

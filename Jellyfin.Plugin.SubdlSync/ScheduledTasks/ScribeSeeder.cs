@@ -898,6 +898,23 @@ public sealed class ScribeSeeder
                 return true;
             }
 
+            // F-M557/F-M563 (Operator-Entscheidung 16.11.2026: „Und die queue wird nur aus files
+            // gebildet deren Quellstempel nich zu ist?"): die Queue entsteht aus dem offenen Stempel.
+            // Ist die Datei für diese Quelle zu — Stempel da und Spursignatur unveraendert —, wird sie
+            // hier gar nicht erst eingereiht: kein Eintrag, keine Extraktion, kein API-Aufruf. Genau
+            // das macht den vollen Durchlauf billig, ohne dass es einen zweiten (inkrementellen) Modus
+            // braucht. Die Signatur zaehlt PAARE, nicht Spuren (F-M562), und die Frage ist dieselbe,
+            // die der Kopf des Laufs stellt (IsCompleteFor).
+            var seedPaare = textStreams
+                .Select(s => ((s.Language ?? string.Empty).ToUpperInvariant(),
+                    Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(s)))
+                .ToList();
+            if (registry.IsCompleteFor(
+                    mediaHash, quelle, Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.SignatureOf(seedPaare)))
+            {
+                return false;
+            }
+
             // ============================================================
             // F-M540 (Operator-Anweisung 16.11.2026: „Prüfung bereits im seeder ob sprache / sub
             // bereits als hochgeladen markiert ist. Wenn ja skip. Prüfung für subdl und tvst,

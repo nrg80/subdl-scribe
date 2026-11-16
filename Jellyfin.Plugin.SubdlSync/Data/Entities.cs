@@ -227,6 +227,29 @@ public class MediaEntity
     // F-M88c: the upload-side completion mark; a file whose embedded side is complete is skipped.
     public DateTime? SubtitlesUploadedAt { get; set; }
 
+    /// <summary>
+    /// F-M557 (Operator-Entscheidung 16.11.2026: „Alle spuren bearbeitet im durchlauf oder übersprungen
+    /// ist zu für die Quelle?"): der Zugeh-Stempel JE QUELLE. Er sagt: für diese Quelle wurde jede
+    /// vorhandene Dialogspur der Datei in einem Durchlauf entschieden — hochgeladen oder bewusst
+    /// übersprungen. Ein Upload bei tvst schliesst die Datei NICHT für SubDL; genau das war der Fehler,
+    /// den <see cref="SubtitlesUploadedAt"/> als eine globale Marke gemacht hat.
+    /// </summary>
+    public DateTime? CompleteSubdl { get; set; }
+
+    /// <summary>F-M557: Zugeh-Stempel für tvsubtitles.net (Serien).</summary>
+    public DateTime? CompleteTvSubtitles { get; set; }
+
+    /// <summary>F-M557: Zugeh-Stempel für moviesubtitles.org (Filme).</summary>
+    public DateTime? CompleteMsub { get; set; }
+
+    /// <summary>
+    /// F-M562: die Spursignatur, die zu den Stempeln gehört — die verschiedenen (Sprache, HI)-Paare der
+    /// Datei, sortiert und verkettet. Weicht sie beim nächsten Nachsehen ab (Spur dazu, Remux, andere
+    /// Sprache), gilt die Datei wieder als offen; ohne diese Zeile wäre der Stempel eine Behauptung über
+    /// einen Zustand, der sich ändern kann.
+    /// </summary>
+    public string? CompleteSignature { get; set; }
+
     // F-M283 (user decision 02.10.2026): the download-side completion mark is GONE.
     //
     // `SubtitlesDownloadedAt` (a timestamp) and `SubtitlesDownloadedLanguages` (a comma-separated

@@ -2407,6 +2407,136 @@ public sealed class ContentHashRegistry : IDisposable
     }
 
     /// <summary>
+    /// F-M562: die Spursignatur einer Datei — die VERSCHIEDENEN (Sprache, HI)-Paare, sortiert und
+    /// verkettet. Nicht die Zahl der Textspuren: liegt eine Sprache zweimal in der Datei, ist sie EINE
+    /// Upload-Einheit. Gemessen an „His &amp; Hers" S01E06 am 16.11.2026: 38 Textspuren, vier Sprachen
+    /// doppelt (FRA, POR, SPA, ZHO) → 34 Einheiten; mit der Spurenzahl als Nenner stünde die Datei
+    /// fälschlich für immer offen.
+    /// </summary>
+    /// <param name="pairs">Die Paare der Datei.</param>
+    /// <returns>Die Signatur, leer wenn die Datei keine Dialogspur hat.</returns>
+    public static string SignatureOf(IEnumerable<(string Language, bool HearingImpaired)> pairs) =>
+        string.Join(
+            "|",
+            pairs.Select(p => p.Language.ToUpperInvariant() + (p.HearingImpaired ? "+HI" : string.Empty))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(x => x, StringComparer.Ordinal));
+
+    /// <summary>
+    /// F-M557 (Operator-Entscheidung 16.11.2026: „Alle spuren bearbeitet im durchlauf oder übersprungen
+    /// ist zu für die Quelle?"): ist die Datei für DIESE Quelle zu? Stempel vorhanden **und** Signatur
+    /// unverändert. Die Frage wird bei jedem Nachsehen neu gestellt — der Stempel ist die Antwort eines
+    /// Durchlaufs, keine Vorbedingung, die man glauben muss (F-M563).
+    /// </summary>
+    /// <param name="mediaHash">Der Medienhash der Datei.</param>
+    /// <param name="provider">Die Quelle, für die gefragt wird.</param>
+    /// <param name="signature">Die aktuelle Spursignatur der Datei; leer = nur der Stempel zählt.</param>
+    /// <returns>Wahr, wenn diese Quelle nichts mehr zu tun hat.</returns>
+    public bool IsCompleteFor(string? mediaHash, SubtitleProvider provider, string? signature)
+    {
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return false;
+        }
+
+        var media = _db.Media.FindById(mediaHash);
+        if (media == null)
+        {
+            return false;
+        }
+
+        var stamp = provider switch
+        {
+            SubtitleProvider.Subdl => media.CompleteSubdl,
+            SubtitleProvider.TvSubtitles => media.CompleteTvSubtitles,
+            SubtitleProvider.MovieSubtitles => media.CompleteMsub,
+            _ => null,
+        };
+        if (stamp == null)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(signature))
+        {
+            return true;
+        }
+
+        return string.Equals(media.CompleteSignature ?? string.Empty, signature, StringComparison.Ordinal);
+    }
+
+    /// <summary>F-M557: setzt den Zugeh-Stempel dieser Quelle samt der Signatur, zu der er gehört.</summary>
+    /// <param name="mediaHash">Der Medienhash der Datei.</param>
+    /// <param name="provider">Die Quelle, die fertig ist.</param>
+    /// <param name="signature">Die Spursignatur des Durchlaufs.</param>
+    public void MarkCompleteFor(string? mediaHash, SubtitleProvider provider, string? signature)
+    {
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return;
+        }
+
+        _db.EnsureMedia(mediaHash, m =>
+        {
+            var now = DateTime.UtcNow;
+            switch (provider)
+            {
+                case SubtitleProvider.Subdl:
+                    m.CompleteSubdl = now;
+                    break;
+                case SubtitleProvider.TvSubtitles:
+                    m.CompleteTvSubtitles = now;
+                    break;
+                case SubtitleProvider.MovieSubtitles:
+                    m.CompleteMsub = now;
+                    break;
+            }
+
+            m.CompleteSignature = signature;
+        });
+    }
+
+    /// <summary>
+    /// F-M557/F-M559: die Abrechnung einer Datei für eine Quelle. Ein Paar gilt als entschieden, wenn
+    /// diese Quelle es hochgeladen hat (eigene Marke) **oder** ein Ablehnungs-Urteil dazu im Store steht
+    /// (Sprache führt die Seite nicht, identischer Text, Text untauglich). Ein gescheiterter Upload
+    /// schreibt keins von beidem — er zählt deshalb **nicht**, und die Datei bleibt offen (F-M558).
+    /// </summary>
+    /// <param name="mediaHash">Der Medienhash der Datei.</param>
+    /// <param name="provider">Die Quelle, für die abgerechnet wird.</param>
+    /// <param name="pairs">Die (Sprache, HI)-Paare der Datei.</param>
+    /// <returns>Einheiten, entschiedene Einheiten und die offenen Paare.</returns>
+    public (int Units, int Settled, List<string> Open) SettlementFor(
+        string? mediaHash, SubtitleProvider provider, IEnumerable<(string Language, bool HearingImpaired)> pairs)
+    {
+        var offen = new List<string>();
+        int einheiten = 0;
+        int entschieden = 0;
+        foreach (var (language, hi) in pairs
+                     .Select(p => (p.Language.ToUpperInvariant(), p.HearingImpaired))
+                     .Distinct())
+        {
+            einheiten++;
+            bool erledigt = !string.IsNullOrEmpty(mediaHash)
+                && (IsUploadedTo(mediaHash, language, hi, provider)
+                    || _db.Embeds.Exists(x => x.MediaHash == mediaHash && x.Language == language
+                        && x.HearingImpaired == hi && x.Status == SubtitleStatus.Rejected)
+                    || _db.Sidecars.Exists(x => x.MediaHash == mediaHash && x.Language == language
+                        && x.HearingImpaired == hi && x.Status == SubtitleStatus.Rejected));
+            if (erledigt)
+            {
+                entschieden++;
+            }
+            else
+            {
+                offen.Add(language + (hi ? "+HI" : string.Empty));
+            }
+        }
+
+        return (einheiten, entschieden, offen);
+    }
+
+    /// <summary>
     /// F-M554 (Befund 16.11.2026, „Warum wird nichts gesendet?"): dieselbe Frage wie
     /// <see cref="IsSubtitlesUploadedFor(string?, SubtitleProvider)"/>, aber gegen die Spuren, die
     /// WIRKLICH in der Datei liegen.

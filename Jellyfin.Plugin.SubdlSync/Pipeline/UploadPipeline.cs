@@ -788,8 +788,50 @@ public sealed class UploadPipeline : IPackFiller
                 .Where(p => p >= 0)
                 .Distinct()
                 .ToList();
+            // F-M557/F-M559/F-M562 (Operator-Entscheidung 16.11.2026): die Abrechnung JE QUELLE, und
+            // zwar hier — vor jeder Arbeit, aus dem Store. Ein Paar ist entschieden, wenn diese Quelle
+            // es hochgeladen hat oder ein Ablehnungs-Urteil dazu steht (Sprache fuehrt die Seite nicht,
+            // identischer Text, Text untauglich). Sind alle Paare entschieden, bekommt die Quelle ihren
+            // Zugeh-Stempel; ein gescheiterter Upload schreibt keins von beidem und haelt die Datei
+            // offen (F-M558). Die Paare — nicht die Spuren: vier Sprachen doppelt sind vier Einheiten
+            // weniger (His & Hers S01E06: 38 Spuren, 34 Einheiten).
+            var kopfPaare = kopfAlleSubs
+                .Where(Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream)
+                .Select(s => ((s.Language ?? string.Empty).ToUpperInvariant(),
+                    Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(s)))
+                .ToList();
+            var kopfSignatur = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.SignatureOf(kopfPaare);
+            foreach (var quelle in quellen)
+            {
+                var (einheiten, entschieden, offen) = Registry.SettlementFor(earlyHash, quelle, kopfPaare);
+                if (einheiten > 0 && offen.Count == 0)
+                {
+                    Registry.MarkCompleteFor(earlyHash, quelle, kopfSignatur);
+                    LogUtil.PerItem(
+                        _config.LogMode,
+                        _logger,
+                        "[Sub Scribe] {File} — {Tracks} track(s) → {Units} pair(s), {Settled} settled — stamp for {Source} (F-M559)",
+                        Path.GetFileName(mediaPath),
+                        kopfPositionen.Count + (kopfAlleSubs.Count - kopfPositionen.Count),
+                        einheiten,
+                        entschieden,
+                        Api.Endpoints.Provenance.Name(quelle));
+                }
+                else if (offen.Count > 0)
+                {
+                    LogUtil.PerItem(
+                        _config.LogMode,
+                        _logger,
+                        "[Sub Scribe] {File} — {Open} pair(s) open for {Source}: {List} (no stamp, F-M559)",
+                        Path.GetFileName(mediaPath),
+                        offen.Count,
+                        Api.Endpoints.Provenance.Name(quelle),
+                        string.Join(", ", offen.Take(8)));
+                }
+            }
+
             var offeneQuellen = quellen
-                .Where(quelle => !Registry.IsSubtitlesUploadedFor(earlyHash, quelle, kopfPositionen))
+                .Where(quelle => !Registry.IsCompleteFor(earlyHash, quelle, kopfSignatur))
                 .ToList();
             if (quellen.Count > 0 && offeneQuellen.Count == 0)
             {
