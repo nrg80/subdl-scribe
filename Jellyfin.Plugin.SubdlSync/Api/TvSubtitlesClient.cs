@@ -786,7 +786,7 @@ public sealed class TvSubtitlesClient
             return SubdlReportOutcome.Failed;
         }
 
-        string url = BaseUrl + "/report_bad.php";
+        string url = WithClient(BaseUrl + "/report_bad.php");
         using var content = new MultipartFormDataContent();
         content.Add(new StringContent(subtitleId.Trim()), "sid");
         content.Add(new StringContent("1"), "go");
@@ -1319,7 +1319,8 @@ public sealed class TvSubtitlesClient
                 false, null, null, null, null, body.Length, TvstAddShowOutcome.DryRun);
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, AddShowPostUrl);
+        var ziel = WithClient(AddShowPostUrl);
+        using var request = new HttpRequestMessage(HttpMethod.Post, ziel);
         request.Headers.Referrer = new Uri(AddShowFormUrl);
         request.Content = new ByteArrayContent(body);
         request.Content.Headers.ContentType =
@@ -1329,10 +1330,10 @@ public sealed class TvSubtitlesClient
         // never gets this far, which keeps the rule "a dry run changes nothing" intact.
         _showsCache = null;
 
-        DebugTrace?.Invoke(SiteTrace.Call("POST", AddShowPostUrl));
+        DebugTrace?.Invoke(SiteTrace.Call("POST", ziel));
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         LastStatus = (int)response.StatusCode;
-        DebugTrace?.Invoke(SiteTrace.Response("POST", AddShowPostUrl, LastStatus));
+        DebugTrace?.Invoke(SiteTrace.Response("POST", ziel, LastStatus));
         var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var plain = TagStripper.Replace(Regex.Replace(text, "\\s+", " ", RegexOptions.CultureInvariant), " ").Trim();
         var status = (int)response.StatusCode;
@@ -1418,20 +1419,60 @@ public sealed class TvSubtitlesClient
             return new TvSubtitlesUploadResult(false, null, null, body.Length, boundary);
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+        var ziel = WithClient(url);
+        using var request = new HttpRequestMessage(HttpMethod.Post, ziel);
         request.Headers.Referrer = new Uri(referer);
         request.Content = new ByteArrayContent(body);
         request.Content.Headers.ContentType =
             System.Net.Http.Headers.MediaTypeHeaderValue.Parse("multipart/form-data; boundary=" + boundary);
 
-        DebugTrace?.Invoke(SiteTrace.Call("POST", url));
+        DebugTrace?.Invoke(SiteTrace.Call("POST", ziel));
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         LastStatus = (int)response.StatusCode;
-        DebugTrace?.Invoke(SiteTrace.Response("POST", url, LastStatus));
+        DebugTrace?.Invoke(SiteTrace.Response("POST", ziel, LastStatus));
         var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var plain = TagStripper.Replace(Regex.Replace(text, "\\s+", " ", RegexOptions.CultureInvariant), " ");
         return new TvSubtitlesUploadResult(
             true, (int)response.StatusCode, plain.Trim(), body.Length, boundary);
+    }
+
+    /// <summary>
+    /// F-M537 (operator order 16.11.2026: „Dann schicken wir doch einfach den Client an tvst mit.
+    /// Schadet nicht oder?"): the client identifies itself on EVERY request to the site, as a query
+    /// parameter <c>client=sub-scribe-&lt;assembly version&gt;</c> — the same idea as SubDL's
+    /// <c>&amp;client=</c> (F-M343), only here the site has no API and no documented parameter.
+    /// <para>
+    /// Measured live on 16.11.2026 before this went in: the parameter changes nothing that matters.
+    /// <c>download-&lt;id&gt;.html</c> answered byte-identical, <c>search2.php</c> and the episode and
+    /// subtitle pages differed only in their own language-switch links, which echo the query string
+    /// back to us, and a POST to <c>add1.php</c> with and without the parameter answered the same
+    /// (HTTP 200, empty body). PHP reads <c>$_POST</c>/<c>$_FILES</c>, so an unknown query parameter
+    /// on a POST is ignored — nothing about the upload changes.
+    /// </para>
+    /// <para>
+    /// The User-Agent carries the same product name and version, so the site sees the client in the
+    /// header AND in its request log even where a proxy strips headers.
+    /// </para>
+    /// </summary>
+    public static string SiteClientQuery { get; } =
+        "sub-scribe-" + (typeof(TvSubtitlesClient).Assembly.GetName().Version?.ToString() ?? "0.0.0.0");
+
+    /// <summary>
+    /// F-M537: appends <see cref="SiteClientQuery"/> to a request URL. One place, so every call of this
+    /// client — page, search, download chain, report, upload — carries the name without a call site
+    /// having to remember it.
+    /// </summary>
+    /// <param name="url">The URL as built by the caller.</param>
+    /// <returns>The URL with the client parameter appended.</returns>
+    public static string WithClient(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            return url;
+        }
+
+        var separator = url.Contains('?', StringComparison.Ordinal) ? '&' : '?';
+        return url + separator + "client=" + SiteClientQuery;
     }
 
     private async Task<string> GetStringAsync(string url, string? referer, CancellationToken cancellationToken)
@@ -1442,16 +1483,17 @@ public sealed class TvSubtitlesClient
 
     private async Task<byte[]> GetBytesAsync(string url, string? referer, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        var ziel = WithClient(url);
+        using var request = new HttpRequestMessage(HttpMethod.Get, ziel);
         if (!string.IsNullOrEmpty(referer))
         {
             request.Headers.Referrer = new Uri(referer);
         }
 
-        DebugTrace?.Invoke(SiteTrace.Call("GET", url));
+        DebugTrace?.Invoke(SiteTrace.Call("GET", ziel));
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         LastStatus = (int)response.StatusCode;
-        DebugTrace?.Invoke(SiteTrace.Response("GET", url, LastStatus));
+        DebugTrace?.Invoke(SiteTrace.Response("GET", ziel, LastStatus));
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
     }

@@ -458,6 +458,9 @@ public sealed class SubdlApiClient
     /// Gets the User-Agent the plugin's HTTP clients carry: the product name plus the REAL assembly
     /// version.
     /// <para>
+    /// Operator correction 16.11.2026 („Subdl scribe stimmt aber nicht mehr"): the product has been
+    /// called "Sub Scribe" since the rename, so the agent names the product, not the old project.
+    /// <para>
     /// Until 10.10.2026 this was the fixed literal "Jellyfin.Plugin.SubdlSync/1.0", so every
     /// release since 1.0 introduced itself to SubDL as version 1.0 — the server could not tell
     /// two versions apart, and the string named the assembly rather than the product. Read from
@@ -475,7 +478,7 @@ public sealed class SubdlApiClient
     /// </para>
     /// </summary>
     public static string DefaultUserAgent { get; } =
-        "SubDL-Scribe/" + (typeof(SubdlApiClient).Assembly.GetName().Version?.ToString() ?? "0.0.0.0")
+        "Sub Scribe/" + (typeof(SubdlApiClient).Assembly.GetName().Version?.ToString() ?? "0.0.0.0")
         + " (+https://github.com/nrg80/sub-scribe)";
 
     /// <summary>Gets or sets the SubDL user-agent used for all requests.</summary>

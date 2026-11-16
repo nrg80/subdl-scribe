@@ -2270,8 +2270,10 @@ internal static class Program
             if (request.RequestUri!.AbsolutePath.EndsWith("search2.php", StringComparison.Ordinal))
             {
                 // F-M516: die Seitensuche — Treffer sind Links /tvshow-<id>.html mit Zeitraum daneben.
+                // F-M537: hinter qs= steht jetzt noch &client=<tag> — der Wert endet am naechsten &.
                 var q = request.RequestUri.Query.Contains("qs=", StringComparison.Ordinal)
-                    ? Uri.UnescapeDataString(request.RequestUri.Query[(request.RequestUri.Query.IndexOf("qs=", StringComparison.Ordinal) + 3)..])
+                    ? Uri.UnescapeDataString(
+                        request.RequestUri.Query[(request.RequestUri.Query.IndexOf("qs=", StringComparison.Ordinal) + 3)..].Split('&')[0])
                     : string.Empty;
                 var hits = _shows
                     .Where(s => s.Name.Contains(q, StringComparison.OrdinalIgnoreCase))
@@ -2480,7 +2482,8 @@ internal static class Program
         {
             await Task.Yield();
             var url = request.RequestUri!.ToString();
-            var path = url.Replace("https://www.tvsubtitles.net/", string.Empty, StringComparison.Ordinal);
+            // F-M537: der Client haengt client=<tag> an jede Anfrage — der Fixture-Name bleibt der Pfad.
+            var path = url.Split('?')[0].Replace("https://www.tvsubtitles.net/", string.Empty, StringComparison.Ordinal);
 
             if (path == "add.html")
             {

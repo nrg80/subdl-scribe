@@ -392,6 +392,10 @@
     "T257": {
       "suite": "packretry",
       "checks": 5
+    },
+    "T258": {
+      "suite": "tvsubtitles",
+      "checks": 5
     }
   }
 }

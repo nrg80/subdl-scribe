@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 576" width="1024" height="576" role="img" aria-label="Sub Scribe">
   <title>Sub Scribe</title>
-  <desc>A screen holding a quill above a subtitle box; a green arrow feeds subtitles in, a blue one drains them out.</desc>
+  <desc>A screen holding a scribe writing on the subtitle box; a green arrow feeds subtitles in, a blue one drains them out.</desc>
   <rect width="1024" height="576" fill="#121826"/>
   <!-- screen frame -->
   <rect x="375.875" y="148.875" width="273.000" height="163.000" rx="13" fill="none" stroke="#dce1eb" stroke-width="8"/>
@@ -10,8 +10,14 @@
   <rect x="448.875" y="264.875" width="127.000" height="31.000" rx="6" fill="none" stroke="#dce1eb" stroke-width="4"/>
   <rect x="457.875" y="271.875" width="109.0" height="5.0" fill="#dce1eb"/>
   <rect x="457.875" y="283.875" width="109.0" height="5.0" fill="#dce1eb"/>
-  <!-- quill -->
-  <path fill="#f3f5f9" d="M 554.2,176.2 L 553.0,175.8 L 547.2,176.0 L 533.0,178.0 L 514.2,183.0 L 502.5,188.2 L 501.0,189.8 L 495.5,199.0 L 494.5,198.2 L 493.8,194.0 L 493.0,194.0 L 487.0,199.0 L 484.0,208.0 L 483.0,208.0 L 482.8,204.2 L 482.0,204.2 L 479.0,207.5 L 475.0,213.5 L 472.0,219.8 L 470.0,225.8 L 469.0,230.5 L 468.8,238.2 L 469.8,238.0 L 474.0,230.0 L 483.8,217.2 L 498.2,202.8 L 508.0,195.0 L 517.2,188.8 L 518.2,189.0 L 520.0,191.5 L 519.2,193.0 L 511.2,198.0 L 503.5,204.0 L 491.0,215.8 L 479.0,230.5 L 474.0,238.5 L 474.0,240.2 L 475.0,240.5 L 477.5,239.5 L 488.0,231.8 L 488.8,230.2 L 484.8,230.8 L 484.5,230.0 L 495.5,225.0 L 521.2,199.8 L 527.2,194.8 L 527.8,193.2 L 524.2,192.8 L 524.5,191.5 L 535.2,187.8 L 543.2,182.0 Z"/>
+  <!-- scribe: head, shoulders, the arm reaching down to write, and the pen -->
+  <circle cx="497" cy="179" r="15.5" fill="#f3f5f9"/>
+  <path fill="#f3f5f9" d="M 472.0,240.5 C 472.0,212.0 480.5,201.0 497.0,201.0 C 513.5,201.0 522.0,212.0 522.0,240.5 Z"/>
+  <path fill="none" stroke="#f3f5f9" stroke-width="10.5" stroke-linecap="round"
+        d="M 515.5,214.0 C 529.0,219.5 539.0,228.5 547.0,239.0"/>
+  <path fill="none" stroke="#32cd78" stroke-width="7.5" stroke-linecap="round"
+        d="M 545.0,237.0 L 560.5,250.0"/>
+  <circle cx="561.5" cy="251.0" r="4.2" fill="#32cd78"/>
   <!-- input arrow -->
   <path fill="#32cd78" d="M 450.0,231.2 L 422.0,210.5 L 421.0,220.0 L 250.5,220.0 L 250.0,242.5 L 420.2,242.8 L 421.5,243.5 L 421.5,252.2 L 422.2,252.5 Z"/>
   <!-- output arrow -->

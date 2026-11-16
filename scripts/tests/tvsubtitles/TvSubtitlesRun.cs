@@ -224,7 +224,7 @@ internal static class Program
         var real = await client.UploadAsync(upload, dryRun: false).ConfigureAwait(false);
         Check("a real run posts multipart to /add1.php with the upload page as referer",
             real.Sent && handler.Requests == 1
-            && handler.LastUrl == "https://www.tvsubtitles.net/add1.php"
+            && handler.LastUrl == TvSubtitlesClient.WithClient("https://www.tvsubtitles.net/add1.php")
             && handler.LastReferer == "https://www.tvsubtitles.net/add.html"
             && handler.LastContentType!.StartsWith("multipart/form-data; boundary=", StringComparison.Ordinal));
         Check("the response text is stripped of tags and collapsed",
@@ -294,7 +294,7 @@ internal static class Program
         var addReal = await addClient.AddShowAsync(addShow, dryRun: false).ConfigureAwait(false);
         Check("the real call posts multipart to /add-tvshow1.php with the form as referer (F-M516)",
             addReal.Sent && addHandler.Requests == 1
-            && addHandler.LastUrl == "https://www.tvsubtitles.net/add-tvshow1.php"
+            && addHandler.LastUrl == TvSubtitlesClient.WithClient("https://www.tvsubtitles.net/add-tvshow1.php")
             && addHandler.LastReferer == "https://www.tvsubtitles.net/add-tvshow.php"
             && addHandler.LastContentType!.StartsWith("multipart/form-data; boundary=", StringComparison.Ordinal),
             "url=" + addHandler.LastUrl + " ctype=" + addHandler.LastContentType);
@@ -640,7 +640,9 @@ internal static class Program
                 : url.Contains("/tvshow-", StringComparison.Ordinal) ? staffelSeite
                 : url.Contains("/episode-", StringComparison.Ordinal)
                     ? File.ReadAllText(Path.Combine(
-                        _fixtures, "season-middle-s01", url[(url.LastIndexOf('/') + 1)..]))
+                        _fixtures,
+                        "season-middle-s01",
+                        url[(url.LastIndexOf('/') + 1)..].Split('?')[0]))
                     : "<html></html>",
         };
         var fm523Client = new TvSubtitlesClient(new HttpClient(fm523Handler));
@@ -703,6 +705,34 @@ internal static class Program
             tvstClient.Contains("/report_bad.php", StringComparison.Ordinal)
             && tvstClient.Contains("\"sid\"", StringComparison.Ordinal)
             && tvstClient.Contains("ReportBadAsync", StringComparison.Ordinal));
+
+        // ── F-M537: the client rides along on every request to the site ─────────────────
+        // Operator order 16.11.2026: „Dann schicken wir doch einfach den Client an tvst mit."
+        var version = typeof(TvSubtitlesClient).Assembly.GetName().Version?.ToString() ?? "0.0.0.0";
+        Check("F-M537: the client tag names the product and the real assembly version",
+            TvSubtitlesClient.SiteClientQuery == "sub-scribe-" + version, TvSubtitlesClient.SiteClientQuery);
+        Check("F-M537: a URL without a query gets ?client=",
+            TvSubtitlesClient.WithClient("https://www.tvsubtitles.net/episode-1.html")
+                == "https://www.tvsubtitles.net/episode-1.html?client=" + TvSubtitlesClient.SiteClientQuery,
+            TvSubtitlesClient.WithClient("https://www.tvsubtitles.net/episode-1.html"));
+        Check("F-M537: a URL that already has a query gets &client=",
+            TvSubtitlesClient.WithClient("https://www.tvsubtitles.net/search2.php?qs=Invasion")
+                == "https://www.tvsubtitles.net/search2.php?qs=Invasion&client=" + TvSubtitlesClient.SiteClientQuery,
+            TvSubtitlesClient.WithClient("https://www.tvsubtitles.net/search2.php?qs=Invasion"));
+        Check("F-M537: every request builder goes through the tagging helper",
+            System.Text.RegularExpressions.Regex.Matches(tvstClient, "new HttpRequestMessage\\(HttpMethod\\.(Get|Post), (\\w+)\\)")
+                .All(m => m.Groups[2].Value == "ziel")
+            && tvstClient.Contains("var ziel = WithClient(url);", StringComparison.Ordinal)
+            && tvstClient.Contains("var ziel = WithClient(AddShowPostUrl);", StringComparison.Ordinal));
+
+        // A real call through the client must show the parameter on the wire, not just in a helper.
+        var tagHandler = new CountingHandler { ReplyStatus = System.Net.HttpStatusCode.OK, ReplyBody = "<html></html>" };
+        var tagClient = new TvSubtitlesClient(new HttpClient(tagHandler));
+        await tagClient.SearchShowsAsync("Weissensee", default).ConfigureAwait(false);
+        Check("F-M537: a real search reaches the site with client= in the URL",
+            tagHandler.LastUrl?.Contains("client=" + TvSubtitlesClient.SiteClientQuery, StringComparison.Ordinal) == true,
+            tagHandler.LastUrl);
+
 
         if (_failures > 0)
         {

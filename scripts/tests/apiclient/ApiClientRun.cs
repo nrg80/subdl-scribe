@@ -68,7 +68,7 @@ Console.WriteLine("--- the client's own identity ---");
 Console.WriteLine("   DefaultUserAgent: " + SubdlApiClient.DefaultUserAgent);
 Console.WriteLine("   IntegrationClient: " + api.IntegrationClient);
 Check(api.IntegrationClient == "other", "the integration name is other", api.IntegrationClient);
-Check(SubdlApiClient.DefaultUserAgent.StartsWith("SubDL-Scribe/", StringComparison.Ordinal),
+Check(SubdlApiClient.DefaultUserAgent.StartsWith("Sub Scribe/", StringComparison.Ordinal),
     "the agent names the product, not the assembly", SubdlApiClient.DefaultUserAgent);
 Check(!SubdlApiClient.DefaultUserAgent.EndsWith("/1.0", StringComparison.Ordinal),
     "the agent no longer reports the frozen version 1.0", SubdlApiClient.DefaultUserAgent);
