@@ -913,6 +913,15 @@ internal static class Program
             "F-M528: one bad hit is skipped AND the foreign value is written to the log");
         Check(!subdlClient.Contains("v.GetInt32();\n        }", StringComparison.Ordinal),
             "F-M528: no int-only read of an API payload is left in the search path");
+        // F-M529: der Befund wird nicht gemeldet, sondern der Treffer faellt — und wird gezaehlt.
+        Check(subdlClient.Contains("LastRejectedByFormat++", StringComparison.Ordinal),
+            "F-M529: a hit whose field shape is not as documented is rejected");
+        Check(subdlClient.Contains("LastJsonMismatches = befund", StringComparison.Ordinal),
+            "F-M529: the rejected hits keep their sub and attribute for the log");
+        string dlSource = File.ReadAllText(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "DownloadPipeline.cs"));
+        Check(dlSource.Contains("summary.RejectedCandidates += _api.LastRejectedByFormat", StringComparison.Ordinal),
+            "F-M529: the count reaches the run's closing line");
 
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."

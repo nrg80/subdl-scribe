@@ -3693,6 +3693,11 @@ public sealed class DownloadPipeline : IDisposable
                 return (null, false, 0, noHi); // 429/5xx/403 → stop the run
             }
 
+            // F-M529: Treffer, deren Feldgestalt SubDLs eigene Doku nicht erlaubt (z. B. framerate
+            // als Kommazahl 23.98), sind im Client schon verworfen worden. Der Zaehler geht in die
+            // Schlusszeile des Laufs, damit die Zahl sichtbar ist, ohne dass jemand ins Debug-Log muss.
+            summary.RejectedCandidates += _api.LastRejectedByFormat;
+
             if (variantMissing.Count > 0 && _config.DownloadHearingImpaired)
             {
                 // Second search, fed from the VARIANT pairs only. A failure here must NOT lose the
@@ -3707,6 +3712,7 @@ public sealed class DownloadPipeline : IDisposable
                     string.IsNullOrWhiteSpace(imdbId) ? null : imdbId,
                     string.IsNullOrWhiteSpace(tmdbId) ? null : tmdbId,
                     season, episode, hiLangs, 20, ct, earlyStop, hearingImpaired: true).ConfigureAwait(false);
+                summary.RejectedCandidates += _api.LastRejectedByFormat; // F-M529, auch fuer den HI-Pool
                 if (hi != null && hi.Count > 0)
                 {
                     noHi = hi.Where(c => c.Language != null && variantMissing.Contains(c.Language, StringComparer.OrdinalIgnoreCase)).ToList();

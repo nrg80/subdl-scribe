@@ -49,6 +49,16 @@ public sealed class SubdlApiClient
 
     /// <summary>F-M450: account name from the login answer, used to sign automated reports.</summary>
     public string AccountName { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// F-M529: the fields of the LAST search that arrived in a shape SubDL's documentation does not
+    /// allow, each naming the affected subtitle and attribute. The affected hits are dropped, not
+    /// repaired — the operator's rule (17.11.2026): "Solche subs einfach rejected und Zähler hoch."
+    /// </summary>
+    public IReadOnlyList<JsonAnomalyRecord> LastJsonMismatches { get; private set; } = Array.Empty<JsonAnomalyRecord>();
+
+    /// <summary>F-M529: how many hits of the LAST search were rejected for that reason.</summary>
+    public int LastRejectedByFormat { get; private set; }
     private DateTime _tokenObtained;
 
     /// <summary>
@@ -1274,6 +1284,8 @@ public sealed class SubdlApiClient
     public async Task<List<SubtitleCandidate>?> SearchSubtitlesAsync(string? imdbId, string? tmdbId, int season, int episode, string? languages, int maxPages, CancellationToken ct, int maxCandidatesPerLanguage = 0, bool? hearingImpaired = null)
     {
         var result = new List<SubtitleCandidate>();
+        LastJsonMismatches = Array.Empty<JsonAnomalyRecord>();
+        LastRejectedByFormat = 0;
         string apiKey = ApiKey ?? throw new InvalidOperationException("Search requires the SubDL API key");
 
         int page = 1;
@@ -1399,11 +1411,14 @@ public sealed class SubdlApiClient
                 if (root.TryGetProperty("subtitles", out var subsEl) && subsEl.ValueKind == JsonValueKind.Array)
                 {
                     batch = new List<SubtitleCandidate>();
+                    var befund = new List<JsonAnomalyRecord>();
                     foreach (var s in subsEl.EnumerateArray())
                     {
-                        // F-M528: ein einzelner Treffer mit unlesbarem Feld darf hoechstens sich
-                        // selbst kosten. Frueher fuhr die FormatException aus dem Parser bis in den
-                        // Zyklus durch und beendete den ganzen Download-Lauf (16.11.2026, 06:45/07:44).
+                        // F-M528/F-M529: ein Treffer, dessen Feldgestalt die Doku nicht erlaubt, wird
+                        // VERWORFEN und gezaehlt — nicht gerettet. Frueher fuhr die FormatException
+                        // aus dem Parser bis in den Zyklus durch und beendete den ganzen Lauf
+                        // (16.11.2026, 06:45/07:44); jetzt kostet so ein Treffer nur sich selbst.
+                        JsonAnomalies.Take();
                         SubtitleCandidate? cand;
                         try
                         {
@@ -1411,6 +1426,14 @@ public sealed class SubdlApiClient
                         }
                         catch (FormatException)
                         {
+                            cand = null;
+                        }
+
+                        var auffaellig = JsonAnomalies.Take();
+                        if (auffaellig.Count > 0)
+                        {
+                            befund.AddRange(auffaellig);
+                            LastRejectedByFormat++;
                             continue;
                         }
 
@@ -1423,13 +1446,14 @@ public sealed class SubdlApiClient
                     // Film-level ids from results[0] onto every candidate
                     SubtitleCandidate.StampFilmIds(batch, root);
 
-                    // F-M528: was SubDL anders geschickt hat als erwartet — eine Zeile je Suche, und
-                    // nur wenn wirklich etwas tolerant gelesen werden musste. Das ist der Beleg dafuer,
-                    // dass der Wert von der Gegenseite kam (und taugt fuer eine Meldung an SubDL).
-                    var gelesen = JsonAnomalies.Take();
-                    if (gelesen.Count > 0)
+                    // F-M529: eine Zeile je Suche — wie viele Treffer deswegen fielen und welches
+                    // Feld in welcher Gestalt kam. Der Sub steht daneben, damit die Stelle auffindbar
+                    // bleibt; gemeldet wird nicht einzeln, gezaehlt wird.
+                    LastJsonMismatches = befund;
+                    if (befund.Count > 0)
                     {
-                        LogInfo($"[SubDL] JSON mit Nachsicht gelesen: {string.Join("; ", gelesen)}");
+                        LogInfo($"[SubDL] {LastRejectedByFormat} Treffer verworfen — Feldgestalt nicht wie dokumentiert: "
+                            + string.Join("; ", JsonAnomalies.Lines(befund)));
                     }
                 }
             }
@@ -2583,6 +2607,9 @@ public sealed class SubtitleCandidate
         {
             c.ReleaseName = rn.GetString() ?? string.Empty;
         }
+
+        // F-M529: ab hier traegt jeder Befund den Sub, zu dem er gehoert.
+        JsonAnomalies.BeginSubtitle(c.SubdlId, c.ReleaseName, c.Language);
 
         if (el.TryGetProperty("language", out var lg) && lg.ValueKind == JsonValueKind.String)
         {

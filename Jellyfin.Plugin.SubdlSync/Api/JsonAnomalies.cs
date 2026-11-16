@@ -36,7 +36,35 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 internal static class JsonAnomalies
 {
     /// <summary>Per-field notes of the running search: at most one line per distinct shape.</summary>
-    private static readonly ConcurrentDictionary<string, string> Notes = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, JsonAnomalyRecord> Notes = new(StringComparer.Ordinal);
+
+    /// <summary>Identity of the hit being parsed right now (F-M529) — needed so a note can name
+    /// WHICH subtitle carried the odd value. Without it a mismatch is a fact about the API only,
+    /// and SubDL cannot act on it.</summary>
+    private static string _subId = string.Empty;
+
+    private static string _subName = string.Empty;
+
+    private static string _subLang = string.Empty;
+
+    /// <summary>Sets the identity of the hit whose fields are being read next.</summary>
+    /// <param name="subId">SubDL entry id ("3676577-8593549").</param>
+    /// <param name="name">Release or file name as listed.</param>
+    /// <param name="language">Language of the entry.</param>
+    public static void BeginSubtitle(string? subId, string? name, string? language)
+    {
+        _subId = subId ?? string.Empty;
+        _subName = name ?? string.Empty;
+        _subLang = language ?? string.Empty;
+    }
+
+    /// <summary>Forgets the identity again after the hit is read.</summary>
+    public static void EndSubtitle()
+    {
+        _subId = string.Empty;
+        _subName = string.Empty;
+        _subLang = string.Empty;
+    }
 
     /// <summary>
     /// Reads a property as an integer, accepting every shape SubDL has actually sent: a whole number,
@@ -113,22 +141,61 @@ internal static class JsonAnomalies
     /// at most one line per cycle, and only when something actually needed tolerance.
     /// </summary>
     /// <returns>One readable line per distinct shape, e.g. <c>"season" = 1.5 (Number) → 1</c>.</returns>
-    public static IReadOnlyList<string> Take()
+    public static IReadOnlyList<JsonAnomalyRecord> Take()
     {
         if (Notes.IsEmpty)
         {
-            return Array.Empty<string>();
+            return Array.Empty<JsonAnomalyRecord>();
         }
 
-        var lines = Notes.Values.OrderBy(x => x, StringComparer.Ordinal).ToList();
+        var records = Notes.Values.OrderBy(x => x.Field + "|" + x.Raw, StringComparer.Ordinal).ToList();
         Notes.Clear();
+        return records;
+    }
+
+    /// <summary>One readable line per record, for the log.</summary>
+    /// <param name="records">The records.</param>
+    /// <returns>Lines like <c>"framerate" = 23.98 (Number) → read as 23</c>.</returns>
+    public static IReadOnlyList<string> Lines(IReadOnlyList<JsonAnomalyRecord> records)
+    {
+        var lines = new List<string>(records.Count);
+        foreach (var r in records)
+        {
+            var field = string.IsNullOrWhiteSpace(r.Field) ? "(unnamed field)" : $"\"{r.Field}\"";
+            var shown = r.Raw.Length > 40 ? r.Raw[..40] + "…" : r.Raw;
+            lines.Add($"{field} = {shown} ({r.Kind}) → read as {r.ReadAs}");
+        }
+
         return lines;
     }
 
     private static void Note(string? name, string raw, JsonValueKind kind, string readAs)
     {
-        var field = string.IsNullOrWhiteSpace(name) ? "(unnamed field)" : $"\"{name}\"";
+        string field = name ?? string.Empty;
         var shown = raw.Length > 40 ? raw[..40] + "…" : raw;
-        Notes.TryAdd($"{field}|{shown}|{kind}", $"{field} = {shown} ({kind}) → read as {readAs}");
+        Notes.TryAdd(
+            $"{field}|{shown}|{kind}|{_subId}",
+            new JsonAnomalyRecord(field, shown, kind.ToString(), readAs, _subId, _subName, _subLang));
     }
 }
+
+/// <summary>
+/// F-M529: one field SubDL sent in a shape its own documentation does not allow — the raw value,
+/// what the plugin made of it, and WHICH subtitle carried it. That last part is what makes the
+/// finding reportable: SubDL's report endpoint is addressed by the subtitle, not by the field.
+/// </summary>
+/// <param name="Field">Attribute name as sent, e.g. <c>framerate</c>.</param>
+/// <param name="Raw">The literal value, shortened.</param>
+/// <param name="Kind">JSON kind that arrived (Number, String, …).</param>
+/// <param name="ReadAs">What the tolerant read produced.</param>
+/// <param name="SubId">SubDL entry id of the affected subtitle.</param>
+/// <param name="SubName">Release or file name of the affected subtitle.</param>
+/// <param name="Language">Language of the affected subtitle.</param>
+public sealed record JsonAnomalyRecord(
+    string Field,
+    string Raw,
+    string Kind,
+    string ReadAs,
+    string SubId,
+    string SubName,
+    string Language);
