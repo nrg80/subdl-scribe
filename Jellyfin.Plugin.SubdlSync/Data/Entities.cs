@@ -189,6 +189,19 @@ public class MediaEntity
     /// </summary>
     public string? TvstShowId { get; set; }
 
+    /// <summary>
+    /// F-M507 (Schema 14, Nutzerauftrag 15.11.2026 „Was was ist, Auflösung per tmdb"): die Nummer, unter
+    /// der der FILM bei moviesubtitles.org geführt wird — dieselbe Ebene wie <see cref="TmdbId"/>,
+    /// <see cref="ImdbId"/> und <see cref="TvstShowId"/>, weil sie dieselbe Frage beantwortet: welcher
+    /// Film IST diese Datei.
+    /// <para>
+    /// Sie wird EINMAL ermittelt (TMDb-Titel plus TMDb-Jahr in der Suche der Seite, eng verglichen) und
+    /// danach gelesen statt neu gesucht. Null heißt „noch nicht ermittelt" — nie „keine Nummer
+    /// vorhanden": geschrieben wird nur, was die Seite wirklich genannt hat.
+    /// </para>
+    /// </summary>
+    public string? MsubMovieId { get; set; }
+
     /// <summary>SubDL release ID (sd_id) when known.</summary>
     public string? SdId { get; set; }
 
@@ -340,6 +353,31 @@ public abstract class SubtitleState
     /// <see cref="SubdlUploadedAt"/> — that is the whole point of two fields.
     /// </summary>
     public DateTime? TvSubtitlesUploadedAt { get; set; }
+
+    /// <summary>
+    /// F-M507 (Schema 14): die Id, unter der moviesubtitles.org diesen Untertitel führt — die
+    /// Gegenseite der Eintragsseite <c>subtitle-&lt;id&gt;.html</c>. Eigenes Feld je Quelle und
+    /// Richtung, wie die vier Kennzeichen aus F-M488: eine Zeile soll von sich aus sagen, was wo
+    /// passiert ist, ohne <see cref="Status"/> zu deuten.
+    /// </summary>
+    public string? MoviesubtitlesDownloadId { get; set; }
+
+    /// <summary>
+    /// F-M507 (Schema 14): die Id, die unser eigener Upload bei moviesubtitles.org bekommen hat.
+    /// <para>
+    /// Das Feld steht hier mit der Spalte, weil die Migration beide Richtungen auf einmal anlegt;
+    /// GESCHRIEBEN wird es erst in Etappe 2b, wenn der Upload dieser Quelle verdrahtet ist. Null heißt
+    /// deshalb heute „noch nicht ermittelt" und nicht „kein Upload".
+    /// </para>
+    /// </summary>
+    public string? MoviesubtitlesUploadId { get; set; }
+
+    /// <summary>
+    /// F-M507 (Schema 14): wann UNSER Upload zu moviesubtitles.org lief (UTC) — ein Zeitpunkt, kein
+    /// Schalter, aus demselben Grund wie <see cref="SubdlUploadedAt"/>. Geschrieben wird er in
+    /// Etappe 2b.
+    /// </summary>
+    public DateTime? MoviesubtitlesUploadedAt { get; set; }
 }
 
 /// <summary>

@@ -117,6 +117,32 @@ public static class SidecarNaming
         => slot >= OriginalSlotMin && slot <= OriginalSlotMax;
 
     /// <summary>
+    /// Operator order 17.11.2026 ("5xer sidecars bitte generell nicht hochladen"): a sidecar in the
+    /// reserved ORIGINAL block is the unsynchronized copy a correction keeps beside its result — it is
+    /// a working file, not a deliverable.
+    /// <para>
+    /// The test is the slot on the name and nothing else, which is why it lives here next to
+    /// <see cref="IsOriginalSlot"/>: no file has to be opened to answer it, and a run of 24 episodes
+    /// pays nothing for the question. Slot 50 counts as well, although no writer hands it out any
+    /// more — older trees still carry such names, and they are originals just the same.
+    /// </para>
+    /// </summary>
+    /// <param name="filePath">Path of the sidecar.</param>
+    /// <param name="mediaPath">Path of the media file the sidecar belongs to.</param>
+    /// <returns>True when the name carries a slot of the original block.</returns>
+    public static bool IsOriginalSidecar(string filePath, string mediaPath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(mediaPath))
+        {
+            return false;
+        }
+
+        string baseName = Path.GetFileNameWithoutExtension(mediaPath);
+        int slot = SlotOf(Path.GetFileNameWithoutExtension(filePath), baseName);
+        return slot >= 50 && slot <= OriginalSlotMax;
+    }
+
+    /// <summary>
     /// Builds the file name a sidecar gets next to the media file.
     /// <para>
     /// F-M260: the writer's counterpart to <see cref="Parse"/>, in the SAME class on purpose. The

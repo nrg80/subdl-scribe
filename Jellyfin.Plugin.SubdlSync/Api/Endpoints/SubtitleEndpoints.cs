@@ -35,19 +35,30 @@ public enum SubtitleDirection
 /// F-M483: what to look for — provider-neutral, so a caller does not have to know which source answers.
 /// Not every source can use every field: SubDL works on IMDb/TMDb ids, tvsubtitles.net only on names.
 /// </summary>
-/// <param name="ShowName">Series title, needed by sources that have no id index.</param>
+/// <param name="ShowName">Series title, needed by sources that have no id index; for a film the film title.</param>
 /// <param name="ImdbId">IMDb id, when known.</param>
 /// <param name="TmdbId">TMDb id, when known.</param>
 /// <param name="Season">Season number.</param>
 /// <param name="Episode">Episode number.</param>
 /// <param name="Language">Target language, site-independent (two-letter, upper or lower case).</param>
+/// <param name="Year">
+/// F-M507: das Jahr, das eine Suche ohne Id-Index braucht (TMDb-Jahr, nicht das des Dateinamens). 0 heißt
+/// „nicht bekannt" — dann darf eine Quelle, die ohne Jahr nicht sicher trifft, nichts liefern.
+/// </param>
+/// <param name="MovieId">
+/// F-M507: die Nummer, unter der die Quelle den FILM führt, wenn der Store sie schon kennt
+/// (<see cref="Jellyfin.Plugin.SubdlScribe.Data.MediaEntity.MsubMovieId"/>). Ist sie gesetzt, wird sie
+/// benutzt statt erneut zu suchen — dieselbe Regel wie <c>UploadTicket.TvstShowId</c> für Serien.
+/// </param>
 public sealed record SubtitleQuery(
     string? ShowName,
     string? ImdbId,
     string? TmdbId,
     int Season,
     int Episode,
-    string Language);
+    string Language,
+    int Year = 0,
+    string? MovieId = null);
 
 /// <summary>
 /// F-M483: one offer a source has for a query. <paramref name="Id"/> is the source's own handle — a
@@ -99,6 +110,16 @@ public sealed record SubtitlePayload(string FileName, byte[] Data, string Langua
 /// der Endpunkt SIE und holt die Serienliste gar nicht erst — der Titel im Ticket ist dann nur noch
 /// Text für Kommentar und Log.
 /// </param>
+/// <param name="MsubMovieId">
+/// F-M508: die Nummer des FILMS bei moviesubtitles.org, wenn der Store sie kennt
+/// (<see cref="Jellyfin.Plugin.SubdlScribe.Data.MediaEntity.MsubMovieId"/>) — dieselbe Regel wie
+/// <paramref name="TvstShowId"/>, eine Ebene tiefer. Fehlt sie, löst der Endpunkt über Titel und Jahr
+/// auf (<paramref name="MovieYear"/>).
+/// </param>
+/// <param name="MovieYear">
+/// F-M508: das Jahr des Films aus dem TMDb-Datensatz. Ohne Jahr ist der Namensvergleich der Seite nicht
+/// eng genug („filter=dune" antwortet fünf Filme) — dann wird nichts geraten.
+/// </param>
 public sealed record UploadTicket(
     string? ShowName,
     string? ImdbId,
@@ -113,7 +134,9 @@ public sealed record UploadTicket(
     bool HearingImpaired,
     bool DoubleEpisode,
     bool SeasonPack,
-    int? TvstShowId = null);
+    int? TvstShowId = null,
+    int? MsubMovieId = null,
+    int MovieYear = 0);
 
 /// <summary>
 /// F-M483: what an upload endpoint answers. <paramref name="Ok"/> false plus a
@@ -281,4 +304,26 @@ public sealed class SubtitleEndpointCatalog
     /// <returns>The sentence.</returns>
     public static string NotWiredReason(SubtitleProvider provider, SubtitleDirection direction) =>
         PluginConfiguration.MissingProviderReason(provider) ?? "switched off";
+
+    /// <summary>
+    /// F-M507 (Operator-Auflage 15.11.2026: „Bevor wir falsche Sprachen hochladen, laden wir nix hoch."):
+    /// gibt es für diese Quelle in DIESEM Build einen Upload-Weg?
+    /// <para>
+    /// Die Frage ist nicht „ist der Schalter an" und nicht „ist sie konfiguriert", sondern „existiert der
+    /// Endpunkt überhaupt". Sie steht hier, weil diese Klasse die Liste der Endpunkte führt: wer eine
+    /// Quelle umsonst in eine Kettenreihenfolge stellt, bekommt später einen Upload-Versuch auf einen Weg,
+    /// den es nicht gibt.
+    /// </para>
+    /// <para>
+    /// F-M508 (Etappe 2b): moviesubtitles.org hat seinen Upload-Endpunkt bekommen, also ist die Antwort
+    /// für ihn jetzt <c>true</c> — der Weg ist verdrahtet. SCHARF IST ER DAMIT NICHT: der Schalter ist
+    /// standardmäßig aus (F-M507: null → aus), und der Upload bleibt gesperrt, bis die Sprachabbildung
+    /// der Seite gegen die echte Seite belegt ist. Diese Methode sagt „der Weg existiert", nicht „er
+    /// läuft" — das entscheidet der Schalter.
+    /// </para>
+    /// </summary>
+    /// <param name="provider">The source asked about.</param>
+    /// <returns>True when this build has an upload endpoint for it.</returns>
+    public static bool HasUploadPath(SubtitleProvider provider) =>
+        provider is SubtitleProvider.Subdl or SubtitleProvider.TvSubtitles or SubtitleProvider.MovieSubtitles;
 }

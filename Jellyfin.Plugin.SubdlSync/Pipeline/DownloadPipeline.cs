@@ -236,6 +236,15 @@ public sealed class DownloadPipeline : IDisposable
     private readonly Api.Endpoints.SubtitleEndpointCatalog _endpoints;
 
     /// <summary>
+    /// F-M507: der Client der dritten Quelle und der Auflöser, der ihre Filmnummer in den Store legt.
+    /// Beide hängen am selben Katalog-Eintrag wie der Endpunkt: der Auflöser sucht, der Endpunkt holt.
+    /// </summary>
+    private readonly Api.MovieSubtitlesClient _msubClient;
+
+    /// <summary>F-M507: welche Nummer hat dieser Film bei moviesubtitles.org — gespeichert, sonst gesucht.</summary>
+    private readonly Api.Endpoints.MsubMovieResolver _msubMovies;
+
+    /// <summary>
     /// F-M504: die Quelle, deren Treffer die Hauptsuche oben bereits liefert. <c>RunV2SearchAsync</c>
     /// fragt SubDL über ihren Id-Index (Ids, HI-Pool, Quota-Behandlung) und trägt das Ergebnis in
     /// <c>candidates</c> ein; sie wird unten NICHT ein zweites Mal über ihren Endpunkt gefragt —
@@ -447,12 +456,18 @@ public sealed class DownloadPipeline : IDisposable
         // F-M485/F-M504: die Download-Quellen dieses Laufs. Der Katalog ist die EINE Stelle, an der
         // steht, welche Endpunkte es gibt; die REIHENFOLGE kommt aus der Konfiguration (SourceOrder),
         // nicht aus der Reihenfolge dieses Arrays.
+        // F-M507: die dritte Quelle (moviesubtitles.org) ist dabei — als DOWNLOAD-Endpunkt. Einen
+        // Upload-Endpunkt hat sie nicht, und deshalb steht sie auch nicht in der Upload-Liste des
+        // Katalogs (SubtitleEndpointCatalog.HasUploadPath).
         var tvClient = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        _msubClient = new Api.MovieSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        _msubMovies = new Api.Endpoints.MsubMovieResolver(_msubClient, _logger);
         _endpoints = new Api.Endpoints.SubtitleEndpointCatalog(
             new[]
             {
                 (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.SubdlDownloadEndpoint(api),
                 (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.TvSubtitlesDownloadEndpoint(tvClient),
+                (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.MovieSubtitlesDownloadEndpoint(_msubClient, _logger),
             },
             new[] { (Api.Endpoints.IUploadEndpoint)new Api.Endpoints.SubdlUploadEndpoint(api) });
     }
@@ -481,6 +496,10 @@ public sealed class DownloadPipeline : IDisposable
         // F-M277: der Download-Trockenlauf läuft Suche und Auswahl und stoppt vor dem Holen — das Suchkontingent IST verbraucht.
         summary.IsDryRun = _config.DownloadDryRun;
         _dailyLimitWaits = 0; // F-M49: fresh per run
+
+        // F-M507: die Merkliste der Filmaulösung gilt je Lauf, nicht je Prozess — ein neuer Lauf fragt
+        // die Seite neu, ein zweiter Film desselben Mediums im selben Lauf nicht.
+        _msubMovies.BeginRun();
 
         // F-M370: point the disk cache at this plugin's data folder and apply the two switches.
         // Either at 0 leaves it off; the trim happens before the first request so a run never
@@ -1467,7 +1486,7 @@ public sealed class DownloadPipeline : IDisposable
         // nichts, die naechste wird trotzdem gefragt (F-M504). Erst NACH der Schleife entscheidet
         // sich, ob der Vorgang „keine Kandidaten" hat. Die Rangfolge der Treffer folgt derselben
         // Liste: Rang 0 ist die zuerst gefragte Quelle (`quellenRang` weiter unten).
-        var quellenReihenfolge = DownloadQueryOrder();
+        var quellenReihenfolge = DownloadQueryOrder(isSeries);
 
         // Die Antworten der Quellen. Die Hauptsuche traegt ihre Kandidaten selbst ein, jede
         // Zusatzquelle ihre Treffer je Sprache — nach der Schleife ist jede gefragte Quelle genau
@@ -1668,7 +1687,7 @@ public sealed class DownloadPipeline : IDisposable
                 var treffer = fremdProSprache.TryGetValue(lang, out var bisher)
                     ? bisher
                     : new List<SubtitleCandidate>();
-                treffer.AddRange(await ForeignCandidatesAsync(quelle, title, isSeries, season, episode, lang, ct).ConfigureAwait(false));
+                treffer.AddRange(await ForeignCandidatesAsync(quelle, title, isSeries, season, episode, lang, tmdbId, mediaPath, mediaHash, ct).ConfigureAwait(false));
                 fremdProSprache[lang] = treffer;
             }
 
@@ -1862,8 +1881,16 @@ public sealed class DownloadPipeline : IDisposable
                 string zaehlung = string.Join(", ", quellenReihenfolge.Select(quelle =>
                     langCands.Count(c => c.Provider == quelle).ToString(System.Globalization.CultureInfo.InvariantCulture)
                     + " " + Api.Endpoints.Provenance.Name(quelle) + " candidate(s)"));
+                // F-M510 (Messung 15.11.2026, erster Film-Lauf auf jf-test): hier stand das Etikett der
+                // SERIEN-Seite fest im Text, obwohl die gefragte Adresse moviesubtitles.org war. Es
+                // nennt jetzt die Adresse, die TATSAECHLICH gefragt wurde: SourceOrder.FamilyPage(isSeries)
+                // ist die eine Stelle, an der die Medienart eine Seite auswaehlt (Serie → tvsubtitles,
+                // Film → moviesubtitles). Die Aussage der Zeile bleibt unveraendert — Kandidaten JE
+                // gefragter Quelle und die Frage-Reihenfolge; die Zaehlung laeuft weiter ueber die Liste
+                // der Quellen, nicht ueber einen festen Namen.
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[tvsubtitles-D] {File} [{Lang}] — {Counts}, order {Order}",
+                    "[{Src}-D] {File} [{Lang}] — {Counts}, order {Order}",
+                    Api.Endpoints.Provenance.Name(Api.Endpoints.SourceOrder.FamilyPage(isSeries)),
                     Path.GetFileName(mediaPath), lang, zaehlung, orderText);
             }
 
@@ -2259,7 +2286,8 @@ public sealed class DownloadPipeline : IDisposable
                                                         origin: Api.Endpoints.Provenance.Name(hi.Provider),
                                                         originId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : hi.Url,
                                                         subdlDownloadId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : null,
-                                                        tvSubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.TvSubtitles ? hi.Url : null));
+                                                        tvSubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.TvSubtitles ? hi.Url : null,
+                                                        moviesubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.MovieSubtitles ? hi.Url : null));
 
                                                     if (_config.LogMode >= LogLevelMode.Verbose)
                                                     {
@@ -2284,7 +2312,8 @@ public sealed class DownloadPipeline : IDisposable
                                             origin: Api.Endpoints.Provenance.Name(hi.Provider),
                                             originId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : hi.Url,
                                             subdlDownloadId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : null,
-                                            tvSubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.TvSubtitles ? hi.Url : null));
+                                            tvSubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.TvSubtitles ? hi.Url : null,
+                                            moviesubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.MovieSubtitles ? hi.Url : null));
                                         _qaFails.RecordSuccess(item.Id.ToString(), lang); // HI save resets the pair counter too
                                         summary.Downloaded++;
                                         RememberSavedLibrary(item, hiPath); // F-M473
@@ -2454,9 +2483,16 @@ public sealed class DownloadPipeline : IDisposable
                         // candidate and of the alternative is part of the line: which file
                         // would be saved, and whether the HI variant would be fetched, is the
                         // one thing a dry run must be able to answer.
+                        // F-M510 (Messung 15.11.2026, erster Film-Lauf): die Zeile nannte den
+                        // Gewinner, aber nicht, WOHER er kam — bei zwei gefragten Quellen ist
+                        // „wer hat gewonnen" genau die Frage, die ein Trockenlauf beantworten
+                        // soll. Die Herkunft steht als erstes Feld der Klammer, damit die
+                        // uebrigen Felder (score, hi) an ihrem Platz bleiben.
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] DRY-RUN {File} [{Lang}] → {Release} (score {Score}, hi={Hi})",
-                            Path.GetFileName(mediaPath), lang, cand.ReleaseName, Score(cand, videoBase),
+                            "[SubDL-D] DRY-RUN {File} [{Lang}] → {Release} ({Source}, score {Score}, hi={Hi})",
+                            Path.GetFileName(mediaPath), lang, cand.ReleaseName,
+                            Api.Endpoints.Provenance.Name(cand.Provider),
+                            Score(cand, videoBase),
                             cand.HearingImpaired ? "yes" : "no");
                     }
 
@@ -3151,7 +3187,8 @@ public sealed class DownloadPipeline : IDisposable
                                     origin: Api.Endpoints.Provenance.Name(cand.Provider),
                                     originId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url,
                                     subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null,
-                                    tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null));
+                                    tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null,
+                                    moviesubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.MovieSubtitles ? cand.Url : null));
 
                                 if (_config.LogMode >= LogLevelMode.Verbose)
                                 {
@@ -3185,7 +3222,8 @@ public sealed class DownloadPipeline : IDisposable
                         originId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url,
                         // F-M488: und zusätzlich in das eigene Feld der Quelle und Richtung.
                         subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null,
-                        tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null));
+                        tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null,
+                        moviesubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.MovieSubtitles ? cand.Url : null));
                     _qaFails.RecordSuccess(item.Id.ToString(), lang); // A real save resets the QA counter
 
                     // F-M491 (operator order 15.11.2026: "ein gefundenes und die signifikanz erfüllendes
@@ -3420,6 +3458,17 @@ public sealed class DownloadPipeline : IDisposable
         // every time. What this spot still reports is the outcome of the search itself — a language
         // whose candidates were all rejected and whose QA budget is spent is closed for this cycle,
         // which is informative, not a give-up (F-M42b: no expiry, no retry budget as a brake).
+        //
+        // F-M510 (Befund 15.11.2026, erster Film-Lauf auf jf-test — NICHT geaendert, Entscheidung offen):
+        // die Zeile heisst „closed by the QA budget", aber `closedLangs` hat genau ZWEI Quellen — den
+        // Ausstieg „not available" oben und den Zweig `if (savedAny)` darunter. Im Trockenlauf setzt der
+        // Trockenlauf-Zweig `savedAny = true` (F-M22, „would have saved") und laeuft damit in denselben
+        // Zweig: die Sprache gilt als geschlossen, obwohl NICHTS geladen und kein QA-Tor befragt wurde.
+        // Gemessen im Lauf 22:12: Store ohne eine einzige `rejected_candidates`-Zeile fuer den Film,
+        // Laufbilanz „1 would have saved … 0 lang not available" — und trotzdem diese Zeile mit „1".
+        // Wer hier „QA budget" liest, sucht einen QA-Fehlerzaehler, den es nicht gibt. Was die Zeile
+        // meint, ist „diese Sprache ist fuer diesen Lauf erledigt" (would-save, gespeichert oder nicht
+        // verfuegbar); der Grund steht in der Zeile eine Ebene hoeher.
         if (!_stopRun && missing.Count > 0 && missing.All(l => closedLangs.Contains(l)))
         {
             LogUtil.PerItem(
@@ -3773,37 +3822,130 @@ public sealed class DownloadPipeline : IDisposable
     /// <summary>
     /// F-M485/F-M504: fragt EINE Zusatzquelle nach dieser Sprache und gibt ihre Treffer als Kandidaten
     /// zurück — mit dem Anbieter, der sie geliefert hat, damit der Abruf weiß, wen er fragen muss. Leer,
-    /// wenn es für diese Quelle keinen Endpunkt gibt, kein Serienname bekannt ist oder sie nichts hat.
+    /// wenn es für diese Quelle keinen Endpunkt gibt, sie für dieses Medium nicht zuständig ist oder sie
+    /// nichts hat.
     /// <para>
     /// Die Quelle ist ein PARAMETER (F-M504, „dritte bis n quelle"): die Methode kennt keine zweite
     /// Quelle und keinen Namen — sie holt den Endpunkt des Anbieters aus dem Katalog und bildet die
-    /// Antwort auf den neutralen Kandidaten ab. Ein neuer Anbieter braucht hier nichts.
+    /// Antwort auf den neutralen Kandidaten ab.
+    /// </para>
+    /// <para>
+    /// F-M507: WAS die Quelle zum Suchen braucht, unterscheidet sich und steht deshalb hier, EINMAL:
+    /// tvsubtitles.net sucht über Serienname, Staffel und Folge (ohne Staffel/Folge gibt es dort nichts
+    /// zu suchen), moviesubtitles.org über Film-Titel und Jahr und kennt beides nicht. Die Medienart ist
+    /// vorher schon entschieden (<see cref="Api.Endpoints.SourceOrder.AppliesTo"/>) — was hier steht, ist
+    /// die zweite Frage: hat diese Quelle für DIESE Medienart überhaupt eine Suchform?
     /// </para>
     /// </summary>
     /// <param name="quelle">Die Zusatzquelle, die gefragt wird.</param>
-    /// <param name="title">Serienname (Quellen ohne Id-Index suchen daraus).</param>
-    /// <param name="isSeries">Falsch bei Filmen — dann gibt es nichts zu fragen.</param>
+    /// <param name="title">Serien- bzw. Filmname (Quellen ohne Id-Index suchen daraus).</param>
+    /// <param name="isSeries">Falsch bei Filmen — dann gibt es keine Staffel und keine Folge.</param>
     /// <param name="season">Staffel.</param>
     /// <param name="episode">Folge.</param>
     /// <param name="lang">Zielsprache.</param>
+    /// <param name="tmdbId">TMDb-Id des Mediums, für den Film-Datensatz der dritten Quelle.</param>
+    /// <param name="mediaPath">Pfad des Mediums (nur für die Logzeile).</param>
+    /// <param name="mediaHash">Medium (OSHash), unter dem die Filmnummer gespeichert wird; null = unbekannt.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Die Treffer dieser Quelle; leer, wenn sie nichts hat.</returns>
     private async Task<List<SubtitleCandidate>> ForeignCandidatesAsync(
-        Configuration.SubtitleProvider quelle, string title, bool isSeries, int season, int episode, string lang, CancellationToken ct)
+        Configuration.SubtitleProvider quelle,
+        string title,
+        bool isSeries,
+        int season,
+        int episode,
+        string lang,
+        string? tmdbId,
+        string? mediaPath,
+        string? mediaHash,
+        CancellationToken ct)
     {
         var leer = new List<SubtitleCandidate>();
         var endpoint = EndpointFor(quelle);
-        if (endpoint is null || !isSeries || string.IsNullOrWhiteSpace(title))
+        if (endpoint is null || string.IsNullOrWhiteSpace(title))
         {
-            // Ohne Staffel/Folge und ohne Titel hat diese Quelle nichts, wonach sie suchen könnte:
-            // sie hat keinen Id-Index (F-M480).
             return leer;
+        }
+
+        // F-M497/F-M507: auch eine Zusatzquelle tritt nicht an, wenn ihr das fehlt, was ihr Weg braucht.
+        // Fuer tvst und msub ist die Antwort immer wahr (keine Zugangsdaten) — die Tuer steht trotzdem
+        // hier, damit die naechste Quelle mit Schluessel nicht an ihr vorbeilaeuft.
+        if (!_config.IsConfiguredForDownload(quelle))
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[{Source}-D] {File} [{Lang}] — skipped — not configured",
+                Api.Endpoints.Provenance.Name(quelle), Path.GetFileName(mediaPath ?? title), lang);
+            return leer;
+        }
+
+        // F-M507: die Medienart ist die erste Tuer. Sie steht hier ein zweites Mal, weil diese Methode
+        // auch aus einem spaeteren Umbau heraus aufgerufen werden koennte — der Aufrufer hat sie ueber
+        // DownloadQueryOrder schon gefiltert.
+        if (!Api.Endpoints.SourceOrder.AppliesTo(quelle, isSeries))
+        {
+            return leer;
+        }
+
+        // Die Suchform der Quelle: Serien brauchen Name + Staffel + Folge (tvst hat keinen Id-Index),
+        // Filme brauchen Titel + Jahr und haben beides nicht.
+        if (isSeries && (season <= 0 || episode <= 0))
+        {
+            return leer;
+        }
+
+        Api.Endpoints.SubtitleQuery abfrage;
+        if (quelle == Configuration.SubtitleProvider.MovieSubtitles)
+        {
+            // F-M507: Titel und Jahr kommen aus TMDb („Was was ist, Auflösung per tmdb"), nicht aus dem
+            // Dateinamen. Die Nummer, unter der die Seite den Film führt, kommt aus dem Store, wenn sie
+            // dort schon steht — sonst wird sie jetzt gesucht und abgelegt (MsubMovieResolver).
+            if (string.IsNullOrWhiteSpace(tmdbId))
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[moviesubtitles] {File} [{Lang}] — skipped: no TMDb id, so there is no leading film record (F-M507)",
+                    Path.GetFileName(mediaPath ?? title), lang);
+                return leer;
+            }
+
+            var movie = await _tmdb.MovieInfoAsync(tmdbId!, ct).ConfigureAwait(false);
+            if (movie is null)
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[moviesubtitles] {File} [{Lang}] — skipped: TMDb answered no film record for {Tmdb} (F-M507)",
+                    Path.GetFileName(mediaPath ?? title), lang, tmdbId);
+                return leer;
+            }
+
+            var film = await _msubMovies
+                .ResolveForMediaAsync(Registry, mediaHash, movie, _config.DownloadDryRun, ct, mediaPath)
+                .ConfigureAwait(false);
+            if (!film.Resolved)
+            {
+                // Filme ohne Jahr oder ohne Treffer: EINE Zeile, kein Fehler, keine Ausnahme.
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[moviesubtitles] {File} [{Lang}] — skipped: no film id ({Status}) (F-M507)",
+                    Path.GetFileName(mediaPath ?? title), lang, film.Status);
+                return leer;
+            }
+
+            abfrage = new Api.Endpoints.SubtitleQuery(
+                movie.Name,
+                null,
+                tmdbId,
+                Season: 0,
+                Episode: 0,
+                lang,
+                Year: movie.ReleaseYear ?? 0,
+                MovieId: film.MovieId!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        else
+        {
+            abfrage = new Api.Endpoints.SubtitleQuery(title, null, tmdbId, season, episode, lang);
         }
 
         try
         {
-            var hits = await endpoint.SearchAsync(
-                new Api.Endpoints.SubtitleQuery(title, null, null, season, episode, lang), ct).ConfigureAwait(false);
+            var hits = await endpoint.SearchAsync(abfrage, ct).ConfigureAwait(false);
 
             return hits.Select(h => new SubtitleCandidate
             {
@@ -3811,15 +3953,18 @@ public sealed class DownloadPipeline : IDisposable
                 ReleaseName = h.Release.Length > 0 ? h.Release : Api.Endpoints.Provenance.Name(quelle) + " " + h.Rip,
                 Language = lang.ToUpperInvariant(),
                 Url = h.Id,
-                Season = season,
-                Episode = episode,
+
+                // F-M507: ein Film hat keine Staffel und keine Folge — die Felder bleiben 0, damit weder
+                // Pack-Rang noch Folgenfilter einen Film als Folge lesen.
+                Season = isSeries ? season : 0,
+                Episode = isSeries ? episode : 0,
             }).ToList();
         }
         catch (Exception ex)
         {
             // Eine Zusatzquelle ist ein Zusatz, kein Muss: ein Fehler dort darf den Lauf nicht kippen.
-            _logger.LogWarning("[{Source}-D] search failed for {Title} S{Season}E{Episode} [{Lang}]: {Error}",
-                Api.Endpoints.Provenance.Name(quelle), title, season, episode, lang, ex.Message);
+            _logger.LogWarning("[{Source}-D] search failed for {Title} [{Lang}]: {Error}",
+                Api.Endpoints.Provenance.Name(quelle), title, lang, ex.Message);
             return leer;
         }
     }
@@ -3847,10 +3992,18 @@ public sealed class DownloadPipeline : IDisposable
     /// <see cref="SourceAllowed"/>, und ein Anbieter ohne verdrahteten Endpunkt faellt hier heraus.
     /// Eine dritte Quelle braucht deshalb nur einen Enum-Eintrag und einen Endpunkt im Katalog.
     /// </para>
+    /// <para>
+    /// F-M507 (Nutzerauftrag 15.11.2026: „Nur das series halt nach tv show und movies nach
+    /// moviesubtitels gehen."): die MEDIENART schneidet die Seite der anderen Art heraus
+    /// (<see cref="Api.Endpoints.SourceOrder.AppliesTo"/>). Eine Serie fragt SubDL und tvsubtitles.net,
+    /// ein Film SubDL und moviesubtitles.org — nie die jeweils andere Seite. Die Medienart kommt aus der
+    /// TMDb-Aufloesung (<c>isSeries</c>), nicht aus einem Dateinamen und nicht aus einer Bibliothek.
+    /// </para>
     /// </summary>
+    /// <param name="isSeries">Wahr fuer eine Serie, falsch fuer einen Film (aus TMDb).</param>
     /// <returns>Die Quellen dieses Laufs, zuerst gefragte zuerst.</returns>
-    private List<Configuration.SubtitleProvider> DownloadQueryOrder() =>
-        Api.Endpoints.SourceOrder.ForOrder(_config.DownloadOrder)
+    private List<Configuration.SubtitleProvider> DownloadQueryOrder(bool isSeries) =>
+        Api.Endpoints.SourceOrder.ForMedia(_config.DownloadOrder, isSeries)
             .Where(SourceAllowed)
             .Where(quelle => EndpointFor(quelle) is { Wired: true })
             .ToList();

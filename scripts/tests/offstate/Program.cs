@@ -2,6 +2,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
 using Jellyfin.Plugin.SubdlScribe.Configuration;
 using Jellyfin.Plugin.SubdlScribe.Registry;
 
@@ -32,7 +33,13 @@ Check("ready upload is NOT off", !WorkerOffState.Applies(UL, ok));
 Check("ready postprocessing is NOT off", !WorkerOffState.Applies(PP, ok));
 
 // --- download: four independent hard stops ----------------------------------
-Check("download off when the toggle is off", Off(DL, c => { c.DownloadEnabled = false; c.TvSubtitlesDownloadEnabled = false; }));
+// F-M507: „alles aus" verlangt auch den Schalter der dritten Quelle — sie ist im ungesetzten Fall an.
+Check("download off when the toggle is off", Off(DL, c =>
+{
+    c.DownloadEnabled = false;
+    c.TvSubtitlesDownloadEnabled = false;
+    c.MovieSubtitlesDownloadEnabled = false;
+}));
 Check("download off when no library is selected", Off(DL, c => c.SelectedLibraries.Clear()));
 Check("download off when the language list is empty", Off(DL, c => c.DownloadLanguages = "  , ,"));
 Check("download off when the MANDATORY credential is missing — and NOT for a missing SubDL key, because tvsubtitles still runs (F-M497)",
@@ -94,6 +101,54 @@ Check("ohne gesetzten Schalter bleibt der tvst-UPLOAD aus, auch wenn der Alt-Wer
     !Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.TvSubtitles),
     "F-M503: null → Upload AUS (unveraendert)");
 
+// F-M507 (Nutzerauftrag 15.11.2026: „Dritte quelle. Nur das series halt nach tv show und movies nach
+// moviesubtitels gehen."): die dritte Quelle hat eigene Schalter, und sie fallen wie tvst aus —
+// Download im ungesetzten Fall AN, Upload AUS. Ein gespeichertes false bleibt AUS; der Alt-Schalter
+// (DownloadEnabled/UploadEnabled) gehoert SubDL und antwortet hier NICHT.
+Check("ohne gesetzten Schalter ist der moviesubtitles-DOWNLOAD an, der Upload aus",
+    Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; }).IsDownloadEnabled(SubtitleProvider.MovieSubtitles)
+    && !Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.MovieSubtitles),
+    "F-M507: null → Download AN, Upload AUS");
+Check("ein explizit ausgeschalteter moviesubtitles-Download bleibt aus",
+    !Mutate(c => { c.DownloadEnabled = true; c.MovieSubtitlesDownloadEnabled = false; }).IsDownloadEnabled(SubtitleProvider.MovieSubtitles)
+    && Mutate(c => { c.DownloadEnabled = false; c.MovieSubtitlesDownloadEnabled = true; }).IsDownloadEnabled(SubtitleProvider.MovieSubtitles),
+    "F-M507: false → AUS, true schlaegt den Alt-Schalter");
+Check("der Alt-Schalter allein schaltet moviesubtitles NICHT ab",
+    Mutate(c => { c.DownloadEnabled = false; c.UploadEnabled = false; }).IsDownloadEnabled(SubtitleProvider.MovieSubtitles)
+    && Mutate(c => { c.UploadEnabled = true; c.MovieSubtitlesUploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.MovieSubtitles),
+    "F-M507: der Alt-Wert gehoert SubDL");
+// F-M508 (Etappe 2b): der Upload-Weg der dritten Quelle EXISTIERT jetzt (Endpunkt verdrahtet), aber er
+// ist gesperrt: der Schalter faellt im ungesetzten Fall aus, und ein gespeichertes true ist die einzige
+// Art, ihn scharf zu machen — bis die Sprachabbildung der Seite belegt ist, bleibt er aus.
+Check("die dritte Quelle hat einen Upload-Weg, aber ihr Schalter ist ohne Entscheidung aus",
+    PluginConfiguration.HasProvider(SubtitleProvider.MovieSubtitles)
+    && SubtitleEndpointCatalog.HasUploadPath(SubtitleProvider.MovieSubtitles)
+    && !Mutate(c => { c.UploadEnabled = true; c.DownloadEnabled = true; }).IsUploadEnabled(SubtitleProvider.MovieSubtitles)
+    && Mutate(c => { c.MovieSubtitlesUploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.MovieSubtitles),
+    "F-M508: der Weg ist gebaut, der Schalter bleibt aus, bis die Sprachabbildung belegt ist");
+
+// F-M509 (Operator-Klarstellung 15.11.2026: „Seperate into subdl and tvst. Tvst is splitted into tvst
+// and moviesub itself"): die Reihenfolge ordnet ZWEI Quellen — SubDL und die tvst-Familie —, und die
+// Familie loest nach Medienart auf ihre Adresse auf. Deshalb hat die Einstellung zwei Werte, und in
+// JEDER Medienart stehen genau zwei Quellen in der Frage-Reihenfolge.
+Check("die Reihenfolge hat zwei Werte und ordnet die Familie, nicht ihre Adressen",
+    Enum.GetValues<PluginConfiguration.DownloadSourceOrder>().Length == 2
+    && SourceOrder.ForMedia(PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst, isSeries: true)
+        .SequenceEqual(new[] { SubtitleProvider.TvSubtitles, SubtitleProvider.Subdl })
+    && SourceOrder.ForMedia(PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst, isSeries: false)
+        .SequenceEqual(new[] { SubtitleProvider.MovieSubtitles, SubtitleProvider.Subdl }),
+    "F-M509: tvst zuerst = die Adresse der Medienart zuerst, danach SubDL");
+
+Check("die Familie ist EINE Quelle mit zwei Adressen, und die Medienart waehlt die Adresse",
+    SourceOrder.FamilyPage(isSeries: true) == SubtitleProvider.TvSubtitles
+    && SourceOrder.FamilyPage(isSeries: false) == SubtitleProvider.MovieSubtitles
+    && SourceOrder.InFamily(SubtitleProvider.TvSubtitles)
+    && SourceOrder.InFamily(SubtitleProvider.MovieSubtitles)
+    && !SourceOrder.InFamily(SubtitleProvider.Subdl)
+    && SourceOrder.FamilyFirst(PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst)
+    && !SourceOrder.FamilyFirst(PluginConfiguration.DownloadSourceOrder.SubdlFirst),
+    "F-M509: zwei Adressen, eine Quelle");
+
 // --- the lamps are NOT repainted (operator: note it, do not grey the row) ---
 var gate = Mutate(c => c.UploadEnabled = false);
 Check("the lamp override is gone from the registry", typeof(WorkerRunRegistry.Outcome).GetField("Off") == null);
@@ -115,8 +170,8 @@ Check("a scheduled rhythm is NOT manual",
 Check("manual needs a runnable direction - upload off is off, not manual",
     WorkerOffState.Applies(UL, Mutate(c => { c.UploadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; })));
 Check("download manual and off are mutually exclusive by construction",
-    WorkerOffState.Applies(DL, Mutate(c => { c.DownloadEnabled = false; c.TvSubtitlesDownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; }))
-    && WorkerOffState.IsManualOnly(DL, Mutate(c => { c.DownloadEnabled = false; c.TvSubtitlesDownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; })));
+    WorkerOffState.Applies(DL, Mutate(c => { c.DownloadEnabled = false; c.TvSubtitlesDownloadEnabled = false; c.MovieSubtitlesDownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; }))
+    && WorkerOffState.IsManualOnly(DL, Mutate(c => { c.DownloadEnabled = false; c.TvSubtitlesDownloadEnabled = false; c.MovieSubtitlesDownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; })));
 // F-M503: der Alt-Schalter allein schaltet die Richtung NICHT mehr ab — der tvst-Download ist im
 // null-Fall an. Genau diese Folge wird hier festgehalten, damit sie nicht als Regression auftaucht.
 Check("Download alt aus + tvst ungesetzt = Richtung bleibt an (F-M503)",

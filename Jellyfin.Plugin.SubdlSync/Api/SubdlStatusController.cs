@@ -61,6 +61,8 @@ public class SubdlStatusController : ControllerBase
             Subdl = await CheckSubdlAsync(cfg, ct).ConfigureAwait(false),
             SubdlLogin = await CheckSubdlLoginAsync(cfg, ct).ConfigureAwait(false),
             Tmdb = await CheckTmdbAsync(cfg, ct).ConfigureAwait(false),
+            Tvst = await CheckReachAsync("tvst (tvsubtitles.net)", "https://www.tvsubtitles.net/", ct).ConfigureAwait(false),
+            Mst = await CheckReachAsync("mst (moviesubtitles.org)", "https://www.moviesubtitles.org/", ct).ConfigureAwait(false),
             Directories = CheckDirectories(cfg),
             Timestamp = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
         };
@@ -384,6 +386,41 @@ public class SubdlStatusController : ControllerBase
         return dto;
     }
 
+    /// <summary>
+    /// Reachability probe for a source that needs no credentials: one GET on its front page.
+    /// <para>
+    /// No key, so nothing to configure. Deliberately the front page and not a search URL — the
+    /// film site answers every search with HTTP 500 while carrying a valid hit list, so a search
+    /// probe would paint it red for a property it always has.
+    /// </para>
+    /// </summary>
+    private async Task<ApiStatusDto> CheckReachAsync(string label, string url, CancellationToken ct)
+    {
+        var dto = new ApiStatusDto { Label = label, Configured = true };
+        try
+        {
+            using var resp = await _httpClient.GetAsync(url, ct).ConfigureAwait(false);
+            if (resp.IsSuccessStatusCode)
+            {
+                dto.Light = "green";
+                dto.Message = "reachable";
+            }
+            else
+            {
+                var code = (int)resp.StatusCode;
+                dto.Light = code == 429 || code == 403 ? "yellow" : "red";
+                dto.Message = $"HTTP {code}";
+            }
+        }
+        catch (Exception ex)
+        {
+            dto.Light = "red";
+            dto.Message = ex.GetType().Name;
+        }
+
+        return dto;
+    }
+
     private async Task<ApiStatusDto> CheckTmdbAsync(PluginConfiguration cfg, CancellationToken ct)
     {
         var dto = new ApiStatusDto { Label = "TMDb API", Configured = !string.IsNullOrWhiteSpace(cfg.TmdbApiKey) };
@@ -516,6 +553,16 @@ public class SubdlStatusController : ControllerBase
         public ApiStatusDto Subdl { get; set; } = new();
         public ApiStatusDto SubdlLogin { get; set; } = new();
         public ApiStatusDto Tmdb { get; set; } = new();
+
+        /// <summary>
+        /// Operator order 16.11.2026: the tvst family has two addresses and each is probed on its
+        /// own — one can answer while the other does not. The SubDL quota bars above are SubDL's
+        /// allowance, not theirs; the labels say so.
+        /// </summary>
+        public ApiStatusDto Tvst { get; set; } = new();
+
+        /// <summary>See <see cref="Tvst"/>: the film address of the same family.</summary>
+        public ApiStatusDto Mst { get; set; } = new();
         public List<DirectoryStatusDto> Directories { get; set; } = new();
         public string Timestamp { get; set; } = string.Empty;
     }

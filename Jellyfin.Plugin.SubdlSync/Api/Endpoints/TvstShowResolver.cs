@@ -48,10 +48,12 @@ namespace Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
 /// </description></item>
 /// <item><description>
 /// Kein Treffer: die Serie wird angelegt — Name und Jahr aus TMDb, Staffelzahl aus TMDb auf 1..22
-/// begrenzt (weiter reicht das Formular der Seite nicht). Danach wird die Liste ERNEUT geholt und mit
-/// demselben engen Vergleich gesucht; erst wenn die Nummer dort steht, wird sie geschrieben. Eine unklare
-/// Antwort der Seite (Timeout, unparsbare Seite) wird einmal nachgefragt; bleibt es unklar, wird NICHTS
-/// geschrieben, eine Zeile protokolliert und tvst für dieses Medium übersprungen.
+/// begrenzt (weiter reicht das Formular der Seite nicht). Danach wird die Nummer <b>nachgesehen</b>
+/// (F-M516: erst die Seitensuche, dann die Liste) und mit demselben engen Vergleich geprüft; erst wenn
+/// sie dort steht, wird sie geschrieben. Die Antwort auf die Anlage allein entscheidet nichts: bestätigt
+/// sie den Erfolg nicht und die Serie steht trotzdem da, war sie schon vorhanden (<c>existed</c>);
+/// bestätigt sie ihn und die Nummer ist nirgends lesbar, lautet das Ergebnis ehrlich
+/// <c>created-id-unknown</c> und es wird NICHTS geschrieben.
 /// </description></item>
 /// </list>
 /// </para>
@@ -98,24 +100,32 @@ public sealed class TvstShowResolver
     /// exakt in der Liste → anlegen und erneut exakt suchen).
     /// </summary>
     /// <param name="registry">Der Store, aus dem die gespeicherte Nummer kommt und in den die neue geht.</param>
-    /// <param name="mediaHash">Medium (OSHash); null heißt „kein Medium bekannt“ — dann wird nichts geschrieben.</param>
+    /// <param name="mediaHash">Medium (OSHash); null heißt „kein Medium bekannt" — dann führt der Pfad.</param>
     /// <param name="series">Der TMDb-Datensatz, dessen Titel führt.</param>
     /// <param name="dryRun">True: nichts anlegen, nichts schreiben.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Das Ergebnis; <see cref="TvstShowResolution.Resolved"/> false heißt „tvst überspringen“.</returns>
+    /// <param name="mediaPath">F-M517: der Pfad der Mediendatei — die zweite Adresse der Medienzeile,
+    /// wenn kein Hash bekannt ist.</param>
+    /// <returns>Das Ergebnis; <see cref="TvstShowResolution.Resolved"/> false heißt „tvst überspringen".</returns>
     public async Task<TvstShowResolution> ResolveForMediaAsync(
         ContentHashRegistry registry,
         string? mediaHash,
         TmdbSeriesInfo series,
         bool dryRun,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? mediaPath = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(series);
 
         // (a) Die gespeicherte Nummer führt. Kein Netzzugriff: sie wurde geprüft, als sie geschrieben
         // wurde, und eine erneute Suche könnte sie nur durch eine schlechtere Antwort ersetzen.
-        var stored = string.IsNullOrEmpty(mediaHash) ? null : registry.GetMedia(mediaHash)?.TvstShowId;
+        // F-M517: ohne Medien-Hash wird dieselbe Zeile über ihren PFAD gelesen — sonst bliebe eine über
+        // den Pfad gespeicherte Nummer für jeden folgenden Lauf unsichtbar (dieselbe Lücke wie bei der
+        // Filmnummer, dieselbe Zeile, dieselbe Antwort).
+        var stored = !string.IsNullOrEmpty(mediaHash)
+            ? registry.GetMedia(mediaHash!)?.TvstShowId
+            : registry.TvstShowIdAtPath(mediaPath);
         if (int.TryParse(stored, NumberStyles.Integer, CultureInfo.InvariantCulture, out var known) && known > 0)
         {
             return new TvstShowResolution(known, TvstShowStatus.Stored);
@@ -143,7 +153,9 @@ public sealed class TvstShowResolver
         var exact = TvSubtitlesClient.ResolveShow(shows, title);
         if (exact is > 0)
         {
-            Persist(registry, mediaHash, exact.Value);
+            var wie = Persist(registry, mediaHash, mediaPath, exact.Value);
+            Log("[tvsubtitles] {Media}: \"{Title}\" ist Serie {Id} — {Note}",
+                mediaHash ?? "?", title, exact.Value, MediaNumberNote.Of(wie));
             return new TvstShowResolution(exact.Value, TvstShowStatus.Found);
         }
 
@@ -170,16 +182,125 @@ public sealed class TvstShowResolver
         // Die Seite kennt höchstens MaxSeason Staffeln; ihre eigene Prüfung lässt nur 1..22 zu.
         var seasons = Math.Clamp(series.Seasons ?? 1, 1, TvSubtitlesClient.MaxSeason);
 
+        // F-M516: gesendet wird der Rumpf des echten Formulars (name, year_s, seasons, go als
+        // multipart/form-data). Die Antwort wird KLASSIFIZIERT, nicht geglaubt — siehe unten.
+        string outcome;
+        int? status = null;
+        string? siteText = null;
         try
         {
             var answer = await _client
                 .AddShowAsync(TvSubtitlesClient.BuildAddShow(title, year, seasons), dryRun: false, ct)
                 .ConfigureAwait(false);
-            if (answer.Status is not (>= 200 and < 300))
+            outcome = answer.Outcome;
+            status = answer.Status;
+            siteText = answer.Response;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Ein Abbruch nach dem Absenden ist KEIN Beweis, dass nichts angelegt wurde. Deshalb wird
+            // auch hier nachgesehen; erst das Ergebnis der Suche entscheidet.
+            outcome = TvstAddShowOutcome.Unclear;
+            siteText = ex.Message;
+            Log("[tvsubtitles] {Media}: Anlegen von \"{Title}\" ohne verwertbare Antwort ({Error}) — es wird nachgesehen.",
+                mediaHash ?? "?", title, ex.Message);
+        }
+
+        // Die Nummer wird NICHT angenommen, sondern nachgesehen — die Antwort trägt keine Id. Erst
+        // die Suche (und als Rückfall die Liste) sagt, ob und als was die Serie jetzt dasteht.
+        var found = await FindShowIdAsync(title, ct).ConfigureAwait(false);
+        var settled = SettleStatus(outcome, found);
+        if (found is > 0)
+        {
+            var wie = Persist(registry, mediaHash, mediaPath, found.Value);
+            if (settled == TvstShowStatus.Created)
             {
-                Log("[tvsubtitles] {Media}: \"{Title}\" konnte nicht angelegt werden (HTTP {Status}) — nichts wird geschrieben, tvst wird übersprungen.",
-                    mediaHash ?? "?", title, answer.Status?.ToString(CultureInfo.InvariantCulture) ?? "?");
-                return new TvstShowResolution(null, TvstShowStatus.Unclear);
+                Log("[tvsubtitles] {Media}: \"{Title}\" ({Year}) als Serie {Id} angelegt und gespeichert — {Note}",
+                    mediaHash ?? "?", title, year, found.Value, MediaNumberNote.Of(wie));
+            }
+            else
+            {
+                // Die Seite hat die Anlage nicht bestätigt, die Serie steht aber da: dann war sie
+                // schon vorhanden (Doppeleintrag vermieden) — gespeichert wird die gefundene Nummer.
+                Log("[tvsubtitles] {Media}: \"{Title}\" steht bereits als Serie {Id} auf der Seite (die Antwort auf die Anlage lautete \"{Outcome}\") — Nummer gespeichert, nichts doppelt angelegt — {Note}",
+                    mediaHash ?? "?", title, found.Value, outcome, MediaNumberNote.Of(wie));
+            }
+
+            return new TvstShowResolution(found.Value, settled);
+        }
+
+        if (settled == TvstShowStatus.CreatedIdUnknown)
+        {
+            Log("[tvsubtitles] {Media}: \"{Title}\" wurde angelegt, aber die Nummer war nicht lesbar (Suche und Liste ohne Treffer) — es wird nichts gespeichert.",
+                mediaHash ?? "?", title);
+        }
+        else if (settled == TvstShowStatus.Refused)
+        {
+            Log("[tvsubtitles] {Media}: \"{Title}\" wurde von der Seite abgelehnt (HTTP {Status}): {Text} — nichts wird gespeichert, tvst wird übersprungen.",
+                mediaHash ?? "?", title, status?.ToString(CultureInfo.InvariantCulture) ?? "?", siteText ?? string.Empty);
+        }
+        else
+        {
+            Log("[tvsubtitles] {Media}: \"{Title}\" — die Seite hat die Anlage nicht bestätigt und die Serie steht nicht in der Liste; nichts wird gespeichert, tvst wird übersprungen.",
+                mediaHash ?? "?", title);
+        }
+
+        return new TvstShowResolution(null, settled);
+    }
+
+    /// <summary>
+    /// F-M516: was aus Antwort und Nachschau folgt. Die Regel ist absichtlich klein und prüfbar:
+    /// <list type="bullet">
+    /// <item><description>Serie gefunden und die Seite hat bestätigt → <c>created</c>.</description></item>
+    /// <item><description>Serie gefunden, aber ohne Bestätigung → <c>existed</c> (sie stand schon da).</description></item>
+    /// <item><description>Nicht gefunden, aber bestätigt → <c>created-id-unknown</c> (ehrlich: angelegt, Nummer nicht lesbar).</description></item>
+    /// <item><description>Nicht gefunden und abgelehnt → <c>refused</c>.</description></item>
+    /// <item><description>Alles andere → <c>unclear</c>.</description></item>
+    /// </list>
+    /// </summary>
+    /// <param name="outcome">Der Ausgang der Anlage (aus <see cref="TvstAddShowOutcome"/>).</param>
+    /// <param name="showId">Die danach gefundene Nummer, oder null.</param>
+    /// <returns>Einer der Werte aus <see cref="TvstShowStatus"/>.</returns>
+    public static string SettleStatus(string outcome, int? showId)
+    {
+        if (showId is > 0)
+        {
+            return outcome == TvstAddShowOutcome.Created ? TvstShowStatus.Created : TvstShowStatus.Existed;
+        }
+
+        return outcome switch
+        {
+            TvstAddShowOutcome.Created => TvstShowStatus.CreatedIdUnknown,
+            TvstAddShowOutcome.Refused => TvstShowStatus.Refused,
+            _ => TvstShowStatus.Unclear,
+        };
+    }
+
+    /// <summary>
+    /// F-M516: die Nummer nach der Anlage — erst über die Seitensuche (ein kleiner Abruf, gemessen
+    /// liefert sie die neue Serie sofort), dann über die vollständige Serienliste. Beides wird eng
+    /// verglichen (<see cref="TvSubtitlesClient.ResolveShow"/>); die Suche ist weich, ihr Ergebnis
+    /// allein wäre kein Beweis.
+    /// </summary>
+    /// <param name="title">Der Name, den die Anlage trug.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Die Nummer, oder null wenn keine Antwort sie zeigt.</returns>
+    private async Task<int?> FindShowIdAsync(string title, CancellationToken ct)
+    {
+        try
+        {
+            var hits = await _client.SearchShowsAsync(title, ct).ConfigureAwait(false);
+            if (hits.Count > 0)
+            {
+                var id = TvSubtitlesClient.ResolveShow(hits, title);
+                if (id is > 0)
+                {
+                    return id;
+                }
             }
         }
         catch (OperationCanceledException)
@@ -188,33 +309,11 @@ public sealed class TvstShowResolver
         }
         catch (Exception ex)
         {
-            Log("[tvsubtitles] {Media}: Anlegen von \"{Title}\" scheiterte ({Error}) — nichts wird geschrieben, tvst wird übersprungen.",
-                mediaHash ?? "?", title, ex.Message);
-            return new TvstShowResolution(null, TvstShowStatus.Unclear);
+            _logger?.LogWarning("[tvsubtitles] show search not readable: {Error}", ex.Message);
         }
 
-        // Die Nummer wird NICHT angenommen, sondern nachgesehen: das Formular antwortet ohne Id, und
-        // eine erfundene Nummer wäre ein Store, der für eine Zeile bürgt, die es nicht gibt.
-        var after = await ShowsOrNullAsync(ct).ConfigureAwait(false);
-        if (after is null)
-        {
-            Log("[tvsubtitles] {Media}: \"{Title}\" wurde angelegt, aber die Serienliste war danach nicht lesbar — die Nummer bleibt unbekannt und wird nicht geschrieben.",
-                mediaHash ?? "?", title);
-            return new TvstShowResolution(null, TvstShowStatus.Unclear);
-        }
-
-        var created = TvSubtitlesClient.ResolveShow(after, title);
-        if (created is not > 0)
-        {
-            Log("[tvsubtitles] {Media}: \"{Title}\" wurde angelegt, steht aber nicht (auch nicht eng verglichen) in der Serienliste — die Nummer bleibt unbekannt und wird nicht geschrieben.",
-                mediaHash ?? "?", title);
-            return new TvstShowResolution(null, TvstShowStatus.Unclear);
-        }
-
-        Persist(registry, mediaHash, created.Value);
-        Log("[tvsubtitles] {Media}: \"{Title}\" ({Year}) als Serie {Id} angelegt und gespeichert.",
-            mediaHash ?? "?", title, year, created.Value);
-        return new TvstShowResolution(created.Value, TvstShowStatus.Created);
+        var shows = await ShowsOrNullAsync(ct).ConfigureAwait(false);
+        return shows is null ? null : TvSubtitlesClient.ResolveShow(shows, title);
     }
 
     /// <summary>
@@ -251,21 +350,22 @@ public sealed class TvstShowResolver
     }
 
     /// <summary>
-    /// F-M501: schreibt die Nummer ins Medium — und nur dorthin, nur wenn sie wirklich gesehen wurde.
+    /// F-M501/F-M517: schreibt die Nummer ins Medium.
+    /// <para>
+    /// F-M517: ohne Medien-Hash wird dieselbe Zeile über ihren PFAD gefunden
+    /// (<see cref="ContentHashRegistry.SetTvstShowId"/>) — dieselbe Spalte <c>TvstShowId</c>, nur eine
+    /// andere Adresse. Der Serienfall litt unter demselben Loch wie die Filmnummer: die Zeile existierte,
+    /// der Hash fehlte, und der alte Weg kehrte stumm zurück.
+    /// </para>
     /// </summary>
     /// <param name="registry">Der Store.</param>
-    /// <param name="mediaHash">Medium; null heißt „kein Medium bekannt“, dann bleibt es beim Benutzen.</param>
+    /// <param name="mediaHash">Medium; null heißt „kein Medium bekannt" — dann führt der Pfad.</param>
+    /// <param name="mediaPath">F-M517: der Pfad der Mediendatei.</param>
     /// <param name="showId">Die gesehene Nummer.</param>
-    private static void Persist(ContentHashRegistry registry, string? mediaHash, int showId)
-    {
-        if (string.IsNullOrEmpty(mediaHash))
-        {
-            return;
-        }
-
-        registry.EnsureMedia(mediaHash, patch: media =>
-            media.TvstShowId = showId.ToString(CultureInfo.InvariantCulture));
-    }
+    /// <returns>Wie geschrieben wurde.</returns>
+    private static MediaNumberWrite Persist(
+        ContentHashRegistry registry, string? mediaHash, string? mediaPath, int showId)
+        => registry.SetTvstShowId(mediaHash, mediaPath, showId);
 
     private void Log(string template, params object?[] args)
     {
@@ -291,6 +391,21 @@ public static class TvstShowStatus
 
     /// <summary>Die Serie wurde angelegt und danach exakt wiedergefunden (F-M501 c).</summary>
     public const string Created = "created";
+
+    /// <summary>
+    /// F-M516: die Seite hat die Anlage angelegt bestätigt, die Nummer war aber nirgends lesbar — dann
+    /// wird NICHTS gespeichert und das ehrlich gesagt.
+    /// </summary>
+    public const string CreatedIdUnknown = "created-id-unknown";
+
+    /// <summary>
+    /// F-M516: die Seite hat die Anlage nicht bestätigt, die Serie stand aber danach in der Liste — sie
+    /// war also schon da. Gespeichert wird die gefundene Nummer, angelegt wurde nichts.
+    /// </summary>
+    public const string Existed = "existed";
+
+    /// <summary>F-M516: die Seite hat die Anlage mit einem Fehlerstatus abgelehnt.</summary>
+    public const string Refused = "refused";
 
     /// <summary>Der Trockenlauf hätte angelegt — er hat es nicht getan und nichts geschrieben.</summary>
     public const string WouldCreate = "would-create";

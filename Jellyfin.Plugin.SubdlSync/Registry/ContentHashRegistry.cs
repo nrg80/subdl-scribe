@@ -289,19 +289,194 @@ public sealed class ContentHashRegistry : IDisposable
 
     // ------------------------------------------------------------ media (area 2)
 
+    /// <summary>
+    /// F-M512: die Medienart, die der STORE für dieses Medium festhält — wahr = Serie, falsch = Film,
+    /// <c>null</c> = die Zeile sagt nichts.
+    /// <para>
+    /// WARUM DIESE QUELLE ZULÄSSIG IST: <see cref="MediaEntity.IsSeries"/> ist der einzige Ort, an dem
+    /// ein früherer Lauf die TMDb-korrigierte Art hinterlegt hat — <see cref="PatchMediaMetadata"/>
+    /// schreibt sie zusammen mit den Kennungen, und <c>true</c> kann nur entstehen, wenn Staffel oder
+    /// Folge wirklich aufgelöst wurden. Die Datei-Auflösung der Pipelines darf Jellyfins Typ
+    /// überschreiben (UploadPipeline: Dateiname, dann TMDb); ohne diese Zeile würde der Einreiher die
+    /// überschriebene Art nicht sehen und die Adresse der Familie am falschen Typ wählen.
+    /// </para>
+    /// <para>
+    /// ES IST EINE ABFRAGE, KEIN NETZZUGRIFF: ein Nachschlagen über den Primärschlüssel
+    /// (<c>media.Id</c> = der Medien-Hash), kein TMDb-Aufruf, kein Dateizugriff — der Hash kommt vom
+    /// Aufrufer. Deshalb darf die Frage im Scan je Item gestellt werden.
+    /// </para>
+    /// <para>
+    /// <c>false</c> TRÄGT NUR MIT BELEG. Die Spalte ist ein <c>bool</c> ohne „unbekannt": jede Zeile,
+    /// die irgendein Lauf anlegt (<c>EnsureMedia</c> in der Beobachtung, <c>MarkSearched</c>, ein
+    /// Seitenträger), steht auf <c>false</c>, ohne dass je jemand die Art geprüft hätte. Eine Serie
+    /// mit einer solchen Zeile als Film zu lesen wäre genau der Fehler, den F-M512 schliesst — nur
+    /// andersherum. Als Film zählt die Zeile deshalb erst, wenn ein Lauf sie WIRKLICH aufgelöst hat:
+    /// dann stehen IMDb-/TMDb-Kennungen da (derselbe Patch, derselbe Aufruf), und die Art ist
+    /// <c>false</c>, weil sie keine Serie ist. Fehlt beides, antwortet diese Methode <c>null</c> —
+    /// „lieber ein Item zu viel" (F-M499/F-M509): der Aufrufer fällt dann auf Jellyfins Typ zurück.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaHash">Medien-Hash (OSHash) des Mediums; leer heisst „kein Medium bekannt".</param>
+    /// <returns>Wahr für eine Serie, falsch für einen aufgelösten Film, null wenn die Zeile nichts sagt.</returns>
+    public bool? MediaKindIsSeries(string? mediaHash)
+    {
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return null;
+        }
+
+        var row = _db.Media.FindById(mediaHash);
+        if (row == null)
+        {
+            return null;
+        }
+
+        // Staffel/Episode sind der zweite, unabhängige Beleg derselben Aussage — sie stehen nur bei
+        // einer Serie, und ein Bestand aus älteren Builds kann sie ohne IsSeries tragen.
+        if (row.IsSeries || row.Season is > 0 || row.Episode is > 0)
+        {
+            return true;
+        }
+
+        // Aufgelöst und trotzdem keine Serie: die Kennungen beweisen den Lauf, nicht die Schreibweise.
+        return !string.IsNullOrWhiteSpace(row.ImdbId) || !string.IsNullOrWhiteSpace(row.TmdbId)
+            ? false
+            : (bool?)null;
+    }
+
     /// <summary>Ensures a media record exists and applies an optional patch.</summary>
     /// <param name="mediaHash">Media hash.</param>
     /// <param name="jellyfinItemId">Optional item id.</param>
     /// <param name="path">Optional path.</param>
     /// <param name="patch">Optional mutation.</param>
     /// <returns>The stored record.</returns>
-    public MediaEntity EnsureMedia(string mediaHash, string? jellyfinItemId = null, string? path = null, Action<MediaEntity>? patch = null)
+    public MediaEntity EnsureMedia(string? mediaHash, string? jellyfinItemId = null, string? path = null, Action<MediaEntity>? patch = null)
         => _db.EnsureMedia(mediaHash, jellyfinItemId, path, patch);
 
     /// <summary>Reads a media record.</summary>
     /// <param name="mediaHash">Media hash.</param>
     /// <returns>Record or null.</returns>
     public MediaEntity? GetMedia(string mediaHash) => _db.Media.FindById(mediaHash);
+
+    // ------------------------------------------------- F-M517: die Zeile über den PFAD
+    // Der Medien-Hash ist die Identität einer Zeile — aber er ist nicht immer zu haben: eine Datei,
+    // die (noch) nicht gelesen werden kann (fehlendes Ziel eines Symlinks, Rechte, ein Lauf, der die
+    // Datei nach dem Schreiben eines Tags noch nicht wieder gehasht hat), liefert `GetMediaHash`
+    // = null. Die ZEILE existiert dann trotzdem, denn sie wurde von einem früheren Lauf über ihren
+    // Hash angelegt und trägt ihren Pfad. Genau diese Zeile ist über `Path` eindeutig adressierbar.
+    //
+    // Geschrieben wird dieselbe Spalte (MsubMovieId/TvstShowId) — es gibt keinen zweiten Speicherweg,
+    // nur einen zweiten Weg, die Zeile zu FINDEN. Ist der Pfad nicht eindeutig (keine Zeile, oder
+    // mehrere), wird NICHTS geschrieben: geraten wird hier nicht.
+
+    /// <summary>
+    /// F-M517: alle Medienzeilen, die diesen Pfad tragen — die Grundlage der Pfad-Adressierung.
+    /// </summary>
+    /// <param name="mediaPath">Der Pfad der Mediendatei.</param>
+    /// <returns>Die Zeilen; leer, wenn keine den Pfad trägt.</returns>
+    public List<MediaEntity> MediaAtPath(string? mediaPath)
+    {
+        if (string.IsNullOrWhiteSpace(mediaPath))
+        {
+            return new List<MediaEntity>();
+        }
+
+        return _db.Media.Find(m => string.Equals(m.Path, mediaPath, StringComparison.Ordinal)).ToList();
+    }
+
+    /// <summary>
+    /// F-M517: die Filmnummer der dritten Quelle, gelesen über den PFAD — für den Fall, dass kein
+    /// Medien-Hash bekannt ist. Nur eine EINDEUTIGE Zeile antwortet; bei mehreren sagt der Store
+    /// nichts, statt eine der Zeilen zu wählen.
+    /// </summary>
+    /// <param name="mediaPath">Der Pfad der Mediendatei.</param>
+    /// <returns>Die gespeicherte Nummer, oder null.</returns>
+    public string? MsubMovieIdAtPath(string? mediaPath)
+    {
+        var rows = MediaAtPath(mediaPath);
+        return rows.Count == 1 ? rows[0].MsubMovieId : null;
+    }
+
+    /// <summary>
+    /// F-M517: die Seriennummer von tvsubtitles, gelesen über den PFAD — dieselbe Regel wie
+    /// <see cref="MsubMovieIdAtPath"/>.
+    /// </summary>
+    /// <param name="mediaPath">Der Pfad der Mediendatei.</param>
+    /// <returns>Die gespeicherte Nummer, oder null.</returns>
+    public string? TvstShowIdAtPath(string? mediaPath)
+    {
+        var rows = MediaAtPath(mediaPath);
+        return rows.Count == 1 ? rows[0].TvstShowId : null;
+    }
+
+    /// <summary>
+    /// F-M517: schreibt die Filmnummer der dritten Quelle ans Medium — über den Hash, sonst über den
+    /// Pfad. Dieselbe Spalte in beiden Fällen.
+    /// </summary>
+    /// <param name="mediaHash">Medien-Hash, wenn bekannt.</param>
+    /// <param name="mediaPath">Pfad der Mediendatei (die zweite Adresse der Zeile).</param>
+    /// <param name="movieId">Die Nummer des Films bei moviesubtitles.org.</param>
+    /// <returns>Wie geschrieben wurde — oder <see cref="MediaNumberWrite.None"/>.</returns>
+    public MediaNumberWrite SetMsubMovieId(string? mediaHash, string? mediaPath, int movieId)
+        => SetMediaNumber(
+            mediaHash,
+            mediaPath,
+            media => media.MsubMovieId = movieId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// F-M517: schreibt die Seriennummer von tvsubtitles ans Medium — dieselbe Regel wie
+    /// <see cref="SetMsubMovieId"/>.
+    /// </summary>
+    /// <param name="mediaHash">Medien-Hash, wenn bekannt.</param>
+    /// <param name="mediaPath">Pfad der Mediendatei.</param>
+    /// <param name="showId">Die Nummer der Serie bei tvsubtitles.net.</param>
+    /// <returns>Wie geschrieben wurde — oder <see cref="MediaNumberWrite.None"/>.</returns>
+    public MediaNumberWrite SetTvstShowId(string? mediaHash, string? mediaPath, int showId)
+        => SetMediaNumber(
+            mediaHash,
+            mediaPath,
+            media => media.TvstShowId = showId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// F-M517: der eine Schreibweg für beide Nummern. Hash zuerst (die Zeile ist dann per Id
+    /// adressiert), Pfad als zweite Adresse — und nur, wenn genau EINE Zeile ihn trägt.
+    /// </summary>
+    /// <param name="mediaHash">Medien-Hash, wenn bekannt.</param>
+    /// <param name="mediaPath">Pfad der Mediendatei.</param>
+    /// <param name="write">Die Mutation (eine Spalte).</param>
+    /// <returns>Wie geschrieben wurde — oder <see cref="MediaNumberWrite.None"/>.</returns>
+    private MediaNumberWrite SetMediaNumber(string? mediaHash, string? mediaPath, Action<MediaEntity> write)
+    {
+        ArgumentNullException.ThrowIfNull(write);
+
+        if (!string.IsNullOrEmpty(mediaHash))
+        {
+            // Der Pfad geht mit: eine neu angelegte Zeile ist danach auch über ihn zu finden.
+            EnsureMedia(
+                mediaHash,
+                path: string.IsNullOrWhiteSpace(mediaPath) ? null : mediaPath,
+                patch: write);
+            return MediaNumberWrite.ByHash;
+        }
+
+        var rows = MediaAtPath(mediaPath);
+        if (rows.Count == 1)
+        {
+            write(rows[0]);
+            _db.Media.Upsert(rows[0]);
+            LogUtil.Detail(_logger, "[SubDL-DB] media number written by path {Path}", mediaPath);
+            return MediaNumberWrite.ByPath;
+        }
+
+        // Kein Hash, und der Pfad ist keine Adresse: keine Zeile oder mehrere. Hier wird nichts
+        // geschrieben und nichts gewählt — der Aufrufer sagt dann die Wahrheit ins Log.
+        LogUtil.Detail(
+            _logger,
+            "[SubDL-DB] media number NOT written: no media hash, and {Reason} ({Path})",
+            rows.Count == 0 ? "no media row carries this path" : rows.Count + " media rows carry this path",
+            mediaPath ?? "-");
+        return MediaNumberWrite.None;
+    }
 
     /// <summary>Removes a media record with its embedded tracks and sidecars.</summary>
     /// <param name="mediaHash">Media hash.</param>
@@ -487,7 +662,9 @@ public sealed class ContentHashRegistry : IDisposable
                           string status, string? contentHash = null, string? reason = null, string? subdlId = null,
                           bool forced = false, string? subdlUploadId = null, string? tvSubtitlesUploadId = null,
                           string? subdlDownloadId = null, string? tvSubtitlesDownloadId = null,
-                          DateTime? subdlUploadedAt = null, DateTime? tvSubtitlesUploadedAt = null)
+                          DateTime? subdlUploadedAt = null, DateTime? tvSubtitlesUploadedAt = null,
+                          string? moviesubtitlesDownloadId = null, string? moviesubtitlesUploadId = null,
+                          DateTime? moviesubtitlesUploadedAt = null)
     {
         if (string.IsNullOrEmpty(mediaHash) || subPos < 0)
         {
@@ -540,6 +717,18 @@ public sealed class ContentHashRegistry : IDisposable
             existing.TvSubtitlesDownloadId = tvSubtitlesDownloadId;
         }
 
+        // F-M507: das Kennzeichen der dritten Quelle — dieselbe Regel wie bei den Sidecars.
+        if (!string.IsNullOrEmpty(moviesubtitlesDownloadId))
+        {
+            existing.MoviesubtitlesDownloadId = moviesubtitlesDownloadId;
+        }
+
+        // F-M508: das Upload-Kennzeichen der dritten Quelle, dieselbe Regel — nur schreiben, wenn bekannt.
+        if (!string.IsNullOrEmpty(moviesubtitlesUploadId))
+        {
+            existing.MoviesubtitlesUploadId = moviesubtitlesUploadId;
+        }
+
         // F-M490: "hochgeladen" je Quelle, mit Zeitpunkt.
         if (subdlUploadedAt.HasValue)
         {
@@ -549,6 +738,11 @@ public sealed class ContentHashRegistry : IDisposable
         if (tvSubtitlesUploadedAt.HasValue)
         {
             existing.TvSubtitlesUploadedAt = tvSubtitlesUploadedAt;
+        }
+
+        if (moviesubtitlesUploadedAt.HasValue)
+        {
+            existing.MoviesubtitlesUploadedAt = moviesubtitlesUploadedAt;
         }
 
         _db.Embeds.Upsert(existing);
@@ -1025,6 +1219,15 @@ public sealed class ContentHashRegistry : IDisposable
             return false;
         }
 
+        // F-M507 (Operator-Auflage 15.11.2026: „Bevor wir falsche Sprachen hochladen, laden wir nix
+        // hoch."): eine Quelle ohne UPLOAD-Weg haelt nie etwas. Ohne diese Zeile fiele sie unten in den
+        // SubDL-Zweig und meldete dessen Marken als die ihren — „diese Quelle hat ihn schon" fuer einen
+        // Weg, den es nicht gibt.
+        if (!Api.Endpoints.SubtitleEndpointCatalog.HasUploadPath(provider))
+        {
+            return false;
+        }
+
         // F-M490: das eigene "hochgeladen" der Quelle ist die erste Antwort. Das Kennzeichen (F-M488)
         // bleibt als zweite: eine Zeile, die eine Id hat, ist hochgeladen, auch wenn der Zeitstempel
         // fehlt (Altdaten aus Schema 11). Beide Ablagen zaehlen — embeds UND sidecars.
@@ -1038,6 +1241,19 @@ public sealed class ContentHashRegistry : IDisposable
                     && x.Language == language
                     && x.HearingImpaired == hearingImpaired
                     && (x.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.TvSubtitlesUploadId)));
+        }
+
+        // F-M508: dieselbe Frage fuer die Film-Adresse der Familie — eigene Spalten, eigene Antwort.
+        if (provider == SubtitleProvider.MovieSubtitles)
+        {
+            return _db.Embeds.Exists(x => x.MediaHash == mediaHash
+                    && x.Language == language
+                    && x.HearingImpaired == hearingImpaired
+                    && (x.MoviesubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.MoviesubtitlesUploadId)))
+                || _db.Sidecars.Exists(x => x.MediaHash == mediaHash
+                    && x.Language == language
+                    && x.HearingImpaired == hearingImpaired
+                    && (x.MoviesubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.MoviesubtitlesUploadId)));
         }
 
         return _db.Embeds.Exists(x => x.MediaHash == mediaHash
@@ -1222,18 +1438,27 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="origin">F-M486: the source this subtitle came from (<c>subdl</c>/<c>tvsubtitles</c>),
     /// or null when nobody said. Written only when non-empty — a null must never overwrite a fact.</param>
     /// <param name="originId">F-M486: the source's own id for this subtitle, written under the same rule.</param>
-    public void MarkSidecar(string? contentHash, string mediaHash, string language, bool hearingImpaired,
+    public void MarkSidecar(string? contentHash, string? mediaHash, string language, bool hearingImpaired,
                             bool forced, string status, string? reason = null, string? subdlId = null,
                             string? fileName = null, string? path = null, string? origin = null,
                             string? originId = null, string? subdlDownloadId = null,
                             string? subdlUploadId = null, string? tvSubtitlesDownloadId = null,
                             string? tvSubtitlesUploadId = null, DateTime? subdlUploadedAt = null,
-                            DateTime? tvSubtitlesUploadedAt = null)
+                            DateTime? tvSubtitlesUploadedAt = null, string? moviesubtitlesDownloadId = null,
+                            string? moviesubtitlesUploadId = null, DateTime? moviesubtitlesUploadedAt = null)
     {
         if (string.IsNullOrEmpty(contentHash))
         {
             return;
         }
+
+        // F-M514: der Medien-Hash ist eine PFLICHTSPALTE (`NOT NULL`), und „kein Medium bekannt" ist
+        // hier der LEERE Wert — genau das reicht der beobachtende Aufrufer (`RecordSkippedContent`)
+        // schon immer so herein. Vorher ging ein null bis in `EnsureMedia` und baute dort eine
+        // Medienzeile ohne Schlüssel; seit EF Core 10 vergiftete die abgewiesene Instanz danach den
+        // ganzen Kontext (siehe `SubdlDbContext.EnsureMedia`). Die Zeile selbst bleibt richtig: ein
+        // Seitenträger ist über seinen INHALT adressiert, nicht über die Datei.
+        mediaHash ??= string.Empty;
 
         var media = _db.EnsureMedia(mediaHash);
         var existing = _db.Sidecars.FindById(contentHash) ?? new SidecarEntity { Id = contentHash };
@@ -1289,6 +1514,18 @@ public sealed class ContentHashRegistry : IDisposable
             existing.TvSubtitlesUploadId = tvSubtitlesUploadId;
         }
 
+        // F-M507: das Kennzeichen der dritten Quelle, gleiche Regel — nur schreiben, wenn bekannt.
+        if (!string.IsNullOrEmpty(moviesubtitlesDownloadId))
+        {
+            existing.MoviesubtitlesDownloadId = moviesubtitlesDownloadId;
+        }
+
+        // F-M508: das Upload-Kennzeichen der dritten Quelle, gleiche Regel.
+        if (!string.IsNullOrEmpty(moviesubtitlesUploadId))
+        {
+            existing.MoviesubtitlesUploadId = moviesubtitlesUploadId;
+        }
+
         // F-M490: "hochgeladen" je Quelle, mit Zeitpunkt. Ein Zeitpunkt wird nie zurueckgesetzt.
         if (subdlUploadedAt.HasValue)
         {
@@ -1298,6 +1535,11 @@ public sealed class ContentHashRegistry : IDisposable
         if (tvSubtitlesUploadedAt.HasValue)
         {
             existing.TvSubtitlesUploadedAt = tvSubtitlesUploadedAt;
+        }
+
+        if (moviesubtitlesUploadedAt.HasValue)
+        {
+            existing.MoviesubtitlesUploadedAt = moviesubtitlesUploadedAt;
         }
 
         if (!string.IsNullOrEmpty(fileName))
@@ -1823,12 +2065,28 @@ public sealed class ContentHashRegistry : IDisposable
         // Fuer tvsubtitles zaehlt NUR seine eigene Marke. Eine Uploaded-Zeile ohne Marke ist dort kein
         // Beleg: sie stammt aus der Zeit vor der Zwei-Quellen-Kette und damit von SubDL. Sie hier
         // mitzaehlen wuerde genau den Defekt fortschreiben, der gemessen wurde — tvst bekaeme nie einen Versuch.
+        // F-M507: dieselbe Regel wie in IsUploadedTo — eine Quelle ohne Upload-Weg haelt nichts.
+        if (!Api.Endpoints.SubtitleEndpointCatalog.HasUploadPath(provider))
+        {
+            return false;
+        }
+
         if (provider == SubtitleProvider.TvSubtitles)
         {
             return _db.Embeds.Exists(x => x.ContentHash == contentHash
                     && (x.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.TvSubtitlesUploadId)))
                 || _db.Sidecars.Exists(x => x.ContentHash == contentHash
                     && (x.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.TvSubtitlesUploadId)));
+        }
+
+        // F-M508: die Film-Adresse der Familie haelt nur, was IHRE Spalten belegen — eine markenlose
+        // Zeile stammt aus der Zeit vor der Zwei-Quellen-Kette und damit von SubDL.
+        if (provider == SubtitleProvider.MovieSubtitles)
+        {
+            return _db.Embeds.Exists(x => x.ContentHash == contentHash
+                    && (x.MoviesubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.MoviesubtitlesUploadId)))
+                || _db.Sidecars.Exists(x => x.ContentHash == contentHash
+                    && (x.MoviesubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.MoviesubtitlesUploadId)));
         }
 
         return _db.Embeds.Exists(x => x.ContentHash == contentHash
@@ -1852,6 +2110,10 @@ public sealed class ContentHashRegistry : IDisposable
     /// <returns>True when another source already holds this content.</returns>
     public bool IsContentUploadedForAnotherSource(string? contentHash, SubtitleProvider provider)
         => Enum.GetValues<SubtitleProvider>()
+
+            // F-M507: „eine andere Quelle" heisst eine, die ueberhaupt hochladen kann. Eine Quelle ohne
+            // Upload-Weg kann nichts halten; sie zu fragen waere eine Frage ohne Adressat.
+            .Where(Api.Endpoints.SubtitleEndpointCatalog.HasUploadPath)
             .Any(other => other != provider && IsContentUploadedFor(contentHash, other));
 
     /// <summary>F-M500: <c>Uploaded</c>-Zeile ohne jede Quellenmarke — "irgendwo hochgeladen", Quelle unbekannt.</summary>
@@ -1861,8 +2123,10 @@ public sealed class ContentHashRegistry : IDisposable
         => row.Status == SubtitleStatus.Uploaded
             && row.SubdlUploadedAt == null
             && row.TvSubtitlesUploadedAt == null
+            && row.MoviesubtitlesUploadedAt == null
             && string.IsNullOrEmpty(row.SubdlUploadId)
             && string.IsNullOrEmpty(row.TvSubtitlesUploadId)
+            && string.IsNullOrEmpty(row.MoviesubtitlesUploadId)
             && string.IsNullOrEmpty(row.SubdlId);
 
     /// <summary>F-M500: dasselbe fuer Sidecar-Zeilen.</summary>
@@ -1872,8 +2136,10 @@ public sealed class ContentHashRegistry : IDisposable
         => row.Status == SubtitleStatus.Uploaded
             && row.SubdlUploadedAt == null
             && row.TvSubtitlesUploadedAt == null
+            && row.MoviesubtitlesUploadedAt == null
             && string.IsNullOrEmpty(row.SubdlUploadId)
             && string.IsNullOrEmpty(row.TvSubtitlesUploadId)
+            && string.IsNullOrEmpty(row.MoviesubtitlesUploadId)
             && string.IsNullOrEmpty(row.SubdlId);
 
     /// <summary>
@@ -1926,6 +2192,7 @@ public sealed class ContentHashRegistry : IDisposable
         // F-M490: die Marke JE QUELLE — nur fuer die Quelle, die den Inhalt haelt; die andere bleibt offen.
         DateTime? subdlAt = settledAsUploaded && quellen.Contains(SubtitleProvider.Subdl) ? DateTime.UtcNow : null;
         DateTime? tvAt = settledAsUploaded && quellen.Contains(SubtitleProvider.TvSubtitles) ? DateTime.UtcNow : null;
+        DateTime? msubAt = settledAsUploaded && quellen.Contains(SubtitleProvider.MovieSubtitles) ? DateTime.UtcNow : null;
 
         if (isLoose)
         {
@@ -1933,7 +2200,7 @@ public sealed class ContentHashRegistry : IDisposable
                 settledAsUploaded ? SubtitleStatus.Uploaded : SubtitleStatus.Rejected,
                 reason: settledAsUploaded ? null : reason,
                 fileName: fileName, path: path,
-                subdlUploadedAt: subdlAt, tvSubtitlesUploadedAt: tvAt);
+                subdlUploadedAt: subdlAt, tvSubtitlesUploadedAt: tvAt, moviesubtitlesUploadedAt: msubAt);
         }
         else
         {
@@ -1941,7 +2208,7 @@ public sealed class ContentHashRegistry : IDisposable
                 settledAsUploaded ? SubtitleStatus.Uploaded : SubtitleStatus.Rejected,
                 contentHash: contentHash,
                 reason: settledAsUploaded ? null : reason,
-                subdlUploadedAt: subdlAt, tvSubtitlesUploadedAt: tvAt);
+                subdlUploadedAt: subdlAt, tvSubtitlesUploadedAt: tvAt, moviesubtitlesUploadedAt: msubAt);
         }
 
         return settledAsUploaded;
@@ -1981,11 +2248,13 @@ public sealed class ContentHashRegistry : IDisposable
     public void MarkDownloaded(string contentHash, string mediaHash, string language, bool hearingImpaired = false,
                                string? subdlId = null, string? fileName = null, string? path = null,
                                string? origin = null, string? originId = null,
-                               string? subdlDownloadId = null, string? tvSubtitlesDownloadId = null)
+                               string? subdlDownloadId = null, string? tvSubtitlesDownloadId = null,
+                               string? moviesubtitlesDownloadId = null)
         => MarkSidecar(contentHash, mediaHash, language, hearingImpaired, forced: false,
                        SubtitleStatus.Downloaded, reason: null, subdlId: subdlId, fileName: fileName, path: path,
                        origin: origin, originId: originId, subdlDownloadId: subdlDownloadId,
-                       tvSubtitlesDownloadId: tvSubtitlesDownloadId);
+                       tvSubtitlesDownloadId: tvSubtitlesDownloadId,
+                       moviesubtitlesDownloadId: moviesubtitlesDownloadId);
 
     /// <summary>
     /// F-M486/F-M487: the provenance of a subtitle the plugin knows by its content hash. Empty strings

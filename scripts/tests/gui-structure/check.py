@@ -193,8 +193,10 @@ def main():
                    "subdlLoadWorkers]"):
         check("refresh covers %s" % loader.rstrip("]"), loader in html)
     # quota covers BOTH the API/search allowance and the download allowance
-    check("quota loader renders the API calls bar", "renderBar('API calls'" in html)
-    check("quota loader renders the downloads bar", "renderBar('Downloads'" in html)
+    # Operator order 16.11.2026: both bars belong to SubDL and say so — the tvst family has its
+    # own lights now, so an unlabelled "Downloads" bar would be read as the whole plugin's.
+    check("quota loader renders the SubDL API calls bar", "renderBar('SubDL API calls'" in html)
+    check("quota loader renders the SubDL downloads bar", "renderBar('SubDL downloads'" in html)
     # status covers the lights AND the library read/write rows
     check("status loader renders the library read/write rows",
           "#SubdlDirStatusList" in html)
@@ -1621,8 +1623,10 @@ def main():
     check("F-M354: the SubDL-API success line says 'reachable', not 'API reachable' (the label says SubDL API)",
           'dto.Message = "reachable";' in status and 'dto.Message = "API reachable";' not in status,
           "'API reachable' next to the label 'SubDL API'")
-    check("F-M354: the same line feeds TMDb — one wording, not two",
-          status.count('dto.Message = "reachable";') == 2, "expected exactly 2 occurrences")
+    # 16.11.2026: both tvst addresses joined as reachability lights and share ONE probe, so the
+    # same one-word line stands in three places: SubDL API, TMDb, and the tvst/mst probe.
+    check("F-M354: the same line feeds TMDb and the tvst/mst probe — one wording, not three",
+          status.count('dto.Message = "reachable";') == 3, "expected exactly 3 occurrences")
     check("F-M354: the login success line says 'OK', not 'Login OK' (the label says SubDL Login)",
           'dto.Message = "OK";' in status and 'dto.Message = "Login OK";' not in status,
           "'Login OK' next to the label 'SubDL Login'")
@@ -1648,6 +1652,8 @@ def main():
     check("F-M356: the JS-injected CSS block still parses (no stray backtick inside it)",
           html.count("var css = `") == 1 and html.count("`;") >= 1, "template literal broken")
     # --- F-M357: the refetch field says what it is, in the words of the field name -----------------
+    # Die Beschreibungen sind englisch (Operator-Entscheid 16.11.2026: "Alles Englisch"); geprueft
+    # wird weiter die Sache: das Feld sagt, was es ist, in den Worten des Feldnamens.
     check("F-M357: the refetch description reads 'Refetch interval for download and upload'",
           "Refetch interval for download and upload." in html, "expected the plain wording")
     check("F-M357: the older wording 'Unified refetch for both ...' is gone",
@@ -1670,7 +1676,7 @@ def main():
     check("F-M391: the season pack toggle notes that absorbed singles are deleted from SubDL",
           "its single upload is deleted from SubDL first" in html)
     check("F-M391: the note sits in the season pack description, not somewhere else",
-          "one pack instead of one upload per episode. Default: on. An episode that already went up on its own"
+          "instead of one upload per episode. Default: on. An episode that already went up on its own"
           in html)
 
     # ---- F-M497 (Operator-Anweisung 15.11.2026: „Pflichtkonfiguration ist tmdb key … Kennzeichnung
@@ -1803,6 +1809,57 @@ def main():
     check("document.querySelector('#RefreshLibraryAfterDownload').checked = config.RefreshLibraryAfterDownload !== false;" in page_src
           and "config.RefreshLibraryAfterDownload = document.querySelector('#RefreshLibraryAfterDownload').checked;" in page_src,
           "F-M473: the switch is loaded and saved")
+
+    # ---- F-M509: die tvst-Familie steht als EINE Quelle mit ZWEI Adressen in der Seite ----------
+    # Operator-Klarstellung 15.11.2026: „Seperate into subdl and tvst. Tvst is splitted into tvst and
+    # moviesub itself." Die Seite muss das zeigen: eine gemeinsame Ueberschrift ueber beiden
+    # Schalterpaaren, je Seite Download UND Upload, und die Reihenfolge bleibt zweiwertig — eine dritte
+    # Position waere eine Position fuer eine ADRESSE, und Adressen sind keine Quellen.
+    up_tab = page_src.index('data-tab-content="upload"')
+    down_tab = page_src.index('data-tab-content="download"')
+    up_part = page_src[up_tab:down_tab]
+    rest = page_src[down_tab:]
+    nxt = [rest.find('data-tab-content="%s"' % t) for t in ("general", "expert", "upload", "download")]
+    nxt = [n for n in nxt if n > 0]
+    down_part = rest[:min(nxt)] if nxt else rest
+
+    for tab_name, part in (("upload", up_part), ("download", down_part)):
+        check("F-M509: the %s tab carries both switches of the family" % tab_name,
+              ('id="TvSubtitlesUploadEnabled"' in part if tab_name == "upload" else 'id="TvSubtitlesDownloadEnabled"' in part)
+              and ('id="MovieSubtitlesUploadEnabled"' in part if tab_name == "upload" else 'id="MovieSubtitlesDownloadEnabled"' in part))
+        check("F-M509: the %s tab names the family ONCE, above both switch pairs" % tab_name,
+              part.count("<h3>tvst — eine Quelle, zwei Adressen</h3>") == 1
+              and part.index("<h3>tvst — eine Quelle, zwei Adressen</h3>")
+              < part.index('id="MovieSubtitlesUploadEnabled"' if tab_name == "upload" else 'id="MovieSubtitlesDownloadEnabled"'))
+        check("F-M509: the family heading says which address serves which medium (%s)" % tab_name,
+              part.count("tvsubtitles.net führt Serien") >= 1 and part.count("moviesubtitles.org führt Filme") >= 1)
+
+    check("F-M508: both film-address switches have their own German description with the default",
+          'id="MovieSubtitlesUploadReason"' in up_part
+          and "Standard: aus" in up_part[up_part.index('id="MovieSubtitlesUploadReason"'):up_part.index('id="MovieSubtitlesUploadReason"') + 400]
+          and "gesperrt, bis die Sprachabbildung" in up_part
+          and 'id="MovieSubtitlesDownloadReason"' in down_part
+          and "Standard: an" in down_part[down_part.index('id="MovieSubtitlesDownloadReason"'):down_part.index('id="MovieSubtitlesDownloadReason"') + 300])
+
+    check("F-M509: the order field keeps exactly TWO values — the family is ordered, not its addresses",
+          'id="DownloadOrder"' in down_part
+          and down_part.count('<option value="TvSubtitlesFirst">') == 1
+          and down_part.count('<option value="SubdlFirst">') == 1
+          and down_part.count("<option value=") == 2)
+
+    check("F-M509: the order's description names the family and where its page comes from",
+          "tvst ist eine Quelle mit zwei Adressen" in down_part
+          and "bei Serien tvsubtitles.net, bei Filmen moviesubtitles.org" in down_part)
+
+    check("F-M508: the film-address switches are loaded and saved like every other switch",
+          "document.querySelector('#MovieSubtitlesUploadEnabled').checked = config.MovieSubtitlesUploadEnabled === true;" in page_src
+          and "document.querySelector('#MovieSubtitlesDownloadEnabled').checked =" in page_src
+          and "config.MovieSubtitlesUploadEnabled = document.querySelector('#MovieSubtitlesUploadEnabled').checked;" in page_src
+          and "config.MovieSubtitlesDownloadEnabled = document.querySelector('#MovieSubtitlesDownloadEnabled').checked;" in page_src)
+
+    check("F-M508: the film-address upload box shows the EFFECTIVE default (null = off), the download box (null = on)",
+          "config.MovieSubtitlesUploadEnabled === true" in page_src
+          and "config.MovieSubtitlesDownloadEnabled === null || config.MovieSubtitlesDownloadEnabled === undefined" in page_src)
 
     print(">>> GUI-STRUKTUR %s: %d/%d Pruefungen bestanden"
           % ("OK" if not failed else "FEHLER", len(results) - len(failed), len(results)))

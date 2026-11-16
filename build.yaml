@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.394"
+version: "12.1.12.401"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,13 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.401: sidecars from the reserved original block (slot 50-99) are no longer uploaded - they are the unsynchronized copies a correction keeps beside its result - and the upload comment carries the TMDb and IMDb ids only.
+  v12.1.12.400: the status page shows a light for each address of the tvst family, and the SubDL quota bars now say they are SubDL's; a number found for a film or show is stored even when no file hash is known, by finding its own row through the path.
+  v12.1.12.399: creating a missing show or film is now judged by the answer the site actually gives (a redirect with done=yes for shows, the "Movie has been added" line for films) instead of by "any 2xx"; a show that already exists is looked up again instead of being created twice.
+  v12.1.12.398: a rejected store row no longer poisons the whole run — the row is refused with a warning and the tracker rebuilds itself, so the upload cycle starts again; films missing on the site can now be created there, guarded against duplicates; the plugin page speaks one language again.
+  v12.1.12.397: movie uploads now translate the quality into the site's own rip values instead of sending it raw, and the upload queuer takes the media kind from TMDb rather than from Jellyfin's item type.
+  v12.1.12.396: the log now names the address that was actually asked, a trailing year in brackets no longer breaks the TMDb title match, and a dry run says which source won the pick.
+  v12.1.12.395: a third address joins the two existing sources — movies are searched and uploaded at moviesubtitles.org, series keep tvsubtitles.net, and TMDb decides which is which; uploading there stays switched off until its language mapping is proven.
   v12.1.12.394: the configured order now decides which search engine is asked first, not only which hit leads — the SubDL search runs inside the ordered source loop instead of always up front — F-M504.
   v12.1.12.393: a subtitle hunt no longer ends when the first source finds nothing — every enabled source is asked, in the configured order, once per language, and the source list is a loop over all providers instead of two hard-coded ones — F-M504.
   v12.1.12.392: the tvsubtitles download is on by default when its switch is unset; the tvsubtitles upload stays off by default — F-M503.

@@ -12,6 +12,7 @@ using System;
 using System.Globalization;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -31,6 +32,48 @@ public sealed class TmdbImdbResolver
     private readonly HttpClient _http;
     private readonly string? _apiKey;
     private static readonly System.Collections.Generic.Dictionary<(string, bool), string?> _cache = new();
+
+    /// <summary>
+    /// F-M510: ein ABSCHLIESSENDES Klammer-Jahr am Titel — <c>(2023)</c>, <c>(2019–2023)</c>,
+    /// <c>[2023]</c>. Es ist die Schreibweise, in der ein Datei- oder Ordnername sein Jahr mitfuehrt
+    /// (<c>Oppenheimer (2023).mkv</c>), und es gehoert NICHT zum Titel: TMDb sucht ihn unter
+    /// „Oppenheimer" und liefert fuer „Oppenheimer (2023)" keinen Treffer mit dem Jahr 2023 — gemessen
+    /// 15.11.2026 im ersten Film-Lauf auf jf-test (HTTP 200, kein Treffer, „id test: keeping Jellyfin's
+    /// ids").
+    /// <para>
+    /// Nur ein ABSCHLIESSENDES Klammer-Jahr zaehlt. Ein Titel, der mit einer Klammer BEGINNT oder in
+    /// deren Mitte eine Klammer traegt, bleibt unangetastet: <c>(Ghost) Riders In the Sky (American
+    /// Outlaws_ Live …)</c> ist ein Titel, kein Jahr, und darf nicht zu „Riders In the Sky" werden.
+    /// <c>Blade Runner 2049</c> traegt sein Jahr ohne Klammer und bleibt ebenfalls, wie es ist.
+    /// </para>
+    /// </summary>
+    private static readonly Regex TrailingYearPattern = new(
+        @"\s*[\(\[]\s*(?:19|20)\d{2}\s*(?:[-\u2013\u2014]\s*(?:19|20)\d{2})?\s*[\)\]]\s*$",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// F-M510: der Titel, den TMDb VERGLEICHEN soll — ohne ein abschliessendes Klammer-Jahr.
+    /// <para>
+    /// Diese Form ist NUR fuer den Vergleich da (Suchanfrage, Jahr-Treffer, Cache-Schluessel). Der
+    /// Anzeigename, der Dateiname, der Sidecar-Name und jede Pack-Bildung lesen den rohen Namen
+    /// weiterhin unveraendert — hier wird nichts umbenannt, nur die Frage an TMDb richtig gestellt.
+    /// </para>
+    /// </summary>
+    /// <param name="title">Der rohe Titel (z. B. aus dem Item-Namen).</param>
+    /// <returns>Der Titel ohne abschliessendes Klammer-Jahr; unveraendert, wenn keins da ist.</returns>
+    public static string ComparisonTitle(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return title ?? string.Empty;
+        }
+
+        var trimmed = title.Trim();
+        var cleaned = TrailingYearPattern.Replace(trimmed, string.Empty).TrimEnd();
+
+        // Ein Titel, der NUR aus „(2023)" bestand, ist kein leerer Titel — dann bleibt der rohe Text.
+        return cleaned.Length == 0 ? trimmed : cleaned;
+    }
 
     /// <summary>
     /// F-M24a (user decision 09.09.2026): per-call trace for TMDB requests — the
@@ -152,11 +195,22 @@ public sealed class TmdbImdbResolver
             return (null, null, false, preferSeries);
         }
 
+        // F-M510 (Messung 15.11.2026, erster Film-Lauf auf jf-test): der Vergleich bekommt den Titel
+        // OHNE ein abschliessendes Klammer-Jahr. „Oppenheimer (2023)" + 2023 fand nichts, weil sowohl
+        // die Suchanfrage als auch der Jahr-Treffer den Namen mit der Jahresangabe tragen — TMDb
+        // fuehrt den Film unter „Oppenheimer". Abgetrennt wird NUR fuer diese Frage: der Anzeigename
+        // des Items, der Dateiname und jeder Sidecar-Name bleiben unveraendert.
+        var lookupTitle = ComparisonTitle(title);
+        if (!string.Equals(lookupTitle, title.Trim(), StringComparison.Ordinal))
+        {
+            Trace?.Invoke($"[TMDB] title for the compare: \"{title.Trim()}\" → \"{lookupTitle}\" (trailing year marker removed)");
+        }
+
         // Cached like the other lookups: the pipeline's later ladder stage asks
         // the same question when the gate already answered it, and a repeat
         // search must not cost a second API call. The strict twin shares the
         // cache entry (same HTTP call, different pick) but not the answer.
-        var cacheKey = ("multi:" + title.Trim().ToUpperInvariant() + "|" + (year?.ToString(CultureInfo.InvariantCulture) ?? string.Empty) + "|" + (strictYear ? "strict" : "loose"), preferSeries);
+        var cacheKey = ("multi:" + lookupTitle.ToUpperInvariant() + "|" + (year?.ToString(CultureInfo.InvariantCulture) ?? string.Empty) + "|" + (strictYear ? "strict" : "loose"), preferSeries);
         lock (_cache)
         {
             if (_cache.TryGetValue(cacheKey, out var cachedHit))
@@ -190,7 +244,7 @@ public sealed class TmdbImdbResolver
             // honour it (search/tv?first_air_date_year=2001 → exactly the 2001 UK show).
             // So the year is applied HERE, on the results, and the typed search stays the
             // precision tool for a single known type.
-            string pathAndQuery = $"search/multi?query={Uri.EscapeDataString(title)}";
+            string pathAndQuery = $"search/multi?query={Uri.EscapeDataString(lookupTitle)}";
 
             string url = TmdbUrl(pathAndQuery);
             using var req = BuildTmdbRequest(url);
@@ -271,7 +325,7 @@ public sealed class TmdbImdbResolver
                     // fallback here is what let a wrongly pinned item pass the id test.
                     if (strictYear && !yearMatch.Found)
                     {
-                        Trace?.Invoke($"[TMDB] strict title+year test found no hit for \"{title}\" ({year?.ToString(CultureInfo.InvariantCulture) ?? "no year"}) — not confirming");
+                        Trace?.Invoke($"[TMDB] strict title+year test found no hit for \"{lookupTitle}\" ({year?.ToString(CultureInfo.InvariantCulture) ?? "no year"}) — not confirming");
                         chosen = (null, null, false, preferSeries);
                     }
 
@@ -287,7 +341,7 @@ public sealed class TmdbImdbResolver
         }
         catch (Exception ex)
         {
-            Trace?.Invoke($"[TMDB] multi-search failed ({title}): {ex.Message}");
+            Trace?.Invoke($"[TMDB] multi-search failed ({lookupTitle}): {ex.Message}");
         }
 
         lock (_cache)
@@ -544,7 +598,11 @@ public sealed class TmdbImdbResolver
             return (null, null);
         }
 
-        var key = ("q:" + title.Trim().ToUpperInvariant() + "|" + (year?.ToString(CultureInfo.InvariantCulture) ?? ""), isSeries);
+        // F-M510: dieselbe Abtrennung fuer die typisierte Suche — auch sie fragt TMDb nach einem TITEL,
+        // und „Oppenheimer (2023)" ist keiner. Der Anzeigename bleibt davon unberuehrt.
+        var lookupTitle = ComparisonTitle(title);
+
+        var key = ("q:" + lookupTitle.ToUpperInvariant() + "|" + (year?.ToString(CultureInfo.InvariantCulture) ?? string.Empty), isSeries);
         lock (_cache)
         {
             if (_cache.TryGetValue(key, out var cached))
@@ -559,7 +617,7 @@ public sealed class TmdbImdbResolver
         {
             string kind = isSeries ? "tv" : "movie";
             string yearParam = isSeries ? "first_air_date_year" : "year";
-            string pathAndQuery = $"search/{kind}?query={Uri.EscapeDataString(title)}";
+            string pathAndQuery = $"search/{kind}?query={Uri.EscapeDataString(lookupTitle)}";
             if (year is int y)
             {
                 pathAndQuery += $"&{yearParam}={y}";
@@ -592,7 +650,7 @@ public sealed class TmdbImdbResolver
                     // F-M217: the year came from Jellyfin and may be the import year
                     // (see the note above) — the same query WITHOUT it is the retry
                     // that recovers such a title. One extra call, only on a miss.
-                    string retryUrl = TmdbUrl($"search/{kind}?query={Uri.EscapeDataString(title)}");
+                    string retryUrl = TmdbUrl($"search/{kind}?query={Uri.EscapeDataString(lookupTitle)}");
                     using var retryReq = BuildTmdbRequest(retryUrl);
                     using var retryResp = await _http.SendAsync(retryReq, ct).ConfigureAwait(false);
                     TraceCall("GET", retryUrl, (int)retryResp.StatusCode);
@@ -1317,6 +1375,118 @@ public sealed class TmdbImdbResolver
         return info;
     }
 
+    /// <summary>
+    /// F-M507 (Nutzerauftrag 15.11.2026: „Was was ist, Auflösung per tmdb"): der TMDb-FILM-Datensatz, auf
+    /// dem die Suche bei moviesubtitles.org beruht — Titel und Erscheinungsjahr, aus EINER Antwort von
+    /// <c>/movie/{id}</c>.
+    /// <para>
+    /// Warum es diesen Zugriff braucht: die Seite hat keinen Id-Index. Sie findet einen Film nur über
+    /// seinen Titel, und ihr Filter ist ein Teilstring-Vergleich — ohne das JAHR ist ein Treffer eine
+    /// Vermutung (`filter=dune` antwortet fünf Filme). Das Jahr aus dem Dateinamen wäre die zweitbeste
+    /// Quelle; TMDb ist die, die auch die Id geliefert hat, auf der die Suche beruht.
+    /// </para>
+    /// <para>
+    /// Der Datensatz wird gecacht wie die übrigen Antworten. Ein Fehlschlag ist kein Fehler, sondern
+    /// null: dann wird die Quelle für dieses Medium übersprungen und die Kette läuft weiter.
+    /// </para>
+    /// </summary>
+    /// <param name="tmdbId">TMDb-Film-id.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Der Datensatz, oder null wenn TMDb nicht antwortet oder nichts hergibt.</returns>
+    public async Task<TmdbMovieInfo?> MovieInfoAsync(string tmdbId, CancellationToken ct)
+    {
+        if (!IsConfigured || AuthBroken || string.IsNullOrWhiteSpace(tmdbId))
+        {
+            return null;
+        }
+
+        var key = ("movie:" + tmdbId, false);
+        lock (_cache)
+        {
+            if (_cache.TryGetValue(key, out var cached))
+            {
+                // "title|original|year"; ein leerer Treffer wird als leerer String abgelegt.
+                var parts = cached?.Split('|');
+                if (parts is { Length: 3 } && parts[0].Length > 0)
+                {
+                    return new TmdbMovieInfo(
+                        parts[0],
+                        parts[1].Length > 0 ? parts[1] : null,
+                        int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var y) ? y : null);
+                }
+
+                if (cached is null or "")
+                {
+                    return null;
+                }
+            }
+        }
+
+        TmdbMovieInfo? info = null;
+        try
+        {
+            string url = TmdbUrl($"movie/{Uri.EscapeDataString(tmdbId)}");
+            using var req = BuildTmdbRequest(url);
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            TraceCall("GET", url, (int)resp.StatusCode);
+            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                HandleAuthFailure();
+            }
+            else if (resp.IsSuccessStatusCode)
+            {
+                using var doc = await JsonDocument.ParseAsync(
+                    await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false), cancellationToken: ct)
+                    .ConfigureAwait(false);
+                var root = doc.RootElement;
+                string? name = null;
+                string? original = null;
+                if (root.TryGetProperty("title", out var titleEl) && titleEl.ValueKind == JsonValueKind.String)
+                {
+                    name = titleEl.GetString();
+                }
+
+                if (root.TryGetProperty("original_title", out var origEl) && origEl.ValueKind == JsonValueKind.String)
+                {
+                    original = origEl.GetString();
+                }
+
+                int? year = null;
+                if (root.TryGetProperty("release_date", out var dateEl) && dateEl.ValueKind == JsonValueKind.String)
+                {
+                    var raw = dateEl.GetString();
+                    if (raw is { Length: >= 4 }
+                        && int.TryParse(raw.AsSpan(0, 4), NumberStyles.None, CultureInfo.InvariantCulture, out var y))
+                    {
+                        year = y;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    info = new TmdbMovieInfo(name!.Trim(), original, year);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace?.Invoke($"[TMDB] film record failed ({tmdbId}): {ex.Message}");
+        }
+
+        lock (_cache)
+        {
+            _cache[key] = info is null
+                ? string.Empty
+                : string.Join(
+                    "|",
+                    info.Name,
+                    info.OriginalTitle ?? string.Empty,
+                    info.ReleaseYear?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+        }
+
+        return info;
+    }
+
 }
 
 /// <summary>
@@ -1332,3 +1502,16 @@ public sealed class TmdbImdbResolver
 /// <param name="FirstAirYear">Erstausstrahlungsjahr, null wenn TMDb keines nennt.</param>
 /// <param name="Seasons">Staffelzahl laut TMDb, null wenn TMDb keine nennt.</param>
 public sealed record TmdbSeriesInfo(string Name, string? OriginalName, int? FirstAirYear, int? Seasons);
+
+/// <summary>
+/// F-M507: der TMDb-Film-Datensatz, mit dem die Suche bei moviesubtitles.org arbeitet — Titel,
+/// Originaltitel und Erscheinungsjahr.
+/// <para>
+/// Bewusst ein eigener, kleiner Datensatz statt eines Verweises auf das JSON: die Suche braucht genau
+/// diese drei Angaben, und was sie nicht braucht, darf sie auch nicht versehentlich benutzen.
+/// </para>
+/// </summary>
+/// <param name="Name">Der TMDb-Titel des Films — er führt bei der Suche und beim Vergleich.</param>
+/// <param name="OriginalTitle">Der Originaltitel, nur zur Diagnose (er wird NICHT gesucht).</param>
+/// <param name="ReleaseYear">Erscheinungsjahr, null wenn TMDb keines nennt — dann wird nicht gesucht.</param>
+public sealed record TmdbMovieInfo(string Name, string? OriginalTitle, int? ReleaseYear);

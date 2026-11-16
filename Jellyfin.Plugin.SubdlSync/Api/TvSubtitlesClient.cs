@@ -51,6 +51,28 @@ public sealed class TvSubtitlesClient
     /// <summary>The site root. https only — the http endpoint redirects.</summary>
     public const string BaseUrl = "https://www.tvsubtitles.net";
 
+    /// <summary>
+    /// F-M516: das Formular, mit dem eine Serie angelegt wird. Am 16.11.2026 wörtlich abgelesen:
+    /// <c>&lt;form action="/add-tvshow1.php" method="post" enctype="multipart/form-data"&gt;</c> mit
+    /// <c>name</c>, <c>year_s</c> (maxlength 4), <c>seasons</c> (maxlength 2), einem namenlosen
+    /// Absende-Knopf und dem versteckten <c>go=1</c>. Es ist dieselbe kaputte Verschachtelung wie auf
+    /// <c>/add.html</c> (<c>&lt;table&gt;&lt;form …&gt;</c>) — die Feldnamen gelten trotzdem.
+    /// </summary>
+    public const string AddShowFormUrl = BaseUrl + "/add-tvshow.php";
+
+    /// <summary>F-M516: das Ziel des Anlege-Formulars.</summary>
+    public const string AddShowPostUrl = BaseUrl + "/add-tvshow1.php";
+
+    /// <summary>
+    /// F-M516: der Erfolgsbeleg der Seite, gemessen am 16.11.2026 an einer echten Anlage: die Antwort
+    /// ist <c>HTTP 302</c> mit leerem Rumpf und <c>Location: /add-tvshow.php?done=yes</c>; diese Seite
+    /// druckt „TV-Show has been added. Thank you.". Mehr sagt die Seite nicht — **keine Id**.
+    /// </summary>
+    public const string AddShowDoneMarker = "done=yes";
+
+    /// <summary>F-M516: derselbe Beleg als Text, für den Fall, dass der Aufrufer der Weiterleitung folgt.</summary>
+    public const string AddShowThanksText = "TV-Show has been added.";
+
     /// <summary>Maximum season number the upload form accepts (its own select offers 1–22).</summary>
     public const int MaxSeason = 22;
 
@@ -232,6 +254,22 @@ public sealed class TvSubtitlesClient
         "images/flags/([a-z]{1,6})\\.gif", RegexOptions.CultureInvariant);
 
     /// <summary>
+    /// F-M516: ein Treffer der Seitensuche (`/search2.php?qs=…`) — ein Link auf `tvshow-4240.html` mit
+    /// dem Namen daneben. Die Suche ist der kürzeste Weg von einem Namen zu einer Id, und sie ist der
+    /// einzige Weg, den die Seite nach einer Anlage anbietet (die Antwort auf den POST trägt keine Id).
+    /// </summary>
+    private static readonly Regex SearchHit = new(
+        "<a href=\"/?(?:[a-z]{2}\\.)?tvshow-(\\d+)\\.html\">([^<]*)</a>",
+        RegexOptions.Singleline | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// F-M516: die Seitensuche hängt an jeden Treffer den Ausstrahlungszeitraum
+    /// (`Weissensee (2010-2026)`). Der Name für den engen Vergleich ist der Teil davor.
+    /// </summary>
+    private static readonly Regex YearRangeSuffix = new(
+        @"\s*\(\d{4}(?:\s*-\s*\d{4})?\)\s*$", RegexOptions.CultureInvariant);
+
+    /// <summary>
     /// F-M498: die Seite kennt genau sieben Rip-Werte (WEB, HDTV, HEVC, DVDRip, DVDSCR, BDRip,
     /// BluRay). Release-Namen schreiben das aber anders — "WEB-DL", "WEBRip", "BRRip", "x265",
     /// "Blu-Ray". Gemessen 15.11.2026 im scharfen Lauf: jede Folge wurde mit
@@ -369,6 +407,65 @@ public sealed class TvSubtitlesClient
 
             var name = TagStripper.Replace(m.Groups[2].Value, string.Empty).Trim();
             result[id] = System.Net.WebUtility.HtmlDecode(name);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// F-M516: die Seitensuche — der Weg von einem Namen zu einer Id, den die Seite selbst anbietet.
+    /// <para>
+    /// Gemessen am 16.11.2026: das Suchformular jeder Seite postet <c>qs</c> an <c>/search2.php</c>;
+    /// derselbe Aufruf als GET (<c>/search2.php?qs=Weissensee</c>) liefert dieselbe Trefferliste. Ein
+    /// Treffer ist ein Link <c>/tvshow-&lt;id&gt;.html</c> mit dem Namen und dem Zeitraum daneben.
+    /// </para>
+    /// <para>
+    /// DIE SUCHE IST WEICH — sie taugt zum FINDEN, nicht zum BEWEISEN. Gemessen: <c>Pagan Peak</c>
+    /// liefert „Twin Peaks“ und „Peaky Blinders“, also Treffer, die kein Wort mit der Frage teilen.
+    /// Deshalb wird ihr Ergebnis im Auflöser durch denselben engen Vergleich geschickt wie die
+    /// Serienliste; „kein Treffer in der Suche“ heißt hier nichts und wird dort nicht als Beweis
+    /// genommen.
+    /// </para>
+    /// </summary>
+    /// <param name="query">Der Suchbegriff — in der Praxis der Show-Name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Id → Name ohne den Zeitraum; leer, wenn die Seite nichts findet.</returns>
+    public async Task<IReadOnlyDictionary<int, string>> SearchShowsAsync(
+        string query, CancellationToken cancellationToken = default)
+    {
+        var html = await GetStringAsync(
+            BaseUrl + "/search2.php?qs=" + Uri.EscapeDataString(query ?? string.Empty), null, cancellationToken)
+            .ConfigureAwait(false);
+        return ParseShowSearch(html);
+    }
+
+    /// <summary>
+    /// F-M516: parst eine Trefferliste der Seitensuche. Der Zeitraum in Klammern wird abgeschnitten,
+    /// sonst fände der enge Vergleich den Namen nie wieder (`Weissensee (2010-2026)`).
+    /// </summary>
+    /// <param name="html">Die Seite.</param>
+    /// <returns>Id → Name; leer bei „No results found“ oder einer unparsbaren Seite.</returns>
+    public static IReadOnlyDictionary<int, string> ParseShowSearch(string html)
+    {
+        var result = new Dictionary<int, string>();
+        if (string.IsNullOrEmpty(html))
+        {
+            return result;
+        }
+
+        foreach (Match m in SearchHit.Matches(html))
+        {
+            if (!int.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+            {
+                continue;
+            }
+
+            var name = System.Net.WebUtility.HtmlDecode(TagStripper.Replace(m.Groups[2].Value, string.Empty)).Trim();
+            name = YearRangeSuffix.Replace(name, string.Empty).Trim();
+            if (name.Length > 0)
+            {
+                result[id] = name;
+            }
         }
 
         return result;
@@ -847,9 +944,9 @@ public sealed class TvSubtitlesClient
             parts.Add(extra.Trim());
         }
 
-        // Always last, so the line ends with who wrote it — and never absent, which is also why the
-        // "no id at all" refusal below stays: an empty id list would leave a comment that names only us.
-        parts.Add(ClientTag);
+        // Operator order 17.11.2026: "Bitte nur noch imdb tmdb" — the comment carries the ids and
+        // nothing else. The client tag is gone from here; the "no id at all" refusal below stays,
+        // because an empty comment would leave the field blank with nothing to show for it.
         return string.Join(" / ", parts);
     }
 
@@ -986,6 +1083,13 @@ public sealed class TvSubtitlesClient
     /// to check first — "Before adding new TV-Show please check if it already exist" — so a caller
     /// resolves the name through <see cref="ResolveShow"/> before it gets here.
     /// <para>
+    /// F-M516 (am 16.11.2026 am echten <c>/add-tvshow.php</c> abgelesen): die Feldliste ist
+    /// <c>name</c>, <c>year_s</c> (maxlength 4), <c>seasons</c> (maxlength 2), <c>go</c> — in dieser
+    /// Reihenfolge, mehr Felder hat das Formular nicht (kein Kommentar, keine Kennung, kein Captcha).
+    /// Der Absende-Knopf trägt <b>keinen</b> Namen und geht deshalb nicht mit; gesendet wird
+    /// <c>multipart/form-data</c>, weil das Formular genau das als <c>enctype</c> angibt.
+    /// </para>
+    /// <para>
     /// F-M501: die Staffelzahl ist auf <see cref="MaxSeason"/> (1–22) begrenzt, weil die Seite genau so
     /// viele kennt — ihr Auswahlfeld bietet 1..22. Die frühere Grenze 1..100 war unsere eigene Prüfung
     /// und liess einen Wert durch, den das Formular stillschweigend auf seinen letzten Eintrag zieht:
@@ -1031,6 +1135,102 @@ public sealed class TvSubtitlesClient
     }
 
     /// <summary>
+    /// F-M516: steht in dieser Seite die Bestätigung der Anlage? Gemessen am 16.11.2026 lautet sie
+    /// `<c>&lt;div class="subtitle2"&gt;&lt;b&gt;TV-Show has been added. Thank you.&lt;/b&gt;&lt;/div&gt;</c>`;
+    /// das Formular selbst steht auf derselben Seite, die Meldung ist also das einzige Kennzeichen.
+    /// </summary>
+    /// <param name="html">Die Antwort der Seite (oder die Seite hinter der Weiterleitung).</param>
+    /// <returns>True, wenn die Seite die Anlage bestätigt.</returns>
+    public static bool AddShowConfirmed(string? html) =>
+        !string.IsNullOrEmpty(html)
+        && html.Contains(AddShowThanksText, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// F-M516: was die Antwort auf einen Anlege-POST bedeutet — und was sie NICHT bedeutet.
+    /// <para>
+    /// Belegt ist genau ein Fall: <b>Erfolg</b> = <c>HTTP 302</c> mit leerem Rumpf und
+    /// <c>Location: /add-tvshow.php?done=yes</c> (dort steht dann „TV-Show has been added. Thank you.“).
+    /// Folgt der Aufrufer der Weiterleitung, kommt dasselbe Kennzeichen als Text an — beide Wege werden
+    /// erkannt (Ziel-URL oder Text).
+    /// </para>
+    /// <para>
+    /// NICHT belegt ist die Antwort auf „gibt es schon“ und auf eine Ablehnung: dafür hätte man ein
+    /// zweites Mal senden müssen, und eine Anlage ist auf dieser Seite nicht rückholbar. Deshalb wird
+    /// hier NUR der Erfolg behauptet. Alles andere ist <see cref="TvstAddShowOutcome.Unclear"/> oder —
+    /// bei einem Fehlerstatus — <see cref="TvstAddShowOutcome.Refused"/>; die Wahrheit über das
+    /// Ergebnis liefert die Serie selbst (Suche/Liste), nie der Wortlaut.
+    /// </para>
+    /// </summary>
+    /// <param name="status">Der HTTP-Status, null wenn nichts gesendet wurde.</param>
+    /// <param name="location">Der <c>Location</c>-Kopf, falls die Weiterleitung nicht verfolgt wurde.</param>
+    /// <param name="finalUrl">Die Adresse, bei der die Antwort tatsächlich landete.</param>
+    /// <param name="text">Der Text der Antwort, Tags entfernt.</param>
+    /// <returns>Einer der Werte aus <see cref="TvstAddShowOutcome"/>.</returns>
+    public static string ClassifyAddShow(int? status, string? location, string? finalUrl, string? text)
+    {
+        if (status is null)
+        {
+            return TvstAddShowOutcome.Unclear;
+        }
+
+        if (status < 400)
+        {
+            var created = Mentions(location, AddShowDoneMarker)
+                || Mentions(finalUrl, AddShowDoneMarker)
+                || AddShowConfirmed(text);
+            return created ? TvstAddShowOutcome.Created : TvstAddShowOutcome.Unclear;
+        }
+
+        return TvstAddShowOutcome.Refused;
+    }
+
+    private static bool Mentions(string? value, string marker) =>
+        !string.IsNullOrEmpty(value) && value.Contains(marker, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// F-M516: sends the "create show" form — the bytes are the form's own fields, in the form's own
+    /// order (<c>name</c>, <c>year_s</c>, <c>seasons</c>, <c>go</c>), as <c>multipart/form-data</c>,
+    /// because that is the <c>enctype</c> the form declares. A dry run builds the same body and sends
+    /// nothing.
+    /// <para>
+    /// Die Antwort wird <b>klassifiziert</b>, nicht geglaubt: siehe <see cref="ClassifyAddShow"/>. Eine
+    /// Id steht in keiner Antwort — sie kommt aus <see cref="SearchShowsAsync"/> oder
+    /// <see cref="ShowsAsync"/>, und beides entscheidet der Aufrufer.
+    /// </para>
+    /// </summary>
+    /// <param name="addShow">The payload from <see cref="BuildAddShow"/>.</param>
+    /// <param name="dryRun">True (default) builds the body and sends nothing.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What the site answered, and what that answer means.</returns>
+    public async Task<TvSubtitlesAddShowResult> AddShowAsync(
+        TvSubtitlesAddShow addShow, bool dryRun = true, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(addShow);
+        var (body, boundary) = BuildFieldBody(addShow.Fields);
+        if (dryRun)
+        {
+            return new TvSubtitlesAddShowResult(
+                false, null, null, null, null, body.Length, TvstAddShowOutcome.DryRun);
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, AddShowPostUrl);
+        request.Headers.Referrer = new Uri(AddShowFormUrl);
+        request.Content = new ByteArrayContent(body);
+        request.Content.Headers.ContentType =
+            System.Net.Http.Headers.MediaTypeHeaderValue.Parse("multipart/form-data; boundary=" + boundary);
+
+        using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var plain = TagStripper.Replace(Regex.Replace(text, "\\s+", " ", RegexOptions.CultureInvariant), " ").Trim();
+        var status = (int)response.StatusCode;
+        var location = response.Headers.Location?.ToString();
+        var finalUrl = response.RequestMessage?.RequestUri?.ToString();
+        return new TvSubtitlesAddShowResult(
+            true, status, location, finalUrl, plain, body.Length,
+            ClassifyAddShow(status, location, finalUrl, plain));
+    }
+
+    /// <summary>
     /// F-M480: sends the upload. Without <paramref name="dryRun"/> false nothing leaves the process —
     /// the body is built either way, so a dry run measures exactly what a real one would send.
     /// </summary>
@@ -1047,23 +1247,7 @@ public sealed class TvSubtitlesClient
     }
 
     /// <summary>
-    /// F-M480: sends the "create show" form. Dry run is the default, exactly like the upload.
-    /// </summary>
-    /// <param name="addShow">The payload from <see cref="BuildAddShow"/>.</param>
-    /// <param name="dryRun">True (default) builds the body and sends nothing.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The result, including the byte count and the response text.</returns>
-    public Task<TvSubtitlesUploadResult> AddShowAsync(
-        TvSubtitlesAddShow addShow, bool dryRun = true, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(addShow);
-        var (body, boundary) = BuildFieldBody(addShow.Fields);
-        return SendAsync(
-            BaseUrl + "/add-tvshow1.php", BaseUrl + "/add-tvshow.php", body, boundary, dryRun, cancellationToken);
-    }
-
-    /// <summary>
-    /// F-M480: builds the multipart body of an upload and hands back the boundary with it. Exposed so a
+    /// F-M516: builds the multipart body of an upload and hands back the boundary with it. Exposed so a
     /// suite can assert the exact bytes without a network call.
     /// </summary>
     /// <param name="upload">The payload.</param>
@@ -1181,6 +1365,37 @@ public sealed record TvSubtitlesUpload(
 /// </summary>
 /// <param name="Fields">The form fields (name, year_s, seasons, go).</param>
 public sealed record TvSubtitlesAddShow(IReadOnlyList<KeyValuePair<string, string>> Fields);
+
+/// <summary>
+/// F-M516: was die Seite auf eine Anlage geantwortet hat — roh und gedeutet.
+/// </summary>
+/// <param name="Sent">False im Trockenlauf; dann ist nichts hinausgegangen.</param>
+/// <param name="Status">Der HTTP-Status, null im Trockenlauf.</param>
+/// <param name="Location">Der <c>Location</c>-Kopf (die gemessene Erfolgsantwort ist eine 302 dorthin).</param>
+/// <param name="FinalUrl">Die Adresse, bei der die Antwort landete — bei verfolgter Weiterleitung die Erfolgsseite.</param>
+/// <param name="Response">Der Antworttext ohne Tags, null im Trockenlauf.</param>
+/// <param name="BodyBytes">Die Größe des Rumpfes, der gesendet wurde (oder würde).</param>
+/// <param name="Outcome">Einer der Werte aus <see cref="TvstAddShowOutcome"/>.</param>
+public sealed record TvSubtitlesAddShowResult(
+    bool Sent, int? Status, string? Location, string? FinalUrl, string? Response, int BodyBytes, string Outcome);
+
+/// <summary>
+/// F-M516: die drei Ausgänge einer Anlage, die die Seite belegen kann — mehr behauptet der Client nicht.
+/// </summary>
+public static class TvstAddShowOutcome
+{
+    /// <summary>Die Seite hat die Anlage bestätigt (302 auf <c>?done=yes</c> bzw. deren Text).</summary>
+    public const string Created = "created";
+
+    /// <summary>Die Seite hat mit einem Fehlerstatus geantwortet — angelegt ist damit nichts belegt.</summary>
+    public const string Refused = "refused";
+
+    /// <summary>Kein Beleg in der Antwort: weder bestätigt noch abgelehnt. Die Serie entscheidet, nicht der Text.</summary>
+    public const string Unclear = "unclear";
+
+    /// <summary>Der Trockenlauf: der Rumpf wurde gebaut, gesendet wurde nichts.</summary>
+    public const string DryRun = "dry-run";
+}
 
 /// <summary>
 /// F-M480: what an upload did — or what it would have sent, in a dry run.

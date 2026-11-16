@@ -33,6 +33,11 @@ public static class Provenance
     public const string TvSubtitles = "tvsubtitles";
 
     /// <summary>
+    /// F-M507: the value written for moviesubtitles.org — the third source, films only.
+    /// </summary>
+    public const string MovieSubtitles = "moviesubtitles";
+
+    /// <summary>
     /// F-M486: the store value for a source.
     /// </summary>
     /// <param name="provider">The source.</param>
@@ -40,6 +45,11 @@ public static class Provenance
     public static string Name(SubtitleProvider provider) => provider switch
     {
         SubtitleProvider.TvSubtitles => TvSubtitles,
+        SubtitleProvider.MovieSubtitles => MovieSubtitles,
+
+        // SubDL ist der Rückfall und war der erste Wert im Store — ein unbekannter Anbieter wird
+        // deshalb NICHT auf ihn abgebildet, sondern bleibt bei seinem Namen. Der Rückfall steht hier
+        // nur für den einen Aufrufer, der SubDL meint, ohne ihn zu nennen (der Name selbst).
         _ => Subdl,
     };
 
@@ -58,6 +68,11 @@ public static class Provenance
         if (string.Equals(origin.Trim(), TvSubtitles, StringComparison.OrdinalIgnoreCase))
         {
             return SubtitleProvider.TvSubtitles;
+        }
+
+        if (string.Equals(origin.Trim(), MovieSubtitles, StringComparison.OrdinalIgnoreCase))
+        {
+            return SubtitleProvider.MovieSubtitles;
         }
 
         return string.Equals(origin.Trim(), Subdl, StringComparison.OrdinalIgnoreCase)

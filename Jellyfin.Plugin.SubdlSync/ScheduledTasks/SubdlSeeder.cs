@@ -653,7 +653,10 @@ public sealed class SubdlSeeder
         {
             // F-M499: nur Quellen, die auch wirklich antreten — Schalter UND Konfiguration (F-M497).
             // Eine Quelle, die die Kette ohnehin ueberspringt, darf die Queue nicht fuellen.
-            foreach (var quelle in UploadSources(config))
+            // F-M509/F-M512: und nur die Adresse der Familie, die diese Medienart fuehrt — die Art
+            // kommt aus dem STORE, nicht mehr allein vom Jellyfin-Typ (siehe MediaKindFor).
+            bool? isSeries = MediaKindFor(item, mediaPath);
+            foreach (var quelle in UploadSources(config, isSeries))
             {
                 if (UploadTodoFor(item, mediaPath, config, quelle))
                 {
@@ -670,16 +673,87 @@ public sealed class SubdlSeeder
     }
 
     /// <summary>
+    /// F-M512 (Nutzerentscheidung 15.11.2026: „Ja den typ augrund tmdb bestimmen"): die Medienart für
+    /// die Frage, WELCHE Adresse der tvst-Familie zuständig ist — der STORE zuerst, Jellyfins Typ nur
+    /// als Rückfall.
+    /// <para>
+    /// WARUM DER STORE DIE BESSERE QUELLE IST: die Auflösung der Pipelines überschreibt Jellyfins Typ
+    /// (Dateiname, dann TMDb) und schreibt das Ergebnis über
+    /// <c>ContentHashRegistry.PatchMediaMetadata</c> in die Medienzeile — der Einreiher las bisher nur
+    /// das Item und sah die Korrektur nie. Gemessen 15.11.2026: Jellyfin führt die Folge als Film, TMDb
+    /// sagt Serie → nur die Filmadresse wurde erwogen, eine offene tvst-Quelle bekam das Item nie;
+    /// umgekehrt wurde eine nie erfüllbare Adresse in jedem Scan neu eingereiht (No-op-Läufe).
+    /// </para>
+    /// <para>
+    /// DER ZUGRIFF BLEIBT BILLIG: <see cref="Registry.ContentHashRegistry.MediaKindIsSeries"/> ist EINE
+    /// Abfrage über den Primärschlüssel je Item, ohne Netzaufruf und ohne TMDb-Request; der Medien-Hash
+    /// kommt aus demselben OSHash-Cache, den der Einreiher in <see cref="UploadTodoFor"/> ohnehin
+    /// fragt. Was die Zeile nicht belegt, belegt sie nicht — dann antwortet der Store <c>null</c>.
+    /// </para>
+    /// <para>
+    /// UND DIE ZUSAGE BLEIBT: ist die Art weder im Store belegt noch am Item ablesbar, gibt diese
+    /// Methode <c>null</c> zurück, und <see cref="UploadSources"/> lässt dann BEIDE Adressen stehen —
+    /// „lieber ein Item zu viel" (F-M499/F-M509).
+    /// </para>
+    /// </summary>
+    /// <param name="item">Jellyfin-Item, die Rückfall-Quelle.</param>
+    /// <param name="mediaPath">Pfad der Mediendatei, über den OSHash der Schlüssel der Medienzeile.</param>
+    /// <returns>Wahr für eine Serie, falsch für einen Film, null wenn beides nichts sagt.</returns>
+    private static bool? MediaKindFor(BaseItem item, string mediaPath)
+    {
+        var stored = StoredMediaKind(mediaPath);
+        if (stored.HasValue)
+        {
+            return stored;
+        }
+
+        return item is Episode ? true : item is Movie ? false : null;
+    }
+
+    /// <summary>
+    /// F-M512: die Medienzeile als Auskunft über die Art, ohne Netz und ohne Dateiinhalt.
+    /// <para>
+    /// Ein Fehler hier darf den Scan nicht anhalten und keine Art behaupten: dann gilt „der Store sagt
+    /// nichts", und <see cref="MediaKindFor"/> fällt auf Jellyfins Typ zurück.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaPath">Pfad der Mediendatei.</param>
+    /// <returns>Wahr/falsch laut Store, null wenn der Store nichts belegt.</returns>
+    private static bool? StoredMediaKind(string mediaPath)
+    {
+        try
+        {
+            var registry = new Registry.ContentHashRegistry(Plugin.Instance!.SharedDbContext);
+            return registry.MediaKindIsSeries(registry.GetMediaHash(mediaPath));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// F-M499: die Quellen, die im Upload wirklich antreten — dieselbe Doppelfrage, die die Kette vor
     /// dem Start jeder Quelle stellt (<see cref="Configuration.PluginConfiguration.IsUploadEnabled"/>
     /// und <see cref="Configuration.PluginConfiguration.IsConfiguredForUpload"/>), hier fuer die Queue.
+    /// <para>
+    /// F-M509/F-M512: die Medienart wird mitgefragt — eine Serie geht an tvsubtitles.net, ein Film an
+    /// moviesubtitles.org. Eine Queue, die die fremde Adresse mitzaehlt, reiht dieselbe Datei in jedem
+    /// Lauf wieder ein, obwohl diese Adresse sie nie bekommen kann. Die Art kommt aus dem Store, sonst
+    /// von Jellyfin (<see cref="MediaKindFor"/>); ist sie nirgends belegt, bleiben beide Adressen
+    /// stehen.
+    /// </para>
     /// </summary>
     /// <param name="config">Configuration to read the two switches from.</param>
+    /// <param name="isSeries">Wahr für eine Serie, falsch für einen Film, null wenn nicht ablesbar.</param>
     /// <returns>The sources that may take part in this upload direction.</returns>
-    private static List<Configuration.SubtitleProvider> UploadSources(Configuration.PluginConfiguration config)
+    private static List<Configuration.SubtitleProvider> UploadSources(
+        Configuration.PluginConfiguration config, bool? isSeries = null)
     {
         var quellen = new List<Configuration.SubtitleProvider>();
-        foreach (var quelle in Enum.GetValues<Configuration.SubtitleProvider>())
+        foreach (var quelle in Enum.GetValues<Configuration.SubtitleProvider>()
+                     .Where(Api.Endpoints.SubtitleEndpointCatalog.HasUploadPath)
+                     .Where(quelle => isSeries is not { } art || Api.Endpoints.SourceOrder.AppliesTo(quelle, art)))
         {
             if (config.IsUploadEnabled(quelle) && config.IsConfiguredForUpload(quelle))
             {

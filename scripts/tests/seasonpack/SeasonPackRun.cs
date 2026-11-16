@@ -348,6 +348,8 @@ internal static class Program
             "F-M430: a bracketed group is read");
         Check(SeasonPack.ReleaseGroup("Unicorn.Academy.S03E01.1080p.WEB.h264-DOLORES[EZTVx.to]") == "DOLORES",
             "F-M430: a site tag behind the group does not hide it");
+        Check(SeasonPack.ReleaseGroup("The Middle.S01E05.MULTI.1080p.WEB-DL.H265-FTMVHD") == "FTMVHD",
+            "F-M505: the group is sent to tvst, not the file name — the name is what the site truncated");
         Check(SeasonPack.ReleaseGroup("A.Bona.Fide.Killer.S01E12.(THENKIRI.COM)") == null,
             "F-M430: a long site watermark is not a group");
         Check(SeasonPack.ReleaseGroup("Toy.Story.4.2019.1080p.BluRay.x264-[YTS.LT]") == "YTS"
@@ -364,6 +366,14 @@ internal static class Program
             "F-M430: an episode title behind an episode tag stays null — nothing is invented");
         Check(SeasonPack.ReleaseGroup(null) == null && SeasonPack.ReleaseGroup("") == null,
             "no name, no group");
+
+        // F-M505 (measured 15.11.2026 on tvsubtitles.net, first Middle season, 193 entries read): the
+        // Release column of the page carries the GROUP — 2HD (28x), REWARD (24x), FQM (14x), FEVER,
+        // POW4, CTU, LOL, DIMENSION, 91 empty, not one entry with a dot. Our uploads carried the media
+        // file name instead, and the page cut it at the dash: "The Middle.S01E21.MULTI.1080p.WEB-DL"
+        // stood there and the group (FTMVHD) was gone. This is the real library name of that episode.
+        Check(SeasonPack.ReleaseGroup("The Middle.S01E01.MULTI.1080p.WEB-DL.H265-FTMVHD") == "FTMVHD",
+            "F-M505: the group is read off the real library name (…WEB-DL.H265-FTMVHD → FTMVHD) — the page's release column carries the group, not the file name");
 
         Check(SeasonPack.PackRelease(new[] { "Reacher.3x04.1080p.WEB" }, "Reacher", "tt9288030", 3, "EN", false)
               == "Reacher.S03.1080p.WEB", "1x05 style markers reduce to the season too");
@@ -419,6 +429,25 @@ internal static class Program
             "the pack takes its id from mySubtitles and keeps the name only as the last resort");
 
         var pipeline = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+
+        // F-M505 (operator 15.11.2026: "Release on tvst is not perfect"): the tvst ticket carries the
+        // GROUP, never the media file name. The page cuts the release at the dash, so a file name
+        // arrives there as "The Middle.S01E21.MULTI.1080p.WEB-DL" and the group is lost; an empty
+        // field is allowed and is the majority on the page, hence the `?? string.Empty`. Bound as
+        // source text, so a later edit cannot quietly put the file name back.
+        {
+            int ticketAt = pipeline.IndexOf("var ticket = new Api.Endpoints.UploadTicket(", StringComparison.Ordinal);
+            int ticketEnd = ticketAt < 0
+                ? -1
+                : pipeline.IndexOf("TvstShowId: show.ShowId);", ticketAt, StringComparison.Ordinal);
+            string ticket = ticketAt < 0 || ticketEnd < 0
+                ? string.Empty
+                : pipeline[ticketAt..(ticketEnd + "TvstShowId: show.ShowId);".Length)];
+            Check(ticket.Length > 0
+                  && ticket.Contains("SeasonPack.ReleaseGroup(releaseName) ?? string.Empty", StringComparison.Ordinal)
+                  && !ticket.Contains("GetFileNameWithoutExtension", StringComparison.Ordinal),
+                "F-M505: the tvst ticket's release field is the GROUP (`SeasonPack.ReleaseGroup(releaseName) ?? string.Empty`) and never the media file name — the page cuts a name at the dash (\"The Middle.S01E21.MULTI.1080p.WEB-DL\") and the group would be lost, an empty field being allowed and the majority on the page");
+        }
         Check(pipeline.Contains("&& !cand.IsLoose && !cand.Forced", StringComparison.Ordinal), "no pack for a loose sidecar or a forced track");
         Check(pipeline.Contains("await packCoordinator.FlushAsync(runCt)", StringComparison.Ordinal), "the run closes its buffers before the summary");
         Check(pipeline.Contains("SeasonPack.IsComplete(aired, entry.Value)", StringComparison.Ordinal), "the pipeline asks the completeness rule");

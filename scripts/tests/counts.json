@@ -57,6 +57,11 @@
         "<root>"
       ]
     },
+    "moviesubtitles": {
+      "args": [
+        "<root>"
+      ]
+    },
     "endpoints": {
       "args": [
         "<root>"
@@ -263,6 +268,70 @@
     "T226": {
       "suite": "endpoints",
       "checks": 10
+    },
+    "T227": {
+      "suite": "seasonpack",
+      "checks": 2
+    },
+    "T228": {
+      "suite": "moviesubtitles",
+      "checks": 84
+    },
+    "T229": {
+      "suite": "endpoints",
+      "checks": 14
+    },
+    "T230": {
+      "suite": "endpoints",
+      "checks": 8
+    },
+    "T231": {
+      "suite": "endpoints",
+      "checks": 8
+    },
+    "T232": {
+      "suite": "moviesubtitles",
+      "checks": 9
+    },
+    "T233": {
+      "suite": "moviesubtitles",
+      "checks": 5
+    },
+    "T234": {
+      "suite": "endpoints",
+      "checks": 7
+    },
+    "T235": {
+      "suite": "moviesubtitles",
+      "checks": 15
+    },
+    "T236": {
+      "suite": "endpoints",
+      "checks": 10
+    },
+    "T237": {
+      "suite": "moviesubtitles",
+      "checks": 6
+    },
+    "T238": {
+      "suite": "tvsubtitles",
+      "checks": 15
+    },
+    "T239": {
+      "suite": "moviesubtitles",
+      "checks": 4
+    },
+    "T240": {
+      "suite": "tvsubtitles",
+      "checks": 3
+    },
+    "T241": {
+      "suite": "tvsubtitles",
+      "checks": 8
+    },
+    "T242": {
+      "suite": "endpoints",
+      "checks": 3
     }
   }
 }

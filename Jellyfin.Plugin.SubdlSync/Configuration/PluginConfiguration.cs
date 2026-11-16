@@ -146,11 +146,26 @@ public enum LogLevelMode
 /// </summary>
 public enum SubtitleProvider
 {
-    /// <summary>SubDL.com — the only source the pipelines talk to.</summary>
+    /// <summary>SubDL.com — the source with an id index, the one its own search asks.</summary>
     Subdl,
 
-    /// <summary>tvsubtitles.net — switches exist, no provider is wired in yet.</summary>
+    /// <summary>tvsubtitles.net — series only, no id index (resolved by name).</summary>
     TvSubtitles,
+
+    /// <summary>
+    /// F-M507 (Nutzerauftrag 15.11.2026: „Dritte quelle. Nur das series halt nach tv show und movies nach
+    /// moviesubtitels gehen."): moviesubtitles.org — films only, no id index, HTML pages.
+    /// <para>
+    /// Der Wert steht am ENDE, damit kein bestehender Member seine Zahl ändert (Subdl bleibt 0,
+    /// TvSubtitles 1) — dieselbe Regel wie bei <see cref="UpdateInterval"/> und <see cref="PruneMode"/>.
+    /// </para>
+    /// <para>
+    /// Die Medienart entscheidet, welche der beiden Seiten überhaupt gefragt wird: eine Serie geht an
+    /// tvsubtitles.net, ein Film an moviesubtitles.org, einander ausschließend
+    /// (<c>Api.Endpoints.SourceOrder.AppliesTo</c>). SubDL unterscheidet nicht und bleibt für beides.
+    /// </para>
+    /// </summary>
+    MovieSubtitles,
 }
 
 /// <summary>
@@ -398,6 +413,27 @@ public class PluginConfiguration : BasePluginConfiguration
     /// belongs to SubDL (F-M477).
     /// </summary>
     public bool? TvSubtitlesDownloadEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the moviesubtitles.org download switch (F-M507). Null = not decided yet, and an
+    /// undecided msub DOWNLOAD is ON — the same defaulting the second source got (F-M503: download on,
+    /// upload off). An explicitly stored false still means OFF; the default only answers while the
+    /// value was never written.
+    /// </summary>
+    public bool? MovieSubtitlesDownloadEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the moviesubtitles.org upload switch (F-M507). Null = not decided yet, and an
+    /// undecided msub UPLOAD is OFF — an upload leaves the process, so it is opt-in like every other
+    /// upload path in this plugin.
+    /// <para>
+    /// F-M508 (Etappe 2b): der Upload-Endpunkt steht, die Kette fragt ihn, wenn dieser Schalter an ist
+    /// und die Medienart ein Film ist. ER BLEIBT TROTZDEM AUS: die Sprachabbildung der Seite ist gegen
+    /// die echte Seite nicht belegt, und der Operator hat gesagt, was dann gilt („Bevor wir falsche
+    /// Sprachen hochladen, laden wir nix hoch."). Freigeben erst nach belegter Sprachabbildung.
+    /// </para>
+    /// </summary>
+    public bool? MovieSubtitlesUploadEnabled { get; set; }
 
     /// <summary>
     /// Gets or sets which download source is asked first (F-M491). Operator decision 15.11.2026:
@@ -821,6 +857,10 @@ public class PluginConfiguration : BasePluginConfiguration
     {
         SubtitleProvider.Subdl => !string.IsNullOrWhiteSpace(Username) && !string.IsNullOrWhiteSpace(Password),
         SubtitleProvider.TvSubtitles => true,
+
+        // F-M507: moviesubtitles.org nimmt keinen Zugang — wie tvsubtitles.net hat die Quelle nichts
+        // zu konfigurieren, also fehlt ihr auch nichts.
+        SubtitleProvider.MovieSubtitles => true,
         _ => false,
     };
 
@@ -838,6 +878,9 @@ public class PluginConfiguration : BasePluginConfiguration
     {
         SubtitleProvider.Subdl => !string.IsNullOrWhiteSpace(ApiKey),
         SubtitleProvider.TvSubtitles => true,
+
+        // F-M507: kein Schlüssel, kein Login — eine HTML-Seite, die jeder lesen darf.
+        SubtitleProvider.MovieSubtitles => true,
         _ => false,
     };
 
@@ -886,6 +929,10 @@ public class PluginConfiguration : BasePluginConfiguration
     {
         SubtitleProvider.Subdl => HasProvider(provider) && (SubdlDownloadEnabled ?? DownloadEnabled),
         SubtitleProvider.TvSubtitles => HasProvider(provider) && (TvSubtitlesDownloadEnabled ?? true),
+
+        // F-M507: moviesubtitles.org hat keinen Alt-Wert — wie tvst ist ein ungesetzter Download AN
+        // und ein gespeichertes false AUS.
+        SubtitleProvider.MovieSubtitles => HasProvider(provider) && (MovieSubtitlesDownloadEnabled ?? true),
         _ => false,
     };
 
@@ -914,45 +961,64 @@ public class PluginConfiguration : BasePluginConfiguration
     {
         SubtitleProvider.Subdl => HasProvider(provider) && (SubdlUploadEnabled ?? UploadEnabled),
         SubtitleProvider.TvSubtitles => HasProvider(provider) && (TvSubtitlesUploadEnabled ?? false),
+
+        // F-M507: der Upload dieser Quelle ist default AUS (F-M503-Regel: Download an, Upload aus).
+        SubtitleProvider.MovieSubtitles => HasProvider(provider) && (MovieSubtitlesUploadEnabled ?? false),
         _ => false,
     };
 
     /// <summary>
-    /// F-M478: does a provider exist for this source? SubDL is the only one wired in; tvsubtitles.net
-    /// has switches but no client, no pipeline branch and no route. The page states this instead of
-    /// offering a choice that does nothing.
+    /// F-M478 (weitergeführt von F-M485/F-M503/F-M507): does a provider exist for this source? Every
+    /// address of the tvst family has a client, a pipeline branch, a route and an endpoint pair; the
+    /// question now only answers the "is this source served at all" switch-off case and stays the one
+    /// place a caller asks it (<see cref="IsDownloadEnabled"/>, <see cref="IsUploadEnabled"/>).
     /// </summary>
-    /// <param name="provider">The subtitle source asked about.</param>
-    /// <returns>True when the source can actually be served.</returns>
-    /// <summary>
-    /// F-M491 (operator order 15.11.2026: "wir brauchen eine einstellbare Reihenfolge unter downloads
-    /// gui ... erst subdl dann tvst oder umgekehrt"): which of the two download sources is asked FIRST.
-    /// The other one stays as the fallback for a language the first could not serve.
-    /// </summary>
-    public enum DownloadSourceOrder
-    {
-        /// <summary>SubDL first, tvsubtitles.net when SubDL has nothing.</summary>
-        SubdlFirst = 0,
-
-        /// <summary>tvsubtitles.net first, SubDL when the site has nothing (the default, F-M491).</summary>
-        TvSubtitlesFirst = 1,
-    }
-
     public static bool HasProvider(SubtitleProvider provider) =>
-        provider is SubtitleProvider.Subdl or SubtitleProvider.TvSubtitles;
+        provider is SubtitleProvider.Subdl or SubtitleProvider.TvSubtitles or SubtitleProvider.MovieSubtitles;
 
     /// <summary>
     /// F-M478: the operator-facing reason a switch is inert, or null when it works. The page prints it
     /// under the switch; the worker-off note uses the same sentence so there is one wording, not two.
+    /// <para>
+    /// F-M509: die Familie steht als EINE Quelle da, mit ihren beiden Adressen und der Medienart, die
+    /// zwischen ihnen entscheidet — nicht als zwei Quellen neben SubDL. Der Upload der Film-Adresse ist
+    /// bis zur belegten Sprachabbildung gesperrt (F-M508); der Satz sagt das, statt den Schalter für
+    /// wirkungslos zu erklären.
+    /// </para>
     /// </summary>
     /// <param name="provider">The subtitle source asked about.</param>
     /// <returns>The reason, or null when the source is wired in.</returns>
     public static string? MissingProviderReason(SubtitleProvider provider) => provider switch
     {
-        SubtitleProvider.TvSubtitles => "tvsubtitles.net — eigener Abruf und eigener Upload, gesteuert von "
-            + "diesen zwei Schaltern. Staffelpacks und der HI-Pool bleiben bei SubDL.",
+        SubtitleProvider.TvSubtitles => "tvst — eine Quelle mit zwei Adressen: tvsubtitles.net für Serien, "
+            + "moviesubtitles.org für Filme. Welche fragt, entscheidet die Medienart. Staffelpacks und "
+            + "der HI-Pool bleiben bei SubDL.",
+        SubtitleProvider.MovieSubtitles => "tvst (Film-Adresse) — moviesubtitles.org für Filme. "
+            + "Download: Standard an. Upload: gesperrt, bis die Sprachabbildung belegt ist (F-M508).",
         _ => null,
     };
+    /// F-M509 (Operator-Klarstellung 15.11.2026: „Seperate into subdl and tvst. Tvst is splitted into
+    /// tvst and moviesub itself"): the configured order on FAMILY level.
+    /// <para>
+    /// TWO values, not three: SubDL and the tvst family. The family is split into two addresses —
+    /// tvsubtitles.net (series) and moviesubtitles.org (films) — and the media type from TMDb decides
+    /// which of the two is asked (<c>Api.Endpoints.SourceOrder.FamilyPage</c>). "tvst first" therefore
+    /// means tvsubtitles.net first for a series and moviesubtitles.org first for a film, SubDL after it
+    /// in both cases. A third value would be a position for an address, and the addresses are not
+    /// sources.
+    /// </para>
+    /// </summary>
+    public enum DownloadSourceOrder
+    {
+        /// <summary>SubDL first, the tvst family (its page for this media type) when SubDL has nothing.</summary>
+        SubdlFirst = 0,
+
+        /// <summary>
+        /// The tvst family first — tvsubtitles.net for a series, moviesubtitles.org for a film — and
+        /// SubDL when that page has nothing (the default, F-M491).
+        /// </summary>
+        TvSubtitlesFirst = 1,
+    }
 
     #endregion
 

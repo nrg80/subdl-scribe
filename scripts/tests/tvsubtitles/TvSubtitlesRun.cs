@@ -18,6 +18,11 @@
 //      the download page's JavaScript file name;
 //   2. the UPLOAD against the form's own limits: which inputs are refused, in which ORDER the fields
 //      go out, that the author field is absent, and that a dry run builds a body and sends nothing.
+//
+// F-M516 (16.11.2026) adds the third part: the CREATE-SHOW path. The form is compared field by field
+// against the page the site really serves, the answer is classified against the one answer that is
+// proven (302 to /add-tvshow.php?done=yes), and the show id is taken from the site's own search —
+// never from a guess and never from "highest id + 1".
 
 using System;
 using System.Collections.Generic;
@@ -29,6 +34,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.SubdlScribe.Api;
+using Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
 
 internal static class Program
 {
@@ -143,20 +149,20 @@ internal static class Program
                 .Contains("filename=\"The Middle - 2x24.gre.srt\"", StringComparison.Ordinal));
 
         // ---- 2. the comment carries the ids, the author stays out -------------------------------
-        Check("the comment names the ids and then the client that wrote it",
-            TvSubtitlesClient.Comment(1422, "tt1442464")
-                == "TMDB 1422 / IMDb tt1442464 / " + TvSubtitlesClient.ClientTag,
+        // Operator order 17.11.2026: "Bitte nur noch imdb tmdb" — no client tag in the comment.
+        Check("the comment names the two ids and nothing else",
+            TvSubtitlesClient.Comment(1422, "tt1442464") == "TMDB 1422 / IMDb tt1442464",
             "found: " + TvSubtitlesClient.Comment(1422, "tt1442464"));
         Check("the client tag carries the running version, read from the assembly",
             TvSubtitlesClient.ClientTag.StartsWith("Sub Scribe ", StringComparison.Ordinal)
             && TvSubtitlesClient.ClientTag.Length > "Sub Scribe ".Length
             && TvSubtitlesClient.ClientTag != "Sub Scribe 0.0.0.0");
-        Check("one id is enough, an unknown id stays out, the client tag never does",
-            TvSubtitlesClient.Comment(1422, null) == "TMDB 1422 / " + TvSubtitlesClient.ClientTag
-            && TvSubtitlesClient.Comment(null, "tt1442464") == "IMDb tt1442464 / " + TvSubtitlesClient.ClientTag
-            && TvSubtitlesClient.Comment(null, null) == TvSubtitlesClient.ClientTag);
-        Check("an extra text sits between the ids and the client tag",
-            TvSubtitlesClient.Comment(1422, null, "recheck") == "TMDB 1422 / recheck / " + TvSubtitlesClient.ClientTag);
+        Check("one id is enough, an unknown id stays out, no id leaves the comment empty",
+            TvSubtitlesClient.Comment(1422, null) == "TMDB 1422"
+            && TvSubtitlesClient.Comment(null, "tt1442464") == "IMDb tt1442464"
+            && TvSubtitlesClient.Comment(null, null) == string.Empty);
+        Check("an extra text follows the ids",
+            TvSubtitlesClient.Comment(1422, null, "recheck") == "TMDB 1422 / recheck");
 
         // ---- 3. the upload refuses what the form would silently swallow -------------------------
         var data = Encoding.UTF8.GetBytes("1\n00:00:01,000 --> 00:00:02,000\nhello\n");
@@ -187,7 +193,7 @@ internal static class Program
             "an absent part is the only way to keep whatever the page pre-fills");
         Check("the ids land in the comment field, the release stays its own field",
             upload.Fields.Single(f => f.Key == "comment").Value
-                == "TMDB 1422 / IMDb tt1442464 / " + TvSubtitlesClient.ClientTag
+                == "TMDB 1422 / IMDb tt1442464"
             && upload.Fields.Single(f => f.Key == "release").Value == "FEVER");
         var flags = BuildOk(data, doubleEpisode: true, hearingImpaired: true)!;
         Check("double episode and hearing-impaired are appended as \"1\" and only when set",
@@ -223,7 +229,7 @@ internal static class Program
         Check("the response text is stripped of tags and collapsed",
             real.Response == "ok" && handler.RepliedWith == 200);
 
-        // ---- 5. creating a show ----------------------------------------------------------------
+        // ---- 5. creating a show: the form, the answer, the number (F-M516) -----------------------
         var addShow = TvSubtitlesClient.BuildAddShow("Beispielserie Test", 2026, 3);
         Check("the create-show payload is name, year_s, seasons, go in that order",
             addShow.Fields.Select(f => f.Key).SequenceEqual(new[] { "name", "year_s", "seasons", "go" }));
@@ -231,6 +237,98 @@ internal static class Program
             Refused(() => TvSubtitlesClient.BuildAddShow("X", 1800, 3))
             && Refused(() => TvSubtitlesClient.BuildAddShow("X", 2026, 0))
             && Refused(() => TvSubtitlesClient.BuildAddShow(" ", 2026, 3)));
+
+        // Das echte Formular (Fixture vom 16.11.2026) — es ist multipart, und es hat genau vier Felder.
+        var addFormHtml = Fixture("add-tvshow-form.html");
+        Check("the site's create-show form is multipart and posts to /add-tvshow1.php",
+            addFormHtml.Contains("action=\"/add-tvshow1.php\"", StringComparison.Ordinal)
+            && addFormHtml.Contains("method=\"post\"", StringComparison.Ordinal)
+            && addFormHtml.Contains("enctype=\"multipart/form-data\"", StringComparison.Ordinal));
+        var formFields = FormFieldNames(addFormHtml);
+        Check("the payload carries exactly the form's fields — none invented, none missing (F-M516)",
+            formFields.SequenceEqual(addShow.Fields.Select(f => f.Key)),
+            "form: " + string.Join(",", formFields)
+            + " / payload: " + string.Join(",", addShow.Fields.Select(f => f.Key)));
+        Check("the form's go is a hidden 1 and the send button has no name of its own (F-M516)",
+            addFormHtml.Contains("<input name=\"go\" type=\"hidden\" value=\"1\">", StringComparison.Ordinal)
+            && addShow.Fields.Single(f => f.Key == "go").Value == "1"
+            && System.Text.RegularExpressions.Regex.IsMatch(addFormHtml, "<input type=\"submit\" value=\"Send\""));
+
+        // Die Antwort der Seite — belegt ist genau der Erfolg, und der ist eine Weiterleitung.
+        var doneHtml = Fixture("add-tvshow-done.html");
+        Check("the site's confirmation is recognised on its own page, and not on the plain form (F-M516)",
+            TvSubtitlesClient.AddShowConfirmed(doneHtml)
+            && !TvSubtitlesClient.AddShowConfirmed(addFormHtml));
+        Check("the measured success answer (302 to ?done=yes) is read as created (F-M516)",
+            TvSubtitlesClient.ClassifyAddShow(
+                302, "https://www.tvsubtitles.net/add-tvshow.php?done=yes", null, string.Empty)
+                == TvstAddShowOutcome.Created
+            && TvSubtitlesClient.ClassifyAddShow(
+                200, null, "https://www.tvsubtitles.net/add-tvshow.php?done=yes", "TV-Show has been added. Thank you.")
+                == TvstAddShowOutcome.Created,
+            "the redirect target and the text behind it are the same marker");
+        Check("an answer without the site's own marker is NEVER reported as created (F-M516)",
+            TvSubtitlesClient.ClassifyAddShow(
+                200, null, "https://www.tvsubtitles.net/add-tvshow.php",
+                "Before adding new TV-Show please check if it already exist")
+                == TvstAddShowOutcome.Unclear
+            && TvSubtitlesClient.ClassifyAddShow(200, null, null, string.Empty) == TvstAddShowOutcome.Unclear
+            && TvSubtitlesClient.ClassifyAddShow(302, "https://www.tvsubtitles.net/add-tvshow.php", null, string.Empty)
+                == TvstAddShowOutcome.Unclear
+            && TvSubtitlesClient.ClassifyAddShow(null, null, null, null) == TvstAddShowOutcome.Unclear);
+        Check("a server error is a refusal, not a creation (F-M516)",
+            TvSubtitlesClient.ClassifyAddShow(500, null, null, string.Empty) == TvstAddShowOutcome.Refused
+            && TvSubtitlesClient.ClassifyAddShow(403, "/x", null, "denied") == TvstAddShowOutcome.Refused);
+
+        // Der Draht: derselbe Rumpf im Trockenlauf, gesendet nur auf dryRun:false.
+        var addHandler = new CountingHandler();
+        var addClient = new TvSubtitlesClient(new HttpClient(addHandler));
+        var addDry = await addClient.AddShowAsync(addShow).ConfigureAwait(false);
+        Check("a dry run of the creation builds the body, says so, and sends nothing",
+            !addDry.Sent && addDry.Status is null && addDry.Outcome == TvstAddShowOutcome.DryRun
+            && addHandler.Requests == 0 && addDry.BodyBytes > 0);
+        addHandler.ReplyStatus = HttpStatusCode.Found;
+        addHandler.ReplyBody = string.Empty;
+        addHandler.ReplyLocation = "https://www.tvsubtitles.net/add-tvshow.php?done=yes";
+        var addReal = await addClient.AddShowAsync(addShow, dryRun: false).ConfigureAwait(false);
+        Check("the real call posts multipart to /add-tvshow1.php with the form as referer (F-M516)",
+            addReal.Sent && addHandler.Requests == 1
+            && addHandler.LastUrl == "https://www.tvsubtitles.net/add-tvshow1.php"
+            && addHandler.LastReferer == "https://www.tvsubtitles.net/add-tvshow.php"
+            && addHandler.LastContentType!.StartsWith("multipart/form-data; boundary=", StringComparison.Ordinal),
+            "url=" + addHandler.LastUrl + " ctype=" + addHandler.LastContentType);
+        Check("the creation's body is the form's four parts and carries no file",
+            addHandler.LastBodyText.Split("Content-Disposition: form-data").Length - 1 == 4
+            && addShow.Fields.All(f => addHandler.LastBodyText.Contains(
+                "name=\"" + f.Key + "\"\r\n\r\n" + f.Value, StringComparison.Ordinal))
+            && !addHandler.LastBodyText.Contains("filename=", StringComparison.Ordinal)
+            && addReal.BodyBytes == addDry.BodyBytes,
+            "parts=" + (addHandler.LastBodyText.Split("Content-Disposition: form-data").Length - 1));
+        Check("the creation reads its own answer as created and keeps the redirect target (F-M516)",
+            addReal.Outcome == TvstAddShowOutcome.Created && addReal.Status == 302
+            && addReal.Location!.Contains("done=yes", StringComparison.Ordinal));
+
+        // Die Nummer nach der Anlage: die Seitensuche (weich!) und die Entscheidung darüber.
+        var searchHits = TvSubtitlesClient.ParseShowSearch(Fixture("search-show.html"));
+        Check("the site's search yields the id and the bare name, without the year range (F-M516)",
+            searchHits.Count == 1 && searchHits.ContainsKey(4242) && searchHits[4242] == "Weissensee"
+            && TvSubtitlesClient.ResolveShow(searchHits, "weissensee") == 4242,
+            "found: " + string.Join(" | ", searchHits.Select(h => h.Key + "=" + h.Value)));
+        Check("\"No results found\" yields no hit at all (F-M516)",
+            TvSubtitlesClient.ParseShowSearch(Fixture("search-no-results.html")).Count == 0);
+        var softHits = TvSubtitlesClient.ParseShowSearch(Fixture("search-soft.html"));
+        Check("the site's search is soft — a lookalike hit is not a match (F-M516)",
+            softHits.Count == 2
+            && TvSubtitlesClient.ResolveShow(softHits, "Pagan Peak") is null,
+            "found: " + string.Join(" | ", softHits.Select(h => h.Value)));
+        Check("the answer alone decides nothing: the show does (F-M516)",
+            TvstShowResolver.SettleStatus(TvstAddShowOutcome.Created, 4242) == TvstShowStatus.Created
+            && TvstShowResolver.SettleStatus(TvstAddShowOutcome.Unclear, 4242) == TvstShowStatus.Existed
+            && TvstShowResolver.SettleStatus(TvstAddShowOutcome.Refused, 4242) == TvstShowStatus.Existed
+            && TvstShowResolver.SettleStatus(TvstAddShowOutcome.Created, null) == TvstShowStatus.CreatedIdUnknown
+            && TvstShowResolver.SettleStatus(TvstAddShowOutcome.Refused, null) == TvstShowStatus.Refused
+            && TvstShowResolver.SettleStatus(TvstAddShowOutcome.Unclear, null) == TvstShowStatus.Unclear,
+            "created+id, unclear+id, created without id, refused without id are four different answers");
 
         // ---- 6. the parsers against the pages the site served -----------------------------------
         var addHtml = Fixture("add-tvshow-select.html");
@@ -281,6 +379,104 @@ internal static class Program
             && !TvSubtitlesClient.IsZip(Encoding.UTF8.GetBytes("<html><script>var s1='files/x.zip';</script></html>"))
             && !TvSubtitlesClient.IsZip(Array.Empty<byte>()));
 
+        // ---- 6b. F-M517: die Seriennummer geht AUCH OHNE Medien-Hash in die Pfad-Zeile ----------
+        // Der Serienfall hat DASSELBE Loch wie die Filmnummer: `TvstShowResolver.Persist` kehrte bei
+        // fehlendem Medien-Hash stumm zurück, obwohl die Medienzeile existiert und ihren Pfad trägt.
+        // Der gemessene Anlass (16.11.2026, jf-test) war eine Datei, deren Pfad ein Symlink ohne Ziel
+        // ist — `GetMediaHash` liefert dann null.
+        const string fm517Pfad =
+            "/opt/data/jf-test/media/middle381/The Middle/Season 02/The Middle.S02E01.MULTI.1080p.WEB-DL.H265-FTMVHD.mkv";
+        const string fm517Hash = "0deccedafea83e1a";
+        string fm517Root = Path.Combine(Path.GetTempPath(), "tvst-fm517-" + Environment.ProcessId);
+        try
+        {
+            if (Directory.Exists(fm517Root))
+            {
+                Directory.Delete(fm517Root, true);
+            }
+
+            Directory.CreateDirectory(fm517Root);
+
+            // (a) Zeile vorhanden, Hash nicht: schreiben über den Pfad, Zeilenzahl unverändert.
+            var listenSeite = new CountingHandler { ReplyBody = Fixture("add-tvshow-select.html") };
+            using (var db = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(
+                Path.Combine(fm517Root, "mit-zeile"), null))
+            {
+                var reg = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(db, null, null);
+                reg.EnsureMedia(fm517Hash, jellyfinItemId: null, path: fm517Pfad);
+                int vorher = db.Media.Count();
+
+                var aufloeser = new TvstShowResolver(new TvSubtitlesClient(new HttpClient(listenSeite)), null);
+                var ohneHash = await aufloeser
+                    .ResolveForMediaAsync(
+                        reg,
+                        mediaHash: null,
+                        new TmdbSeriesInfo("The Middle", "The Middle", 2009, null),
+                        dryRun: false,
+                        CancellationToken.None,
+                        mediaPath: fm517Pfad)
+                    .ConfigureAwait(false);
+
+                int nachher = db.Media.Count();
+                Check("ohne Medien-Hash, aber mit Pfad-Zeile: die gefundene Seriennummer steht danach in der Zeile (F-M517)",
+                    ohneHash.Resolved && ohneHash.ShowId == 512 && ohneHash.Status == TvstShowStatus.Found
+                    && db.Media.FindById(fm517Hash)?.TvstShowId == "512"
+                    && reg.TvstShowIdAtPath(fm517Pfad) == "512"
+                    && nachher == vorher && vorher == 1,
+                    "id=" + (db.Media.FindById(fm517Hash)?.TvstShowId ?? "<null>")
+                    + " zeilen=" + vorher + "->" + nachher);
+
+                var zweite = await aufloeser
+                    .ResolveForMediaAsync(
+                        reg,
+                        mediaHash: null,
+                        new TmdbSeriesInfo("The Middle", "The Middle", 2009, null),
+                        dryRun: false,
+                        CancellationToken.None,
+                        mediaPath: fm517Pfad)
+                    .ConfigureAwait(false);
+                Check("die über den Pfad gespeicherte Seriennummer wird beim naechsten Mal gelesen, nicht neu gesucht (F-M517)",
+                    zweite.Status == TvstShowStatus.Stored && zweite.ShowId == 512 && listenSeite.Requests == 1,
+                    "status=" + zweite.Status + " requests=" + listenSeite.Requests);
+            }
+
+            // (b) Keine Zeile, kein Hash: nichts wird geschrieben, und der Text sagt warum.
+            var zweiteListe = new CountingHandler { ReplyBody = Fixture("add-tvshow-select.html") };
+            using (var dbLeer = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(
+                Path.Combine(fm517Root, "ohne-zeile"), null))
+            {
+                var regLeer = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(dbLeer, null, null);
+                var ohneZeile = await new TvstShowResolver(new TvSubtitlesClient(new HttpClient(zweiteListe)), null)
+                    .ResolveForMediaAsync(
+                        regLeer,
+                        mediaHash: null,
+                        new TmdbSeriesInfo("The Middle", "The Middle", 2009, null),
+                        dryRun: false,
+                        CancellationToken.None,
+                        mediaPath: "/opt/data/jf-test/media/middle381/Ohne Zeile/S01E01.mkv")
+                    .ConfigureAwait(false);
+                Check("ohne Hash UND ohne Pfad-Zeile: nichts geschrieben, die Nummer gilt nur fuer diesen Lauf (F-M517)",
+                    ohneZeile.Resolved && ohneZeile.ShowId == 512
+                    && dbLeer.Media.Count() == 0
+                    && MediaNumberNote.Of(Jellyfin.Plugin.SubdlScribe.Registry.MediaNumberWrite.None) == MediaNumberNote.NotStored,
+                    "zeilen=" + dbLeer.Media.Count());
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(fm517Root))
+                {
+                    Directory.Delete(fm517Root, true);
+                }
+            }
+            catch (IOException)
+            {
+                // Ein haengender SQLite-Handle darf die Suite nicht umbringen; das Verzeichnis liegt im Temp.
+            }
+        }
+
         // ---- 7. opt-in live run: the only part that touches the site ----------------------------
         // Not a check, a probe: it prints what the live site answers so a protocol change shows up as
         // a visible difference instead of a red suite on somebody else's bad day. Run with --live.
@@ -293,6 +489,9 @@ internal static class Program
             var liveShows = await live.ShowsAsync().ConfigureAwait(false);
             var middle = TvSubtitlesClient.ResolveShow(liveShows, "The Middle");
             Console.WriteLine($"  shows: {liveShows.Count}, The Middle -> {middle}");
+            var liveSearch = await live.SearchShowsAsync("The Middle").ConfigureAwait(false);
+            Console.WriteLine($"  search \"The Middle\": {liveSearch.Count} hit(s), narrow resolve -> "
+                + $"{TvSubtitlesClient.ResolveShow(liveSearch, "The Middle")}");
             if (middle is int showId)
             {
                 var liveSeasons = await live.SeasonsAsync(showId).ConfigureAwait(false);
@@ -339,6 +538,56 @@ internal static class Program
             }
         }
 
+        // ---- Season in the fixture, judged by what the site actually serves -----------------------
+        // Operator 17.11.2026: "Staffel ins fixture und schauen das tvst das richtige macht". The
+        // pages below are season 1 of The Middle (show 512), captured page by page on 17.11.2026 and
+        // stored byte for byte. Nothing here builds its own HTML: the parser is asked the questions a
+        // real run asks, and the release column answers the one that was wrong until F-M505 — the site
+        // prints the uploader's GROUP there, not a file name. The single entry that does carry a file
+        // name is our own upload from before that fix, and it is the reason the group is sent.
+        var seasonDir = Path.Combine(_fixtures, "season-middle-s01");
+        var seasonPage = await File.ReadAllTextAsync(Path.Combine(seasonDir, "tvshow-512-1.html")).ConfigureAwait(false);
+        var seasonEpisodes = TvSubtitlesClient.ParseEpisodePages(seasonPage);
+        Check("the captured season page lists 24 episode pages", seasonEpisodes.Count == 24, $"{seasonEpisodes.Count}");
+        Check("every listed episode page is in the fixture",
+            seasonEpisodes.All(id => File.Exists(Path.Combine(seasonDir, $"episode-{id}.html"))));
+        Check("the season page names season 1 and no other",
+            TvSubtitlesClient.ParseSeasons(seasonPage, 512).Contains(1));
+
+        var labels = new List<(int Season, int Episode)>();
+        foreach (var id in seasonEpisodes)
+        {
+            var page = await File.ReadAllTextAsync(Path.Combine(seasonDir, $"episode-{id}.html")).ConfigureAwait(false);
+            labels.Add(TvSubtitlesClient.ParseEpisodeLabel(page));
+        }
+
+        Check("each episode page names its own episode number, 1 to 24 exactly once",
+            labels.All(l => l.Season == 1)
+            && labels.Select(l => l.Episode).Distinct().Count() == 24
+            && labels.Min(l => l.Episode) == 1 && labels.Max(l => l.Episode) == 24,
+            string.Join(",", labels.Select(l => $"{l.Season}x{l.Episode}")));
+
+        // 1x05 holds ten subtitles: nine from other uploaders, one of ours.
+        var episode05 = TvSubtitlesClient.ParseEntries(
+            await File.ReadAllTextAsync(Path.Combine(seasonDir, "episode-22461.html")).ConfigureAwait(false));
+        Check("1x05 carries ten subtitle entries", episode05.Count == 10, $"{episode05.Count}");
+        Check("the release cells carry uploader groups — only our pre-F-M505 entry carries a file name",
+            episode05.Count(e => e.Release == "FEVER") == 3
+            && episode05.Count(e => e.Release == "REWARD") == 1
+            && episode05.Count(e => e.Release.Length == 0) == 5
+            && episode05.Count(e => e.Release.StartsWith("The Middle.S01E05", StringComparison.Ordinal)) == 1,
+            string.Join(" | ", episode05.Select(e => $"{e.Language}:{e.Rip}:{e.Release}")));
+        Check("the rip cells stay the site's own vocabulary",
+            episode05.Count(e => e.Rip == "HDTV") == 8
+            && episode05.Count(e => e.Rip == "WEB") == 1
+            && episode05.Count(e => e.Rip == "DVDRip") == 1,
+            string.Join(" | ", episode05.Select(e => e.Rip)));
+        Check("languages come back as the site's two-letter codes",
+            episode05.Count(e => e.Language == "fr") == 2
+            && episode05.Count(e => e.Language == "en") == 1
+            && episode05.Any(e => e.Language == "ro"),
+            string.Join(",", episode05.Select(e => e.Language)));
+
         Console.WriteLine();
         if (_failures > 0)
         {
@@ -365,6 +614,24 @@ internal static class Program
         TvSubtitlesClient.BuildUpload(
             512, 2, 24, "de", "The Middle - 2x24.srt", data, "HDTV", "FEVER",
             1422, "tt1442464", null, doubleEpisode, hearingImpaired);
+
+    /// <summary>
+    /// F-M516: die Feldnamen des Anlege-Formulars, so wie sie im echten HTML stehen — nur innerhalb des
+    /// Formulars (die Seite trägt auch die Suchleiste und eine Sprachauswahl), und ohne den
+    /// Absende-Knopf, der keinen Namen hat.
+    /// </summary>
+    /// <param name="html">Die Seite mit dem Formular.</param>
+    /// <returns>Die Feldnamen in der Reihenfolge des Formulars.</returns>
+    private static List<string> FormFieldNames(string html)
+    {
+        var start = html.IndexOf("action=\"/add-tvshow1.php\"", StringComparison.Ordinal);
+        var end = html.IndexOf("</form>", start, StringComparison.Ordinal);
+        var block = html[start..end];
+        return System.Text.RegularExpressions.Regex
+            .Matches(block, "<input[^>]*name=\"([^\"]+)\"")
+            .Select(m => m.Groups[1].Value)
+            .ToList();
+    }
 
     private static TvSubtitlesUpload? Build(
         int showId = 512,
@@ -443,6 +710,18 @@ internal static class Program
 
         public string? LastContentType { get; private set; }
 
+        /// <summary>F-M516: der Rumpf der letzten Anfrage, damit eine Pruefung die Teile zaehlen kann.</summary>
+        public string LastBodyText { get; private set; } = string.Empty;
+
+        /// <summary>F-M516: der Status, mit dem geantwortet wird (Vorgabe 200).</summary>
+        public HttpStatusCode ReplyStatus { get; set; } = HttpStatusCode.OK;
+
+        /// <summary>F-M516: der Rumpf der Antwort (Vorgabe „ok“).</summary>
+        public string ReplyBody { get; set; } = "<html><b>ok</b>\n</html>";
+
+        /// <summary>F-M516: der <c>Location</c>-Kopf, wenn die Antwort eine Weiterleitung ist.</summary>
+        public string? ReplyLocation { get; set; }
+
         public int RepliedWith { get; private set; } = 200;
 
         protected override async Task<HttpResponseMessage> SendAsync(
@@ -452,12 +731,23 @@ internal static class Program
             LastUrl = request.RequestUri?.ToString();
             LastReferer = request.Headers.Referrer?.ToString();
             LastContentType = request.Content?.Headers.ContentType?.ToString();
-            await Task.Yield();
-            RepliedWith = 200;
-            return new HttpResponseMessage(HttpStatusCode.OK)
+            if (request.Content is not null)
             {
-                Content = new StringContent("<html><b>ok</b>\n</html>", Encoding.UTF8, "text/html"),
+                LastBodyText = await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await Task.Yield();
+            RepliedWith = (int)ReplyStatus;
+            var response = new HttpResponseMessage(ReplyStatus)
+            {
+                Content = new StringContent(ReplyBody, Encoding.UTF8, "text/html"),
             };
+            if (ReplyLocation is not null)
+            {
+                response.Headers.Location = new Uri(ReplyLocation);
+            }
+
+            return response;
         }
     }
 }

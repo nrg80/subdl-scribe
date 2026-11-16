@@ -104,7 +104,13 @@ public sealed class SubdlDbContext : IDisposable
     // nachgezogen (EnsureMediaColumns), ein Bestand bleibt also gueltig und lesbar; der Marker wandert
     // mit, weil ein aelterer Build das Feld nicht kennt und es beim Schreiben stillschweigend
     // verlieren wuerde.
-    public const int CurrentSchemaVersion = 13;
+    // F-M507 (15.11.2026): raised to 14. Die dritte Quelle bekommt ihre eigenen Spalten — je Quelle und
+    // Richtung eine (MoviesubtitlesDownloadId, MoviesubtitlesUploadId) plus den Upload-Zeitpunkt
+    // (MoviesubtitlesUploadedAt) an `sidecars` UND `embeds`, und das MEDIA-Record die Film-Nummer der
+    // Gegenseite (`MsubMovieId`, dieselbe Ebene wie TvstShowId). Nachgezogen beim Start
+    // (EnsureReportColumns/EnsureMediaColumns), Bestandszeilen bleiben unangetastet und lesen die neuen
+    // Felder als null.
+    public const int CurrentSchemaVersion = 14;
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
@@ -125,6 +131,10 @@ public sealed class SubdlDbContext : IDisposable
         // reads the old format, it is skipped when there is nothing to import, and it never deletes
 
         _db = new SubdlSqliteContext(_dbPath);
+
+        // F-M514: the context itself warns now (a rejected row, a rebuilt tracker), so it needs the
+        // same logger the registries log to — one line, one place.
+        _db.Logger = logger;
         _db.Database.EnsureCreated();
         EnsurePacksTable();
         EnsureReportColumns();
@@ -354,7 +364,16 @@ public sealed class SubdlDbContext : IDisposable
                      ("sidecars", "SubdlUploadedAt", "ALTER TABLE sidecars ADD COLUMN SubdlUploadedAt TEXT NULL;"),
                      ("sidecars", "TvSubtitlesUploadedAt", "ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;"),
                      ("embeds", "SubdlUploadedAt", "ALTER TABLE embeds ADD COLUMN SubdlUploadedAt TEXT NULL;"),
-                     ("embeds", "TvSubtitlesUploadedAt", "ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;")
+                     ("embeds", "TvSubtitlesUploadedAt", "ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;"),
+
+                     // F-M507 (schema 14): die dritte Quelle, je Richtung ihr eigenes Kennzeichen und
+                     // ihr eigener Upload-Zeitpunkt — dieselben drei Felder in beiden Untertitel-Tabellen.
+                     ("sidecars", "MoviesubtitlesDownloadId", "ALTER TABLE sidecars ADD COLUMN MoviesubtitlesDownloadId TEXT NULL;"),
+                     ("sidecars", "MoviesubtitlesUploadId", "ALTER TABLE sidecars ADD COLUMN MoviesubtitlesUploadId TEXT NULL;"),
+                     ("sidecars", "MoviesubtitlesUploadedAt", "ALTER TABLE sidecars ADD COLUMN MoviesubtitlesUploadedAt TEXT NULL;"),
+                     ("embeds", "MoviesubtitlesDownloadId", "ALTER TABLE embeds ADD COLUMN MoviesubtitlesDownloadId TEXT NULL;"),
+                     ("embeds", "MoviesubtitlesUploadId", "ALTER TABLE embeds ADD COLUMN MoviesubtitlesUploadId TEXT NULL;"),
+                     ("embeds", "MoviesubtitlesUploadedAt", "ALTER TABLE embeds ADD COLUMN MoviesubtitlesUploadedAt TEXT NULL;")
                  })
         {
             try
@@ -424,47 +443,57 @@ public sealed class SubdlDbContext : IDisposable
     }
 
     /// <summary>
-    /// F-M501 (Schema 13): zieht <c>media.TvstShowId</c> auf einem Bestand nach, der die Spalte noch
-    /// nicht kennt.
+    /// F-M501 (Schema 13) / F-M507 (Schema 14): zieht die Spalten des MEDIUM-Records auf einem Bestand
+    /// nach, der sie noch nicht kennt — heute <c>media.TvstShowId</c> und <c>media.MsubMovieId</c>.
     /// <para>
     /// <c>EnsureCreated</c> baut ein Schema nur bei einer NEUEN Datei und ändert eine bestehende Tabelle
     /// nie — ohne diesen Schritt liefe jede Abfrage auf einem aufgerüsteten Datenbestand gegen eine
     /// Tabelle ohne die Spalte, und der Fehler landete mitten im Upload-Lauf. SQLite kennt kein
-    /// „ADD COLUMN IF NOT EXISTS“, deshalb ist jedes <c>ALTER</c> an die Spaltenliste der Tabelle
+    /// „ADD COLUMN IF NOT EXISTS", deshalb ist jedes <c>ALTER</c> an die Spaltenliste der Tabelle
     /// gebunden. Ein Fehlschlag wird protokolliert und geschluckt: eine fehlende Spalte darf den
     /// Plugin-Start nicht verhindern.
+    /// </para>
+    /// <para>
+    /// Die Liste ist eine Liste, kein Einzelfall: die nächste Spalte am Medium kostet eine Zeile hier
+    /// und keine zweite Methode.
     /// </para>
     /// </summary>
     private void EnsureMediaColumns()
     {
-        try
+        foreach (var (column, ddl) in new[]
+                 {
+                     ("TvstShowId", "ALTER TABLE media ADD COLUMN TvstShowId TEXT NULL;"),
+                     ("MsubMovieId", "ALTER TABLE media ADD COLUMN MsubMovieId TEXT NULL;"),
+                 })
         {
-            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            using (var cmd = _db.Database.GetDbConnection().CreateCommand())
+            try
             {
-                if (cmd.Connection!.State != System.Data.ConnectionState.Open)
+                var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                using (var cmd = _db.Database.GetDbConnection().CreateCommand())
                 {
-                    cmd.Connection.Open();
+                    if (cmd.Connection!.State != System.Data.ConnectionState.Open)
+                    {
+                        cmd.Connection.Open();
+                    }
+
+                    cmd.CommandText = "PRAGMA table_info(media);";
+                    using var reader = cmd.ExecuteReader();
+                    while (reader.Read())
+                    {
+                        existing.Add(reader.GetString(1));
+                    }
                 }
 
-                cmd.CommandText = "PRAGMA table_info(media);";
-                using var reader = cmd.ExecuteReader();
-                while (reader.Read())
+                if (!existing.Contains(column))
                 {
-                    existing.Add(reader.GetString(1));
+                    _db.Database.ExecuteSqlRaw(ddl);
+                    LogUtil.Normal(_logger, "[SubDL] data file: column {Column} added to media.", column);
                 }
             }
-
-            const string Name = "TvstShowId";
-            if (!existing.Contains(Name))
+            catch (Exception ex)
             {
-                _db.Database.ExecuteSqlRaw("ALTER TABLE media ADD COLUMN TvstShowId TEXT NULL;");
-                LogUtil.Normal(_logger, "[SubDL] data file: column {Column} added to media.", Name);
+                _logger?.LogWarning("[SubDL] could not add {Column} to media (continuing): {Msg}", column, ex.Message);
             }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning("[SubDL] could not add the media columns (continuing): {Msg}", ex.Message);
         }
     }
 
@@ -770,8 +799,27 @@ public sealed class SubdlDbContext : IDisposable
     /// <param name="path">Optional file path.</param>
     /// <param name="patch">Optional mutation.</param>
     /// <returns>The stored record.</returns>
-    public MediaEntity EnsureMedia(string mediaHash, string? jellyfinItemId, string? path, Action<MediaEntity>? patch = null)
+    public MediaEntity EnsureMedia(string? mediaHash, string? jellyfinItemId, string? path, Action<MediaEntity>? patch = null)
     {
+        // F-M514 (Vorfall 16.11.2026, jf-test 02:51): OHNE SCHLUESSEL GIBT ES KEINE ZEILE.
+        // Ein leerer Medien-Hash heisst "diese Datei hat noch keine Identitaet" — nicht "eine Zeile
+        // ohne Id". Genau das wurde hier aber gebaut: `new MediaEntity { Id = null }`, und Entity
+        // Framework verweigert das Anhaengen ("Unable to track an entity of type 'MediaEntity'
+        // because its primary key property 'Id' is null"). Seit EF Core 10 bleibt die abgewiesene
+        // Instanz danach als Detached im Change Tracker stehen, und JEDES spaetere SaveChanges
+        // dieses Kontexts wirft "Unexpected entry.EntityState: Detached" — der Store war damit fuer
+        // den Rest des Prozesses schreibunfaehig, und der Upload-Zyklus endete ohne Lauf. Gemessen
+        // im Log: 02:51:48.410 die WRITE-FAILED-Zeile, 02:51:48.428 die erste Detached-Warnung.
+        // Der Aufruf kommt aus `MarkSidecar` (Download-Pfad), wenn `GetMediaHash` fuer die eben
+        // geschriebene Datei noch keinen OSHash kennt. Also: nichts anlegen, nichts anhaengen, und
+        // die Zusage "kein Medium bekannt" durchreichen — der Schreiber bekommt eine leere, nicht
+        // gespeicherte Instanz (seine Kopien der Kennungen bleiben dann leer, wie ohne Zeile).
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            LogUtil.Detail(_logger, "[SubDL-DB] media row NOT written: no media hash known (F-M514)");
+            return new MediaEntity();
+        }
+
         var entity = Media.FindById(mediaHash);
         if (entity == null)
         {
@@ -895,6 +943,103 @@ public sealed class SubdlSqliteContext : DbContext
     /// </para>
     /// </summary>
     public object Gate { get; } = new();
+
+    /// <summary>
+    /// F-M514: the plugin's logger, handed down by <see cref="SubdlDbContext"/> so a store-side guard
+    /// can warn without a second wiring path. Null in a host-free probe, so every use is optional.
+    /// </summary>
+    public ILogger? Logger { get; set; }
+
+    /// <summary>
+    /// F-M514: a rejected attach must not poison this context for the rest of the process.
+    /// <para>
+    /// Entity Framework Core 10 leaves the instance behind as a <c>Detached</c> entry when it refuses
+    /// to track it (measured 16.11.2026 on 10.0.11: "Unable to track an entity … primary key property
+    /// 'Id' is null"). From then on EVERY <c>SaveChanges</c> of the same context throws
+    /// <c>ArgumentOutOfRangeException: Unexpected entry.EntityState: Detached</c> from the command
+    /// batch preparer, and nothing can be written again — that is how one unkeyed media row ended a
+    /// whole upload cycle ("cycle finished without an upload run", jf-test 02:51–03:07).
+    /// </para>
+    /// <para>
+    /// The repair drops the ghosts and re-attaches everything else from the same instances, so the
+    /// identity map and every pending change survive. It is safe to retry because the exception is
+    /// thrown while the commands are PREPARED, before any of them is executed: a failed preparation
+    /// writes nothing at all. A second failure is NOT swallowed — the retry is the last word, and a
+    /// store that still refuses stays visible.
+    /// </para>
+    /// </summary>
+    /// <inheritdoc />
+    public override int SaveChanges()
+    {
+        try
+        {
+            return base.SaveChanges();
+        }
+        catch (ArgumentOutOfRangeException ex) when (IsDetachedGhost(ex) && RestoreTracker())
+        {
+            Logger?.LogWarning(
+                "[SubDL-DB] a rejected row left a Detached entry in the change tracker; the tracker was rebuilt and the write retried ({Msg})",
+                ex.Message);
+            return base.SaveChanges();
+        }
+    }
+
+    /// <summary>F-M514: the one exception shape the tracker repair answers to.</summary>
+    /// <param name="ex">The thrown exception.</param>
+    /// <returns>True when this is the Detached-ghost failure of the command batch preparer.</returns>
+    private static bool IsDetachedGhost(Exception ex)
+        => ex.Message.Contains("Unexpected entry.EntityState", StringComparison.Ordinal);
+
+    /// <summary>
+    /// F-M514: rebuilds the change tracker without the entries Entity Framework left as
+    /// <c>Detached</c>, keeping every other row tracked with the state it had.
+    /// <para>
+    /// Setting <c>Entry.State = Detached</c> on the ghost does NOT remove it — measured against
+    /// 10.0.11: the entry stays in the tracker and the next save throws the same exception. Only
+    /// <see cref="ChangeTracker.Clear"/> drops it, which is why every tracked row is captured first
+    /// and re-attached afterwards (as <c>Added</c>/<c>Modified</c>/<c>Deleted</c>/<c>Unchanged</c>).
+    /// The row cache of the areas points at these same instances, so re-attaching them is also what
+    /// keeps "read a row, mutate it, save it" working — an untracked cached row would make a later
+    /// save silently write nothing.
+    /// </para>
+    /// </summary>
+    /// <returns>True when the tracker was rebuilt, false when even that failed.</returns>
+    private bool RestoreTracker()
+    {
+        try
+        {
+            // Detect first: a row mutated by its caller still reads "Unchanged" until change
+            // detection runs, and re-attaching it as Unchanged would discard that change.
+            ChangeTracker.DetectChanges();
+
+            var snapshot = ChangeTracker.Entries()
+                .Where(e => e.State != EntityState.Detached)
+                .Select(e => (e.Entity, e.State))
+                .ToList();
+
+            ChangeTracker.Clear();
+
+            foreach (var (entity, state) in snapshot)
+            {
+                try
+                {
+                    Entry(entity).State = state;
+                }
+                catch (Exception)
+                {
+                    // One row that cannot be attached again must not abort the repair; it is lost,
+                    // and the warning above names the cause.
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger?.LogWarning("[SubDL-DB] the change tracker could not be rebuilt ({Msg})", ex.Message);
+            return false;
+        }
+    }
 
     /// <summary>
     /// How many writes may accumulate before a batch commits on its own.
@@ -1325,11 +1470,28 @@ public sealed class SubdlSet<TEntity>
     private void UpsertCore(TEntity entity)
     {
         var key = _keyText(entity);
+
+        // F-M514: OHNE SCHLUESSEL GIBT ES KEINE ZEILE — und ein Schreibversuch darf den Store nicht
+        // vergiften. Eine Zeile ohne Geschäftsschlüssel kann Entity Framework nicht verfolgen; seit
+        // EF Core 10 bleibt sie danach als Detached im Change Tracker stehen, und JEDES spätere
+        // SaveChanges dieses Kontexts wirft „Unexpected entry.EntityState: Detached". Deshalb wird
+        // sie hier gar nicht erst angehängt: warnen, nicht schreiben. Die Regel gilt für JEDE Area
+        // und damit für jeden Worker, weil sie im gemeinsamen Set steht, nicht am Aufrufer.
+        if (string.IsNullOrEmpty(key))
+        {
+            _db.Logger?.LogWarning(
+                "[SubDL-DB] {Area}: a row without a business key was not written (F-M514)",
+                typeof(TEntity).Name);
+            return;
+        }
+
         var existing = Rows().FirstOrDefault(r => string.Equals(_keyText(r), key, StringComparison.Ordinal));
         if (existing == null)
         {
-            _rowCache.Add(entity);
+            // Attach FIRST, cache second: a rejected attach that lands in the cache would leave a
+            // row behind that no table holds and no key can address.
             _db.Add(entity);
+            _rowCache.Add(entity);
         }
         else if (!ReferenceEquals(existing, entity))
         {
@@ -1377,13 +1539,23 @@ public sealed class SubdlSet<TEntity>
             var any = false;
             foreach (var e in entities)
             {
-                any = true;
                 var key = _keyText(e);
+                if (string.IsNullOrEmpty(key))
+                {
+                    // F-M514: see UpsertCore — a keyless row is not a row, and attaching it would
+                    // leave a Detached entry that breaks every later write of this context.
+                    _db.Logger?.LogWarning(
+                        "[SubDL-DB] {Area}: a row without a business key was not written (F-M514)",
+                        typeof(TEntity).Name);
+                    continue;
+                }
+
+                any = true;
                 var existing = Rows().FirstOrDefault(r => string.Equals(_keyText(r), key, StringComparison.Ordinal));
                 if (existing == null)
                 {
-                    _rowCache.Add(e);
                     _db.Add(e);
+                    _rowCache.Add(e);
                 }
                 else if (!ReferenceEquals(existing, e))
                 {
@@ -1412,6 +1584,15 @@ public sealed class SubdlSet<TEntity>
         {
             foreach (var e in entities)
             {
+                // F-M514: a keyless row is not a row — see UpsertCore.
+                if (string.IsNullOrEmpty(_keyText(e)))
+                {
+                    _db.Logger?.LogWarning(
+                        "[SubDL-DB] {Area}: a row without a business key was not written (F-M514)",
+                        typeof(TEntity).Name);
+                    continue;
+                }
+
                 _db.Add(e);
                 _rowCache.Add(e);
             }

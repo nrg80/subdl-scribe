@@ -147,7 +147,10 @@ Check(
     pipeline.Contains("string quality = SourceQuality.Detect(loosePath, mediaPath);", StringComparison.Ordinal),
     "the pipeline reads the value from the subtitle's own name, the container as fallback");
 Check(
-    pipeline.Contains("UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality,", StringComparison.Ordinal),
+    // F-M509: der Aufruf steht jetzt in der Versandtabelle der Quelle (SendToSourceAsync); die Pruefung
+    // haelt die Absicht fest — der erkannte Wert geht als `quality` in den Upload, nicht ein Literal.
+    pipeline.Contains("_api.UploadSubtitleAsync(", StringComparison.Ordinal)
+    && pipeline.Contains("srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season,", StringComparison.Ordinal),
     "… and passes it into the upload call");
 
 Console.WriteLine();

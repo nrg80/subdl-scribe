@@ -82,6 +82,16 @@
                                 <span class="subdl-label">TMDb API</span>
                                 <span class="subdl-msg">—</span>
                             </div>
+                            <div class="subdl-status-row" id="TvstStatus">
+                                <span class="subdl-light"></span>
+                                <span class="subdl-label">tvst (tvsubtitles.net)</span>
+                                <span class="subdl-msg">—</span>
+                            </div>
+                            <div class="subdl-status-row" id="MstStatus">
+                                <span class="subdl-light"></span>
+                                <span class="subdl-label">mst (moviesubtitles.org)</span>
+                                <span class="subdl-msg">—</span>
+                            </div>
                             <h4 style="margin-top:0.8em;margin-bottom:0.3em;">Library directories</h4>
                             <div id="SubdlDirStatusList">
                                 <div class="fieldDescription">Loading…</div>
@@ -397,12 +407,25 @@
                             <div class="fieldDescription">Enable all upload functions against SubDL. Default: off.</div>
                         </div>
 
+                        <h3>tvst — one source, two addresses</h3>
+                        <div class="fieldDescription" style="max-width:60em;">
+                            Series → tvsubtitles.net. Films → moviesubtitles.org. TMDb decides.
+                        </div>
+
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="TvSubtitlesUploadEnabled" name="TvSubtitlesUploadEnabled" type="checkbox" is="emby-checkbox" />
-                                <span>Upload enabled — tvsubtitles.net</span>
+                                <span>Upload enabled — tvsubtitles.net (series)</span>
                             </label>
-                            <div class="fieldDescription" id="TvSubtitlesUploadReason">tvsubtitles.net — eigener Abruf und eigener Upload, gesteuert von diesen zwei Schaltern. Staffelpacks und der HI-Pool bleiben bei SubDL. Default: off (F-M503) — der Download dieser Quelle ist default an.</div>
+                            <div class="fieldDescription" id="TvSubtitlesUploadReason">Series address. Default: off.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="MovieSubtitlesUploadEnabled" name="MovieSubtitlesUploadEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Upload enabled — moviesubtitles.org (films)</span>
+                            </label>
+                            <div class="fieldDescription" id="MovieSubtitlesUploadReason">Film address. Default: off.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -484,21 +507,34 @@
                             <div class="fieldDescription">Enable all download functions against SubDL. Default: on.</div>
                         </div>
 
+                        <h3>tvst — one source, two addresses</h3>
+                        <div class="fieldDescription" style="max-width:60em;">
+                            Series → tvsubtitles.net. Films → moviesubtitles.org. TMDb decides.
+                        </div>
+
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="TvSubtitlesDownloadEnabled" name="TvSubtitlesDownloadEnabled" type="checkbox" is="emby-checkbox" />
-                                <span>Download enabled — tvsubtitles.net</span>
+                                <span>Download enabled — tvsubtitles.net (series)</span>
                             </label>
-                            <div class="fieldDescription" id="TvSubtitlesDownloadReason">tvsubtitles.net — eigener Abruf und eigener Upload, gesteuert von diesen zwei Schaltern. Staffelpacks und der HI-Pool bleiben bei SubDL. Default: on (F-M503) — der Upload dieser Quelle bleibt default aus.</div>
+                            <div class="fieldDescription" id="TvSubtitlesDownloadReason">Series address. Default: on.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="MovieSubtitlesDownloadEnabled" name="MovieSubtitlesDownloadEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Download enabled — moviesubtitles.org (films)</span>
+                            </label>
+                            <div class="fieldDescription" id="MovieSubtitlesDownloadReason">Film address. Default: on.</div>
                         </div>
 
                         <div class="selectContainer">
                             <label class="selectLabel" for="DownloadOrder">Download order</label>
                             <select id="DownloadOrder" name="DownloadOrder" is="emby-select-withcolor" class="emby-select-withcolor emby-select">
-                                <option value="TvSubtitlesFirst">tvsubtitles.net first, SubDL as fallback</option>
-                                <option value="SubdlFirst">SubDL first, tvsubtitles.net as fallback</option>
+                                <option value="TvSubtitlesFirst">tvst / mst first</option>
+                                <option value="SubdlFirst">SubDL first</option>
                             </select>
-                            <div class="fieldDescription">Which source is asked first for a missing language. The other one is only asked when the first has nothing. Default: tvsubtitles.net first.</div>
+                            <div class="fieldDescription">Which source is asked first.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -1062,6 +1098,8 @@
                             config.SubdlUploadEnabled === null || config.SubdlUploadEnabled === undefined
                                 ? !!config.UploadEnabled : !!config.SubdlUploadEnabled;
                         document.querySelector('#TvSubtitlesUploadEnabled').checked = !!config.TvSubtitlesUploadEnabled;
+                        // F-M508: undecided (null) is OFF for the film address — the box shows the EFFECTIVE state.
+                        document.querySelector('#MovieSubtitlesUploadEnabled').checked = config.MovieSubtitlesUploadEnabled === true;
                         document.querySelector('#DryRun').checked = config.DryRun;
                         document.querySelector('#LogMode').value = config.LogMode;
                         document.querySelector('#OshashRefresh').value = config.OshashRefresh || 'Monthly';
@@ -1090,6 +1128,10 @@
                         document.querySelector('#TvSubtitlesDownloadEnabled').checked =
                             config.TvSubtitlesDownloadEnabled === null || config.TvSubtitlesDownloadEnabled === undefined
                                 ? true : !!config.TvSubtitlesDownloadEnabled;
+                        // F-M507: undecided (null) is ON for the film address — same default as the series address.
+                        document.querySelector('#MovieSubtitlesDownloadEnabled').checked =
+                            config.MovieSubtitlesDownloadEnabled === null || config.MovieSubtitlesDownloadEnabled === undefined
+                                ? true : !!config.MovieSubtitlesDownloadEnabled;
                         document.querySelector('#DownloadOrder').value = config.DownloadOrder === 'SubdlFirst'
                             ? 'SubdlFirst'
                             : 'TvSubtitlesFirst';
@@ -1490,9 +1532,9 @@ workers.forEach(function (w) {
                         }
                         var lines = [];
                         lines.push('<div style="font-weight:600;">Plan: ' + (res.plan || 'Free') + '</div>');
-                        lines.push(renderBar('API calls', res.search.used, res.search.limit, resetLocal(res.search.reset_at)));
+                        lines.push(renderBar('SubDL API calls', res.search.used, res.search.limit, resetLocal(res.search.reset_at)));
                         if (res.downloads) {
-                            lines.push(renderBar('Downloads', res.downloads.used, res.downloads.limit, resetLocal(res.downloads.reset_at)));
+                            lines.push(renderBar('SubDL downloads', res.downloads.used, res.downloads.limit, resetLocal(res.downloads.reset_at)));
                         }
                         box.innerHTML = lines.join('');
                         // The footer stamp is NOT written here any more (30.09.2026): this loader runs
@@ -1711,6 +1753,8 @@ workers.forEach(function (w) {
                         config.SubdlUploadEnabled = document.querySelector('#SubdlUploadEnabled').checked;
                         // F-M485: the second source is wired, so its switch is stored as the operator set it.
                         config.TvSubtitlesUploadEnabled = document.querySelector('#TvSubtitlesUploadEnabled').checked;
+                        // F-M508: the film address has its own switch; the page stores what is checked.
+                        config.MovieSubtitlesUploadEnabled = document.querySelector('#MovieSubtitlesUploadEnabled').checked;
                         config.DryRun = document.querySelector('#DryRun').checked;
                         config.LogMode = document.querySelector('#LogMode').value;
                         config.OshashRefresh = document.querySelector('#OshashRefresh').value;
@@ -1729,6 +1773,8 @@ workers.forEach(function (w) {
                         config.SubdlDownloadEnabled = document.querySelector('#SubdlDownloadEnabled').checked;
                         // F-M485: the second source is wired — the switch is stored as the operator set it.
                         config.TvSubtitlesDownloadEnabled = document.querySelector('#TvSubtitlesDownloadEnabled').checked;
+                        // F-M507: same for the film address of the family.
+                        config.MovieSubtitlesDownloadEnabled = document.querySelector('#MovieSubtitlesDownloadEnabled').checked;
                         config.DownloadOrder = document.querySelector('#DownloadOrder').value === 'TvSubtitlesFirst'
                             ? 'TvSubtitlesFirst'
                             : 'SubdlFirst';
@@ -1788,6 +1834,8 @@ workers.forEach(function (w) {
                 subdlSetLight('#SubdlLoginStatus', 'grey', 'Checking…');
                 subdlSetLight('#SubdlApiStatus', 'grey', 'Checking…');
                 subdlSetLight('#TmdbApiStatus', 'grey', 'Checking…');
+                subdlSetLight('#TvstStatus', 'grey', 'Checking…');
+                subdlSetLight('#MstStatus', 'grey', 'Checking…');
                 var dirList = document.querySelector('#SubdlDirStatusList');
                 if (dirList) { dirList.innerHTML = '<div class="fieldDescription">Loading…</div>'; }
 
@@ -1800,6 +1848,12 @@ workers.forEach(function (w) {
                     subdlSetLight('#SubdlLoginStatus', (login.Light || 'grey').toLowerCase(), login.Message);
                     subdlSetLight('#SubdlApiStatus', (api.Light || 'grey').toLowerCase(), api.Message);
                     subdlSetLight('#TmdbApiStatus', (tmdb.Light || 'grey').toLowerCase(), tmdb.Message);
+                    // The tvst family has two addresses; each gets its own light, because one can be
+                    // reachable while the other is not.
+                    var tvst = data.Tvst || {};
+                    var mst = data.Mst || {};
+                    subdlSetLight('#TvstStatus', (tvst.Light || 'grey').toLowerCase(), tvst.Message);
+                    subdlSetLight('#MstStatus', (mst.Light || 'grey').toLowerCase(), mst.Message);
 
                     if (dirList) {
                         var dirs = data.Directories || [];
@@ -1831,6 +1885,8 @@ workers.forEach(function (w) {
                     subdlSetLight('#SubdlLoginStatus', 'red', 'Status probe failed');
                     subdlSetLight('#SubdlApiStatus', 'red', 'Status probe failed');
                     subdlSetLight('#TmdbApiStatus', 'red', 'Status probe failed');
+                    subdlSetLight('#TvstStatus', 'red', 'Status probe failed');
+                    subdlSetLight('#MstStatus', 'red', 'Status probe failed');
                     if (dirList) { dirList.innerHTML = '<div class="fieldDescription" style="color:#a4262c;">Unable to load status.</div>'; }
                 });
             }

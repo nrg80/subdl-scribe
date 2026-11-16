@@ -1,0 +1,52 @@
+<!--
+  This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
+  SPDX-License-Identifier: GPL-3.0-or-later
+
+  Sub Scribe is free software: you can redistribute it and/or modify it under
+  the terms of the GNU General Public License as published by the Free Software
+  Foundation, either version 3 of the License, or (at your option) any later
+  version. Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the
+  implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  See the GNU General Public License for more details.
+
+  No network. The parsers are driven with the pages captured under fixtures/,
+  the upload is built and measured without sending. Since F-M517 one block drives
+  a real store in a temp directory (the media row addressed by its PATH instead
+  of by its hash). The optional live probe, switched on with the flag "live",
+  only reads.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>moviesubtitlesrun</AssemblyName>
+    <RootNamespace>MovieSubtitlesRun</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CA1305;CA1307;CA1862</NoWarn>
+    <JellyfinDir Condition="'$(JellyfinDir)' == ''">/opt/data/jf-test/jellyfin</JellyfinDir>
+    <PluginDir Condition="'$(PluginDir)' == ''">/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/bin/Release/net10.0</PluginDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Jellyfin.Plugin.SubdlSync"><HintPath>$(PluginDir)/Jellyfin.Plugin.SubdlSync.dll</HintPath></Reference>
+    <Reference Include="MediaBrowser.Common"><HintPath>$(JellyfinDir)/MediaBrowser.Common.dll</HintPath></Reference>
+    <Reference Include="MediaBrowser.Controller"><HintPath>$(JellyfinDir)/MediaBrowser.Controller.dll</HintPath></Reference>
+    <Reference Include="MediaBrowser.Model"><HintPath>$(JellyfinDir)/MediaBrowser.Model.dll</HintPath></Reference>
+    <Reference Include="Microsoft.Extensions.Logging.Abstractions"><HintPath>$(JellyfinDir)/Microsoft.Extensions.Logging.Abstractions.dll</HintPath></Reference>
+    <!-- F-M517: die Pruefung „Nummer ohne Medien-Hash" faehrt einen ECHTEN Store in einem Temp-Verzeichnis
+         (dieselben Abhaengigkeiten, die auch die Plugin-DLL braucht). -->
+    <Reference Include="Microsoft.EntityFrameworkCore"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.dll</HintPath></Reference>
+    <Reference Include="Microsoft.EntityFrameworkCore.Abstractions"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.Abstractions.dll</HintPath></Reference>
+    <Reference Include="Microsoft.EntityFrameworkCore.Relational"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.Relational.dll</HintPath></Reference>
+    <Reference Include="Microsoft.EntityFrameworkCore.Sqlite"><HintPath>$(JellyfinDir)/Microsoft.EntityFrameworkCore.Sqlite.dll</HintPath></Reference>
+    <Reference Include="Microsoft.Data.Sqlite"><HintPath>$(JellyfinDir)/Microsoft.Data.Sqlite.dll</HintPath></Reference>
+    <Reference Include="SQLitePCLRaw.core"><HintPath>$(JellyfinDir)/SQLitePCLRaw.core.dll</HintPath></Reference>
+    <Reference Include="SQLitePCLRaw.provider.e_sqlite3"><HintPath>$(JellyfinDir)/SQLitePCLRaw.provider.e_sqlite3.dll</HintPath></Reference>
+    <Reference Include="SQLitePCLRaw.batteries_v2"><HintPath>$(JellyfinDir)/SQLitePCLRaw.batteries_v2.dll</HintPath></Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Die native e_sqlite3-Bibliothek kommt wie bei der endpoints-Suite ueber das Paket (cache-vorhanden). -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+  </ItemGroup>
+</Project>

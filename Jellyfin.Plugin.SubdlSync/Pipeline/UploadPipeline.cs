@@ -178,6 +178,17 @@ public sealed class UploadPipeline : IPackFiller
     private readonly Api.Endpoints.TvstShowResolver _tvstShows;
 
     /// <summary>
+    /// F-M508: der Client der Film-Adresse derselben Familie und ihre Filmmummer-Auflösung. Dieselbe
+    /// Lebensdauer wie die der Serien-Adresse — die Merkliste der Auflösung gilt je Lauf
+    /// (<see cref="Api.Endpoints.MsubMovieResolver.BeginRun"/>), damit ein Film mit vier fehlenden
+    /// Sprachen nicht viermal bei der Seite sucht.
+    /// </summary>
+    private readonly Api.MovieSubtitlesClient _msubClient;
+
+    /// <summary>F-M508: die Filmmummer-Auflösung der Film-Adresse (gespeichert → eng gesucht).</summary>
+    private readonly Api.Endpoints.MsubMovieResolver _msubMovies;
+
+    /// <summary>
     /// F-M389: one item per (series IMDb id, season) that this run worked — the way into a season
     /// whose episodes are NOT all in the queue. Jellyfin stores the SERIES id on the series, never
     /// on the episode, so the season is found through an episode rather than by a provider query.
@@ -330,6 +341,10 @@ public sealed class UploadPipeline : IPackFiller
         // F-M501: EIN Client und EIN Auflöser für den ganzen Lauf — siehe die Feldbemerkungen oben.
         _tvstClient = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
         _tvstShows = new Api.Endpoints.TvstShowResolver(_tvstClient, logger);
+
+        // F-M508: dasselbe für die Film-Adresse der Familie — ein Client, ein Auflöser, ein Lauf.
+        _msubClient = new Api.MovieSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        _msubMovies = new Api.Endpoints.MsubMovieResolver(_msubClient, logger);
     }
 
     /// <summary>
@@ -351,6 +366,9 @@ public sealed class UploadPipeline : IPackFiller
         // F-M501: die Anlege-Sperre der tvst-Serienauflösung gilt je Lauf, nicht je Prozess — hier ist
         // der Anfang des Laufs, also hier wird sie geleert.
         _tvstShows.BeginRun();
+
+        // F-M508: die Merkliste der Film-Adresse ebenso — sie gilt je Lauf, nicht je Prozess.
+        _msubMovies.BeginRun();
 
         // F-M247: record that this run was a dry run. It does the searching and the QA, so its
         // summary fills up with numbers, but it writes nothing to SubDL — the statistics must
@@ -692,8 +710,12 @@ public sealed class UploadPipeline : IPackFiller
             // Die Quellen sind dieselben, die auch die Kette anlaufen laesst (Schalter UND
             // Konfiguration, im Trockenlauf nur der Schalter — F-M496). Ein Lauf ohne eingeschaltete
             // Quelle ueberspringt nichts: dann gibt es keine Marke, die als "fertig" gelten duerfte.
+            // F-M509: die Medienart ist HIER noch nicht aufgeloest (sie kommt weiter unten aus TMDb). Sie
+            // wird deshalb nicht geraten: ohne sie bleiben beide Adressen der Familie stehen, und eine
+            // Datei gilt erst als fertig, wenn BEIDE sie haben. Das kann nur zu einem Item zu viel im Lauf
+            // fuehren, nie zu einem weggelassenen — die Kette selbst fragt danach mit der echten Medienart.
             string? earlyHash = Registry.GetMediaHash(mediaPath);
-            var quellen = UploadSources();
+            var quellen = UploadSources(isSeries: null);
             var offeneQuellen = quellen
                 .Where(quelle => !Registry.IsSubtitlesUploadedFor(earlyHash, quelle))
                 .ToList();
@@ -1092,7 +1114,7 @@ public sealed class UploadPipeline : IPackFiller
                 // F-M4/F-M61: dedup — (media content hash, language) pair already uploaded?
                 // F-M71: HI variants have their own key space — a normal upload never blocks an SDH variant.
                 bool streamHi = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream);
-                if (!AnyUploadSourceStillWants(mediaHash, lang, streamHi))
+                if (!AnyUploadSourceStillWants(mediaHash, lang, streamHi, isSeries))
                 {
                     // Pair already up. This position is NOT uploaded by itself, so it does not get
                     // an uploaded verdict of its own; it is recorded as rejected-by-self-echo, which
@@ -1260,7 +1282,7 @@ public sealed class UploadPipeline : IPackFiller
                 // that keeps a QA-rejected sidecar out of the queue. Adding a second check for this one
                 // reason would read the file twice and make the lock look like a special case.
 
-                if (!AnyUploadSourceStillWants(mediaHash, looseLang, looseHi))
+                if (!AnyUploadSourceStillWants(mediaHash, looseLang, looseHi, isSeries))
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] Loose SRT already uploaded — skipping: {File} ({Lang}{Hi})", Path.GetFileName(loosePath), looseLang, looseHi ? ",HI" : "");
                     continue;
@@ -1567,22 +1589,30 @@ public sealed class UploadPipeline : IPackFiller
                     SourceAllowed(Configuration.SubtitleProvider.TvSubtitles),
                     dryHerkunft,
                     Registry.IsUploadedTo(mediaHash!, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.Subdl),
-                    Registry.IsUploadedTo(mediaHash!, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.TvSubtitles));
-                foreach (var quelle in UploadSourceOrder())
+                    Registry.IsUploadedTo(mediaHash!, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.TvSubtitles),
+                    SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles),
+                    Registry.IsUploadedTo(mediaHash!, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.MovieSubtitles));
+                foreach (var quelle in UploadSourceOrder(isSeries))
                 {
                     // F-M496: der Toggle JE QUELLE, vor ihrer Zeile — dieselbe Frage, die die Kette
                     // unmittelbar vor ihrem Start stellt (SourceAllowed). Aus heisst: diese Quelle
                     // taucht im Bericht nicht auf, die andere schon.
                     if (!SourceAllowed(quelle))
                     {
+                        // F-M508 (Operator-Auflage: „Bevor wir falsche Sprachen hochladen, laden wir nix
+                        // hoch."): dass die Film-Adresse der Familie NICHT sendet, ist im Trockenlauf
+                        // eine Auskunft und keine Stille. Sie sagt, warum nichts rausgeht.
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL] DRY-RUN {Name} [{Lang}] — source {Source} not sent: that source is switched off",
+                            neutralName, cand.Lang, Api.Endpoints.Provenance.Name(quelle));
                         continue;
                     }
 
-                    // F-M496 (Operator-Anweisung: „ein Trockenlauf braucht keine Zugangsdaten"): eine
+                    // F-M497 (Operator-Anweisung: „ein Trockenlauf braucht keine Zugangsdaten"): eine
                     // Quelle, die NUR die Konfiguration nicht hat, wird im Trockenlauf trotzdem
                     // gezeigt — er macht keinen Aufruf und verlangt deshalb nichts. Live faellt sie
                     // aus der Kette (F-M497); der Trockenlauf sagt, was passieren WUERDE.
-                    if (quelle == Configuration.SubtitleProvider.Subdl ? !dryGate.Subdl : !dryGate.TvSubtitles)
+                    if (!Api.Endpoints.UploadGate.May(dryGate, quelle))
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
                             "[SubDL] {Name} [{Lang}] — source {Source} skipped: {Reason}",
@@ -1593,18 +1623,10 @@ public sealed class UploadPipeline : IPackFiller
                         continue;
                     }
 
-                    if (quelle == Configuration.SubtitleProvider.Subdl)
-                    {
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] DRY-RUN would upload {Name} [{Lang}]", neutralName, cand.Lang);
-                    }
-                    else
-                    {
-                        // F-M496: der tvst-Zweig hatte keinen eigenen Trockenlauf-Schutz. Der Ausstieg
-                        // weiter unten (UploadSrtContentAsync) deckte die Kette nur als Ganzes ab und
-                        // sagte nichts ueber diese Quelle; hier steht die Zeile VOR jedem Aufruf —
-                        // auch vor dem Show-Abruf, den der Endpunkt sonst schon im Trockenlauf macht.
-                        LogUtil.PerItem(_config.LogMode, _logger,"[tvsubtitles] DRY-RUN would upload {Name} [{Lang}]", neutralName, cand.Lang);
-                    }
+                    // F-M496: je Quelle EINE Zeile, vor ihrem Aufruf — der tvst-Zweig hatte sie nicht,
+                    // und der Ausstieg weiter unten (UploadSrtContentAsync) deckte die Kette nur als
+                    // Ganzes ab und sagte nichts ueber diese Quelle.
+                    LogUtil.PerItem(_config.LogMode, _logger, DryRunLine(quelle), neutralName, cand.Lang);
                 }
             }
 
@@ -2136,8 +2158,16 @@ public sealed class UploadPipeline : IPackFiller
     /// </summary>
     /// <param name="mediaPath">Media file path.</param>
     /// <returns>One entry per loose sidecar.</returns>
+    /// <remarks>
+    /// Operator order 17.11.2026 ("5xer sidecars bitte generell nicht hochladen"): the reserved
+    /// original block (slot 50–99) is filtered out here, at the one place upload candidates enter the
+    /// run. Those files are the unsynchronized copies a correction keeps beside its result — publishing
+    /// them would put the raw take up next to the corrected one under the same episode.
+    /// </remarks>
     public static List<(string Path, string Lang, bool HearingImpaired, bool Forced)> FindLooseSrts(string mediaPath)
-        => Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.List(mediaPath);
+        => Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.List(mediaPath)
+            .Where(x => !Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsOriginalSidecar(x.Path, mediaPath))
+            .ToList();
 
     /// <summary>
     /// F-M71: resolves a loose-file language token (2-letter direct, 3-letter ISO 639-2 via mapper).
@@ -2451,9 +2481,9 @@ public sealed class UploadPipeline : IPackFiller
             SourceAllowed(Configuration.SubtitleProvider.TvSubtitles),
             herkunft,
             Registry.IsUploadedTo(mediaHash, lang, hearingImpaired, Configuration.SubtitleProvider.Subdl),
-            Registry.IsUploadedTo(mediaHash, lang, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles));
-        bool darfSubdl = gate.Subdl;
-        bool darfZweite = gate.TvSubtitles;
+            Registry.IsUploadedTo(mediaHash, lang, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles),
+            SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles),
+            Registry.IsUploadedTo(mediaHash, lang, hearingImpaired, Configuration.SubtitleProvider.MovieSubtitles));
         if (gate.SkipReason is not null)
         {
             LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] {Name} [{Lang}] — skipped: {Reason}",
@@ -2461,7 +2491,7 @@ public sealed class UploadPipeline : IPackFiller
             return UploadResult.Skipped(gate.SkipReason);
         }
 
-        // F-M500 (Operator-Anweisung 15.11.2026): eine bekannte Herkunft sperrt beide Quellen. Die Zeile
+        // F-M500 (Operator-Anweisung 15.11.2026): eine bekannte Herkunft sperrt ALLE Quellen. Die Zeile
         // nennt sie, damit im Lauf steht, WOHER der Text kommt und warum er nirgends hochgeht.
         if (Api.Endpoints.Provenance.OriginBlockedReason(herkunft) is { } herkunftGesperrt)
         {
@@ -2469,26 +2499,31 @@ public sealed class UploadPipeline : IPackFiller
                 "[SubDL] {Name} [{Lang}] — {Reason}", neutralName, lang, herkunftGesperrt);
         }
 
-        // F-M495 (Operator-Anweisung 15.11.2026): beide Endpunkte werden hintereinander gefragt, in der
-        // eingestellten Reihenfolge, und vor dem Start jedes Endpunkts wird DESSEN Toggle geprueft.
+        // F-M495 (Operator-Anweisung 15.11.2026) / F-M509 (Klärstellung: „Tvst is splitted into tvst and
+        // moviesub itself"): EINE Schleife ueber die zustaendigen Quellen — keine Fallunterscheidung
+        // mehr, die „alles ausser SubDL" in einen Zweig wirft. Was in der Liste steht, entscheidet die
+        // Reihenfolge (Familien-Ebene) und die Medienart: bei einer Serie stehen SubDL und
+        // tvsubtitles.net darin, bei einem Film SubDL und moviesubtitles.org.
         //
-        // Vorher waehlte der Lauf genau EIN Ziel (`vonZweiter`) und nahm die zweite Quelle nur dann, wenn
-        // die erste abgelehnt hatte. Jetzt bekommt jede Quelle ihren eigenen Versuch: was sie genommen
-        // hat, steht danach in IHREM Id-/Zeitstempel-Feld, und beide Felder koennen gesetzt sein. Die
-        // Reihenfolge ist die konfigurierte Download-Reihenfolge — eine eigene Einstellung fuer den
-        // Upload gibt es nicht (Operator: keine neue GUI-Option).
-        var quellenReihenfolge = UploadSourceOrder();
+        // JE QUELLE gilt: eigener Schalter, eigene Konfiguration, eigenes Tor (Herkunft F-M487,
+        // „diese Quelle hat ihn schon" F-M488), eigener Versuch, eigenes Ergebnis, eigene Marke — und ein
+        // Fehler bei EINER Quelle beendet die Kette nicht (der Versuch der naechsten laeuft weiter).
+        // Genau deshalb wird das Ergebnis in einer Ablage JE QUELLE gesammelt und nicht in zwei
+        // benannten Variablen.
+        var quellenReihenfolge = UploadSourceOrder(isSeries);
+        var ergebnisse = new Dictionary<Configuration.SubtitleProvider, UploadResult>();
 
-        UploadResult? subdlErgebnis = null;
-        UploadResult? zweiteErgebnis = null;
         foreach (var quelle in quellenReihenfolge)
         {
             // Der Toggle der Quelle, ueber denselben Pruefpunkt wie Gate und Sammelstufe. Aus heisst
             // UEBERSPRINGEN, nicht abbrechen: die andere Quelle kann den Untertitel noch nehmen.
+            // F-M508: die Film-Adresse ist standardmaessig aus — DASS sie deshalb nicht sendet, steht
+            // als Zeile im Lauf, statt still zu fehlen („Bevor wir falsche Sprachen hochladen, laden wir
+            // nix hoch.").
             if (!SourceAllowed(quelle))
             {
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL] {Name} [{Lang}] — source {Source} skipped: that source is switched off",
+                    "[SubDL] {Name} [{Lang}] — source {Source} skipped: that source is switched off, nothing sent",
                     neutralName, lang, Api.Endpoints.Provenance.Name(quelle));
                 continue;
             }
@@ -2511,7 +2546,7 @@ public sealed class UploadPipeline : IPackFiller
             // und die Herkunft (F-M487, verschaerft 15.11.2026: bekannt = NIRGENDS hin, unbekannt =
             // ueberallhin). Ein verbotenes Ziel wird uebersprungen und im Log genannt; die Kette laeuft
             // weiter, das Tor wird also nicht abgeschafft, sondern je Quelle gefragt.
-            if (quelle == Configuration.SubtitleProvider.Subdl ? !darfSubdl : !darfZweite)
+            if (!Api.Endpoints.UploadGate.May(gate, quelle))
             {
                 LogUtil.PerItem(_config.LogMode, _logger,
                     "[SubDL] {Name} [{Lang}] — source {Source} skipped: {Reason}",
@@ -2524,16 +2559,14 @@ public sealed class UploadPipeline : IPackFiller
 
             try
             {
-                if (quelle == Configuration.SubtitleProvider.Subdl)
-                {
-                    subdlErgebnis = await _api.UploadSubtitleAsync(srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, ct, hearingImpaired, framerate).ConfigureAwait(false);
-                }
-                else
-                {
-                    zweiteErgebnis = await SendToSecondSourceAsync(
-                        srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season, episode, hearingImpaired, mediaHash, ct)
-                        .ConfigureAwait(false);
-                }
+                // Ein Zweig JE QUELLE — aber nicht mehr „SubDL oder alles andere": jede Quelle hat ihre
+                // eigene Versandmethode, und welche das ist, sagt der Anbieter selbst. Ein vierter
+                // Anbieter braucht damit eine Methode und einen Eintrag in der Ablage, keine neue
+                // Fallunterscheidung hier.
+                ergebnisse[quelle] = await SendToSourceAsync(
+                        quelle, srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId,
+                        isSeries, season, episode, hearingImpaired, mediaHash, mediaPath, framerate, ct)
+                    .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -2542,24 +2575,42 @@ public sealed class UploadPipeline : IPackFiller
             catch (Exception ex)
             {
                 // F-M495: ein Fehler bei DIESER Quelle darf den Versuch bei der naechsten nicht
-                // verhindern. Der Prioritaet geht immer; kann die zweite nicht, ist das hinnehmbar.
+                // verhindern. Das Ergebnis der Quelle ist ihr eigener Fehlschlag — die Kette laeuft
+                // weiter, und niemand sonst erbt den Fehler.
                 _logger.LogWarning(
                     "[SubDL] upload to {Source} failed for {Name} [{Lang}]: {Msg} — the next source is still tried.",
                     Api.Endpoints.Provenance.Name(quelle), neutralName, lang, ex.Message);
+                ergebnisse[quelle] = UploadResult.Failed(ex.Message);
             }
         }
 
-        bool subdlGenommen = subdlErgebnis is { Ok: true };
-        bool zweiteGenommen = zweiteErgebnis is { Ok: true };
+        UploadResult? Ergebnis(Configuration.SubtitleProvider provider) =>
+            ergebnisse.TryGetValue(provider, out var e) ? e : null;
 
-        // Was der Rest der Methode liest: die Fassung, die genommen hat. Hat keine genommen, der
-        // aussagekraeftigste Fehlschlag (eine „nicht zustaendig"-Meldung der zweiten Quelle erklaert
-        // nichts, wenn SubDL es versucht und nicht genommen hat).
-        UploadResult result = subdlGenommen ? subdlErgebnis!
-            : zweiteGenommen ? zweiteErgebnis!
-            : (subdlErgebnis is { SkippedItem: false } ? subdlErgebnis : null)
-                ?? (zweiteErgebnis is { SkippedItem: false } ? zweiteErgebnis : null)
-                ?? subdlErgebnis ?? zweiteErgebnis ?? UploadResult.Skipped("no-upload-source");
+        bool Genommen(Configuration.SubtitleProvider provider) => Ergebnis(provider) is { Ok: true };
+
+        bool subdlGenommen = Genommen(Configuration.SubtitleProvider.Subdl);
+        bool zweiteGenommen = Genommen(Configuration.SubtitleProvider.TvSubtitles);
+
+        // F-M508: die Film-Adresse fuehrt ihr eigenes „genommen" — es wird NICHT in zweiteGenommen
+        // gemischt, sonst traege die tvst-Marke den Zeitstempel einer anderen Adresse. Und weil die
+        // Seite keine Id nennt, steht hier, was gilt: angenommen, Id unbekannt.
+        bool dritteGenommen = Genommen(Configuration.SubtitleProvider.MovieSubtitles);
+        if (dritteGenommen)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[moviesubtitles] {Name} [{Lang}] — accepted, id unknown: the site names none (own mark minted)",
+                neutralName, lang);
+        }
+
+        // Was der Rest der Methode liest: die Fassung, die genommen hat — in Kettenreihenfolge, denn dort
+        // steht, wer zuerst gefragt wurde. Hat keine genommen, der aussagekraeftigste Fehlschlag (eine
+        // „nicht zustaendig"-Meldung einer Quelle erklaert nichts, wenn eine andere es versucht und nicht
+        // genommen hat).
+        UploadResult result = quellenReihenfolge.Select(Ergebnis).FirstOrDefault(e => e is { Ok: true })
+            ?? quellenReihenfolge.Select(Ergebnis).FirstOrDefault(e => e is { SkippedItem: false })
+            ?? quellenReihenfolge.Select(Ergebnis).FirstOrDefault(e => e is not null)
+            ?? UploadResult.Skipped("no-upload-source");
 
         if (result.Ok)
         {
@@ -2633,6 +2684,18 @@ public sealed class UploadPipeline : IPackFiller
             // Metadata describing the file, and the verdict describing this subtitle, are two
             // different facts and get two rows in two areas.
             Registry.MarkAndFlush(() => Registry.PatchMediaMetadata(mediaHash, imdbId, season, episode, sdId, tmdbId));
+            // F-M488/F-M490/F-M509: EINE Marke JE QUELLE, aus derselben Ablage, in der die Kette ihre
+            // Ergebnisse gesammelt hat. Der Zeitpunkt wird EINMAL genommen, damit Id und Stempel
+            // dieselbe Sekunde tragen; jede Quelle bekommt ihre eigene Zeile, keine erbt die einer
+            // anderen.
+            var jetzt = DateTime.UtcNow;
+            var subdlMarke = MarkOf(ergebnisse, Configuration.SubtitleProvider.Subdl,
+                uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture), contentHashEarly, releaseName, jetzt);
+            var tvstMarke = MarkOf(ergebnisse, Configuration.SubtitleProvider.TvSubtitles,
+                null, contentHashEarly, releaseName, jetzt);
+            var msubMarke = MarkOf(ergebnisse, Configuration.SubtitleProvider.MovieSubtitles,
+                null, contentHashEarly, releaseName, jetzt);
+
             Registry.MarkAndFlush(() =>
             {
                 if (loosePath != null)
@@ -2644,38 +2707,30 @@ public sealed class UploadPipeline : IPackFiller
                         // vergeben wir eine eigene (Präfix own:) — ein Upload ohne Kennzeichen wäre von
                         // einem, der nie stattfand, nicht zu unterscheiden.
                         // F-M495: JEDE Quelle bekommt ihre Marke, soweit sie genommen hat — nach der
-                        // Kette können BEIDE Felder gesetzt sein, vorher war es genau eines.
-                        subdlUploadId: subdlGenommen
-                            ? uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                                ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.Subdl, contentHashEarly, releaseName, DateTime.UtcNow)
-                            : null,
-                        tvSubtitlesUploadId: zweiteGenommen
-                            ? zweiteErgebnis!.SourceId
-                                ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.TvSubtitles, contentHashEarly, releaseName, DateTime.UtcNow)
-                            : null,
+                        // Kette können mehrere Felder gesetzt sein, vorher war es genau eines.
+                        subdlUploadId: subdlMarke.Id,
+                        tvSubtitlesUploadId: tvstMarke.Id,
+                        moviesubtitlesUploadId: msubMarke.Id,
                         // F-M490: "hochgeladen" je Quelle, mit Zeitpunkt — nur fuer die Quelle, die
                         // den Upload wirklich genommen hat.
-                        subdlUploadedAt: subdlGenommen ? DateTime.UtcNow : null,
-                        tvSubtitlesUploadedAt: zweiteGenommen ? DateTime.UtcNow : null);
+                        subdlUploadedAt: subdlMarke.At,
+                        tvSubtitlesUploadedAt: tvstMarke.At,
+                        moviesubtitlesUploadedAt: msubMarke.At);
                 }
                 else
                 {
                     Registry.MarkEmbed(mediaHash, subPos, lang, hearingImpaired,
                         SubtitleStatus.Uploaded, contentHash: contentHashEarly,
                         subdlId: uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        // F-M495: je Quelle ihre eigene Marke — beide Felder können gesetzt sein.
-                        subdlUploadId: subdlGenommen
-                            ? uploadId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                                ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.Subdl, contentHashEarly, releaseName, DateTime.UtcNow)
-                            : null,
-                        tvSubtitlesUploadId: zweiteGenommen
-                            ? zweiteErgebnis!.SourceId
-                                ?? Api.Endpoints.Provenance.OwnUploadId(Configuration.SubtitleProvider.TvSubtitles, contentHashEarly, releaseName, DateTime.UtcNow)
-                            : null,
+                        // F-M495/F-M508: je Quelle ihre eigene Marke — mehrere Felder können gesetzt sein.
+                        subdlUploadId: subdlMarke.Id,
+                        tvSubtitlesUploadId: tvstMarke.Id,
+                        moviesubtitlesUploadId: msubMarke.Id,
                         // F-M490: "hochgeladen" je Quelle, mit Zeitpunkt — nur fuer die Quelle, die
                         // den Upload wirklich genommen hat.
-                        subdlUploadedAt: subdlGenommen ? DateTime.UtcNow : null,
-                        tvSubtitlesUploadedAt: zweiteGenommen ? DateTime.UtcNow : null);
+                        subdlUploadedAt: subdlMarke.At,
+                        tvSubtitlesUploadedAt: tvstMarke.At,
+                        moviesubtitlesUploadedAt: msubMarke.At);
                 }
             });
 
@@ -5034,7 +5089,225 @@ public sealed class UploadPipeline : IPackFiller
     // Kept as a comment for history until the next cleanup.
 
     /// <summary>
-    /// F-M485: sends one subtitle to the second source (tvsubtitles.net).
+    /// F-M509 (Operator-Klarstellung 15.11.2026: „Tvst is splitted into tvst and moviesub itself"):
+    /// EIN Versand je Quelle — die Stelle, an der die Kette ihre Quelle auf ihre Methode abbildet.
+    /// <para>
+    /// Hier stand bis Etappe 2b die Bauform „wenn SubDL, dann …, sonst die zweite Quelle". Sie war die
+    /// Sperre dafuer, dass eine dritte Quelle je ihren eigenen Weg bekommen konnte: alles, was nicht
+    /// SubDL war, landete bei tvsubtitles.net — auch ein Film. Jetzt nennt jede Quelle ihren Namen, und
+    /// die Medienart ist im Endpunkt selbst die Bedingung (die Film-Adresse lehnt ein Ticket mit Staffel
+    /// oder Folge ab, die Serien-Adresse eines ohne).
+    /// </para>
+    /// <para>
+    /// F-M508: die Film-Adresse wird nur erreicht, wenn die Medienart ein Film ist — das entscheidet die
+    /// Liste (<see cref="UploadSourceOrder"/>) ueber <c>SourceOrder.AppliesTo</c>, nicht diese Methode.
+    /// </para>
+    /// </summary>
+    /// <param name="quelle">Die Quelle, die senden soll.</param>
+    /// <param name="srtContent">Der Untertiteltext.</param>
+    /// <param name="neutralName">Der neutrale Dateiname des Uploads.</param>
+    /// <param name="lang">Der Sprachcode.</param>
+    /// <param name="releaseName">Der Release-Name der Mediendatei.</param>
+    /// <param name="quality">Die erkannte Quelle/Qualitaet (Rip-Feld).</param>
+    /// <param name="imdbId">IMDb-Kennung, wenn bekannt.</param>
+    /// <param name="tmdbId">TMDb-Kennung, wenn bekannt.</param>
+    /// <param name="isSeries">Wahr fuer eine Serie, falsch fuer einen Film.</param>
+    /// <param name="season">Staffel (Serie) — 0 beim Film.</param>
+    /// <param name="episode">Folge (Serie) — 0 beim Film.</param>
+    /// <param name="hearingImpaired">HI-Variante.</param>
+    /// <param name="mediaHash">Medium (OSHash) fuer die Nummern-Aufloesung im Store.</param>
+    /// <param name="mediaPath">F-M517: der Pfad der Mediendatei — die zweite Adresse der Medienzeile, wenn
+    /// kein Hash bekannt ist (die Nummer darf dann nicht verloren gehen).</param>
+    /// <param name="framerate">Bildrate-Kennung (nur SubDL).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Das Ergebnis DIESER Quelle.</returns>
+    private Task<UploadResult> SendToSourceAsync(
+        Configuration.SubtitleProvider quelle, string srtContent, string neutralName, string lang,
+        string releaseName, string quality, string? imdbId, string? tmdbId, bool isSeries,
+        int season, int episode, bool hearingImpaired, string? mediaHash, string? mediaPath,
+        string? framerate, CancellationToken ct) => quelle switch
+    {
+        Configuration.SubtitleProvider.Subdl => _api.UploadSubtitleAsync(
+            srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season,
+            episode, ct, hearingImpaired, framerate),
+        Configuration.SubtitleProvider.TvSubtitles => SendToTvSubtitlesAsync(
+            srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, season,
+            episode, hearingImpaired, mediaHash, mediaPath, ct),
+        Configuration.SubtitleProvider.MovieSubtitles => SendToMovieSubtitlesAsync(
+            srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId, isSeries, mediaHash,
+            mediaPath, ct),
+        _ => Task.FromResult(UploadResult.Skipped("no-upload-path")),
+    };
+
+    /// <summary>
+    /// F-M508 (Etappe 2b): sends one subtitle to the FILM address of the tvst family
+    /// (moviesubtitles.org).
+    /// <para>
+    /// Die Arbeitsteilung ist die der Serien-Adresse: die AUFLOESUNG der Filmmummer („welcher Film ist
+    /// diese Datei") gehoert in den Store und steht in <see cref="Api.Endpoints.MsubMovieResolver"/> —
+    /// gespeicherte Nummer, sonst enge Suche ueber TMDb-Titel und TMDb-Jahr. Fehlt die Nummer am Ende,
+    /// wird diese Adresse uebersprungen und die Kette laeuft weiter. Der TRANSPORT ist der Endpunkt.
+    /// </para>
+    /// <para>
+    /// F-M513: FEHLT DER FILM, WIRD ER HIER ANGELEGT — und nur hier. <see cref="Api.Endpoints.MsubMovieResolver.ResolveOrCreateForMediaAsync"/>
+    /// ist die einzige Fassung, die anlegen darf, und dieser Zweig ist ihre einzige Aufrufstelle: er
+    /// wird ausschliesslich betreten, wenn der Upload-Schalter der Film-Adresse an ist (Gate der Kette,
+    /// <c>SourceAllowed</c>), und der Trockenlauf baut die Anlege-Nutzlast, ohne sie zu senden. Ob
+    /// angelegt, gefunden oder verweigert wurde, steht im <see cref="Api.Endpoints.MsubMovieResolution.Status"/>
+    /// — nicht nur im Log.
+    /// </para>
+    /// <para>
+    /// GESPERRT BLEIBT SIE UEBER DEN SCHALTER: der Upload-Schalter dieser Adresse ist im ungesetzten Fall
+    /// aus (F-M507/F-M508). Geprueft wird gegen Fixtures und Zaehl-Handler; ohne ihn geht kein POST gegen
+    /// die Seite.
+    /// </para>
+    /// </summary>
+    /// <param name="srtContent">Der Untertiteltext.</param>
+    /// <param name="neutralName">Der neutrale Dateiname des Uploads.</param>
+    /// <param name="lang">Der Sprachcode.</param>
+    /// <param name="releaseName">Der Release-NAME der Mediendatei — der Endpunkt laesst daraus die Gruppe
+    /// schneiden (F-M505); der Dateiname selbst geht nicht in das Feld.</param>
+    /// <param name="quality">Die erkannte Quelle/Qualitaet (Rip-Feld der Seite).</param>
+    /// <param name="imdbId">IMDb-Kennung, wenn bekannt.</param>
+    /// <param name="tmdbId">TMDb-Kennung, wenn bekannt — ohne sie gibt es keinen fuehrenden Titel.</param>
+    /// <param name="isSeries">Wahr fuer eine Serie: dann ist diese Adresse nicht zustaendig.</param>
+    /// <param name="mediaHash">Medium (OSHash) fuer die Nummer im Store.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Das Ergebnis dieser Adresse.</returns>
+    private async Task<UploadResult> SendToMovieSubtitlesAsync(
+        string srtContent, string neutralName, string lang, string releaseName, string quality,
+        string? imdbId, string? tmdbId, bool isSeries, string? mediaHash, string? mediaPath,
+        CancellationToken ct)
+    {
+        if (isSeries)
+        {
+            return UploadResult.Skipped("film-source-films-only");
+        }
+
+        // F-M508: ohne TMDb-Kennung gibt es keinen fuehrenden Titel — dann wird nicht geraten.
+        if (string.IsNullOrWhiteSpace(tmdbId))
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[moviesubtitles] {Name} [{Lang}] — skipped: no TMDb id, so there is no leading title (F-M508)",
+                neutralName, lang);
+            return UploadResult.Skipped("film-source-no-tmdb-id");
+        }
+
+        var movie = await _tmdb.MovieInfoAsync(tmdbId!, ct).ConfigureAwait(false);
+        if (movie is null)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[moviesubtitles] {Name} [{Lang}] — skipped: TMDb answered no film record for {Tmdb} (F-M508)",
+                neutralName, lang, tmdbId);
+            return UploadResult.Skipped("film-source-no-film-record");
+        }
+
+        var aufloesung = await _msubMovies
+            .ResolveOrCreateForMediaAsync(Registry, mediaHash, movie, _config.DryRun, ct, mediaPath)
+            .ConfigureAwait(false);
+        if (!aufloesung.Resolved)
+        {
+            // F-M508: KEIN Blocker. Die Zeile nennt den Grund (Status), damit im Lauf steht, warum die
+            // Film-Adresse fuer dieses Medium nichts bekommt, und die Kette laeuft weiter.
+            //
+            // F-M513: die Status nennen jetzt auch die Anlage — `exists-other-year` heisst „der Titel
+            // steht da, aber mit einem anderen Jahr, also NICHT anlegen", `created-id-not-readable`
+            // heisst „angelegt, aber ohne tvid gibt es keinen Upload". Der Text der Seite steht als
+            // Detail-Zeile daneben, nicht in der Kurzzeile.
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[moviesubtitles] {Name} [{Lang}] — skipped: no film id ({Status}) (F-M508)",
+                neutralName, lang, aufloesung.Status);
+            if (!string.IsNullOrEmpty(aufloesung.Answer))
+            {
+                LogUtil.Detail(_logger, "[moviesubtitles] the site answered: {Answer}", aufloesung.Answer);
+            }
+
+            return UploadResult.Skipped("film-source-movie-" + aufloesung.Status);
+        }
+
+        // Die zweite Tuer des Trockenlaufs steht im Endpunkt (Vorgabewert true); die Kette reicht ihren
+        // eigenen Schalter herein, damit ein Aufruf ohne Konfiguration nichts sendet (F-M483/F-M496).
+        var endpoint = new Api.Endpoints.MovieSubtitlesUploadEndpoint(_msubClient, dryRun: _config.DryRun);
+        var ticket = new Api.Endpoints.UploadTicket(
+            movie.Name,
+            imdbId,
+            tmdbId,
+            Season: 0,
+            Episode: 0,
+            lang,
+            neutralName,
+            System.Text.Encoding.UTF8.GetBytes(srtContent),
+            quality,
+            // F-M505: der RELEASE-NAME, nicht die Gruppe — der Endpunkt (bzw. BuildUpload) schneidet die
+            // Gruppe heraus. Stuende hier schon die Gruppe, waere deren „Gruppe" leer und das Feld leer.
+            releaseName,
+            HearingImpaired: false,
+            DoubleEpisode: false,
+            SeasonPack: false,
+            TvstShowId: null,
+            MsubMovieId: aufloesung.MovieId,
+            MovieYear: movie.ReleaseYear ?? 0);
+
+        var answer = await endpoint.SendAsync(ticket, ct).ConfigureAwait(false);
+        LogUtil.PerItem(_config.LogMode, _logger,
+            "[moviesubtitles] {Name} [{Lang}] — {Result}{Reason}",
+            neutralName, lang,
+            answer.Ok ? "accepted" : "refused",
+            string.IsNullOrEmpty(answer.Reason) ? string.Empty : ": " + answer.Reason);
+
+        // F-M508: die Antwort der Seite wird durchgereicht, nicht gedeutet. Eine Id nennt sie nicht —
+        // dann steht hier „unbekannt" und die Kette vergibt die eigene Marke (own:moviesubtitles:…).
+        if (!string.IsNullOrEmpty(answer.Answer))
+        {
+            LogUtil.Detail(_logger, "[moviesubtitles] answer: {Answer}", answer.Answer);
+        }
+
+        LogUtil.PerItem(_config.LogMode, _logger,
+            "[moviesubtitles] id of our upload: {Id}",
+            answer.Id ?? (answer.Ok ? "not named by the site" : "none"));
+
+        return answer.Ok ? UploadResult.Success(answer.Id) : UploadResult.Failed(answer.Reason ?? "film-source-refused");
+    }
+
+    /// <summary>
+    /// F-M496: die Trockenlauf-Zeile EINER Quelle. Sie steht hier EINMAL, weil der Bericht sonst fuer jede
+    /// Quelle eine eigene Zeichenkette haette und die naechste Quelle keine bekaeme.
+    /// </summary>
+    /// <param name="quelle">Die Quelle, ueber die die Zeile spricht.</param>
+    /// <returns>Die Vorlage fuer <see cref="LogUtil.PerItem"/>.</returns>
+    private static string DryRunLine(Configuration.SubtitleProvider quelle) =>
+        "[" + Api.Endpoints.Provenance.Name(quelle) + "] DRY-RUN would upload {Name} [{Lang}]";
+
+    /// <summary>
+    /// F-M488/F-M490/F-M508: die Marke EINER Quelle aus den Ergebnissen der Kette. Hat die Quelle
+    /// genommen, ist ihre Marke ihre eigene Id — oder, wenn sie keine nennt, eine selbst vergebene
+    /// (<c>own:&lt;quelle&gt;:&lt;Zeit&gt;:&lt;hex&gt;</c>). Hat sie nicht genommen, bleibt beides leer; eine
+    /// Marke fuer einen Upload, der nicht stattfand, waere eine Luege im Store.
+    /// </summary>
+    /// <param name="ergebnisse">Die Ergebnisse der Kette, je Quelle.</param>
+    /// <param name="quelle">Die Quelle, deren Marke gefragt ist.</param>
+    /// <param name="knownId">Eine bereits bekannte Id (nur SubDL liest sie aus der Antwort).</param>
+    /// <param name="contentHash">Inhalts-Hash des Textes (Grundlage der eigenen Marke).</param>
+    /// <param name="releaseName">Release-Name (Grundlage der eigenen Marke).</param>
+    /// <param name="jetzt">Der Zeitpunkt des Uploads — fuer Id und Stempel derselbe.</param>
+    /// <returns>Die Id (oder null) und der Zeitpunkt (oder null).</returns>
+    private static (string? Id, DateTime? At) MarkOf(
+        IReadOnlyDictionary<Configuration.SubtitleProvider, UploadResult> ergebnisse,
+        Configuration.SubtitleProvider quelle, string? knownId, string contentHash, string releaseName,
+        DateTime jetzt)
+    {
+        if (!ergebnisse.TryGetValue(quelle, out var ergebnis) || !ergebnis.Ok)
+        {
+            return (null, null);
+        }
+
+        var id = knownId ?? ergebnis.SourceId
+            ?? Api.Endpoints.Provenance.OwnUploadId(quelle, contentHash, releaseName, jetzt);
+        return (id, jetzt);
+    }
+
+    /// <summary>
+    /// F-M485: sends one subtitle to the SERIES address of the tvst family (tvsubtitles.net).
     /// <para>
     /// F-M501 (Operator-Anweisung 15.11.2026): Name und Jahr kommen jetzt aus TMDb und die
     /// Seriennummer aus dem Store — nicht mehr aus dem Dateinamen. Der Name aus dem Dateinamen war eine
@@ -5045,10 +5318,10 @@ public sealed class UploadPipeline : IPackFiller
     /// weiter, denn die andere Quelle bekommt ihren Versuch unabhaengig davon.
     /// </para>
     /// </summary>
-    private async Task<UploadResult> SendToSecondSourceAsync(
+    private async Task<UploadResult> SendToTvSubtitlesAsync(
         string srtContent, string neutralName, string lang, string releaseName, string quality,
         string? imdbId, string? tmdbId, bool isSeries, int season, int episode, bool hearingImpaired,
-        string? mediaHash, CancellationToken ct)
+        string? mediaHash, string? mediaPath, CancellationToken ct)
     {
         if (!isSeries || season <= 0 || episode <= 0)
         {
@@ -5074,7 +5347,7 @@ public sealed class UploadPipeline : IPackFiller
         }
 
         var show = await _tvstShows
-            .ResolveForMediaAsync(Registry, mediaHash, series, _config.DryRun, ct)
+            .ResolveForMediaAsync(Registry, mediaHash, series, _config.DryRun, ct, mediaPath)
             .ConfigureAwait(false);
         if (!show.Resolved)
         {
@@ -5104,7 +5377,14 @@ public sealed class UploadPipeline : IPackFiller
             // F-M498: die Seite kennt nur sieben Rip-Werte; "WEB-DL" aus dem Release-Namen wird
             // hier auf "WEB" gezogen, sonst lehnt sie jede Folge ab.
             TvSubtitlesClient.RipFromQuality(quality),
-            Path.GetFileNameWithoutExtension(releaseName),
+            // F-M505 (Operator 15.11.2026: "Release on tvst is not perfect"): die Seite fuehrt in
+            // ihrer Release-Spalte die GRUPPE, nicht den Dateinamen — 193 Eintraege der ersten
+            // Middle-Staffel geprueft: 2HD, REWARD, FQM, FEVER, POW4, CTU, LOL, DIMENSION, 91 leer,
+            // kein einziger mit Punkten. Hier stand der Mediendateiname; die Seite schnitt ihn am
+            // Bindestrich ab, sodass "The Middle.S01E21.MULTI.1080p.WEB-DL" zu lesen war und die
+            // Gruppe (FTMVHD) ganz fehlte. Ohne erkennbare Gruppe bleibt das Feld leer — das ist
+            // ein erlaubter Wert und die Mehrheit auf der Seite.
+            SeasonPack.ReleaseGroup(releaseName) ?? string.Empty,
             hearingImpaired,
             DoubleEpisode: false,
             SeasonPack: false,
@@ -5151,10 +5431,18 @@ public sealed class UploadPipeline : IPackFiller
     /// Im Trockenlauf gilt die Konfigurationsfrage NICHT (F-M496): er macht keinen Aufruf und braucht
     /// deshalb keine Zugangsdaten — er zeigt nur, was ein echter Lauf taete.
     /// </para>
+    /// <para>
+    /// F-M509: die Medienart schneidet die Adresse der anderen Art heraus — Serien gehen an
+    /// tvsubtitles.net, Filme an moviesubtitles.org. Ohne diesen Schnitt stuende die jeweils fremde
+    /// Adresse als „offene Quelle" in der Datei und die Datei wuerde nie fertig. Ist die Medienart nicht
+    /// bekannt (<c>null</c>), bleiben beide Adressen stehen: lieber eine Zeile zu viel als eine Datei,
+    /// die als fertig gilt, obwohl eine Quelle sie noch nicht hat.
+    /// </para>
     /// </summary>
+    /// <param name="isSeries">Wahr für eine Serie, falsch für einen Film, null wenn (noch) nicht bekannt.</param>
     /// <returns>Die Quellen dieses Laufs, in der Reihenfolge, in der sie angetreten werden.</returns>
-    private List<Configuration.SubtitleProvider> UploadSources() =>
-        UploadSourceOrder()
+    private List<Configuration.SubtitleProvider> UploadSources(bool? isSeries) =>
+        UploadSourceOrder(isSeries)
             .Where(SourceAllowed)
             .Where(quelle => _config.DryRun || _config.IsConfiguredForUpload(quelle))
             .ToList();
@@ -5165,7 +5453,7 @@ public sealed class UploadPipeline : IPackFiller
     /// nicht (F-M495). Sie steht hier EINMAL, weil der Trockenlauf sie ebenfalls braucht: zwei
     /// Aufzaehlungen derselben Reihenfolge waeren zwei Wahrheiten, und der Trockenlauf wuerde sie
     /// irgendwann anders erzaehlen als der echte Lauf sie nimmt.
-    /// </summary>
+    /// </para>
     /// <para>
     /// F-M504 (Nutzerergaenzung 15.11.2026: „Dritte bis n quelle sind ebenfalls denkbar"): die
     /// Reihenfolge kommt aus <see cref="Api.Endpoints.SourceOrder"/> und nicht mehr aus einem
@@ -5173,27 +5461,60 @@ public sealed class UploadPipeline : IPackFiller
     /// waere darin nie angetreten. Die Kette selbst lief schon ueber die Liste — sie hat die neue
     /// Quelle also ohne Aenderung mitgenommen.
     /// </para>
-    /// <returns>Die Quellen in der Reihenfolge, in der sie angetreten werden.</returns>
-    private Configuration.SubtitleProvider[] UploadSourceOrder() =>
-        Api.Endpoints.SourceOrder.ForOrder(_config.DownloadOrder).ToArray();
+    /// <para>
+    /// F-M509 (Operator-Klarstellung 15.11.2026: „Tvst is splitted into tvst and moviesub itself"): die
+    /// Reihenfolge gilt auf FAMILIEN-Ebene. „tvst zuerst" heisst bei einer Serie tvsubtitles.net zuerst
+    /// und bei einem Film moviesubtitles.org zuerst; SubDL folgt in beiden Faellen. Die Liste hat
+    /// deshalb in jeder Medienart genau zwei Eintraege, und die Medienart waehlt die Adresse der Familie
+    /// (<see cref="Api.Endpoints.SourceOrder.ForMedia"/>) — keine dritte Position in der Reihenfolge und
+    /// keine dritte Einstellung.
+    /// </para>
+    /// <para>
+    /// F-M508: die Liste wird auf die Quellen eingegrenzt, fuer die es einen UPLOAD-Endpunkt gibt
+    /// (<see cref="Api.Endpoints.SubtitleEndpointCatalog.HasUploadPath"/>). Der Upload der Film-Adresse
+    /// ist seit Etappe 2b verdrahtet — er steht hier also, wenn seine Medienart zutrifft, und der
+    /// Schalter der Quelle entscheidet, ob er angetreten wird (und der ist standardmaessig aus).
+    /// </para>
+    /// </summary>
+    /// <param name="isSeries">Wahr für eine Serie, falsch für einen Film, null wenn nicht bekannt.</param>
+    /// <returns>Die Quellen in der Reihenfolge, in der sie angetreten werden — ohne Quellen, die keinen Upload-Weg haben.</returns>
+    private Configuration.SubtitleProvider[] UploadSourceOrder(bool? isSeries) =>
+        (isSeries is { } art
+            ? Api.Endpoints.SourceOrder.ForMedia(_config.DownloadOrder, art)
+            : Api.Endpoints.SourceOrder.ForMedia(_config.DownloadOrder, isSeries: true)
+                .Concat(Api.Endpoints.SourceOrder.ForMedia(_config.DownloadOrder, isSeries: false))
+                .Distinct())
+            .Where(Api.Endpoints.SubtitleEndpointCatalog.HasUploadPath)
+            .ToArray();
 
     /// <summary>
     /// F-M489: has ANY upload source still to get this pair? Asked per source, because a tvst upload must
     /// not keep the pair out of a SubDL upload and vice versa. Provenance is unknown at collection time
     /// without hashing the content, and unknown provenance is allowed everywhere (F-M487) — that is the
     /// safe direction here: it can only make the pair look MORE in need, never less.
+    /// <para>
+    /// F-M508: die Film-Adresse der Familie wird mitgefragt. Sie ist die dritte Quelle im Tor, nicht in
+    /// der Reihenfolge: die Reihenfolge ordnet zwei Quellen (SubDL und die Familie), das Tor fragt jede
+    /// Adresse, die in diesem Build hochladen kann.
+    /// </para>
     /// </summary>
     /// <param name="mediaHash">Parent media hash.</param>
     /// <param name="language">Language code.</param>
     /// <param name="hearingImpaired">HI flag of the pair.</param>
-    /// <returns>True when at least one enabled source does not have it yet.</returns>
-    private bool AnyUploadSourceStillWants(string? mediaHash, string language, bool hearingImpaired) =>
+    /// <param name="isSeries">Wahr für eine Serie: dann zählt nur die Serien-Adresse der Familie.</param>
+    /// <returns>True when at least one enabled source that could take it does not have it yet.</returns>
+    private bool AnyUploadSourceStillWants(string? mediaHash, string language, bool hearingImpaired, bool isSeries) =>
         Api.Endpoints.UploadGate.Decide(
             SourceAllowed(Configuration.SubtitleProvider.Subdl),
-            SourceAllowed(Configuration.SubtitleProvider.TvSubtitles),
+            // F-M509: nur die Adresse der Familie, die DIESE Medienart fuehrt, kann etwas wollen. Eine
+            // Serie kann der Film-Adresse nichts geben — sie hier mitzuzaehlen liesse das Paar ewig
+            // „gewollt" aussehen, und die Spur wuerde in jedem Lauf erneut durch die Kette geschickt.
+            SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries,
             origin: null,
             Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.Subdl),
-            Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles))
+            isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles),
+            SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles) && !isSeries,
+            !isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.MovieSubtitles))
         .SkipReason is null;
 
     /// <summary>
@@ -5278,10 +5599,14 @@ public sealed class UploadPipeline : IPackFiller
             return (ContentSettle.Reject, string.Empty);
         }
 
-        var quellen = UploadSources();
+        // F-M509: hier ist die Medienart nicht verlaesslich bekannt (die Zeile kann aus einer Ablehnung
+        // ohne TMDb-Aufloesung stammen). Sie wird nicht geraten: ohne sie zaehlen beide Adressen der
+        // Familie. Das kann einen Kandidaten hoechstens WEITER an die Kette schicken, nie einen Beleg
+        // verschlucken.
+        var quellen = UploadSources(isSeries: null);
         // Ohne eingeschaltete Quelle gibt es keine offene: dann zaehlt jeder Beleg im Bestand, damit ein
         // Lauf mit abgeschaltetem Upload den Inhalt nicht als "nirgends hochgeladen" ablehnt.
-        var beleg = (quellen.Count > 0 ? quellen : UploadSourceOrder().ToList())
+        var beleg = (quellen.Count > 0 ? quellen : UploadSourceOrder(isSeries: null).ToList())
             .Where(quelle => Registry.IsContentUploadedFor(contentHash, quelle))
             .ToList();
 
