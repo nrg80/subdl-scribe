@@ -1063,6 +1063,21 @@ internal static class Program
                     && uploadSource.Contains("public int SettledItems { get; set; }", StringComparison.Ordinal)
                     && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries", StringComparison.Ordinal));
 
+                // ---- F-M548: der Rhythmus haengt hinter der gezogenen Datei -------------------------
+                Check("F-M548: the transfer rhythm follows every saved download — two sites, both after the save",
+                    downloadSource.Split("await Task.Delay(_limiter.TransferPauseMsLessFit(), ct)").Length - 1 == 2
+                    && downloadSource.Contains("// F-M548: eine gezogene Datei → danach der Transfer-Rhythmus.", StringComparison.Ordinal)
+                    && downloadSource.Contains("// F-M548: der Rhythmus nach der gezogenen Datei", StringComparison.Ordinal));
+                int abruf = downloadSource.IndexOf("CandidateAttempt attempt = await DownloadCandidateAsync(cand, season, episode, ct)", StringComparison.Ordinal);
+                Check("F-M548: and it no longer stands in front of the fetch",
+                    abruf > 400
+                    && !downloadSource.Substring(abruf - 400, 400).Contains("TransferPauseMsLessFit", StringComparison.Ordinal));
+                int dryStelle = downloadSource.IndexOf("DRY-RUN HI", StringComparison.Ordinal);
+                Check("F-M548: a dry run transfers nothing and therefore waits for nothing",
+                    dryStelle > 800
+                    && !downloadSource.Substring(dryStelle - 800, 800).Contains("TransferPauseMsLessFit", StringComparison.Ordinal)
+                    && !downloadSource.Substring(dryStelle, 800).Contains("TransferPauseMsLessFit", StringComparison.Ordinal));
+
                 // ---- F-M547: Limits haengen an der externen Anfrage und an der echten Uebertragung ----
                 string registratorQuelle547 = await File.ReadAllTextAsync(Path.Combine(
                     root, "Jellyfin.Plugin.SubdlSync", "PluginServiceRegistrator.cs")).ConfigureAwait(false);

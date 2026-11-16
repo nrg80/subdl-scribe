@@ -2137,7 +2137,9 @@ public sealed class DownloadPipeline : IDisposable
                             // measured time comes off the pause. Both pauses carry it, because both
                             // gaps contain an alignment — this one the main track's, the next one the
                             // HI track's. Floor 0.
-                            await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
+                            // F-M548: hier stand die Transfer-Pause vor dem HI-Abruf. Sie gehoert hinter
+                            // das Ablegen (siehe die Stelle bei summary.Downloaded++) — vor der Anfrage
+                            // bestrafte sie den Versuch, nicht die Uebertragung.
                             // F-M464: the SDH fetch carries its own outcome — no reset, no state on
                             // the client, nothing a later request could overwrite.
                             DownloadOutcome hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
@@ -2364,6 +2366,8 @@ public sealed class DownloadPipeline : IDisposable
                                             moviesubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.MovieSubtitles ? hi.Url : null));
                                         _qaFails.RecordSuccess(item.Id.ToString(), lang); // HI save resets the pair counter too
                                         summary.Downloaded++;
+                                        // F-M548: eine gezogene Datei → danach der Transfer-Rhythmus.
+                                        await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
                                         RememberSavedLibrary(item, hiPath); // F-M473
                                         ReportOutcome(item, ItemOutcome.Done);
                                         hiSaved = true;
@@ -2593,14 +2597,12 @@ public sealed class DownloadPipeline : IDisposable
                     continue;
                 }
 
-                // F-M26: the pause before a REAL download (download→download), ±30 %.
-                // The local call budget that stood here until 03.10.2026 is removed (F-M20): it could
-                // only ever stop the run, and the plugin no longer counts its own calls.
-                // F-M310: the alignment of the PREVIOUS subtitle (main or HI) ran inside this gap, so
-                // its measured time comes off the pause — an alignment of a whole season's files is
-                // real work the transfer rhythm should not be charging for. Floor 0.
-                await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
-
+                // F-M548 (Operator-Anweisung 16.11.2026: „Ja auch rate limit nachdem eine datei geladen
+                // wurde"): der Rhythmus haengt NICHT mehr vor dem Abruf, sondern nach dem Ablegen. Die
+                // Pause vorher stand hier seit F-M26; sie kostete auch den Abruf, der dann scheiterte,
+                // und sie lag vor der Anfrage statt dahinter. Verlegt an die beiden Stellen, an denen
+                // eine Datei wirklich abgelegt wird (HI und Hauptspur).
+                // Die 0,5-s-API-Pause zieht der PacingHandler nach jeder externen Antwort.
                 _watchdog?.Heartbeat();
                 DownloadOutcome dl = DownloadOutcome.None("candidate");
                 CandidateAttempt attempt = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
@@ -3288,6 +3290,10 @@ public sealed class DownloadPipeline : IDisposable
                     {
                         summary.DownloadedWithoutSignificance++;
                     }
+
+                    // F-M548: der Rhythmus nach der gezogenen Datei — beide Zweige haben Bytes geholt
+                    // und abgelegt, nur die Signifikanz unterscheidet sie.
+                    await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
                     RememberSavedLibrary(item, targetPath); // F-M473
                     ReportOutcome(item, ItemOutcome.Done);
                     // F-M472: this save came out of a season pack, and the archive holding the other
