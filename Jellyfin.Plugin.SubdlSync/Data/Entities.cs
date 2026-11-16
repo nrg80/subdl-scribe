@@ -301,6 +301,7 @@ public abstract class SubtitleState
     /// <summary>Rejection reason (one of <see cref="RejectReason"/>, suffixes allowed), else null.</summary>
     public string? Reason { get; set; }
 
+
     /// <summary>When <see cref="Status"/> was last set.</summary>
     public DateTime StatusAt { get; set; } = DateTime.UtcNow;
 

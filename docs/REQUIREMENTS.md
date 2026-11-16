@@ -12,10 +12,11 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 13 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 95 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 102 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 3 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M379–F-M448 und F-M475, F-M476
+ - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 7 requirements (F-M557–F-M563)
 - [4. Download Pipeline](#4-download-pipeline) — 84 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 32 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
@@ -375,6 +376,67 @@ Dieses Unterkapitel fasst zusammen, was ein Pack ist, wann er beim Upload entste
 **F-M380:** **Die Breite entscheidet das Auflösungs-Token, nicht die Höhe.** Ein beschnittenes Bild bleibt 1080p, auch wenn die Höhe unter der Schwelle der nächsten Stufe liegt.
 
 **F-M381:** **Ein Serienname ist noch kein Release-Name.** Die im Dateisystem unzulässigen Zeichen werden aus dem Seriennamen entfernt, damit keines in den Archivnamen wandert.
+### 3.4 Upload completion criteria
+
+**Warum ein eigenes Kapitel.** „Fertig" war bis hierher nirgends beschrieben, sondern nur im Code
+entschieden — und an zwei Stellen verschieden. Der Einreiher fragte die Spuren, der Kopf des Laufs fragte
+zusätzlich einen Stempel, den nur ein abgeschlossener Lauf setzt. Ergebnis: **285** Wegwürfe je Zyklus bei
+0 Uploads (16.11.2026, 21:09), danach **292** Wegwürfe (439), und Dateien, deren Spuren alle „schon oben"
+oder „verworfen" endeten, kehrten in jedem Zyklus wieder. Dieses Kapitel legt fest, wann eine Datei für eine
+Quelle zu ist — eine Regel, die beide Seiten aufrufen.
+
+**F-M557 [U]:** **Zugeh-Kriterium ist ein Stempel je Quelle auf der Datei, nicht ein Urteil je Spur.**
+Am Ende des Durchlaufs für eine Quelle wird geprüft, ob **jede vorhandene Dialogspur** dieser Datei für
+diese Quelle *hochgeladen* oder *bewusst übersprungen* wurde. Gleich ⇒ Stempel der Quelle auf der
+Medienzeile (`Subdl…`, `TvSubtitles…`, `Moviesubtitles…`). Ungleich ⇒ **kein** Stempel. Die Spur-Urteile
+im Store bleiben Diagnose; sie entscheiden nicht mehr über „fertig". Damit entfallen die Spalte `VotedBy`
+und Schema 15 — die Regel braucht sie nicht.
+Gemessen ist das die Antwort auf die Frage des Operators (16.11.2026): „Alle spuren bearbeitet im
+durchlauf oder übersprungen ist zu für die Quelle?"
+
+**F-M558 [U]:** **Ein bewusster Skip zählt, ein Fehlversuch nicht.**
+Bewusst übersprungen heißt: die Seite führt die Sprache nicht (F-M538), das Paar ist bei dieser Quelle
+schon oben (Selbst-Echo), oder der Text ist untauglich (Struktur, Laufzeit, zu klein, unmappbares
+Kennzeichen). Ein gescheiterter Upload, ein Abbruch, ein Lesefehler und ein `deferred` zählen **nicht** —
+dann bleibt der Stempel weg und die Datei kommt zu Recht wieder. Das ist die Stelle, an der „fertig"
+bisher zu früh behauptet wurde.
+
+**F-M559 [U]:** **Jede Datei rechnet ab, und die Abrechnung steht im Log.**
+Eine Zeile je Datei: `12 tracks, 3 uploaded, 8 skipped, 1 unaccounted — no stamp for tvsubtitles` bzw. bei
+Deckung `12 tracks accounted — stamp for tvsubtitles`. Die unaccounted-Spur ist eine Aussage, kein
+Schweigen; sie ist die Messgröße dafür, ob der Urteilsraum dicht ist. Steht sie über mehrere Zyklen auf 0,
+ist „alle Spuren zu, pro Quelle" erreicht.
+
+**F-M560 [U]:** **Aktiv heißt spielend.**
+Die Vollständigkeit fragt nur Quellen, die für diese Richtung eingeschaltet, konfiguriert sind und für die
+Medienart einen Upload-Weg haben (`HasUploadPath`; bei einer Serie tritt moviesubtitles.org gar nicht an,
+F-M544). Eine ausgeschaltete Quelle blockiert nichts — sonst hielte der standardmäßig ausgeschaltete
+Film-Upload-Schalter jeden Film für immer offen.
+
+**F-M561 [U]:** **Der Sprachausschluss wird zur Stimme der Quelle.**
+F-M538 überspringt eine Sprache, die die Seite nicht führt, heute **ohne Zeile** im Store. Unter F-M557 ist
+das ein bewusster Skip dieser Quelle — also zählt er für tvst/mst mit, während SubDL dieselbe Spur weiter
+offen hat. Ohne diesen Punkt bliebe tvst auf jeder Spur offen, deren Sprache es nicht führt (gemessen
+16.11.2026: **174** solche Fälle, ID 28×, HE 18×, NO 18×, TH 16×, VI 16×, HR 14×, TL 12×, ET 6×).
+
+**F-M562 [U]:** **Neben dem Stempel steht die Spursignatur.**
+Anzahl der Dialogspuren plus Folge ihrer Sprach-/HI-Kennzeichen. Weicht sie beim nächsten Nachsehen ab,
+gilt die Datei als offen und wird erneut eingereiht — sonst würde eine später hinzugefügte Untertitelspur
+oder ein Remux nie gesendet. Der Stempel allein wäre eine Behauptung über einen Zustand, der sich ändern
+kann.
+
+**F-M563 [U]:** **Eine Frage, zwei Aufrufer — und die Queue entsteht aus ihr.**
+`IsCompleteFor(file, quelle)` ist die einzige Stelle, die „zu" beantwortet; Einreiher und Kopf des Laufs
+rufen sie. Der Einreiher bildet die Queue **nur** aus Dateien, die mindestens einen offenen Quellstempel
+haben, und der Eintrag trägt genau diese Quellen (F-M546/F-M549). Ein eingespielter Bestand erzeugt damit
+keine Einträge, keine Extraktion und keine API-Anfrage — der volle Durchlauf liest je Datei eine
+Store-Zeile pro Quelle und findet nichts. Der frühe Ausstieg vor dem Spurdurchlauf (F-M541) zählt nur,
+wenn er belegen kann, dass jede vorhandene Spur für diese Quelle bereits ein Endurteil hat; sonst läuft
+der Durchlauf und rechnet ab (F-M559).
+Antwort des Operators auf die Frage nach der Queue (16.11.2026): „Und die queue wird nur aus files gebildet
+deren Quellstempel nich zu ist?" — ja, und das ist der Grund, warum der tägliche Durchlauf nicht die ganze
+Bibliothek abarbeitet, ohne dass dafür eigens ein inkrementeller Modus nötig wäre.
+
 ## 4. Download Pipeline
 
 **F-M151a [B3]:** **Download-side short-circuit — replaced by the derived open-pair question.**
