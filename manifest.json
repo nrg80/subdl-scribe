@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.433",
-        "changelog": "v12.1.12.433: log lines name the source that answered, and every log prefix says Sub Scribe instead of SubDL.",
+        "version": "12.1.12.434",
+        "changelog": "v12.1.12.434: a saved download names the source it came from, the HI copy too.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.433-dev/Jellyfin.Plugin.SubdlSync_12.1.12.433.zip",
-        "checksum": "e70538ece3ce4518b524e0af7b47c6c2",
-        "timestamp": "2026-11-16T19:10:24Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.434-dev/Jellyfin.Plugin.SubdlSync_12.1.12.434.zip",
+        "checksum": "e38d69ed453a8edee20f0450c025dee2",
+        "timestamp": "2026-11-16T19:21:17Z"
       }
     ]
   }
