@@ -250,6 +250,23 @@ public sealed class TvSubtitlesClient
     private static readonly Regex SubtitleAnchor = new(
         "<a href=\"/subtitle-(\\d+)\\.html\">", RegexOptions.CultureInvariant);
 
+    // ============================================================
+    // F-M543 (16.11.2026): was in diesem Lauf schon gefragt wurde, wird nicht erneut gefragt.
+    //
+    // Gemessen am 16.11. im Upload-Zyklus 10:33-12:10: 1.988 Anfragen auf episode-<id>.html und 350 auf
+    // tvshow-<show>-<season>.html. Ursache ist die Suche nach der Folgenseite: FindEpisodePageAsync
+    // laeuft die Folgenliste der Staffel durch und holt von JEDER Kandidatenseite die Ueberschrift, um
+    // (Staffel, Folge) zu lesen — fuer Folge 22 also 22 Anfragen, fuer eine Staffel quadratisch. Die
+    // Ueberschrift einer Seite aendert sich nie, die Folgenliste nur, wenn WIR etwas anlegen; deshalb
+    // werden beide gemerkt, und die Folgenliste hat dafuer einen eigenen Verwerfer.
+    // ============================================================
+    private readonly System.Collections.Generic.Dictionary<int, (int Season, int Episode)> _episodeLabels = new();
+    private readonly System.Collections.Generic.Dictionary<(int ShowId, int Season), System.Collections.Generic.IReadOnlyList<int>> _seasonPages = new();
+    private readonly System.Collections.Generic.Dictionary<(int ShowId, int Season, int Episode), int> _pageByEpisode = new();
+
+    /// <summary>Obergrenze, damit ein langer Prozess nicht unbegrenzt sammelt.</summary>
+    private const int MemoLimit = 20000;
+
     private static readonly Regex Flag = new(
         "images/flags/([a-z]{1,6})\\.gif", RegexOptions.CultureInvariant);
 
@@ -653,10 +670,61 @@ public sealed class TvSubtitlesClient
     public async Task<IReadOnlyList<int>> EpisodePagesAsync(
         int showId, int season, CancellationToken cancellationToken = default)
     {
+        // F-M543: die Folgenliste einer Staffel wird je Lauf einmal geholt.
+        lock (_episodeLabels)
+        {
+            if (_seasonPages.TryGetValue((showId, season), out var gemerkt))
+            {
+                return gemerkt;
+            }
+        }
+
         var url = string.Format(
             CultureInfo.InvariantCulture, "{0}/tvshow-{1}-{2}.html", BaseUrl, showId, season);
         var html = await GetStringAsync(url, null, cancellationToken).ConfigureAwait(false);
-        return ParseEpisodePages(html);
+        var seiten = ParseEpisodePages(html);
+        lock (_episodeLabels)
+        {
+            if (_seasonPages.Count >= MemoLimit)
+            {
+                _seasonPages.Clear();
+            }
+
+            _seasonPages[(showId, season)] = seiten;
+        }
+
+        return seiten;
+    }
+
+    /// <summary>
+    /// F-M543: verwirft die gemerkte Folgenliste einer Staffel. Noetig, sobald WIR eine Folge oder eine
+    /// Serie anlegen — dann ist die Liste, die wir vorher gelesen haben, nicht mehr wahr.
+    /// </summary>
+    /// <param name="showId">Show id.</param>
+    /// <param name="season">Season number.</param>
+    /// <summary>
+    /// F-M543: verwirft alle gemerkten Folgenlisten. Wird nach einer Anlage aufgerufen, weil wir dann
+    /// nicht wissen, welche Staffelseite die neue ist.
+    /// </summary>
+    public void ClearSeasonMemos()
+    {
+        lock (_episodeLabels)
+        {
+            _seasonPages.Clear();
+            _pageByEpisode.Clear();
+        }
+    }
+
+    public void InvalidateSeasonPages(int showId, int season)
+    {
+        lock (_episodeLabels)
+        {
+            _seasonPages.Remove((showId, season));
+            foreach (var key in _pageByEpisode.Keys.Where(k => k.ShowId == showId && k.Season == season).ToList())
+            {
+                _pageByEpisode.Remove(key);
+            }
+        }
     }
 
     /// <summary>
@@ -694,10 +762,33 @@ public sealed class TvSubtitlesClient
     public async Task<(int Season, int Episode)> EpisodeLabelAsync(
         int pageId, CancellationToken cancellationToken = default)
     {
+        // F-M543: die Ueberschrift einer Seite aendert sich nie — einmal lesen genuegt fuer den Lauf.
+        lock (_episodeLabels)
+        {
+            if (_episodeLabels.TryGetValue(pageId, out var gemerkt))
+            {
+                return gemerkt;
+            }
+        }
+
         var html = await GetStringAsync(
             string.Format(CultureInfo.InvariantCulture, "{0}/episode-{1}.html", BaseUrl, pageId), null, cancellationToken)
             .ConfigureAwait(false);
-        return ParseEpisodeLabel(html);
+        var label = ParseEpisodeLabel(html);
+        if (label.Season > 0 || label.Episode > 0)
+        {
+            lock (_episodeLabels)
+            {
+                if (_episodeLabels.Count >= MemoLimit)
+                {
+                    _episodeLabels.Clear();
+                }
+
+                _episodeLabels[pageId] = label;
+            }
+        }
+
+        return label;
     }
 
     /// <summary>
@@ -862,12 +953,32 @@ public sealed class TvSubtitlesClient
     public async Task<int?> FindEpisodePageAsync(
         int showId, int season, int episode, CancellationToken cancellationToken = default)
     {
+        // F-M543: einmal gefundene Folgenseiten bleiben gemerkt; die Ueberschriften der Kandidaten
+        // kosteten vorher je Suche eine Anfrage pro Kandidat.
+        lock (_episodeLabels)
+        {
+            if (_pageByEpisode.TryGetValue((showId, season, episode), out var bekannt))
+            {
+                return bekannt;
+            }
+        }
+
         var pages = await EpisodePagesAsync(showId, season, cancellationToken).ConfigureAwait(false);
         foreach (var page in pages)
         {
             var label = await EpisodeLabelAsync(page, cancellationToken).ConfigureAwait(false);
             if (label.Season == season && label.Episode == episode)
             {
+                lock (_episodeLabels)
+                {
+                    if (_pageByEpisode.Count >= MemoLimit)
+                    {
+                        _pageByEpisode.Clear();
+                    }
+
+                    _pageByEpisode[(showId, season, episode)] = page;
+                }
+
                 return page;
             }
         }
@@ -1329,6 +1440,9 @@ public sealed class TvSubtitlesClient
         // F-M522: a real add changes the list, so the remembered copy is stale from here on. A dry run
         // never gets this far, which keeps the rule "a dry run changes nothing" intact.
         _showsCache = null;
+
+        // F-M543: dasselbe fuer die Folgenlisten — eine angelegte Serie bringt neue Staffelseiten.
+        ClearSeasonMemos();
 
         DebugTrace?.Invoke(SiteTrace.Call("POST", ziel));
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);

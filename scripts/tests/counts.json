@@ -416,6 +416,10 @@
     "T263": {
       "suite": "storex",
       "checks": 8
+    },
+    "T264": {
+      "suite": "tvsubtitles",
+      "checks": 4
     }
   }
 }

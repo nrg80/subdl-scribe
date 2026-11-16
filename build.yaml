@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.425"
+version: "12.1.12.426"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.426: the episode page is looked up once per run instead of once per request — a season no longer costs a request per candidate page.
   v12.1.12.425: TMDb answers are kept in the store instead of only in memory — a restart no longer re-asks the same titles and ids.
   v12.1.12.424: a file whose text streams were all rejected ends before the ffmpeg pass instead of being re-extracted and skipped stream by stream on every run.
   v12.1.12.423: the queue asks each site for its own language set before it looks at the marks; the mark check stays per source, so the queue does not fill up again.

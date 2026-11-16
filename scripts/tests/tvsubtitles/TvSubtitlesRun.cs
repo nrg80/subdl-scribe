@@ -669,6 +669,28 @@ internal static class Program
             && dlQuelle.Contains("Registry.TvstShowIdAtPath(mediaPath)", StringComparison.Ordinal)
             && dlQuelle.Contains("&& !_config.DryRun", StringComparison.Ordinal));
 
+        // ---- F-M543: die Folgenseite wird je Lauf einmal gesucht, nicht je Anfrage -----------------
+        var suchHandler = new SeasonFixtureHandler();
+        var suchClient = new TvSubtitlesClient(new HttpClient(suchHandler));
+        var seite3 = await suchClient.FindEpisodePageAsync(512, 9, 3).ConfigureAwait(false);
+        Check("F-M543: the episode page is found from the season list", seite3 == 9003,
+            seite3?.ToString(CultureInfo.InvariantCulture) ?? "null");
+        int epAnfragenNachErster = suchHandler.Episodes;
+        int staffelAnfragen = suchHandler.Season;
+        var nochmal = await suchClient.FindEpisodePageAsync(512, 9, 3).ConfigureAwait(false);
+        Check("F-M543: the same question costs no second request",
+            nochmal == seite3 && suchHandler.Episodes == epAnfragenNachErster && suchHandler.Season == staffelAnfragen,
+            suchHandler.Episodes.ToString(CultureInfo.InvariantCulture) + " episode, " + suchHandler.Season.ToString(CultureInfo.InvariantCulture) + " season");
+        var seite5 = await suchClient.FindEpisodePageAsync(512, 9, 5).ConfigureAwait(false);
+        Check("F-M543: a later episode of the same season does not walk the list again",
+            seite5 == 9005 && suchHandler.Season == 1 && suchHandler.Episodes - epAnfragenNachErster == 2,
+            "season " + suchHandler.Season.ToString(CultureInfo.InvariantCulture) + ", +"
+                + (suchHandler.Episodes - epAnfragenNachErster).ToString(CultureInfo.InvariantCulture) + " episode");
+        suchClient.InvalidateSeasonPages(512, 9);
+        await suchClient.FindEpisodePageAsync(512, 9, 1).ConfigureAwait(false);
+        Check("F-M543: after our own create the season list is read again, the labels are not",
+            suchHandler.Season == 2, suchHandler.Season.ToString(CultureInfo.InvariantCulture));
+
         Console.WriteLine();
         // ---- F-M533: Robustheit und Meldeweg der Seite ------------------------------------------
         var gut = new Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry("123", "de", "WEB", "FTMVHD", "3 days");
@@ -846,6 +868,43 @@ internal static class Program
     }
 
     /// <summary>An HTTP handler that answers "ok" and remembers what it was handed.</summary>
+    /// <summary>
+    /// F-M543: eine Staffel mit fuenf Folgen 9x01-9x05 und ein Zaehler fuer jede Anfrage. Die Seiten
+    /// entstehen hier, damit die Reihenfolge feststeht — die echten Fixtures laufen neueste zuerst.
+    /// </summary>
+    private sealed class SeasonFixtureHandler : HttpMessageHandler
+    {
+        public int Season { get; private set; }
+
+        public int Episodes { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var name = Path.GetFileName(request.RequestUri!.AbsolutePath);
+            string body;
+            if (name.StartsWith("tvshow-", StringComparison.Ordinal))
+            {
+                Season++;
+                body = "<html><body>"
+                    + string.Concat(System.Linq.Enumerable.Range(1, 5)
+                        .Select(n => "<a href=\"/episode-" + (9000 + n).ToString(CultureInfo.InvariantCulture) + ".html\">E"
+                            + n.ToString(CultureInfo.InvariantCulture) + "</a>"))
+                    + "</body></html>";
+            }
+            else
+            {
+                Episodes++;
+                var nummer = int.Parse(System.Text.RegularExpressions.Regex.Match(name, @"episode-(\d+)").Groups[1].Value, CultureInfo.InvariantCulture) - 9000;
+                body = "<html><body><h2>Testserie 9x" + nummer.ToString("00", CultureInfo.InvariantCulture) + "</h2></body></html>";
+            }
+
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(body),
+            });
+        }
+    }
+
     private sealed class CountingHandler : HttpMessageHandler
     {
         public int Requests { get; private set; }
