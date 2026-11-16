@@ -2211,6 +2211,7 @@ public sealed class UploadPipeline : IPackFiller
             "no-season-ep" => "item has no season/episode numbers — cannot upload",
             "second-source-no-tmdb-id" => "no TMDb id, so there is no leading title for tvsubtitles.net (F-M501)",
             "second-source-no-series-record" => "TMDb answered no series record, so name and year are unknown (F-M501)",
+            "second-source-no-language" => "the site does not carry this language, so it can never take it (F-M538)",
             _ => reason
         };
     }
@@ -5197,6 +5198,15 @@ public sealed class UploadPipeline : IPackFiller
             return UploadResult.Skipped("film-source-films-only");
         }
 
+        // F-M538: dasselbe fuer die Film-Adresse — sie hat ihr eigenes Sprachset, nicht das der Serienseite.
+        if (Api.MovieSubtitlesClient.SiteLanguage(lang) is null)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[moviesubtitles] {Name} [{Lang}] — skipped: the site has no such language (F-M538)",
+                neutralName, lang);
+            return UploadResult.Skipped("second-source-no-language");
+        }
+
         // F-M508: ohne TMDb-Kennung gibt es keinen fuehrenden Titel — dann wird nicht geraten.
         if (string.IsNullOrWhiteSpace(tmdbId))
         {
@@ -5339,6 +5349,18 @@ public sealed class UploadPipeline : IPackFiller
         if (!isSeries || season <= 0 || episode <= 0)
         {
             return UploadResult.Skipped("second-source-episodes-only");
+        }
+
+        // F-M538: die Seite fuehrt diese Sprache nicht — also wird sie nicht gesendet UND nicht als
+        // Fehlschlag gebucht. Vorher antwortete der Endpunkt „nicht angenommen", die Kette machte
+        // daraus ein Failed, und das Log meldete fuer dasselbe Paar in jedem Lauf
+        // „UPLOAD FAILED …: tvsubtitles.net has no language 'HR'".
+        if (Api.TvSubtitlesClient.SiteLanguage(lang) is null)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[tvsubtitles] {Name} [{Lang}] — skipped: the site has no such language (F-M538)",
+                neutralName, lang);
+            return UploadResult.Skipped("second-source-no-language");
         }
 
         // F-M501: ohne TMDb-Kennung gibt es keinen fuehrenden Titel — dann wird nicht geraten.
@@ -5522,11 +5544,19 @@ public sealed class UploadPipeline : IPackFiller
             // F-M509: nur die Adresse der Familie, die DIESE Medienart fuehrt, kann etwas wollen. Eine
             // Serie kann der Film-Adresse nichts geben — sie hier mitzuzaehlen liesse das Paar ewig
             // „gewollt" aussehen, und die Spur wuerde in jedem Lauf erneut durch die Kette geschickt.
-            SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries,
+            // F-M538 (Operator-Anweisung 16.11.2026: „Sprachen die tvst nicht unterstuetzt, nicht mehr
+            // in die Kette fuer tvst"): jede Seite fuehrt ihr EIGENES Sprachset. Was tvst nicht hat
+            // (gemessen 16.11.: 174 Ablehnungen an einem Tag fuer ID/HE/NO/TH/VI/HR/TL/ET), kann die
+            // Seite nie wollen — dann ist das Paar erledigt und wird nicht in jedem Lauf erneut
+            // durch die Kette geschickt. SubDL behaelt sein eigenes, weiteres Set und wird hier
+            // NICHT gefiltert.
+            SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries
+                && Api.TvSubtitlesClient.SiteLanguage(language) is not null,
             origin: null,
             Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.Subdl),
             isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles),
-            SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles) && !isSeries,
+            SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles) && !isSeries
+                && Api.MovieSubtitlesClient.SiteLanguage(language) is not null,
             !isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.MovieSubtitles))
         .SkipReason is null;
 

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 576" width="1024" height="576" role="img" aria-label="Sub Scribe">
   <title>Sub Scribe</title>
-  <desc>A screen holding a scribe writing on the subtitle box; a green arrow feeds subtitles in, a blue one drains them out.</desc>
+  <desc>A screen holding a scribe — yellow head, blue body, a pen in hand — writing on the subtitle box; a green arrow feeds subtitles in, a blue one drains them out.</desc>
   <rect width="1024" height="576" fill="#121826"/>
   <!-- screen frame -->
   <rect x="375.875" y="148.875" width="273.000" height="163.000" rx="13" fill="none" stroke="#dce1eb" stroke-width="8"/>
@@ -10,14 +10,11 @@
   <rect x="448.875" y="264.875" width="127.000" height="31.000" rx="6" fill="none" stroke="#dce1eb" stroke-width="4"/>
   <rect x="457.875" y="271.875" width="109.0" height="5.0" fill="#dce1eb"/>
   <rect x="457.875" y="283.875" width="109.0" height="5.0" fill="#dce1eb"/>
-  <!-- scribe: head, shoulders, the arm reaching down to write, and the pen -->
-  <circle cx="497" cy="179" r="15.5" fill="#f3f5f9"/>
-  <path fill="#f3f5f9" d="M 472.0,240.5 C 472.0,212.0 480.5,201.0 497.0,201.0 C 513.5,201.0 522.0,212.0 522.0,240.5 Z"/>
-  <path fill="none" stroke="#f3f5f9" stroke-width="10.5" stroke-linecap="round"
-        d="M 515.5,214.0 C 529.0,219.5 539.0,228.5 547.0,239.0"/>
-  <path fill="none" stroke="#32cd78" stroke-width="7.5" stroke-linecap="round"
-        d="M 545.0,237.0 L 560.5,250.0"/>
-  <circle cx="561.5" cy="251.0" r="4.2" fill="#32cd78"/>
+  <!-- the scribe, as it stands in the shipped logo: yellow head, blue body, a pen in hand -->
+  <circle cx="513" cy="228" r="8.2" fill="#f4d03f"/>
+  <path fill="#00a4dc" d="M 494.0,259.5 L 494.0,251.5 C 494.0,245.5 499.0,243.0 506.0,243.0 C 513.0,243.0 518.0,245.5 518.0,251.5 L 518.0,259.5 Z"/>
+  <path fill="none" stroke="#ffffff" stroke-width="4.6" stroke-linecap="round" d="M 534.0,245.0 L 518.5,261.0"/>
+  <circle cx="536.0" cy="243.5" r="3.4" fill="#f4d03f"/>
   <!-- input arrow -->
   <path fill="#32cd78" d="M 450.0,231.2 L 422.0,210.5 L 421.0,220.0 L 250.5,220.0 L 250.0,242.5 L 420.2,242.8 L 421.5,243.5 L 421.5,252.2 L 422.2,252.5 Z"/>
   <!-- output arrow -->

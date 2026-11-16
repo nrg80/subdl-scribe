@@ -396,6 +396,10 @@
     "T258": {
       "suite": "tvsubtitles",
       "checks": 5
+    },
+    "T259": {
+      "suite": "endpoints",
+      "checks": 3
     }
   }
 }

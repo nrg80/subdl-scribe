@@ -1027,6 +1027,23 @@ internal static class Program
                     && uploadSource.Contains("return UploadResult.Skipped(\"second-source-show-\" + show.Status)", StringComparison.Ordinal),
                     "status=" + kaputt.Status + " posts=" + handlerKaputt.Posts);
 
+                // ---- F-M538: jede Seite fuehrt ihr eigenes Sprachset --------------------------
+                // Operator-Anweisung 16.11.2026: „Sprachen die tvst nicht unterstuetzt, nicht mehr in
+                // die Kette fuer tvst. Fuer subdl gilt ein anderes sprachset."
+                Check("F-M538: both site families gate the chain by their OWN language table",
+                    uploadSource.Contains("Api.TvSubtitlesClient.SiteLanguage(language) is not null", StringComparison.Ordinal)
+                    && uploadSource.Contains("Api.MovieSubtitlesClient.SiteLanguage(language) is not null", StringComparison.Ordinal));
+                Check("F-M538: a language the site does not carry is a skip with its own reason, not a failure",
+                    uploadSource.Contains("return UploadResult.Skipped(\"second-source-no-language\")", StringComparison.Ordinal)
+                    && uploadSource.Contains("the site has no such language (F-M538)", StringComparison.Ordinal));
+                Check("F-M538: the site sets really are separate (Hindi is on neither site, Arabic on both)",
+                    TvSubtitlesClient.SiteLanguage("hi") is null
+                    && MovieSubtitlesClient.SiteLanguage("hi") is null
+                    && TvSubtitlesClient.SiteLanguage("ar") == "ar"
+                    && MovieSubtitlesClient.SiteLanguage("ar") == "ar",
+                    "tvst(hi)=" + (TvSubtitlesClient.SiteLanguage("hi") ?? "-")
+                    + " mst(hi)=" + (MovieSubtitlesClient.SiteLanguage("hi") ?? "-"));
+
                 // Anlegen hoechstens einmal je Medium und Lauf: derselbe Fehlschlag wird NICHT wiederholt.
                 var zweiterVersuch = await aufloeserKaputt
                     .ResolveForMediaAsync(
