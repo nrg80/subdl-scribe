@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.394",
-        "changelog": "v12.1.12.394: the configured order now decides which search engine is asked first, not only which hit leads — the SubDL search runs inside the ordered source loop instead of always up front — F-M504.",
+        "version": "12.1.12.401",
+        "changelog": "v12.1.12.401: sidecars from the reserved original block (slot 50-99) are no longer uploaded - they are the unsynchronized copies a correction keeps beside its result - and the upload comment carries the TMDb and IMDb ids only.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.394-dev/Jellyfin.Plugin.SubdlSync_12.1.12.394.zip",
-        "checksum": "756e8b3d256cc296025ceebdce9d6021",
-        "timestamp": "2026-11-15T19:08:48Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.401-dev/Jellyfin.Plugin.SubdlSync_12.1.12.401.zip",
+        "checksum": "4935b6ec6a95701854128df2b419df91",
+        "timestamp": "2026-11-16T04:21:52Z"
       }
     ]
   }
