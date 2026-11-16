@@ -352,6 +352,16 @@ public sealed class TvSubtitlesClient
     private readonly HttpClient _http;
 
     /// <summary>
+    /// F-M521: the debug channel for this site. Two lines per request ("API call", "API response"),
+    /// Debug only — the same shape SubDL has always used. Both directions go through it, because
+    /// searching, fetching and uploading share the same three HTTP call sites.
+    /// </summary>
+    public event Action<string>? DebugTrace;
+
+    /// <summary>Gets the status code of the last request; 0 when no answer arrived.</summary>
+    public int LastStatus { get; private set; }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="TvSubtitlesClient"/> class.
     /// </summary>
     /// <param name="http">The HttpClient to use. <see cref="SubdlApiClient.NewHttpClient"/> gives one
@@ -1219,7 +1229,10 @@ public sealed class TvSubtitlesClient
         request.Content.Headers.ContentType =
             System.Net.Http.Headers.MediaTypeHeaderValue.Parse("multipart/form-data; boundary=" + boundary);
 
+        DebugTrace?.Invoke(SiteTrace.Call("POST", AddShowPostUrl));
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        LastStatus = (int)response.StatusCode;
+        DebugTrace?.Invoke(SiteTrace.Response("POST", AddShowPostUrl, LastStatus));
         var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var plain = TagStripper.Replace(Regex.Replace(text, "\\s+", " ", RegexOptions.CultureInvariant), " ").Trim();
         var status = (int)response.StatusCode;
@@ -1311,7 +1324,10 @@ public sealed class TvSubtitlesClient
         request.Content.Headers.ContentType =
             System.Net.Http.Headers.MediaTypeHeaderValue.Parse("multipart/form-data; boundary=" + boundary);
 
+        DebugTrace?.Invoke(SiteTrace.Call("POST", url));
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        LastStatus = (int)response.StatusCode;
+        DebugTrace?.Invoke(SiteTrace.Response("POST", url, LastStatus));
         var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var plain = TagStripper.Replace(Regex.Replace(text, "\\s+", " ", RegexOptions.CultureInvariant), " ");
         return new TvSubtitlesUploadResult(
@@ -1332,7 +1348,10 @@ public sealed class TvSubtitlesClient
             request.Headers.Referrer = new Uri(referer);
         }
 
+        DebugTrace?.Invoke(SiteTrace.Call("GET", url));
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        LastStatus = (int)response.StatusCode;
+        DebugTrace?.Invoke(SiteTrace.Response("GET", url, LastStatus));
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
     }

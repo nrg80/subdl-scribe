@@ -340,10 +340,16 @@ public sealed class UploadPipeline : IPackFiller
 
         // F-M501: EIN Client und EIN Auflöser für den ganzen Lauf — siehe die Feldbemerkungen oben.
         _tvstClient = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+
+        // F-M521 (Operator-Anweisung 17.11.2026: „Und logging für uploads?"): the upload direction of
+        // the tvst family is traced too — the same two Debug lines per request as SubDL, so an upload
+        // run proves which address it posted to and what came back.
+        _tvstClient.DebugTrace += OnApiTrace;
         _tvstShows = new Api.Endpoints.TvstShowResolver(_tvstClient, logger);
 
         // F-M508: dasselbe für die Film-Adresse der Familie — ein Client, ein Auflöser, ein Lauf.
         _msubClient = new Api.MovieSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        _msubClient.DebugTrace += OnApiTrace;
         _msubMovies = new Api.Endpoints.MsubMovieResolver(_msubClient, logger);
     }
 

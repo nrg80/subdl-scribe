@@ -2100,6 +2100,33 @@ internal static class Program
             Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.FindLooseSrts(ep)
                 .All(x => !SidecarNaming.IsOriginalSidecar(x.Path, ep)));
 
+
+        // ---- F-M521: die tvst-Familie schreibt ihre Anfragen mit (Operator 17.11.2026) -------------
+        // Vorher schwieg beide Adressen: „0 tvsubtitles candidate(s)" sah aus wie ein Lauf, der die
+        // Seite nie gefragt hat. Zwei Zeilen je Anfrage auf Debug, die Kennung in der Sammelzeile.
+        Check("F-M521: the request line names method and path, never the query",
+            SiteTrace.Call("GET", "https://www.tvsubtitles.net/search.php?q=Grey%27s+Anatomy")
+                == "API call GET https://www.tvsubtitles.net/search.php");
+        Check("F-M521: the response line repeats the path and carries the status",
+            SiteTrace.Response("POST", "https://www.moviesubtitles.org/add.php?tvid=13392", 302)
+                == "API response POST https://www.moviesubtitles.org/add.php → 302");
+        Check("F-M521: the summary text says how the site answered",
+            SiteTrace.Answer(200, 3) == "HTTP 200, 3 hit(s)"
+            && SiteTrace.Answer(0, 0) == "no answer, 0 hit(s)");
+        Check("F-M521: both addresses of the family carry a debug channel",
+            typeof(TvSubtitlesClient).GetEvent("DebugTrace") is not null
+            && typeof(MovieSubtitlesClient).GetEvent("DebugTrace") is not null
+            && typeof(MovieSubtitlesClient).GetProperty("LastStatus") is not null);
+        string dlSource = await File.ReadAllTextAsync(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "DownloadPipeline.cs")).ConfigureAwait(false);
+        string ulSource = await File.ReadAllTextAsync(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "UploadPipeline.cs")).ConfigureAwait(false);
+        Check("F-M521: both directions subscribe the channel — download and upload",
+            dlSource.Contains("_tvClient.DebugTrace += OnApiTrace", StringComparison.Ordinal)
+            && dlSource.Contains("_msubClient.DebugTrace += OnApiTrace", StringComparison.Ordinal)
+            && ulSource.Contains("_tvstClient.DebugTrace += OnApiTrace", StringComparison.Ordinal)
+            && ulSource.Contains("_msubClient.DebugTrace += OnApiTrace", StringComparison.Ordinal));
+
         if (_failures > 0)
         {
             Console.WriteLine($">>> ENDPUNKTE: {_failures} von {_checks} Pruefungen fehlgeschlagen");

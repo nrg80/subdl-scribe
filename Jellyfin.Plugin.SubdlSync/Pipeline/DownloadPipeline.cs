@@ -241,6 +241,10 @@ public sealed class DownloadPipeline : IDisposable
     /// </summary>
     private readonly Api.MovieSubtitlesClient _msubClient;
 
+    // F-M521: the series address needs a name of its own here, because its debug channel is attached
+    // per run like SubDL's — and the summary line asks this instance what the site answered.
+    private Api.TvSubtitlesClient? _tvClient;
+
     /// <summary>F-M507: welche Nummer hat dieser Film bei moviesubtitles.org — gespeichert, sonst gesucht.</summary>
     private readonly Api.Endpoints.MsubMovieResolver _msubMovies;
 
@@ -459,7 +463,8 @@ public sealed class DownloadPipeline : IDisposable
         // F-M507: die dritte Quelle (moviesubtitles.org) ist dabei — als DOWNLOAD-Endpunkt. Einen
         // Upload-Endpunkt hat sie nicht, und deshalb steht sie auch nicht in der Upload-Liste des
         // Katalogs (SubtitleEndpointCatalog.HasUploadPath).
-        var tvClient = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        _tvClient = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        var tvClient = _tvClient;
         _msubClient = new Api.MovieSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
         _msubMovies = new Api.Endpoints.MsubMovieResolver(_msubClient, _logger);
         _endpoints = new Api.Endpoints.SubtitleEndpointCatalog(
@@ -589,6 +594,16 @@ public sealed class DownloadPipeline : IDisposable
 
         // F-M24a: forward per-call API traces to LogLevel.Debug
         _api.DebugTrace += OnApiTrace;
+
+        // F-M521: the tvst family gets the same channel as SubDL, in both directions. Without it the
+        // answer of tvsubtitles.net / moviesubtitles.org never reached the log, so a run that asked the
+        // site looked exactly like a run that never did.
+        if (_tvClient is not null)
+        {
+            _tvClient.DebugTrace += OnApiTrace;
+        }
+
+        _msubClient.DebugTrace += OnApiTrace;
 
         // F-M232: the client's LogInfo channel (429 raw bodies, rate headers, login
         // diagnostics) was subscribed only by the postprocessing path, so a download
@@ -746,6 +761,12 @@ public sealed class DownloadPipeline : IDisposable
         }
 
         _api.DebugTrace -= OnApiTrace;
+        if (_tvClient is not null)
+        {
+            _tvClient.DebugTrace -= OnApiTrace;
+        }
+
+        _msubClient.DebugTrace -= OnApiTrace;
         _api.Log -= OnApiLog; // F-M232: detach the client's LogInfo channel per run
         _tmdb.Trace -= OnTmdbTrace;
         _runSummaryForEvents = null;
@@ -1648,6 +1669,11 @@ public sealed class DownloadPipeline : IDisposable
         // tvsubtitles vorn, wird ERST fuer alle fehlenden Sprachen tvst gefragt und DANACH die
         // SubDL-Suche gefahren; steht SubDL vorn, ist es umgekehrt. In beiden Faellen laeuft
         // dieselbe Schleife — die Reihenfolge ist Daten, kein Sonderfall im Code.
+        // F-M521: was die Adresse geantwortet hat, je Quelle EINE kurze Angabe. Sie geht in die
+        // Verdichtungszeile, damit „asked: tvsubtitles" nicht mehr behauptet werden muss: dort steht
+        // dann der Status der Seite und die Zahl der Treffer.
+        var antworten = new Dictionary<Configuration.SubtitleProvider, string>();
+
         foreach (var quelle in quellenReihenfolge)
         {
             ct.ThrowIfCancellationRequested();
@@ -1690,6 +1716,13 @@ public sealed class DownloadPipeline : IDisposable
                 treffer.AddRange(await ForeignCandidatesAsync(quelle, title, isSeries, season, episode, lang, tmdbId, mediaPath, mediaHash, ct).ConfigureAwait(false));
                 fremdProSprache[lang] = treffer;
             }
+
+            // F-M521: the status of the LAST request that source made, plus the hits it produced.
+            int status = quelle == Configuration.SubtitleProvider.MovieSubtitles
+                ? _msubClient.LastStatus
+                : _tvClient?.LastStatus ?? 0;
+            int trefferZahl = fremdProSprache.Values.Sum(liste => liste.Count(c => c.Provider == quelle));
+            antworten[quelle] = Api.SiteTrace.Answer(status, trefferZahl);
 
             gefragteQuellen.Add(quelle);
         }
@@ -1815,7 +1848,9 @@ public sealed class DownloadPipeline : IDisposable
                 string.Join(",", missing),
                 gefragteQuellen.Count == 0
                     ? "none"
-                    : string.Join(", ", gefragteQuellen.Select(Api.Endpoints.Provenance.Name)));
+                    : string.Join(", ", gefragteQuellen.Select(q =>
+                        Api.Endpoints.Provenance.Name(q)
+                        + (antworten.TryGetValue(q, out var a) ? " (" + a + ")" : string.Empty))));
             return;
         }
 
@@ -1880,7 +1915,8 @@ public sealed class DownloadPipeline : IDisposable
                 // ueberhaupt eine Quelle mitgelaufen ist; ohne sie waere die Zeile eine Selbstauskunft.
                 string zaehlung = string.Join(", ", quellenReihenfolge.Select(quelle =>
                     langCands.Count(c => c.Provider == quelle).ToString(System.Globalization.CultureInfo.InvariantCulture)
-                    + " " + Api.Endpoints.Provenance.Name(quelle) + " candidate(s)"));
+                    + " " + Api.Endpoints.Provenance.Name(quelle) + " candidate(s)"
+                    + (antworten.TryGetValue(quelle, out var a) ? " (" + a + ")" : string.Empty)));
                 // F-M510 (Messung 15.11.2026, erster Film-Lauf auf jf-test): hier stand das Etikett der
                 // SERIEN-Seite fest im Text, obwohl die gefragte Adresse moviesubtitles.org war. Es
                 // nennt jetzt die Adresse, die TATSAECHLICH gefragt wurde: SourceOrder.FamilyPage(isSeries)

@@ -351,6 +351,16 @@ public sealed class MovieSubtitlesClient
     private readonly HttpClient _http;
 
     /// <summary>
+    /// F-M521: the debug channel for moviesubtitles.org — same two lines per request as the series
+    /// address and as SubDL, Debug only. Search, fetch, adding a film and uploading all pass through
+    /// these call sites, so both directions are covered by one wiring.
+    /// </summary>
+    public event Action<string>? DebugTrace;
+
+    /// <summary>Gets the status code of the last request; 0 when no answer arrived.</summary>
+    public int LastStatus { get; private set; }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="MovieSubtitlesClient"/> class.
     /// </summary>
     /// <param name="http">The HttpClient to use. <see cref="SubdlApiClient.NewHttpClient"/> gives one
@@ -1399,11 +1409,14 @@ public sealed class MovieSubtitlesClient
         request.Content.Headers.ContentType =
             System.Net.Http.Headers.MediaTypeHeaderValue.Parse("multipart/form-data; boundary=" + boundary);
 
+        DebugTrace?.Invoke(SiteTrace.Call("POST", BaseUrl + "/add.php"));
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        LastStatus = (int)response.StatusCode;
+        DebugTrace?.Invoke(SiteTrace.Response("POST", BaseUrl + "/add.php", LastStatus));
         var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var plain = TagStripper.Replace(Regex.Replace(text, "\\s+", " ", RegexOptions.CultureInvariant), " ");
         return new MovieSubtitlesUploadResult(
-            true, (int)response.StatusCode, plain.Trim(), body.Length, boundary);
+            true, LastStatus, plain.Trim(), body.Length, boundary);
     }
 
     // ---- F-M513: einen FILM anlegen ---------------------------------------------------------------
@@ -1608,7 +1621,10 @@ public sealed class MovieSubtitlesClient
         request.Content.Headers.ContentType =
             System.Net.Http.Headers.MediaTypeHeaderValue.Parse("multipart/form-data; boundary=" + boundary);
 
+        DebugTrace?.Invoke(SiteTrace.Call("POST", BaseUrl + "/add-movie.php"));
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        LastStatus = (int)response.StatusCode;
+        DebugTrace?.Invoke(SiteTrace.Response("POST", BaseUrl + "/add-movie.php", LastStatus));
         var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var plain = TagStripper.Replace(Regex.Replace(text, "\\s+", " ", RegexOptions.CultureInvariant), " ")
             .Trim();
@@ -1881,8 +1897,12 @@ public sealed class MovieSubtitlesClient
 
         // A caller that follows redirects itself gets the file bytes straight from here; one that does
         // not (a test handler) gets the 302 and its Location. Both are read below.
-        return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+        DebugTrace?.Invoke(SiteTrace.Call("GET", url));
+        var antwort = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
+        LastStatus = (int)antwort.StatusCode;
+        DebugTrace?.Invoke(SiteTrace.Response("GET", url, LastStatus));
+        return antwort;
     }
 }
 
