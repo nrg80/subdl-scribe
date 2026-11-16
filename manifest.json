@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.418",
-        "changelog": "v12.1.12.418: Subtitles that the site serves in a legacy codepage (Arabic cp1256, Greek cp1253, Bulgarian cp1251) are now read through the language of the candidate instead of being destroyed — strict UTF-8 first, the codepage only when that fails.",
+        "version": "12.1.12.419",
+        "changelog": "v12.1.12.419: The client now names itself on every request to tvsubtitles.net (client=sub-scribe-<version>) and carries the current product name in its user-agent instead of the retired one.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.418-dev/Jellyfin.Plugin.SubdlSync_12.1.12.418.zip",
-        "checksum": "98728321dc4c44474a9bea877f8b51cb",
-        "timestamp": "2026-11-16T11:43:06Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.419-dev/Jellyfin.Plugin.SubdlSync_12.1.12.419.zip",
+        "checksum": "7b1c5720c8db65b7413e83011e4667ee",
+        "timestamp": "2026-11-16T11:56:16Z"
       }
     ]
   }
