@@ -408,6 +408,9 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         _sharedWorkerRuns = null;
         var logger = _loggerFactory?.CreateLogger<SubdlDbContext>();
         _sharedDbContext = new SubdlDbContext(DataFolderPath, logger);
+
+        // F-M542: the TMDb answers live in the store now, so a restart does not re-ask them.
+        Jellyfin.Plugin.SubdlScribe.Registry.TmdbAnswerStore.Attach(_sharedDbContext.Context);
     }
 
     /// <inheritdoc />

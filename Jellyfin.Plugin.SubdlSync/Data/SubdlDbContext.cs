@@ -19,6 +19,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubdlScribe.Registry;
 
 namespace Jellyfin.Plugin.SubdlScribe.Data;
 
@@ -137,6 +138,7 @@ public sealed class SubdlDbContext : IDisposable
         _db.Logger = logger;
         _db.Database.EnsureCreated();
         EnsurePacksTable();
+        EnsureTmdbAnswersTable();
         EnsureReportColumns();
         EnsureStatusColumns();
         EnsurePackColumns();
@@ -206,6 +208,13 @@ public sealed class SubdlDbContext : IDisposable
     /// write in that case: the newer build may store fields this one would silently drop.
     /// </summary>
     public bool IsWrittenByNewerVersion { get; private set; }
+
+    /// <summary>
+    /// F-M542: the EF context itself, for a store that owns its own table (the TMDb answers). The
+    /// wrapper's other members stay the normal way in; this is the one door for a new table that has no
+    /// wrapper API yet.
+    /// </summary>
+    public SubdlSqliteContext Context => _db;
 
     /// <summary>
     /// Reads area 0 and decides whether this build may write to the file.
@@ -285,6 +294,27 @@ public sealed class SubdlDbContext : IDisposable
         catch (Exception ex)
         {
             _logger?.LogWarning("[SubDL] could not create the packs table (continuing): {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// F-M542: creates the <c>tmdb_answers</c> table on a data file that predates it. Same reason and
+    /// same shape as <see cref="EnsurePacksTable"/>: <c>EnsureCreated</c> builds a schema only when the
+    /// FILE is new, and a missing table would throw on the first TMDb answer instead of at startup.
+    /// </summary>
+    private void EnsureTmdbAnswersTable()
+    {
+        try
+        {
+            _db.Database.ExecuteSqlRaw(
+                "CREATE TABLE IF NOT EXISTS tmdb_answers ("
+                + "Id TEXT NOT NULL PRIMARY KEY, "
+                + "Value TEXT NOT NULL DEFAULT '', "
+                + "Written TEXT NOT NULL DEFAULT '');");
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("[SubDL] could not create the tmdb_answers table (continuing): {Msg}", ex.Message);
         }
     }
 
@@ -1147,6 +1177,9 @@ public sealed class SubdlSqliteContext : DbContext
 
     /// <summary>Pipeline run bookkeeping.</summary>
     public DbSet<PipelineRunEntity> RunRows => Set<PipelineRunEntity>();
+
+    /// <summary>F-M542: TMDb answers, so a restart does not re-ask the same questions.</summary>
+    public DbSet<TmdbAnswerEntity> TmdbAnswerRows => Set<TmdbAnswerEntity>();
 
     /// <summary>Area 5: cumulative GUI counters.</summary>
     public DbSet<StatusStatsEntity> StatusRows => Set<StatusStatsEntity>();

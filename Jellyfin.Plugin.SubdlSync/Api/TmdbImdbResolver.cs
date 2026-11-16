@@ -213,7 +213,7 @@ public sealed class TmdbImdbResolver
         var cacheKey = ("multi:" + lookupTitle.ToUpperInvariant() + "|" + (year?.ToString(CultureInfo.InvariantCulture) ?? string.Empty) + "|" + (strictYear ? "strict" : "loose"), preferSeries);
         lock (_cache)
         {
-            if (_cache.TryGetValue(cacheKey, out var cachedHit))
+            if (TryCache(cacheKey, out var cachedHit))
             {
                 // Hit stored as "imdb|tmdb|found|isSeries".
                 var parts = cachedHit?.Split('|');
@@ -346,7 +346,7 @@ public sealed class TmdbImdbResolver
 
         lock (_cache)
         {
-            _cache[cacheKey] = $"{(imdb ?? string.Empty)}|{(tmdb ?? string.Empty)}|{(found ? "1" : "0")}|{(isSeries ? "1" : "0")}";
+            SetCache(cacheKey, $"{(imdb ?? string.Empty)}|{(tmdb ?? string.Empty)}|{(found ? "1" : "0")}|{(isSeries ? "1" : "0")}");
         }
 
         return (imdb, tmdb, found, isSeries);
@@ -443,7 +443,7 @@ public sealed class TmdbImdbResolver
         var key = ("id:" + tmdbId, isSeries);
         lock (_cache)
         {
-            if (_cache.TryGetValue(key, out var cached))
+            if (TryCache(key, out var cached))
             {
                 return cached;
             }
@@ -511,7 +511,7 @@ public sealed class TmdbImdbResolver
 
         lock (_cache)
         {
-            _cache[key] = imdb;
+            SetCache(key, imdb);
         }
 
         return imdb;
@@ -541,7 +541,7 @@ public sealed class TmdbImdbResolver
         var key = ("imdb:" + imdbId, true);
         lock (_cache)
         {
-            if (_cache.TryGetValue(key, out var cached))
+            if (TryCache(key, out var cached))
             {
                 return cached;
             }
@@ -585,7 +585,7 @@ public sealed class TmdbImdbResolver
 
         lock (_cache)
         {
-            _cache[key] = tmdb;
+            SetCache(key, tmdb);
         }
 
         return tmdb;
@@ -605,7 +605,7 @@ public sealed class TmdbImdbResolver
         var key = ("q:" + lookupTitle.ToUpperInvariant() + "|" + (year?.ToString(CultureInfo.InvariantCulture) ?? string.Empty), isSeries);
         lock (_cache)
         {
-            if (_cache.TryGetValue(key, out var cached))
+            if (TryCache(key, out var cached))
             {
                 return (cached, null); // Cache stores the imdb part only (legacy entries)
             }
@@ -683,7 +683,7 @@ public sealed class TmdbImdbResolver
 
         lock (_cache)
         {
-            _cache[key] = imdb;
+            SetCache(key, imdb);
         }
 
         return (imdb, tmdb); // Both ids (tmdb may be null on resolve miss)
@@ -823,7 +823,7 @@ public sealed class TmdbImdbResolver
         var key = ("showOf:" + imdbId, false);
         lock (_cache)
         {
-            if (_cache.TryGetValue(key, out var cached))
+            if (TryCache(key, out var cached))
             {
                 var parts = cached?.Split('|');
                 return parts is { Length: 2 }
@@ -866,7 +866,7 @@ public sealed class TmdbImdbResolver
 
         lock (_cache)
         {
-            _cache[key] = $"{(tvId ?? string.Empty)}|{(isEpisode ? "1" : "0")}";
+            SetCache(key, $"{(tvId ?? string.Empty)}|{(isEpisode ? "1" : "0")}");
         }
 
         return (tvId, isEpisode);
@@ -908,7 +908,7 @@ public sealed class TmdbImdbResolver
         var cacheKey = ($"showByEp:{episodeTmdbId}|{title.Trim().ToUpperInvariant()}|{season}|{episode}", true);
         lock (_cache)
         {
-            if (_cache.TryGetValue(cacheKey, out var cached))
+            if (TryCache(cacheKey, out var cached))
             {
                 var p = cached?.Split('|');
                 return p is { Length: 2 }
@@ -980,7 +980,7 @@ public sealed class TmdbImdbResolver
 
         lock (_cache)
         {
-            _cache[cacheKey] = $"{(showImdb ?? string.Empty)}|{(showTmdb ?? string.Empty)}";
+            SetCache(cacheKey, $"{(showImdb ?? string.Empty)}|{(showTmdb ?? string.Empty)}");
         }
 
         return (showImdb, showTmdb);
@@ -1018,7 +1018,7 @@ public sealed class TmdbImdbResolver
         var key = ("isShow:" + tmdbId, false);
         lock (_cache)
         {
-            if (_cache.TryGetValue(key, out var cached))
+            if (TryCache(key, out var cached))
             {
                 return cached == "1";
             }
@@ -1047,7 +1047,7 @@ public sealed class TmdbImdbResolver
 
         lock (_cache)
         {
-            _cache[key] = ok ? "1" : "0";
+            SetCache(key, ok ? "1" : "0");
         }
 
         return ok;
@@ -1283,7 +1283,7 @@ public sealed class TmdbImdbResolver
         var key = ("tv:" + tmdbId, true);
         lock (_cache)
         {
-            if (_cache.TryGetValue(key, out var cached))
+            if (TryCache(key, out var cached))
             {
                 // "name|original|year|seasons"; ein leerer Treffer wird als leerer String abgelegt.
                 var parts = cached?.Split('|');
@@ -1362,14 +1362,14 @@ public sealed class TmdbImdbResolver
 
         lock (_cache)
         {
-            _cache[key] = info is null
+            SetCache(key, info is null
                 ? string.Empty
                 : string.Join(
                     "|",
                     info.Name,
                     info.OriginalName ?? string.Empty,
                     info.FirstAirYear?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
-                    info.Seasons?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+                    info.Seasons?.ToString(CultureInfo.InvariantCulture) ?? string.Empty));
         }
 
         return info;
@@ -1403,7 +1403,7 @@ public sealed class TmdbImdbResolver
         var key = ("movie:" + tmdbId, false);
         lock (_cache)
         {
-            if (_cache.TryGetValue(key, out var cached))
+            if (TryCache(key, out var cached))
             {
                 // "title|original|year"; ein leerer Treffer wird als leerer String abgelegt.
                 var parts = cached?.Split('|');
@@ -1475,18 +1475,67 @@ public sealed class TmdbImdbResolver
 
         lock (_cache)
         {
-            _cache[key] = info is null
+            SetCache(key, info is null
                 ? string.Empty
                 : string.Join(
                     "|",
                     info.Name,
                     info.OriginalTitle ?? string.Empty,
-                    info.ReleaseYear?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+                    info.ReleaseYear?.ToString(CultureInfo.InvariantCulture) ?? string.Empty));
         }
 
         return info;
     }
 
+
+    /// <summary>
+    /// F-M542: reads an answer — memory first, then the store. The store makes the answer survive a
+    /// plugin restart; measured 16.11.2026 were 283 of 555 daily TMDb requests repeats caused by the 31
+    /// restarts of that day.
+    /// </summary>
+    /// <param name="key">Question key.</param>
+    /// <param name="value">The answer.</param>
+    /// <returns>True when an answer exists.</returns>
+    private static bool TryCache((string, bool) key, out string? value)
+    {
+        lock (_cache)
+        {
+            if (_cache.TryGetValue(key, out value))
+            {
+                return true;
+            }
+        }
+
+        if (Registry.TmdbAnswerStore.TryGet(key, out var stored))
+        {
+            lock (_cache)
+            {
+                _cache[key] = stored;
+            }
+
+            value = stored;
+            return true;
+        }
+
+        value = null;
+        return false;
+    }
+
+    /// <summary>
+    /// F-M542: writes an answer to both tiers. The store write is best effort — a run must never fail
+    /// because the cache could not be written.
+    /// </summary>
+    /// <param name="key">Question key.</param>
+    /// <param name="value">The answer, <c>null</c> for "asked and found nothing".</param>
+    private static void SetCache((string, bool) key, string? value)
+    {
+        lock (_cache)
+        {
+            _cache[key] = value;
+        }
+
+        Registry.TmdbAnswerStore.Put(key, value);
+    }
 }
 
 /// <summary>

@@ -412,6 +412,10 @@
     "T262": {
       "suite": "endpoints",
       "checks": 2
+    },
+    "T263": {
+      "suite": "storex",
+      "checks": 8
     }
   }
 }

@@ -22,6 +22,7 @@
 // Usage: storun <workdir>
 
 using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubdlScribe.Registry;
 
 if (args.Length == 0)
 {
@@ -408,6 +409,55 @@ using (var db = new SubdlDbContext(workdir, null))
     db.Packs.DeleteMany(x => x.ImdbId == "tt26545992");
     Check(db.Packs.Count() == 0, "and deleting by series empties it again",
         db.Packs.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
+}
+
+// ---- F-M542: die TMDb-Antworten liegen im Store ------------------------------------------------
+//
+// Vorher standen sie nur in einem statischen Woerterbuch: 555 Anfragen an einem Tag, 31 Neustarts,
+// 283 Wiederholungen. Hier wird das geprueft, was den Unterschied macht — die Antwort ueberlebt den
+// Neustart, der Serien-Schalter gehoert zum Schluessel, ein Nichttreffer ist eine echte Antwort, und
+// beide Haltbarkeiten greifen.
+var frageSerie = ("multi:CUNK ON CINEMA|2022|loose", true);
+var frageFilm = ("multi:CUNK ON CINEMA|2022|loose", false);
+var frageLeer = ("multi:GIBTSNICHT|0|loose", true);
+using (var db = new SubdlDbContext(workdir, null))
+{
+    TmdbAnswerStore.Attach(db.Context);
+    Check(!TmdbAnswerStore.TryGet(frageSerie, out _), "F-M542: eine unbekannte Frage hat keine Antwort im Store");
+    TmdbAnswerStore.Put(frageSerie, "tt2130442|102348|1|1");
+    Check(TmdbAnswerStore.TryGet(frageSerie, out var sofort) && sofort == "tt2130442|102348|1|1",
+        "F-M542: die Antwort kommt im selben Prozess zurueck");
+    TmdbAnswerStore.Put(frageLeer, null);
+}
+
+// Neustart: neuer Kontext, leerer Speicher-Cache.
+using (var db = new SubdlDbContext(workdir, null))
+{
+    TmdbAnswerStore.Attach(db.Context);
+    Check(TmdbAnswerStore.TryGet(frageSerie, out var nachNeustart) && nachNeustart == "tt2130442|102348|1|1",
+        "F-M542: die Antwort ueberlebt den Neustart — genau dafuer ist sie im Store");
+    Check(!TmdbAnswerStore.TryGet(frageFilm, out _),
+        "F-M542: der Serien-Schalter gehoert zum Schluessel, die Filmfrage ist eine andere Frage");
+    Check(TmdbAnswerStore.TryGet(frageLeer, out var leer) && leer == null,
+        "F-M542: ein gespeicherter Nichttreffer ist eine echte Antwort, kein Fehlschlag");
+
+    // Haltbarkeit: eine Id-Antwort nach 200 Tagen, ein Nichttreffer nach 8 Tagen.
+    var zeilen = db.Context.TmdbAnswerRows.ToList();
+    foreach (var zeile in zeilen)
+    {
+        zeile.Written = DateTime.UtcNow.AddDays(zeile.Id.StartsWith("multi:GIBTSNICHT", StringComparison.Ordinal) ? -8 : -200);
+    }
+
+    db.Context.SaveChanges();
+    TmdbAnswerStore.Attach(db.Context);
+    Check(!TmdbAnswerStore.TryGet(frageSerie, out _),
+        "F-M542: eine 200 Tage alte Id-Antwort gilt nicht mehr");
+    Check(!TmdbAnswerStore.TryGet(frageLeer, out _),
+        "F-M542: ein 8 Tage alter Nichttreffer gilt nicht mehr (TMDb traegt Titel nach)");
+    TmdbAnswerStore.Prune();
+    Check(db.Context.TmdbAnswerRows.Count() == 0,
+        "F-M542: das Aufraeumen entfernt die abgelaufenen Zeilen",
+        db.Context.TmdbAnswerRows.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
 }
 
 Console.WriteLine();
