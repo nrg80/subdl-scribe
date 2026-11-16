@@ -2374,8 +2374,9 @@ public sealed class DownloadPipeline : IDisposable
                                         if (_config.LogMode >= LogLevelMode.Verbose)
                                         {
                                             LogUtil.PerItem(_config.LogMode, _logger,(asMainTrack
-                                                ? "[Sub Scribe-D] SAVED HI as main track {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"
-                                                : "[Sub Scribe-D] SAVED HI variant {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"),
+                                                ? "[Sub Scribe-D] SAVED {Source} HI as main track {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"
+                                                : "[Sub Scribe-D] SAVED {Source} HI variant {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"),
+                                                Api.Endpoints.Provenance.Name(hi.Provider),
                                                 Path.GetFileName(hiPath), lang, hi.ReleaseName,
                                                 string.IsNullOrEmpty(hi.OriginalName) ? "—" : hi.OriginalName,
                                                 string.IsNullOrEmpty(hi.Author) ? "—" : hi.Author,
@@ -3342,7 +3343,12 @@ public sealed class DownloadPipeline : IDisposable
                     }
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
-                        LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe-D] SAVED {Path} (lang={Lang}, score {Score}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb}) for {File}",
+                        // F-M551 (Operator-Frage 16.11.2026: „Und Download wird im log jetzt auch die
+                        // Quelle angezeigt?"): nein, stand sie nicht — die Zeile nannte Release, SubDL-Name,
+                        // Autor und Ids, aber nicht die Quelle, aus der die Datei kam. Jetzt steht sie
+                        // direkt hinter SAVED, wie beim Upload.
+                        LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] SAVED {Source} {Path} (lang={Lang}, score {Score}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb}) for {File}",
+                            Api.Endpoints.Provenance.Name(cand.Provider),
                             Path.GetFileName(targetPath), lang, Score(cand, videoBase), cand.ReleaseName,
                             string.IsNullOrEmpty(cand.OriginalName) ? "—" : cand.OriginalName,
                             string.IsNullOrEmpty(cand.Author) ? "—" : cand.Author,

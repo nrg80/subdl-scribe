@@ -1063,6 +1063,14 @@ internal static class Program
                     && uploadSource.Contains("public int SettledItems { get; set; }", StringComparison.Ordinal)
                     && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries", StringComparison.Ordinal));
 
+                // ---- F-M551: auch die Download-Zeile nennt die Quelle -------------------------------
+                Check("F-M551: a saved download names the source it came from",
+                    downloadSource.Contains("\"[Sub Scribe-D] SAVED {Source} {Path}", StringComparison.Ordinal)
+                    && downloadSource.Contains("Api.Endpoints.Provenance.Name(cand.Provider)", StringComparison.Ordinal));
+                Check("F-M551: the saved HI copy names it too",
+                    downloadSource.Split("SAVED {Source} HI", StringSplitOptions.None).Length - 1 == 2
+                    && downloadSource.Contains("Api.Endpoints.Provenance.Name(hi.Provider)", StringComparison.Ordinal));
+
                 // ---- F-M550: die Log-Zeile nennt die Quelle, und das Plugin heisst nicht SubDL ------
                 string uploadResultSource = await File.ReadAllTextAsync(Path.Combine(
                     root, "Jellyfin.Plugin.SubdlSync", "Api", "UploadResult.cs")).ConfigureAwait(false);

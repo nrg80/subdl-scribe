@@ -145,8 +145,8 @@ internal static class HiPoolRun
 
         // 5. THE LOG. One line, two readings — a reader must be able to tell which case happened.
         Check("a save as main track is not logged as a variant",
-            fn.Contains("SAVED HI as main track", StringComparison.Ordinal)
-            && fn.Contains("SAVED HI variant", StringComparison.Ordinal)
+            fn.Contains("SAVED {Source} HI as main track", StringComparison.Ordinal)
+            && fn.Contains("SAVED {Source} HI variant", StringComparison.Ordinal)
             && fn.Contains("asMainTrack", StringComparison.Ordinal));
 
         // 6. THE ORDER OF THE POOL. Rank first, score second — a different order would decide the
