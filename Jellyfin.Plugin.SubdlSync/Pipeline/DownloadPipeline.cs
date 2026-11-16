@@ -3698,6 +3698,28 @@ public sealed class DownloadPipeline : IDisposable
             // Schlusszeile des Laufs, damit die Zahl sichtbar ist, ohne dass jemand ins Debug-Log muss.
             summary.RejectedCandidates += _api.LastRejectedByFormat;
 
+            // F-M531: die vorbereiteten Meldungen abgeben — nur wenn der Schalter steht (derselbe wie
+            // fuer defekte Untertitel, F-M450) und nur mit Melde-Id. Ein Fehlschlag aendert am Lauf
+            // nichts: die Meldung ist Beiwerk, der Untertitel ist ohnehin verworfen.
+            foreach (var meldung in _api.TakeFormatReports())
+            {
+                if (!_config.ReportBrokenSubtitles)
+                {
+                    break;
+                }
+
+                var outcome = await _api.ReportBrokenSubtitleAsync(
+                    meldung.NId, meldung.Category, meldung.Comment, ct).ConfigureAwait(false);
+                if (outcome == SubdlReportOutcome.Accepted)
+                {
+                    summary.Reported++;
+                }
+                else if (outcome == SubdlReportOutcome.Deferred)
+                {
+                    summary.ReportsDeferred++;
+                }
+            }
+
             if (variantMissing.Count > 0 && _config.DownloadHearingImpaired)
             {
                 // Second search, fed from the VARIANT pairs only. A failure here must NOT lose the

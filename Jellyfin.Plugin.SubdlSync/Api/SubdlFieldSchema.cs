@@ -94,7 +94,7 @@ public static class SubdlFieldSchema
     /// </summary>
     /// <param name="el">The entry.</param>
     /// <returns>Entry id, release name and language, each empty when absent.</returns>
-    public static (string SubId, string Name, string Language) Identity(JsonElement el)
+    public static (string SubId, string Name, string Language, string NId) Identity(JsonElement el)
     {
         string id = string.Empty;
         if (el.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String)
@@ -111,7 +111,18 @@ public static class SubdlFieldSchema
 
         string name = Text(el, "release_name");
         string lang = Text(el, "language").ToUpperInvariant();
-        return (id, name, lang);
+        string nId = string.Empty;
+        if (el.TryGetProperty("subtitlePage", out var sp) && sp.ValueKind == JsonValueKind.String)
+        {
+            string page = sp.GetString() ?? string.Empty;
+            int slash = page.LastIndexOf('/');
+            if (slash >= 0 && slash + 1 < page.Length)
+            {
+                nId = page[(slash + 1)..];
+            }
+        }
+
+        return (id, name, lang, nId);
     }
 
     /// <summary>
@@ -121,9 +132,9 @@ public static class SubdlFieldSchema
     /// </summary>
     /// <param name="el">The entry as answered.</param>
     /// <returns>Findings, empty when the shape is as documented.</returns>
-    public static IReadOnlyList<string> Check(JsonElement el)
+    public static IReadOnlyList<FieldShapeFinding> Check(JsonElement el)
     {
-        var findings = new List<string>();
+        var findings = new List<FieldShapeFinding>();
         CheckFields(el, string.Empty, EntryFields, findings);
 
         if (el.TryGetProperty("unpack_files", out var files) && files.ValueKind == JsonValueKind.Array)
@@ -137,7 +148,8 @@ public static class SubdlFieldSchema
                 }
                 else if (file.ValueKind != JsonValueKind.Null)
                 {
-                    findings.Add($"unpack_files[{i}] = {Kind(file)} — documented as an object");
+                    findings.Add(new FieldShapeFinding(
+                        $"unpack_files[{i}]", "unpack_files", Raw(file), Kind(file), "an object"));
                 }
 
                 i++;
@@ -145,7 +157,8 @@ public static class SubdlFieldSchema
         }
         else if (el.TryGetProperty("unpack_files", out var bad) && bad.ValueKind != JsonValueKind.Null)
         {
-            findings.Add($"unpack_files = {Kind(bad)} — documented as an array");
+            findings.Add(new FieldShapeFinding(
+                "unpack_files", "unpack_files", Raw(bad), Kind(bad), "an array"));
         }
 
         return findings;
@@ -155,7 +168,7 @@ public static class SubdlFieldSchema
         JsonElement el,
         string prefix,
         (string Name, Shape Shape)[] fields,
-        List<string> findings)
+        List<FieldShapeFinding> findings)
     {
         foreach (var (name, shape) in fields)
         {
@@ -166,7 +179,8 @@ public static class SubdlFieldSchema
 
             if (!Fits(v, shape))
             {
-                findings.Add($"{prefix}{name} = {Raw(v)} ({Kind(v)}) — documented as {Describe(shape)}");
+                findings.Add(new FieldShapeFinding(
+                    prefix + name, name, Raw(v), Kind(v), Describe(shape)));
             }
         }
     }
@@ -218,3 +232,20 @@ public static class SubdlFieldSchema
             ? v.GetString() ?? string.Empty
             : string.Empty;
 }
+
+/// <summary>
+/// F-M531: one field that arrived in a shape its documentation does not allow — kept in parts
+/// (attribute, received value, documented shape) so the report can state exactly that, without a
+/// story around it.
+/// </summary>
+/// <param name="Path">Position in the answer, e.g. <c>framerate</c> or <c>unpack_files[0].season</c>.</param>
+/// <param name="Attribute">Attribute name as sent.</param>
+/// <param name="Received">The value as it arrived (shortened).</param>
+/// <param name="Kind">JSON kind that arrived.</param>
+/// <param name="Documented">The shape the documentation promises.</param>
+public sealed record FieldShapeFinding(
+    string Path,
+    string Attribute,
+    string Received,
+    string Kind,
+    string Documented);

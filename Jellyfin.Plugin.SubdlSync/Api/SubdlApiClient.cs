@@ -59,6 +59,27 @@ public sealed class SubdlApiClient
 
     /// <summary>F-M529: how many hits of the LAST search were rejected for that reason.</summary>
     public int LastRejectedByFormat { get; private set; }
+
+    /// <summary>
+    /// F-M531: prepared reports about metadata format mismatches, waiting to be filed. The client
+    /// only prepares them; whether a report actually goes out is the pipeline's decision (it owns
+    /// the switch and the run summary).
+    /// </summary>
+    private readonly List<(string NId, string Category, string Comment)> _pendingFormatReports = new();
+
+    /// <summary>Takes the prepared mismatch reports and clears the list.</summary>
+    /// <returns>Reports to file.</returns>
+    public IReadOnlyList<(string NId, string Category, string Comment)> TakeFormatReports()
+    {
+        if (_pendingFormatReports.Count == 0)
+        {
+            return Array.Empty<(string, string, string)>();
+        }
+
+        var taken = _pendingFormatReports.ToList();
+        _pendingFormatReports.Clear();
+        return taken;
+    }
     private DateTime _tokenObtained;
 
     /// <summary>
@@ -1438,10 +1459,23 @@ public sealed class SubdlApiClient
                         var auffaellig = JsonAnomalies.Take();
                         if (falsch.Count > 0 || auffaellig.Count > 0)
                         {
+                            string version = typeof(SubdlApiClient).Assembly.GetName().Version?.ToString() ?? string.Empty;
                             foreach (var f in falsch)
                             {
+                                var meldung = Pipeline.MetadataMismatchReports.Build(
+                                    f, ident.SubId, ident.Name, ident.Language, version, AccountName);
                                 befund.Add(new JsonAnomalyRecord(
-                                    f, string.Empty, "Mismatch", "dropped", ident.SubId, ident.Name, ident.Language));
+                                    f.Path, f.Received, f.Kind, f.Documented, ident.SubId, ident.Name, ident.Language));
+                                if (meldung == null)
+                                {
+                                    continue;
+                                }
+
+                                LogInfo($"[SubDL] {meldung.Comment}");
+                                if (!string.IsNullOrWhiteSpace(ident.NId))
+                                {
+                                    _pendingFormatReports.Add((ident.NId, meldung.Category, meldung.Comment));
+                                }
                             }
 
                             befund.AddRange(auffaellig);

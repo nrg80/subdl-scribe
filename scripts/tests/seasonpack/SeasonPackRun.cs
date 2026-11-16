@@ -951,24 +951,44 @@ internal static class Program
             var findings = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Check(doc.RootElement);
             Check(findings.Count == 5,
                 "F-M530: five wrong shapes are named (got " + findings.Count + ")");
-            Check(findings.Any(f => f.Contains("season", StringComparison.Ordinal)),
+            Check(findings.Any(f => f.Path == "season"),
                 "F-M530: a number sent as text is a finding");
-            Check(findings.Any(f => f.Contains("framerate", StringComparison.Ordinal)),
+            Check(findings.Any(f => f.Path == "framerate"),
                 "F-M530: a fractional framerate is a finding");
-            Check(findings.Any(f => f.Contains("hi", StringComparison.Ordinal)),
+            Check(findings.Any(f => f.Path == "hi"),
                 "F-M530: a flag sent as text is a finding");
-            Check(findings.Any(f => f.StartsWith("author", StringComparison.Ordinal)),
+            Check(findings.Any(f => f.Path == "author"),
                 "F-M530: an array where a string belongs is a finding");
-            Check(findings.Any(f => f.StartsWith("unpack_files[0].season", StringComparison.Ordinal)),
+            Check(findings.Any(f => f.Path == "unpack_files[0].season"),
                 "F-M530: the pack's own files are checked too, with their position named");
+
         }
 
         using (var doc = System.Text.Json.JsonDocument.Parse("{ \"unpack_files\": \"kaputt\" }"))
         {
             var findings = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Check(doc.RootElement);
-            Check(findings.Count == 1 && findings[0].StartsWith("unpack_files =", StringComparison.Ordinal),
+            Check(findings.Count == 1 && findings[0].Path == "unpack_files",
                 "F-M530: a string where the pack array belongs is a finding, not a crash");
         }
+
+        // ---- F-M531: die Meldung sagt nur, was verkehrt ist ------------------------------------
+        var probe = new Jellyfin.Plugin.SubdlScribe.Api.FieldShapeFinding(
+            "framerate", "framerate", "23.98", "Number", "a whole number");
+        var text = Jellyfin.Plugin.SubdlScribe.Pipeline.MetadataMismatchReports.Build(
+            probe, "3676577-8593549", "The.Odyssey.2026.720p.WEBRip", "en", "12.1.12.413", "konto");
+        Check(text != null && text!.Category == Jellyfin.Plugin.SubdlScribe.Pipeline.BrokenSubtitleReports.CategoryMetadata,
+            "F-M531: a format mismatch is filed as wrong release info");
+        var zeilen = (text?.Comment ?? string.Empty).Split('\n');
+        Check(zeilen.Length == 5 && zeilen[0] == "Metadata format mismatch.",
+            "F-M531: the report opens with the finding and carries nothing else");
+        Check(zeilen[1] == "Attribute: framerate (documented: a whole number, received: 23.98)",
+            "F-M531: the attribute line names documented and received value");
+        Check(zeilen[2] == "Subtitle: 3676577-8593549 ('The.Odyssey.2026.720p.WEBRip', EN)",
+            "F-M531: the subtitle line names the affected sub");
+        Check((text?.Comment ?? string.Empty).Contains("Automated report by Sub Scribe", StringComparison.Ordinal)
+              && !(text?.Comment ?? string.Empty).Contains("because", StringComparison.OrdinalIgnoreCase)
+              && !(text?.Comment ?? string.Empty).Contains("please", StringComparison.OrdinalIgnoreCase),
+            "F-M531: attribution, and no story around it");
 
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
