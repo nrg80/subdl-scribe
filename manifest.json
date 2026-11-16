@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.431",
-        "changelog": "v12.1.12.431: the download rhythm also hangs behind the saved file — no pause in front of a fetch, none for a dry run.",
+        "version": "12.1.12.432",
+        "changelog": "v12.1.12.432: the per-source queue now survives a restart — every queued item carries its own sources.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.431-dev/Jellyfin.Plugin.SubdlSync_12.1.12.431.zip",
-        "checksum": "b387190002bcecbaa67d378bbedf4b42",
-        "timestamp": "2026-11-16T16:11:27Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.432-dev/Jellyfin.Plugin.SubdlSync_12.1.12.432.zip",
+        "checksum": "42c3e0015ed02a8ea9eafb6b33a8d2a6",
+        "timestamp": "2026-11-16T17:43:24Z"
       }
     ]
   }
