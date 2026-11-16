@@ -1983,11 +1983,17 @@ public sealed class UploadPipeline : IPackFiller
                     }
                 }
 
-                // (16.09.2026): pause between two real uploads = the steered
-                // rate-limit interval (3600/cap). Skip-continues never reach this
-                // delay (they continue above); a run with only skips/bare API
-                // calls spaces those by MinCallPauseSec (0.5 s) in the throttle.
-                await Task.Delay(_limiter.TransferPauseMs(), runCt).ConfigureAwait(false);
+                // F-M547 (Operator-Regel 16.11.2026): „Ja. Oder gezogen wurde. Nur dann einstellbares
+                // rate limit 400/h. Immer danach. Sonst keine limits." Das Transfer-Rhythmus
+                // (3600/UploadsPerHour, ±30 %) haengt jetzt an einer ECHTEN Uebertragung dieser Datei.
+                // Vorher zahlte jede verarbeitete Datei die Pause, auch wenn nur der Store antwortete —
+                // gemessen 16.11.2026: 400/h = 9 s je Datei, ~250 Dateien je Zyklus, also rund 38
+                // Minuten Wartezeit ohne einen einzigen Netzaufruf. Die API-Pause (0,5 s) zieht der
+                // PacingHandler nach jeder externen Anfrage; hier gehoert sie nicht hin.
+                if (itemUploadedThisRun)
+                {
+                    await Task.Delay(_limiter.TransferPauseMs(), runCt).ConfigureAwait(false);
+                }
             }
 
             // F-M88c: when every candidate of this media file has been settled and none

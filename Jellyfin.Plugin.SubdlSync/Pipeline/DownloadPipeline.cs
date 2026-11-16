@@ -1548,7 +1548,9 @@ public sealed class DownloadPipeline : IDisposable
             // The pause stays (F-M48 fix 08.09.2026): without it the search path fired up to 100
             // requests in ~9 s, SubDL answered 429 and every result was silently discarded as
             // "no candidates".
-            await _limiter.PauseAsync(ct).ConfigureAwait(false);
+            // F-M547: die 0,5-s-Pause vor der Suche entfaellt — der PacingHandler zieht sie jetzt nach
+            // JEDER externen Antwort, also auch nach der vorigen. Vorher war sie doppelt (einmal vor
+            // der Suche, einmal nach der Antwort davor).
             // (16.09.2026, user decision): this pause is the only one before a search. An
             // extra delay sat here once and doubled it — every search waited 2× MinCallPauseSec.
 

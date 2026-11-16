@@ -1063,6 +1063,31 @@ internal static class Program
                     && uploadSource.Contains("public int SettledItems { get; set; }", StringComparison.Ordinal)
                     && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries", StringComparison.Ordinal));
 
+                // ---- F-M547: Limits haengen an der externen Anfrage und an der echten Uebertragung ----
+                string registratorQuelle547 = await File.ReadAllTextAsync(Path.Combine(
+                    root, "Jellyfin.Plugin.SubdlSync", "PluginServiceRegistrator.cs")).ConfigureAwait(false);
+                string pacerQuelle = await File.ReadAllTextAsync(Path.Combine(
+                    root, "Jellyfin.Plugin.SubdlSync", "Api", "ExternalApiPacer.cs")).ConfigureAwait(false);
+                string handlerQuelle = await File.ReadAllTextAsync(Path.Combine(
+                    root, "Jellyfin.Plugin.SubdlSync", "Api", "PacingHandler.cs")).ConfigureAwait(false);
+                Check("F-M547: the API pause sits in every HTTP chain, inside the retry handler",
+                    registratorQuelle547.Split("new Api.PacingHandler(").Length - 1 == 2,
+                    (registratorQuelle547.Split("new Api.PacingHandler(").Length - 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + " Kette(n)");
+                Check("F-M547: the pause is drawn after the call and defaults to half a second",
+                    pacerQuelle.Contains("public const int DefaultPauseMs = 500;", StringComparison.Ordinal)
+                    && pacerQuelle.Contains("await Task.Delay(ms, ct).ConfigureAwait(false);", StringComparison.Ordinal)
+                    && handlerQuelle.Contains("await ExternalApiPacer.AfterCallAsync(cancellationToken).ConfigureAwait(false);", StringComparison.Ordinal)
+                    && handlerQuelle.IndexOf("await base.SendAsync", StringComparison.Ordinal)
+                       < handlerQuelle.IndexOf("await ExternalApiPacer.AfterCallAsync", StringComparison.Ordinal));
+                Check("F-M547: a pause of zero is honoured — the pause can be switched off",
+                    pacerQuelle.Contains("if (ms > 0 && !ct.IsCancellationRequested)", StringComparison.Ordinal)
+                    && pacerQuelle.Contains("Volatile.Write(ref _pauseMs, ms < 0 ? 0 : ms);", StringComparison.Ordinal));
+                Check("F-M547: the transfer rhythm follows a REAL transfer, not a processed file",
+                    uploadSource.Contains("if (itemUploadedThisRun)", StringComparison.Ordinal)
+                    && uploadSource.Split("await Task.Delay(_limiter.TransferPauseMs(), runCt)").Length - 1 == 1);
+                Check("F-M547: the download search no longer pauses before the call",
+                    !downloadSource.Contains("await _limiter.PauseAsync(ct).ConfigureAwait(false);", StringComparison.Ordinal));
+
                 // ---- F-M546: eine Queue je Quelle -------------------------------------------------
                 Check("F-M546: the seeder keeps one queue per source",
                     seederSource.Contains("public Dictionary<Configuration.SubtitleProvider, HashSet<string>> UploadBySource", StringComparison.Ordinal)

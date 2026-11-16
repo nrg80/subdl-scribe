@@ -51,8 +51,10 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // (3 attempts) instead of surfacing as a cancellation. HttpClient.Timeout is disabled
         // (InfiniteTimeSpan) because it would otherwise cap the WHOLE request including retries
         // and cancel them mid-sequence.
-        var retry = new TransientRetryHandler(new SocketsHttpHandler());
+        // F-M547: die API-Pause sitzt INNEN (jeder Versuch zaehlt), der Retry aussen.
+        var retry = new TransientRetryHandler(new Api.PacingHandler(new SocketsHttpHandler()));
         var http = new HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+        Api.ExternalApiPacer.Configure(config.MinCallPauseSec);
 
         // F-M343: the client identity travels with EVERY call this client makes — and it is not
         // only a SubDL caller: the registrator hands this very HttpClient to TmdbImdbResolver, so
@@ -171,7 +173,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<TmdbImdbResolver>(sp =>
         {
             // F-M235: same retry discipline for the DI-resolved resolver.
-            var retry = new TransientRetryHandler(new System.Net.Http.SocketsHttpHandler());
+            // F-M547: dieselbe Kette wie in BuildApiClient — eine Regel, zwei Baustellen.
+            var retry = new TransientRetryHandler(new Api.PacingHandler(new System.Net.Http.SocketsHttpHandler()));
+            Api.ExternalApiPacer.Configure(Plugin.Instance!.Configuration.MinCallPauseSec);
             var http = new System.Net.Http.HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
             var log = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
                       .CreateLogger<TmdbImdbResolver>();

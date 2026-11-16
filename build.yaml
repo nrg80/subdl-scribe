@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.429"
+version: "12.1.12.430"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.430: limits only where they belong — the 400/h rhythm follows a real transfer, the 0.5 s pause follows every external API call, nothing else waits.
   v12.1.12.429: one upload queue per source — a source that did not queue an item no longer keeps it open, and the scan line names the counts per source.
   v12.1.12.428: the TMDb store is really attached on the normal start path (it was not) and heals itself if a context appears without it.
   v12.1.12.427: a series is no longer measured against moviesubtitles.org at the head of the run — the item names the media kind, so a finished series can actually become "complete".

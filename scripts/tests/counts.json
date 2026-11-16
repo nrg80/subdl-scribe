@@ -432,6 +432,10 @@
     "T267": {
       "suite": "endpoints",
       "checks": 4
+    },
+    "T268": {
+      "suite": "endpoints",
+      "checks": 5
     }
   }
 }
