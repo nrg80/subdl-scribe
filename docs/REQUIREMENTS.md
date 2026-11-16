@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.420.
+**Status:** Implementation — v12.1.12.421.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -1154,7 +1154,7 @@ Status: a missing key reports **red**; the settings page refuses to save it and 
 
 Dieselbe Suche mit und ohne Parameter ergabned an IDENTICAL payload (HTTP 200, status true, 10 candidates, equal content signature), and an unknown value (`client=bogus_wert`) was accepted just as silently. The parameter cannot break a call, and the published list is a convention rather than a server-side check.
 
-The User-Agent is built from the assembly version — `SubDL-Scribe/<version> (+https://github.com/nrg80/sub-scribe)`. Until it was the fixed literal `Jellyfin.Plugin.SubdlSync/1.0`, so every release since 1.0 introduced itself to SubDL as version 1.0 and no two versions could be told apart. Read from the assembly, a version bump needs no second edit and cannot fall out of step with it.
+The User-Agent is built from the assembly version and names the product — `Sub Scribe/<version> (+https://github.com/nrg80/sub-scribe)`. F-M537 (16.11.2026) replaced the retired project name `SubDL-Scribe` there; that is also the name every request to tvsubtitles.net carries as `client=sub-scribe-<version>`. Until it was the fixed literal `Jellyfin.Plugin.SubdlSync/1.0`, so every release since 1.0 introduced itself to SubDL as version 1.0 and no two versions could be told apart. Read from the assembly, a version bump needs no second edit and cannot fall out of step with it.
 
 `SubdlApiClient.NewHttpClient` is the one factory every SubDL client is built with, and the client factory sets the same agent as its own client's default. Both exist for the same reason: the LOGIN call builds its own request and adds no header of its own, and the plugin builds SubDL clients at more than one place — the main API client, the status probe, the quota read, the upload postprocessing controller and the upload pipeline's own pass. Those ad-hoc clients carried NO agent at all, so their calls (login in particular) went out with no User-Agent whatsoever. Verified that login succeeds with the plugin agent, with the old one and with none, so the agent is free to set. The status probe's said `SubDL-Sync-Status/1.0` — the pre-rename product name, frozen at the same version — and carries the shared agent now.
 

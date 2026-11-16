@@ -261,7 +261,7 @@ for req in ('Jellyfin.Plugin.SubdlSync.dll', 'LanguageDetection.dll', 'build.yam
 # Apache-2.0, which requires the licence and notice alongside a redistribution.
 for req in ('licenses/THIRD-PARTY.txt',
             'licenses/LanguageDetection-Apache-2.0.txt',
-            'licenses/SubDL-Scribe-GPL-3.0.txt'):
+            'licenses/Sub-Scribe-GPL-3.0.txt'):
     if req not in names:
         sys.exit(f"  FAIL: {req} missing from the ZIP — a required licence is not shipped")
 if any(n.endswith('meta.json') for n in names):

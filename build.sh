@@ -64,7 +64,7 @@ files = [
 licences = [
     'licenses/THIRD-PARTY.txt',
     'licenses/LanguageDetection-Apache-2.0.txt',
-    'licenses/SubDL-Scribe-GPL-3.0.txt',
+    'licenses/Sub-Scribe-GPL-3.0.txt',
 ]
 with zipfile.ZipFile('$ZIP', 'w', zipfile.ZIP_DEFLATED) as z:
     for f in files:

@@ -60,7 +60,7 @@ before it is saved:
    └── licenses/
        ├── THIRD-PARTY.txt
        ├── LanguageDetection-Apache-2.0.txt
-       └── SubDL-Scribe-GPL-3.0.txt
+       └── Sub-Scribe-GPL-3.0.txt
    ```
 
 3. Restart Jellyfin.

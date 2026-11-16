@@ -1,7 +1,7 @@
 Third-party components shipped in this plugin
 ============================================
 
-SubDL Scribe itself is licensed under GPL-3.0-or-later (see SubDL-Scribe-GPL-3.0.txt).
+Sub Scribe itself is licensed under GPL-3.0-or-later (see Sub-Scribe-GPL-3.0.txt).
 
 The release ZIP carries two third-party assemblies. Both are permissively
 licensed and compatible with GPL-3.0-or-later.
