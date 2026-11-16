@@ -1856,8 +1856,8 @@ def main():
     check("F-M525: the tvst heading is gone from the DOWNLOAD tab (operator order 17.11.2026)",
           down_part.count("<h3>tvst</h3>") == 0,
           "%d gefunden" % down_part.count("<h3>tvst</h3>"))
-    check("F-M525: the UPLOAD tab keeps its one-word heading — there the family still needs a title",
-          up_part.count("<h3>tvst</h3>") == 1,
+    check("F-M534: the tvst heading is gone from the UPLOAD tab too (operator order 17.11.2026)",
+          up_part.count("<h3>tvst</h3>") == 0,
           "%d gefunden" % up_part.count("<h3>tvst</h3>"))
 
     check("F-M520: saving the family switch writes BOTH address flags",
