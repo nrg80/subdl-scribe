@@ -908,8 +908,8 @@ public sealed class ScribeSeeder
             // Dieselbe Abbildung wie im Kopf des Laufs: ISO-3 (ENG) → Store-Code (EN). Zwei verschiedene
             // Schluessel auf derselben Zeile waeren zwei Wahrheiten (gemessen: 0 Stempel im 441-Lauf).
             var seedPaare = textStreams
-                .Select(s => (Jellyfin.Plugin.SubScribe.Language.LanguageMapper.MapToSubdl(s.Language)
-                        ?? (s.Language ?? string.Empty).ToUpperInvariant(),
+                .Select(s => (Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(s.Language)
+                        ?? string.Empty,
                     Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(s)))
                 .ToList();
             if (registry.IsCompleteFor(

@@ -666,6 +666,8 @@ public sealed class ContentHashRegistry : IDisposable
                           string? moviesubtitlesDownloadId = null, string? moviesubtitlesUploadId = null,
                           DateTime? moviesubtitlesUploadedAt = null)
     {
+        // F-M557: der Store fuehrt ISO (ENG), nicht den Code der Quelle (EN).
+        language = Language.LanguageMapper.Canonical(language) ?? language;
         if (string.IsNullOrEmpty(mediaHash) || subPos < 0)
         {
             return;
@@ -773,6 +775,8 @@ public sealed class ContentHashRegistry : IDisposable
     /// <returns>True when a row was created or its facts changed.</returns>
     public bool ObserveEmbed(string? mediaHash, int subPos, string language, bool hearingImpaired, bool forced = false)
     {
+        // F-M557: der Store fuehrt ISO (ENG), nicht den Code der Quelle (EN).
+        language = Language.LanguageMapper.Canonical(language) ?? language;
         if (string.IsNullOrEmpty(mediaHash) || subPos < 0)
         {
             return false;
@@ -1186,6 +1190,8 @@ public sealed class ContentHashRegistry : IDisposable
     /// <returns>True when an uploaded stream of that pair exists.</returns>
     public bool IsUploaded(string? mediaHash, string language, bool hearingImpaired = false)
     {
+        // F-M557: der Store fuehrt ISO (ENG), nicht den Code der Quelle (EN).
+        language = Language.LanguageMapper.Canonical(language) ?? language;
         if (string.IsNullOrEmpty(mediaHash))
         {
             return false;
@@ -1214,6 +1220,8 @@ public sealed class ContentHashRegistry : IDisposable
     /// <returns>True when that source already has the subtitle.</returns>
     public bool IsUploadedTo(string? mediaHash, string language, bool hearingImpaired, SubtitleProvider provider)
     {
+        // F-M557: der Store fuehrt ISO (ENG), nicht den Code der Quelle (EN).
+        language = Language.LanguageMapper.Canonical(language) ?? language;
         if (string.IsNullOrEmpty(mediaHash))
         {
             return false;
@@ -1384,6 +1392,8 @@ public sealed class ContentHashRegistry : IDisposable
 
     public List<int> EpisodesWithLanguage(string? imdbId, int season, string language, bool hearingImpaired)
     {
+        // F-M557: der Store fuehrt ISO (ENG), nicht den Code der Quelle (EN).
+        language = Language.LanguageMapper.Canonical(language) ?? language;
         if (string.IsNullOrWhiteSpace(imdbId))
         {
             return new List<int>();
@@ -1447,6 +1457,8 @@ public sealed class ContentHashRegistry : IDisposable
                             DateTime? tvSubtitlesUploadedAt = null, string? moviesubtitlesDownloadId = null,
                             string? moviesubtitlesUploadId = null, DateTime? moviesubtitlesUploadedAt = null)
     {
+        // F-M557: der Store fuehrt ISO (ENG), nicht den Code der Quelle (EN).
+        language = Language.LanguageMapper.Canonical(language) ?? language;
         if (string.IsNullOrEmpty(contentHash))
         {
             return;
@@ -1593,6 +1605,8 @@ public sealed class ContentHashRegistry : IDisposable
     public bool ObserveSidecar(string? contentHash, string mediaHash, string language, bool hearingImpaired,
                                bool forced, string? fileName = null, string? path = null)
     {
+        // F-M557: der Store fuehrt ISO (ENG), nicht den Code der Quelle (EN).
+        language = Language.LanguageMapper.Canonical(language) ?? language;
         if (string.IsNullOrEmpty(contentHash) || string.IsNullOrEmpty(mediaHash))
         {
             return false;
@@ -2286,6 +2300,8 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="reason">Why it was discarded.</param>
     public void RecordRejectedCandidate(string itemId, string language, string subdlId, string reason)
     {
+        // F-M557: der Store fuehrt ISO (ENG), nicht den Code der Quelle (EN).
+        language = Language.LanguageMapper.Canonical(language) ?? language;
         if (string.IsNullOrEmpty(itemId) || string.IsNullOrEmpty(subdlId))
         {
             return;
@@ -2309,6 +2325,8 @@ public sealed class ContentHashRegistry : IDisposable
     /// <returns>Discarded release ids.</returns>
     public List<string> GetRejectedCandidates(string itemId, string language)
     {
+        // F-M557: der Store fuehrt ISO (ENG), nicht den Code der Quelle (EN).
+        language = Language.LanguageMapper.Canonical(language) ?? language;
         // Compared in LINQ-to-objects rather than in the query: the stored value is normalised on
         // write, and the caller may pass either case.
         return _db.RejectedCandidates

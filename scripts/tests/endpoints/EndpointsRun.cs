@@ -354,7 +354,7 @@ internal static class Program
             // AKTUELLEN Stand, weil ein stehengebliebener Marker die Migration nicht mehr anzeigt.
             // F-M507: er steht inzwischen auf 14 (die Spalten der dritten Quelle).
             && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"))
-                .Contains("CurrentSchemaVersion = 15", StringComparison.Ordinal));
+                .Contains("CurrentSchemaVersion = 16", StringComparison.Ordinal));
 
         // ---- 10. eigene Kennzeichen je Quelle und Richtung (F-M488) ---------------------------
         var entities = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"));
@@ -365,7 +365,7 @@ internal static class Program
             && entities.Contains("public string? TvSubtitlesDownloadId { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public string? TvSubtitlesUploadId { get; set; }", StringComparison.Ordinal));
         Check("schema 11 adds them to sidecars AND embeds",
-            dbc.Contains("CurrentSchemaVersion = 15", StringComparison.Ordinal)
+            dbc.Contains("CurrentSchemaVersion = 16", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId TEXT NULL;", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE embeds ADD COLUMN TvSubtitlesDownloadId TEXT NULL;", StringComparison.Ordinal));
         Check("the download writes the field of its own source",
@@ -443,7 +443,7 @@ internal static class Program
         Check("each source has its own uploaded timestamp, sidecars and embeds alike",
             entities.Contains("public DateTime? SubdlUploadedAt { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public DateTime? TvSubtitlesUploadedAt { get; set; }", StringComparison.Ordinal)
-            && dbc.Contains("CurrentSchemaVersion = 15", StringComparison.Ordinal)
+            && dbc.Contains("CurrentSchemaVersion = 16", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE sidecars ADD COLUMN SubdlUploadedAt TEXT NULL;", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;", StringComparison.Ordinal));
         Check("the timestamp is set for the source that took the upload, never for another",
@@ -682,17 +682,25 @@ internal static class Program
             && !uploadSource.Contains("IsSubtitlesUploaded(", StringComparison.Ordinal));
 
         Check("F-M557: die Abrechnung bildet das Sprachkennzeichen ab, bevor sie den Store fragt",
-            uploadSource.Contains("LanguageMapper.MapToSubdl(s.Language)", StringComparison.Ordinal)
-            && seederSource.Contains("LanguageMapper.MapToSubdl(s.Language)", StringComparison.Ordinal)
-            && uploadSource.Contains("?? (s.Language ?? string.Empty).ToUpperInvariant()", StringComparison.Ordinal));
+            uploadSource.Contains("LanguageMapper.Canonical(s.Language)", StringComparison.Ordinal)
+            && seederSource.Contains("LanguageMapper.Canonical(s.Language)", StringComparison.Ordinal)
+            && uploadSource.Contains("Registry.SettlementFor(earlyHash, quelle, kopfPaare)", StringComparison.Ordinal));
 
         // --- F-M557..F-M563: Zugeh-Stempel je Quelle, abgeleitet und nicht global -----------------
         string reg557 = await File.ReadAllTextAsync(Path.Combine(
             root, "Jellyfin.Plugin.SubdlSync", "Registry", "ContentHashRegistry.cs")).ConfigureAwait(false);
         string db557 = await File.ReadAllTextAsync(Path.Combine(
             root, "Jellyfin.Plugin.SubdlSync", "Data", "ScribeDbContext.cs")).ConfigureAwait(false);
-        Check("F-M557: der Zugeh-Stempel steht JE QUELLE auf der Medienzeile (Schema 15)",
-            db557.Contains("CurrentSchemaVersion = 15", StringComparison.Ordinal)
+        Check("F-M557: der Store fuehrt ISO, die Quelle bekommt ihren Code erst an der Kante",
+            reg557.Contains("public static string? Canonical(string? code)", StringComparison.Ordinal)
+            || reg557.Contains("Language.LanguageMapper.Canonical(language) ?? language", StringComparison.Ordinal));
+        Check("F-M557: Schema 16 schreibt den Bestand auf ISO um und leert die alten Stempel",
+            db557.Contains("private void NormaliseLanguages()", StringComparison.Ordinal)
+            && db557.Contains("media.CompleteSignature = null;", StringComparison.Ordinal)
+            && db557.Contains("NormaliseLanguages();", StringComparison.Ordinal));
+
+        Check("F-M557: der Zugeh-Stempel steht JE QUELLE auf der Medienzeile (Schema 16)",
+            db557.Contains("CurrentSchemaVersion = 16", StringComparison.Ordinal)
             && db557.Contains("ADD COLUMN CompleteSubdl TEXT NULL", StringComparison.Ordinal)
             && db557.Contains("ADD COLUMN CompleteTvSubtitles TEXT NULL", StringComparison.Ordinal)
             && db557.Contains("ADD COLUMN CompleteMsub TEXT NULL", StringComparison.Ordinal)
@@ -1412,7 +1420,7 @@ internal static class Program
                     && nachher?.TvstShowId == "512"
                     // F-M507: der Marker ist inzwischen 14 — die Datei wird auf den Stand DIESES Builds
                     // gehoben, und der Bestand muss das aushalten.
-                    && legacyDb.Meta.FindById("db")?.SchemaVersion == 15,
+                    && legacyDb.Meta.FindById("db")?.SchemaVersion == 16,
                     "bestand=" + (bestand?.ImdbId ?? "-") + "/" + (bestand?.TmdbId ?? "-")
                     + "/tvst=" + (vorherTvst ?? "<null>")
                     + " nachher=" + (nachher?.TvstShowId ?? "-")
@@ -1778,7 +1786,7 @@ internal static class Program
                     && filmAuf.Status == MsubMovieStatus.Found
                     && gespeichert == "102"
                     && zweiteRunde.Status == MsubMovieStatus.Stored
-                    && msubStore.Meta.FindById("db")?.SchemaVersion == 15,
+                    && msubStore.Meta.FindById("db")?.SchemaVersion == 16,
                     "id=" + (gespeichert ?? "<null>") + " status=" + filmAuf.Status + "/" + zweiteRunde.Status
                     + " marker=" + msubStore.Meta.FindById("db")?.SchemaVersion);
             }
@@ -1841,7 +1849,7 @@ internal static class Program
                 && spurSpalten.Contains("MoviesubtitlesDownloadId")
                 && spurSpalten.Contains("MoviesubtitlesUploadId")
                 && spurSpalten.Contains("MoviesubtitlesUploadedAt")
-                && marker == 15,
+                && marker == 16,
                 "media=" + string.Join(",", medienSpalten.Where(x => x.StartsWith("Msub", StringComparison.Ordinal)))
                 + " sidecars=" + string.Join(",", seitenSpalten.Where(x => x.StartsWith("Moviesub", StringComparison.Ordinal)))
                 + " embeds=" + string.Join(",", spurSpalten.Where(x => x.StartsWith("Moviesub", StringComparison.Ordinal)))
@@ -1855,7 +1863,7 @@ internal static class Program
             var provenanceSource = ReadText(
                 Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/Endpoints/Provenance.cs"));
             Check("Schema 14 ist der Marker, die Spalten stehen in EnsureReportColumns und EnsureMediaColumns (F-M507)",
-                dbSource.Contains("public const int CurrentSchemaVersion = 15;", StringComparison.Ordinal)
+                dbSource.Contains("public const int CurrentSchemaVersion = 16;", StringComparison.Ordinal)
                 && dbSource.Contains("ALTER TABLE sidecars ADD COLUMN MoviesubtitlesDownloadId", StringComparison.Ordinal)
                 && dbSource.Contains("ALTER TABLE embeds ADD COLUMN MoviesubtitlesUploadedAt", StringComparison.Ordinal)
                 && dbSource.Contains("(\"MsubMovieId\", \"ALTER TABLE media ADD COLUMN MsubMovieId TEXT NULL;\")", StringComparison.Ordinal)

@@ -111,7 +111,7 @@ public sealed class ScribeDbContext : IDisposable
     // Gegenseite (`MsubMovieId`, dieselbe Ebene wie TvstShowId). Nachgezogen beim Start
     // (EnsureReportColumns/EnsureMediaColumns), Bestandszeilen bleiben unangetastet und lesen die neuen
     // Felder als null.
-    public const int CurrentSchemaVersion = 15;
+    public const int CurrentSchemaVersion = 16;
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
@@ -143,6 +143,7 @@ public sealed class ScribeDbContext : IDisposable
         EnsureStatusColumns();
         EnsurePackColumns();
         EnsureMediaColumns();
+        NormaliseLanguages();
         _db.ConfigurePragmas();
 
         Meta = new ScribeSet<MetaEntity>(_db, e => e.Id);
@@ -531,6 +532,68 @@ public sealed class ScribeDbContext : IDisposable
             {
                 _logger?.LogWarning("[Sub Scribe] could not add {Column} to media (continuing): {Msg}", column, ex.Message);
             }
+        }
+    }
+
+    /// <summary>
+    /// F-M557 (Operator-Anweisung 17.11.2026: „Ich würde iso nehmen und immer auf die jeweiligen Quellen
+    /// umsetzen. Per Software-Routine"): Schema 16 schreibt die Sprache EINMAL in ISO 639-2
+    /// (<c>ENG</c>, <c>DEU</c>) in den Store; jede Quelle bekommt ihre Schreibweise erst an der Kante.
+    /// <para>
+    /// Diese Wanderung zieht den Bestand nach: jede Zeile in <c>embeds</c> und <c>sidecars</c> bekommt ihr
+    /// ISO-Kennzeichen, und die Zugeh-Stempel werden geleert — eine Signatur aus der alten Schreibweise
+    /// darf keine Datei als fertig behaupten.
+    /// </para>
+    /// </summary>
+    private void NormaliseLanguages()
+    {
+        try
+        {
+            int geaendert = 0;
+            foreach (var row in _db.EmbedRows.ToList())
+            {
+                string? iso = Language.LanguageMapper.Canonical(row.Language);
+                if (iso != null && !string.Equals(iso, row.Language, StringComparison.Ordinal))
+                {
+                    row.Language = iso;
+                    _db.EmbedRows.Update(row);
+                    geaendert++;
+                }
+            }
+
+            foreach (var row in _db.SidecarRows.ToList())
+            {
+                string? iso = Language.LanguageMapper.Canonical(row.Language);
+                if (iso != null && !string.Equals(iso, row.Language, StringComparison.Ordinal))
+                {
+                    row.Language = iso;
+                    _db.SidecarRows.Update(row);
+                    geaendert++;
+                }
+            }
+
+            foreach (var media in _db.MediaRows.ToList())
+            {
+                if (media.CompleteSubdl != null || media.CompleteTvSubtitles != null
+                    || media.CompleteMsub != null || media.CompleteSignature != null)
+                {
+                    media.CompleteSubdl = null;
+                    media.CompleteTvSubtitles = null;
+                    media.CompleteMsub = null;
+                    media.CompleteSignature = null;
+                    _db.MediaRows.Update(media);
+                }
+            }
+
+            int n = _db.SaveChanges();
+            if (geaendert > 0)
+            {
+                LogUtil.Normal(_logger, "[Sub Scribe] data file: {Count} language tag(s) rewritten to ISO 639-2 (schema 16).", geaendert);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("[Sub Scribe] could not rewrite the language tags (continuing): {Msg}", ex.Message);
         }
     }
 

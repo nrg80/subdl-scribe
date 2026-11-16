@@ -85,6 +85,31 @@ public static class LanguageMapper
     };
 
     /// <summary>
+    /// F-M557 (Operator-Anweisung 17.11.2026: „Ich würde iso nehmen und immer auf die jeweiligen Quellen
+    /// umsetzen. Per Software-Routine"): die EINE Schreibweise, in der der Store eine Sprache fuehrt —
+    /// ISO 639-2 in Grossbuchstaben (<c>ENG</c>, <c>DEU</c>). Jede Quelle bekommt ihre eigene Schreibweise
+    /// erst an der Kante (tvst/mst ueber ihre SiteLanguage-Tabelle, SubDL ueber
+    /// <see cref="MapToSubdl"/>); im Store steht nie ein quellenspezifischer Code. Vorher lagen beide
+    /// Schreibweisen nebeneinander, und die Vollstaendigkeitsfrage stellte sich mit <c>ENG</c>, waehrend
+    /// die Zeile <c>EN</c> hiess — 839 offene Paare und 0 Stempel.
+    /// </summary>
+    /// <param name="code">Ein Sprachkennzeichen, gleich in welcher Schreibweise.</param>
+    /// <returns>Das ISO-639-2-Kennzeichen in Grossbuchstaben, oder null bei leerer Eingabe.</returns>
+    public static string? Canonical(string? code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return null;
+        }
+
+        string trimmed = code.Trim();
+        string iso = trimmed.Length == 2
+            ? ToIso6392(trimmed) ?? trimmed
+            : trimmed;
+        return iso.ToUpperInvariant();
+    }
+
+    /// <summary>
     /// F-M261: maps a SubDL two-letter code to the ISO 639-2 tag to write into a container.
     /// </summary>
     /// <param name="subdlCode">Two-letter code as <see cref="MapToSubdl"/> returns it.</param>

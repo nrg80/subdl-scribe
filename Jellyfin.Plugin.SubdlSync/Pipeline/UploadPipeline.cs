@@ -803,8 +803,8 @@ public sealed class UploadPipeline : IPackFiller
             // die Kette (unmappable language tag).
             var kopfPaare = kopfAlleSubs
                 .Where(Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream)
-                .Select(s => (Jellyfin.Plugin.SubScribe.Language.LanguageMapper.MapToSubdl(s.Language)
-                        ?? (s.Language ?? string.Empty).ToUpperInvariant(),
+                .Select(s => (Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(s.Language)
+                        ?? string.Empty,
                     Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(s)))
                 .ToList();
             var kopfSignatur = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.SignatureOf(kopfPaare);
