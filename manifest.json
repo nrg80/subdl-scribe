@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.421",
-        "changelog": "v12.1.12.421: documentation, licence-file name and licence headers say \"Sub Scribe\" everywhere instead of the retired \"SubDL Scribe\".",
+        "version": "12.1.12.422",
+        "changelog": "v12.1.12.422: an item whose text streams are all settled and whose pairs no source still wants ends before the ffmpeg pass instead of after it.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.421-dev/Jellyfin.Plugin.SubdlSync_12.1.12.421.zip",
-        "checksum": "d54a00ccca66f300655eaa6df8c23915",
-        "timestamp": "2026-11-16T12:14:23Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.422-dev/Jellyfin.Plugin.SubdlSync_12.1.12.422.zip",
+        "checksum": "17efe269d9e78538de1074c9ed149eb2",
+        "timestamp": "2026-11-16T12:49:37Z"
       }
     ]
   }
