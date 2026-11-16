@@ -640,7 +640,9 @@ internal static class Program
         // gelesen wurde — also "irgendwo hochgeladen". Der zweite Endpunkt bekam nie seinen Versuch.
         Check("die Upload-Queue fragt je Quelle statt quellenblind (F-M499)",
             seederSource.Contains("UploadTodoFor(item, mediaPath, config, quelle)", StringComparison.Ordinal)
-            && seederSource.Contains("registry.IsUploadedTo(mediaHash, mapped, hi, quelle)", StringComparison.Ordinal)
+            && seederSource.Contains("registry.ArePositionsTerminalFor(mediaHash", StringComparison.Ordinal)
+            && seederSource.Contains("registry.CountKnownPairsFor(mediaHash, quelle)", StringComparison.Ordinal)
+            && seederSource.Contains("registry.IsSidecarUploadedTo(looseHash, quelle)", StringComparison.Ordinal)
             && !seederSource.Contains("registry.CountKnownPairs(mediaHash)", StringComparison.Ordinal)
             && seederSource.Contains("registry.IsSidecarUploadedTo(looseHash, quelle)", StringComparison.Ordinal)
             && !seederSource.Contains("registry.ArePositionsTerminal(mediaHash", StringComparison.Ordinal)
@@ -1063,17 +1065,17 @@ internal static class Program
                 // ---- F-M540: die Queue fragt den Store je Paar, je Quelle ----------------------
                 // Operator-Anweisung 16.11.2026: „Prüfung bereits im seeder ob sprache / sub bereits als
                 // hochgeladen markiert ist. Wenn ja skip. Prüfung für subdl und tvst, jeweils eine eigene queue"
-                Check("F-M540: the queue asks the store per (language, HI) pair and per source",
-                    seederSource.Contains("if (!registry.IsUploadedTo(mediaHash, mapped, hi, quelle))", StringComparison.Ordinal)
-                    && seederSource.Contains("bool hi = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(s);", StringComparison.Ordinal)
-                    && !seederSource.Contains("registry.CountKnownPairsFor(mediaHash, quelle) >= needed.Count + untagged", StringComparison.Ordinal));
-                Check("F-M540: the queue also asks whether the site carries the language at all",
+                Check("F-M540: the queue keeps asking per source (F-M499) and no longer guesses a settled item",
+                    seederSource.Contains("registry.ArePositionsTerminalFor(mediaHash", StringComparison.Ordinal)
+                    && seederSource.Contains("registry.CountKnownPairsFor(mediaHash, quelle)", StringComparison.Ordinal)
+                    && seederSource.Contains("UploadTodoFor(item, mediaPath, config, quelle)", StringComparison.Ordinal));
+                Check("F-M540: the queue asks whether the site carries the language at all",
                     seederSource.Contains("Api.TvSubtitlesClient.SiteLanguage(mapped) is not null", StringComparison.Ordinal)
                     && seederSource.Contains("Api.MovieSubtitlesClient.SiteLanguage(mapped) is not null", StringComparison.Ordinal)
-                    && seederSource.Contains("continue;", StringComparison.Ordinal));
-                Check("F-M540: an untagged stream keeps the item queued and loose .srt keep their own check",
-                    seederSource.Contains("return true; // ungetaggte Spur: die Kette entscheidet nach dem Extrahieren", StringComparison.Ordinal)
-                    && seederSource.Contains("if (looseSrts.Count > 0 && SidecarsNeedWork(looseSrts, mediaHash, quelle))", StringComparison.Ordinal));
+                    && seederSource.Contains("return false; // diese Seite führt keine dieser Sprachen", StringComparison.Ordinal));
+                Check("F-M540: an untagged stream keeps the item queued",
+                    seederSource.Contains("bool anyUntagged = textStreams.Any(s => string.IsNullOrWhiteSpace(s.Language));", StringComparison.Ordinal)
+                    && seederSource.Contains("if (!anyUntagged && !anyCarried)", StringComparison.Ordinal));
 
                 // Anlegen hoechstens einmal je Medium und Lauf: derselbe Fehlschlag wird NICHT wiederholt.
                 var zweiterVersuch = await aufloeserKaputt

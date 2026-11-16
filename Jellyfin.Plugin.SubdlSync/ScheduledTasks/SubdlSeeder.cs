@@ -822,58 +822,85 @@ public sealed class SubdlSeeder
             // ============================================================
             // F-M540 (Operator-Anweisung 16.11.2026: „Prüfung bereits im seeder ob sprache / sub
             // bereits als hochgeladen markiert ist. Wenn ja skip. Prüfung für subdl und tvst,
-            // jeweils eine eigene queue"): EINE Frage, direkt aus dem Store — fehlt DIESER Quelle
-            // noch ein Paar (Sprache + HI), das sie überhaupt führen kann? Nein ⇒ der Eintrag
-            // gehört nicht in ihre Queue.
-            // Vorher standen hier zwei Heuristiken: „alle Positionen terminal für diese Quelle"
-            // (liest Positionen, nicht Paare) und „bekannte Paare >= benötigte + ungetaggte"
-            // (rechnete Mengen gegeneinander und ging auf, sobald eine Sprache bei der ANDEREN
-            // Quelle lag). Deshalb standen Cunk on Cinema S01E01–E06 in jedem Lauf in der Queue:
-            // 6 Einträge, je 22 Sprachen, 156 Selbst-Echo-Zeilen, 0 echte Uploads.
-            // Jede Quelle hat ihre eigene Queue (der Aufrufer fragt je Quelle, F-M499), jede
-            // Abbildung bleibt bei ihrem Client (SubDL im SubDL-Client, tvst im tvst-Client).
-            // Ungetaggte Spuren halten den Eintrag offen — ihre Sprache steht erst nach dem
+            // jeweils eine eigene queue"): die Sprache der SEITE gilt schon hier, nicht erst in der
+            // Kette (dort seit F-M538). Führt die Seite KEINE der getaggten Sprachen dieser Datei,
+            // kann sie hier nie etwas bekommen — ihre Marke bleibt für immer leer, und der Eintrag
+            // stand trotzdem in jedem Lauf in ihrer Queue (gemessen 16.11.: Cunk on Cinema
+            // S01E01–E06, 6 Einträge, je 22 Sprachen, 8 davon ID/HE/NO/TH/VI/HR/TL/ET, die tvst
+            // nicht führt — 156 Selbst-Echo-Zeilen, 0 echte Uploads).
+            // Ungetaggte Spuren halten den Eintrag offen: ihre Sprache steht erst nach dem
             // Extrahieren fest, und geraten wird nicht.
+            // Der Rest der Prüfung bleibt unverändert — die Marken je Quelle liest weiter
+            // ArePositionsTerminalFor/CountKnownPairsFor (F-M499).
             // ============================================================
-            foreach (var s in textStreams)
+            if (quelle is Configuration.SubtitleProvider.TvSubtitles or Configuration.SubtitleProvider.MovieSubtitles)
             {
-                string? mapped = string.IsNullOrWhiteSpace(s.Language)
-                    ? null
-                    : LanguageMapper.MapToSubdl(s.Language) ?? s.Language;
-                if (mapped is null)
+                bool anyUntagged = textStreams.Any(s => string.IsNullOrWhiteSpace(s.Language));
+                bool anyCarried = textStreams.Any(s =>
                 {
-                    return true; // ungetaggte Spur: die Kette entscheidet nach dem Extrahieren
-                }
+                    if (string.IsNullOrWhiteSpace(s.Language))
+                    {
+                        return false;
+                    }
 
-                // F-M538: was die Seite nicht führt, kann sie nie bekommen — ihre Marke bleibt
-                // für immer leer, das ist kein offener Auftrag.
-                if (quelle is Configuration.SubtitleProvider.TvSubtitles or Configuration.SubtitleProvider.MovieSubtitles)
-                {
-                    bool carried = quelle == Configuration.SubtitleProvider.TvSubtitles
+                    string? mapped = LanguageMapper.MapToSubdl(s.Language) ?? s.Language;
+                    return quelle == Configuration.SubtitleProvider.TvSubtitles
                         ? Api.TvSubtitlesClient.SiteLanguage(mapped) is not null
                         : Api.MovieSubtitlesClient.SiteLanguage(mapped) is not null;
-                    if (!carried)
-                    {
-                        continue;
-                    }
-                }
-
-                bool hi = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(s);
-                if (!registry.IsUploadedTo(mediaHash, mapped, hi, quelle))
+                });
+                if (!anyUntagged && !anyCarried)
                 {
-                    return true; // diese Quelle hat das Paar noch nicht
+                    return false; // diese Seite führt keine dieser Sprachen — für sie gibt es hier nichts
                 }
             }
 
-            // Lose .srt behalten ihre eigene Prüfung: nur eine Datei, die weder bei DIESER Quelle
-            // hochgeladen noch verworfen ist, hält den Eintrag offen.
-            var looseSrts = Pipeline.UploadPipeline.FindLooseSrts(mediaPath);
-            if (looseSrts.Count > 0 && SidecarsNeedWork(looseSrts, mediaHash, quelle))
+            // Parity: settled positions skip the embedded walk. Loose sidecars
+            // DO keep their own checks — but those are pure registry lookups
+            // (IsUploadedTo / RejectedReason per language, zero I/O), so the seeder
+            // runs them here too (user request 13.09.2026: seeder decides the
+            // sidecars directly). Only a sidecar that is neither uploaded (to THIS
+            // source) nor rejected keeps the item as todo.
+            // F-M499: "settled" heisst "fuer DIESE Quelle erledigt" — eine Terminalzeile liest
+            // Status=Uploaded und damit "irgendwo hochgeladen"; ArePositionsTerminalFor fragt die
+            // eigene Marke der Quelle (F-M488/F-M490) und laesst eine verworfene Spur fuer alle gelten.
+            if (registry.ArePositionsTerminalFor(mediaHash, textStreams.Select(s => allSubs.FindIndex(x => x == s)), quelle))
             {
+                var loose = Pipeline.UploadPipeline.FindLooseSrts(mediaPath);
+                if (!SidecarsNeedWork(loose, mediaHash, quelle))
+                {
+                    return false; // embedded settled for this source + every sidecar uploaded/rejected/hash-known
+                }
+
                 return true;
             }
 
-            return false;
+            // Parity: distinct (language, HI) pairs fully known — FOR THIS SOURCE — plus no loose
+            // sidecars → nothing to do. The mapping below is SubDL's own and stays untouched (user
+            // order 15.11.2026: tvst maps in its client, SubDL in its client, no shared table); the
+            // net is a cheap "everything known" answer, never a language decision.
+            if (Pipeline.UploadPipeline.FindLooseSrts(mediaPath).Count == 0)
+            {
+                var needed = new HashSet<string>(StringComparer.Ordinal);
+                int untagged = 0;
+                foreach (var s in textStreams)
+                {
+                    string? mapped = s.Language is null ? null : LanguageMapper.MapToSubdl(s.Language);
+                    if (mapped is null)
+                    {
+                        untagged++;
+                    }
+                    else
+                    {
+                        needed.Add(mapped + "|" + (Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(s) ? "1" : "0"));
+                    }
+                }
+
+                if (registry.CountKnownPairsFor(mediaHash, quelle) >= needed.Count + untagged)
+                {
+                    return false;
+                }
+            }
+
             return true;
         }
         catch
