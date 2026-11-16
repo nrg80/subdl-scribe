@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.423",
-        "changelog": "v12.1.12.423: the queue asks each site for its own language set before it looks at the marks; the mark check stays per source, so the queue does not fill up again.",
+        "version": "12.1.12.424",
+        "changelog": "v12.1.12.424: a file whose text streams were all rejected ends before the ffmpeg pass instead of being re-extracted and skipped stream by stream on every run.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.423-dev/Jellyfin.Plugin.SubdlSync_12.1.12.423.zip",
-        "checksum": "5b1c245d3f033fb5d1ba3cc56dd2383a",
-        "timestamp": "2026-11-16T13:18:33Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.424-dev/Jellyfin.Plugin.SubdlSync_12.1.12.424.zip",
+        "checksum": "15a39f58a9867f283a94af93c7f446d5",
+        "timestamp": "2026-11-16T13:43:11Z"
       }
     ]
   }
