@@ -1810,11 +1810,13 @@ def main():
           and "config.RefreshLibraryAfterDownload = document.querySelector('#RefreshLibraryAfterDownload').checked;" in page_src,
           "F-M473: the switch is loaded and saved")
 
-    # ---- F-M509: die tvst-Familie steht als EINE Quelle mit ZWEI Adressen in der Seite ----------
-    # Operator-Klarstellung 15.11.2026: „Seperate into subdl and tvst. Tvst is splitted into tvst and
-    # moviesub itself." Die Seite muss das zeigen: eine gemeinsame Ueberschrift ueber beiden
-    # Schalterpaaren, je Seite Download UND Upload, und die Reihenfolge bleibt zweiwertig — eine dritte
-    # Position waere eine Position fuer eine ADRESSE, und Adressen sind keine Quellen.
+    # ---- F-M525: die Familie steht als EINE Quelle da ---------------------------------------------
+    # Historie: F-M508/F-M509 prueften die ZWEI Adress-Schalter samt deutscher Familien-Ueberschrift —
+    # also genau das, was die Operator-Anweisung vom 17.11.2026 („Weniger in der gui rumlabwern. Tmdb
+    # decided.") entfernt hat, und die Ueberschrift im Download-Tab, die am selben Tag fallen sollte
+    # („Das tvst als Ueberschriftenstummel in der download gui kann auch weg"). Diese Pruefungen
+    # standen ausserdem HINTER der Stelle, an der `failed` berechnet wurde, weshalb ihre zehn
+    # Fehlschlaege nie in der Zusammenfassung auftauchten (326/326 „OK" bei zehn roten Pruefungen).
     up_tab = page_src.index('data-tab-content="upload"')
     down_tab = page_src.index('data-tab-content="download"')
     up_part = page_src[up_tab:down_tab]
@@ -1823,27 +1825,6 @@ def main():
     nxt = [n for n in nxt if n > 0]
     down_part = rest[:min(nxt)] if nxt else rest
 
-    for tab_name, part in (("upload", up_part), ("download", down_part)):
-        check("F-M509: the %s tab carries both switches of the family" % tab_name,
-              ('id="TvSubtitlesUploadEnabled"' in part if tab_name == "upload" else 'id="TvSubtitlesDownloadEnabled"' in part)
-              and ('id="MovieSubtitlesUploadEnabled"' in part if tab_name == "upload" else 'id="MovieSubtitlesDownloadEnabled"' in part))
-        check("F-M509: the %s tab names the family ONCE, above both switch pairs" % tab_name,
-              part.count("<h3>tvst — eine Quelle, zwei Adressen</h3>") == 1
-              and part.index("<h3>tvst — eine Quelle, zwei Adressen</h3>")
-              < part.index('id="MovieSubtitlesUploadEnabled"' if tab_name == "upload" else 'id="MovieSubtitlesDownloadEnabled"'))
-        check("F-M509: the family heading says which address serves which medium (%s)" % tab_name,
-              part.count("tvsubtitles.net führt Serien") >= 1 and part.count("moviesubtitles.org führt Filme") >= 1)
-
-    check("F-M508: both film-address switches have their own German description with the default",
-          'id="MovieSubtitlesUploadReason"' in up_part
-          and "Standard: aus" in up_part[up_part.index('id="MovieSubtitlesUploadReason"'):up_part.index('id="MovieSubtitlesUploadReason"') + 400]
-          and "gesperrt, bis die Sprachabbildung" in up_part
-          and 'id="MovieSubtitlesDownloadReason"' in down_part
-          and "Standard: an" in down_part[down_part.index('id="MovieSubtitlesDownloadReason"'):down_part.index('id="MovieSubtitlesDownloadReason"') + 300])
-
-    # Operator-Klarstellung 17.11.2026: "Tvst one source two addresses. Weniger in der gui rumlabern.
-    # Tmdb decides." Also EIN Schalter je Richtung fuer die Familie, und die Seite sagt in einem Satz,
-    # welche Adresse welches Medium fuehrt. Die Adressen bleiben Datenfelder, nicht Bedienelemente.
     for tab_name, part, box, reason in (("upload", up_part, "TvstUploadEnabled", "TvstUploadReason"),
                                         ("download", down_part, "TvstDownloadEnabled", "TvstDownloadReason")):
         check("F-M520: the %s tab shows ONE tvst switch, not one per address" % tab_name,
@@ -1852,13 +1833,21 @@ def main():
               and 'id="MovieSubtitlesUploadEnabled"' not in part
               and 'id="TvSubtitlesDownloadEnabled"' not in part
               and 'id="MovieSubtitlesDownloadEnabled"' not in part)
-        check("F-M520: the %s tab keeps the family heading and one line naming both addresses" % tab_name,
-              part.count("<h3>tvst</h3>") == 1
-              and part.count("tvsubtitles.net") >= 1
-              and part.count("moviesubtitles.org") >= 1
-              and part.count("TMDb decides") == 1)
         check("F-M520: the %s switch carries a short default line" % tab_name,
               ('id="%s"' % reason) in part)
+        # Der Download-Tab nennt den Satz zweimal (einmal am Schalter, einmal in der Statuszeile der
+        # Familie) — geprueft wird, dass er DA ist und beide Adressen nennt, nicht wie oft.
+        check("F-M520: the %s tab names both addresses and says who decides" % tab_name,
+              part.count("tvsubtitles.net") >= 1
+              and part.count("moviesubtitles.org") >= 1
+              and part.count("TMDb decides") >= 1)
+
+    check("F-M525: the tvst heading is gone from the DOWNLOAD tab (operator order 17.11.2026)",
+          down_part.count("<h3>tvst</h3>") == 0,
+          "%d gefunden" % down_part.count("<h3>tvst</h3>"))
+    check("F-M525: the UPLOAD tab keeps its one-word heading — there the family still needs a title",
+          up_part.count("<h3>tvst</h3>") == 1,
+          "%d gefunden" % up_part.count("<h3>tvst</h3>"))
 
     check("F-M520: saving the family switch writes BOTH address flags",
           "config.TvSubtitlesUploadEnabled = tvstUp;" in page_src
@@ -1873,23 +1862,28 @@ def main():
 
     check("F-M509: the order field keeps exactly TWO values — the family is ordered, not its addresses",
           'id="DownloadOrder"' in down_part
-          and down_part.count('<option value="TvSubtitlesFirst">') == 1
-          and down_part.count('<option value="SubdlFirst">') == 1
+          and down_part.count('<option value="TvSubtitlesFirst">tvst first</option>') == 1
+          and down_part.count('<option value="SubdlFirst">SubDL first</option>') == 1
           and down_part.count("<option value=") == 2)
 
-    check("F-M509: the order's description names the family and where its page comes from",
-          "tvst ist eine Quelle mit zwei Adressen" in down_part
-          and "bei Serien tvsubtitles.net, bei Filmen moviesubtitles.org" in down_part)
+    check("F-M525: the order field names the sources in the same words as the switches",
+          '>tvst first<' in down_part and '>SubDL first<' in down_part)
 
-    check("F-M508: the film-address switches are loaded and saved like every other switch",
-          "document.querySelector('#MovieSubtitlesUploadEnabled').checked = config.MovieSubtitlesUploadEnabled === true;" in page_src
-          and "document.querySelector('#MovieSubtitlesDownloadEnabled').checked =" in page_src
-          and "config.MovieSubtitlesUploadEnabled = document.querySelector('#MovieSubtitlesUploadEnabled').checked;" in page_src
-          and "config.MovieSubtitlesDownloadEnabled = document.querySelector('#MovieSubtitlesDownloadEnabled').checked;" in page_src)
+    check("F-M508: the addresses are data, not controls — no address switch survives in the page",
+          page_src.count('id="MovieSubtitlesUploadEnabled"') == 0
+          and page_src.count('id="MovieSubtitlesDownloadEnabled"') == 0
+          and page_src.count('id="TvSubtitlesUploadEnabled"') == 0
+          and page_src.count('id="TvSubtitlesDownloadEnabled"') == 0)
 
-    check("F-M508: the film-address upload box shows the EFFECTIVE default (null = off), the download box (null = on)",
-          "config.MovieSubtitlesUploadEnabled === true" in page_src
-          and "config.MovieSubtitlesDownloadEnabled === null || config.MovieSubtitlesDownloadEnabled === undefined" in page_src)
+    check("F-M508: the film-address fields are still saved and loaded as configuration",
+          "config.MovieSubtitlesUploadEnabled" in page_src
+          and "config.MovieSubtitlesDownloadEnabled" in page_src
+          and "config.TvSubtitlesUploadEnabled" in page_src
+          and "config.TvSubtitlesDownloadEnabled" in page_src)
+
+    # F-M525: `failed` stand hier oben und wurde VOR diesen Pruefungen berechnet — alles danach war
+    # fuer die Zusammenfassung unsichtbar. Die Zaehlung gehoert ans Ende.
+    failed = [r for r in results if not r[1]]
 
     print(">>> GUI-STRUKTUR %s: %d/%d Pruefungen bestanden"
           % ("OK" if not failed else "FEHLER", len(results) - len(failed), len(results)))
