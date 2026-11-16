@@ -1418,7 +1418,13 @@ public sealed class SubdlApiClient
                         // VERWORFEN und gezaehlt — nicht gerettet. Frueher fuhr die FormatException
                         // aus dem Parser bis in den Zyklus durch und beendete den ganzen Lauf
                         // (16.11.2026, 06:45/07:44); jetzt kostet so ein Treffer nur sich selbst.
+                        // F-M530: die Gestalt JEDES Metadatenfeldes wird gegen die Doku geprueft, nicht
+                        // nur die Felder, die der Parser zufaellig liest. Ein falscher Eintrag wird
+                        // benannt (Sub + Attribut), der Treffer faellt, der Lauf laeuft weiter.
                         JsonAnomalies.Take();
+                        var ident = SubdlFieldSchema.Identity(s);
+                        var falsch = SubdlFieldSchema.Check(s);
+
                         SubtitleCandidate? cand;
                         try
                         {
@@ -1430,8 +1436,14 @@ public sealed class SubdlApiClient
                         }
 
                         var auffaellig = JsonAnomalies.Take();
-                        if (auffaellig.Count > 0)
+                        if (falsch.Count > 0 || auffaellig.Count > 0)
                         {
+                            foreach (var f in falsch)
+                            {
+                                befund.Add(new JsonAnomalyRecord(
+                                    f, string.Empty, "Mismatch", "dropped", ident.SubId, ident.Name, ident.Language));
+                            }
+
                             befund.AddRange(auffaellig);
                             LastRejectedByFormat++;
                             continue;

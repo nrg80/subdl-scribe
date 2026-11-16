@@ -923,6 +923,53 @@ internal static class Program
         Check(dlSource.Contains("summary.RejectedCandidates += _api.LastRejectedByFormat", StringComparison.Ordinal),
             "F-M529: the count reaches the run's closing line");
 
+        // ---- F-M530: jedes Metadatenfeld robust, Meldung + droppen, kein Run-Fail ----------------
+        // Operator-Anweisung 17.11.2026: „in jedem Metadatenfeld Robustheit gegen Falscheintrag.
+        // Meldung und droppen, kein run fail." Geprueft wird die Tabelle, die das entscheidet.
+        string sauber = """
+        { "url": "/subtitle/1-2.zip", "release_name": "X", "language": "de", "season": 1, "episode": 2,
+          "framerate": 2, "fps": "23.976", "hi": true, "full_season": false, "download_count": 12,
+          "unpack_files": [ { "file_n_id": "abc", "season": 1, "episode": 2, "hi": false, "size": 100 } ] }
+        """;
+        using (var doc = System.Text.Json.JsonDocument.Parse(sauber))
+        {
+            var findings = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Check(doc.RootElement);
+            Check(findings.Count == 0,
+                "F-M530: a documented entry — including numeric fps as TEXT — is not a finding");
+            var ident = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Identity(doc.RootElement);
+            Check(ident.SubId == "1-2" && ident.Name == "X" && ident.Language == "DE",
+                "F-M530: the finding can name its subtitle (id, release name, language)");
+        }
+
+        string falsch = """
+        { "url": "/subtitle/9-9.zip", "release_name": "Y", "language": "de",
+          "season": "3", "framerate": 23.98, "hi": "true", "author": ["a"],
+          "unpack_files": [ { "file_n_id": "abc", "season": 1.5 } ] }
+        """;
+        using (var doc = System.Text.Json.JsonDocument.Parse(falsch))
+        {
+            var findings = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Check(doc.RootElement);
+            Check(findings.Count == 5,
+                "F-M530: five wrong shapes are named (got " + findings.Count + ")");
+            Check(findings.Any(f => f.Contains("season", StringComparison.Ordinal)),
+                "F-M530: a number sent as text is a finding");
+            Check(findings.Any(f => f.Contains("framerate", StringComparison.Ordinal)),
+                "F-M530: a fractional framerate is a finding");
+            Check(findings.Any(f => f.Contains("hi", StringComparison.Ordinal)),
+                "F-M530: a flag sent as text is a finding");
+            Check(findings.Any(f => f.StartsWith("author", StringComparison.Ordinal)),
+                "F-M530: an array where a string belongs is a finding");
+            Check(findings.Any(f => f.StartsWith("unpack_files[0].season", StringComparison.Ordinal)),
+                "F-M530: the pack's own files are checked too, with their position named");
+        }
+
+        using (var doc = System.Text.Json.JsonDocument.Parse("{ \"unpack_files\": \"kaputt\" }"))
+        {
+            var findings = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Check(doc.RootElement);
+            Check(findings.Count == 1 && findings[0].StartsWith("unpack_files =", StringComparison.Ordinal),
+                "F-M530: a string where the pack array belongs is a finding, not a crash");
+        }
+
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
             : $"seasonpack: {_checks} checks, {Failures.Count} failed.");
