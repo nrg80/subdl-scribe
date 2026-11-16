@@ -2406,6 +2406,54 @@ public sealed class ContentHashRegistry : IDisposable
         return tracks.All(track => IsEmbedTerminalFor(mediaHash, track.SubPos, provider));
     }
 
+    /// <summary>
+    /// F-M554 (Befund 16.11.2026, „Warum wird nichts gesendet?"): dieselbe Frage wie
+    /// <see cref="IsSubtitlesUploadedFor(string?, SubtitleProvider)"/>, aber gegen die Spuren, die
+    /// WIRKLICH in der Datei liegen.
+    /// <para>
+    /// DER FEHLER: die Fassung ohne Positionen urteilte ueber die Zeilen, die der Store KENNT
+    /// (<c>Embeds.Find(MediaHash)</c>). Kennt er nur einen Teil — etwa weil eine fruehere Fassung an
+    /// dieser Datei abgebrochen ist oder weil spaeter Spuren hinzukamen —, dann sind alle bekannten
+    /// Zeilen erledigt und die Datei galt als „fertig", obwohl die meisten Spuren nie angesehen wurden.
+    /// Der Einreiher fragt dagegen die echten Positionen und sagt „offen"; der Kopf warf das Item
+    /// daraufhin in JEDEM Zyklus weg. Gemessen im 21:09-Zyklus: 285 Dateien mit
+    /// <c>upload file-complete for every upload source</c>, 0 Uploads.
+    /// </para>
+    /// <para>
+    /// Die Zusicherung bleibt: ohne Dateimarke ist nichts zu ueberspringen (die Marke ist die
+    /// Vorbedingung), und ohne Spurbeleg ebenso wenig. Zusaetzlich muss JEDE geforderte Position fuer
+    /// diese Quelle erledigt sein — die Regel fuer „erledigt" ist unveraendert
+    /// <see cref="IsEmbedTerminalFor"/>.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaHash">Media hash.</param>
+    /// <param name="provider">The source in question.</param>
+    /// <param name="requiredPositions">Die Spuren, die die Datei wirklich hat.</param>
+    /// <returns>True when this source has nothing left to do on this file.</returns>
+    public bool IsSubtitlesUploadedFor(string? mediaHash, SubtitleProvider provider, IEnumerable<int> requiredPositions)
+    {
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return false;
+        }
+
+        var need = requiredPositions.Where(p => p >= 0).Distinct().ToList();
+        if (need.Count == 0)
+        {
+            // Keine Spur bekannt: dann entscheidet die alte Lesart (Zeilenbeleg), nicht der Zufall.
+            return IsSubtitlesUploadedFor(mediaHash, provider);
+        }
+
+        if (_db.Media.FindById(mediaHash)?.SubtitlesUploadedAt == null)
+        {
+            return false;
+        }
+
+        // Eine Datei ist erst fertig, wenn die Marke steht UND jede vorhandene Spur fuer diese Quelle
+        // erledigt ist. Zeilen, die der Store zusaetzlich kennt, stoeren nicht — sie sind erledigt.
+        return need.All(p => IsEmbedTerminalFor(mediaHash, p, provider));
+    }
+
     // ------------------------------------------------- the download mark is GONE
     //
     // F-M283 (user decision 02.10.2026): `MarkSubtitlesDownloaded`, `IsSubtitlesDownloaded`,

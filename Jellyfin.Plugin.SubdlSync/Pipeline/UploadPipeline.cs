@@ -776,8 +776,20 @@ public sealed class UploadPipeline : IPackFiller
 
             string? earlyHash = Registry.GetMediaHash(mediaPath);
             var quellen = UploadSources(medienart);
+            // F-M554: die Spuren, die diese Datei wirklich hat — nicht nur die, die der Store kennt.
+            // Dieselbe Zaehlweise wie weiter unten (F-M5): Position innerhalb der Untertitelspuren,
+            // und ein forcierter Sidecar ist keine Upload-Arbeit (F-M246/F-M284).
+            var kopfAlleSubs = _mediaSourceManager.GetMediaStreams(item.Id)?
+                .Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal)
+                .ToList() ?? new List<MediaStream>();
+            var kopfPositionen = kopfAlleSubs
+                .Where(Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream)
+                .Select(s => kopfAlleSubs.FindIndex(x => x == s))
+                .Where(p => p >= 0)
+                .Distinct()
+                .ToList();
             var offeneQuellen = quellen
-                .Where(quelle => !Registry.IsSubtitlesUploadedFor(earlyHash, quelle))
+                .Where(quelle => !Registry.IsSubtitlesUploadedFor(earlyHash, quelle, kopfPositionen))
                 .ToList();
             if (quellen.Count > 0 && offeneQuellen.Count == 0)
             {

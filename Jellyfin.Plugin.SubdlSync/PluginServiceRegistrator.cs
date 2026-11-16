@@ -53,7 +53,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // and cancel them mid-sequence.
         // F-M547: die API-Pause sitzt INNEN (jeder Versuch zaehlt), der Retry aussen.
         var retry = new TransientRetryHandler(new Api.PacingHandler(new SocketsHttpHandler()));
-        var http = new HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+        var chain = new Api.TmdbCacheHandler(retry);
+        var http = new HttpClient(chain) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
         Api.ExternalApiPacer.Configure(config.MinCallPauseSec);
 
         // F-M343: the client identity travels with EVERY call this client makes — and it is not
@@ -175,8 +176,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             // F-M235: same retry discipline for the DI-resolved resolver.
             // F-M547: dieselbe Kette wie in BuildApiClient — eine Regel, zwei Baustellen.
             var retry = new TransientRetryHandler(new Api.PacingHandler(new System.Net.Http.SocketsHttpHandler()));
+            var chain = new Api.TmdbCacheHandler(retry);
             Api.ExternalApiPacer.Configure(Plugin.Instance!.Configuration.MinCallPauseSec);
-            var http = new System.Net.Http.HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+            var http = new System.Net.Http.HttpClient(chain) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
             var log = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
                       .CreateLogger<TmdbImdbResolver>();
             retry.Log = msg => Microsoft.Extensions.Logging.LoggerExtensions.LogDebug(log, "[Sub Scribe-Retry] {Msg}", msg);

@@ -673,7 +673,7 @@ internal static class Program
         // quellenweise eingereiht, und die Pipeline warf sie alle mit "[SubDL] SKIP {File} — upload
         // file-complete" wieder weg — die Dateimarke stand von den SubDL-Uploads. Ergebnis "0 uploaded".
         Check("die Pipeline ueberspringt nur, wenn ALLE eingeschalteten und konfigurierten Quellen fertig sind (F-M499)",
-            uploadSource.Contains("Registry.IsSubtitlesUploadedFor(earlyHash, quelle)", StringComparison.Ordinal)
+            uploadSource.Contains("Registry.IsSubtitlesUploadedFor(earlyHash, quelle, kopfPositionen)", StringComparison.Ordinal)
             && uploadSource.Contains("if (quellen.Count > 0 && offeneQuellen.Count == 0)", StringComparison.Ordinal)
             && uploadSource.Contains(
                 "private List<Configuration.SubtitleProvider> UploadSources(bool? isSeries) =>", StringComparison.Ordinal)
@@ -681,6 +681,51 @@ internal static class Program
                 "_config.DryRun || _config.IsConfiguredForUpload(quelle)", StringComparison.Ordinal)
             // Die blinde Frage darf im Kopf des Laufs nicht mehr stehen — sie war der Defekt.
             && !uploadSource.Contains("IsSubtitlesUploaded(", StringComparison.Ordinal));
+
+        // --- F-M555: jede TMDb-Antwort wird an EINER Stelle abgelegt und von dort beantwortet --------
+        // Befund 16.11.2026 ("Die tmdb requests sind komisch. Elle ist laengst durchgelaufen"):
+        // 1221 Anfragen, 305 verschiedene Adressen, 916 Wiederholungen, der id test 2173x fuer 183
+        // Titel. Der Speicher half nur an 9 von 13 Sendestellen.
+        string registratorSource = await File.ReadAllTextAsync(Path.Combine(
+            root, "Jellyfin.Plugin.SubdlSync", "PluginServiceRegistrator.cs")).ConfigureAwait(false);
+        string? cacheHandler = null;
+        try
+        {
+            cacheHandler = await File.ReadAllTextAsync(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "TmdbCacheHandler.cs")).ConfigureAwait(false);
+        }
+        catch (FileNotFoundException)
+        {
+        }
+
+        Check("F-M555: ein Handler in der Kette beantwortet jede TMDb-Adresse aus dem Speicher",
+            cacheHandler != null
+            && cacheHandler.Contains("public sealed class TmdbCacheHandler : DelegatingHandler", StringComparison.Ordinal)
+            && cacheHandler.Contains("Registry.TmdbAnswerStore.TryGet((key, true), out string? stored)", StringComparison.Ordinal)
+            && cacheHandler.Contains("Registry.TmdbAnswerStore.Put((key, true), body)", StringComparison.Ordinal));
+        Check("F-M555: der Handler fasst nur TMDb an, und der Schluessel traegt keinen api_key",
+            cacheHandler != null
+            && cacheHandler.Contains("private const string TmdbHost = \"api.themoviedb.org\";", StringComparison.Ordinal)
+            && cacheHandler.Contains("!string.Equals(request.RequestUri.Host, TmdbHost, StringComparison.OrdinalIgnoreCase)", StringComparison.Ordinal)
+            && cacheHandler.Contains("part.StartsWith(\"api_key=\", StringComparison.OrdinalIgnoreCase)", StringComparison.Ordinal)
+            && cacheHandler.Contains("private const string KeyPrefix = \"url:\";", StringComparison.Ordinal));
+        Check("F-M555: er sitzt in BEIDEN HTTP-Ketten (sonst hilft er nur der Haelfte der Aufrufe)",
+            registratorSource.Contains("var chain = new Api.TmdbCacheHandler(retry);", StringComparison.Ordinal)
+            && CountOccurrences(registratorSource, "var chain = new Api.TmdbCacheHandler(retry);") == 2
+            && CountOccurrences(registratorSource, "new HttpClient(chain)") + CountOccurrences(registratorSource, "new System.Net.Http.HttpClient(chain)") == 2);
+
+        // --- F-M554: der Kopf urteilt ueber die SPUREN DER DATEI, nicht ueber die Zeilen des Stores ----
+        // Befund 16.11.2026, 21:09-Zyklus: 285 Dateien mit "upload file-complete for every upload
+        // source" und 0 Uploads. Der Store kannte nur einen Teil der Spuren (alte Zeilen), alle
+        // bekannten waren erledigt — die Datei galt als fertig, obwohl die meisten Spuren nie
+        // angesehen wurden. Der Einreiher fragte die echten Positionen und sagte "offen".
+        Check("F-M554: der Kopf gibt die echten Spuren der Datei mit",
+            uploadSource.Contains("var kopfAlleSubs = _mediaSourceManager.GetMediaStreams(item.Id)?", StringComparison.Ordinal)
+            && uploadSource.Contains(".Where(Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream)", StringComparison.Ordinal)
+            && uploadSource.Contains("var kopfPositionen = kopfAlleSubs", StringComparison.Ordinal));
+        Check("F-M554: eine Datei gilt nur als fertig, wenn JEDE vorhandene Spur fuer diese Quelle erledigt ist",
+            registrySource.Contains("public bool IsSubtitlesUploadedFor(string? mediaHash, SubtitleProvider provider, IEnumerable<int> requiredPositions)", StringComparison.Ordinal)
+            && registrySource.Contains("return need.All(p => IsEmbedTerminalFor(mediaHash, p, provider));", StringComparison.Ordinal)
+            && registrySource.Contains("if (need.Count == 0)", StringComparison.Ordinal));
 
         Check("das quellenweise Gegenstueck der Dateimarke existiert und filtert auf die Quelle (F-M499)",
             registrySource.Contains(
@@ -2712,5 +2757,24 @@ internal static class Program
         {
             Content = new StringContent(body, Encoding.UTF8, "text/html"),
         };
+    }
+
+    /// <summary>Counts non-overlapping occurrences of a needle (F-M555 checks).</summary>
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        if (string.IsNullOrEmpty(haystack) || string.IsNullOrEmpty(needle))
+        {
+            return 0;
+        }
+
+        int count = 0;
+        int at = 0;
+        while ((at = haystack.IndexOf(needle, at, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            at += needle.Length;
+        }
+
+        return count;
     }
 }
