@@ -376,6 +376,10 @@
     "T253": {
       "suite": "seasonpack",
       "checks": 5
+    },
+    "T254": {
+      "suite": "seasonpack",
+      "checks": 5
     }
   }
 }

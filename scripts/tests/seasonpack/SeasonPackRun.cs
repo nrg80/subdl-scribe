@@ -990,6 +990,53 @@ internal static class Program
               && !(text?.Comment ?? string.Empty).Contains("please", StringComparison.OrdinalIgnoreCase),
             "F-M531: attribution, and no story around it");
 
+        // ---- F-M532: auch die anderen SubDL-Antworten werden geprueft ---------------------------
+        using (var doc = System.Text.Json.JsonDocument.Parse(
+            "{ \"imdb_id\": 123, \"tmdb_id\": 1368337 }"))
+        {
+            var f = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.CheckFilm(doc.RootElement);
+            Check(f.Count == 1 && f[0].Path == "imdb_id",
+                "F-M532: the film block is checked (a numeric imdb_id is a finding)");
+        }
+
+        using (var doc = System.Text.Json.JsonDocument.Parse(
+            "{ \"usage\": { \"search\": { \"used\": 5, \"limit\": \"100\" }, \"downloads\": { \"used\": 1.5 } } }"))
+        {
+            var f = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.CheckQuota(doc.RootElement);
+            Check(f.Count == 2
+                  && f.Any(x => x.Path == "search.limit")
+                  && f.Any(x => x.Path == "downloads.used"),
+                "F-M532: the quota answer is checked, nested blocks named (got " + f.Count + ")");
+        }
+
+        using (var doc = System.Text.Json.JsonDocument.Parse(
+            "{ \"subtitle\": { \"id\": \"3755405\", \"n_id\": \"abc\" } }"))
+        {
+            var f = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.CheckOwnEntry(doc.RootElement);
+            Check(f.Count == 1 && f[0].Path == "subtitle.id",
+                "F-M532: an own-list entry is checked (an id sent as text is a finding)");
+        }
+
+        using (var doc = System.Text.Json.JsonDocument.Parse(
+            "{ \"subtitle\": { \"sd_id\": \"x\", \"subtitle_id\": \"9\" } }"))
+        {
+            var f = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.CheckUploadAnswer(doc.RootElement);
+            Check(f.Count == 1 && f[0].Path == "subtitle.subtitle_id",
+                "F-M532: the upload answer is checked too");
+        }
+
+        var gesammelt = new List<string>();
+        Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.OnMismatch = (f, ctx) => gesammelt.Add(ctx + ":" + f.Path);
+        using (var doc = System.Text.Json.JsonDocument.Parse("{ \"imdb_id\": 7 }"))
+        {
+            bool gemeldet = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Emit(
+                Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.CheckFilm(doc.RootElement), "search answer, film block");
+            Check(gemeldet && gesammelt.Count == 1 && gesammelt[0] == "search answer, film block:imdb_id",
+                "F-M532: a finding from another answer reaches the same reporter");
+        }
+
+        Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.OnMismatch = null;
+
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
             : $"seasonpack: {_checks} checks, {Failures.Count} failed.");

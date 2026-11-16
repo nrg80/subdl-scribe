@@ -164,6 +164,135 @@ public static class SubdlFieldSchema
         return findings;
     }
 
+
+    /// <summary>Fields of the film block (<c>results[0]</c>).</summary>
+    private static readonly (string Name, Shape Shape)[] FilmFields =
+    {
+        ("imdb_id", Shape.Text),
+        ("tmdb_id", Shape.NumberOrText)
+    };
+
+    /// <summary>Fields of the quota answer (<c>usage.search</c> / <c>usage.downloads</c>).</summary>
+    private static readonly (string Name, Shape Shape)[] QuotaFields =
+    {
+        ("used", Shape.Whole),
+        ("limit", Shape.Whole),
+        ("remaining", Shape.Whole),
+        ("reset_at", Shape.Text)
+    };
+
+    /// <summary>Fields of one entry in the own-subtitle list (<c>/user/mySubtitles</c>).</summary>
+    private static readonly (string Name, Shape Shape)[] OwnEntryFields =
+    {
+        ("id", Shape.Whole),
+        ("subtitles_uploaded_id", Shape.Whole),
+        ("tmdb_id", Shape.NumberOrText),
+        ("n_id", Shape.Text),
+        ("name", Shape.Text),
+        ("language", Shape.Text),
+        ("lang", Shape.Text),
+        ("imdb_id", Shape.Text)
+    };
+
+    /// <summary>Fields of the upload answer (<c>subtitle</c> block).</summary>
+    private static readonly (string Name, Shape Shape)[] UploadAnswerFields =
+    {
+        ("sd_id", Shape.Text),
+        ("subtitle_id", Shape.Whole)
+    };
+
+    /// <summary>
+    /// F-M532: where a finding goes. The client installs a logger here, so the parsers of the OTHER
+    /// answers — which own no logger (the quota snapshot is a plain model) — report through the same
+    /// door as the search answer.
+    /// </summary>
+    public static Action<FieldShapeFinding, string>? OnMismatch { get; set; }
+
+    /// <summary>Checks the film block <c>results[0]</c>.</summary>
+    /// <param name="el">The film entry.</param>
+    /// <returns>Findings.</returns>
+    public static IReadOnlyList<FieldShapeFinding> CheckFilm(JsonElement el) => CheckTable(el, string.Empty, FilmFields);
+
+    /// <summary>Checks the quota answer, including its two nested counter blocks.</summary>
+    /// <param name="el">The answer root.</param>
+    /// <returns>Findings.</returns>
+    public static IReadOnlyList<FieldShapeFinding> CheckQuota(JsonElement el)
+    {
+        var findings = new List<FieldShapeFinding>();
+        var usage = el.TryGetProperty("usage", out var us) && us.ValueKind == JsonValueKind.Object ? us : el;
+        foreach (string block in new[] { "search", "downloads" })
+        {
+            if (usage.TryGetProperty(block, out var b) && b.ValueKind == JsonValueKind.Object)
+            {
+                CheckFields(b, block + ".", QuotaFields, findings);
+            }
+        }
+
+        return findings;
+    }
+
+    /// <summary>Checks one entry of the own-subtitle list.</summary>
+    /// <param name="el">The entry.</param>
+    /// <returns>Findings.</returns>
+    public static IReadOnlyList<FieldShapeFinding> CheckOwnEntry(JsonElement el)
+    {
+        var findings = new List<FieldShapeFinding>();
+        if (el.TryGetProperty("subtitle", out var sub) && sub.ValueKind == JsonValueKind.Object)
+        {
+            CheckFields(sub, "subtitle.", OwnEntryFields, findings);
+        }
+
+        return findings;
+    }
+
+    /// <summary>Checks the upload answer.</summary>
+    /// <param name="el">The answer root.</param>
+    /// <returns>Findings.</returns>
+    public static IReadOnlyList<FieldShapeFinding> CheckUploadAnswer(JsonElement el)
+    {
+        var findings = new List<FieldShapeFinding>();
+        if (el.TryGetProperty("subtitle", out var sub) && sub.ValueKind == JsonValueKind.Object)
+        {
+            CheckFields(sub, "subtitle.", UploadAnswerFields, findings);
+        }
+
+        return findings;
+    }
+
+    /// <summary>
+    /// Hands findings to the installed reporter (F-M532). Returns true when something was wrong, so
+    /// the caller can drop the value/record it just parsed.
+    /// </summary>
+    /// <param name="findings">The findings.</param>
+    /// <param name="context">Which answer they came from ("quota answer", "own subtitle list", …).</param>
+    /// <returns>True when the answer carried a wrong field shape.</returns>
+    public static bool Emit(IReadOnlyList<FieldShapeFinding> findings, string context)
+    {
+        if (findings.Count == 0)
+        {
+            return false;
+        }
+
+        var reporter = OnMismatch;
+        if (reporter != null)
+        {
+            foreach (var f in findings)
+            {
+                reporter(f, context);
+            }
+        }
+
+        return true;
+    }
+
+    private static IReadOnlyList<FieldShapeFinding> CheckTable(
+        JsonElement el, string prefix, (string Name, Shape Shape)[] fields)
+    {
+        var findings = new List<FieldShapeFinding>();
+        CheckFields(el, prefix, fields, findings);
+        return findings;
+    }
+
     private static void CheckFields(
         JsonElement el,
         string prefix,

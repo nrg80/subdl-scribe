@@ -2636,7 +2636,14 @@ public sealed class UploadPipeline : IPackFiller
             if (subdlGenommen && result.Response != null)
             {
                 var root = result.Response.RootElement;
-                if (root.TryGetProperty("subtitle", out var subEl) && subEl.ValueKind == System.Text.Json.JsonValueKind.Object)
+
+                // F-M532: die Upload-Antwort wird genauso geprueft. Ist die Gestalt falsch, wird sie
+                // gemeldet und die Id NICHT gelesen — der Eintrag bleibt ohne Id statt mit geratener.
+                bool antwortInOrdnung = !Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Emit(
+                    Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.CheckUploadAnswer(root), "upload answer");
+                if (antwortInOrdnung
+                    && root.TryGetProperty("subtitle", out var subEl)
+                    && subEl.ValueKind == System.Text.Json.JsonValueKind.Object)
                 {
                     if (subEl.TryGetProperty("sd_id", out var sdEl) && sdEl.ValueKind == System.Text.Json.JsonValueKind.String)
                     {

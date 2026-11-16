@@ -89,6 +89,12 @@ public sealed class SubdlApiClient
     public SubdlApiClient(HttpClient http)
     {
         _http = http;
+
+        // F-M532: die Parser der uebrigen Antworten (Quota, eigene Liste, Filmblock, Upload) haben
+        // keinen eigenen Logger — ihre Befunde kommen hier durch dieselbe Tuer wie die Suchantwort.
+        SubdlFieldSchema.OnMismatch = (f, context) => LogInfo(
+            $"[SubDL] Metadata format mismatch ({context}).\n"
+            + $"Attribute: {f.Path} (documented: {f.Documented}, received: {f.Received})");
     }
 
     /// <summary>
@@ -392,6 +398,18 @@ public sealed class SubdlApiClient
             }
 
             var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            if (System.Text.Json.JsonDocument.Parse(body) is { } quotaDoc)
+            {
+                using (quotaDoc)
+                {
+                    if (SubdlFieldSchema.Emit(SubdlFieldSchema.CheckQuota(quotaDoc.RootElement), "quota answer"))
+                    {
+                        // Der Zaehlerstand ist unbrauchbar: melden und wie "unbekannt" behandeln.
+                        return QuotaRead.Unreadable;
+                    }
+                }
+            }
+
             var snap = SubdlQuotaSnapshot.FromJson(body);
             if (snap == null || !snap.IsKnown(forDownload))
             {
@@ -2741,6 +2759,13 @@ public sealed class SubtitleCandidate
         if (root.TryGetProperty("results", out var results) && results.ValueKind == JsonValueKind.Array && results.GetArrayLength() > 0)
         {
             var film = results[0];
+
+            // F-M532: auch der Filmblock wird auf Feldgestalt geprueft. Ein falscher Wert wird
+            // gemeldet und dann NICHT benutzt — die Id bleibt leer statt geraten.
+            if (SubdlFieldSchema.Emit(SubdlFieldSchema.CheckFilm(film), "search answer, film block"))
+            {
+                return;
+            }
             if (film.TryGetProperty("imdb_id", out var imEl) && imEl.ValueKind == JsonValueKind.String)
             {
                 imdb = imEl.GetString();
@@ -3059,6 +3084,12 @@ public sealed class OwnSubtitleEntry
     /// <summary>Parses a /user/mySubtitles array element.</summary>
     public static OwnSubtitleEntry? FromJson(JsonElement el)
     {
+        // F-M532: falsche Feldgestalt -> melden und den Eintrag fallen lassen (nicht raten).
+        if (SubdlFieldSchema.Emit(SubdlFieldSchema.CheckOwnEntry(el), "own subtitle list"))
+        {
+            return null;
+        }
+
         if (!el.TryGetProperty("subtitle", out var sub) || sub.ValueKind != JsonValueKind.Object)
         {
             return null;
