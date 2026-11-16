@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.408",
-        "changelog": "v12.1.12.408: Settings that only affect one source now say so at the switch — \"SubDL only\" for the SubDL limit, season packs, the hearing-impaired variant, the AI account, the broken-subtitle report and the archive cache.",
+        "version": "12.1.12.409",
+        "changelog": "v12.1.12.409: The \"SubDL only\" marker no longer sits between the label text and Jellyfin's checkbox outline — that broke the CSS sibling chain, so the boxes could not be ticked.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.408-dev/Jellyfin.Plugin.SubdlSync_12.1.12.408.zip",
-        "checksum": "1a9a633fc7f0c5ef649c95235e9b41f6",
-        "timestamp": "2026-11-16T06:54:35Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.409-dev/Jellyfin.Plugin.SubdlSync_12.1.12.409.zip",
+        "checksum": "c7b621985b289294eb0d04823d2c11e2",
+        "timestamp": "2026-11-16T07:09:49Z"
       }
     ]
   }
