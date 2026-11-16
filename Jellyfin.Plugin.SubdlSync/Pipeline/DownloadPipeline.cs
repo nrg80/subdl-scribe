@@ -2139,7 +2139,7 @@ public sealed class DownloadPipeline : IDisposable
                             // F-M464: the SDH fetch carries its own outcome — no reset, no state on
                             // the client, nothing a later request could overwrite.
                             DownloadOutcome hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
-                            var hiBytes = CorrectInvisibleCues(hiDl.Content);
+                            var hiBytes = CorrectInvisibleCues(hiDl.Content, lang);
 
                             // F-M455/F-M460: an empty answer is asked once more after ten seconds,
                             // here as well. The SDH pool is where the uploaders put their own cuts,
@@ -2157,10 +2157,10 @@ public sealed class DownloadPipeline : IDisposable
                                 _watchdog?.Heartbeat();
                                 _api.ResetRateLimitFlag();
                                 hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
-                                hiBytes = CorrectInvisibleCues(hiDl.Content);
+                                hiBytes = CorrectInvisibleCues(hiDl.Content, lang);
                             }
 
-                            var hiStats = hiBytes != null && hiBytes.Length >= 100 ? Qa.QaGates.ParseSrt(DecodeSrt(hiBytes)) : null;
+                            var hiStats = hiBytes != null && hiBytes.Length >= 100 ? Qa.QaGates.ParseSrt(DecodeSrt(hiBytes, lang)) : null;
                             bool hiStructureOk = hiStats != null
                                 && hiStats.Monotonic
                                 && hiStats.MinCueMs > 100
@@ -2170,7 +2170,7 @@ public sealed class DownloadPipeline : IDisposable
                             bool hiRuntimeOk = false;
                             if (hiBytesUsable)
                             {
-                                hiRuntimeOk = RuntimeMatches(item, hiBytes!, out hiRuntimeReason);
+                                hiRuntimeOk = RuntimeMatches(item, hiBytes!, lang, out hiRuntimeReason);
                             }
                             if (hiBytesUsable && hiStructureOk && hiRuntimeOk)
                             {
@@ -2182,7 +2182,7 @@ public sealed class DownloadPipeline : IDisposable
                                 // this is the case the sync more often CANNOT fix — and then it
                                 // writes nothing and says so.
                                 byte[] hiWriteBytes = hiBytes!;
-                                string hiContent = DecodeSrt(hiBytes!);
+                                string hiContent = DecodeSrt(hiBytes!, lang);
                                 string? hiUnsync = null;
                                 // F-M321: the HI refusal was "no proven gain" — best version already.
                                 bool hiGoodAsDownloaded = false;
@@ -2760,7 +2760,7 @@ public sealed class DownloadPipeline : IDisposable
                     // language vs requested tag; fail-open when CLD2 has no verdict.
                     if (_config.QaDownloadVerifyLanguage)
                     {
-                        string? detected = Qa.QaGates.DetectLanguage(DecodeSrt(candidateBytes));
+                        string? detected = Qa.QaGates.DetectLanguage(DecodeSrt(candidateBytes, lang));
                         if (detected != null
                             && !string.Equals(detected, lang, StringComparison.OrdinalIgnoreCase)
                             && !Qa.QaGates.IsFamilyMatch(lang, detected))
@@ -2773,7 +2773,7 @@ public sealed class DownloadPipeline : IDisposable
                     // already-downloaded bytes — free (no extra quota), rejects broken
                     // SRTs (no timings, non-monotonic timestamps, implausible cue
                     // durations) BEFORE they are saved next to the media file.
-                    var srtStats = Qa.QaGates.ParseSrt(DecodeSrt(candidateBytes));
+                    var srtStats = Qa.QaGates.ParseSrt(DecodeSrt(candidateBytes, lang));
                     bool structureOk = srtStats != null
                         && srtStats.Monotonic
                         && srtStats.MinCueMs > 100
@@ -2791,7 +2791,7 @@ public sealed class DownloadPipeline : IDisposable
                     }
 
                     // F-M43 Stufe 2 (runtime): cue span vs item runtime
-                    if (!RuntimeMatches(item, candidateBytes, out string? runtimeReason) && runtimeReason != null)
+                    if (!RuntimeMatches(item, candidateBytes, lang, out string? runtimeReason) && runtimeReason != null)
                     {
                         return "runtime (" + runtimeReason + ")";
                     }
@@ -2822,7 +2822,7 @@ public sealed class DownloadPipeline : IDisposable
 
                         // F-M388: the same correction the fetched candidate got — a gate must judge
                         // the file as it would be written, not as the archive happened to store it.
-                        siblingBytes = CorrectInvisibleCues(siblingBytes) ?? siblingBytes;
+                        siblingBytes = CorrectInvisibleCues(siblingBytes, lang) ?? siblingBytes;
                         string? siblingFail = QaGateFailure(siblingBytes);
                         if (siblingFail != null)
                         {
@@ -2952,7 +2952,7 @@ public sealed class DownloadPipeline : IDisposable
                 // F-M388: these are the CORRECTED bytes (invisible cues dropped, renumbered), so the
                 // file on disk, the hash computed just below and the text the gates saw are one artefact.
                 byte[] writeBytes = bytes;
-                string content = DecodeSrt(bytes);
+                string content = DecodeSrt(bytes, lang);
                 string? unsyncPayload = null;
                 // F-M318: does THIS candidate's refusal justify walking to the next one? Only a
                 // verdict on the file does; a verdict on the audio (or a missing ffmpeg) would be
@@ -3859,14 +3859,14 @@ public sealed class DownloadPipeline : IDisposable
     {
         CandidateAttempt rawAttempt = await DownloadCandidateRawAsync(cand, season, episode, ct).ConfigureAwait(false);
         byte[]? raw = rawAttempt.Bytes;
-        byte[]? corrected = CorrectInvisibleCues(raw);
+        byte[]? corrected = CorrectInvisibleCues(raw, cand.Language);
         if (corrected != null && raw != null && corrected.Length != raw.Length)
         {
             LogUtil.PerItem(_config.LogMode, _logger,
                 "[SubDL-D] {Release} [{Lang}] — invisible cues dropped: {Before} → {After} cue(s)",
                 cand.ReleaseName, cand.Language,
-                Qa.QaGates.ParseSrt(DecodeSrt(raw))?.CueCount ?? 0,
-                Qa.QaGates.ParseSrt(DecodeSrt(corrected))?.CueCount ?? 0);
+                Qa.QaGates.ParseSrt(DecodeSrt(raw, cand.Language))?.CueCount ?? 0,
+                Qa.QaGates.ParseSrt(DecodeSrt(corrected, cand.Language))?.CueCount ?? 0);
         }
 
         return rawAttempt with { Bytes = corrected };
@@ -3882,15 +3882,16 @@ public sealed class DownloadPipeline : IDisposable
     /// rule (a trailing newline is dropped by the same trim the upload side has always applied).
     /// </summary>
     /// <param name="raw">Payload as fetched.</param>
+    /// <param name="language">Language of the candidate — decides the codepage when the bytes are not UTF-8 (F-M536).</param>
     /// <returns>Corrected payload, or null when nothing was fetched.</returns>
-    public static byte[]? CorrectInvisibleCues(byte[]? raw)
+    public static byte[]? CorrectInvisibleCues(byte[]? raw, string? language = null)
     {
         if (raw is not { Length: > 0 })
         {
             return raw;
         }
 
-        return System.Text.Encoding.UTF8.GetBytes(ContentHashRegistry.NormalizeSrt(DecodeSrt(raw)));
+        return System.Text.Encoding.UTF8.GetBytes(ContentHashRegistry.NormalizeSrt(DecodeSrt(raw, language)));
     }
 
     /// <summary>
@@ -4341,10 +4342,82 @@ public sealed class DownloadPipeline : IDisposable
 
 
     /// <summary>
-    /// Decode SRT bytes with BOM detection (UTF-8/UTF-16LE/UTF-16BE) before
-    /// any QA parse. The old hard-coded UTF-8 read mangled valid UTF-16 files
-    /// (live case Coherence.zh: valid file appeared cue-less → false-positive
-    /// structure reject). No BOM → strict UTF-8 (same as before).
+    /// F-M536 (operator question 16.11.2026: „Die anders codierten files setzen wir um und werden die
+    /// richtig dargestellt?"): Alt-Codepage je Sprache, gemessen an echten Dateien der Seite —
+    /// Arabisch lag als cp1256 (Prison Break 1x22), Griechisch als cp1253 (Game of Thrones 1x10),
+    /// Bulgarisch als cp1251 (dieselbe Folge), Russisch dagegen als UTF-8. Die Sprache des Kandidaten
+    /// ist bekannt, also fuehrt sie: kein Raten ueber alle Codepages, sondern die eine, die zu dieser
+    /// Sprache gehoert.
+    /// </summary>
+    private static readonly Dictionary<string, int> LegacyCodepageByLanguage = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["ar"] = 1256, ["ara"] = 1256,
+        ["gr"] = 1253, ["el"] = 1253, ["ell"] = 1253, ["gre"] = 1253,
+        ["bg"] = 1251, ["bul"] = 1251,
+        ["ru"] = 1251, ["rus"] = 1251,
+        ["ua"] = 1251, ["uk"] = 1251, ["ukr"] = 1251,
+        ["cz"] = 1250, ["cs"] = 1250, ["cze"] = 1250,
+        ["pl"] = 1250, ["pol"] = 1250,
+        ["hu"] = 1250, ["hun"] = 1250,
+        ["ro"] = 1250, ["rum"] = 1250,
+        ["sl"] = 1250, ["slo"] = 1250, ["sk"] = 1250,
+        ["tr"] = 1254, ["tur"] = 1254,
+        ["he"] = 1255, ["heb"] = 1255,
+        ["jp"] = 932, ["ja"] = 932, ["jpn"] = 932,
+        ["cn"] = 936, ["zh"] = 936, ["chi"] = 936,
+        ["ko"] = 949, ["kor"] = 949,
+        ["th"] = 874, ["tha"] = 874,
+        ["vi"] = 1258, ["vie"] = 1258,
+    };
+
+    /// <summary>Strict UTF-8: throws on a byte sequence that is not UTF-8 — the signal to look at the language.</summary>
+    private static readonly System.Text.UTF8Encoding StrictUtf8 =
+        new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    private static readonly object CodepageGate = new();
+    private static bool _codepagesRegistered;
+
+    /// <summary>
+    /// F-M536: the codepage for a language code, 0 when the language is unknown or already UTF-8.
+    /// Region and three-letter forms are accepted (<c>ar-SA</c>, <c>ara</c>, <c>gr</c>).
+    /// </summary>
+    /// <param name="language">Language code as the candidate carries it.</param>
+    /// <returns>The Windows codepage, or 0.</returns>
+    private static int LegacyCodepageFor(string? language)
+    {
+        if (string.IsNullOrWhiteSpace(language))
+        {
+            return 0;
+        }
+
+        var code = language.Trim();
+        var dash = code.IndexOf('-', StringComparison.Ordinal);
+        if (dash > 0)
+        {
+            code = code[..dash];
+        }
+
+        return LegacyCodepageByLanguage.TryGetValue(code, out var cp) ? cp : 0;
+    }
+
+    private static System.Text.Encoding Codepage(int codepage)
+    {
+        lock (CodepageGate)
+        {
+            if (!_codepagesRegistered)
+            {
+                System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+                _codepagesRegistered = true;
+            }
+        }
+
+        return System.Text.Encoding.GetEncoding(codepage);
+    }
+
+    /// <summary>
+    /// Decode SRT bytes with BOM detection (UTF-8/UTF-16LE/UTF-16BE) before any QA parse. The old
+    /// hard-coded UTF-8 read mangled valid UTF-16 files (live case Coherence.zh: valid file appeared
+    /// cue-less → false-positive structure reject).
     /// </summary>
     /// <remarks>
     /// F-M187: this is the ONLY path from downloaded bytes to text. Every
@@ -4355,19 +4428,46 @@ public sealed class DownloadPipeline : IDisposable
     /// file, so <c>IsContentKnown</c> misses and the file is uploaded again.
     /// The runtime check degrades silently as well: NUL bytes break the
     /// timecode regex, so it reports "matches" without actually checking.
+    /// <para>
+    /// F-M536: without a BOM the bytes are first tried as strict UTF-8. Only when that FAILS does the
+    /// language's own codepage step in — measured on the site's real files, Arabic arrived as cp1256,
+    /// Greek as cp1253, Bulgarian as cp1251 and were rendered as <c>�</c> before this. Pure-ASCII or
+    /// already-UTF-8 payloads never reach the codepage branch, so nothing that works today changes.
+    /// </para>
     /// </remarks>
-    private static string DecodeSrt(byte[] bytes)
+    /// <param name="bytes">Payload as fetched.</param>
+    /// <param name="language">Language of the candidate, for the legacy-codepage fallback.</param>
+    /// <returns>The text of the file.</returns>
+    private static string DecodeSrt(byte[] bytes, string? language = null)
     {
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+        {
+            return System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+        }
+
         if (bytes.Length >= 2)
         {
             if (bytes[0] == 0xFF && bytes[1] == 0xFE) return System.Text.Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
             if (bytes[0] == 0xFE && bytes[1] == 0xFF) return System.Text.Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
         }
-        return System.Text.Encoding.UTF8.GetString(bytes);
+
+        try
+        {
+            return StrictUtf8.GetString(bytes);
+        }
+        catch (System.Text.DecoderFallbackException)
+        {
+        }
+
+        var codepage = LegacyCodepageFor(language);
+        return codepage == 0
+            ? System.Text.Encoding.UTF8.GetString(bytes)
+            : Codepage(codepage).GetString(bytes);
     }
 
+
     /// <summary>F-M43 Stufe 2: SRT cue span vs item runtime, tolerance from config. Returns (ok, reason).</summary>
-    private bool RuntimeMatches(BaseItem item, byte[] srtBytes, out string? reason)
+    private bool RuntimeMatches(BaseItem item, byte[] srtBytes, string? language, out string? reason)
     {
         reason = null;
         int toleranceSec = _config.DownloadRuntimeToleranceSec;
@@ -4376,7 +4476,7 @@ public sealed class DownloadPipeline : IDisposable
             return true; // check disabled or no runtime metadata
         }
 
-        string content = DecodeSrt(srtBytes);
+        string content = DecodeSrt(srtBytes, language);
         long firstStart = -1, lastEnd = -1;
         var timeRegex = new Regex(@"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})");
         foreach (Match m in timeRegex.Matches(content))

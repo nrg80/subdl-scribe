@@ -141,7 +141,7 @@ internal static class HiPoolRun
         Check("the SDH lines are NOT stripped on the way in",
             !Regex.IsMatch(fn, @"Strip|RemoveSdh|StripHi|SdhTags", RegexOptions.Singleline));
         Check("the fetch keeps the correction for invisible cues only",
-            fn.Contains("CorrectInvisibleCues(hiDl.Content)", StringComparison.Ordinal));
+            fn.Contains("CorrectInvisibleCues(hiDl.Content, lang)", StringComparison.Ordinal));
 
         // 5. THE LOG. One line, two readings — a reader must be able to tell which case happened.
         Check("a save as main track is not logged as a variant",

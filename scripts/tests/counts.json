@@ -388,6 +388,10 @@
     "T256": {
       "suite": "reporting",
       "checks": 1
+    },
+    "T257": {
+      "suite": "packretry",
+      "checks": 5
     }
   }
 }

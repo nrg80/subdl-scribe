@@ -166,6 +166,42 @@ internal static class Program
               && correctedText.Contains("\n2\n00:00:04,000", StringComparison.Ordinal),
             "and what is left is renumbered 1, 2 …", correctedText.Split('\n').FirstOrDefault() ?? "");
 
+        // ── 5b. F-M536: the site serves some languages in a legacy codepage ──────────────
+        // Measured on the site's own files on 16.11.2026: Arabic arrived as cp1256 (Prison Break
+        // 1x22), Greek as cp1253 (Game of Thrones 1x10), Bulgarian as cp1251 (the same episode) —
+        // and every one of them was rendered as U+FFFD before this, because DecodeSrt only knew BOM
+        // and UTF-8. The language of the candidate decides, not a guess over all codepages.
+        Console.WriteLine("5b. Legacy codepages (F-M536)");
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        const string arabisch = "1\n00:00:01,000 --> 00:00:02,000\nفي الحلقات السابقة\n";
+        const string bulgarisch = "1\n00:00:01,000 --> 00:00:02,000\nПогледни ме.\n";
+        const string griechisch = "1\n00:00:01,000 --> 00:00:02,000\nΗ Epoca Team παρουσιάζει\n";
+
+        string AusLegacy(string text, int codepage, string? language)
+            => System.Text.Encoding.UTF8.GetString(
+                DownloadPipeline.CorrectInvisibleCues(
+                    System.Text.Encoding.GetEncoding(codepage).GetBytes(text), language)!);
+
+        var arabischRueck = AusLegacy(arabisch, 1256, "ar");
+        Check(arabischRueck.Contains("في الحلقات السابقة", StringComparison.Ordinal) && !arabischRueck.Contains('\uFFFD'),
+            "cp1256 Arabic is read as Arabic (F-M536)", arabischRueck.Split('\n').Skip(2).FirstOrDefault() ?? "");
+        var bulgarischRueck = AusLegacy(bulgarisch, 1251, "bg");
+        Check(bulgarischRueck.Contains("Погледни ме.", StringComparison.Ordinal) && !bulgarischRueck.Contains('\uFFFD'),
+            "cp1251 Bulgarian is read as Bulgarian (F-M536)", bulgarischRueck.Split('\n').Skip(2).FirstOrDefault() ?? "");
+        var griechischRueck = AusLegacy(griechisch, 1253, "gre");
+        Check(griechischRueck.Contains("Η Epoca Team παρουσιάζει", StringComparison.Ordinal) && !griechischRueck.Contains('\uFFFD'),
+            "cp1253 Greek is read as Greek, addressed by its ISO code (F-M536)",
+            griechischRueck.Split('\n').Skip(2).FirstOrDefault() ?? "");
+        Check(AusLegacy(arabisch, 1256, null).Contains('\uFFFD'),
+            "without a language nothing is guessed — the old behaviour is kept, not papered over (F-M536)");
+
+        // The codepage must never touch a payload that IS UTF-8: strict UTF-8 wins first.
+        string utf8Arabisch = System.Text.Encoding.UTF8.GetString(
+            DownloadPipeline.CorrectInvisibleCues(System.Text.Encoding.UTF8.GetBytes(arabisch), "ar")!);
+        Check(utf8Arabisch.Contains("في الحلقات السابقة", StringComparison.Ordinal),
+            "a UTF-8 payload stays UTF-8 even when the language has a codepage (F-M536)");
+
+
         // The operator's condition, as an assertion: md5 over the CORRECTED bytes is the md5 the
         // registry stores for the state.
         string hashOfCorrected = Convert.ToHexString(
@@ -195,13 +231,13 @@ internal static class Program
         Console.WriteLine("6. Order of operations");
         var wrapper = pipe.IndexOf("DownloadCandidateRawAsync(", StringComparison.Ordinal);
         var gate = pipe.IndexOf("string? gateFail = QaGateFailure(bytes);", StringComparison.Ordinal);
-        Check(wrapper > 0 && pipe.Contains("byte[]? corrected = CorrectInvisibleCues(raw);", StringComparison.Ordinal),
+        Check(wrapper > 0 && pipe.Contains("byte[]? corrected = CorrectInvisibleCues(raw, cand.Language);", StringComparison.Ordinal),
             "the fetched payload is corrected in the download itself");
         Check(gate > 0, "the gates run on the corrected bytes");
         Check(pipe.Contains("byte[] writeBytes = bytes;", StringComparison.Ordinal)
               && pipe.Contains("ComputeHash(content)", StringComparison.Ordinal),
             "the write and the state hash take the same, already corrected bytes");
-        Check(pipe.Contains("siblingBytes = CorrectInvisibleCues(siblingBytes)", StringComparison.Ordinal),
+        Check(pipe.Contains("siblingBytes = CorrectInvisibleCues(siblingBytes, lang)", StringComparison.Ordinal),
             "a retried sibling of the archive is corrected as well");
         Check(pipe.Contains("var hiBytes = CorrectInvisibleCues(", StringComparison.Ordinal),
             "so is the hearing-impaired file");

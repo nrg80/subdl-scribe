@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.417.
+**Status:** Implementation — v12.1.12.418.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -2247,6 +2247,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 
 **T240:** Der Serienfall hat dasselbe Loch und denselben Weg (F-M517), in der Suite `tvsubtitles`: an einer echten Store-Datei bekommt die Zeile einer Folge (`TvstShowId` leer, Pfad gesetzt) über `TvstShowResolver.ResolveForMediaAsync(registry, mediaHash: null, …, mediaPath: …)` die Nummer **512** der Serie — Status `found`, `TvstShowId = "512"`, **Zeilenzahl unverändert**, `TvstShowIdAtPath` liest sie, und der zweite Aufruf liest statt zu suchen (`stored`, genau **eine** Anfrage an die Seitenliste, die des ersten Aufrufs). Ohne Hash und ohne Pfad-Zeile bleibt der Store **leer** (0 Zeilen), obwohl die Nummer gefunden wurde, und der Vermerk ist `MediaNumberNote.NotStored`. **3 Prüfungen**, alle in der Suite `tvsubtitles` (65 → 68).
 
+**F-M536 [D]:** **Anders codierte Untertitel werden über die Sprache der Datei gelesen, nicht geraten.** Anweisung 16.11.2026 („Die anders codierten files setzen wir um und werden die richtig dargestellt?"). Gemessen an echten Dateien der Seite: Arabisch lag als **cp1256** (Prison Break 1x22), Griechisch als **cp1253** und Bulgarisch als **cp1251** (Game of Thrones 1x10), Russisch dagegen als UTF-8 — die Seite normalisiert nichts. `DecodeSrt` kannte bis dahin nur BOM und UTF-8, also wurde jeder dieser Texte zu `U+FFFD` und war schon vor QA, Hash und Schreiben zerstört. Jetzt gilt: BOM zuerst, dann **striktes UTF-8**; scheitert das, entscheidet die **bekannte Sprache** des Kandidaten über die Codepage (`ar`→1256, `gr`/`el`→1253, `bg`/`ru`/`ua`→1251, `cz`/`pl`/`hu`/`ro`/`sl`→1250, `tr`→1254, `he`→1255, `jp`→932, `cn`→936, `ko`→949, `th`→874, `vi`→1258), Region- und Dreibuchstabenformen eingeschlossen. Ohne Sprache wird **nicht** geraten — dann bleibt es beim alten Verhalten. UTF-8-Nutzlasten erreichen den Codepage-Zweig nie, alles was heute funktioniert bleibt unverändert.
+
 **F-M535 [D]:** **Der Melde-Versand läuft, solange die Spuren noch hängen.** Befund 16.11.2026 („Aber in der Statistik steht 2 broken subtitles reported"): die Statistik zählte **2** Meldungen seit dem Reset 06:22:50, im Log war nur **eine** `API call POST …/report`-Zeile zu sehen. Ursache war die Reihenfolge im Laufende: `_api.DebugTrace -= OnApiTrace` stand **vor** `FlushReportsAsync`, also wurde die POST-Zeile jeder Meldung, die im Flush hinausging, verworfen — gezählt wurde richtig, der Beleg fehlte. Jetzt wird erst geflusht, dann abgehängt. Damit hinterlässt jede angenommene Meldung beide Zeilen (POST + Per-Item), und die Zahl in der Statistik ist im Log nachzählbar.
 
 **F-M534 [D]:** **Der tvst-Stummel ist auch im Upload-Tab weg.** Anweisung 17.11.2026 („In der Upload gui ist noch die tvst Überschrift. Wie bei download löschen bitte"). Damit steht `<h3>tvst</h3>` **nirgends** mehr in der Oberfläche — die Familie ist eine Quelle mit einem Schalter je Richtung, die Überschrift war der Rest der alten Zwei-Quellen-Sicht (F-M525 hatte nur den Download-Tab erwischt). Die Aussage „eine Quelle, zwei Adressen, TMDb entscheidet" trägt weiterhin die Beschreibungszeile unter dem Schalter.
@@ -2295,6 +2297,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 **T254b:** Der Stummel im Upload-Tab (F-M534), in `gui-structure`: `<h3>tvst</h3>` kommt in **keinem** der beiden Tabs mehr vor (vorher prüfte dieselbe Stelle ihn auf **genau eins**). Dieselbe Prüfzahl (338), nur die Erwartung gedreht.
 
+
+**T257:** Alt-Codepages beim Abruf (F-M536), in `packretry`: dieselbe SRT-Zeile als **cp1256** (Arabisch) mit `ar`, als **cp1251** (Bulgarisch) mit `bg` und als **cp1253** (Griechisch) mit `gre` ergibt jeweils den **lesbaren** Text und kein `U+FFFD`; dieselben cp1256-Bytes **ohne** Sprachangabe ergeben weiterhin `U+FFFD` (es wird nicht geraten); und eine **UTF-8**-Nutzlast mit `ar` bleibt UTF-8, weil striktes UTF-8 zuerst greift. **5 Prüfungen** in `packretry` (128 → 133).
 
 **T256:** Die Reihenfolge Flush → Abhängen (F-M535), in `reporting`: im Quelltext der Pipeline muss `FlushReportsAsync(summary, ct)` **vor** `_api.DebugTrace -= OnApiTrace` stehen (**1 Prüfung**, 83 → 84).
 
