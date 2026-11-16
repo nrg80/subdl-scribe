@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.414",
-        "changelog": "v12.1.12.414: The field-shape check now covers every SubDL answer — film block, quota, own subtitle list and upload answer — with the same rule: name the attribute, drop the value, keep the run going.",
+        "version": "12.1.12.415",
+        "changelog": "v12.1.12.415: tvsubtitles.net gets the same treatment: an entry whose language, rip or episode label the site's own form would refuse is reported through its \"Report bad\" form, dropped and counted. The report switch no longer carries a SubDL-only marker.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.414-dev/Jellyfin.Plugin.SubdlSync_12.1.12.414.zip",
-        "checksum": "c00964c37a7b2ba4707f26c3fa008c5e",
-        "timestamp": "2026-11-16T07:49:28Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.415-dev/Jellyfin.Plugin.SubdlSync_12.1.12.415.zip",
+        "checksum": "200d23df7ef67ef93f1e3a934a5cb2a2",
+        "timestamp": "2026-11-16T08:00:06Z"
       }
     ]
   }
