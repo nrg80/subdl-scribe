@@ -360,6 +360,10 @@
     "T249": {
       "suite": "gui-structure",
       "checks": 10
+    },
+    "T250": {
+      "suite": "gui-structure",
+      "checks": 7
     }
   }
 }

@@ -904,8 +904,19 @@ def main():
     # than redundant.
     up_pos = html.find('id="UploadContinueAfterLimit"')
     dl_pos = html.find('id="DownloadContinueAfterLimit"')
-    up_label = html[html.find("<span>", up_pos):html.find("</span>", up_pos) + 7] if up_pos != -1 else ""
-    dl_label = html[html.find("<span>", dl_pos):html.find("</span>", dl_pos) + 7] if dl_pos != -1 else ""
+
+    def _visible_label(pos):
+        """Nur der SICHTBARE Satz. Seit F-M526 haengt ein Quellenmerker IM Text-Span
+        („… <span class=src-badge>SubDL only</span>"); ein Vergleich der rohen Spans wuerde
+        den Merker mitzaehlen und die Paritaet der beiden Richtungen falsch bewerten."""
+        if pos == -1:
+            return ""
+        start = html.find("<span>", pos) + len("<span>")
+        end = html.find("<", start)
+        return html[start:end].strip()
+
+    up_label = _visible_label(up_pos)
+    dl_label = _visible_label(dl_pos)
     check("F-M338: the upload label carries no 'API'",
           up_label != "" and "API" not in up_label,
           "the operator asked for it without the word; measured label=%r" % up_label)
@@ -913,7 +924,7 @@ def main():
           up_label != "" and up_label == dl_label,
           "upload=%r download=%r - a wording difference reads as a behaviour difference" % (up_label, dl_label))
     check("F-M338: the download label is unchanged",
-          dl_label == "<span>Continue after daily limit</span>",
+          dl_label == "Continue after daily limit",
           "the fix is on the upload side only; measured download=%r" % dl_label)
 
     # ---- F-M337 (operator order 09.10.2026): the General tab carries everything that matters ----
@@ -1897,6 +1908,21 @@ def main():
         check("F-M526: %s carries the SubDL-only marker" % cid,
               pos > 0 and 'src-subdl' in page_src[max(0, pos - 400):pos + 400],
               "kein Merker" if pos > 0 else "Control fehlt")
+
+    # F-M527: Jellyfin zeichnet das Haekchen ueber die Nachbar-Kette
+    # `.emby-checkbox:checked + span + .checkboxOutline` — das Outline-<span> haengt der Baustein
+    # selbst ans ENDE des Labels. Steht zwischen Text-Span und Outline ein weiteres <span>, ist die
+    # Kette unterbrochen: der Klick zaehlt, aber es erscheint kein Haken (Operator-Befund 17.11.2026:
+    # „Die boxen mit dem subdl only badge lassen sich nicht mehr ticken"). Der Merker gehoert deshalb
+    # IN den Text-Span, nie daneben.
+    check("F-M527: no badge sits between the label text and Jellyfin's checkbox outline",
+          '</span> <span class="src-badge' not in page_src,
+          "%d kaputte Ketten" % page_src.count('</span> <span class="src-badge'))
+    for cid in ("UploadContinueAfterLimit", "UploadSeasonPacks", "DownloadContinueAfterLimit",
+                "DownloadHearingImpaired", "AllowAiTranslatedSubs", "ReportBrokenSubtitles"):
+        pos = page_src.find('id="%s"' % cid)
+        check("F-M527: %s keeps the marker nested inside its label text" % cid,
+              pos > 0 and 'SubDL only</span></span>' in page_src[pos:pos + 700])
 
     check("F-M526: the marker has its own two styles and spells the source out",
           ".src-badge {" in page_src and ".src-subdl {" in page_src and ".src-tvst" in page_src
