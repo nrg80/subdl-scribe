@@ -51,11 +51,11 @@ public class SubdlPostprocessTask : IScheduledTask
 
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
-        LogUtil.Normal(_logger, "[SubDL] Scheduled postprocessing task triggered.");
+        LogUtil.Normal(_logger, "[Sub Scribe] Scheduled postprocessing task triggered.");
         var plugin = Plugin.Instance;
         if (plugin == null)
         {
-            _logger.LogError("[SubDL] Plugin instance missing — cannot run.");
+            _logger.LogError("[Sub Scribe] Plugin instance missing — cannot run.");
             return;
         }
 

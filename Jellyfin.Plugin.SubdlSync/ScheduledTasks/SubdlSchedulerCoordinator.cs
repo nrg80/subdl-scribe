@@ -191,14 +191,14 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             if (attempt == MaxRescheduleAttempts + 1)
             {
                 _logger.LogWarning(
-                    "[SubDL] {Slot} reschedule limit reached ({Limit}x, {Reason}) — NOT rescheduling again today; "
+                    "[Sub Scribe] {Slot} reschedule limit reached ({Limit}x, {Reason}) — NOT rescheduling again today; "
                     + "the budget resets at the next UTC day roll-over (00:00 UTC).",
                     slot, MaxRescheduleAttempts, reason);
             }
             else
             {
                 LogUtil.Detail(_logger, 
-                    "[SubDL] {Slot} reschedule refused again ({Attempt}x, limit {Limit}).",
+                    "[Sub Scribe] {Slot} reschedule refused again ({Attempt}x, limit {Limit}).",
                     slot, attempt, MaxRescheduleAttempts);
             }
 
@@ -206,7 +206,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         }
 
         LogUtil.Detail(_logger, 
-            "[SubDL] {Slot} reschedule {Attempt}/{Limit} ({Reason}).",
+            "[Sub Scribe] {Slot} reschedule {Attempt}/{Limit} ({Reason}).",
             slot, attempt, MaxRescheduleAttempts, reason);
         return true;
     }
@@ -220,7 +220,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     {
         if (_rescheduleCounts.TryRemove(slot, out int had) && had > 0)
         {
-            LogUtil.Detail(_logger, "[SubDL] {Slot} reschedule counter reset (was {Count}).", slot, had);
+            LogUtil.Detail(_logger, "[Sub Scribe] {Slot} reschedule counter reset (was {Count}).", slot, had);
         }
     }
 
@@ -249,7 +249,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         if (slots > 0)
         {
             LogUtil.Detail(_logger, 
-                "[SubDL] reschedule budget reset for the new UTC day ({Slots} slot(s) cleared) (F-M208).",
+                "[Sub Scribe] reschedule budget reset for the new UTC day ({Slots} slot(s) cleared) (F-M208).",
                 slots);
         }
     }
@@ -312,7 +312,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         if (!had)
         {
             LogUtil.Detail(_logger,
-                "[SubDL] stop ({Direction}): no fire pending — nothing to cancel (F-M351).",
+                "[Sub Scribe] stop ({Direction}): no fire pending — nothing to cancel (F-M351).",
                 upload ? "upload" : "download");
             return false;
         }
@@ -332,18 +332,18 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         {
             var row = CancelledRow(upload);
             Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns?.MarkCancelled(row.Key, row.Name, row.Detail);
-            LogUtil.Detail(_logger, "[SubDL] stop ({Direction}): worker row marked cancelled.", upload ? "upload" : "download");
+            LogUtil.Detail(_logger, "[Sub Scribe] stop ({Direction}): worker row marked cancelled.", upload ? "upload" : "download");
         }
         catch (Exception ex)
         {
             // A row that cannot be written must never make the stop fail — the fire is already gone.
-            LogUtil.Detail(_logger, "[SubDL] stop ({Direction}): marking the worker row failed: {Msg}", upload ? "upload" : "download", ex.Message);
+            LogUtil.Detail(_logger, "[Sub Scribe] stop ({Direction}): marking the worker row failed: {Msg}", upload ? "upload" : "download", ex.Message);
         }
         // The moment is logged in UTC and NOT converted: DeferFire prints its retry the same way, and a
         // local time labelled "UTC" is worse than no label — the first live test on the dev instance
         // reported "02:30 UTC" for a fire that was armed at 00:30Z.
         LogUtil.Normal(_logger,
-            "[SubDL] stop ({Direction}): pending fire for {Due:yyyy-MM-dd HH:mm} UTC cancelled — {Reason} (F-M351).",
+            "[Sub Scribe] stop ({Direction}): pending fire for {Due:yyyy-MM-dd HH:mm} UTC cancelled — {Reason} (F-M351).",
             upload ? "upload" : "download",
             was!.Value,
             reason);
@@ -411,8 +411,8 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         LogUtil.Normal(
             _logger,
             previous == DateTime.MinValue
-                ? "[SubDL] Upload postprocessing armed for {FireAt:yyyy-MM-dd HH:mm} UTC — {Reason} (F-M445)."
-                : "[SubDL] Upload postprocessing re-armed for {FireAt:yyyy-MM-dd HH:mm} UTC — {Reason}; the order for {Previous:yyyy-MM-dd HH:mm} UTC is cancelled, the last one wins (F-M445).",
+                ? "[Sub Scribe] Upload postprocessing armed for {FireAt:yyyy-MM-dd HH:mm} UTC — {Reason} (F-M445)."
+                : "[Sub Scribe] Upload postprocessing re-armed for {FireAt:yyyy-MM-dd HH:mm} UTC — {Reason}; the order for {Previous:yyyy-MM-dd HH:mm} UTC is cancelled, the last one wins (F-M445).",
             fireAtUtc, reason, previous);
     }
 
@@ -435,7 +435,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         _stateDirty = true;
         LogUtil.Normal(
             _logger,
-            "[SubDL] Upload postprocessing cancelled — the order for {Cancelled:yyyy-MM-dd HH:mm} UTC is dropped: {Reason} (F-M445).",
+            "[Sub Scribe] Upload postprocessing cancelled — the order for {Cancelled:yyyy-MM-dd HH:mm} UTC is dropped: {Reason} (F-M445).",
             cancelled, reason);
     }
 
@@ -476,7 +476,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             _pruneDeferredUntil = fireAtUtc;
             _refreshFireWhy = "lockbusy";
             _stateDirty = true;
-            LogUtil.Normal(_logger, "[SubDL] Database refresh re-fire scheduled at {FireAt:yyyy-MM-dd HH:mm} UTC.", fireAtUtc);
+            LogUtil.Normal(_logger, "[Sub Scribe] Database refresh re-fire scheduled at {FireAt:yyyy-MM-dd HH:mm} UTC.", fireAtUtc);
         }
     }
 
@@ -492,7 +492,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             _oshashDeferredUntil = fireAtUtc;
             _oshashFireWhy = "lockbusy";
             _stateDirty = true;
-            LogUtil.Normal(_logger, "[SubDL] OSHash refresh re-fire scheduled at {FireAt:yyyy-MM-dd HH:mm} UTC.", fireAtUtc);
+            LogUtil.Normal(_logger, "[Sub Scribe] OSHash refresh re-fire scheduled at {FireAt:yyyy-MM-dd HH:mm} UTC.", fireAtUtc);
         }
     }
 
@@ -548,7 +548,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         {
             LogUtil.Detail(
                 _logger,
-                "[SubDL] Scan defer ({Direction}): fire at {Existing:yyyy-MM-dd HH:mm} UTC is already sooner — keeping it (F-M475).",
+                "[Sub Scribe] Scan defer ({Direction}): fire at {Existing:yyyy-MM-dd HH:mm} UTC is already sooner — keeping it (F-M475).",
                 upload ? "upload" : "download",
                 existing.Value);
             return false;
@@ -570,7 +570,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL] Scan defer ({Direction}): fire moved from {Previous:yyyy-MM-dd HH:mm} UTC to {FireAt:yyyy-MM-dd HH:mm} UTC — the sooner attempt wins (F-M475).",
+                "[Sub Scribe] Scan defer ({Direction}): fire moved from {Previous:yyyy-MM-dd HH:mm} UTC to {FireAt:yyyy-MM-dd HH:mm} UTC — the sooner attempt wins (F-M475).",
                 upload ? "upload" : "download",
                 existing.Value,
                 fireAtUtc);
@@ -579,7 +579,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL] Scan defer ({Direction}): fire armed for {FireAt:yyyy-MM-dd HH:mm} UTC — retry in {Min} min (F-M475).",
+                "[Sub Scribe] Scan defer ({Direction}): fire armed for {FireAt:yyyy-MM-dd HH:mm} UTC — retry in {Min} min (F-M475).",
                 upload ? "upload" : "download",
                 fireAtUtc,
                 minutes);
@@ -811,7 +811,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         if (existing.HasValue)
         {
             LogUtil.Normal(_logger, 
-                "[SubDL] Recovery fire already scheduled ({Direction}): {Existing:yyyy-MM-dd HH:mm} local — skipping duplicate (F-M65).",
+                "[Sub Scribe] Recovery fire already scheduled ({Direction}): {Existing:yyyy-MM-dd HH:mm} local — skipping duplicate (F-M65).",
                 upload ? "upload" : "download",
                 TimeZoneInfo.ConvertTimeFromUtc(existing.Value, TimeZoneInfo.Local));
             return;
@@ -855,7 +855,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         if (overload)
         {
             LogUtil.Normal(_logger, 
-                "[SubDL] Overload recovery fire scheduled ({Direction}): {FireAt:yyyy-MM-dd HH:mm} local — SubDL was transiently overloaded (service_busy); retrying this direction once in 10–30 min (F-M67).",
+                "[Sub Scribe] Overload recovery fire scheduled ({Direction}): {FireAt:yyyy-MM-dd HH:mm} local — SubDL was transiently overloaded (service_busy); retrying this direction once in 10–30 min (F-M67).",
                 upload ? "upload" : "download",
                 TimeZoneInfo.ConvertTimeFromUtc(fireAt, TimeZoneInfo.Local));
         }
@@ -867,14 +867,14 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             // 30..300 min jitter that never happened here — misleading in the log.
             LogUtil.Normal(_logger, 
                 // F-M206: a respacing fire carries no jitter and must not claim a quota reset.
-                "[SubDL] Recovery fire scheduled ({Direction}): {FireAt:yyyy-MM-dd HH:mm} local — respaced by JobSpacingMinutes after lock-busy or rate-limit (no jitter).",
+                "[Sub Scribe] Recovery fire scheduled ({Direction}): {FireAt:yyyy-MM-dd HH:mm} local — respaced by JobSpacingMinutes after lock-busy or rate-limit (no jitter).",
                 upload ? "upload" : "download",
                 TimeZoneInfo.ConvertTimeFromUtc(fireAt, TimeZoneInfo.Local));
         }
         else
         {
             LogUtil.Normal(_logger, 
-                "[SubDL] Recovery fire scheduled ({Direction}): quota reset {Reset:yyyy-MM-dd HH:mm} local + 30..300 min jitter → fire ~{FireAt:yyyy-MM-dd HH:mm} local — re-firing this direction once after the reset (F-M65, F-M152).",
+                "[Sub Scribe] Recovery fire scheduled ({Direction}): quota reset {Reset:yyyy-MM-dd HH:mm} local + 30..300 min jitter → fire ~{FireAt:yyyy-MM-dd HH:mm} local — re-firing this direction once after the reset (F-M65, F-M152).",
                 upload ? "upload" : "download",
                 TimeZoneInfo.ConvertTimeFromUtc(fireAtUtc, TimeZoneInfo.Local),
                 TimeZoneInfo.ConvertTimeFromUtc(fireAt, TimeZoneInfo.Local));
@@ -891,7 +891,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         LoadSchedulerState();
         _loop = Task.Run(() => LoopAsync(_cts.Token));
         LogUtil.Normal(_logger, 
-            "[SubDL] Refetch scheduler started.");
+            "[Sub Scribe] Refetch scheduler started.");
     }
 
     /// <summary>
@@ -923,7 +923,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 if (hadFile || worker.Triggers.Count > 0)
                 {
                     LogUtil.Normal(_logger, 
-                        "[SubDL] Scheduler: clearing {Count} stale trigger(s) from '{Task}' (fixed-time fires replaced by random anchors).",
+                        "[Sub Scribe] Scheduler: clearing {Count} stale trigger(s) from '{Task}' (fixed-time fires replaced by random anchors).",
                         worker.Triggers.Count, worker.Name);
                     worker.ReloadTriggerEvents(); // reloads from file → now empty defaults
                 }
@@ -931,7 +931,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL] Scheduler: stale-trigger cleanup failed: {Msg}", ex.Message);
+            _logger.LogWarning("[Sub Scribe] Scheduler: stale-trigger cleanup failed: {Msg}", ex.Message);
         }
     }
 
@@ -952,7 +952,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError("[SubDL] Scheduler tick failed: {Msg}", ex.Message);
+                    _logger.LogError("[Sub Scribe] Scheduler tick failed: {Msg}", ex.Message);
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(TickSeconds), ct).ConfigureAwait(false);
@@ -1039,7 +1039,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             _recoveryFireDownloadWhy = null;
             ResetReschedule("download"); // really fired — clear the 16x counter
             PersistRecoveryFires();
-            LogUtil.Normal(_logger, "[SubDL] Recovery fire: download — {Reason}; queueing download run (F-M65, F-M475).", downReason);
+            LogUtil.Normal(_logger, "[Sub Scribe] Recovery fire: download — {Reason}; queueing download run (F-M65, F-M475).", downReason);
             _taskManager.QueueScheduledTask<SubdlDownloadTask>(new TaskOptions());
             return;
         }
@@ -1065,7 +1065,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             _recoveryFireUploadWhy = null;
             ResetReschedule("upload"); // really fired — clear the 16x counter
             PersistRecoveryFires();
-            LogUtil.Normal(_logger, "[SubDL] Recovery fire: upload — {Reason}; queueing upload run (F-M65, F-M475).", upReason);
+            LogUtil.Normal(_logger, "[Sub Scribe] Recovery fire: upload — {Reason}; queueing upload run (F-M65, F-M475).", upReason);
             _taskManager.QueueScheduledTask<SubdlUploadTask>(new TaskOptions());
             return;
         }
@@ -1136,7 +1136,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                     _refreshFireWhy = null; // fired — the reason goes with the moment (F-M475)
                     _stateDirty = true;
                     ResetReschedule("refresh"); // fired — clear the 16x counter
-                    LogUtil.Normal(_logger, "[SubDL] Database refresh fire at {Anchor:yyyy-MM-dd HH:mm} local ({Mode}).", (DateTime)refreshAnchor, config.PruneMode);
+                    LogUtil.Normal(_logger, "[Sub Scribe] Database refresh fire at {Anchor:yyyy-MM-dd HH:mm} local ({Mode}).", (DateTime)refreshAnchor, config.PruneMode);
                     _taskManager.QueueScheduledTask<SubdlDatabaseRefreshTask>(new TaskOptions());
                 }
                 else
@@ -1148,7 +1148,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                         _pruneDeferredUntil = nowUtc.AddMinutes(Math.Max(1, config.JobSpacingMinutes));
                         _refreshFireWhy = "lockbusy";
                         _stateDirty = true;
-                        LogUtil.Normal(_logger, "[SubDL] Database refresh deferred to {Until:HH:mm} local (lock busy).", _pruneDeferredUntil.ToLocalTime());
+                        LogUtil.Normal(_logger, "[Sub Scribe] Database refresh deferred to {Until:HH:mm} local (lock busy).", _pruneDeferredUntil.ToLocalTime());
                     }
                 }
             }
@@ -1184,7 +1184,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                     _oshashFireWhy = null; // fired — the reason goes with the moment (F-M475)
                     _stateDirty = true;
                     ResetReschedule("oshash"); // fired — clear the 16x counter
-                    LogUtil.Normal(_logger, "[SubDL] OSHash-refresh fire at {Anchor:yyyy-MM-dd HH:mm} local.", (DateTime)osAnchor);
+                    LogUtil.Normal(_logger, "[Sub Scribe] OSHash-refresh fire at {Anchor:yyyy-MM-dd HH:mm} local.", (DateTime)osAnchor);
                     _taskManager.QueueScheduledTask<SubdlOshashRefreshTask>(new TaskOptions());
                 }
                 else
@@ -1194,7 +1194,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                         _oshashDeferredUntil = nowUtc.AddMinutes(Math.Max(1, config.JobSpacingMinutes));
                         _oshashFireWhy = "lockbusy";
                         _stateDirty = true;
-                        LogUtil.Normal(_logger, "[SubDL] OSHash-refresh deferred to {Until:HH:mm} local (lock busy).", _oshashDeferredUntil.ToLocalTime());
+                        LogUtil.Normal(_logger, "[Sub Scribe] OSHash-refresh deferred to {Until:HH:mm} local (lock busy).", _oshashDeferredUntil.ToLocalTime());
                     }
                 }
             }
@@ -1228,7 +1228,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                     ResetReschedule("postprocess");
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] Upload postprocessing fires now — armed 30-minute rhythm after the last upload run (F-M445).");
+                        "[Sub Scribe] Upload postprocessing fires now — armed 30-minute rhythm after the last upload run (F-M445).");
                     _taskManager.QueueScheduledTask<SubdlPostprocessTask>(new TaskOptions());
                 }
             }
@@ -1285,7 +1285,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 if (TryCountReschedule("refetch", "lock-busy anchor"))
                 {
                     LogUtil.Normal(_logger,
-                        "[SubDL] Refetch fire ({Anchor}) deferred — a run holds the lock; retrying at {Retry:yyyy-MM-dd HH:mm} local (F-M117).",
+                        "[Sub Scribe] Refetch fire ({Anchor}) deferred — a run holds the lock; retrying at {Retry:yyyy-MM-dd HH:mm} local (F-M117).",
                         fire.AnchorDesc, _refetchDeferredUntil.ToLocalTime());
                 }
 
@@ -1310,7 +1310,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             ResetReschedule("download"); // regular anchor owns both directions again
             ResetReschedule("upload");
             LogUtil.Normal(_logger, 
-                "[SubDL] Refetch fire: rhythm={Rhythm} anchor {Anchor} — queueing cycle (unified refetch interval, F-M111).",
+                "[Sub Scribe] Refetch fire: rhythm={Rhythm} anchor {Anchor} — queueing cycle (unified refetch interval, F-M111).",
                 effective, fire.AnchorDesc);
 
             // F-M111 (user decision 12.09.2026): the unified refetch rhythm fires
@@ -1365,7 +1365,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             _catchUpFired = true;
             _stateDirty = true;
             LogUtil.Normal(_logger, 
-                "[SubDL] Refetch catch-up: missed anchor window — queueing one cycle (F-M156).");
+                "[Sub Scribe] Refetch catch-up: missed anchor window — queueing one cycle (F-M156).");
 
             bool downloadJoins = config.IsDownloadEnabled(SubtitleProvider.Subdl);
             bool uploadJoins = config.IsUploadEnabled(SubtitleProvider.Subdl);
@@ -1422,7 +1422,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
 
         PersistRecoveryFires();
         _logger.LogWarning(
-            "[SubDL] Recovery fire ({Direction}) deferred — a run holds the lock; retrying at {Retry:yyyy-MM-dd HH:mm} UTC (F-M117).",
+            "[Sub Scribe] Recovery fire ({Direction}) deferred — a run holds the lock; retrying at {Retry:yyyy-MM-dd HH:mm} UTC (F-M117).",
             upload ? "upload" : "download",
             spaced);
     }
@@ -1614,7 +1614,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL] Recovery-fire persist failed: {Msg}", ex.Message);
+            _logger.LogWarning("[Sub Scribe] Recovery-fire persist failed: {Msg}", ex.Message);
         }
     }
 
@@ -1678,14 +1678,14 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             if (_recoveryFireDownloadUtc.HasValue || _recoveryFireUploadUtc.HasValue)
             {
                 LogUtil.Normal(_logger, 
-                    "[SubDL] Recovery fires restored from disk: download {D:yyyy-MM-dd HH:mm} UTC, upload {U:yyyy-MM-dd HH:mm} UTC (F-M116).",
+                    "[Sub Scribe] Recovery fires restored from disk: download {D:yyyy-MM-dd HH:mm} UTC, upload {U:yyyy-MM-dd HH:mm} UTC (F-M116).",
                     _recoveryFireDownloadUtc ?? DateTime.MinValue,
                     _recoveryFireUploadUtc ?? DateTime.MinValue);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL] Recovery-fire reload failed: {Msg}", ex.Message);
+            _logger.LogWarning("[Sub Scribe] Recovery-fire reload failed: {Msg}", ex.Message);
         }
     }
 
@@ -1728,7 +1728,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL] Scheduler-state persist failed: {Msg}", ex.Message);
+            _logger.LogWarning("[Sub Scribe] Scheduler-state persist failed: {Msg}", ex.Message);
         }
     }
 
@@ -1798,7 +1798,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             _postprocessFireWhy = _postprocessArmUtc == DateTime.MinValue ? null : ParseToken(fields, "postprocessWhy");
 
             LogUtil.Normal(_logger,
-                "[SubDL] Scheduler state restored from disk: refresh {Refresh}, oshash {Oshash}, postprocessing armed for {Pp}, refetch slot {Fired}, catch-up {CatchUp}.",
+                "[Sub Scribe] Scheduler state restored from disk: refresh {Refresh}, oshash {Oshash}, postprocessing armed for {Pp}, refetch slot {Fired}, catch-up {CatchUp}.",
                 _lastPruneMarker ?? "-",
                 _lastOshashMarker ?? "-",
                 _postprocessArmUtc == DateTime.MinValue ? "-" : _postprocessArmUtc.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
@@ -1807,7 +1807,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL] Scheduler-state reload failed: {Msg}", ex.Message);
+            _logger.LogWarning("[Sub Scribe] Scheduler-state reload failed: {Msg}", ex.Message);
         }
     }
 

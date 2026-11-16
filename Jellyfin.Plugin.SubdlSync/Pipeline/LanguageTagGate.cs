@@ -286,7 +286,7 @@ public sealed class LanguageTagGate
                 // record, and the sibling F-M264 line is at Normal for the same reason. At PerItem
                 // the operator could never tell a skipped file from an untouched one.
                 LogUtil.Normal(_logger,
-                    "[SubDL-D] {File} — {Count} track(s) already ran through language detection; container not re-opened (F-M266).",
+                    "[Sub Scribe-D] {File} — {Count} track(s) already ran through language detection; container not re-opened (F-M266).",
                     System.IO.Path.GetFileName(mediaPath), skipped);
             }
         }
@@ -331,7 +331,7 @@ public sealed class LanguageTagGate
             if (alreadyTagged > 0)
             {
                 LogUtil.Normal(_logger,
-                    "[SubDL-D] {File} — {Count} track(s) already carry a language tag in the container; nothing to write (F-M264).",
+                    "[Sub Scribe-D] {File} — {Count} track(s) already carry a language tag in the container; nothing to write (F-M264).",
                     System.IO.Path.GetFileName(mediaPath), alreadyTagged);
             }
         }
@@ -356,7 +356,7 @@ public sealed class LanguageTagGate
         if (exit != 0 && texts.Values.All(v => v == null))
         {
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL-D] language resolution of {File} skipped: extraction exited {Exit}",
+                "[Sub Scribe-D] language resolution of {File} skipped: extraction exited {Exit}",
                 System.IO.Path.GetFileName(mediaPath), exit);
             return new LanguageResolution(tracks, wanted, untagged, written);
         }
@@ -371,7 +371,7 @@ public sealed class LanguageTagGate
                 // scan does not open the container for this position again.
                 _registry?.MarkDetectionAttempt(gateHash, pos, Data.DetectionOutcome.NoText);
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL-D] {File} s{Pos} — untagged track carries no text, left unresolved",
+                    "[Sub Scribe-D] {File} s{Pos} — untagged track carries no text, left unresolved",
                     System.IO.Path.GetFileName(mediaPath), pos);
                 continue;
             }
@@ -383,7 +383,7 @@ public sealed class LanguageTagGate
             {
                 _registry?.MarkDetectionAttempt(gateHash, pos, Data.DetectionOutcome.TooSmall);
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL-D] {File} s{Pos} — untagged track too small to detect a language ({Bytes} bytes), left unresolved",
+                    "[Sub Scribe-D] {File} s{Pos} — untagged track too small to detect a language ({Bytes} bytes), left unresolved",
                     System.IO.Path.GetFileName(mediaPath), pos, text.Length);
                 continue;
             }
@@ -393,7 +393,7 @@ public sealed class LanguageTagGate
             {
                 _registry?.MarkDetectionAttempt(gateHash, pos, Data.DetectionOutcome.Failed);
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL-D] {File} s{Pos} — language could not be detected ({Bytes} bytes), left unresolved",
+                    "[Sub Scribe-D] {File} s{Pos} — language could not be detected ({Bytes} bytes), left unresolved",
                     System.IO.Path.GetFileName(mediaPath), pos, text.Length);
                 continue;
             }
@@ -403,7 +403,7 @@ public sealed class LanguageTagGate
             wanted[pos] = detected;
             _registry?.MarkDetectionAttempt(gateHash, pos, Data.DetectionOutcome.Resolved, detected, hi);
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL-D] {File} s{Pos} — untagged track resolved to {Lang} ({Bytes} bytes)",
+                "[Sub Scribe-D] {File} s{Pos} — untagged track resolved to {Lang} ({Bytes} bytes)",
                 System.IO.Path.GetFileName(mediaPath), pos, detected, text.Length);
         }
 
@@ -463,7 +463,7 @@ public sealed class LanguageTagGate
 
             string identity = oldHash != null && newHash != null ? $"  {oldHash} -> {newHash}" : string.Empty;
             LogUtil.Normal(_logger,
-                "[SubDL-D] {File} — {Count} language code(s) written into the container: {Langs}{Identity}",
+                "[Sub Scribe-D] {File} — {Count} language code(s) written into the container: {Langs}{Identity}",
                 System.IO.Path.GetFileName(mediaPath), iso639.Count, string.Join(", ", writtenLangs), identity);
         }
 

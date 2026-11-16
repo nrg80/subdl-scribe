@@ -129,7 +129,7 @@ public class SubdlAdoptController : ControllerBase
 
         LogUtil.Normal(
             _logger,
-            "[SubDL] adopt: {Adopted} uploaded row(s) written for {Files} file(s) from already published SubDL entries | missing file {NoFile} | unreadable {NoHash} | no id {NoId} | bad position {BadPos}.",
+            "[Sub Scribe] adopt: {Adopted} uploaded row(s) written for {Files} file(s) from already published SubDL entries | missing file {NoFile} | unreadable {NoHash} | no id {NoId} | bad position {BadPos}.",
             adopted, files.Count, noFile, noHash, noId, badPos);
 
         return Ok(new

@@ -55,14 +55,14 @@ public sealed class OshashCache
         var e = _db.Oshashes.FindById(mediaPath);
         if (e == null || e.Size != size || e.MtimeUnix != mtimeUnix)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] oshash lookup miss {Path}", mediaPath);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] oshash lookup miss {Path}", mediaPath);
             return null;
         }
 
         validatedUtc = e.Updated;
         if (revalidateEvery != TimeSpan.Zero && e.Updated < DateTime.UtcNow - revalidateEvery)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] oshash lookup expired {Path}", mediaPath);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] oshash lookup expired {Path}", mediaPath);
             return null;
         }
 
@@ -77,7 +77,7 @@ public sealed class OshashCache
 
         if (firstHit)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] oshash lookup hit {Path}", mediaPath);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] oshash lookup hit {Path}", mediaPath);
         }
 
         return e.Hash;
@@ -100,7 +100,7 @@ public sealed class OshashCache
             MtimeUnix = mtimeUnix,
             Updated = DateTime.UtcNow
         });
-        LogUtil.Detail(_logger, "[SubDL-DB] oshash store {Path} {Hash}", mediaPath, hash);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] oshash store {Path} {Hash}", mediaPath, hash);
     }
 
 
@@ -110,7 +110,7 @@ public sealed class OshashCache
     public void Remove(string mediaPath)
     {
         _db.Oshashes.Delete(mediaPath);
-        LogUtil.Detail(_logger, "[SubDL-DB] oshash remove {Path}", mediaPath);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] oshash remove {Path}", mediaPath);
     }
 
     public int PruneStalePaths(IReadOnlyList<string> libraryRoots)

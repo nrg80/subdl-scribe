@@ -229,7 +229,7 @@ public sealed class SubdlDbContext : IDisposable
                 meta = new MetaEntity { Id = "db", SchemaVersion = CurrentSchemaVersion };
                 Meta.Upsert(meta);
                 LogUtil.Normal(_logger,
-                    "[SubDL] data file initialised, schema version {Version}.", CurrentSchemaVersion);
+                    "[Sub Scribe] data file initialised, schema version {Version}.", CurrentSchemaVersion);
                 return;
             }
 
@@ -237,7 +237,7 @@ public sealed class SubdlDbContext : IDisposable
             {
                 IsWrittenByNewerVersion = true;
                 _logger?.LogError(
-                    "[SubDL] data file schema version {Found} is NEWER than this plugin understands ({Current}). "
+                    "[Sub Scribe] data file schema version {Found} is NEWER than this plugin understands ({Current}). "
                     + "Writing is disabled for this session so the newer data is not damaged. Update the plugin.",
                     meta.SchemaVersion, CurrentSchemaVersion);
                 return;
@@ -246,7 +246,7 @@ public sealed class SubdlDbContext : IDisposable
             if (meta.SchemaVersion < CurrentSchemaVersion)
             {
                 _logger?.LogWarning(
-                    "[SubDL] data file schema version {Found} is older than {Current}; upgrading the marker. "
+                    "[Sub Scribe] data file schema version {Found} is older than {Current}; upgrading the marker. "
                     + "Records from other schema versions are ignored, not rewritten.",
                     meta.SchemaVersion, CurrentSchemaVersion);
                 meta.SchemaVersion = CurrentSchemaVersion;
@@ -256,7 +256,7 @@ public sealed class SubdlDbContext : IDisposable
         catch (Exception ex)
         {
             // A broken compatibility check must never stop the plugin from starting.
-            _logger?.LogWarning("[SubDL] schema version check failed (continuing): {Msg}", ex.Message);
+            _logger?.LogWarning("[Sub Scribe] schema version check failed (continuing): {Msg}", ex.Message);
         }
     }
 
@@ -293,7 +293,7 @@ public sealed class SubdlDbContext : IDisposable
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning("[SubDL] could not create the packs table (continuing): {Msg}", ex.Message);
+            _logger?.LogWarning("[Sub Scribe] could not create the packs table (continuing): {Msg}", ex.Message);
         }
     }
 
@@ -314,7 +314,7 @@ public sealed class SubdlDbContext : IDisposable
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning("[SubDL] could not create the tmdb_answers table (continuing): {Msg}", ex.Message);
+            _logger?.LogWarning("[Sub Scribe] could not create the tmdb_answers table (continuing): {Msg}", ex.Message);
         }
     }
 
@@ -361,13 +361,13 @@ public sealed class SubdlDbContext : IDisposable
                 if (!existing.Contains(name))
                 {
                     _db.Database.ExecuteSqlRaw(ddl);
-                    LogUtil.Normal(_logger, "[SubDL] data file: column {Column} added to rejected_candidates.", name);
+                    LogUtil.Normal(_logger, "[Sub Scribe] data file: column {Column} added to rejected_candidates.", name);
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning("[SubDL] could not add the report columns (continuing): {Msg}", ex.Message);
+            _logger?.LogWarning("[Sub Scribe] could not add the report columns (continuing): {Msg}", ex.Message);
         }
 
         // F-M486 (schema 10): Herkunft je Untertitel. Ohne sie kann der Upload nicht wissen, ob er
@@ -425,12 +425,12 @@ public sealed class SubdlDbContext : IDisposable
                 if (!exists)
                 {
                     _db.Database.ExecuteSqlRaw(ddl);
-                    LogUtil.Normal(_logger, "[SubDL] data file: column {Column} added to {Table}.", column, table);
+                    LogUtil.Normal(_logger, "[Sub Scribe] data file: column {Column} added to {Table}.", column, table);
                 }
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning("[SubDL] could not add {Column} to {Table} (continuing): {Msg}", column, table, ex.Message);
+                _logger?.LogWarning("[Sub Scribe] could not add {Column} to {Table} (continuing): {Msg}", column, table, ex.Message);
             }
         }
     }
@@ -463,12 +463,12 @@ public sealed class SubdlDbContext : IDisposable
             if (!existing.Contains(Name))
             {
                 _db.Database.ExecuteSqlRaw("ALTER TABLE packs ADD COLUMN Fingerprint TEXT NULL;");
-                LogUtil.Normal(_logger, "[SubDL] data file: column {Column} added to packs.", Name);
+                LogUtil.Normal(_logger, "[Sub Scribe] data file: column {Column} added to packs.", Name);
             }
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning("[SubDL] could not add the pack columns (continuing): {Msg}", ex.Message);
+            _logger?.LogWarning("[Sub Scribe] could not add the pack columns (continuing): {Msg}", ex.Message);
         }
     }
 
@@ -517,12 +517,12 @@ public sealed class SubdlDbContext : IDisposable
                 if (!existing.Contains(column))
                 {
                     _db.Database.ExecuteSqlRaw(ddl);
-                    LogUtil.Normal(_logger, "[SubDL] data file: column {Column} added to media.", column);
+                    LogUtil.Normal(_logger, "[Sub Scribe] data file: column {Column} added to media.", column);
                 }
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning("[SubDL] could not add {Column} to media (continuing): {Msg}", column, ex.Message);
+                _logger?.LogWarning("[Sub Scribe] could not add {Column} to media (continuing): {Msg}", column, ex.Message);
             }
         }
     }
@@ -555,12 +555,12 @@ public sealed class SubdlDbContext : IDisposable
             if (!existing.Contains("BrokenReported"))
             {
                 _db.Database.ExecuteSqlRaw("ALTER TABLE status_stats ADD COLUMN BrokenReported INTEGER NOT NULL DEFAULT 0;");
-                LogUtil.Normal(_logger, "[SubDL] data file: column BrokenReported added to status_stats.");
+                LogUtil.Normal(_logger, "[Sub Scribe] data file: column BrokenReported added to status_stats.");
             }
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning("[SubDL] could not add the status column (continuing): {Msg}", ex.Message);
+            _logger?.LogWarning("[Sub Scribe] could not add the status column (continuing): {Msg}", ex.Message);
         }
     }
 
@@ -584,12 +584,12 @@ public sealed class SubdlDbContext : IDisposable
             meta.Updated = DateTime.UtcNow;
             Meta.Upsert(meta);
             LogUtil.Normal(_logger,
-                "[SubDL] data file last written by plugin {Plugin} on Jellyfin {Jellyfin}",
+                "[Sub Scribe] data file last written by plugin {Plugin} on Jellyfin {Jellyfin}",
                 pluginVersion ?? "unknown", jellyfinVersion ?? "unknown");
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning("[SubDL] recording versions failed (continuing): {Msg}", ex.Message);
+            _logger?.LogWarning("[Sub Scribe] recording versions failed (continuing): {Msg}", ex.Message);
         }
     }
 
@@ -653,7 +653,7 @@ public sealed class SubdlDbContext : IDisposable
         var cutoff = now ?? DateTime.UtcNow;
         var expiredCounters = Counters.DeleteMany(x => x.Expires != null && x.Expires < cutoff);
         var oldRuns = Runs.DeleteMany(x => x.Ended != null && x.Ended < cutoff.AddDays(-30));
-        LogUtil.Detail(_logger, "[SubDL] store pruned: {ExpiredCounters} expired counters, {OldRuns} old runs", expiredCounters, oldRuns);
+        LogUtil.Detail(_logger, "[Sub Scribe] store pruned: {ExpiredCounters} expired counters, {OldRuns} old runs", expiredCounters, oldRuns);
     }
 
     /// <summary>
@@ -713,7 +713,7 @@ public sealed class SubdlDbContext : IDisposable
             catch (Exception statEx)
             {
                 _logger?.LogWarning(
-                    "[SubDL-DB] ANALYZE skipped ({Msg}) — the file was compacted, the query statistics stay stale.",
+                    "[Sub Scribe-DB] ANALYZE skipped ({Msg}) — the file was compacted, the query statistics stay stale.",
                     statEx.Message);
             }
 
@@ -734,7 +734,7 @@ public sealed class SubdlDbContext : IDisposable
             long afterTotal = mainAfter + walAfter;
 
             LogUtil.Detail(_logger,
-                "[SubDL-DB] compacted: {BeforeTotal} -> {AfterTotal} bytes total "
+                "[Sub Scribe-DB] compacted: {BeforeTotal} -> {AfterTotal} bytes total "
                 + "(main {MainBefore} -> {MainAfter}, wal {WalBefore} -> {WalAfter}); "
                 + "{Rebuilt} area(s) rewritten, {Released} bytes released; statistics {Stats}.",
                 beforeTotal, afterTotal, mainBefore, mainAfter, walBefore, walAfter,
@@ -748,7 +748,7 @@ public sealed class SubdlDbContext : IDisposable
             // must not leave a dead connection behind either. The outcome stays distinguishable:
             // "recovered" means the store works but the FILE WAS NOT SHRUNK, which is not the same
             // message as "compacted".
-            _logger?.LogWarning("[SubDL-DB] compaction failed: {Msg}", ex.Message);
+            _logger?.LogWarning("[Sub Scribe-DB] compaction failed: {Msg}", ex.Message);
             var recovered = VerifyAndRepair(ex);
             return (beforeTotal, beforeTotal, 0,
                 recovered ? CompactOutcome.Recovered : CompactOutcome.Broken);
@@ -770,12 +770,12 @@ public sealed class SubdlDbContext : IDisposable
         try
         {
             _ = Meta.FindById("db");
-            _logger?.LogWarning("[SubDL-DB] data file still answers after the failed compaction ({Cause}).", cause.Message);
+            _logger?.LogWarning("[Sub Scribe-DB] data file still answers after the failed compaction ({Cause}).", cause.Message);
             return true;
         }
         catch (Exception probeEx)
         {
-            _logger?.LogError(probeEx, "[SubDL-DB] the data file stopped answering after the failed compaction — restart Jellyfin to recover the database.");
+            _logger?.LogError(probeEx, "[Sub Scribe-DB] the data file stopped answering after the failed compaction — restart Jellyfin to recover the database.");
             return false;
         }
     }
@@ -846,7 +846,7 @@ public sealed class SubdlDbContext : IDisposable
         // gespeicherte Instanz (seine Kopien der Kennungen bleiben dann leer, wie ohne Zeile).
         if (string.IsNullOrEmpty(mediaHash))
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] media row NOT written: no media hash known (F-M514)");
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] media row NOT written: no media hash known (F-M514)");
             return new MediaEntity();
         }
 
@@ -872,7 +872,7 @@ public sealed class SubdlDbContext : IDisposable
 
         patch?.Invoke(entity);
         Media.Upsert(entity);
-        LogUtil.Detail(_logger, "[SubDL-DB] media upsert {Hash}", mediaHash);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] media upsert {Hash}", mediaHash);
         return entity;
     }
 
@@ -924,7 +924,7 @@ public sealed class SubdlDbContext : IDisposable
         }
         catch (Exception ex)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] pending writes could not be flushed on dispose: {Msg}", ex.Message);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] pending writes could not be flushed on dispose: {Msg}", ex.Message);
         }
 
         _db.Dispose();
@@ -1008,7 +1008,7 @@ public sealed class SubdlSqliteContext : DbContext
         catch (ArgumentOutOfRangeException ex) when (IsDetachedGhost(ex) && RestoreTracker())
         {
             Logger?.LogWarning(
-                "[SubDL-DB] a rejected row left a Detached entry in the change tracker; the tracker was rebuilt and the write retried ({Msg})",
+                "[Sub Scribe-DB] a rejected row left a Detached entry in the change tracker; the tracker was rebuilt and the write retried ({Msg})",
                 ex.Message);
             return base.SaveChanges();
         }
@@ -1066,7 +1066,7 @@ public sealed class SubdlSqliteContext : DbContext
         }
         catch (Exception ex)
         {
-            Logger?.LogWarning("[SubDL-DB] the change tracker could not be rebuilt ({Msg})", ex.Message);
+            Logger?.LogWarning("[Sub Scribe-DB] the change tracker could not be rebuilt ({Msg})", ex.Message);
             return false;
         }
     }
@@ -1513,7 +1513,7 @@ public sealed class SubdlSet<TEntity>
         if (string.IsNullOrEmpty(key))
         {
             _db.Logger?.LogWarning(
-                "[SubDL-DB] {Area}: a row without a business key was not written (F-M514)",
+                "[Sub Scribe-DB] {Area}: a row without a business key was not written (F-M514)",
                 typeof(TEntity).Name);
             return;
         }
@@ -1578,7 +1578,7 @@ public sealed class SubdlSet<TEntity>
                     // F-M514: see UpsertCore — a keyless row is not a row, and attaching it would
                     // leave a Detached entry that breaks every later write of this context.
                     _db.Logger?.LogWarning(
-                        "[SubDL-DB] {Area}: a row without a business key was not written (F-M514)",
+                        "[Sub Scribe-DB] {Area}: a row without a business key was not written (F-M514)",
                         typeof(TEntity).Name);
                     continue;
                 }
@@ -1621,7 +1621,7 @@ public sealed class SubdlSet<TEntity>
                 if (string.IsNullOrEmpty(_keyText(e)))
                 {
                     _db.Logger?.LogWarning(
-                        "[SubDL-DB] {Area}: a row without a business key was not written (F-M514)",
+                        "[Sub Scribe-DB] {Area}: a row without a business key was not written (F-M514)",
                         typeof(TEntity).Name);
                     continue;
                 }

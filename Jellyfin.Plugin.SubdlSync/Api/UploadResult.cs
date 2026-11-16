@@ -38,6 +38,13 @@ public class UploadResult
     public string? SourceId { get; init; }
 
     /// <summary>
+    /// F-M550: the source that actually answered. The log used to name no source at all, and the old
+    /// <c>[SubDL]</c> prefix in front of an upload line read like "uploaded to SubDL" even when the
+    /// upload went to tvsubtitles. Set by the chain where the source is known, not by its caller.
+    /// </summary>
+    public Configuration.SubtitleProvider? Source { get; set; }
+
+    /// <summary>
     /// Creates a success result carrying the source's own id for the upload.
     /// </summary>
     /// <param name="sourceId">The id the source reported, or null.</param>

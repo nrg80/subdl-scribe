@@ -119,7 +119,7 @@ internal sealed class LibraryScope
                 // Fail-soft: the locations are an ADDITION to the name check, never a
                 // replacement — losing them degrades nested libraries to the old
                 // name-only behaviour instead of losing the scope entirely.
-                logger?.LogWarning("[SubDL] Library locations unresolvable ({Msg}) — falling back to library names.", ex.Message);
+                logger?.LogWarning("[Sub Scribe] Library locations unresolvable ({Msg}) — falling back to library names.", ex.Message);
             }
         }
 

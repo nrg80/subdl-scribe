@@ -233,7 +233,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         _libraryManager.ItemAdded += OnItemAdded;
         LoadQueues();
         Instance = this;
-        LogUtil.Normal(_logger, "[SubDL-Dispatch] Active."); // No queue counts
+        LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] Active."); // No queue counts
     }
 
     /// <summary>Library (collection) name of an item, preferring the SELECTED library.</summary>
@@ -268,7 +268,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL-Dispatch] ResolveLibraryName failed for {Name}: {Msg}", item?.Name ?? "?", ex.Message);
+            _logger.LogWarning("[Sub Scribe-Dispatch] ResolveLibraryName failed for {Name}: {Msg}", item?.Name ?? "?", ex.Message);
             return null;
         }
     }
@@ -308,7 +308,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         bool downArr = config.AnyDownloadEnabled && config.DownloadOnArrival;
         if (!upArr && !downArr)
         {
-            LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[SubDL-Dispatch] Event ignored — on-arrival disabled for both directions: {Name}", e.Item.Name);
+            LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[Sub Scribe-Dispatch] Event ignored — on-arrival disabled for both directions: {Name}", e.Item.Name);
             return;
         }
 
@@ -325,7 +325,7 @@ public sealed class SubdlEventDispatcher : IDisposable
                     _pendingDuringCycleIds ??= new System.Collections.Generic.List<string>();
                     _pendingDuringCycleIds.Add(e.Item.Id.ToString());
                 }
-                LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[SubDL-Dispatch] Event during cycle — next seed round will include it: {Name}", e.Item.Name);
+                LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[Sub Scribe-Dispatch] Event during cycle — next seed round will include it: {Name}", e.Item.Name);
                 return;
             }
 
@@ -337,7 +337,7 @@ public sealed class SubdlEventDispatcher : IDisposable
                 // is scoped to the collected ids.
                 _pendingEventIds ??= new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
                 _pendingEventIds.Add(e.Item.Id.ToString());
-                LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[SubDL-Dispatch] Event during debounce (timer not reset, joined): {Name}", e.Item.Name);
+                LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[Sub Scribe-Dispatch] Event during debounce (timer not reset, joined): {Name}", e.Item.Name);
                 return;
             }
 
@@ -358,7 +358,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             _pendingEventIds.Add(e.Item.Id.ToString());
         }
 
-        LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[SubDL-Dispatch] Event: {Name} — cycle in {Min} min.", e.Item.Name, DebounceWindow.TotalMinutes);
+        LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[Sub Scribe-Dispatch] Event: {Name} — cycle in {Min} min.", e.Item.Name, DebounceWindow.TotalMinutes);
         _debounceTimer ??= new Timer(_ => _ = TimerFiredAsync(), null, Timeout.Infinite, Timeout.Infinite);
         _debounceTimer.Change(DebounceWindow, Timeout.InfiniteTimeSpan);
     }
@@ -386,7 +386,7 @@ public sealed class SubdlEventDispatcher : IDisposable
                         }
                     }
 
-                    LogUtil.Normal(_logger, "[SubDL-Dispatch] debounce fired during a running cycle — {N} arrival(s) handed to the follow-up.", _pendingEventIds.Count);
+                    LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] debounce fired during a running cycle — {N} arrival(s) handed to the follow-up.", _pendingEventIds.Count);
                 }
 
                 _pendingEventIds = null;
@@ -412,7 +412,7 @@ public sealed class SubdlEventDispatcher : IDisposable
                 var libName = ResolveLibraryName(item);
                 if (libName == null)
                 {
-                    _logger.LogWarning("[SubDL-Dispatch] Library unresolvable for {Name} — full scan.", item.Name);
+                    _logger.LogWarning("[Sub Scribe-Dispatch] Library unresolvable for {Name} — full scan.", item.Name);
                     lock (_lock)
                     {
                         _eventLibraries = null;
@@ -427,7 +427,7 @@ public sealed class SubdlEventDispatcher : IDisposable
                 }
             }
 
-            LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[SubDL-Dispatch] Event libraries: {Libs}", _eventLibraries == null ? "unknown — full scan" : string.Join(", ", _eventLibraries));
+            LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[Sub Scribe-Dispatch] Event libraries: {Libs}", _eventLibraries == null ? "unknown — full scan" : string.Join(", ", _eventLibraries));
         }
 
         try
@@ -437,7 +437,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         catch (Exception ex)
         {
             MarkCycleFailure(ex.Message);
-            _logger.LogError("[SubDL-Dispatch] Cycle failed: {Msg}", ex.Message);
+            _logger.LogError("[Sub Scribe-Dispatch] Cycle failed: {Msg}", ex.Message);
         }
         finally
         {
@@ -472,7 +472,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             return;
         }
-        LogUtil.Normal(_logger, "[SubDL-Dispatch] during-cycle arrivals still pending at cycle end — follow-up cycle in 90 s.");
+        LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] during-cycle arrivals still pending at cycle end — follow-up cycle in 90 s.");
         _ = Task.Run(async () =>
         {
             try
@@ -486,7 +486,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogError("[SubDL-Dispatch] during-cycle follow-up failed: {Msg}", ex.Message);
+                _logger.LogError("[Sub Scribe-Dispatch] during-cycle follow-up failed: {Msg}", ex.Message);
             }
         }, _cts.Token);
     }
@@ -596,13 +596,13 @@ public sealed class SubdlEventDispatcher : IDisposable
                 {
                     _logger.LogWarning(
                         // F-M204: a running cycle is never widened; the overlap is answered by a reschedule.
-                        "[SubDL-Dispatch] {Reason} rescheduled +{Spacing} min — cycle already running (dir {Running}, requested {Requested}).",
+                        "[Sub Scribe-Dispatch] {Reason} rescheduled +{Spacing} min — cycle already running (dir {Running}, requested {Requested}).",
                         reason, spacing, _pendingDirection, dir);
                 }
                 else
                 {
                     _logger.LogWarning(
-                        "[SubDL-Dispatch] {Reason} NOT rescheduled — reschedule limit reached for today; "
+                        "[Sub Scribe-Dispatch] {Reason} NOT rescheduled — reschedule limit reached for today; "
                         + "the budget resets at the next UTC day roll-over (00:00 UTC) (dir {Running}, requested {Requested}).",
                         reason, _pendingDirection, dir);
                 }
@@ -633,7 +633,7 @@ public sealed class SubdlEventDispatcher : IDisposable
                 // geht die Ausnahme mit Stapel ins Log; die Meldung bleibt daneben stehen.
                 _logger.LogError(
                     ex,
-                    "[SubDL-Dispatch] {Reason} cycle failed: {Msg} (see the exception below for the site)",
+                    "[Sub Scribe-Dispatch] {Reason} cycle failed: {Msg} (see the exception below for the site)",
                     reason,
                     ex.Message);
             }
@@ -672,7 +672,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             // full-coverage path stays reserved for schedule/manual.
             if (ArrivalCycleHasNothingToDo(true, onlyItems?.Count ?? 0))
             {
-                LogUtil.Normal(_logger, "[SubDL-Dispatch] {Trigger}: no arrivals collected — no run.", trigger);
+                LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] {Trigger}: no arrivals collected — no run.", trigger);
                 return;
             }
         }
@@ -751,7 +751,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             _downloadAllowanceHeld = await ReadDownloadAllowanceAsync(configForCycle).ConfigureAwait(false);
             if (_downloadAllowanceHeld != null)
             {
-                LogUtil.Normal(_logger, "[SubDL-Dispatch] download held back this cycle — {Reason} (F-M331).", _downloadAllowanceHeld);
+                LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] download held back this cycle — {Reason} (F-M331).", _downloadAllowanceHeld);
             }
         }
         if (dir != CycleDirection.UploadOnly
@@ -799,7 +799,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         _stopCts = new CancellationTokenSource();
         // F-M402 (operator order 02.11.2026): the cycle line says whether this cycle runs dry — the
         // log has to answer "was that a dry run?" the same way the workers line does.
-        LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle start ({Trigger}, dir {Dir}{Dry}).", trigger, initialDirection, DrySuffix());
+        LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] cycle start ({Trigger}, dir {Dir}{Dry}).", trigger, initialDirection, DrySuffix());
 
         CycleDirection dir;
         lock (_lock)
@@ -838,11 +838,11 @@ public sealed class SubdlEventDispatcher : IDisposable
     {
         if (_userStopActive)
         {
-            LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle end ({Trigger}, dir {Dir}{Dry}) — user stop.", trigger, dir, DrySuffix());
+            LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] cycle end ({Trigger}, dir {Dir}{Dry}) — user stop.", trigger, dir, DrySuffix());
         }
         else
         {
-            LogUtil.Normal(_logger, "[SubDL-Dispatch] cycle end ({Trigger}, dir {Dir}{Dry}).", trigger, dir, DrySuffix());
+            LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] cycle end ({Trigger}, dir {Dir}{Dry}).", trigger, dir, DrySuffix());
         }
     }
 
@@ -910,7 +910,7 @@ public sealed class SubdlEventDispatcher : IDisposable
                         // once per cycle so the reason SubDL delivered nothing is in the log.
                         LogUtil.Normal(
                             _logger,
-                            "[SubDL-Dispatch] SubDL download limit spent ({0}/{1}) — this cycle runs on tvsubtitles.net only (F-M492)",
+                            "[Sub Scribe-Dispatch] SubDL download limit spent ({0}/{1}) — this cycle runs on tvsubtitles.net only (F-M492)",
                             api.Quota.DownloadsUsed,
                             api.Quota.DownloadsLimit);
                         return null;
@@ -943,7 +943,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         catch (Exception ex)
         {
             // Unreadable is not spent — see the summary above.
-            LogUtil.Detail(config.LogMode, _logger, "[SubDL-Dispatch] quota probe failed ({Msg}) — proceeding as before.", ex.Message);
+            LogUtil.Detail(config.LogMode, _logger, "[Sub Scribe-Dispatch] quota probe failed ({Msg}) — proceeding as before.", ex.Message);
             return null;
         }
         finally
@@ -985,7 +985,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             return false;
         }
 
-        LogUtil.Normal(_logger, "[SubDL-Seed] library scan running — seed deferred {Min} min ({Reason}, dir {Dir}).", minutes, reason, dir);
+        LogUtil.Normal(_logger, "[Sub Scribe-Seed] library scan running — seed deferred {Min} min ({Reason}, dir {Dir}).", minutes, reason, dir);
         // GREY: the seed did not scan and did not fail — it waited for a scan it cannot see into.
         var scanDetail = string.Format(System.Globalization.CultureInfo.InvariantCulture, "library scan running — retry in {0} min", minutes);
         RecordSeeder(Registry.WorkerRunRegistry.Outcome.Deferred, scanDetail);
@@ -1008,7 +1008,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             // Nothing armed means an EARLIER attempt is already pending — that one wins, so the
             // deferral is not lost. Only a missing coordinator (shutdown) leaves nothing behind,
             // and then there is nothing left to defer.
-            LogUtil.Detail(_logger, "[SubDL-Seed] scan defer: an earlier fire is already pending ({Dir}) — nothing to arm (F-M475).", dir);
+            LogUtil.Detail(_logger, "[Sub Scribe-Seed] scan defer: an earlier fire is already pending ({Dir}) — nothing to arm (F-M475).", dir);
         }
 
         // The reason belongs to the moment: the status line pairs the pending fire with this text,
@@ -1043,7 +1043,7 @@ public sealed class SubdlEventDispatcher : IDisposable
                 // F-M365: no direction outcome, so no row — nothing ran, and a status row would
                 // have to invent a time for work that did not happen.
                 _downHeldByAllowance = true;
-                LogUtil.Normal(_logger, "[SubDL-Dispatch] download held back — {Reason}. Queued items stay due (F-M331); no worker row (F-M365).", _downloadAllowanceHeld);
+                LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] download held back — {Reason}. Queued items stay due (F-M331); no worker row (F-M365).", _downloadAllowanceHeld);
             }
 
             return true; // toggle off (or no allowance) = direction permanently "done" for this cycle
@@ -1062,7 +1062,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         // F-M233: an arrival cycle runs ONLY when its own arrivals produced new work.
         if (ShouldSkipRunForArrivalScope(scopedOnly, fresh.Count))
         {
-            LogUtil.PerItem(config.LogMode, _logger, "[SubDL-Dispatch] no arrivals queued for {Dir} — no run.", upload ? "upload" : "download");
+            LogUtil.PerItem(config.LogMode, _logger, "[Sub Scribe-Dispatch] no arrivals queued for {Dir} — no run.", upload ? "upload" : "download");
             return true; // nothing new this round — direction ends
         }
 
@@ -1113,11 +1113,11 @@ public sealed class SubdlEventDispatcher : IDisposable
 
         if (!hasPending)
         {
-            LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger, "[SubDL-Dispatch] no during-cycle arrivals — skip follow-up reseed.");
+            LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger, "[Sub Scribe-Dispatch] no during-cycle arrivals — skip follow-up reseed.");
             return;
         }
 
-        LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger, "[SubDL-Dispatch] during-cycle arrivals pending — one follow-up reseed.");
+        LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger, "[Sub Scribe-Dispatch] during-cycle arrivals pending — one follow-up reseed.");
 
         if (followUpDown && config.AnyDownloadEnabled)
         {
@@ -1135,7 +1135,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
         }
 
-        LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger, "[SubDL-Dispatch] follow-up cycle done.");
+        LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger, "[Sub Scribe-Dispatch] follow-up cycle done.");
     }
 
 
@@ -1385,7 +1385,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             if (_runActive)
             {
-                _logger.LogWarning("[SubDL-Dispatch] {Dir} skipped — spacing.", upload ? "Upload" : "Download");
+                _logger.LogWarning("[Sub Scribe-Dispatch] {Dir} skipped — spacing.", upload ? "Upload" : "Download");
                 return false;
             }
 
@@ -1452,7 +1452,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
             catch (OperationCanceledException) when (_userStopActive)
             {
-                LogUtil.Normal(_logger, "[SubDL] Upload run aborted — user stop (F-M131).");
+                LogUtil.Normal(_logger, "[Sub Scribe] Upload run aborted — user stop (F-M131).");
                 _upQuotaStopped = true;
                 return (null, null);
             }
@@ -1484,7 +1484,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
             catch (OperationCanceledException) when (_userStopActive)
             {
-                LogUtil.Normal(_logger, "[SubDL-D] Download run aborted — user stop (F-M131).");
+                LogUtil.Normal(_logger, "[Sub Scribe-D] Download run aborted — user stop (F-M131).");
                 _downQuotaStopped = true;
                 return (null, null);
             }
@@ -1503,7 +1503,7 @@ public sealed class SubdlEventDispatcher : IDisposable
     {
         var fireAt = DateTime.UtcNow.AddMinutes(Math.Max(1, config.JobSpacingMinutes));
         ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload, fireAt);
-        _logger.LogWarning("[SubDL] {Dir} skipped by global run lock — self re-fire at {FireLocal} local (F-M146).", upload ? "Upload" : "Download", fireAt.ToLocalTime());
+        _logger.LogWarning("[Sub Scribe] {Dir} skipped by global run lock — self re-fire at {FireLocal} local (F-M146).", upload ? "Upload" : "Download", fireAt.ToLocalTime());
     }
 
     /// <summary>
@@ -1669,7 +1669,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SubDL] failed to update the status counters.");
+            _logger.LogError(ex, "[Sub Scribe] failed to update the status counters.");
         }
     }
 
@@ -1735,12 +1735,12 @@ public sealed class SubdlEventDispatcher : IDisposable
         if (dryRun)
         {
             LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,
-                "[SubDL-Dispatch] DRY-RUN — {Count} item(s) left Queued in the {Queue} queue (F-M22: a dry run removes no work).",
+                "[Sub Scribe-Dispatch] DRY-RUN — {Count} item(s) left Queued in the {Queue} queue (F-M22: a dry run removes no work).",
                 queue.Count(x => x.State == QueueItem.ItemState.Queued), upload ? "upload" : "download");
         }
         else if (removed > 0)
         {
-            LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[SubDL-Dispatch] {Count} finished items removed from {Queue} queue.", removed, upload ? "upload" : "download");
+            LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[Sub Scribe-Dispatch] {Count} finished items removed from {Queue} queue.", removed, upload ? "upload" : "download");
         }
 
         SaveQueues();
@@ -1829,7 +1829,7 @@ public sealed class SubdlEventDispatcher : IDisposable
                 qi.State = QueueItem.ItemState.Purged;
                 _purgedIds.Add(qi.ItemId);
                 _purgedDirty = true;
-                _logger.LogWarning("[SubDL-Dispatch] Retry limit ({Max}) — purged: {Name}", MaxRetries, qi.Name);
+                _logger.LogWarning("[Sub Scribe-Dispatch] Retry limit ({Max}) — purged: {Name}", MaxRetries, qi.Name);
             }
         }
         else if (state == QueueItem.ItemState.Done)
@@ -2025,7 +2025,7 @@ public sealed class SubdlEventDispatcher : IDisposable
 
         // The wait between the two rows is the point of the exercise: the alignment runs DURING the
         // download, so its row is open for exactly as long as the download works on it.
-        LogUtil.Detail(config.LogMode, _logger, "[SubDL] auto-sync row opened with the download run.");
+        LogUtil.Detail(config.LogMode, _logger, "[Sub Scribe] auto-sync row opened with the download run.");
     }
 
     /// <summary>
@@ -2122,7 +2122,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         // but does not take the row over; the numbers stay until the cycle ends.
         if (outcome == Registry.WorkerRunRegistry.Outcome.Skipped && _seedLegsScanned > 0)
         {
-            LogUtil.Normal(_logger, "[SubDL-Seed] leg skipped after a scan this cycle — seeder row keeps the scan's result ({Detail}).", detail);
+            LogUtil.Normal(_logger, "[Sub Scribe-Seed] leg skipped after a scan this cycle — seeder row keeps the scan's result ({Detail}).", detail);
             return;
         }
 
@@ -2167,7 +2167,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL-Dispatch] download ran nothing this cycle ({Why}) — no worker row (F-M366).",
+                "[Sub Scribe-Dispatch] download ran nothing this cycle ({Why}) — no worker row (F-M366).",
                 config.AnyDownloadEnabled ? "run never began" : "switched off");
         }
 
@@ -2175,7 +2175,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL-Dispatch] upload ran nothing this cycle ({Why}) — no worker row (F-M366).",
+                "[Sub Scribe-Dispatch] upload ran nothing this cycle ({Why}) — no worker row (F-M366).",
                 config.AnyUploadEnabled ? "run never began" : "switched off");
         }
     }
@@ -2237,7 +2237,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         // log either.
         if (LibraryScope.Create(_libraryManager, Plugin.Instance?.Configuration?.SelectedLibraries, _logger).IsEmpty)
         {
-            LogUtil.Normal(_logger, "[SubDL-Seed] No libraries selected — seeder not started ({Reason}).", reason);
+            LogUtil.Normal(_logger, "[Sub Scribe-Seed] No libraries selected — seeder not started ({Reason}).", reason);
             _lastSeedNewIdsUp.Clear();
             _lastSeedNewIdsDown.Clear();
             _lastSeedNewItems = 0;
@@ -2273,7 +2273,7 @@ public sealed class SubdlEventDispatcher : IDisposable
                 SetDirectionOutcome(upload: false, Registry.WorkerRunRegistry.Outcome.Deferred, "run lock busy — rescheduled");
             }
             RecordSeeder(Registry.WorkerRunRegistry.Outcome.Deferred, "run lock busy — rescheduled");
-            LogUtil.Normal(_logger, "[SubDL-Seed] Deferred by {Spacing} min — global run lock busy.", spacingSeed);
+            LogUtil.Normal(_logger, "[Sub Scribe-Seed] Deferred by {Spacing} min — global run lock busy.", spacingSeed);
             return false;
         }
 
@@ -2315,7 +2315,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             forcedScan = drainDuringCycle || onlyItemIds != null;
             if (forcedScan)
             {
-                LogUtil.Normal(_logger, "[SubDL-Seed] during-cycle arrival pending — forcing scan ({Reason}, dir {Dir}).", reason, dir);
+                LogUtil.Normal(_logger, "[Sub Scribe-Seed] during-cycle arrival pending — forcing scan ({Reason}, dir {Dir}).", reason, dir);
             }
 
             // (15.09.2026): rounds 2..n run a cheap JF-DB pre-check
@@ -2333,13 +2333,13 @@ public sealed class SubdlEventDispatcher : IDisposable
                     _lastSeedNewIdsUp.Clear();
                     _lastSeedNewIdsDown.Clear();
                     _lastSeedNewItems = 0;
-                    LogUtil.Detail(_logger, "[SubDL-Seed] pre-check: no changes since {Stamp:HH:mm:ss} — skipped ({Reason}).", lastStamp.ToLocalTime(), reason);
+                    LogUtil.Detail(_logger, "[Sub Scribe-Seed] pre-check: no changes since {Stamp:HH:mm:ss} — skipped ({Reason}).", lastStamp.ToLocalTime(), reason);
                     // GREY, not green: the seeder did not scan — it looked, found no change and had
                     // nothing to do. Reporting "ok" here would read as a full scan.
                     RecordSeeder(Registry.WorkerRunRegistry.Outcome.Skipped, "no changes — scan skipped");
                     return true;
                 }
-                LogUtil.Detail(_logger, "[SubDL-Seed] pre-check: changed {Newest:HH:mm:ss} — full scan ({Reason}).", newest.ToLocalTime(), reason);
+                LogUtil.Detail(_logger, "[Sub Scribe-Seed] pre-check: changed {Newest:HH:mm:ss} — full scan ({Reason}).", newest.ToLocalTime(), reason);
             }
 
             // F-M448 (operator order 05.11.2026): "defer 15 min (aus gui) wenn der seeder auf einen
@@ -2353,7 +2353,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             }
 
             DateTime scanStartedUtc = DateTime.UtcNow;
-            LogUtil.Detail(_logger, "[SubDL-Seed] start ({Reason}, dir {Dir}).", reason, dir);
+            LogUtil.Detail(_logger, "[Sub Scribe-Seed] start ({Reason}, dir {Dir}).", reason, dir);
             _lastSeedNewIdsUp.Clear();
             _lastSeedNewIdsDown.Clear();
             // The seeder is the longest part of a cycle and had NO row of its own, so the GUI showed
@@ -2418,11 +2418,11 @@ public sealed class SubdlEventDispatcher : IDisposable
                 if (drainDuringCycle)
                 {
                     _pendingDuringCycleIds = null;
-                    LogUtil.Normal(_logger, "[SubDL-Seed] during-cycle arrival consumed — forced scan done ({Reason}, dir {Dir}).", reason, dir);
+                    LogUtil.Normal(_logger, "[Sub Scribe-Seed] during-cycle arrival consumed — forced scan done ({Reason}, dir {Dir}).", reason, dir);
                 }
             }
             // No candidate/queue counts in the log.
-            LogUtil.Detail(_logger, "[SubDL-Seed] done ({Reason}, dir {Dir}).", reason, dir);
+            LogUtil.Detail(_logger, "[Sub Scribe-Seed] done ({Reason}, dir {Dir}).", reason, dir);
             return true;
         }
         finally
@@ -2449,7 +2449,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             // re-extract loop — the pipeline verdict was permanent).
             if (_purgedIds.Contains(c.ItemId))
             {
-                LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[SubDL-Seed] skip purged item: {Name}", c.Name);
+                LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[Sub Scribe-Seed] skip purged item: {Name}", c.Name);
                 continue;
             }
             if (!known.Contains(c.ItemId))
@@ -2532,7 +2532,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
         catch (Exception ex)
         {
-            LogUtil.Detail(_logger, "[SubDL-Dispatch] seed-scan stamp unreadable ({Msg}) — starting empty.", ex.Message);
+            LogUtil.Detail(_logger, "[Sub Scribe-Dispatch] seed-scan stamp unreadable ({Msg}) — starting empty.", ex.Message);
         }
 
         try
@@ -2565,7 +2565,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL-Dispatch] Queue load failed: {Msg}", ex.Message);
+            _logger.LogWarning("[Sub Scribe-Dispatch] Queue load failed: {Msg}", ex.Message);
         }
     }
 
@@ -2598,7 +2598,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
         catch (Exception ex)
         {
-            LogUtil.Detail(_logger, "[SubDL-Dispatch] seed-scan stamp save failed: {Msg}", ex.Message);
+            LogUtil.Detail(_logger, "[Sub Scribe-Dispatch] seed-scan stamp save failed: {Msg}", ex.Message);
         }
     }
 
@@ -2625,7 +2625,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL-Dispatch] Queue save failed: {Msg}", ex.Message);
+            _logger.LogWarning("[Sub Scribe-Dispatch] Queue save failed: {Msg}", ex.Message);
         }
     }
 
@@ -2642,7 +2642,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
 
         LoadQueues();
-        LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[SubDL-Dispatch] Queues reloaded (reset): {Up} up / {Down} down.", _uploadQueue.Count, _downloadQueue.Count);
+        LogUtil.PerItem(Plugin.Instance?.Configuration.LogMode ?? LogLevelMode.Normal, _logger,"[Sub Scribe-Dispatch] Queues reloaded (reset): {Up} up / {Down} down.", _uploadQueue.Count, _downloadQueue.Count);
     }
 
     /// <summary>
@@ -2657,14 +2657,14 @@ public sealed class SubdlEventDispatcher : IDisposable
         {
             if (!_cycleActive)
             {
-                LogUtil.Normal(_logger, "[SubDL-Dispatch] {Reason}: no cycle active — nothing to stop.", reason);
+                LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] {Reason}: no cycle active — nothing to stop.", reason);
                 return;
             }
             _userStopActive = true;
         }
         SetDirectionOutcome(upload: true, Registry.WorkerRunRegistry.Outcome.Cancelled, "user stop");
         SetDirectionOutcome(upload: false, Registry.WorkerRunRegistry.Outcome.Cancelled, "user stop");
-        LogUtil.Normal(_logger, "[SubDL-Dispatch] {Reason}: user stop requested — aborting current run(s).", reason);
+        LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] {Reason}: user stop requested — aborting current run(s).", reason);
         try { _stopCts.Cancel(); } catch (ObjectDisposedException)
         {
             // _stopCts already disposed during shutdown — the caller only needs the cancellation signal once.

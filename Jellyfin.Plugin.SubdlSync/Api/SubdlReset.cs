@@ -68,7 +68,7 @@ public class SubdlReset : ControllerBase
                 // Checkpoint). The old single-file engine had no such side file, so this is a step
                 // the format change introduced.
                 try { db.Checkpoint(); }
-                catch (Exception ex) { _logger.LogWarning(ex, "[SubDL] checkpoint before the reset backup failed; the backup may miss recent writes."); }
+                catch (Exception ex) { _logger.LogWarning(ex, "[Sub Scribe] checkpoint before the reset backup failed; the backup may miss recent writes."); }
 
                 db.Dispose();
 
@@ -92,7 +92,7 @@ public class SubdlReset : ControllerBase
                     if (!string.Equals(old, backupPath, StringComparison.OrdinalIgnoreCase))
                     {
                         try { System.IO.File.Delete(old); }
-                        catch (Exception ex) { _logger.LogWarning(ex, "[SubDL] Could not delete old backup {Old}.", old); }
+                        catch (Exception ex) { _logger.LogWarning(ex, "[Sub Scribe] Could not delete old backup {Old}.", old); }
                     }
                 }
 
@@ -121,7 +121,7 @@ public class SubdlReset : ControllerBase
                 Plugin.Instance.ResetStatusStats();
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] Reset \"all\": status counters zeroed with the database, {Count} cached archive(s) purged.",
+                    "[Sub Scribe] Reset \"all\": status counters zeroed with the database, {Count} cached archive(s) purged.",
                     purgedArchives);
             }
             else if (scope.Equals("upload", StringComparison.OrdinalIgnoreCase))
@@ -149,7 +149,7 @@ public class SubdlReset : ControllerBase
                     db.Media.Update(touched);
                 }
 
-                LogUtil.Normal(_logger, "[SubDL] Reset \"upload\": {Count} file-complete marker(s) cleared.", touched.Count);
+                LogUtil.Normal(_logger, "[Sub Scribe] Reset \"upload\": {Count} file-complete marker(s) cleared.", touched.Count);
             }
             else if (scope.Equals("download", StringComparison.OrdinalIgnoreCase))
             {
@@ -175,7 +175,7 @@ public class SubdlReset : ControllerBase
                 // burned candidates, the QA counters and the search stamps — and drops the sweep
                 // over `SubtitlesDownloadedAt`, because the item is re-asked from its evidence on
                 // the very next run. Nothing needs clearing to make it due again.
-                LogUtil.Normal(_logger, "[SubDL] Reset \"download\": downloaded sidecars, burned candidates and search stamps cleared. No completion mark exists (F-M283).");
+                LogUtil.Normal(_logger, "[Sub Scribe] Reset \"download\": downloaded sidecars, burned candidates and search stamps cleared. No completion mark exists (F-M283).");
             }
             else
             {
@@ -183,12 +183,12 @@ public class SubdlReset : ControllerBase
             }
 
             ScheduledTasks.SubdlEventDispatcher.Instance?.ReloadQueues();
-            _logger.LogWarning("[SubDL] Registry reset ({Scope}) completed; backup {Backup}.", scope, backupPath);
+            _logger.LogWarning("[Sub Scribe] Registry reset ({Scope}) completed; backup {Backup}.", scope, backupPath);
             return Ok(new { ok = true, scope, backup = Path.GetFileName(backupPath) });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SubDL] Registry reset ({Scope}) failed.", scope);
+            _logger.LogError(ex, "[Sub Scribe] Registry reset ({Scope}) failed.", scope);
             return Ok(new { ok = false, error = "reset-error" });
         }
     }
@@ -259,7 +259,7 @@ public class SubdlReset : ControllerBase
                 // what makes the pre-restore copy a complete snapshot rather than the main file
                 // alone.
                 try { db.Checkpoint(); }
-                catch (Exception ex) { _logger.LogWarning(ex, "[SubDL] checkpoint before the pre-restore copy failed."); }
+                catch (Exception ex) { _logger.LogWarning(ex, "[Sub Scribe] checkpoint before the pre-restore copy failed."); }
             }
 
             db.Dispose();
@@ -281,12 +281,12 @@ public class SubdlReset : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SubDL] Restore failed.");
+            _logger.LogError(ex, "[Sub Scribe] Restore failed.");
             return Ok(new { ok = false, error = "restore-error" });
         }
 
         ScheduledTasks.SubdlEventDispatcher.Instance?.ReloadQueues();
-        _logger.LogWarning("[SubDL] Restored database from backup {Stamp}.", stamp);
+        _logger.LogWarning("[Sub Scribe] Restored database from backup {Stamp}.", stamp);
         return Ok(new { ok = true, stamp });
     }
 

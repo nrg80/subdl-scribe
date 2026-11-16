@@ -70,7 +70,7 @@ public class SubdlStopController : ControllerBase
                 return BadRequest(new { error = "direction must be upload, download or all" });
             }
 
-            LogUtil.Normal(_logger, "[SubDL] Stop marker created for {Direction}.", direction);
+            LogUtil.Normal(_logger, "[Sub Scribe] Stop marker created for {Direction}.", direction);
 
             // F-M351 (order 18.10.2026): a stop also cancels the pending fire of the direction it names.
             // RequestUserStop only aborts the cycle that is RUNNING; without this the armed fire brought
@@ -95,7 +95,7 @@ public class SubdlStopController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SubDL] failed to create stop marker");
+            _logger.LogError(ex, "[Sub Scribe] failed to create stop marker");
             return StatusCode(500, new { error = ex.Message });
         }
     }
@@ -133,7 +133,7 @@ public class SubdlStopController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SubDL] failed to clear stop marker");
+            _logger.LogError(ex, "[Sub Scribe] failed to clear stop marker");
             return StatusCode(500, new { error = ex.Message });
         }
     }

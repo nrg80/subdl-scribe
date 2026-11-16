@@ -101,7 +101,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
         var plugin = Plugin.Instance;
         if (plugin == null)
         {
-            _logger.LogError("[SubDL-Refresh] Plugin instance missing — cannot run.");
+            _logger.LogError("[Sub Scribe-Refresh] Plugin instance missing — cannot run.");
             return;
         }
 
@@ -114,7 +114,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL-Refresh] DataFolderPath unavailable ({Message}) — refresh skipped.", ex.Message);
+            _logger.LogWarning("[Sub Scribe-Refresh] DataFolderPath unavailable ({Message}) — refresh skipped.", ex.Message);
             return;
         }
 
@@ -127,7 +127,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
         {
             var spacing = JobSpacingMinutes();
             SubdlSchedulerCoordinator.Instance?.ScheduleRefreshFire(DateTime.UtcNow.AddMinutes(spacing));
-            _logger.LogWarning("[SubDL-Refresh] Deferred — global run lock busy; re-fire scheduled in {Spacing} min.", spacing);
+            _logger.LogWarning("[Sub Scribe-Refresh] Deferred — global run lock busy; re-fire scheduled in {Spacing} min.", spacing);
             // Lock busy is a DEFERRAL, not a switch-off: the work is pending and will retry, so the
             // light is yellow. Grey stays for "disabled" and "never run".
             plugin.WorkerRuns.Finish("SubdlSyncDatabaseRefreshTask", Name, Registry.WorkerRunRegistry.Outcome.Deferred, "lock busy — rescheduled");
@@ -157,13 +157,13 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("[SubDL-Refresh] Library not queryable ({Message}) — refresh skipped.", ex.Message);
+                _logger.LogWarning("[Sub Scribe-Refresh] Library not queryable ({Message}) — refresh skipped.", ex.Message);
                 return;
             }
 
             if (allItems.Count == 0)
             {
-                _logger.LogWarning("[SubDL-Refresh] Library query returned 0 items — refresh skipped.");
+                _logger.LogWarning("[Sub Scribe-Refresh] Library query returned 0 items — refresh skipped.");
                 return;
             }
 
@@ -210,11 +210,11 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                         .Select(m => m.Path!));
                     if (mediaRoots.Count == 0)
                     {
-                        LogUtil.Normal(_logger, "[SubDL-Refresh] no stored media paths to verify — gone-file side skipped.");
+                        LogUtil.Normal(_logger, "[Sub Scribe-Refresh] no stored media paths to verify — gone-file side skipped.");
                     }
                     else if (!Registry.SubtitlePresence.RootsUsable(mediaRoots))
                     {
-                        _logger.LogWarning("[SubDL-Refresh] {N} media root(s) not readable — gone-file side skipped (nothing removed).", mediaRoots.Count);
+                        _logger.LogWarning("[Sub Scribe-Refresh] {N} media root(s) not readable — gone-file side skipped (nothing removed).", mediaRoots.Count);
                     }
                     else
                     {
@@ -256,11 +256,11 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                     var roots = registry.GetSidecarRoots();
                     if (roots.Count == 0)
                     {
-                        LogUtil.Normal(_logger, "[SubDL-Refresh] no stored subtitle paths to verify — file side skipped.");
+                        LogUtil.Normal(_logger, "[Sub Scribe-Refresh] no stored subtitle paths to verify — file side skipped.");
                     }
                     else if (!Registry.SubtitlePresence.RootsUsable(roots))
                     {
-                        _logger.LogWarning("[SubDL-Refresh] {N} subtitle root(s) not readable — file side skipped (no verdict forgotten).", roots.Count);
+                        _logger.LogWarning("[Sub Scribe-Refresh] {N} subtitle root(s) not readable — file side skipped (no verdict forgotten).", roots.Count);
                     }
                     else
                     {
@@ -307,7 +307,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                     switch (outcome)
                     {
                         case Data.CompactOutcome.Compacted:
-                            LogUtil.Normal(_logger, "[SubDL-Refresh] data file compacted: {Before} -> {After} bytes.", before, after);
+                            LogUtil.Normal(_logger, "[Sub Scribe-Refresh] data file compacted: {Before} -> {After} bytes.", before, after);
                             break;
 
                         case Data.CompactOutcome.Repaired:
@@ -318,7 +318,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                             // werden wir nicht mehr lösen, dafür gibt es den rebuild") — but the worker
                             // row must say WHICH path ran, otherwise a fallback reads as a clean run.
                             compactNote = $"compaction failed — rebuilt from own rows ({before} -> {after} bytes)";
-                            LogUtil.Normal(_logger, "[SubDL-Refresh] rebuild failed — the data file was rebuilt from its own rows: {Before} -> {After} bytes (previous state kept as one .bak).", before, after);
+                            LogUtil.Normal(_logger, "[Sub Scribe-Refresh] rebuild failed — the data file was rebuilt from its own rows: {Before} -> {After} bytes (previous state kept as one .bak).", before, after);
                             break;
 
                         case Data.CompactOutcome.Recovered:
@@ -327,13 +327,13 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                             // silent would hide a broken rebuild.
                             compactNote = $"compaction failed — file not shrunk ({before} bytes stay)";
                             _logger.LogWarning(
-                                "[SubDL-Refresh] compaction failed — the data file was NOT shrunk ({Before} bytes stay). The database was reopened and is usable; the next refresh retries.",
+                                "[Sub Scribe-Refresh] compaction failed — the data file was NOT shrunk ({Before} bytes stay). The database was reopened and is usable; the next refresh retries.",
                                 before);
                             break;
 
                         default:
                             compactNote = "compaction failed — data file could not be reopened";
-                            _logger.LogWarning("[SubDL-Refresh] compaction failed and the data file could not be reopened — restart Jellyfin to recover the database.");
+                            _logger.LogWarning("[Sub Scribe-Refresh] compaction failed and the data file could not be reopened — restart Jellyfin to recover the database.");
                             break;
                     }
                 }
@@ -342,13 +342,13 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
                     // Already caught inside Compact(); belt-and-braces so a compaction problem cannot
                     // mark the refresh as failed after its real work succeeded.
                     compactNote = $"compaction skipped ({ex.Message})";
-                    _logger.LogWarning("[SubDL-Refresh] compaction skipped ({Msg}).", ex.Message);
+                    _logger.LogWarning("[Sub Scribe-Refresh] compaction skipped ({Msg}).", ex.Message);
                 }
             }
             catch (Exception ex)
             {
                 refreshException = ex;
-                _logger.LogError(ex, "[SubDL-Refresh] Refresh aborted mid-run — already-flushed parts stay, remainder untouched.");
+                _logger.LogError(ex, "[Sub Scribe-Refresh] Refresh aborted mid-run — already-flushed parts stay, remainder untouched.");
             }
 
             int removedTotal = removedSearch + removedQa + removedOshash + removedPacks
@@ -360,7 +360,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL-Refresh] Removed dead state: {Search} search / {Qa} qa-fail / {Oshash} oshash / {PrunedSubs} subtitle / {PrunedMedia} media (dead items) / {GonePathSubs} subtitle + {GonePathMedia} media (file gone from disk). Forgot {Sidecars} vanished subtitle verdict(s); {OpenFiles} item(s) with an open required file; forgot {Embeds} stale embedded row(s).",
+                    "[Sub Scribe-Refresh] Removed dead state: {Search} search / {Qa} qa-fail / {Oshash} oshash / {PrunedSubs} subtitle / {PrunedMedia} media (dead items) / {GonePathSubs} subtitle + {GonePathMedia} media (file gone from disk). Forgot {Sidecars} vanished subtitle verdict(s); {OpenFiles} item(s) with an open required file; forgot {Embeds} stale embedded row(s).",
                     removedSearch, removedQa, removedOshash,
                     removedPrunedSubtitles, removedPrunedMedia,
                     removedGonePathSubtitles, removedGonePathMedia,
@@ -368,11 +368,11 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             }
             else if (refreshException != null)
             {
-                _logger.LogWarning("[SubDL-Refresh] No counters updated because an exception occurred earlier; see error log for details.");
+                _logger.LogWarning("[Sub Scribe-Refresh] No counters updated because an exception occurred earlier; see error log for details.");
             }
             else
             {
-                LogUtil.Normal(_logger, "[SubDL-Refresh] Database matches reality — nothing changed.");
+                LogUtil.Normal(_logger, "[Sub Scribe-Refresh] Database matches reality — nothing changed.");
             }
 
             // The refresh's own numbers are locals and vanish with the method — persist the outcome so
@@ -507,7 +507,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
         if (changed.Count > 0)
         {
             db.Sidecars.Update(changed);
-            LogUtil.Normal(_logger, "[SubDL-Refresh] forced flag stated on {Count} sidecar row(s) written before the field existed ({ForcedCount} forced, {PlainCount} not).", changed.Count, updated, changed.Count - updated);
+            LogUtil.Normal(_logger, "[Sub Scribe-Refresh] forced flag stated on {Count} sidecar row(s) written before the field existed ({ForcedCount} forced, {PlainCount} not).", changed.Count, updated, changed.Count - updated);
         }
 
         return updated;
@@ -563,7 +563,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             }
             catch (Exception ex)
             {
-                LogUtil.Detail(_logger, "[SubDL-Refresh] embedded check skipped for {Id}: {Msg}", media.Id, ex.Message);
+                LogUtil.Detail(_logger, "[Sub Scribe-Refresh] embedded check skipped for {Id}: {Msg}", media.Id, ex.Message);
                 continue; // unreadable streams — no verdict this run
             }
 
@@ -683,7 +683,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
             open++;
             LogUtil.Normal(
                 _logger,
-                "[SubDL-Refresh] {File} has {Count} open required file(s): {Pairs}",
+                "[Sub Scribe-Refresh] {File} has {Count} open required file(s): {Pairs}",
                 Path.GetFileName(media.Path!),
                 actionable.Count,
                 string.Join(", ", actionable.Select(p => p.ToString())));
@@ -742,7 +742,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
         {
             // unknown ≠ missing: the registry half already answered, and a probe that fails adds
             // nothing rather than turning a language into "absent".
-            LogUtil.Detail(_logger, "[SubDL-Refresh] embedded coverage probe skipped for {Id}: {Msg}", media.Id, ex.Message);
+            LogUtil.Detail(_logger, "[Sub Scribe-Refresh] embedded coverage probe skipped for {Id}: {Msg}", media.Id, ex.Message);
         }
 
         return found;

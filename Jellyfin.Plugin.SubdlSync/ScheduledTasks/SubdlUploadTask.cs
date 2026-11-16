@@ -78,7 +78,7 @@ public class SubdlUploadTask : IScheduledTask
         var plugin = Plugin.Instance;
         if (plugin == null)
         {
-            _logger.LogError("[SubDL] Plugin instance missing — cannot run.");
+            _logger.LogError("[Sub Scribe] Plugin instance missing — cannot run.");
             return;
         }
 
@@ -91,7 +91,7 @@ public class SubdlUploadTask : IScheduledTask
         if (!config.AnyUploadEnabled)
         {
             // F-M366: no row for a direction that ran nothing — the lamps have no "disabled".
-            LogUtil.Normal(_logger, "[SubDL] Upload inactive (UploadEnabled=false) — run skipped, no worker row (F-M366).");
+            LogUtil.Normal(_logger, "[Sub Scribe] Upload inactive (UploadEnabled=false) — run skipped, no worker row (F-M366).");
             return;
         }
 
@@ -111,7 +111,7 @@ public class SubdlUploadTask : IScheduledTask
         if (!started)
         {
             // F-M366: a cycle is already running, but THIS task ran nothing — log only, no row.
-            LogUtil.Normal(_logger, "[SubDL] cycle already active — this task ran nothing, no worker row (F-M366).");
+            LogUtil.Normal(_logger, "[Sub Scribe] cycle already active — this task ran nothing, no worker row (F-M366).");
             return; // cycle already active — nothing to wait for
         }
         try
@@ -140,7 +140,7 @@ public class SubdlUploadTask : IScheduledTask
             // SEEDER's sentence on the Upload line. Log only.
             LogUtil.Normal(
                 _logger,
-                "[SubDL] cycle finished without an upload run (cycleFinished {Done}, seeder {SO}/{SD}, direction {DO}/{DD}) — no worker row (F-M366).",
+                "[Sub Scribe] cycle finished without an upload run (cycleFinished {Done}, seeder {SO}/{SD}, direction {DO}/{DD}) — no worker row (F-M366).",
                 cycleFinished,
                 seedOutcome ?? "-",
                 seedDetail ?? "-",
@@ -159,12 +159,12 @@ public class SubdlUploadTask : IScheduledTask
             }
             else if (dispatcher.DirectionRowWritten(upload: true))
             {
-                LogUtil.Normal(_logger, "[SubDL] jellyfin restart — the run's own row stands.");
+                LogUtil.Normal(_logger, "[Sub Scribe] jellyfin restart — the run's own row stands.");
             }
             else
             {
                 // F-M366: restart before any upload run — no row for work that did not happen.
-                LogUtil.Normal(_logger, "[SubDL] jellyfin restart before any upload run — no worker row (F-M366).");
+                LogUtil.Normal(_logger, "[Sub Scribe] jellyfin restart before any upload run — no worker row (F-M366).");
             }
         }
     }

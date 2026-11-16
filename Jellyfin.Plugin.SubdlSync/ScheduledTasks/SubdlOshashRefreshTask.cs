@@ -79,7 +79,7 @@ public class SubdlOshashRefreshTask : IScheduledTask
         var plugin = Plugin.Instance;
         if (plugin == null)
         {
-            _logger.LogError("[SubDL-OshashRefresh] Plugin instance missing — cannot run.");
+            _logger.LogError("[Sub Scribe-OshashRefresh] Plugin instance missing — cannot run.");
             return;
         }
 
@@ -88,7 +88,7 @@ public class SubdlOshashRefreshTask : IScheduledTask
         var cache = plugin.SharedOshashCache;
         if (cache == null)
         {
-            _logger.LogError("[SubDL-OshashRefresh] Cache unavailable — cannot run.");
+            _logger.LogError("[Sub Scribe-OshashRefresh] Cache unavailable — cannot run.");
             return;
         }
 
@@ -113,7 +113,7 @@ public class SubdlOshashRefreshTask : IScheduledTask
         {
             var spacing = JobSpacingMinutes();
             SubdlSchedulerCoordinator.Instance?.ScheduleOshashFire(DateTime.UtcNow.AddMinutes(spacing));
-            _logger.LogWarning("[SubDL-OshashRefresh] Deferred — global run lock busy; re-fire scheduled in {Spacing} min.", spacing);
+            _logger.LogWarning("[Sub Scribe-OshashRefresh] Deferred — global run lock busy; re-fire scheduled in {Spacing} min.", spacing);
             // Lock busy is a DEFERRAL, not a switch-off: the work is pending and will retry, so the
             // light is yellow. Grey stays for "disabled" and "never run".
             plugin.WorkerRuns.Finish("SubdlSyncOshashRefreshTask", Name, Registry.WorkerRunRegistry.Outcome.Deferred, "lock busy — rescheduled");
@@ -147,7 +147,7 @@ public class SubdlOshashRefreshTask : IScheduledTask
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning("[SubDL-OshashRefresh] Stat failed for {Path} ({Message}) — entry untouched.", path, ex.Message);
+                    _logger.LogWarning("[Sub Scribe-OshashRefresh] Stat failed for {Path} ({Message}) — entry untouched.", path, ex.Message);
                     missing++;
                     continue;
                 }
@@ -176,7 +176,7 @@ public class SubdlOshashRefreshTask : IScheduledTask
             }
 
             cache.Flush();
-            LogUtil.Normal(_logger, "[SubDL-OshashRefresh] done: {Total} entries — {Changed} changed, {Missing} missing, {Skipped} skipped.", snapshot.Count, fingerprintChanged, missing, skipped);
+            LogUtil.Normal(_logger, "[Sub Scribe-OshashRefresh] done: {Total} entries — {Changed} changed, {Missing} missing, {Skipped} skipped.", snapshot.Count, fingerprintChanged, missing, skipped);
             plugin.WorkerRuns.Finish("SubdlSyncOshashRefreshTask", Name, Registry.WorkerRunRegistry.Outcome.Ok,
                 $"{snapshot.Count} entries — {fingerprintChanged} changed, {missing} missing, {skipped} skipped");
             progress?.Report(100);
@@ -186,13 +186,13 @@ public class SubdlOshashRefreshTask : IScheduledTask
             // F-M293 (user decision 03.10.2026): no stop button exists for this worker, so this is a
             // restart or a task cancel, not a user stop. See the postprocessing twin; the row reports
             // the work that landed rather than an action nobody took.
-            LogUtil.Normal(_logger, "[SubDL-OshashRefresh] Cancelled — restart, not a user stop.");
+            LogUtil.Normal(_logger, "[Sub Scribe-OshashRefresh] Cancelled — restart, not a user stop.");
             plugin.WorkerRuns.Finish("SubdlSyncOshashRefreshTask", Name, Registry.WorkerRunRegistry.Outcome.Ok, "restart");
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SubDL-OshashRefresh] Aborted mid-run — flushed entries stay, remainder untouched.");
+            _logger.LogError(ex, "[Sub Scribe-OshashRefresh] Aborted mid-run — flushed entries stay, remainder untouched.");
             plugin.WorkerRuns.Finish("SubdlSyncOshashRefreshTask", Name, Registry.WorkerRunRegistry.Outcome.Failed, ex.Message);
         }
         finally

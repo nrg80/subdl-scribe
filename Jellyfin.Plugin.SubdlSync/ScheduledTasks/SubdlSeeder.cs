@@ -219,7 +219,7 @@ public sealed class SubdlSeeder
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL-Seed] Change pre-check failed ({Msg}) — forcing full scan.", ex.Message);
+            _logger.LogWarning("[Sub Scribe-Seed] Change pre-check failed ({Msg}) — forcing full scan.", ex.Message);
             return DateTime.MaxValue; // safe direction: pre-check never skips
         }
 
@@ -251,7 +251,7 @@ public sealed class SubdlSeeder
             SubdlEventDispatcher.CycleDirection.DownloadOnly => "download",
             _ => "both"
         };
-        LogUtil.Normal(_logger, "[SubDL-Seed] scan started ({Direction})", dirLabel);
+        LogUtil.Normal(_logger, "[Sub Scribe-Seed] scan started ({Direction})", dirLabel);
 
 
         // F-M4a: requirement marker added for traceability.
@@ -267,7 +267,7 @@ public sealed class SubdlSeeder
         // ever work (measured: 913 queued for a 26-item test library).
         if (scope.IsEmpty)
         {
-            LogUtil.Normal(_logger, "[SubDL-Seed] No libraries selected — nothing to queue.");
+            LogUtil.Normal(_logger, "[Sub Scribe-Seed] No libraries selected — nothing to queue.");
             return snapshot;
         }
 
@@ -445,11 +445,11 @@ public sealed class SubdlSeeder
                         snapshot.Upload.Count,
                         PerSourceSummary(snapshot))
                     : string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} download queued", snapshot.Download.Count);
-            LogUtil.Normal(_logger, "[SubDL-Seed] scan finished ({Direction}) — {Covered}", dirLabel, covered);
+            LogUtil.Normal(_logger, "[Sub Scribe-Seed] scan finished ({Direction}) — {Covered}", dirLabel, covered);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL-Seed] Library scan failed: {Msg}", ex.Message);
+            _logger.LogWarning("[Sub Scribe-Seed] Library scan failed: {Msg}", ex.Message);
         }
         finally
         {
@@ -596,7 +596,7 @@ public sealed class SubdlSeeder
         }
         catch (Exception ex)
         {
-            LogUtil.Detail(_logger, ex, "[SubDL-Seeder] TMDb fallback failed for {Title}", title);
+            LogUtil.Detail(_logger, ex, "[Sub Scribe-Seeder] TMDb fallback failed for {Title}", title);
         }
 
         return (null, null, season, episode, isSeries);
@@ -1232,7 +1232,7 @@ public sealed class SubdlSeeder
                 // and the identity pair. This line therefore carries only what the seeder adds and the
                 // gate cannot know: how many registry rows the rename actually carried across.
                 LogUtil.PerItem(config.LogMode, _logger,
-                    "[SubDL-Seed] {File} — identity moved, {Moved} registry row(s) carried across",
+                    "[Sub Scribe-Seed] {File} — identity moved, {Moved} registry row(s) carried across",
                     System.IO.Path.GetFileName(mediaPath), moved);
             }
 
@@ -1268,7 +1268,7 @@ public sealed class SubdlSeeder
         catch (Exception ex)
         {
             // Never a precondition: the item is queued by the rules that applied before this gate.
-            LogUtil.Detail(_logger, "[SubDL-Seed] language allocation skipped for {File}: {Msg}",
+            LogUtil.Detail(_logger, "[Sub Scribe-Seed] language allocation skipped for {File}: {Msg}",
                 System.IO.Path.GetFileName(mediaPath), ex.Message);
             return 0;
         }
@@ -1341,7 +1341,7 @@ public sealed class SubdlSeeder
         {
             // An observation is never a precondition — a file whose streams cannot be read is still
             // scanned and queued like any other.
-            LogUtil.Detail(_logger, "[SubDL-Seed] embedded facts not recorded for {File}: {Msg}",
+            LogUtil.Detail(_logger, "[Sub Scribe-Seed] embedded facts not recorded for {File}: {Msg}",
                 System.IO.Path.GetFileName(mediaPath), ex.Message);
             return 0;
         }
@@ -1416,7 +1416,7 @@ public sealed class SubdlSeeder
             if (DryRunActive())
             {
                 LogUtil.Normal(_logger,
-                    "[SubDL-Seed] {Old} names no language — detected {Lang}; dry run: NOT renamed (F-M312).",
+                    "[Sub Scribe-Seed] {Old} names no language — detected {Lang}; dry run: NOT renamed (F-M312).",
                     System.IO.Path.GetFileName(loosePath), lang);
                 return loosePath;
             }
@@ -1433,7 +1433,7 @@ public sealed class SubdlSeeder
             File.Move(loosePath, target);
 
             LogUtil.Normal(_logger,
-                "[SubDL-Seed] {Old} names no language — detected {Lang}, renamed to {New}",
+                "[Sub Scribe-Seed] {Old} names no language — detected {Lang}, renamed to {New}",
                 System.IO.Path.GetFileName(loosePath), lang, targetName);
             renamed = true;
             return target;
@@ -1442,7 +1442,7 @@ public sealed class SubdlSeeder
         {
             // A refused rename is not a failed observation: the file stays where it is and is
             // recorded under its current name, which is true.
-            LogUtil.Detail(_logger, "[SubDL-Seed] {File} could not be renamed: {Msg}",
+            LogUtil.Detail(_logger, "[Sub Scribe-Seed] {File} could not be renamed: {Msg}",
                 System.IO.Path.GetFileName(loosePath), ex.Message);
             return loosePath;
         }
@@ -1539,7 +1539,7 @@ public sealed class SubdlSeeder
                     if (normalized.Length < 2048)
                     {
                         LogUtil.Detail(_logger,
-                            "[SubDL-Seed] {File} names no language and is too small to detect one ({Bytes} bytes) — left as is",
+                            "[Sub Scribe-Seed] {File} names no language and is too small to detect one ({Bytes} bytes) — left as is",
                             System.IO.Path.GetFileName(loosePath), normalized.Length);
                         continue;
                     }
@@ -1548,7 +1548,7 @@ public sealed class SubdlSeeder
                     if (detected == null)
                     {
                         LogUtil.Detail(_logger,
-                            "[SubDL-Seed] {File} names no language and none could be detected ({Bytes} bytes) — left as is",
+                            "[Sub Scribe-Seed] {File} names no language and none could be detected ({Bytes} bytes) — left as is",
                             System.IO.Path.GetFileName(loosePath), normalized.Length);
                         continue;
                     }
@@ -1599,7 +1599,7 @@ public sealed class SubdlSeeder
         }
         catch (Exception ex)
         {
-            LogUtil.Detail(_logger, "[SubDL-Seed] sidecar facts not recorded for {File}: {Msg}",
+            LogUtil.Detail(_logger, "[Sub Scribe-Seed] sidecar facts not recorded for {File}: {Msg}",
                 System.IO.Path.GetFileName(mediaPath), ex.Message);
             return new SidecarObservation(0, 0);
         }

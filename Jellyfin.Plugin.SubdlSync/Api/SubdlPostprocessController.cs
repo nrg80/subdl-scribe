@@ -50,7 +50,7 @@ public class SubdlPostprocessController : ControllerBase
         // F-M291 (operator order 08.10.2026): a MANUAL trigger always runs, with upload switched on
         // or off. The upload binding belongs to the automatic run only, and it is enforced where that
         // run is armed (the scheduler's anchor).
-        LogUtil.Normal(_logger, "[SubDL] Manual upload postprocessing triggered via API.");
+        LogUtil.Normal(_logger, "[Sub Scribe] Manual upload postprocessing triggered via API.");
         await UploadPipeline.RunUploadPostprocessingAsync().ConfigureAwait(false);
         return Ok(new { status = "postprocessing completed" });
     }

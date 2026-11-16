@@ -166,7 +166,7 @@ public sealed class QaFailTracker
         if (recorded > 0)
         {
             PruneOldest(itemId, language);
-            LogUtil.Detail(_logger, "[SubDL-DB] burned candidates {Item}|{Lang} +{Count}", itemId, language, recorded);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] burned candidates {Item}|{Lang} +{Count}", itemId, language, recorded);
         }
     }
 
@@ -183,7 +183,7 @@ public sealed class QaFailTracker
         // match a row stored in another case, which the previous engine's exact EQ never did.
         var upper = language.ToUpperInvariant();
         _db.RejectedCandidates.DeleteMany(c => c.ItemId == itemId && c.Language == upper);
-        LogUtil.Detail(_logger, "[SubDL-DB] burned candidates reset {Item}|{Lang}", itemId, language);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] burned candidates reset {Item}|{Lang}", itemId, language);
     }
 
     /// <summary>Removes the burned candidates of items that no longer exist.</summary>
@@ -205,7 +205,7 @@ public sealed class QaFailTracker
 
         if (removed > 0)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] burned candidate prune {Removed}", removed);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] burned candidate prune {Removed}", removed);
         }
 
         return removed;

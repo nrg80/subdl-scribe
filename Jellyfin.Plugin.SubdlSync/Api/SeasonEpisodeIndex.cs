@@ -113,7 +113,7 @@ public static class SeasonEpisodeIndex
             using var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
-                logger?.LogDebug("[SubDL] season index: IMDb answered {Status} for {Imdb} S{Season}.", (int)resp.StatusCode, imdbId, season);
+                logger?.LogDebug("[Sub Scribe] season index: IMDb answered {Status} for {Imdb} S{Season}.", (int)resp.StatusCode, imdbId, season);
                 return null;
             }
 
@@ -148,7 +148,7 @@ public static class SeasonEpisodeIndex
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            logger?.LogDebug(ex, "[SubDL] season index: IMDb lookup failed for {Imdb} S{Season}.", imdbId, season);
+            logger?.LogDebug(ex, "[Sub Scribe] season index: IMDb lookup failed for {Imdb} S{Season}.", imdbId, season);
             return null;
         }
     }
@@ -167,7 +167,7 @@ public static class SeasonEpisodeIndex
             using var resp = await http.GetAsync(url, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
-                logger?.LogDebug("[SubDL] season index: TMDB answered {Status} for {Tmdb} S{Season}.", (int)resp.StatusCode, tmdbId, season);
+                logger?.LogDebug("[Sub Scribe] season index: TMDB answered {Status} for {Tmdb} S{Season}.", (int)resp.StatusCode, tmdbId, season);
                 return null;
             }
 
@@ -190,7 +190,7 @@ public static class SeasonEpisodeIndex
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            logger?.LogDebug(ex, "[SubDL] season index: TMDB lookup failed for {Tmdb} S{Season}.", tmdbId, season);
+            logger?.LogDebug(ex, "[Sub Scribe] season index: TMDB lookup failed for {Tmdb} S{Season}.", tmdbId, season);
             return null;
         }
     }

@@ -105,7 +105,7 @@ public sealed class DownloadSearchTracker
         media.LastSearchUtc = null;
         media.LastSearchLanguages = null;
         _db.Media.Update(media);
-        LogUtil.Detail(_logger, "[SubDL-DB] search stamp cleared for {Item} — rework due now", itemId);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] search stamp cleared for {Item} — rework due now", itemId);
         return true;
     }
 
@@ -117,14 +117,14 @@ public sealed class DownloadSearchTracker
         var media = FindByItemId(itemId);
         if (media == null)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] search stamp skipped — no media record for item {Item}", itemId);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] search stamp skipped — no media record for item {Item}", itemId);
             return;
         }
 
         media.LastSearchUtc = DateTime.UtcNow;
         media.LastSearchLanguages = Normalize(currentLanguages);
         _db.Media.Update(media);
-        LogUtil.Detail(_logger, "[SubDL-DB] search stamp {Item} langs={Langs}", itemId, media.LastSearchLanguages);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] search stamp {Item} langs={Langs}", itemId, media.LastSearchLanguages);
     }
 
     /// <summary>Records a search with no language list.</summary>
@@ -149,7 +149,7 @@ public sealed class DownloadSearchTracker
             _db.Media.Update(media);
         }
 
-        LogUtil.Detail(_logger, "[SubDL-DB] search stamps cleared: {Count}", stamped.Count);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] search stamps cleared: {Count}", stamped.Count);
         return stamped.Count;
     }
 
@@ -171,7 +171,7 @@ public sealed class DownloadSearchTracker
 
         if (dead.Count > 0)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] search stamp prune {Removed}", dead.Count);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] search stamp prune {Removed}", dead.Count);
         }
 
         return dead.Count;

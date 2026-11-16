@@ -128,7 +128,7 @@ public sealed class WorkerRunRegistry
         catch (Exception ex)
         {
             // Recording a run must never break the run itself.
-            _logger?.LogWarning("[SubDL] recording the start of worker {Key} failed: {Msg}", key, ex.Message);
+            _logger?.LogWarning("[Sub Scribe] recording the start of worker {Key} failed: {Msg}", key, ex.Message);
         }
     }
 
@@ -176,7 +176,7 @@ public sealed class WorkerRunRegistry
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning("[SubDL] recording the result of worker {Key} failed: {Msg}", key, ex.Message);
+            _logger?.LogWarning("[Sub Scribe] recording the result of worker {Key} failed: {Msg}", key, ex.Message);
         }
     }
 
@@ -214,7 +214,7 @@ public sealed class WorkerRunRegistry
         catch (Exception ex)
         {
             // Recording a cancellation must never break the stop itself.
-            _logger?.LogWarning("[SubDL] recording the cancellation of worker {Key} failed: {Msg}", key, ex.Message);
+            _logger?.LogWarning("[Sub Scribe] recording the cancellation of worker {Key} failed: {Msg}", key, ex.Message);
         }
     }
 
@@ -394,7 +394,7 @@ public sealed class WorkerRunRegistry
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning("[SubDL] reading worker rows failed for {Key}: {Msg}", key, ex.Message);
+                _logger?.LogWarning("[Sub Scribe] reading worker rows failed for {Key}: {Msg}", key, ex.Message);
                 row = new WorkerRunEntity { Id = key, Name = name, Started = null, Outcome = Outcome.Never };
             }
 
@@ -422,7 +422,7 @@ public sealed class WorkerRunRegistry
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning("[SubDL] reading worker {Key} failed: {Msg}", key, ex.Message);
+            _logger?.LogWarning("[Sub Scribe] reading worker {Key} failed: {Msg}", key, ex.Message);
             return null;
         }
     }

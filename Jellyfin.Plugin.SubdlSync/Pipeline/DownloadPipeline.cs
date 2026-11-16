@@ -335,7 +335,7 @@ public sealed class DownloadPipeline : IDisposable
         catch (Exception)
         {
             _readonlyDirs.Add(dir);
-            LogUtil.Normal(_logger, "[SubDL-D] Directory not writable — skipped this run: {Dir}", dir);
+            LogUtil.Normal(_logger, "[Sub Scribe-D] Directory not writable — skipped this run: {Dir}", dir);
             return false;
         }
     }
@@ -524,7 +524,7 @@ public sealed class DownloadPipeline : IDisposable
             summary.SkippedByLock = true;
             var spacing = Math.Clamp(_config.JobSpacingMinutes, 5, 120);
             ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: false, DateTime.UtcNow.AddMinutes(spacing));
-            LogUtil.Normal(_logger, "[SubDL-D] Download deferred by {Spacing} min — global run lock busy.", spacing);
+            LogUtil.Normal(_logger, "[Sub Scribe-D] Download deferred by {Spacing} min — global run lock busy.", spacing);
             return summary;
         }
         try
@@ -535,14 +535,14 @@ public sealed class DownloadPipeline : IDisposable
         var missingDown = _config.MissingCredentials();
         if (missingDown.Count > 0)
         {
-            LogUtil.Normal(_logger, "[SubDL-D] download: NOT started — missing credential(s): {Missing}. Set them in the plugin configuration.", string.Join(", ", missingDown));
+            LogUtil.Normal(_logger, "[Sub Scribe-D] download: NOT started — missing credential(s): {Missing}. Set them in the plugin configuration.", string.Join(", ", missingDown));
             return summary;
         }
 
         var targets = TargetLanguages;
         if (targets.Count == 0)
         {
-            LogUtil.Normal(_logger, "[SubDL-D] No target languages configured — nothing to do.");
+            LogUtil.Normal(_logger, "[Sub Scribe-D] No target languages configured — nothing to do.");
             return summary;
         }
 
@@ -554,7 +554,7 @@ public sealed class DownloadPipeline : IDisposable
         // CollectItems — which reads like "it scanned the whole server".
         if (_config.SelectedLibraries.Count == 0)
         {
-            LogUtil.Normal(_logger, "[SubDL-D] No libraries selected — nothing to do.");
+            LogUtil.Normal(_logger, "[Sub Scribe-D] No libraries selected — nothing to do.");
             return summary;
         }
 
@@ -569,7 +569,7 @@ public sealed class DownloadPipeline : IDisposable
         // file records the language list it was searched under, and IsDue compares that against the
         // current configuration. A file whose stored list differs is simply due again — no global
         // reset, no second bookkeeping row to keep in step.
-        LogUtil.Detail(_config.LogMode, _logger, "[SubDL-D] target languages: {Languages}", string.Join(",", targets));
+        LogUtil.Detail(_config.LogMode, _logger, "[Sub Scribe-D] target languages: {Languages}", string.Join(",", targets));
 
         // NF-4: in-run watchdog — fixed 6-min grace, independent of the pacing knob.
         // ApiActivity fires after EVERY completed API round-trip (search pages,
@@ -590,7 +590,7 @@ public sealed class DownloadPipeline : IDisposable
         // run, naming whether it is on. The per-file detail (which audio track, which subtitle it
         // was fitted against) stays at Verbose. F-M24d's "one summary line per direction" is not
         // violated: this is the run START line it already prescribes, carrying one more fact.
-        LogUtil.Normal(_logger, "[SubDL] download: started{Dry}, refetch={Refetch}, audio fit={Fit}",
+        LogUtil.Normal(_logger, "[Sub Scribe] download: started{Dry}, refetch={Refetch}, audio fit={Fit}",
             _config.DownloadDryRun ? ", dry" : string.Empty, _config.RefetchInterval, _config.QaDownloadAutoSync ? "on" : "off");
 
         PipelineStopSignal.ClearStaleMarkers(Plugin.Instance?.DataFolderPath ?? string.Empty);
@@ -620,7 +620,7 @@ public sealed class DownloadPipeline : IDisposable
         _savedSubtitlePaths.Clear();
 
         // F-M54: wrong TMDB key reported ONCE at Normal/Error level.
-        _tmdb.AuthError += msg => _logger.LogError("[SubDL-D] {Msg}", msg);
+        _tmdb.AuthError += msg => _logger.LogError("[Sub Scribe-D] {Msg}", msg);
 
         // NO run-level metadata grace here — the arrival watcher grants ONE
         // 1-min grace per event before this (first) pipeline starts. Scheduled
@@ -682,7 +682,7 @@ public sealed class DownloadPipeline : IDisposable
             // User stop marker — check BEFORE doing any work.
             if (PipelineStopSignal.IsStopped(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: false, runCt))
             {
-                LogUtil.Normal(_logger, "[SubDL-D] download: user stop requested — finishing current run.");
+                LogUtil.Normal(_logger, "[Sub Scribe-D] download: user stop requested — finishing current run.");
                 summary.StopRequested = true;
                 break;
             }
@@ -705,7 +705,7 @@ public sealed class DownloadPipeline : IDisposable
                 // F-M48 fix (08.09.2026): quota/rate-limit exhausted mid-run — stop
                 // instead of marking the remaining items "searched" with garbage results.
                 _logger.LogWarning(
-                    "[SubDL-D] Run aborted after {Done}/{Total} queued items — quota/rate limit hit; remaining items stay due for the next run.",
+                    "[Sub Scribe-D] Run aborted after {Done}/{Total} queued items — quota/rate limit hit; remaining items stay due for the next run.",
                     idx, queuedTotal);
                 break;
             }
@@ -757,7 +757,7 @@ public sealed class DownloadPipeline : IDisposable
 
                     var numbers = pulled.Select(p => ((Episode)p).IndexNumber ?? 0).OrderBy(n => n).ToList();
                     LogUtil.Normal(_logger,
-                        "[SubDL-D] pack \"{Release}\" covers {Season}x{First}-{Last} — {N} episode(s) of that release moved right after {File}",
+                        "[Sub Scribe-D] pack \"{Release}\" covers {Season}x{First}-{Last} — {N} episode(s) of that release moved right after {File}",
                         cover.ReleaseName, cover.Season, numbers[0], numbers[^1], pulled.Count, Path.GetFileName(item.Path));
                 }
             }
@@ -788,7 +788,7 @@ public sealed class DownloadPipeline : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL-D] report flush failed: {Msg}", ex.Message);
+            _logger.LogWarning("[Sub Scribe-D] report flush failed: {Msg}", ex.Message);
         }
 
         // F-M535: die Spuren werden erst NACH dem Melde-Versand abgehaengt. Vorher stand das
@@ -816,7 +816,7 @@ public sealed class DownloadPipeline : IDisposable
         summary.RejectedCandidates += _tvstFormatRejected; // F-M533
 
         LogUtil.Normal(_logger, 
-            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {NotSignificant} downloaded without significance | {Rejected} rejected after fetch | {NoCand} no candidates | {Ai} AI uploader filtered | {Reported} reported ({ReportsDeferred} deferred) | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
+            "[Sub Scribe-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {NotSignificant} downloaded without significance | {Rejected} rejected after fetch | {NoCand} no candidates | {Ai} AI uploader filtered | {Reported} reported ({ReportsDeferred} deferred) | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
             summary.Downloaded,
             summary.FittedToAudio,
             (summary.FitMsTotal / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
@@ -844,7 +844,7 @@ public sealed class DownloadPipeline : IDisposable
             // F-M23: same as the upload pipeline — a run cancelled from outside (user stop,
             // restart, task cancel) must not discard the downloads it already completed.
             // Return the partial summary; the caller still sees the cancel via StopRequested.
-            LogUtil.Normal(_logger, "[SubDL-D] download: cancelled — keeping the partial result. {N} saved", summary.Downloaded);
+            LogUtil.Normal(_logger, "[Sub Scribe-D] download: cancelled — keeping the partial result. {N} saved", summary.Downloaded);
             summary.StopRequested = true;
             return summary;
         }
@@ -895,18 +895,18 @@ public sealed class DownloadPipeline : IDisposable
     /// </summary>
     private void OnTmdbTrace(string msg)
     {
-        LogUtil.Trace(_config.LogMode, _logger, "{Tag} {Msg}", "[SubDL-D]", msg);
+        LogUtil.Trace(_config.LogMode, _logger, "{Tag} {Msg}", "[Sub Scribe-D]", msg);
     }
 
     /// <summary>F-M24a: per-API-call trace → LogLevel.Debug (never Normal/Verbose).</summary>
-    private void OnApiTrace(string msg) => LogUtil.Detail(_config.LogMode, _logger, "[SubDL-D] {Msg}", msg);
+    private void OnApiTrace(string msg) => LogUtil.Detail(_config.LogMode, _logger, "[Sub Scribe-D] {Msg}", msg);
 
     /// <summary>
     /// F-M232: routes the API client's LogInfo channel into the run log (429 raw bodies,
     /// rate headers, login diagnostics). Detail keeps them at the plugin's own Debug mode.
     /// </summary>
     /// <param name="msg">Message from the API client.</param>
-    private void OnApiLog(string msg) => LogUtil.Detail(_config.LogMode, _logger, "[SubDL-D] {Msg}", msg);
+    private void OnApiLog(string msg) => LogUtil.Detail(_config.LogMode, _logger, "[Sub Scribe-D] {Msg}", msg);
 
     private async Task<bool> WaitOutDailyLimitAsync(CancellationToken ct)
     {
@@ -915,7 +915,7 @@ public sealed class DownloadPipeline : IDisposable
             // F-M152 (rev.10, user decision 17.09.2026): tick OFF = clean stop,
             // NO recovery fire. Items stay due; the next trigger is an arrival
             // event or the weekly anchor. (Old F-M65 fire-on-tick-off removed.)
-            LogUtil.Normal(_logger, "[SubDL-D] Daily limit reached - continue-after-limit is OFF: clean stop, no recovery fire (F-M152).");
+            LogUtil.Normal(_logger, "[Sub Scribe-D] Daily limit reached - continue-after-limit is OFF: clean stop, no recovery fire (F-M152).");
             return false;
         }
 
@@ -925,7 +925,7 @@ public sealed class DownloadPipeline : IDisposable
         // the upload direction for hours behind the download wait (verified live).
         if (IsArrivalRun)
         {
-            _logger.LogWarning("[SubDL-D] Daily limit (429), arrival run — not waiting, next scheduled run.");
+            _logger.LogWarning("[Sub Scribe-D] Daily limit (429), arrival run — not waiting, next scheduled run.");
             return false;
         }
 
@@ -940,7 +940,7 @@ public sealed class DownloadPipeline : IDisposable
             _api.ResetRateLimitFlag();
             ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
             _logger.LogWarning(
-                "[SubDL-D] 429 is a short-term rate limit — download allowance still has {Remaining}/{Limit} left; "
+                "[Sub Scribe-D] 429 is a short-term rate limit — download allowance still has {Remaining}/{Limit} left; "
                 + "run respaced by JobSpacingMinutes, item stays due (F-M238).",
                 _api.Quota?.DownloadsRemaining, _api.Quota?.DownloadsLimit);
             return false;
@@ -956,13 +956,13 @@ public sealed class DownloadPipeline : IDisposable
             var nowUtc = DateTime.UtcNow;
             reset = nowUtc.Date.AddDays(1); // next 00:00 UTC
             LogUtil.Normal(_logger, 
-                "[SubDL-D] Daily limit reached without a server-reported reset time — waiting until {ResetUtc} UTC (next UTC midnight) instead.",
+                "[Sub Scribe-D] Daily limit reached without a server-reported reset time — waiting until {ResetUtc} UTC (next UTC midnight) instead.",
                 reset.Value.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
         }
 
         if (_dailyLimitWaits >= 1)
         {
-            _logger.LogWarning("[SubDL-D] Daily limit again — run stopped, next scheduled run.");
+            _logger.LogWarning("[Sub Scribe-D] Daily limit again — run stopped, next scheduled run.");
             return false;
         }
 
@@ -983,7 +983,7 @@ public sealed class DownloadPipeline : IDisposable
         string resetLocal = TimeZoneInfo.ConvertTimeFromUtc(effectiveReset, TimeZoneInfo.Local).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         var fireInfo = ScheduledTasks.SubdlSchedulerCoordinator.Instance?.GetPendingFireUtc(upload: false);
         _logger.LogWarning(
-            "[SubDL-D] Daily download limit (429) — run stopped. Reset ~{ResetLocal} local; recovery fire ~{Next} local (F-M152, F-M182).",
+            "[Sub Scribe-D] Daily download limit (429) — run stopped. Reset ~{ResetLocal} local; recovery fire ~{Next} local (F-M152, F-M182).",
             resetLocal,
             fireInfo.HasValue
                 ? TimeZoneInfo.ConvertTimeFromUtc(fireInfo.Value, TimeZoneInfo.Local).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)
@@ -1052,7 +1052,7 @@ public sealed class DownloadPipeline : IDisposable
         {
             summary.Failed++;
             ReportOutcome(item, ItemOutcome.RealFailure);
-            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] FILE MISSING {File} — vanished between seeding and this run", Path.GetFileName(mediaPath));
+            LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] FILE MISSING {File} — vanished between seeding and this run", Path.GetFileName(mediaPath));
 
             return;
         }
@@ -1128,7 +1128,7 @@ public sealed class DownloadPipeline : IDisposable
             // to be overtaken. That is why `MarksInvalidated` is gone: there was never a mark to
             // invalidate, only a deletion whose evidence disappeared.
             summary.SkippedItems++;
-            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] SKIP {File} — nothing open", Path.GetFileName(mediaPath));
+            LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] SKIP {File} — nothing open", Path.GetFileName(mediaPath));
             return;
         }
 
@@ -1139,7 +1139,7 @@ public sealed class DownloadPipeline : IDisposable
             LogUtil.PerItem(
                 _config.LogMode,
                 _logger,
-                "[SubDL-D] open but QA-exhausted {File}: {Pairs}",
+                "[Sub Scribe-D] open but QA-exhausted {File}: {Pairs}",
                 Path.GetFileName(mediaPath),
                 string.Join(",", openPairs.Select(r => r.ToString())));
         }
@@ -1163,7 +1163,7 @@ public sealed class DownloadPipeline : IDisposable
         {
             summary.SkippedItems++;
             summary.SkippedByFilter++;
-            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] SKIP {File} — {Reason}", Path.GetFileName(mediaPath), skip);
+            LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe-D] SKIP {File} — {Reason}", Path.GetFileName(mediaPath), skip);
 
             return;
         }
@@ -1197,7 +1197,7 @@ public sealed class DownloadPipeline : IDisposable
             {
                 isSeries = true;
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL-D] type from file name (not Jellyfin) {File} — series, name states S{Season}E{Episode}",
+                    "[Sub Scribe-D] type from file name (not Jellyfin) {File} — series, name states S{Season}E{Episode}",
                     Path.GetFileName(mediaPath), parsedName.Season ?? 0, parsedName.Episode ?? 0);
             }
 
@@ -1247,7 +1247,7 @@ public sealed class DownloadPipeline : IDisposable
                 tmdbId = verified.Tmdb;
                 isSeries = verified.IsSeries;
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL-D] TMDb id test corrected the item — tmdb={Tmdb} imdb={Imdb} {File}.",
+                    "[Sub Scribe-D] TMDb id test corrected the item — tmdb={Tmdb} imdb={Imdb} {File}.",
                     tmdbId ?? "-", imdbId ?? "-", Path.GetFileName(mediaPath));
             }
 
@@ -1308,7 +1308,7 @@ public sealed class DownloadPipeline : IDisposable
                     {
                         isSeries = multi.IsSeries; // TMDB decides, not Jellyfin
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] TMDb resolved this as a {Kind} — type corrected {File}.",
+                            "[Sub Scribe-D] TMDb resolved this as a {Kind} — type corrected {File}.",
                             multi.IsSeries ? "series" : "movie", Path.GetFileName(mediaPath));
                     }
                 }
@@ -1339,7 +1339,7 @@ public sealed class DownloadPipeline : IDisposable
                     if (fnTitle != null && !fnTitleUsable)
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] filename fallback refused {File} — the name yields no usable title (\"{Title}\")",
+                            "[Sub Scribe-D] filename fallback refused {File} — the name yields no usable title (\"{Title}\")",
                             fnFileName, fnTitle);
                     }
 
@@ -1375,7 +1375,7 @@ public sealed class DownloadPipeline : IDisposable
                                 && !string.Equals(fnIdTmdb, fnNameTmdb, StringComparison.Ordinal))
                             {
                                 LogUtil.PerItem(_config.LogMode, _logger,
-                                    "[SubDL-D] filename fallback refused {File} — the name states imdb={Imdb} (tmdb={IdTmdb}) while its own title \"{Title}\" ({Year}) resolves to tmdb={NameTmdb}; neither is trusted",
+                                    "[Sub Scribe-D] filename fallback refused {File} — the name states imdb={Imdb} (tmdb={IdTmdb}) while its own title \"{Title}\" ({Year}) resolves to tmdb={NameTmdb}; neither is trusted",
                                     fnFileName, fnImdbFromName, fnIdTmdb, fnTitle,
                                     fnYear.HasValue ? fnYear.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "no year",
                                     fnNameTmdb);
@@ -1391,7 +1391,7 @@ public sealed class DownloadPipeline : IDisposable
                         {
                             isSeries = fnIsSeries; // the filename knows the content type
                             summary.IdResolvedFromFilename++;
-                            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] filename fallback {File} — title \"{Title}\" ({Kind} {Year}) → imdb={Imdb}",
+                            LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe-D] filename fallback {File} — title \"{Title}\" ({Kind} {Year}) → imdb={Imdb}",
                                 Path.GetFileName(mediaPath), fnTitle, fnIsSeries ? "tv" : "movie", fnYear, imdbId);
                         }
                     }
@@ -1410,7 +1410,7 @@ public sealed class DownloadPipeline : IDisposable
                 if (_config.LogMode >= LogLevelMode.Verbose)
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL-D] SKIP {File} — no id resolvable (TMDb ladder failed) — the next run tries again",
+                        "[Sub Scribe-D] SKIP {File} — no id resolvable (TMDb ladder failed) — the next run tries again",
                         Path.GetFileName(mediaPath));
                 }
 
@@ -1435,7 +1435,7 @@ public sealed class DownloadPipeline : IDisposable
         {
             summary.SkippedItems++;
             summary.SkippedNoId++;
-            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] SKIP {File} — no id resolvable (after wait + TMDB)", Path.GetFileName(mediaPath));
+            LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe-D] SKIP {File} — no id resolvable (after wait + TMDB)", Path.GetFileName(mediaPath));
 
             return;
         }
@@ -1478,7 +1478,7 @@ public sealed class DownloadPipeline : IDisposable
             LogUtil.PerItem(
                 _config.LogMode,
                 _logger,
-                "[SubDL-D] {File} — only the variant is open: {Pairs} (regular files present, no re-fetch)",
+                "[Sub Scribe-D] {File} — only the variant is open: {Pairs} (regular files present, no re-fetch)",
                 Path.GetFileName(mediaPath),
                 string.Join(",", openPairsNow.Select(p => p.ToString())));
         }
@@ -1579,7 +1579,7 @@ public sealed class DownloadPipeline : IDisposable
                 transientAttempt++;
                 int waitSec = Math.Max(5, _api.TransientRetrySeconds);
                 _logger.LogWarning(
-                    "[SubDL-D] SubDL transiently overloaded (429 service_busy) at {File} — waiting {Sec}s, retry {Attempt}/{Max}. Not the daily limit; run continues.",
+                    "[Sub Scribe-D] SubDL transiently overloaded (429 service_busy) at {File} — waiting {Sec}s, retry {Attempt}/{Max}. Not the daily limit; run continues.",
                     Path.GetFileName(mediaPath), waitSec, transientAttempt, maxTransientRetries);
                 await Task.Delay(TimeSpan.FromSeconds(waitSec), ct).ConfigureAwait(false);
                 _watchdog?.Heartbeat();
@@ -1597,7 +1597,7 @@ public sealed class DownloadPipeline : IDisposable
                 _stopRun = true;
                 if (_api.AuthBroken)
                 {
-                    _logger.LogError("[SubDL-D] API key rejected (403) — run stopped at {File}, check credentials.",
+                    _logger.LogError("[Sub Scribe-D] API key rejected (403) — run stopped at {File}, check credentials.",
                         Path.GetFileName(mediaPath));
                 }
                 else if (_api.TransientOverload)
@@ -1606,7 +1606,7 @@ public sealed class DownloadPipeline : IDisposable
                     // server overload; the recovery fire is the short overload fire.
                     ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
                     _logger.LogWarning(
-                        "[SubDL-D] SubDL still overloaded (429 service_busy) after {Max} retries — stopping run at {File}; item stays due for the overload fire.",
+                        "[Sub Scribe-D] SubDL still overloaded (429 service_busy) after {Max} retries — stopping run at {File}; item stays due for the overload fire.",
                         maxTransientRetries, Path.GetFileName(mediaPath));
                 }
                 else
@@ -1632,7 +1632,7 @@ public sealed class DownloadPipeline : IDisposable
                         _stopRun = false;
                         ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
                         _logger.LogWarning(
-                            "[SubDL-D] 429 at {File} is a short-term rate limit — search allowance still has {Remaining}/{Limit} left; "
+                            "[Sub Scribe-D] 429 at {File} is a short-term rate limit — search allowance still has {Remaining}/{Limit} left; "
                             + "run respaced by JobSpacingMinutes, item stays due (F-M238).",
                             Path.GetFileName(mediaPath), _api.Quota?.SearchRemaining, _api.Quota?.SearchLimit);
                     }
@@ -1650,7 +1650,7 @@ public sealed class DownloadPipeline : IDisposable
                         var anchor = _api.RateLimitResetUtc ?? NextMidnightUtc();
                         ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFire(upload: false, anchor.ToUniversalTime());
                         _logger.LogWarning(
-                            "[SubDL-D] Search allowance spent ({Reason}) — run stopped at {File}; one recovery fire after the reset at {Reset} local (F-M238).",
+                            "[Sub Scribe-D] Search allowance spent ({Reason}) — run stopped at {File}; one recovery fire after the reset at {Reset} local (F-M238).",
                             searchExhausted ? "counter says spent" : "allowance unreadable, treated as spent",
                             Path.GetFileName(mediaPath),
                             TimeZoneInfo.ConvertTimeFromUtc(anchor, TimeZoneInfo.Local).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
@@ -1661,7 +1661,7 @@ public sealed class DownloadPipeline : IDisposable
                         // did not happen), so the counter and the queue guard apply.
                         summary.QuotaStopped++;
                         _logger.LogWarning(
-                            "[SubDL-D] Search allowance spent — run stopped at {File}; no recovery fire (continue-after-limit is off or arrival run) (F-M238).",
+                            "[Sub Scribe-D] Search allowance spent — run stopped at {File}; no recovery fire (continue-after-limit is off or arrival run) (F-M238).",
                             Path.GetFileName(mediaPath));
                     }
                 }
@@ -1697,7 +1697,7 @@ public sealed class DownloadPipeline : IDisposable
                 if (!_config.IsConfiguredForDownload(MainSearchSource))
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL-D] {File} — SubDL skipped — not configured (required for SubDL only)",
+                        "[Sub Scribe-D] {File} — SubDL skipped — not configured (required for SubDL only)",
                         Path.GetFileName(mediaPath));
                     continue;
                 }
@@ -1788,7 +1788,7 @@ public sealed class DownloadPipeline : IDisposable
             {
                 summary.IdMismatches++;
                 _logger.LogWarning(
-                    "[SubDL-D] ID mismatch {File} — searched imdb={SImdb}/tmdb={STmdb}, SubDL returned imdb={RImdb}/tmdb={RTmdb}; dropping all {N} candidates for this item",
+                    "[Sub Scribe-D] ID mismatch {File} — searched imdb={SImdb}/tmdb={STmdb}, SubDL returned imdb={RImdb}/tmdb={RTmdb}; dropping all {N} candidates for this item",
                     Path.GetFileName(mediaPath), imdbId ?? "—", tmdbId ?? "—", returnedImdb ?? "—", returnedTmdb ?? "—", candidates.Count);
                 summary.NotAvailable += missing.Count;
                 return;
@@ -1799,7 +1799,7 @@ public sealed class DownloadPipeline : IDisposable
             {
                 resolvedImdb = returnedImdb;
                 summary.IdBackfilledFromApi++;
-                LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] ID backfill {File} — imdb={Imdb} from SubDL results[0] (searched by tmdb={Tmdb})",
+                LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe-D] ID backfill {File} — imdb={Imdb} from SubDL results[0] (searched by tmdb={Tmdb})",
                     Path.GetFileName(mediaPath), returnedImdb, tmdbId);
             }
 
@@ -1807,7 +1807,7 @@ public sealed class DownloadPipeline : IDisposable
             {
                 resolvedTmdb = returnedTmdb;
                 summary.IdBackfilledFromApi++;
-                LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] ID backfill {File} — tmdb={Tmdb} from SubDL results[0] (searched by imdb={Imdb})",
+                LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe-D] ID backfill {File} — tmdb={Tmdb} from SubDL results[0] (searched by imdb={Imdb})",
                     Path.GetFileName(mediaPath), returnedTmdb, imdbId);
             }
 
@@ -1834,7 +1834,7 @@ public sealed class DownloadPipeline : IDisposable
             if (droppedAi > 0)
             {
                 summary.AiUploaderFiltered += droppedAi;
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] {File} — {N} candidate(s) from the AI translation account dropped (switch \"Allow AI translated subs (SUBDL AI)\" off)", Path.GetFileName(mediaPath), droppedAi);
+                LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] {File} — {N} candidate(s) from the AI translation account dropped (switch \"Allow AI translated subs (SUBDL AI)\" off)", Path.GetFileName(mediaPath), droppedAi);
             }
         }
 
@@ -1855,7 +1855,7 @@ public sealed class DownloadPipeline : IDisposable
             // F-M504: die Zeile nennt die Quellen, die TATSAECHLICH gefragt wurden. „no candidates on
             // SubDL" behauptete eine Suche, an der tvsubtitles gar nicht beteiligt war — und wenn es
             // gefragt wurde, ist „nur SubDL war leer" die falsche Auskunft.
-            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] {File} — no candidates for [{Langs}] — asked: {Sources}",
+            LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] {File} — no candidates for [{Langs}] — asked: {Sources}",
                 Path.GetFileName(mediaPath),
                 string.Join(",", missing),
                 gefragteQuellen.Count == 0
@@ -1946,7 +1946,7 @@ public sealed class DownloadPipeline : IDisposable
             {
                 summary.NotAvailable++;
                 ReportOutcome(item, ItemOutcome.NotAvailable);
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] {File} [{Lang}] — not available", Path.GetFileName(mediaPath), lang);
+                LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] {File} [{Lang}] — not available", Path.GetFileName(mediaPath), lang);
 
                 closedLangs.Add(lang); // F-M88c: definitively not available = terminal
                 continue;
@@ -1994,7 +1994,7 @@ public sealed class DownloadPipeline : IDisposable
                 if (beforeMemoryFilter > ranked.Count)
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL-D] {File} [{Lang}] — {N} candidate(s) skipped before the walk: QA-rejected in an earlier run ({Ids})",
+                        "[Sub Scribe-D] {File} [{Lang}] — {N} candidate(s) skipped before the walk: QA-rejected in an earlier run ({Ids})",
                         Path.GetFileName(mediaPath), lang, beforeMemoryFilter - ranked.Count,
                         string.Join(",", qaKnownRejected));
 
@@ -2089,7 +2089,7 @@ public sealed class DownloadPipeline : IDisposable
                     // F-M255: the HI pool had no usable entry for this language — previously
                     // indistinguishable from "the pool was empty".
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL-D] HI reject {File} [{Lang}]: no usable candidate in the HI pool ({N} in pool)",
+                        "[Sub Scribe-D] HI reject {File} [{Lang}]: no usable candidate in the HI pool ({N} in pool)",
                         Path.GetFileName(mediaPath), lang, hiCandidates.Count(c => c.Language == lang));
                     return false;
                 }
@@ -2118,7 +2118,7 @@ public sealed class DownloadPipeline : IDisposable
                     if (!SourceAllowed(hi.Provider))
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — candidate from {Source} skipped: that source is switched off",
+                            "[Sub Scribe-D] {File} [{Lang}] — candidate from {Source} skipped: that source is switched off",
                             Path.GetFileName(mediaPath), lang, Api.Endpoints.Provenance.Name(hi.Provider));
                         continue;
                     }
@@ -2155,7 +2155,7 @@ public sealed class DownloadPipeline : IDisposable
                                 && _emptyRetried.Add("hi|" + lang + "|" + hi.Url))
                             {
                                 LogUtil.PerItem(_config.LogMode, _logger,
-                                    "[SubDL-D] {File} [{Lang}] — SDH: empty answer from {Release}, asking once more in 10 s (F-M455)",
+                                    "[Sub Scribe-D] {File} [{Lang}] — SDH: empty answer from {Release}, asking once more in 10 s (F-M455)",
                                     Path.GetFileName(mediaPath), lang, hi.ReleaseName);
                                 await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
                                 _watchdog?.Heartbeat();
@@ -2208,7 +2208,7 @@ public sealed class DownloadPipeline : IDisposable
                                         // pool where the drift lives (all 38 measured HI files drifted).
                                         summary.FittedToAudio++;
                                         LogUtil.PerItem(_config.LogMode, _logger,
-                                            "[SubDL-D] HI auto-sync {Reason} for {File} [{Lang}] ({Release})",
+                                            "[Sub Scribe-D] HI auto-sync {Reason} for {File} [{Lang}] ({Release})",
                                             hiSync.Reason, Path.GetFileName(mediaPath), lang, hi.ReleaseName);
                                     }
                                     else
@@ -2227,7 +2227,7 @@ public sealed class DownloadPipeline : IDisposable
                                         if (_config.LogMode >= LogLevelMode.Verbose)
                                         {
                                             LogUtil.PerItem(_config.LogMode, _logger,
-                                                "[SubDL-D] HI auto-sync not applied for {File} [{Lang}]: {Reason} ({Release})",
+                                                "[Sub Scribe-D] HI auto-sync not applied for {File} [{Lang}]: {Reason} ({Release})",
                                                 Path.GetFileName(mediaPath), lang, hiSync.Reason, hi.ReleaseName);
                                         }
                                     }
@@ -2272,7 +2272,7 @@ public sealed class DownloadPipeline : IDisposable
                                             // subtitle is not written at all.
                                             summary.RejectedCandidates++;
                                             LogUtil.PerItem(_config.LogMode, _logger,
-                                                "[SubDL-D] HI SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 51–99; nothing written ({Release})",
+                                                "[Sub Scribe-D] HI SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 51–99; nothing written ({Release})",
                                                 Path.GetFileName(mediaPath), lang, hi.ReleaseName);
                                         }
                                         else
@@ -2312,7 +2312,7 @@ public sealed class DownloadPipeline : IDisposable
                                             if (hiOriginalPath == null)
                                             {
                                                 LogUtil.PerItem(_config.LogMode, _logger,
-                                                    "[SubDL-D] HI original NOT kept for {File} [{Lang}] — no free slot in the reserved range 51–99",
+                                                    "[Sub Scribe-D] HI original NOT kept for {File} [{Lang}] — no free slot in the reserved range 51–99",
                                                     Path.GetFileName(mediaPath), lang);
                                             }
                                             else
@@ -2342,14 +2342,14 @@ public sealed class DownloadPipeline : IDisposable
                                                     if (_config.LogMode >= LogLevelMode.Verbose)
                                                     {
                                                         LogUtil.PerItem(_config.LogMode, _logger,
-                                                            "[SubDL-D] HI original kept as {Path} — locked against upload (F-M315)",
+                                                            "[Sub Scribe-D] HI original kept as {Path} — locked against upload (F-M315)",
                                                             Path.GetFileName(hiOriginalPath));
                                                     }
                                                 }
                                                 catch (Exception ex)
                                                 {
                                                     _logger.LogWarning(ex,
-                                                        "[SubDL-D] could not keep the unsynchronized HI original for {File}",
+                                                        "[Sub Scribe-D] could not keep the unsynchronized HI original for {File}",
                                                         Path.GetFileName(hiPath));
                                                 }
                                             }
@@ -2374,8 +2374,8 @@ public sealed class DownloadPipeline : IDisposable
                                         if (_config.LogMode >= LogLevelMode.Verbose)
                                         {
                                             LogUtil.PerItem(_config.LogMode, _logger,(asMainTrack
-                                                ? "[SubDL-D] SAVED HI as main track {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"
-                                                : "[SubDL-D] SAVED HI variant {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"),
+                                                ? "[Sub Scribe-D] SAVED HI as main track {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"
+                                                : "[Sub Scribe-D] SAVED HI variant {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"),
                                                 Path.GetFileName(hiPath), lang, hi.ReleaseName,
                                                 string.IsNullOrEmpty(hi.OriginalName) ? "—" : hi.OriginalName,
                                                 string.IsNullOrEmpty(hi.Author) ? "—" : hi.Author,
@@ -2388,7 +2388,7 @@ public sealed class DownloadPipeline : IDisposable
                                         // Safety, not a promise: the dry run never reaches the fetch
                                         // (it breaks before it, F-M22). If that ever changes, this
                                         // guard still stops the HI file from being written.
-                                        LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] DRY-RUN would save HI variant for {File} [{Lang}]", Path.GetFileName(mediaPath), lang);
+                                        LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] DRY-RUN would save HI variant for {File} [{Lang}]", Path.GetFileName(mediaPath), lang);
                                     }
                                 }
                                 else
@@ -2401,7 +2401,7 @@ public sealed class DownloadPipeline : IDisposable
                                     // F-M255: fetched, but the content is already known — a distinct
                                     // outcome that previously looked exactly like "not saved".
                                     LogUtil.PerItem(_config.LogMode, _logger,
-                                        "[SubDL-D] HI reject {File} [{Lang}]: content already known ({Release})",
+                                        "[Sub Scribe-D] HI reject {File} [{Lang}]: content already known ({Release})",
                                         Path.GetFileName(mediaPath), lang, hi.ReleaseName);
                                 }
                             }
@@ -2423,7 +2423,7 @@ public sealed class DownloadPipeline : IDisposable
                                             : $"structure: monotonic={hiStats.Monotonic} min={hiStats.MinCueMs}ms max={hiStats.MaxCueMs}ms")
                                         : "runtime: " + (hiRuntimeReason ?? "no match");
                                 LogUtil.PerItem(_config.LogMode, _logger,
-                                    "[SubDL-D] HI reject {File} [{Lang}]: {Reason} ({Release})",
+                                    "[Sub Scribe-D] HI reject {File} [{Lang}]: {Reason} ({Release})",
                                     Path.GetFileName(mediaPath), lang, hiRejectReason, hi.ReleaseName);
 
                                 // F-M460 (operator order 10.11.2026): the SDH walk measures the SAME
@@ -2500,7 +2500,7 @@ public sealed class DownloadPipeline : IDisposable
                 if (walkLimit > 0 && refusalsThisRun >= walkLimit)
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL-D] {File} [{Lang}] — candidate limit reached: {N} candidate(s) pulled (limit {Limit}); {Kept} file(s) kept, {M} lower-ranked candidate(s) not tried",
+                        "[Sub Scribe-D] {File} [{Lang}] — candidate limit reached: {N} candidate(s) pulled (limit {Limit}); {Kept} file(s) kept, {M} lower-ranked candidate(s) not tried",
                         Path.GetFileName(mediaPath), lang, refusalsThisRun, walkLimit,
                         refusalsThisRun, Math.Max(0, ranked.Count - attempts));
                     break;
@@ -2516,7 +2516,7 @@ public sealed class DownloadPipeline : IDisposable
                     {
                         if (_config.LogMode >= LogLevelMode.Verbose)
                         {
-                            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — FPS reject {Release}: {CandFps} vs {VidFps} (>±{Tol}%)",
+                            LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe-D] {File} [{Lang}] — FPS reject {Release}: {CandFps} vs {VidFps} (>±{Tol}%)",
                                 Path.GetFileName(mediaPath), lang, cand.ReleaseName, cand.Fps, videoFps.Value, _config.DownloadFpsTolerancePercent);
                         }
 
@@ -2541,7 +2541,7 @@ public sealed class DownloadPipeline : IDisposable
                         // soll. Die Herkunft steht als erstes Feld der Klammer, damit die
                         // uebrigen Felder (score, hi) an ihrem Platz bleiben.
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] DRY-RUN {File} [{Lang}] → {Release} ({Source}, score {Score}, hi={Hi})",
+                            "[Sub Scribe-D] DRY-RUN {File} [{Lang}] → {Release} ({Source}, score {Score}, hi={Hi})",
                             Path.GetFileName(mediaPath), lang, cand.ReleaseName,
                             Api.Endpoints.Provenance.Name(cand.Provider),
                             Score(cand, videoBase),
@@ -2565,7 +2565,7 @@ public sealed class DownloadPipeline : IDisposable
                             .ThenByDescending(c => c.DownloadCount)
                             .FirstOrDefault();
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] DRY-RUN HI {File} [{Lang}] → {Result} ({HiCount} in the HI pool)",
+                            "[Sub Scribe-D] DRY-RUN HI {File} [{Lang}] → {Result} ({HiCount} in the HI pool)",
                             Path.GetFileName(mediaPath), lang,
                             hiPick == null ? "none on SubDL" : hiPick.ReleaseName,
                             hiForLang.Count);
@@ -2592,7 +2592,7 @@ public sealed class DownloadPipeline : IDisposable
                 if (!SourceAllowed(cand.Provider))
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL-D] {File} [{Lang}] — candidate from {Source} skipped: that source is switched off",
+                        "[Sub Scribe-D] {File} [{Lang}] — candidate from {Source} skipped: that source is switched off",
                         Path.GetFileName(mediaPath), lang, Api.Endpoints.Provenance.Name(cand.Provider));
                     continue;
                 }
@@ -2628,7 +2628,7 @@ public sealed class DownloadPipeline : IDisposable
                     dlTransientAttempt++;
                     int waitSec = Math.Max(5, _api.TransientRetrySeconds);
                     _logger.LogWarning(
-                        "[SubDL-D] SubDL transiently overloaded during download of {File} — waiting {Sec}s, retry {Attempt}/{Max}. Not the daily limit; run continues.",
+                        "[Sub Scribe-D] SubDL transiently overloaded during download of {File} — waiting {Sec}s, retry {Attempt}/{Max}. Not the daily limit; run continues.",
                         Path.GetFileName(mediaPath), waitSec, dlTransientAttempt, maxDlTransientRetries);
                     await Task.Delay(TimeSpan.FromSeconds(waitSec), ct).ConfigureAwait(false);
                     _watchdog?.Heartbeat();
@@ -2681,7 +2681,7 @@ public sealed class DownloadPipeline : IDisposable
                     if (genuineEmptyNow && _emptyRetried.Add(lang + "|" + cand.Url))
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — empty answer from {Release}, asking once more in 10 s (F-M455)",
+                            "[Sub Scribe-D] {File} [{Lang}] — empty answer from {Release}, asking once more in 10 s (F-M455)",
                             Path.GetFileName(mediaPath), lang, cand.ReleaseName);
                         await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
                         _watchdog?.Heartbeat();
@@ -2703,7 +2703,7 @@ public sealed class DownloadPipeline : IDisposable
                     // F-M255: no candidate is discarded without a line. This exit had none, so a
                     // fetched-and-thrown-away candidate left no trace at all.
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL-D] {File} [{Lang}] — download reject {Release}: {Reason}",
+                        "[Sub Scribe-D] {File} [{Lang}] — download reject {Release}: {Reason}",
                         Path.GetFileName(mediaPath), lang, cand.ReleaseName,
                         bytes == null
                             ? "no bytes (" + dl.Label + ")"
@@ -2835,7 +2835,7 @@ public sealed class DownloadPipeline : IDisposable
                         }
 
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — next file of the same archive accepted: {Sibling} (first refused: {First})",
+                            "[Sub Scribe-D] {File} [{Lang}] — next file of the same archive accepted: {Sibling} (first refused: {First})",
                             Path.GetFileName(mediaPath), lang, sibling.Name, gateFail);
                         bytes = siblingBytes;
                         packFile = sibling;
@@ -2900,7 +2900,7 @@ public sealed class DownloadPipeline : IDisposable
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — QA reject {Release}: {Reason} (no usable file left in this archive)",
+                            "[Sub Scribe-D] {File} [{Lang}] — QA reject {Release}: {Reason} (no usable file left in this archive)",
                             Path.GetFileName(mediaPath), lang, cand.ReleaseName, gateFail);
                     }
 
@@ -2935,7 +2935,7 @@ public sealed class DownloadPipeline : IDisposable
                     if (_config.QaDownloadAutoSync)
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — fit reads audio track {Pos} of {N} ({Reason}); subtitle {Sub}",
+                            "[Sub Scribe-D] {File} [{Lang}] — fit reads audio track {Pos} of {N} ({Reason}); subtitle {Sub}",
                             Path.GetFileName(mediaPath), lang, audioChoice.Position,
                             audioChoice.TrackCount, audioChoice.Reason,
                             cand.ReleaseName ?? "(unknown)");
@@ -2983,7 +2983,7 @@ public sealed class DownloadPipeline : IDisposable
                         content = syncResult.Corrected;
                         summary.FittedToAudio++; // F-M308
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — auto-sync {Reason}",
+                            "[Sub Scribe-D] {File} [{Lang}] — auto-sync {Reason}",
                             Path.GetFileName(mediaPath), lang, syncResult.Reason);
                     }
                     else
@@ -3029,7 +3029,7 @@ public sealed class DownloadPipeline : IDisposable
                         // missing ffmpeg is reported ONCE per run by FfmpegTools.LogWarning
                         // regardless of the mode, which is where it is visible at Normal.
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — auto-sync not applied: {Reason}",
+                            "[Sub Scribe-D] {File} [{Lang}] — auto-sync not applied: {Reason}",
                             Path.GetFileName(mediaPath), lang, syncResult.Reason);
                     }
                 }
@@ -3109,7 +3109,7 @@ public sealed class DownloadPipeline : IDisposable
                             summary.Failed++;
                             ReportOutcome(item, ItemOutcome.RealFailure);
                             LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL-D] SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 51–99; nothing written",
+                                "[Sub Scribe-D] SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 51–99; nothing written",
                                 Path.GetFileName(mediaPath), lang);
                             continue;
                         }
@@ -3127,7 +3127,7 @@ public sealed class DownloadPipeline : IDisposable
                     {
                         summary.Failed++;
                         ReportOutcome(item, ItemOutcome.RealFailure);
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] SKIP {File} [{Lang}] — directory not writable: {Dir} (F-M89 read-only guard)", Path.GetFileName(mediaPath), lang, targetDir);
+                        LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe-D] SKIP {File} [{Lang}] — directory not writable: {Dir} (F-M89 read-only guard)", Path.GetFileName(mediaPath), lang, targetDir);
                         continue;
                     }
 
@@ -3201,7 +3201,7 @@ public sealed class DownloadPipeline : IDisposable
                                 // Refusing is the safe direction: an invented name would overwrite
                                 // an original already kept.
                                 LogUtil.PerItem(_config.LogMode, _logger,
-                                    "[SubDL-D] original NOT kept for {File} [{Lang}] — no free slot in the reserved range 51–99",
+                                    "[Sub Scribe-D] original NOT kept for {File} [{Lang}] — no free slot in the reserved range 51–99",
                                     Path.GetFileName(mediaPath), lang);
                             }
                             else
@@ -3243,7 +3243,7 @@ public sealed class DownloadPipeline : IDisposable
                                 if (_config.LogMode >= LogLevelMode.Verbose)
                                 {
                                     LogUtil.PerItem(_config.LogMode, _logger,
-                                        "[SubDL-D] original kept as {Path} — locked against upload (F-M315)",
+                                        "[Sub Scribe-D] original kept as {Path} — locked against upload (F-M315)",
                                         Path.GetFileName(originalPath));
                                 }
                             }
@@ -3253,7 +3253,7 @@ public sealed class DownloadPipeline : IDisposable
                             // The corrected file is already on disk and correct — a failure to
                             // keep the original must not undo it, but it must be visible.
                             _logger.LogWarning(ex,
-                                "[SubDL-D] could not keep the unsynchronized original for {File}",
+                                "[Sub Scribe-D] could not keep the unsynchronized original for {File}",
                                 Path.GetFileName(targetPath));
                         }
                     }
@@ -3336,13 +3336,13 @@ public sealed class DownloadPipeline : IDisposable
                         {
                             correctionHuntAbandoned = true;
                             LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL-D] {File} [{Lang}] — correction hunt abandoned after {N} candidate(s): the fit refused for a reason no other candidate can change ({Reason})",
+                                "[Sub Scribe-D] {File} [{Lang}] — correction hunt abandoned after {N} candidate(s): the fit refused for a reason no other candidate can change ({Reason})",
                                 Path.GetFileName(mediaPath), lang, refusalsThisRun, huntReason);
                         }
                     }
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] SAVED {Path} (lang={Lang}, score {Score}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb}) for {File}",
+                        LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe-D] SAVED {Path} (lang={Lang}, score {Score}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb}) for {File}",
                             Path.GetFileName(targetPath), lang, Score(cand, videoBase), cand.ReleaseName,
                             string.IsNullOrEmpty(cand.OriginalName) ? "—" : cand.OriginalName,
                             string.IsNullOrEmpty(cand.Author) ? "—" : cand.Author,
@@ -3376,7 +3376,7 @@ public sealed class DownloadPipeline : IDisposable
                         // F-M255: name the candidates this stop leaves untried — otherwise they are
                         // absent from the record although the next run will walk them.
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — corrected file saved; {N} lower-ranked candidate(s) not tried this run",
+                            "[Sub Scribe-D] {File} [{Lang}] — corrected file saved; {N} lower-ranked candidate(s) not tried this run",
                             Path.GetFileName(mediaPath), lang,
                             Math.Max(0, ranked.Count - attempts));
 
@@ -3409,7 +3409,7 @@ public sealed class DownloadPipeline : IDisposable
                         correctionHuntAbandoned = false;
                         refusalsThisRun = 0;
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — correction hunt continues on {Other}: the refusal came from {Source}, {N} candidate(s) of the other source are still untried (F-M494)",
+                            "[Sub Scribe-D] {File} [{Lang}] — correction hunt continues on {Other}: the refusal came from {Source}, {N} candidate(s) of the other source are still untried (F-M494)",
                             Path.GetFileName(mediaPath), lang,
                             Api.Endpoints.Provenance.Name(offeneAndereQuelle[0].Cand.Provider),
                             Api.Endpoints.Provenance.Name(cand.Provider),
@@ -3426,7 +3426,7 @@ public sealed class DownloadPipeline : IDisposable
                 {
                     summary.Failed++;
                     ReportOutcome(item, ItemOutcome.RealFailure);
-                    _logger.LogError("[SubDL-D] WRITE FAILED {File} [{Lang}]: {Msg}", Path.GetFileName(mediaPath), lang, ex.Message);
+                    _logger.LogError("[Sub Scribe-D] WRITE FAILED {File} [{Lang}]: {Msg}", Path.GetFileName(mediaPath), lang, ex.Message);
                     break; // IO error — retrying another candidate won't help
                 }
             }
@@ -3470,7 +3470,7 @@ public sealed class DownloadPipeline : IDisposable
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL-D] {File} [{Lang}] — run ended without save; {N} download(s) memorized, next run takes fresh candidates",
+                            "[Sub Scribe-D] {File} [{Lang}] — run ended without save; {N} download(s) memorized, next run takes fresh candidates",
                             Path.GetFileName(mediaPath), lang, qaRejectedReleases.Count);
                     }
                 }
@@ -3494,7 +3494,7 @@ public sealed class DownloadPipeline : IDisposable
                 ReportOutcome(item, ItemOutcome.NotAvailable);
                 if (_config.LogMode >= LogLevelMode.Verbose)
                 {
-                    LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — no candidate passed checks (F-M46), language marked not-available",
+                    LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe-D] {File} [{Lang}] — no candidate passed checks (F-M46), language marked not-available",
                         Path.GetFileName(mediaPath), lang);
                 }
             }
@@ -3528,7 +3528,7 @@ public sealed class DownloadPipeline : IDisposable
             LogUtil.PerItem(
                 _config.LogMode,
                 _logger,
-                "[SubDL-D] {File} — {Count} language(s) closed by the QA budget this run; nothing left to search",
+                "[Sub Scribe-D] {File} — {Count} language(s) closed by the QA budget this run; nothing left to search",
                 Path.GetFileName(mediaPath),
                 missing.Count);
         }
@@ -3582,7 +3582,7 @@ public sealed class DownloadPipeline : IDisposable
         }
         catch (Exception ex)
         {
-            LogUtil.Detail(_config.LogMode, _logger, "[SubDL-D] embedded facts not recorded: {Msg}", ex.Message);
+            LogUtil.Detail(_config.LogMode, _logger, "[Sub Scribe-D] embedded facts not recorded: {Msg}", ex.Message);
             return 0;
         }
     }
@@ -3660,7 +3660,7 @@ public sealed class DownloadPipeline : IDisposable
         if (!_config.IsConfiguredForDownload(Configuration.SubtitleProvider.Subdl))
         {
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL-D] {File} — SubDL skipped — not configured (required for SubDL only)",
+                "[Sub Scribe-D] {File} — SubDL skipped — not configured (required for SubDL only)",
                 filename);
             return (new List<SubtitleCandidate>(), false, 0, new List<SubtitleCandidate>());
         }
@@ -3679,7 +3679,7 @@ public sealed class DownloadPipeline : IDisposable
         if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId))
         {
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL-D] MAIN (v1 id) skipped {File} — no TMDB/IMDb ID resolvable, no title search (F-M45)",
+                "[Sub Scribe-D] MAIN (v1 id) skipped {File} — no TMDB/IMDb ID resolvable, no title search (F-M45)",
                 filename);
         }
         else
@@ -3757,25 +3757,25 @@ public sealed class DownloadPipeline : IDisposable
                 {
                     noHi = hi.Where(c => c.Language != null && variantMissing.Contains(c.Language, StringComparer.OrdinalIgnoreCase)).ToList();
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL-D] HI search {File} [{Langs}] — {N} hearing-impaired candidates (separate pool, F-M241)",
+                        "[Sub Scribe-D] HI search {File} [{Langs}] — {N} hearing-impaired candidates (separate pool, F-M241)",
                         filename, hiLangs, noHi.Count);
                 }
                 else if (hi == null)
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL-D] HI search {File} — failed this run; regular candidates kept (F-M241)", filename);
+                        "[Sub Scribe-D] HI search {File} — failed this run; regular candidates kept (F-M241)", filename);
                 }
             }
 
             if (main.Count > 0)
             {
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL-D] MAIN (v1 id) {File} [{Langs}] — {N} candidates (episode-exact)",
+                    "[Sub Scribe-D] MAIN (v1 id) {File} [{Langs}] — {N} candidates (episode-exact)",
                     filename, langs, main.Count);
                 return (main, false, 0, noHi);
             }
 
-            LogUtil.Detail(_config.LogMode, _logger, "[SubDL-D] MAIN (v1 id) {File} — no candidates → filename fallback", filename);
+            LogUtil.Detail(_config.LogMode, _logger, "[Sub Scribe-D] MAIN (v1 id) {File} — no candidates → filename fallback", filename);
         }
 
         // V2 filename batch backup REMOVED — the MAIN v1 search already
@@ -3854,7 +3854,7 @@ public sealed class DownloadPipeline : IDisposable
             // without a single measured case. It is gone: an entry without an id is skipped and SAID
             // SO, instead of being fetched over a shape nobody has ever verified.
             _logger.LogWarning(
-                "[SubDL-D] entry without an id (no subtitlePage) — cannot fetch S{Season}E{Episode}: {Member}",
+                "[Sub Scribe-D] entry without an id (no subtitlePage) — cannot fetch S{Season}E{Episode}: {Member}",
                 season, episode, member ?? "—");
             return DownloadOutcome.None("no-entry-id");
         }
@@ -3871,7 +3871,7 @@ public sealed class DownloadPipeline : IDisposable
         if (corrected != null && raw != null && corrected.Length != raw.Length)
         {
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL-D] {Release} [{Lang}] — invisible cues dropped: {Before} → {After} cue(s)",
+                "[Sub Scribe-D] {Release} [{Lang}] — invisible cues dropped: {Before} → {After} cue(s)",
                 cand.ReleaseName, cand.Language,
                 Qa.QaGates.ParseSrt(DecodeSrt(raw, cand.Language))?.CueCount ?? 0,
                 Qa.QaGates.ParseSrt(DecodeSrt(corrected, cand.Language))?.CueCount ?? 0);
@@ -4220,7 +4220,7 @@ public sealed class DownloadPipeline : IDisposable
                 // entry would write the wrong episode's text next to this file — worse than not
                 // saving anything, so treat it as no candidate (F-M215).
                 _logger.LogWarning(
-                    "[SubDL-D] pack {Release} has {N} files but none for S{Season}E{Episode} — candidate skipped instead of saving the wrong episode.",
+                    "[Sub Scribe-D] pack {Release} has {N} files but none for S{Season}E{Episode} — candidate skipped instead of saving the wrong episode.",
                     cand.ReleaseName, cand.UnpackFiles.Count, season, episode);
                 return new CandidateAttempt(null, null, DownloadOutcome.None("candidate"));
             }
@@ -4228,7 +4228,7 @@ public sealed class DownloadPipeline : IDisposable
             if (_config.LogMode >= LogLevelMode.Debug)
             {
                 LogUtil.Detail(_config.LogMode, _logger,
-                    "[SubDL-D] unpack pick S{Season}E{Episode} from pack {Release} → {File} (HI={Hi})",
+                    "[Sub Scribe-D] unpack pick S{Season}E{Episode} from pack {Release} → {File} (HI={Hi})",
                     season, episode, cand.ReleaseName, want.Name, want.HearingImpaired);
             }
         }
@@ -4243,7 +4243,7 @@ public sealed class DownloadPipeline : IDisposable
                 // of its own member URL — once per pack the archive is fetched, every further
                 // episode of the same pack is a cache hit.
                 _logger.LogInformation(
-                    "[SubDL] pack served whole — {N} file(s) per archive fetch: {Release}",
+                    "[Sub Scribe] pack served whole — {N} file(s) per archive fetch: {Release}",
                     cand.UnpackFiles.Count, cand.ReleaseName);
             }
 
@@ -4253,7 +4253,7 @@ public sealed class DownloadPipeline : IDisposable
         if (want != null)
         {
             _logger.LogWarning(
-                "[SubDL-D] pack {Release} did not resolve S{Season}E{Episode} from the archive — nothing saved.",
+                "[Sub Scribe-D] pack {Release} did not resolve S{Season}E{Episode} from the archive — nothing saved.",
                 cand.ReleaseName, season, episode);
         }
 
@@ -4680,7 +4680,7 @@ public sealed class DownloadPipeline : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogDebug("[SubDL-D] library lookup failed for {Item}: {Msg}", item.Id, ex.Message);
+            _logger.LogDebug("[Sub Scribe-D] library lookup failed for {Item}: {Msg}", item.Id, ex.Message);
         }
 
         if (!string.IsNullOrWhiteSpace(savedPath))
@@ -4730,12 +4730,12 @@ public sealed class DownloadPipeline : IDisposable
 
                 _providerManager.QueueRefresh(libraryId, options, RefreshPriority.High);
                 LogUtil.Normal(_logger,
-                    "[SubDL-D] library {Library}: scan for new and updated files queued ({Count} subtitle(s) saved in this run, {Files} file(s) reported)",
+                    "[Sub Scribe-D] library {Library}: scan for new and updated files queued ({Count} subtitle(s) saved in this run, {Files} file(s) reported)",
                     libraryId.ToString("N"), summary.Downloaded, _savedSubtitlePaths.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("[SubDL-D] library update for {Library} failed: {Msg}", libraryId.ToString("N"), ex.Message);
+                _logger.LogWarning("[Sub Scribe-D] library update for {Library} failed: {Msg}", libraryId.ToString("N"), ex.Message);
             }
         }
     }
@@ -4852,7 +4852,7 @@ public sealed class DownloadPipeline : IDisposable
             catch (Exception ex)
             {
                 summary.ReportsDeferred++;
-                _logger.LogWarning("[SubDL-D] report for {Release} not filed: {Msg}", row.ReleaseName, ex.Message);
+                _logger.LogWarning("[Sub Scribe-D] report for {Release} not filed: {Msg}", row.ReleaseName, ex.Message);
             }
         }
 
@@ -4874,7 +4874,7 @@ public sealed class DownloadPipeline : IDisposable
             _qaFails.MarkReported(row);
             summary.Reported++;
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL-D] {Release} [{Lang}] — reported to SubDL ({Category}) for subtitle {NId}",
+                "[Sub Scribe-D] {Release} [{Lang}] — reported to SubDL ({Category}) for subtitle {NId}",
                 row.ReleaseName, lang, text.Category, row.NId);
             return;
         }

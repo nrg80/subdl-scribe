@@ -253,7 +253,7 @@ public class SubdlStatusController : ControllerBase
         }
 
         var row = plugin.ResetStatusStats();
-        LogUtil.Normal(_logger, "[SubDL] statistics reset: counters zeroed, period restarted.");
+        LogUtil.Normal(_logger, "[Sub Scribe] statistics reset: counters zeroed, period restarted.");
 
         // F-M218/F-M219: the response is fed straight back into the renderer by the GUI
         // (window.subdlRenderStats(res)), so it must carry the SAME fields the Stats GET

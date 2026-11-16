@@ -93,7 +93,7 @@ public sealed class SubdlApiClient
         // F-M532: die Parser der uebrigen Antworten (Quota, eigene Liste, Filmblock, Upload) haben
         // keinen eigenen Logger — ihre Befunde kommen hier durch dieselbe Tuer wie die Suchantwort.
         SubdlFieldSchema.OnMismatch = (f, context) => LogInfo(
-            $"[SubDL] Metadata format mismatch ({context}).\n"
+            $"[Sub Scribe] Metadata format mismatch ({context}).\n"
             + $"Attribute: {f.Path} (documented: {f.Documented}, received: {f.Received})");
     }
 
@@ -212,7 +212,7 @@ public sealed class SubdlApiClient
         }
         if (any)
         {
-            LogInfo($"[SubDL] rate headers - limit: {lim ?? "-"} | remaining: {rem ?? "-"} | reset: {rst ?? "-"}");
+            LogInfo($"[Sub Scribe] rate headers - limit: {lim ?? "-"} | remaining: {rem ?? "-"} | reset: {rst ?? "-"}");
         }
         return any;
     }
@@ -261,7 +261,7 @@ public sealed class SubdlApiClient
         // Log the raw 429 once per occurrence.
         string? rawReset = resp.Headers.TryGetValues("x-ratelimit-reset", out var rr) ? rr.FirstOrDefault() : null;
         string? rawRetry = resp.Headers.TryGetValues("retry-after", out var ry) ? ry.FirstOrDefault() : null;
-        LogInfo($"[SubDL] 429 raw response - body: {body} | x-ratelimit-reset: {rawReset ?? "absent"} | retry-after: {rawRetry ?? "absent"}");
+        LogInfo($"[Sub Scribe] 429 raw response - body: {body} | x-ratelimit-reset: {rawReset ?? "absent"} | retry-after: {rawRetry ?? "absent"}");
 
         // F-M152 (rev.10): ALWAYS observe rate headers first - the v2 middleware
         // populates them on 429 as well. Header present -> authoritative quota
@@ -393,7 +393,7 @@ public sealed class SubdlApiClient
             using var resp = await _http.GetAsync(url, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
-                LogInfo($"[SubDL] quota read: /me answered HTTP {(int)resp.StatusCode} — allowance unknown, day-long pace.");
+                LogInfo($"[Sub Scribe] quota read: /me answered HTTP {(int)resp.StatusCode} — allowance unknown, day-long pace.");
                 return QuotaRead.Unreadable;
             }
 
@@ -413,7 +413,7 @@ public sealed class SubdlApiClient
             var snap = SubdlQuotaSnapshot.FromJson(body);
             if (snap == null || !snap.IsKnown(forDownload))
             {
-                LogInfo("[SubDL] quota read: response carries no usable limit — allowance unknown, day-long pace.");
+                LogInfo("[Sub Scribe] quota read: response carries no usable limit — allowance unknown, day-long pace.");
                 return QuotaRead.Unreadable;
             }
 
@@ -429,7 +429,7 @@ public sealed class SubdlApiClient
                 Edge429NoHeaders = false;
             }
 
-            LogInfo($"[SubDL] quota read: search {snap.SearchUsed}/{snap.SearchLimit} (remaining {snap.SearchRemaining}), "
+            LogInfo($"[Sub Scribe] quota read: search {snap.SearchUsed}/{snap.SearchLimit} (remaining {snap.SearchRemaining}), "
                 + $"downloads {snap.DownloadsUsed}/{snap.DownloadsLimit} (remaining {snap.DownloadsRemaining}), "
                 + $"reset {snap.ResetAtUtc:yyyy-MM-dd HH:mm} UTC.");
 
@@ -439,7 +439,7 @@ public sealed class SubdlApiClient
         catch (Exception ex)
         {
             // Any failure here must not decide anything: keep the day-long pace.
-            LogInfo($"[SubDL] quota read failed ({ex.GetType().Name}) — allowance unknown, day-long pace.");
+            LogInfo($"[Sub Scribe] quota read failed ({ex.GetType().Name}) — allowance unknown, day-long pace.");
             return QuotaRead.Unreadable;
         }
     }
@@ -1492,7 +1492,7 @@ public sealed class SubdlApiClient
                                     continue;
                                 }
 
-                                LogInfo($"[SubDL] {meldung.Comment}");
+                                LogInfo($"[Sub Scribe] {meldung.Comment}");
                                 if (!string.IsNullOrWhiteSpace(ident.NId))
                                 {
                                     _pendingFormatReports.Add((ident.NId, meldung.Category, meldung.Comment));
@@ -1519,7 +1519,7 @@ public sealed class SubdlApiClient
                     LastJsonMismatches = befund;
                     if (befund.Count > 0)
                     {
-                        LogInfo($"[SubDL] {LastRejectedByFormat} Treffer verworfen — Feldgestalt nicht wie dokumentiert: "
+                        LogInfo($"[Sub Scribe] {LastRejectedByFormat} Treffer verworfen — Feldgestalt nicht wie dokumentiert: "
                             + string.Join("; ", JsonAnomalies.Lines(befund)));
                     }
                 }

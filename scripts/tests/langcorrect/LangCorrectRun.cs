@@ -137,7 +137,7 @@ internal static class LangCorrectRun
         // F-M400 (operator order 02.11.2026): the log line states the finding — tag, detection,
         // result — and does not call the tag a liar. The neutral wording is asserted, so it cannot
         // drift back.
-        Check(pipeline.Contains("[SubDL] LANGUAGE {File} — tagged {Tag}, detected {Lang}"),
+        Check(pipeline.Contains("[Sub Scribe] LANGUAGE {File} — tagged {Tag}, detected {Lang}"),
             "the line names tag and detection side by side");
         Check(!pipeline.Contains("the tag lies"),
             "and it does not accuse the tag");

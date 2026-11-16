@@ -179,7 +179,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             var http = new System.Net.Http.HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
             var log = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
                       .CreateLogger<TmdbImdbResolver>();
-            retry.Log = msg => Microsoft.Extensions.Logging.LoggerExtensions.LogDebug(log, "[SubDL-Retry] {Msg}", msg);
+            retry.Log = msg => Microsoft.Extensions.Logging.LoggerExtensions.LogDebug(log, "[Sub Scribe-Retry] {Msg}", msg);
             return new TmdbImdbResolver(http, Plugin.Instance!.Configuration.TmdbApiKey);
         });
         serviceCollection.AddSingleton<SubdlEventDispatcher>();

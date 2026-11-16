@@ -282,7 +282,7 @@ public sealed class ContentHashRegistry : IDisposable
         }
         catch (Exception ex)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] media hash failed for {Path}: {Msg}", mediaPath, ex.Message);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] media hash failed for {Path}: {Msg}", mediaPath, ex.Message);
             return null;
         }
     }
@@ -464,7 +464,7 @@ public sealed class ContentHashRegistry : IDisposable
         {
             write(rows[0]);
             _db.Media.Upsert(rows[0]);
-            LogUtil.Detail(_logger, "[SubDL-DB] media number written by path {Path}", mediaPath);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] media number written by path {Path}", mediaPath);
             return MediaNumberWrite.ByPath;
         }
 
@@ -472,7 +472,7 @@ public sealed class ContentHashRegistry : IDisposable
         // geschrieben und nichts gewählt — der Aufrufer sagt dann die Wahrheit ins Log.
         LogUtil.Detail(
             _logger,
-            "[SubDL-DB] media number NOT written: no media hash, and {Reason} ({Path})",
+            "[Sub Scribe-DB] media number NOT written: no media hash, and {Reason} ({Path})",
             rows.Count == 0 ? "no media row carries this path" : rows.Count + " media rows carry this path",
             mediaPath ?? "-");
         return MediaNumberWrite.None;
@@ -554,7 +554,7 @@ public sealed class ContentHashRegistry : IDisposable
             _db.Media.Delete(oldHash);
             moved++;
 
-            LogUtil.Detail(_logger, "[SubDL-DB] media identity {Old} -> {New} ({Path})",
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] media identity {Old} -> {New} ({Path})",
                 oldHash, newHash, target.Path ?? "?");
         }
 
@@ -747,7 +747,7 @@ public sealed class ContentHashRegistry : IDisposable
 
         _db.Embeds.Upsert(existing);
         RefreshMediaAggregates(mediaHash);
-        LogUtil.Detail(_logger, "[SubDL-DB] embed {Media}|{Pos} {Status} {Lang}", mediaHash, subPos, status, language);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] embed {Media}|{Pos} {Status} {Lang}", mediaHash, subPos, status, language);
     }
 
     /// <summary>
@@ -822,7 +822,7 @@ public sealed class ContentHashRegistry : IDisposable
 
         _db.Embeds.Upsert(row);
         RefreshMediaAggregates(mediaHash);
-        LogUtil.Detail(_logger, "[SubDL-DB] embed {Media}|{Pos} observed {Lang} (HI={Hi})",
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] embed {Media}|{Pos} observed {Lang} (HI={Hi})",
             mediaHash, subPos, language, hearingImpaired);
         return true;
     }
@@ -894,7 +894,7 @@ public sealed class ContentHashRegistry : IDisposable
         _db.Embeds.Upsert(row);
         if (changed)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] embed {Media}|{Pos} detection {Outcome} {Lang}",
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] embed {Media}|{Pos} detection {Outcome} {Lang}",
                 mediaHash, subPos, outcome, language ?? "-");
         }
 
@@ -1560,7 +1560,7 @@ public sealed class ContentHashRegistry : IDisposable
         existing.Episode = media.Episode;
 
         _db.Sidecars.Upsert(existing);
-        LogUtil.Detail(_logger, "[SubDL-DB] sidecar {Hash} {Status} {Lang}", contentHash, status, language);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] sidecar {Hash} {Status} {Lang}", contentHash, status, language);
     }
 
     /// <summary>
@@ -1647,7 +1647,7 @@ public sealed class ContentHashRegistry : IDisposable
         }
 
         _db.Sidecars.Upsert(row);
-        LogUtil.Detail(_logger, "[SubDL-DB] sidecar {Hash} observed {Lang} (HI={Hi})",
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] sidecar {Hash} observed {Lang} (HI={Hi})",
             contentHash, language, hearingImpaired);
         return true;
     }
@@ -1694,7 +1694,7 @@ public sealed class ContentHashRegistry : IDisposable
         row.FileName = fileName;
         row.Path = path;
         _db.Sidecars.Upsert(row);
-        LogUtil.Detail(_logger, "[SubDL-DB] sidecar {Hash} moved to {Name}", contentHash, fileName);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] sidecar {Hash} moved to {Name}", contentHash, fileName);
         return true;
     }
 
@@ -2341,7 +2341,7 @@ public sealed class ContentHashRegistry : IDisposable
         {
             m.SubtitlesUploadedAt = now;
         });
-        LogUtil.Detail(_logger, "[SubDL-DB] subtitles uploaded-complete {Media}", mediaHash);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] subtitles uploaded-complete {Media}", mediaHash);
     }
 
     /// <summary>True when the embedded subtitle side of this file is complete.</summary>
@@ -2357,7 +2357,7 @@ public sealed class ContentHashRegistry : IDisposable
     /// <para>
     /// Der Anlass: der Seeder hatte nach dem ersten Teil von F-M499 27 Folgen quellenweise in die
     /// Queue gelegt, und die Pipeline warf sie alle wieder weg mit
-    /// "[SubDL] SKIP {File} — upload file-complete". Die Dateimarke stand von den SubDL-Uploads,
+    /// "[Sub Scribe] SKIP {File} — upload file-complete". Die Dateimarke stand von den SubDL-Uploads,
     /// tvsubtitles hatte auf diesen Dateien noch keine einzige Spur und bekam so nie seinen Versuch;
     /// der Lauf endete mit "0 uploaded". Die quellenblinde Frage war also im Pipeline-Kopf genau
     /// derselbe Defekt, den F-M499 in der Queue schon behoben hatte.
@@ -2495,7 +2495,7 @@ public sealed class ContentHashRegistry : IDisposable
 
         if (removed > 0)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] forgot {N} vanished sidecar verdict(s)", removed);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] forgot {N} vanished sidecar verdict(s)", removed);
         }
 
         return removed;
@@ -2570,7 +2570,7 @@ public sealed class ContentHashRegistry : IDisposable
             {
                 _db.Embeds.Delete(row.Id);
                 removed++;
-                LogUtil.Detail(_logger, "[SubDL-DB] forgot stale embed {Media}|{Pos} {Lang} (HI={Hi}, position gone)",
+                LogUtil.Detail(_logger, "[Sub Scribe-DB] forgot stale embed {Media}|{Pos} {Lang} (HI={Hi}, position gone)",
                     mediaHash, row.SubPos, row.Language, row.HearingImpaired);
                 continue;
             }
@@ -2591,7 +2591,7 @@ public sealed class ContentHashRegistry : IDisposable
 
             _db.Embeds.Delete(row.Id);
             removed++;
-            LogUtil.Detail(_logger, "[SubDL-DB] forgot stale embed {Media}|{Pos} {Lang} (HI={Hi})",
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] forgot stale embed {Media}|{Pos} {Lang} (HI={Hi})",
                 mediaHash, row.SubPos, row.Language, row.HearingImpaired);
         }
 

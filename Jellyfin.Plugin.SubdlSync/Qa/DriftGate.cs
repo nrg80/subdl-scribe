@@ -117,7 +117,7 @@ public static class DriftGate
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "[SubDL] drift gate: audio decode failed for {File}", Path.GetFileName(mediaPath));
+            logger.LogDebug(ex, "[Sub Scribe] drift gate: audio decode failed for {File}", Path.GetFileName(mediaPath));
             return Skip("audio decode failed");
         }
 
@@ -142,7 +142,7 @@ public static class DriftGate
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "[SubDL] drift gate: detector failed for {File}", Path.GetFileName(mediaPath));
+            logger.LogDebug(ex, "[Sub Scribe] drift gate: detector failed for {File}", Path.GetFileName(mediaPath));
             return Skip("detector error");
         }
     }

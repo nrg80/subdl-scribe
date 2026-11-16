@@ -274,7 +274,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         catch (Exception ex)
         {
             _loggerFactory?.CreateLogger<Plugin>().LogError(ex,
-                "[SubDL] failed to persist plugin state (user settings left untouched).");
+                "[Sub Scribe] failed to persist plugin state (user settings left untouched).");
         }
     }
 

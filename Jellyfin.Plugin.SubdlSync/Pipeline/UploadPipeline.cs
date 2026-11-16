@@ -410,7 +410,7 @@ public sealed class UploadPipeline : IPackFiller
             summary.SkippedByLock = true;
             var spacingUp = JobSpacingMinutes();
             ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: true, DateTime.UtcNow.AddMinutes(spacingUp));
-            LogUtil.Normal(_logger, "[SubDL] Upload deferred by {Spacing} min — global run lock busy.", spacingUp);
+            LogUtil.Normal(_logger, "[Sub Scribe] Upload deferred by {Spacing} min — global run lock busy.", spacingUp);
             return summary;
         }
 
@@ -421,7 +421,7 @@ public sealed class UploadPipeline : IPackFiller
         int sweptDirs = Api.RunWorkFiles.PurgeStale(null, TimeSpan.FromDays(2));
         if (sweptDirs > 0)
         {
-            LogUtil.Normal(_logger, "[SubDL] upload: {Count} left-over working directorie(s) of an earlier run removed.", sweptDirs);
+            LogUtil.Normal(_logger, "[Sub Scribe] upload: {Count} left-over working directorie(s) of an earlier run removed.", sweptDirs);
         }
 
         var skipFilter = new SkipFilter(_config.EffectiveSkipDirPatterns, _config.EffectiveSkipFilePatterns);
@@ -433,13 +433,13 @@ public sealed class UploadPipeline : IPackFiller
         var missingUp = _config.MissingCredentials();
         if (missingUp.Count > 0)
         {
-            LogUtil.Normal(_logger, "[SubDL] upload: NOT started — missing credential(s): {Missing}. Set them in the plugin configuration.", string.Join(", ", missingUp));
+            LogUtil.Normal(_logger, "[Sub Scribe] upload: NOT started — missing credential(s): {Missing}. Set them in the plugin configuration.", string.Join(", ", missingUp));
             return summary;
         }
 
         if (_config.SelectedLibraries.Count == 0)
         {
-            LogUtil.Normal(_logger, "[SubDL] No libraries selected — nothing to do.");
+            LogUtil.Normal(_logger, "[Sub Scribe] No libraries selected — nothing to do.");
             return summary;
         }
 
@@ -460,7 +460,7 @@ public sealed class UploadPipeline : IPackFiller
         // logging "0 items queued" although the scan runs 15 lines later and found 304.
         // F-M403 (operator order 02.11.2026): one spelling for the mode. Inline it is the lowercase
         // word "dry" (as in the workers line), on an event line it is the prefix "DRY-RUN".
-        LogUtil.Normal(_logger, "[SubDL] upload: started{Dry}", _config.DryRun ? ", dry" : string.Empty);
+        LogUtil.Normal(_logger, "[Sub Scribe] upload: started{Dry}", _config.DryRun ? ", dry" : string.Empty);
 
         PipelineStopSignal.ClearStaleMarkers(Plugin.Instance?.DataFolderPath ?? string.Empty);
 
@@ -477,12 +477,12 @@ public sealed class UploadPipeline : IPackFiller
         _tmdb.Trace += OnTmdbTrace;
 
         // F-M54: wrong TMDB key reported ONCE at Normal/Error level.
-        _tmdb.AuthError += msg => _logger.LogError("[SubDL] {Msg}", msg);
+        _tmdb.AuthError += msg => _logger.LogError("[Sub Scribe] {Msg}", msg);
 
         // F-M190 (24.09.2026, user decision): a JF-vs-TMDB id disagreement is
         // reported at Normal level (the debug trace alone was invisible), and
         // TMDB wins. Detached on run end with the other TMDB handlers.
-        void OnIdMismatch(string msg) => LogUtil.Normal(_logger, "[SubDL] {Msg}", msg);
+        void OnIdMismatch(string msg) => LogUtil.Normal(_logger, "[Sub Scribe] {Msg}", msg);
         _tmdb.IdMismatch += OnIdMismatch;
 
         // The 1-min metadata grace lives in the ARRIVAL WATCHER (once per
@@ -567,7 +567,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] queue: {Imdb} S{Season} brought {Have} of {Aired} episode(s) — the queued items are not the whole season, so no pack is built from this run.",
+                        "[Sub Scribe] queue: {Imdb} S{Season} brought {Have} of {Aired} episode(s) — the queued items are not the whole season, so no pack is built from this run.",
                         entry.Key.Item1, entry.Key.Item2, have.Count, aired.Count);
                     continue;
                 }
@@ -577,7 +577,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] queue: {Imdb} S{Season} — every language is already inside a pack, nothing is investigated.",
+                        "[Sub Scribe] queue: {Imdb} S{Season} — every language is already inside a pack, nothing is investigated.",
                         entry.Key.Item1, entry.Key.Item2);
                     continue;
                 }
@@ -585,7 +585,7 @@ public sealed class UploadPipeline : IPackFiller
                 arrivalSeasons[entry.Key] = have;
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] queue: {Imdb} S{Season} brought all {Aired} episode(s) — the pack is built from the queued items of this run only.",
+                    "[Sub Scribe] queue: {Imdb} S{Season} brought all {Aired} episode(s) — the pack is built from the queued items of this run only.",
                     entry.Key.Item1, entry.Key.Item2, aired.Count);
             }
 
@@ -594,7 +594,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] no season pack this run — no queue of this run was a whole season (F-M424/F-M425).");
+                    "[Sub Scribe] no season pack this run — no queue of this run was a whole season (F-M424/F-M425).");
             }
 
             if (completeSeasons.Count > 0)
@@ -643,12 +643,12 @@ public sealed class UploadPipeline : IPackFiller
                 // 403, hourly cap) stops without a fire.
                 if (_api.TransientOverload)
                 {
-                    _logger.LogWarning("[SubDL] {Msg}", ex.Message);
+                    _logger.LogWarning("[Sub Scribe] {Msg}", ex.Message);
                     ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: true, DateTime.UtcNow);
                     return summary;
                 }
 
-                _logger.LogError("[SubDL] {Msg} — upload run aborted.", ex.Message);
+                _logger.LogError("[Sub Scribe] {Msg} — upload run aborted.", ex.Message);
                 return summary;
             }
         }
@@ -680,14 +680,14 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] pack did not go up for {Imdb} S{Season} [{Lang}] — the singles it was meant to carry go up in the single phase (F-M429).",
+                        "[Sub Scribe] pack did not go up for {Imdb} S{Season} [{Lang}] — the singles it was meant to carry go up in the single phase (F-M429).",
                         packImdb, packSeason, packLang);
                 }
             }
 
             LogUtil.Normal(
                 _logger,
-                "[SubDL] pack phase done — {Count} language(s) are carried by packs of this run; their singles are skipped, everything else goes up single.",
+                "[Sub Scribe] pack phase done — {Count} language(s) are carried by packs of this run; their singles are skipped, everything else goes up single.",
                 _packAbsorbed.Count);
         }
 
@@ -696,7 +696,7 @@ public sealed class UploadPipeline : IPackFiller
             // User stop marker — check BEFORE doing any work.
             if (PipelineStopSignal.IsStopped(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: true, runCt))
             {
-                LogUtil.Normal(_logger, "[SubDL] upload: user stop requested — finishing current run.");
+                LogUtil.Normal(_logger, "[Sub Scribe] upload: user stop requested — finishing current run.");
                 summary.StopRequested = true;
                 break;
             }
@@ -717,7 +717,7 @@ public sealed class UploadPipeline : IPackFiller
             if (string.IsNullOrWhiteSpace(mediaPath))
             {
                 // F-M255: a skipped item is named, not silently dropped.
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] SKIP {Name} — item has no file path", item.Name);
+                LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] SKIP {Name} — item has no file path", item.Name);
                 continue;
             }
 
@@ -728,7 +728,7 @@ public sealed class UploadPipeline : IPackFiller
             // F-M499 (gemessen 15.11.2026, 16:17 im scharfen Lauf): "upload-complete" war hier
             // QUELLENBLIND gelesen — die Dateimarke stand von den SubDL-Uploads, tvsubtitles hatte auf
             // denselben Dateien noch keine Spur, und die Pipeline warf die 27 vom Seeder quellenweise
-            // eingereihten Folgen alle wieder weg ("[SubDL] SKIP {File} — upload file-complete",
+            // eingereihten Folgen alle wieder weg ("[Sub Scribe] SKIP {File} — upload file-complete",
             // Laufende "0 uploaded"). Dieselbe Frage, die F-M499 in der Queue je Quelle stellt, gilt
             // im Kopf des Laufs: uebersprungen wird nur, wenn KEINE Quelle mehr offen ist.
             //
@@ -786,7 +786,7 @@ public sealed class UploadPipeline : IPackFiller
                 LogUtil.PerItem(
                     _config.LogMode,
                     _logger,
-                    "[SubDL] SKIP {File} — upload file-complete for every upload source ({Sources})",
+                    "[Sub Scribe] SKIP {File} — upload file-complete for every upload source ({Sources})",
                     Path.GetFileName(mediaPath),
                     string.Join(", ", quellen.Select(Api.Endpoints.Provenance.Name)));
 
@@ -799,7 +799,7 @@ public sealed class UploadPipeline : IPackFiller
                 // fuer die andere nicht, und genau diese Zeile fehlte, als der Lauf "0 uploaded" sagte.
                 LogUtil.Detail(
                     _logger,
-                    "[SubDL] {File} — still open: {Sources} (F-M499)",
+                    "[Sub Scribe] {File} — still open: {Sources} (F-M499)",
                     Path.GetFileName(mediaPath),
                     string.Join(", ", offeneQuellen.Select(Api.Endpoints.Provenance.Name)));
             }
@@ -821,7 +821,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 summary.Failed++;
                 ReportOutcome(item, ItemOutcome.RealFailure);
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] FILE MISSING {File} — vanished between seeding and this run", Path.GetFileName(mediaPath));
+                LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] FILE MISSING {File} — vanished between seeding and this run", Path.GetFileName(mediaPath));
 
                 continue;
             }
@@ -855,7 +855,7 @@ public sealed class UploadPipeline : IPackFiller
                 summary.SkippedItems++;
                 summary.SkippedByFilter++;
                 summary.FilesSkipped++; // Fully skipped file for the status card
-                LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} — {Reason}", Path.GetFileName(mediaPath), skip);
+                LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] SKIP {File} — {Reason}", Path.GetFileName(mediaPath), skip);
 
                 continue;
             }
@@ -882,7 +882,7 @@ public sealed class UploadPipeline : IPackFiller
                 season = parsedName.Season ?? season;
                 episode = parsedName.Episode ?? episode;
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL] {File}: file name marks a series (S{Season}E{Episode}) while Jellyfin reports no series — resolving as series.",
+                    "[Sub Scribe] {File}: file name marks a series (S{Season}E{Episode}) while Jellyfin reports no series — resolving as series.",
                     Path.GetFileName(mediaPath), parsedName.Season ?? 0, parsedName.Episode ?? 0);
             }
 
@@ -987,7 +987,7 @@ public sealed class UploadPipeline : IPackFiller
                         {
                             isSeries = multi.IsSeries;
                             LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL] {File}: TMDB resolved this as a {Kind} — type corrected.",
+                                "[Sub Scribe] {File}: TMDB resolved this as a {Kind} — type corrected.",
                                 Path.GetFileName(mediaPath), multi.IsSeries ? "series" : "movie");
                         }
                     }
@@ -1004,7 +1004,7 @@ public sealed class UploadPipeline : IPackFiller
                     if (_config.LogMode >= LogLevelMode.Verbose)
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL] SKIP {File} — no-imdb (TMDB ladder failed) — requeued, not-found +1",
+                            "[Sub Scribe] SKIP {File} — no-imdb (TMDB ladder failed) — requeued, not-found +1",
                             Path.GetFileName(mediaPath));
                     }
 
@@ -1018,7 +1018,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 summary.SkippedNoImdb++;
                 summary.FilesSkipped++; // Fully skipped file for the status card
-                LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} — no-imdb/no-season-ep (TMDB ladder)", Path.GetFileName(mediaPath));
+                LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] SKIP {File} — no-imdb/no-season-ep (TMDB ladder)", Path.GetFileName(mediaPath));
                 continue;
             }
 
@@ -1098,7 +1098,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 summary.SettledItems++;
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL] SKIP {File} — item settled before extraction (every text stream has its end state, no source still wants a pair, F-M539)",
+                    "[Sub Scribe] SKIP {File} — item settled before extraction (every text stream has its end state, no source still wants a pair, F-M539)",
                     Path.GetFileName(mediaPath));
                 continue;
             }
@@ -1118,7 +1118,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 summary.SettledItems++;
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL] SKIP {File} — every text stream was rejected earlier, nothing can be uploaded (F-M541)",
+                    "[Sub Scribe] SKIP {File} — every text stream was rejected earlier, nothing can be uploaded (F-M541)",
                     Path.GetFileName(mediaPath));
                 continue;
             }
@@ -1136,7 +1136,7 @@ public sealed class UploadPipeline : IPackFiller
             if (textPositions.Count > 0)
             {
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL] extraction: {Count} text stream(s) in ONE ffmpeg pass for {File} (exit {Exit}){Note}",
+                    "[Sub Scribe] extraction: {Count} text stream(s) in ONE ffmpeg pass for {File} (exit {Exit}){Note}",
                     textPositions.Count, Path.GetFileName(mediaPath), batchExit,
                     retryPerStream ? " — per-stream retry for empty streams" : string.Empty);
             }
@@ -1157,7 +1157,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     // F-M255: the stream could not be located in the unfiltered list — without this
                     // line the position simply vanished from the run.
-                    LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] SKIP {File} — subtitle stream not in the unfiltered list", Path.GetFileName(mediaPath));
+                    LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] SKIP {File} — subtitle stream not in the unfiltered list", Path.GetFileName(mediaPath));
                     continue;
                 }
 
@@ -1181,7 +1181,7 @@ public sealed class UploadPipeline : IPackFiller
                     {
                         summary.SkippedStreams++;
                         summary.RejectedCandidates++; // F-M286
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File}: untagged stream s{Pos} — resolve-und disabled",
+                        LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] SKIP {File}: untagged stream s{Pos} — resolve-und disabled",
                             Path.GetFileName(mediaPath), subPos);
                         // One row, one verdict: the stream is rejected with und-off. There is no
                         // second "settled" row to keep in sync — terminality is derived from this one.
@@ -1209,7 +1209,7 @@ public sealed class UploadPipeline : IPackFiller
                         mediaHash, subPos, rawLang, Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream),
                         SubtitleStatus.Rejected, reason: RejectReason.UnmappedLanguage));
                     // F-M255: the registry row above is not visible in the log — name the tag.
-                    LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] SKIP {File} s{Pos} — unmappable language tag {Tag}", Path.GetFileName(mediaPath), subPos, rawLang);
+                    LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] SKIP {File} s{Pos} — unmappable language tag {Tag}", Path.GetFileName(mediaPath), subPos, rawLang);
                     continue;
                 }
 
@@ -1229,7 +1229,7 @@ public sealed class UploadPipeline : IPackFiller
                         mediaHash, subPos, lang, streamHi,
                         SubtitleStatus.Rejected, reason: RejectReason.SelfEcho));
                     // F-M255: one line per discarded stream, whatever the reason.
-                    LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] SKIP {File} s{Pos} [{Lang}] — duplicate-self-echo (pair already uploaded, HI={Hi})", Path.GetFileName(mediaPath), subPos, lang, streamHi);
+                    LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] SKIP {File} s{Pos} [{Lang}] — duplicate-self-echo (pair already uploaded, HI={Hi})", Path.GetFileName(mediaPath), subPos, lang, streamHi);
                     continue;
                 }
 
@@ -1254,7 +1254,7 @@ public sealed class UploadPipeline : IPackFiller
                     if (settleVerdict == ContentSettle.Settled)
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
+                            "[Sub Scribe] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
                             Path.GetFileName(mediaPath), lang);
 
                         continue;
@@ -1264,7 +1264,7 @@ public sealed class UploadPipeline : IPackFiller
                     {
                         // Kein neues Urteil, kein Reject: die Spur wird neu gelesen und geht an die Kette.
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL] REPLAY {File} s{Pos} [{Lang}] — rejected as duplicate-content earlier, still open for {Sources} (F-M500)",
+                            "[Sub Scribe] REPLAY {File} s{Pos} [{Lang}] — rejected as duplicate-content earlier, still open for {Sources} (F-M500)",
                             Path.GetFileName(mediaPath), subPos, lang, settleOpen);
                     }
                     else
@@ -1273,7 +1273,7 @@ public sealed class UploadPipeline : IPackFiller
                         summary.RejectedCandidates++; // F-M286
                         // Known reject for THIS position — carry the original reason forward verbatim
                         // instead of replacing it with a generic note, so the cause stays readable.
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(mediaPath), lang, ExplainReject(rejectReason));
+                        LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(mediaPath), lang, ExplainReject(rejectReason));
 
                         continue;
                     }
@@ -1287,7 +1287,7 @@ public sealed class UploadPipeline : IPackFiller
                 if (srt == null && retryPerStream)
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL] per-stream retry after the failed one-pass call: {File} stream {Pos}",
+                        "[Sub Scribe] per-stream retry after the failed one-pass call: {File} stream {Pos}",
                         Path.GetFileName(mediaPath), subPos);
                     srt = await ExtractSingleStreamAsync(mediaPath, subPos, runCt).ConfigureAwait(false);
                 }
@@ -1296,7 +1296,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     summary.Failed++;
                     ReportOutcome(item, ItemOutcome.RealFailure);
-                    _logger.LogError("[SubDL] EXTRACTION FAILED {File} stream {Pos}", Path.GetFileName(mediaPath), subPos);
+                    _logger.LogError("[Sub Scribe] EXTRACTION FAILED {File} stream {Pos}", Path.GetFileName(mediaPath), subPos);
                     continue;
                 }
 
@@ -1318,7 +1318,7 @@ public sealed class UploadPipeline : IPackFiller
                     {
                         summary.SkippedStreams++;
                         summary.RejectedCandidates++; // F-M286
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File}: untagged stream s{Pos} — too small to detect a language ({Bytes} bytes)",
+                        LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] SKIP {File}: untagged stream s{Pos} — too small to detect a language ({Bytes} bytes)",
                             Path.GetFileName(mediaPath), subPos, srt.Length);
                         // Persist the skip so the file can reach file-complete —
                         // otherwise und-skips never learn a pair and the file is re-walked forever.
@@ -1334,7 +1334,7 @@ public sealed class UploadPipeline : IPackFiller
                     {
                         summary.SkippedStreams++;
                         summary.RejectedCandidates++; // F-M286
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File}: untagged stream s{Pos} — language could not be detected ({Bytes} bytes)",
+                        LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] SKIP {File}: untagged stream s{Pos} — language could not be detected ({Bytes} bytes)",
                             Path.GetFileName(mediaPath), subPos, srt.Length);
                         // Same — persist detection failures so files can complete.
                         string undContentHashFm87 = ContentHashRegistry.ComputeHash(srt);
@@ -1345,7 +1345,7 @@ public sealed class UploadPipeline : IPackFiller
                     }
 
                     lang = detected;
-                    LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] {File}: untagged stream s{Pos} — detected language {Lang} ({Bytes} bytes)",
+                    LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] {File}: untagged stream s{Pos} — detected language {Lang} ({Bytes} bytes)",
                         Path.GetFileName(mediaPath), subPos, lang, srt.Length);
                 }
 
@@ -1373,7 +1373,7 @@ public sealed class UploadPipeline : IPackFiller
                     summary.SkippedStreams++;
                     summary.RejectedCandidates++; // F-M286
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL] SKIP {File} — forced subtitle, observed but never uploaded (F-M284)",
+                        "[Sub Scribe] SKIP {File} — forced subtitle, observed but never uploaded (F-M284)",
                         Path.GetFileName(loosePath));
                     continue;
                 }
@@ -1386,7 +1386,7 @@ public sealed class UploadPipeline : IPackFiller
 
                 if (!AnyUploadSourceStillWants(mediaHash, looseLang, looseHi, isSeries))
                 {
-                    LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] Loose SRT already uploaded — skipping: {File} ({Lang}{Hi})", Path.GetFileName(loosePath), looseLang, looseHi ? ",HI" : "");
+                    LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] Loose SRT already uploaded — skipping: {File} ({Lang}{Hi})", Path.GetFileName(loosePath), looseLang, looseHi ? ",HI" : "");
                     continue;
                 }
 
@@ -1400,7 +1400,7 @@ public sealed class UploadPipeline : IPackFiller
                 catch
                 {
                     summary.Failed++;
-                    LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] SKIP {Path} — sidecar unreadable", loosePath);
+                    LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] SKIP {Path} — sidecar unreadable", loosePath);
                     continue;
                 }
 
@@ -1421,7 +1421,7 @@ public sealed class UploadPipeline : IPackFiller
                     if (looseSettle == ContentSettle.Settled)
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
+                            "[Sub Scribe] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
                             Path.GetFileName(loosePath), looseLang);
 
                         continue;
@@ -1430,14 +1430,14 @@ public sealed class UploadPipeline : IPackFiller
                     if (looseSettle == ContentSettle.DueForAnotherSource)
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL] REPLAY {File} [{Lang}] — rejected as duplicate-content earlier, still open for {Sources} (F-M500)",
+                            "[Sub Scribe] REPLAY {File} [{Lang}] — rejected as duplicate-content earlier, still open for {Sources} (F-M500)",
                             Path.GetFileName(loosePath), looseLang, looseOpen);
                     }
                     else
                     {
                         summary.SkippedStreams++;
                         summary.RejectedCandidates++; // F-M286
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(loosePath), looseLang, ExplainReject(looseReject));
+                        LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(loosePath), looseLang, ExplainReject(looseReject));
 
                         continue;
                     }
@@ -1474,7 +1474,7 @@ public sealed class UploadPipeline : IPackFiller
                             summary.SkippedStreams++;
                             summary.RejectedCandidates++; // F-M286
                             LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL] SKIP {File} — sidecar names no language and resolve-und is disabled",
+                                "[Sub Scribe] SKIP {File} — sidecar names no language and resolve-und is disabled",
                                 Path.GetFileName(loosePath));
                             string offHash = ContentHashRegistry.ComputeHash(looseSrt);
                             Registry.MarkAndFlush(() => Registry.MarkSidecar(
@@ -1489,7 +1489,7 @@ public sealed class UploadPipeline : IPackFiller
                             summary.SkippedStreams++;
                             summary.RejectedCandidates++; // F-M286
                             LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL] SKIP {File} — sidecar names no language and is too small to detect one ({Bytes} bytes)",
+                                "[Sub Scribe] SKIP {File} — sidecar names no language and is too small to detect one ({Bytes} bytes)",
                                 Path.GetFileName(loosePath), looseSrt.Length);
                             string smallHash = ContentHashRegistry.ComputeHash(looseSrt);
                             Registry.MarkAndFlush(() => Registry.MarkSidecar(
@@ -1505,7 +1505,7 @@ public sealed class UploadPipeline : IPackFiller
                             summary.SkippedStreams++;
                             summary.RejectedCandidates++; // F-M286
                             LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL] SKIP {File} — sidecar names no language and none could be detected ({Bytes} bytes)",
+                                "[Sub Scribe] SKIP {File} — sidecar names no language and none could be detected ({Bytes} bytes)",
                                 Path.GetFileName(loosePath), looseSrt.Length);
                             string failHash = ContentHashRegistry.ComputeHash(looseSrt);
                             Registry.MarkAndFlush(() => Registry.MarkSidecar(
@@ -1517,7 +1517,7 @@ public sealed class UploadPipeline : IPackFiller
 
                         looseLangResolved = looseDetected;
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL] {File}: sidecar names no language — detected {Lang} ({Bytes} bytes)",
+                            "[Sub Scribe] {File}: sidecar names no language — detected {Lang} ({Bytes} bytes)",
                             Path.GetFileName(loosePath), looseDetected, looseSrt.Length);
                     }
 
@@ -1528,7 +1528,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     summary.Failed++;
                     ReportOutcome(item, ItemOutcome.RealFailure);
-                    _logger.LogError("[SubDL] READ FAILED {File}: {Msg}", Path.GetFileName(loosePath), ex.Message);
+                    _logger.LogError("[Sub Scribe] READ FAILED {File}: {Msg}", Path.GetFileName(loosePath), ex.Message);
                 }
             }
 
@@ -1540,7 +1540,7 @@ public sealed class UploadPipeline : IPackFiller
                 // from it this run. Previously the early continue bypassed the
                 // per-file verdict and the card showed 0 files skipped forever.
                 summary.FilesSkipped++;
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] SKIP {File} — no stream survived local screening (F-M69)", Path.GetFileName(mediaPath));
+                LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] SKIP {File} — no stream survived local screening (F-M69)", Path.GetFileName(mediaPath));
                 progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
                 continue;
             }
@@ -1582,7 +1582,7 @@ public sealed class UploadPipeline : IPackFiller
                     {
                         summary.SkippedStreams++;
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
+                            "[Sub Scribe] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
                             Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang);
 
                         continue;
@@ -1592,7 +1592,7 @@ public sealed class UploadPipeline : IPackFiller
                     {
                         // Dieselbe Sprache, eine Quelle ohne den Inhalt: der Kandidat laeuft weiter.
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL] DUE {File} [{Lang}] — content already up elsewhere, still open for {Sources} (F-M500)",
+                            "[Sub Scribe] DUE {File} [{Lang}] — content already up elsewhere, still open for {Sources} (F-M500)",
                             Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang, qaOpen);
 
                         qaSurvivors.Add(correctedLang != null
@@ -1611,7 +1611,7 @@ public sealed class UploadPipeline : IPackFiller
                     // run-end otherwise lost the entry; live, the 12:03 MS-mismatch vanished on the
                     // 12:05 deploy restart).
 
-                    LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang, ExplainReject(qaReject));
+                    LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang, ExplainReject(qaReject));
 
                     continue;
                 }
@@ -1619,7 +1619,7 @@ public sealed class UploadPipeline : IPackFiller
                 if (correctedLang != null)
                 {
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL] LANGUAGE {File} — tagged {Tag}, detected {Lang}; uploaded under {Lang} (F-M375)",
+                        "[Sub Scribe] LANGUAGE {File} — tagged {Tag}, detected {Lang}; uploaded under {Lang} (F-M375)",
                         Path.GetFileName(cand.IsLoose ? cand.LoosePath : mediaPath), cand.Lang, correctedLang, correctedLang);
                     qaSurvivors.Add((cand.IsLoose, cand.Stream, cand.SubPos, cand.LoosePath, correctedLang, cand.Srt, cand.HearingImpaired, cand.Forced));
                     continue;
@@ -1678,7 +1678,7 @@ public sealed class UploadPipeline : IPackFiller
                     isSeries, imdbId!, season, episode, cand.Lang, ContentHashRegistry.ComputeHash(cand.Srt), cand.HearingImpaired);
 
                 // F-M496 (Operator-Anweisung 15.11.2026): der Trockenlauf spielt die KETTE durch, nicht
-                // mehr ein einzelnes Ziel. Hier stand bis jetzt EINE Zeile "[SubDL] DRY-RUN would
+                // mehr ein einzelnes Ziel. Hier stand bis jetzt EINE Zeile "[Sub Scribe] DRY-RUN would
                 // upload …" — sie verschwieg, dass seit F-M495 zwei Endpunkte hintereinander gefragt
                 // werden, und damit auch den zweiten Schalter. Jetzt bekommt jede Quelle ihre eigene
                 // Zeile, in derselben Reihenfolge, in der die Kette sie fragen würde, und erst NACHDEM
@@ -1705,7 +1705,7 @@ public sealed class UploadPipeline : IPackFiller
                         // hoch."): dass die Film-Adresse der Familie NICHT sendet, ist im Trockenlauf
                         // eine Auskunft und keine Stille. Sie sagt, warum nichts rausgeht.
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL] DRY-RUN {Name} [{Lang}] — source {Source} not sent: that source is switched off",
+                            "[Sub Scribe] DRY-RUN {Name} [{Lang}] — source {Source} not sent: that source is switched off",
                             neutralName, cand.Lang, Api.Endpoints.Provenance.Name(quelle));
                         continue;
                     }
@@ -1717,7 +1717,7 @@ public sealed class UploadPipeline : IPackFiller
                     if (!Api.Endpoints.UploadGate.May(dryGate, quelle))
                     {
                         LogUtil.PerItem(_config.LogMode, _logger,
-                            "[SubDL] {Name} [{Lang}] — source {Source} skipped: {Reason}",
+                            "[Sub Scribe] {Name} [{Lang}] — source {Source} skipped: {Reason}",
                             neutralName, cand.Lang, Api.Endpoints.Provenance.Name(quelle),
                             Api.Endpoints.Provenance.MayUploadTo(dryHerkunft, quelle)
                                 ? "already-uploaded:" + Api.Endpoints.Provenance.Name(quelle)
@@ -1766,7 +1766,7 @@ public sealed class UploadPipeline : IPackFiller
                 // Check stop marker also between streams of the same item.
                 if (PipelineStopSignal.IsStopped(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: true, runCt))
                 {
-                    LogUtil.Normal(_logger, "[SubDL] upload: user stop requested mid-item — finishing current run.");
+                    LogUtil.Normal(_logger, "[Sub Scribe] upload: user stop requested mid-item — finishing current run.");
                     summary.StopRequested = true;
                     break;
                 }
@@ -1810,7 +1810,7 @@ public sealed class UploadPipeline : IPackFiller
                             SubtitleStatus.Rejected, contentHash: contentHash, reason: RejectReason.SelfEcho));
                     }
 
-                    LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason} (registry gate)", gateFrueh.SkipReason, Path.GetFileName(fileName), cand.Lang);
+                    LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] SKIP {File} [{Lang}] — {Reason} (registry gate)", gateFrueh.SkipReason, Path.GetFileName(fileName), cand.Lang);
 
                     continue;
                 }
@@ -1876,7 +1876,11 @@ public sealed class UploadPipeline : IPackFiller
                                 SubtitleStatus.Uploaded, contentHash: ContentHashRegistry.ComputeHash(cand.Srt)));
                         }
 
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] UPLOADED {File} [{Lang}]", Path.GetFileName(fileName), cand.Lang);
+                        // F-M550 (Operator-Frage 16.11.2026: „Wieso steht im log dass nach subdl
+                        // hochgeladen wurde, lädt er nicht gerade zu tvst?"): die Zeile nannte die
+                        // Quelle nicht — nur das alte Präfix [SubDL] stand davor, und das liest sich wie
+                        // „nach SubDL geladen". Jetzt steht die Quelle in der Zeile.
+                        LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] UPLOADED {File} [{Lang}] → {Source}", Path.GetFileName(fileName), cand.Lang, QuellName(result));
 
                         break;
                     case { SkippedItem: true }:
@@ -1905,7 +1909,7 @@ public sealed class UploadPipeline : IPackFiller
                         {
                             summary.SkippedStreams++;
                             LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
+                                "[Sub Scribe] SETTLED {File} [{Lang}] — identical subtitle already uploaded earlier (F-M298)",
                                 Path.GetFileName(fileName), cand.Lang);
 
                             break;
@@ -1918,7 +1922,7 @@ public sealed class UploadPipeline : IPackFiller
                             // offen, statt quellenneutral verworfen zu werden (F-M500).
                             summary.SkippedStreams++;
                             LogUtil.PerItem(_config.LogMode, _logger,
-                                "[SubDL] DUE {File} [{Lang}] — content already up elsewhere, still open for {Sources} (F-M500)",
+                                "[Sub Scribe] DUE {File} [{Lang}] — content already up elsewhere, still open for {Sources} (F-M500)",
                                 Path.GetFileName(fileName), cand.Lang, skipOpen);
 
                             break;
@@ -1931,19 +1935,19 @@ public sealed class UploadPipeline : IPackFiller
                         // as failures, not skips) keep the stream due.
                         // The reject row itself was already written by RecordSkippedContent above.
 
-                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(fileName), cand.Lang, ExplainReject(result.Reason));
+                        LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] SKIP {File} [{Lang}] → {Source} — {Reason}", Path.GetFileName(fileName), cand.Lang, QuellName(result), ExplainReject(result.Reason));
 
                         break;
                     default:
                         summary.Failed++;
                         itemHadFailures = true; // F-M88c: failure blocks file-complete marker
-                        _logger.LogError("[SubDL] UPLOAD FAILED {File} [{Lang}]: {Reason}", Path.GetFileName(fileName), cand.Lang, result.Reason);
+                        _logger.LogError("[Sub Scribe] UPLOAD FAILED {File} [{Lang}] → {Source}: {Reason}", Path.GetFileName(fileName), cand.Lang, QuellName(result), result.Reason);
                         break;
                 }
 
                 if (_api.AuthBroken)
                 {
-                    _logger.LogError("[SubDL] API key rejected (403) — upload stopped, check credentials.");
+                    _logger.LogError("[Sub Scribe] API key rejected (403) — upload stopped, check credentials.");
                     return summary;
                 }
 
@@ -1953,7 +1957,7 @@ public sealed class UploadPipeline : IPackFiller
                 // hourly budget is available.
                 if (_api.HourlyUploadCapHit)
                 {
-                    _logger.LogWarning("[SubDL] Upload hourly cap (500/h) — run stopped, next hourly budget.");
+                    _logger.LogWarning("[Sub Scribe] Upload hourly cap (500/h) — run stopped, next hourly budget.");
                     _api.ResetHourlyCapFlag();
                     ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: true, DateTime.UtcNow);
                     return summary;
@@ -1964,7 +1968,7 @@ public sealed class UploadPipeline : IPackFiller
                     // Arrival runs never wait out the daily limit
                     if (IsArrivalRun)
                     {
-                        _logger.LogWarning("[SubDL] Daily limit (429), arrival run — pass stopped, next scheduled run.");
+                        _logger.LogWarning("[Sub Scribe] Daily limit (429), arrival run — pass stopped, next scheduled run.");
                         return summary;
                     }
 
@@ -1976,7 +1980,7 @@ public sealed class UploadPipeline : IPackFiller
                     else
                     {
                         var fireInfoUp = ScheduledTasks.SubdlSchedulerCoordinator.Instance?.GetPendingFireUtc(upload: true);
-                        _logger.LogWarning("[SubDL] SubDL account daily limit (HTTP 429) — stopping upload run early. Restart: {FireLocal} local time.{Pending}",
+                        _logger.LogWarning("[Sub Scribe] SubDL account daily limit (HTTP 429) — stopping upload run early. Restart: {FireLocal} local time.{Pending}",
                             fireInfoUp?.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) ?? "see scheduler log", fireInfoUp.HasValue ? string.Empty : " (no pending fire — will re-fire at next scheduled run)");
                         summary.QuotaStopped++;
                         return summary;
@@ -2001,7 +2005,7 @@ public sealed class UploadPipeline : IPackFiller
             if (itemHadCandidates && !itemHadFailures && mediaHash != null)
             {
                 Registry.MarkAndFlush(() => Registry.MarkSubtitlesUploaded(mediaHash));
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] FILE COMPLETE {File} — all streams settled", Path.GetFileName(mediaPath));
+                LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] FILE COMPLETE {File} — all streams settled", Path.GetFileName(mediaPath));
             }
 
             // Per-file verdict for the status card ("X subtitles in Y files").
@@ -2048,12 +2052,12 @@ public sealed class UploadPipeline : IPackFiller
 
         if (summary.IsDryRun)
         {
-            LogUtil.Normal(_logger, "[SubDL] upload: finished — lock released. DRY-RUN would have uploaded {N} | {Rejected} rejected, {Skipped} stream(s) skipped",
+            LogUtil.Normal(_logger, "[Sub Scribe] upload: finished — lock released. DRY-RUN would have uploaded {N} | {Rejected} rejected, {Skipped} stream(s) skipped",
                 summary.Uploaded, summary.RejectedCandidates, summary.SkippedStreams);
         }
         else
         {
-            LogUtil.Normal(_logger, "[SubDL] upload: finished — lock released. {N} uploaded | {Rejected} rejected, {Skipped} stream(s) skipped",
+            LogUtil.Normal(_logger, "[Sub Scribe] upload: finished — lock released. {N} uploaded | {Rejected} rejected, {Skipped} stream(s) skipped",
                 summary.Uploaded, summary.RejectedCandidates, summary.SkippedStreams);
         }
 
@@ -2067,7 +2071,7 @@ public sealed class UploadPipeline : IPackFiller
             // statistics. Return the partial summary instead — the uploads DID reach SubDL.
             // The cancellation is not swallowed: the caller still learns about it through
             // StopRequested/the stop marker and aborts the cycle.
-            LogUtil.Normal(_logger, "[SubDL] upload: cancelled — keeping the partial result. {N} uploaded", summary.Uploaded);
+            LogUtil.Normal(_logger, "[Sub Scribe] upload: cancelled — keeping the partial result. {N} uploaded", summary.Uploaded);
             summary.StopRequested = true;
             return summary;
         }
@@ -2077,7 +2081,7 @@ public sealed class UploadPipeline : IPackFiller
             int workFiles = _workFiles.Purge();
             if (workFiles > 0)
             {
-                _logger.LogDebug("[SubDL] upload: {Count} working file(s) of this run removed.", workFiles);
+                _logger.LogDebug("[Sub Scribe] upload: {Count} working file(s) of this run removed.", workFiles);
             }
 
             // F-M445 (operator decision 02.11.2026): the end of every upload run re-arms the upload
@@ -2105,7 +2109,7 @@ public sealed class UploadPipeline : IPackFiller
                 // An order someone else placed stays untouched — this run does not own it.
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] upload: nothing uploaded — no postprocessing order armed (F-M465).");
+                    "[Sub Scribe] upload: nothing uploaded — no postprocessing order armed (F-M465).");
             }
 
             PipelineRunLock.Release(_logger, "upload");
@@ -2489,7 +2493,7 @@ public sealed class UploadPipeline : IPackFiller
             LogUtil.PerItem(
                 _config.LogMode,
                 _logger,
-                "[SubDL] SKIP {File} [{Lang}] — carried by the pack built in this run, no single beside it (F-M429).",
+                "[Sub Scribe] SKIP {File} [{Lang}] — carried by the pack built in this run, no single beside it (F-M429).",
                 Path.GetFileName(mediaPath), lang);
             return UploadResult.Skipped("pack-carries-it");
         }
@@ -2561,7 +2565,7 @@ public sealed class UploadPipeline : IPackFiller
         // door, so a caller that arrives here in dry mode still sends nothing.
         if (_config.DryRun)
         {
-            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL] DRY-RUN would upload {Name} [{Lang}]", neutralName, lang);
+            LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] DRY-RUN would upload {Name} [{Lang}]", neutralName, lang);
 
             return UploadResult.Skipped("dry-run");
         }
@@ -2595,7 +2599,7 @@ public sealed class UploadPipeline : IPackFiller
             Registry.IsUploadedTo(mediaHash, lang, hearingImpaired, Configuration.SubtitleProvider.MovieSubtitles));
         if (gate.SkipReason is not null)
         {
-            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] {Name} [{Lang}] — skipped: {Reason}",
+            LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] {Name} [{Lang}] — skipped: {Reason}",
                 neutralName, lang, gate.SkipReason);
             return UploadResult.Skipped(gate.SkipReason);
         }
@@ -2605,7 +2609,7 @@ public sealed class UploadPipeline : IPackFiller
         if (Api.Endpoints.Provenance.OriginBlockedReason(herkunft) is { } herkunftGesperrt)
         {
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL] {Name} [{Lang}] — {Reason}", neutralName, lang, herkunftGesperrt);
+                "[Sub Scribe] {Name} [{Lang}] — {Reason}", neutralName, lang, herkunftGesperrt);
         }
 
         // F-M495 (Operator-Anweisung 15.11.2026) / F-M509 (Klärstellung: „Tvst is splitted into tvst and
@@ -2632,7 +2636,7 @@ public sealed class UploadPipeline : IPackFiller
             if (!SourceAllowed(quelle))
             {
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL] {Name} [{Lang}] — source {Source} skipped: that source is switched off, nothing sent",
+                    "[Sub Scribe] {Name} [{Lang}] — source {Source} skipped: that source is switched off, nothing sent",
                     neutralName, lang, Api.Endpoints.Provenance.Name(quelle));
                 continue;
             }
@@ -2646,7 +2650,7 @@ public sealed class UploadPipeline : IPackFiller
             if (!_config.DryRun && !_config.IsConfiguredForUpload(quelle))
             {
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL] {Name} [{Lang}] — source {Source} skipped — not configured (required for SubDL only)",
+                    "[Sub Scribe] {Name} [{Lang}] — source {Source} skipped — not configured (required for SubDL only)",
                     neutralName, lang, Api.Endpoints.Provenance.Name(quelle));
                 continue;
             }
@@ -2658,7 +2662,7 @@ public sealed class UploadPipeline : IPackFiller
             if (!Api.Endpoints.UploadGate.May(gate, quelle))
             {
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL] {Name} [{Lang}] — source {Source} skipped: {Reason}",
+                    "[Sub Scribe] {Name} [{Lang}] — source {Source} skipped: {Reason}",
                     neutralName, lang, Api.Endpoints.Provenance.Name(quelle),
                     Api.Endpoints.Provenance.MayUploadTo(herkunft, quelle)
                         ? "already-uploaded:" + Api.Endpoints.Provenance.Name(quelle)
@@ -2676,6 +2680,10 @@ public sealed class UploadPipeline : IPackFiller
                         quelle, srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId,
                         isSeries, season, episode, hearingImpaired, mediaHash, mediaPath, framerate, ct)
                     .ConfigureAwait(false);
+
+                // F-M550: die antwortende Quelle reist im Ergebnis mit — der Aufrufer weiss sonst nicht,
+                // wer genommen hat, und schrieb frueher nur das alte Praefix „[SubDL]" davor.
+                ergebnisse[quelle].Source = quelle;
             }
             catch (OperationCanceledException)
             {
@@ -2687,7 +2695,7 @@ public sealed class UploadPipeline : IPackFiller
                 // verhindern. Das Ergebnis der Quelle ist ihr eigener Fehlschlag — die Kette laeuft
                 // weiter, und niemand sonst erbt den Fehler.
                 _logger.LogWarning(
-                    "[SubDL] upload to {Source} failed for {Name} [{Lang}]: {Msg} — the next source is still tried.",
+                    "[Sub Scribe] upload to {Source} failed for {Name} [{Lang}]: {Msg} — the next source is still tried.",
                     Api.Endpoints.Provenance.Name(quelle), neutralName, lang, ex.Message);
                 ergebnisse[quelle] = UploadResult.Failed(ex.Message);
             }
@@ -2773,7 +2781,7 @@ public sealed class UploadPipeline : IPackFiller
                 // replaces it, so it is named on the upload — not only when it had to be fetched.
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] upload id {Id} from the upload answer for {File} [{Lang}].",
+                    "[Sub Scribe] upload id {Id} from the upload answer for {File} [{Lang}].",
                     uploadId, Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
             }
             else if (subdlGenommen)
@@ -2784,7 +2792,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] upload id {Id} taken from mySubtitles for {File} [{Lang}] — without it the single could never be deleted when a pack replaces it.",
+                        "[Sub Scribe] upload id {Id} taken from mySubtitles for {File} [{Lang}] — without it the single could never be deleted when a pack replaces it.",
                         uploadId, Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
                 }
                 else
@@ -2792,7 +2800,7 @@ public sealed class UploadPipeline : IPackFiller
                     // F-M421: silence was the wrong answer here — the row is written with a NULL id,
                     // and nobody would ever learn why its pack could not delete the single.
                     _logger.LogWarning(
-                        "[SubDL] no upload id for {File} [{Lang}] — this single stays beside a pack that replaces it, because there is no handle to delete it.",
+                        "[Sub Scribe] no upload id for {File} [{Lang}] — this single stays beside a pack that replaces it, because there is no handle to delete it.",
                         Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
                 }
             }
@@ -2862,7 +2870,7 @@ public sealed class UploadPipeline : IPackFiller
         }
         else if (_api.ServerRateLimited)
         {
-            _logger.LogWarning("[SubDL] SubDL account daily limit (HTTP 429) — upload run should stop early.");
+            _logger.LogWarning("[Sub Scribe] SubDL account daily limit (HTTP 429) — upload run should stop early.");
         }
 
         return result;
@@ -2886,11 +2894,11 @@ public sealed class UploadPipeline : IPackFiller
     /// </summary>
     private void OnTmdbTrace(string msg)
     {
-        LogUtil.Trace(_config.LogMode, _logger, "{Tag} {Msg}", "[SubDL]", msg);
+        LogUtil.Trace(_config.LogMode, _logger, "{Tag} {Msg}", "[Sub Scribe]", msg);
     }
 
     /// <summary>F-M24a: per-API-call trace → LogLevel.Debug (never Normal/Verbose).</summary>
-    private void OnApiTrace(string msg) => LogUtil.Detail(_config.LogMode, _logger, "[SubDL] {Msg}", msg);
+    private void OnApiTrace(string msg) => LogUtil.Detail(_config.LogMode, _logger, "[Sub Scribe] {Msg}", msg);
 
     /// <summary>
     /// F-M232: routes the API client's LogInfo channel into the run log. Login retries,
@@ -2898,7 +2906,7 @@ public sealed class UploadPipeline : IPackFiller
     /// own Debug mode so Normal stays a lifecycle-only log.
     /// </summary>
     /// <param name="msg">Message from the API client.</param>
-    private void OnApiLog(string msg) => LogUtil.Detail(_config.LogMode, _logger, "[SubDL] {Msg}", msg);
+    private void OnApiLog(string msg) => LogUtil.Detail(_config.LogMode, _logger, "[Sub Scribe] {Msg}", msg);
 
     private async Task<bool> WaitOutDailyLimitAsync(RunWatchdog watchdog, CancellationToken ct)
     {
@@ -2907,7 +2915,7 @@ public sealed class UploadPipeline : IPackFiller
             // F-M152 (rev.10, user decision 17.09.2026): tick OFF = clean stop,
             // NO recovery fire. Items stay due; the next trigger is an arrival
             // event or the weekly anchor. (Old F-M65 fire-on-tick-off removed.)
-            LogUtil.Normal(_logger, "[SubDL] Daily limit reached — continue-after-limit is OFF: clean stop, no recovery fire (F-M152).");
+            LogUtil.Normal(_logger, "[Sub Scribe] Daily limit reached — continue-after-limit is OFF: clean stop, no recovery fire (F-M152).");
             return false;
         }
 
@@ -2921,7 +2929,7 @@ public sealed class UploadPipeline : IPackFiller
             _api.ResetRateLimitFlag();
             ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: true, DateTime.UtcNow);
             _logger.LogWarning(
-                "[SubDL] 429 is a short-term rate limit — search allowance still has {Remaining}/{Limit} left; "
+                "[Sub Scribe] 429 is a short-term rate limit — search allowance still has {Remaining}/{Limit} left; "
                 + "run respaced by JobSpacingMinutes, items stay due (F-M238).",
                 _api.Quota?.SearchRemaining, _api.Quota?.SearchLimit);
             return false;
@@ -2937,13 +2945,13 @@ public sealed class UploadPipeline : IPackFiller
             var nowUtc = DateTime.UtcNow;
             reset = nowUtc.Date.AddDays(1); // next 00:00 UTC
             LogUtil.Normal(_logger, 
-                "[SubDL] Daily limit reached without a server-reported reset time — waiting until {ResetUtc} UTC (next UTC midnight) instead.",
+                "[Sub Scribe] Daily limit reached without a server-reported reset time — waiting until {ResetUtc} UTC (next UTC midnight) instead.",
                 reset.Value.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
         }
 
         if (_dailyLimitWaits >= 1)
         {
-            _logger.LogWarning("[SubDL] Daily limit again — run stopped, next scheduled run.");
+            _logger.LogWarning("[Sub Scribe] Daily limit again — run stopped, next scheduled run.");
             return false;
         }
 
@@ -2974,7 +2982,7 @@ public sealed class UploadPipeline : IPackFiller
         string resetLocal = TimeZoneInfo.ConvertTimeFromUtc(effectiveReset, TimeZoneInfo.Local).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         var fireInfo = ScheduledTasks.SubdlSchedulerCoordinator.Instance?.GetPendingFireUtc(upload: true);
         _logger.LogWarning(
-            "[SubDL] Account daily limit reached - run stopped; reset ~{ResetLocal} local, recovery fire ~{Next} local (F-M152, F-M182).",
+            "[Sub Scribe] Account daily limit reached - run stopped; reset ~{ResetLocal} local, recovery fire ~{Next} local (F-M152, F-M182).",
             resetLocal,
             fireInfo.HasValue
                 ? TimeZoneInfo.ConvertTimeFromUtc(fireInfo.Value, TimeZoneInfo.Local).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)
@@ -2996,7 +3004,7 @@ public sealed class UploadPipeline : IPackFiller
         string configKey = config.FfmpegPath ?? string.Empty;
         if (_cachedFfmpegPath != null && _cachedFfmpegConfig == configKey)
         {
-            LogUtil.Detail(logger, "[SubDL] ffmpeg path from cache: {Path}", _cachedFfmpegPath);
+            LogUtil.Detail(logger, "[Sub Scribe] ffmpeg path from cache: {Path}", _cachedFfmpegPath);
             return _cachedFfmpegPath;
         }
 
@@ -3016,11 +3024,11 @@ public sealed class UploadPipeline : IPackFiller
             var configured = config.FfmpegPath.Trim();
             if (File.Exists(configured))
             {
-                LogUtil.Detail(config.LogMode, logger, "[SubDL] ffmpeg path from config override: {Path}", configured);
+                LogUtil.Detail(config.LogMode, logger, "[Sub Scribe] ffmpeg path from config override: {Path}", configured);
                 return configured;
             }
 
-            logger.LogWarning("[SubDL] configured ffmpeg override not found: {Path}, falling back to auto-detection", configured);
+            logger.LogWarning("[Sub Scribe] configured ffmpeg override not found: {Path}, falling back to auto-detection", configured);
         }
 
         // 2) PATH lookup via "which ffmpeg" / "where ffmpeg"
@@ -3030,7 +3038,7 @@ public sealed class UploadPipeline : IPackFiller
             var path = FindInPath(candidate);
             if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
             {
-                LogUtil.Detail(config.LogMode, logger, "[SubDL] ffmpeg path from PATH: {Path}", path);
+                LogUtil.Detail(config.LogMode, logger, "[Sub Scribe] ffmpeg path from PATH: {Path}", path);
                 return path;
             }
         }
@@ -3054,13 +3062,13 @@ public sealed class UploadPipeline : IPackFiller
         {
             if (File.Exists(candidate))
             {
-                LogUtil.Detail(logger, "[SubDL] ffmpeg path from static fallback: {Path}", candidate);
+                LogUtil.Detail(logger, "[Sub Scribe] ffmpeg path from static fallback: {Path}", candidate);
                 return candidate;
             }
         }
 
         // 5) last resort: keep "ffmpeg" and let the OS report the failure in the extraction log
-        logger.LogWarning("[SubDL] ffmpeg not found anywhere; extraction will fail until ffmpeg is installed or FfmpegPath is configured");
+        logger.LogWarning("[Sub Scribe] ffmpeg not found anywhere; extraction will fail until ffmpeg is installed or FfmpegPath is configured");
         return "ffmpeg";
     }
 
@@ -3192,7 +3200,7 @@ public sealed class UploadPipeline : IPackFiller
             using var proc = Process.Start(psi);
             if (proc == null)
             {
-                _logger.LogError("[SubDL] ffmpeg failed to start for {File}", Path.GetFileName(mediaPath));
+                _logger.LogError("[Sub Scribe] ffmpeg failed to start for {File}", Path.GetFileName(mediaPath));
                 return (result, -1);
             }
 
@@ -3205,7 +3213,7 @@ public sealed class UploadPipeline : IPackFiller
             if (proc.ExitCode != 0)
             {
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL] one-pass extraction of {File} exited {Exit}: {Err}",
+                    "[Sub Scribe] one-pass extraction of {File} exited {Exit}: {Err}",
                     Path.GetFileName(mediaPath), proc.ExitCode,
                     stderr.Length <= 300 ? stderr : stderr[..300]);
             }
@@ -3222,7 +3230,7 @@ public sealed class UploadPipeline : IPackFiller
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError("[SubDL] reading extracted stream {Idx} failed for {File}: {Msg}",
+                    _logger.LogError("[Sub Scribe] reading extracted stream {Idx} failed for {File}: {Msg}",
                         idx, Path.GetFileName(mediaPath), ex.Message);
                 }
             }
@@ -3235,7 +3243,7 @@ public sealed class UploadPipeline : IPackFiller
         }
         catch (Exception ex)
         {
-            _logger.LogError("[SubDL] one-pass extraction error for {File}: {Msg}",
+            _logger.LogError("[Sub Scribe] one-pass extraction error for {File}: {Msg}",
                 Path.GetFileName(mediaPath), ex.Message);
             foreach (int idx in subIndices)
             {
@@ -3283,7 +3291,7 @@ public sealed class UploadPipeline : IPackFiller
             using var proc = Process.Start(psi);
             if (proc == null)
             {
-                _logger.LogError("[SubDL] ffmpeg failed to start for {File}", Path.GetFileName(mediaPath));
+                _logger.LogError("[Sub Scribe] ffmpeg failed to start for {File}", Path.GetFileName(mediaPath));
                 return null;
             }
 
@@ -3291,7 +3299,7 @@ public sealed class UploadPipeline : IPackFiller
             await proc.WaitForExitAsync(ct).ConfigureAwait(false);
             if (proc.ExitCode != 0 || !File.Exists(tempSrt))
             {
-                _logger.LogError("[SubDL] ffmpeg extraction failed for {File} stream {Idx}: exit={Exit}, stderr: {Err}",
+                _logger.LogError("[Sub Scribe] ffmpeg extraction failed for {File} stream {Idx}: exit={Exit}, stderr: {Err}",
                     Path.GetFileName(mediaPath), subIndex, proc.ExitCode, stderr.Length <= 300 ? stderr : stderr[..300]);
                 return null;
             }
@@ -3300,7 +3308,7 @@ public sealed class UploadPipeline : IPackFiller
         }
         catch (Exception ex)
         {
-            _logger.LogError("[SubDL] ffmpeg extraction error for {File}: {Msg}", Path.GetFileName(mediaPath), ex.Message);
+            _logger.LogError("[Sub Scribe] ffmpeg extraction error for {File}: {Msg}", Path.GetFileName(mediaPath), ex.Message);
             return null;
         }
         finally
@@ -3363,7 +3371,7 @@ public sealed class UploadPipeline : IPackFiller
         }
         catch (Exception ex)
         {
-            LogUtil.Normal(_logger, "[SubDL] season pack: library query failed ({Msg}) — no season is packed this run.", ex.Message);
+            LogUtil.Normal(_logger, "[Sub Scribe] season pack: library query failed ({Msg}) — no season is packed this run.", ex.Message);
             return result;
         }
 
@@ -3411,7 +3419,7 @@ public sealed class UploadPipeline : IPackFiller
             }
         }
 
-        LogUtil.Normal(_logger, "[SubDL] season pack: {Count} season(s) with at least two episodes on disk.", present.Count);
+        LogUtil.Normal(_logger, "[Sub Scribe] season pack: {Count} season(s) with at least two episodes on disk.", present.Count);
         foreach (var entry in present)
         {
             if (entry.Value.Count < 2)
@@ -3425,7 +3433,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack skipped: {Imdb} S{Season} — no episode count (IMDb and TMDB both silent), stays single.",
+                    "[Sub Scribe] season pack skipped: {Imdb} S{Season} — no episode count (IMDb and TMDB both silent), stays single.",
                     entry.Key.Item1, entry.Key.Item2);
                 continue;
             }
@@ -3456,7 +3464,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: already up as a pack, nothing is extracted.",
+                        "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: already up as a pack, nothing is extracted.",
                         entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(language, hi));
                     continue;
                 }
@@ -3473,7 +3481,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: neither the store nor the files of every aired episode carry this language — no pack for it, the single uploads of this run are unaffected.",
+                        "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: neither the store nor the files of every aired episode carry this language — no pack for it, the single uploads of this run are unaffected.",
                         entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(language, hi));
                 }
             }
@@ -3525,7 +3533,7 @@ public sealed class UploadPipeline : IPackFiller
                     .ToList();
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack candidate: {Imdb} S{Season} — {Count} of {Aired} episode(s) on disk, season complete, release group {Group}.",
+                    "[Sub Scribe] season pack candidate: {Imdb} S{Season} — {Count} of {Aired} episode(s) on disk, season complete, release group {Group}.",
                     entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count, completeGroup);
             }
             else if (SeasonPack.IsComplete(aired, entry.Value))
@@ -3534,7 +3542,7 @@ public sealed class UploadPipeline : IPackFiller
                 // are unaffected; this is the pack's own refusal.
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack skipped: {Imdb} S{Season} — all {Aired} episode(s) are on disk but split over {Groups} release(s) ({List}), a pack carries one release, stays single.",
+                    "[Sub Scribe] season pack skipped: {Imdb} S{Season} — all {Aired} episode(s) are on disk but split over {Groups} release(s) ({List}), a pack carries one release, stays single.",
                     entry.Key.Item1, entry.Key.Item2, aired.Count, groupOf.Count,
                     string.Join(", ", groupOf.Select(g => $"{g.Key}: {g.Value.Count}")));
             }
@@ -3548,14 +3556,14 @@ public sealed class UploadPipeline : IPackFiller
                     .ToList();
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack candidate: {Imdb} S{Season} — release group {Group} supplies all {Aired} episode(s), season complete.",
+                    "[Sub Scribe] season pack candidate: {Imdb} S{Season} — release group {Group} supplies all {Aired} episode(s), season complete.",
                     entry.Key.Item1, entry.Key.Item2, completeGroup, aired.Count);
             }
             else
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack skipped: {Imdb} S{Season} — {Have} episode(s) on disk against {Aired} aired, no release group covers the season, stays single.",
+                    "[Sub Scribe] season pack skipped: {Imdb} S{Season} — {Have} episode(s) on disk against {Aired} aired, no release group covers the season, stays single.",
                     entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count);
             }
         }
@@ -3605,7 +3613,7 @@ public sealed class UploadPipeline : IPackFiller
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "[SubDL] could not read mySubtitles for the upload id.");
+            _logger.LogDebug(ex, "[Sub Scribe] could not read mySubtitles for the upload id.");
             return null;
         }
 
@@ -3643,7 +3651,7 @@ public sealed class UploadPipeline : IPackFiller
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "[SubDL] could not read myPublishedSubtitles for the upload id.");
+            _logger.LogDebug(ex, "[Sub Scribe] could not read myPublishedSubtitles for the upload id.");
             return null;
         }
 
@@ -3656,7 +3664,7 @@ public sealed class UploadPipeline : IPackFiller
             // /user/deletePublishedSubtitle expects; the upload id would miss the entry it belongs to.
             LogUtil.Normal(
                 _logger,
-                "[SubDL] entry id {Id} taken from myPublishedSubtitles for {File} [{Lang}] (upload id {UploadId}) — the submission list knows nothing, the published list names it (F-M432/F-M435).",
+                "[Sub Scribe] entry id {Id} taken from myPublishedSubtitles for {File} [{Lang}] (upload id {UploadId}) — the submission list knows nothing, the published list names it (F-M432/F-M435).",
                 byName.HandleId, file, lang, byName.UploadId);
             return byName.HandleId;
         }
@@ -3815,7 +3823,7 @@ public sealed class UploadPipeline : IPackFiller
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — the episode is not in the library, it does not join the pack.",
+                "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — the episode is not in the library, it does not join the pack.",
                 imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
             return null;
         }
@@ -3831,7 +3839,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — file {Nth} of {Count} joins the pack, the file(s) before it did not (F-M444).",
+                        "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — file {Nth} of {Count} joins the pack, the file(s) before it did not (F-M444).",
                         imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), index + 1, files.Count);
                 }
 
@@ -3842,7 +3850,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — file {Nth} of {Count} does not qualify ({Reason}), trying the next file of this episode (F-M444).",
+                    "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — file {Nth} of {Count} does not qualify ({Reason}), trying the next file of this episode (F-M444).",
                     imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), index + 1, files.Count, why);
             }
         }
@@ -3878,7 +3886,7 @@ public sealed class UploadPipeline : IPackFiller
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — no embedded text track for this language and variant, it does not join the pack.",
+                "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — no embedded text track for this language and variant, it does not join the pack.",
                 imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
             return (null, "no embedded text track for this language and variant");
         }
@@ -3900,7 +3908,7 @@ public sealed class UploadPipeline : IPackFiller
                 fillPositions = fillPositions.Where(position => !alreadyRefused.Contains(position)).ToList();
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — {Count} track(s) are already refused in the store, not extracted again (F-M443).",
+                    "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — {Count} track(s) are already refused in the store, not extracted again (F-M443).",
                     imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), alreadyRefused.Count);
             }
 
@@ -3908,7 +3916,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — every track of this language is already refused in the store, nothing is extracted (F-M443).",
+                    "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — every track of this language is already refused in the store, nothing is extracted (F-M443).",
                     imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
                 return (null, "every track of this language is already refused in the store");
             }
@@ -3961,7 +3969,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — track {Nth} of {Count} joins the pack, the tracks before it did not (F-M431).",
+                        "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — track {Nth} of {Count} joins the pack, the tracks before it did not (F-M431).",
                         imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), attempt + 1, fillPositions.Count);
                 }
 
@@ -3972,14 +3980,14 @@ public sealed class UploadPipeline : IPackFiller
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — track {Nth} of {Count} does not qualify ({Reason}), trying the next track of this language (F-M431).",
+                    "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — track {Nth} of {Count} does not qualify ({Reason}), trying the next track of this language (F-M431).",
                     imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), attempt + 1, fillPositions.Count, reason);
             }
         }
 
         LogUtil.Normal(
             _logger,
-            "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — none of the {Count} track(s) of this language qualifies ({Reason}), it does not join the pack.",
+            "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — none of the {Count} track(s) of this language qualifies ({Reason}), it does not join the pack.",
             imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired), fillPositions.Count, reason);
         return (null, reason);
     }
@@ -4060,7 +4068,7 @@ public sealed class UploadPipeline : IPackFiller
 
             LogUtil.Normal(
                 _logger,
-                "[SubDL] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — first publication: the pack carries this text up, no single went up before it (F-M429).",
+                "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} [{Lang}] — first publication: the pack carries this text up, no single went up before it (F-M429).",
                 imdbId, season, episode, SeasonPack.LangTag(lang, hearingImpaired));
         }
 
@@ -4224,7 +4232,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     // A season folder that cannot be read costs the pack, never the run.
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL] season pack filler: reading the season folder of {Imdb} S{Season} failed ({Msg}) — falling back to the library.",
+                        "[Sub Scribe] season pack filler: reading the season folder of {Imdb} S{Season} failed ({Msg}) — falling back to the library.",
                         imdbId, season, ex.Message);
                 }
             }
@@ -4296,7 +4304,7 @@ public sealed class UploadPipeline : IPackFiller
         catch (Exception ex)
         {
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL] season pack filler: stream list of {File} unavailable ({Msg}).",
+                "[Sub Scribe] season pack filler: stream list of {File} unavailable ({Msg}).",
                 Path.GetFileName(item.Path ?? item.Name), ex.Message);
             return positions;
         }
@@ -4494,7 +4502,7 @@ public sealed class UploadPipeline : IPackFiller
         catch (Exception ex)
         {
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL] season pack plan: the stream list of {File} is unavailable ({Msg}) — falling back to the store for its languages.",
+                "[Sub Scribe] season pack plan: the stream list of {File} is unavailable ({Msg}) — falling back to the store for its languages.",
                 Path.GetFileName(episode.Path ?? episode.Name), ex.Message);
         }
 
@@ -4559,7 +4567,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     // A file that cannot be hashed contributes no language — the season is not planned.
                     LogUtil.PerItem(_config.LogMode, _logger,
-                        "[SubDL] season pack plan: {File} could not be hashed ({Msg}) — no fill-only pack for {Imdb} S{Season}.",
+                        "[Sub Scribe] season pack plan: {File} could not be hashed ({Msg}) — no fill-only pack for {Imdb} S{Season}.",
                         Path.GetFileName(path ?? episode.Name), ex.Message, entry.Key.Item1, entry.Key.Item2);
                     continue;
                 }
@@ -4602,14 +4610,14 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] season pack plan: {Imdb} S{Season} [{Lang}] — already inside a pack, nothing is re-sent.",
+                        "[Sub Scribe] season pack plan: {Imdb} S{Season} [{Lang}] — already inside a pack, nothing is re-sent.",
                         entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(pair.Key.Lang, pair.Key.Hi));
                     continue;
                 }
 
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack closing: {Imdb} S{Season} [{Lang}] — every episode is uploaded, the container is built from the store.",
+                    "[Sub Scribe] season pack closing: {Imdb} S{Season} [{Lang}] — every episode is uploaded, the container is built from the store.",
                     entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(pair.Key.Lang, pair.Key.Hi));
                 planned.Add((entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi));
             }
@@ -4643,7 +4651,7 @@ public sealed class UploadPipeline : IPackFiller
 
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack plan: {Imdb} S{Season} — no language is uploaded for every episode, no pack is built. Closest: {Closest}. Episodes with no uploaded row at all: {WithoutRow}.",
+                    "[Sub Scribe] season pack plan: {Imdb} S{Season} — no language is uploaded for every episode, no pack is built. Closest: {Closest}. Episodes with no uploaded row at all: {WithoutRow}.",
                     entry.Key.Item1, entry.Key.Item2,
                     closest.Count == 0 ? "none" : string.Join(" | ", closest),
                     withoutRow.Count == 0 ? "none" : string.Join(",", withoutRow));
@@ -4682,7 +4690,7 @@ public sealed class UploadPipeline : IPackFiller
             packable.Add(entry.Key);
             LogUtil.Normal(
                 _logger,
-                "[SubDL] season pack plan: {Imdb} S{Season} — {Have} of {Count} episode(s) queued, the rest is filled from what is already uploaded.",
+                "[Sub Scribe] season pack plan: {Imdb} S{Season} — {Have} of {Count} episode(s) queued, the rest is filled from what is already uploaded.",
                 entry.Key.Item1, entry.Key.Item2, have.Count, entry.Value.Count);
         }
 
@@ -4881,7 +4889,7 @@ public sealed class UploadPipeline : IPackFiller
         {
             var spacing = JobSpacingMinutes();
             SubdlSchedulerCoordinator.Instance?.SchedulePostprocessFire(DateTime.UtcNow.AddMinutes(spacing));
-            LogUtil.Normal(logger, "[SubDL] Postprocessing deferred by {Spacing} min (global lock busy).", spacing);
+            LogUtil.Normal(logger, "[Sub Scribe] Postprocessing deferred by {Spacing} min (global lock busy).", spacing);
             return;
         }
 
@@ -4933,7 +4941,7 @@ public sealed class UploadPipeline : IPackFiller
         }
 
         var logger = loggerFactory.CreateLogger("SubDL-UploadPostprocessing");
-        LogUtil.Detail(logger, "[SubDL-Postprocessing] effective pacing: MinCallPauseSec={Pause} (no local call budget, F-M20).", cfg.MinCallPauseSec);
+        LogUtil.Detail(logger, "[Sub Scribe-Postprocessing] effective pacing: MinCallPauseSec={Pause} (no local call budget, F-M20).", cfg.MinCallPauseSec);
 
         try
         {
@@ -4960,7 +4968,7 @@ public sealed class UploadPipeline : IPackFiller
                 Password = cfg.Password,
                 ApiKey = cfg.ApiKey
             };
-            api.Log += msg => LogUtil.Detail(logger, "[SubDL-Postprocessing] {Msg}", msg);
+            api.Log += msg => LogUtil.Detail(logger, "[Sub Scribe-Postprocessing] {Msg}", msg);
 
             var limiter = new GlobalRateLimiter(cfg.UploadsPerHour, cfg.MinCallPauseSec);
 
@@ -4973,7 +4981,7 @@ public sealed class UploadPipeline : IPackFiller
             }
             catch (Exception ex)
             {
-                logger.LogWarning("[SubDL] Upload postprocessing login failed: {Msg}", ex.Message);
+                logger.LogWarning("[Sub Scribe] Upload postprocessing login failed: {Msg}", ex.Message);
                 return;
             }
 
@@ -4987,11 +4995,11 @@ public sealed class UploadPipeline : IPackFiller
             }
             catch (OperationCanceledException)
             {
-                logger.LogWarning("[SubDL] Upload postprocessing: fetching mySubtitles timed out.");
+                logger.LogWarning("[Sub Scribe] Upload postprocessing: fetching mySubtitles timed out.");
             }
             catch (Exception ex)
             {
-                logger.LogWarning("[SubDL] Upload postprocessing could not fetch mySubtitles: {Msg}", ex.Message);
+                logger.LogWarning("[Sub Scribe] Upload postprocessing could not fetch mySubtitles: {Msg}", ex.Message);
             }
 
             if (allMySubtitles == null)
@@ -5052,7 +5060,7 @@ public sealed class UploadPipeline : IPackFiller
             }
             catch (Exception ex)
             {
-                logger.LogWarning("[SubDL] Upload postprocessing could not read myPublishedSubtitles: {Msg}", ex.Message);
+                logger.LogWarning("[Sub Scribe] Upload postprocessing could not read myPublishedSubtitles: {Msg}", ex.Message);
             }
 
             // F-M437: the watermark is the newest createdAt this pass saw — stored through the partial
@@ -5065,11 +5073,11 @@ public sealed class UploadPipeline : IPackFiller
 
             LogUtil.Normal(
                 logger,
-                "[SubDL] Upload postprocessing: walked {Pages} page(s) down to the watermark, {Count} stored handle(s) moved to their published entry id (F-M435/F-M437).",
+                "[Sub Scribe] Upload postprocessing: walked {Pages} page(s) down to the watermark, {Count} stored handle(s) moved to their published entry id (F-M435/F-M437).",
                 pagesWalked, remappedHandles);
 
 
-            LogUtil.Normal(logger, "[SubDL] Upload postprocessing: fetched {Total} mySubtitles entries, {Rejected} rejected to clean up.", allMySubtitles.Count, rejectedEntries.Count);
+            LogUtil.Normal(logger, "[Sub Scribe] Upload postprocessing: fetched {Total} mySubtitles entries, {Rejected} rejected to clean up.", allMySubtitles.Count, rejectedEntries.Count);
 
             int matchedDeleted = 0, unmatchedDeleted = 0, failedToDelete = 0;
             var uploadedCandidates = registry.GetUploadedEmbeds();
@@ -5078,7 +5086,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 if (ct.IsCancellationRequested)
                 {
-                    logger.LogWarning("[SubDL] Upload postprocessing: run time limit reached, stopping early.");
+                    logger.LogWarning("[Sub Scribe] Upload postprocessing: run time limit reached, stopping early.");
                     break;
                 }
 
@@ -5118,15 +5126,15 @@ public sealed class UploadPipeline : IPackFiller
                     var delStart = DateTime.UtcNow;
                     using var deleteCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                     deleted = await api.DeleteMySubtitleAsync(rejected.UploadId, deleteCts.Token).ConfigureAwait(false);
-                    LogUtil.Detail(logger, "[SubDL-Postprocessing] delete {UploadId} took {ElapsedMs} ms (pause+network).", rejected.UploadId, (DateTime.UtcNow - delStart).TotalMilliseconds);
+                    LogUtil.Detail(logger, "[Sub Scribe-Postprocessing] delete {UploadId} took {ElapsedMs} ms (pause+network).", rejected.UploadId, (DateTime.UtcNow - delStart).TotalMilliseconds);
                 }
                 catch (OperationCanceledException)
                 {
-                    logger.LogWarning("[SubDL] Upload postprocessing: delete rejected upload {UploadId} timed out.", rejected.UploadId);
+                    logger.LogWarning("[Sub Scribe] Upload postprocessing: delete rejected upload {UploadId} timed out.", rejected.UploadId);
                 }
                 catch (Exception delEx)
                 {
-                    logger.LogWarning("[SubDL] Upload postprocessing: delete rejected upload {UploadId} failed: {Msg}", rejected.UploadId, delEx.Message);
+                    logger.LogWarning("[Sub Scribe] Upload postprocessing: delete rejected upload {UploadId} failed: {Msg}", rejected.UploadId, delEx.Message);
                 }
 
                 if (deleted)
@@ -5168,18 +5176,18 @@ public sealed class UploadPipeline : IPackFiller
                             }
                         }
 
-                        LogUtil.PerItem(logger, "[SubDL] Upload postprocessing: deleted matched rejected upload {UploadId} ({Name}) and marked remote-duplicate.", rejected.UploadId, rejected.Name);
+                        LogUtil.PerItem(logger, "[Sub Scribe] Upload postprocessing: deleted matched rejected upload {UploadId} ({Name}) and marked remote-duplicate.", rejected.UploadId, rejected.Name);
                     }
                     else
                     {
                         unmatchedDeleted++;
-                        LogUtil.PerItem(logger, "[SubDL] Upload postprocessing: deleted unmatched rejected upload {UploadId} ({Name}).", rejected.UploadId, rejected.Name);
+                        LogUtil.PerItem(logger, "[Sub Scribe] Upload postprocessing: deleted unmatched rejected upload {UploadId} ({Name}).", rejected.UploadId, rejected.Name);
                     }
                 }
                 else
                 {
                     failedToDelete++;
-                    logger.LogWarning("[SubDL] Upload postprocessing: failed to delete rejected upload {UploadId}.", rejected.UploadId);
+                    logger.LogWarning("[Sub Scribe] Upload postprocessing: failed to delete rejected upload {UploadId}.", rejected.UploadId);
                 }
             }
 
@@ -5189,7 +5197,7 @@ public sealed class UploadPipeline : IPackFiller
             _postprocessingResolved = matchedDeleted;
             _postprocessingLastResult = $"done in {elapsed.TotalSeconds:F0}s: {matchedDeleted} matched rejected deleted+marked, {unmatchedDeleted} unmatched rejected deleted, {failedToDelete} failed, {rejectedEntries.Count} rejected entries";
             LogUtil.Normal(logger, 
-                "[SubDL] Upload postprocessing DONE in {Seconds:F0}s: {Matched} matched rejected deleted+remote-duplicate, {Unmatched} unmatched rejected deleted, {Failed} failed, {Total} rejected in fetched pages.",
+                "[Sub Scribe] Upload postprocessing DONE in {Seconds:F0}s: {Matched} matched rejected deleted+remote-duplicate, {Unmatched} unmatched rejected deleted, {Failed} failed, {Total} rejected in fetched pages.",
                 elapsed.TotalSeconds, matchedDeleted, unmatchedDeleted, failedToDelete, rejectedEntries.Count);
         }
         catch (Exception ex)
@@ -5197,7 +5205,7 @@ public sealed class UploadPipeline : IPackFiller
             _postprocessingRunning = false;
             var elapsed = DateTime.UtcNow - _postprocessingStartedUtc;
             _postprocessingLastResult = $"failed after {elapsed.TotalSeconds:F0}s: {ex.Message}";
-            logger.LogWarning("[SubDL] Upload postprocessing failed: {Msg}", ex.Message);
+            logger.LogWarning("[Sub Scribe] Upload postprocessing failed: {Msg}", ex.Message);
         }
     }
 
@@ -5578,6 +5586,17 @@ public sealed class UploadPipeline : IPackFiller
     /// </summary>
     /// <param name="isSeries">Wahr für eine Serie, falsch für einen Film, null wenn (noch) nicht bekannt.</param>
     /// <returns>Die Quellen dieses Laufs, in der Reihenfolge, in der sie angetreten werden.</returns>
+    /// <summary>
+    /// F-M550: der Name der Quelle, die geantwortet hat. Kennt das Ergebnis keine (kein Versand
+    /// gelungen), steht dort „no source answered" — geraten wird nichts.
+    /// </summary>
+    /// <param name="result">The upload result.</param>
+    /// <returns>The source's log name.</returns>
+    private static string QuellName(UploadResult result) =>
+        result.Source is { } quelle
+            ? Api.Endpoints.Provenance.Name(quelle)
+            : "no source answered";
+
     private List<Configuration.SubtitleProvider> UploadSources(bool? isSeries) =>
         UploadSourceOrder(isSeries)
             .Where(SourceAllowed)

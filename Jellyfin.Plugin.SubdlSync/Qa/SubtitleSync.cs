@@ -289,7 +289,7 @@ public static class SubtitleSync
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "[SubDL] auto-sync: decode failed for {File}", System.IO.Path.GetFileName(mediaPath));
+            logger.LogDebug(ex, "[Sub Scribe] auto-sync: decode failed for {File}", System.IO.Path.GetFileName(mediaPath));
             return new Result(false, 0, srtText, null, "audio decode failed");
         }
 
@@ -310,7 +310,7 @@ public static class SubtitleSync
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "[SubDL] auto-sync: fit threw for {File}", System.IO.Path.GetFileName(mediaPath));
+            logger.LogDebug(ex, "[Sub Scribe] auto-sync: fit threw for {File}", System.IO.Path.GetFileName(mediaPath));
             return new Result(false, 0, srtText, null, "fit error");
         }
 

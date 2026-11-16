@@ -607,12 +607,12 @@ internal static class Program
             && !ohneSubdlKonfig.IsConfiguredForDownload(SubtitleProvider.Subdl)
             && ohneSubdlKonfig.IsConfiguredForDownload(SubtitleProvider.TvSubtitles)
             && uploadSource.Contains(
-                "\"[SubDL] {Name} [{Lang}] — source {Source} skipped — not configured (required for SubDL only)\"",
+                "\"[Sub Scribe] {Name} [{Lang}] — source {Source} skipped — not configured (required for SubDL only)\"",
                 StringComparison.Ordinal)
             && downloadSource.Contains(
                 "if (!_config.IsConfiguredForDownload(Configuration.SubtitleProvider.Subdl))", StringComparison.Ordinal)
             && downloadSource.Contains(
-                "\"[SubDL-D] {File} — SubDL skipped — not configured (required for SubDL only)\"", StringComparison.Ordinal));
+                "\"[Sub Scribe-D] {File} — SubDL skipped — not configured (required for SubDL only)\"", StringComparison.Ordinal));
 
         // --- Abschnitt 16: Rip-Zuordnung fuer den tvst-Upload (F-M498) ---
         // Gemessen 15.11.2026 im scharfen Lauf: die Seite lehnt jede Folge mit "rip must be one of
@@ -1063,6 +1063,21 @@ internal static class Program
                     && uploadSource.Contains("public int SettledItems { get; set; }", StringComparison.Ordinal)
                     && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries", StringComparison.Ordinal));
 
+                // ---- F-M550: die Log-Zeile nennt die Quelle, und das Plugin heisst nicht SubDL ------
+                string uploadResultSource = await File.ReadAllTextAsync(Path.Combine(
+                    root, "Jellyfin.Plugin.SubdlSync", "Api", "UploadResult.cs")).ConfigureAwait(false);
+                Check("F-M550: an upload line names the source that answered",
+                    uploadSource.Contains("QuellName(result)", StringComparison.Ordinal)
+                    && uploadSource.Contains("ergebnisse[quelle].Source = quelle;", StringComparison.Ordinal)
+                    && uploadResultSource.Contains("public Configuration.SubtitleProvider? Source { get; set; }", StringComparison.Ordinal));
+                Check("F-M550: no log prefix still says SubDL",
+                    !uploadSource.Contains("\"[SubDL", StringComparison.Ordinal)
+                    && !downloadSource.Contains("\"[SubDL", StringComparison.Ordinal)
+                    && !seederSource.Contains("\"[SubDL", StringComparison.Ordinal)
+                    && uploadSource.Contains("\"[Sub Scribe] UPLOADED", StringComparison.Ordinal));
+                Check("F-M550: an unknown source is named as unknown, not guessed",
+                    uploadSource.Contains("\"no source answered\"", StringComparison.Ordinal));
+
                 // ---- F-M549: die Quellen je Item ueberleben den Neustart --------------------------
                 string verteilerQuelle = await File.ReadAllTextAsync(Path.Combine(
                     root, "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlEventDispatcher.cs")).ConfigureAwait(false);
@@ -1451,7 +1466,7 @@ internal static class Program
             && downloadSource.Contains("summary.SkippedNoCandidates++;", StringComparison.Ordinal)
             && downloadSource.Contains("asked: {Sources}", StringComparison.Ordinal)
             && downloadSource.Contains("Api.Endpoints.Provenance.Name", StringComparison.Ordinal)
-            && !downloadSource.Contains("[SubDL-D] {File} — no candidates on ", StringComparison.Ordinal));
+            && !downloadSource.Contains("[Sub Scribe-D] {File} — no candidates on ", StringComparison.Ordinal));
 
         // (c) kein Doppelabruf: EIN Aufruf je Quelle und Sprache, die Schleife liest nur noch.
         var abrufe = System.Text.RegularExpressions.Regex.Matches(downloadSource, @"await ForeignCandidatesAsync\(").Count;
@@ -1876,7 +1891,7 @@ internal static class Program
         // Der Trockenlauf nennt jetzt auch, WOHER der gewaehlte Kandidat kommt: bei zwei gefragten
         // Quellen ist "wer hat gewonnen" genau die Frage, die er beantworten soll.
         var dryZeile = downloadSource.IndexOf(
-            "\"[SubDL-D] DRY-RUN {File} [{Lang}] → {Release} ({Source}, score {Score}, hi={Hi})\"",
+            "\"[Sub Scribe-D] DRY-RUN {File} [{Lang}] → {Release} ({Source}, score {Score}, hi={Hi})\"",
             StringComparison.Ordinal);
         var dryHerkunft = dryZeile < 0
             ? -1

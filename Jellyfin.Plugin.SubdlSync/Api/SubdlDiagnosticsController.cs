@@ -148,7 +148,7 @@ public class SubdlDiagnosticsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[SubDL] diagnostics endpoint failed");
+            _logger.LogError(ex, "[Sub Scribe] diagnostics endpoint failed");
             return StatusCode(500, new { error = ex.Message, stack = ex.StackTrace });
         }
     }

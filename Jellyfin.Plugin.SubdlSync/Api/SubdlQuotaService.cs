@@ -87,7 +87,7 @@ public class SubdlQuota : ControllerBase
                 .ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogWarning("[SubDL] Quota endpoint: /me answered HTTP {Code}", (int)resp.StatusCode);
+                _logger.LogWarning("[Sub Scribe] Quota endpoint: /me answered HTTP {Code}", (int)resp.StatusCode);
                 return Ok(new { error = "subdl-http-" + (int)resp.StatusCode });
             }
 
@@ -108,7 +108,7 @@ public class SubdlQuota : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[SubDL] Quota endpoint failed: {Msg}", ex.Message);
+            _logger.LogWarning("[Sub Scribe] Quota endpoint failed: {Msg}", ex.Message);
             return Ok(new { error = "unreachable" });
         }
     }

@@ -94,7 +94,7 @@ public class SubdlDownloadTask : IScheduledTask
         var plugin = Plugin.Instance;
         if (plugin == null)
         {
-            _logger.LogError("[SubDL-D] Plugin instance missing — cannot run.");
+            _logger.LogError("[Sub Scribe-D] Plugin instance missing — cannot run.");
             return;
         }
 
@@ -110,7 +110,7 @@ public class SubdlDownloadTask : IScheduledTask
             // The lamps know run/ok/fail/cancel/skip/defer — a disabled direction rendered as a
             // grey "skip", which reads like a run that skipped something. Nothing ran, so nothing
             // is claimed: the log carries the line, the row stays as it is.
-            LogUtil.Normal(_logger, "[SubDL-D] Download pipeline disabled — run skipped, no worker row (F-M366).");
+            LogUtil.Normal(_logger, "[Sub Scribe-D] Download pipeline disabled — run skipped, no worker row (F-M366).");
             return;
         }
 
@@ -130,7 +130,7 @@ public class SubdlDownloadTask : IScheduledTask
             // F-M366: a cycle is already running and this direction is part of it, but THIS task
             // ran nothing. The deferral belongs in the log, not in a row that would have to borrow
             // the running cycle's timestamp.
-            LogUtil.Normal(_logger, "[SubDL-D] cycle already active — this task ran nothing, no worker row (F-M366).");
+            LogUtil.Normal(_logger, "[Sub Scribe-D] cycle already active — this task ran nothing, no worker row (F-M366).");
             return;
         }
         try
@@ -167,7 +167,7 @@ public class SubdlDownloadTask : IScheduledTask
             // sentence, which is a status for work that did not happen. Log only.
             LogUtil.Normal(
                 _logger,
-                "[SubDL-D] cycle finished without a download run (cycleFinished {Done}, seeder {SO}/{SD}, direction {DO}/{DD}) — no worker row (F-M366).",
+                "[Sub Scribe-D] cycle finished without a download run (cycleFinished {Done}, seeder {SO}/{SD}, direction {DO}/{DD}) — no worker row (F-M366).",
                 cycleFinished,
                 seedOutcome ?? "-",
                 seedDetail ?? "-",
@@ -194,13 +194,13 @@ public class SubdlDownloadTask : IScheduledTask
             {
                 // The run's own row is already there and stays: it describes work that really
                 // happened before the restart.
-                LogUtil.Normal(_logger, "[SubDL-D] jellyfin restart — the run's own row stands.");
+                LogUtil.Normal(_logger, "[Sub Scribe-D] jellyfin restart — the run's own row stands.");
             }
             else
             {
                 // F-M366: the restart cut this task before any download run began, so "ok / restart"
                 // claimed a run that never happened. Log only.
-                LogUtil.Normal(_logger, "[SubDL-D] jellyfin restart before any download run — no worker row (F-M366).");
+                LogUtil.Normal(_logger, "[Sub Scribe-D] jellyfin restart before any download run — no worker row (F-M366).");
             }
         }
     }
