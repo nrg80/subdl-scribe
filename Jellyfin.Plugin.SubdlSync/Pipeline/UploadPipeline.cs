@@ -290,6 +290,19 @@ public sealed class UploadPipeline : IPackFiller
     // loop to queued ids; ItemResult reports per-item outcomes for the queue.
     public HashSet<string>? QueueFilter { get; set; }
 
+    /// <summary>
+    /// F-M546 (Operator-Frage 16.11.2026: „Wieso machen wir dann nicht eine queue pro quelle?"): die
+    /// Queue JE QUELLE. <see cref="QueueFilter"/> bleibt die Vereinigung (welche Items der Lauf
+    /// ueberhaupt anfasst); hier steht, welche Quelle welches Item eingereiht hat. Damit fragt der Lauf
+    /// eine Datei nur noch gegen die Quellen, die sie wollen — eine Quelle, die das Item nicht
+    /// eingereiht hat, haelt es nicht mehr offen, und der Kopf-Skip ist wieder die billige
+    /// Eine-Marke-Frage von 12.1.12.378, nur je Quelle.
+    /// </summary>
+    public Dictionary<Configuration.SubtitleProvider, HashSet<string>>? QueueFilterBySource { get; set; }
+
+    /// <summary>F-M546: die Quellen, die das AKTUELLE Item eingereiht haben (null = unbekannt).</summary>
+    private HashSet<Configuration.SubtitleProvider>? _queuedSourcesForItem;
+
     /// <summary>Per-item outcome report for the queue bookkeeping (fired per item).</summary>
     public event Action<string, ItemOutcome>? ItemResult;
 
@@ -740,6 +753,27 @@ public sealed class UploadPipeline : IPackFiller
                 Movie => false,
                 _ => (bool?)null,
             };
+
+            // F-M546: welche Quellen haben DIESES Item eingereiht?
+            _queuedSourcesForItem = null;
+            if (QueueFilterBySource != null && QueueFilterBySource.Count > 0)
+            {
+                string itemId = item.Id.ToString();
+                var gemeldet = new HashSet<Configuration.SubtitleProvider>();
+                foreach (var paar in QueueFilterBySource)
+                {
+                    if (paar.Value.Contains(itemId))
+                    {
+                        gemeldet.Add(paar.Key);
+                    }
+                }
+
+                if (gemeldet.Count > 0)
+                {
+                    _queuedSourcesForItem = gemeldet;
+                }
+            }
+
             string? earlyHash = Registry.GetMediaHash(mediaPath);
             var quellen = UploadSources(medienart);
             var offeneQuellen = quellen
@@ -5542,7 +5576,18 @@ public sealed class UploadPipeline : IPackFiller
         UploadSourceOrder(isSeries)
             .Where(SourceAllowed)
             .Where(quelle => _config.DryRun || _config.IsConfiguredForUpload(quelle))
+            .Where(QueuedForSource)
             .ToList();
+
+    /// <summary>
+    /// F-M546: hat diese Quelle das aktuelle Item eingereiht? Ohne Meldung (oder bei einem Lauf ohne
+    /// Queue je Quelle) bleibt alles wie vorher — die Eingrenzung darf nur weglassen, was ohnehin nicht
+    /// gewollt war, nie eine Quelle, die das Item angefordert hat.
+    /// </summary>
+    /// <param name="quelle">The source in question.</param>
+    /// <returns>True when this source may work on the current item.</returns>
+    private bool QueuedForSource(Configuration.SubtitleProvider quelle) =>
+        _queuedSourcesForItem == null || _queuedSourcesForItem.Contains(quelle);
 
     /// <summary>
     /// F-M496 (Operator-Anweisung 15.11.2026): die Reihenfolge, in der die Kette die Quellen fragt —
@@ -5602,7 +5647,9 @@ public sealed class UploadPipeline : IPackFiller
     /// <returns>True when at least one enabled source that could take it does not have it yet.</returns>
     private bool AnyUploadSourceStillWants(string? mediaHash, string language, bool hearingImpaired, bool isSeries) =>
         Api.Endpoints.UploadGate.Decide(
-            SourceAllowed(Configuration.SubtitleProvider.Subdl),
+            // F-M546: auch hier gilt die Queue JE QUELLE — eine Quelle, die dieses Item nicht
+            // eingereiht hat, „will" es nicht und haelt die Spur nicht offen.
+            SourceAllowed(Configuration.SubtitleProvider.Subdl) && QueuedForSource(Configuration.SubtitleProvider.Subdl),
             // F-M509: nur die Adresse der Familie, die DIESE Medienart fuehrt, kann etwas wollen. Eine
             // Serie kann der Film-Adresse nichts geben — sie hier mitzuzaehlen liesse das Paar ewig
             // „gewollt" aussehen, und die Spur wuerde in jedem Lauf erneut durch die Kette geschickt.
@@ -5613,11 +5660,13 @@ public sealed class UploadPipeline : IPackFiller
             // durch die Kette geschickt. SubDL behaelt sein eigenes, weiteres Set und wird hier
             // NICHT gefiltert.
             SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries
+                && QueuedForSource(Configuration.SubtitleProvider.TvSubtitles)
                 && Api.TvSubtitlesClient.SiteLanguage(language) is not null,
             origin: null,
             Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.Subdl),
             isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles),
             SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles) && !isSeries
+                && QueuedForSource(Configuration.SubtitleProvider.MovieSubtitles)
                 && Api.MovieSubtitlesClient.SiteLanguage(language) is not null,
             !isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.MovieSubtitles))
         .SkipReason is null;

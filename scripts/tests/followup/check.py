@@ -146,7 +146,7 @@ def main():
           "IsArrivalRun = false" not in src,
           "the literal was the defect: it looked deliberate and was never true")
     check("the scope decides, not the trigger name",
-          re.search(r"ExecutePipelineAsync\(upload, config, filter, progress, trigger, scopeIds != null\)", src) is not None,
+          re.search(r"ExecutePipelineAsync\(\s*upload, config, filter, progress, trigger, scopeIds != null", src) is not None,
           "the queue scope IS the arrival statement (F-M233) — a trigger string can drift")
 
     # --- F-M448 (operator order 05.11.2026): "defer 15 min (aus gui) wenn der seeder auf einen

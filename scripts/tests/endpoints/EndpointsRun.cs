@@ -524,7 +524,8 @@ internal static class Program
         Check("the queue fills for the direction, not for SubDL — a spent SubDL allowance does not empty it",
             seederSource.Contains("bool downloadQueueable = config.AnyDownloadEnabled", StringComparison.Ordinal)
             && seederSource.Contains("(downloadAllowed || config.IsDownloadEnabled(SubtitleProvider.TvSubtitles))", StringComparison.Ordinal)
-            && seederSource.Contains("config.AnyUploadEnabled && IsUploadTodo", StringComparison.Ordinal));
+            && seederSource.Contains("config.AnyUploadEnabled", StringComparison.Ordinal)
+            && seederSource.Contains("UploadTodoSources(item, mediaPath, config)", StringComparison.Ordinal));
         Check("the off-state of a direction is asked for the direction, not for SubDL",
             offStateSource.Contains("return !config.AnyDownloadEnabled", StringComparison.Ordinal)
             && offStateSource.Contains("return !config.AnyUploadEnabled", StringComparison.Ordinal));
@@ -1061,6 +1062,21 @@ internal static class Program
                     uploadSource.Contains("item settled before extraction", StringComparison.Ordinal)
                     && uploadSource.Contains("public int SettledItems { get; set; }", StringComparison.Ordinal)
                     && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries", StringComparison.Ordinal));
+
+                // ---- F-M546: eine Queue je Quelle -------------------------------------------------
+                Check("F-M546: the seeder keeps one queue per source",
+                    seederSource.Contains("public Dictionary<Configuration.SubtitleProvider, HashSet<string>> UploadBySource", StringComparison.Ordinal)
+                    && seederSource.Contains("UploadTodoSources(item, mediaPath, config)", StringComparison.Ordinal)
+                    && seederSource.Contains("menge.Add(qi.ItemId);", StringComparison.Ordinal));
+                Check("F-M546: the run narrows its sources to the ones that queued the item",
+                    uploadSource.Contains("public Dictionary<Configuration.SubtitleProvider, HashSet<string>>? QueueFilterBySource", StringComparison.Ordinal)
+                    && uploadSource.Contains("private HashSet<Configuration.SubtitleProvider>? _queuedSourcesForItem;", StringComparison.Ordinal)
+                    && uploadSource.Contains(".Where(QueuedForSource)", StringComparison.Ordinal)
+                    && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.Subdl) && QueuedForSource(Configuration.SubtitleProvider.Subdl),", StringComparison.Ordinal));
+                Check("F-M546: without a per-source queue nothing is narrowed away",
+                    uploadSource.Contains("_queuedSourcesForItem == null || _queuedSourcesForItem.Contains(quelle)", StringComparison.Ordinal));
+                Check("F-M546: the scan line names the queue per source instead of one bare number",
+                    seederSource.Contains("PerSourceSummary(snapshot)", StringComparison.Ordinal));
 
                 // ---- F-M545: der Store wird auf JEDEM Weg angehaengt, auf dem ein Kontext entsteht --
                 // Am 16.11.2026 haengte nur RecreateDbContext an, der normale Start nicht — der Store

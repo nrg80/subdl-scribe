@@ -45,6 +45,13 @@ public sealed class SeedSnapshot
     /// <summary>Library candidates for the upload queue.</summary>
     public List<QueueItem> Upload { get; } = new();
 
+    /// <summary>
+    /// F-M546 (Operator-Frage 16.11.2026: „Wieso machen wir dann nicht eine queue pro quelle?"): die
+    /// Upload-Queue JE QUELLE. <see cref="Upload"/> bleibt die Vereinigung und damit die Liste der
+    /// Items, die der Lauf ueberhaupt anfasst; hier steht, WELCHE Quelle welches Item eingereiht hat.
+    /// </summary>
+    public Dictionary<Configuration.SubtitleProvider, HashSet<string>> UploadBySource { get; } = new();
+
     /// <summary>Library candidates for the download queue.</summary>
     public List<QueueItem> Download { get; } = new();
 
@@ -377,10 +384,28 @@ public sealed class SubdlSeeder
                     snapshot.Download.Add(Clone(qi));
                 }
 
-                if (dir != SubdlEventDispatcher.CycleDirection.DownloadOnly
-                    && config.AnyUploadEnabled && IsUploadTodo(item, mediaPath, config))
+                if (dir != SubdlEventDispatcher.CycleDirection.DownloadOnly && config.AnyUploadEnabled)
                 {
-                    snapshot.Upload.Add(Clone(qi));
+                    // F-M546: die Queue wird je Quelle gefuellt. Ein Item, das nur tvst noch braucht,
+                    // steht danach nur in der tvst-Queue — SubDL und mst halten es nicht mehr offen.
+                    var todoQuellen = UploadTodoSources(item, mediaPath, config);
+                    if (todoQuellen.Count > 0)
+                    {
+                        snapshot.Upload.Add(Clone(qi));
+                        if (!string.IsNullOrEmpty(qi.ItemId))
+                        {
+                            foreach (var quelle in todoQuellen)
+                            {
+                                if (!snapshot.UploadBySource.TryGetValue(quelle, out var menge))
+                                {
+                                    menge = new HashSet<string>(StringComparer.Ordinal);
+                                    snapshot.UploadBySource[quelle] = menge;
+                                }
+
+                                menge.Add(qi.ItemId);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -402,7 +427,11 @@ public sealed class SubdlSeeder
             string covered = coversUp && coversDown
                 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} upload, {1} download queued", snapshot.Upload.Count, snapshot.Download.Count)
                 : coversUp
-                    ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} upload queued", snapshot.Upload.Count)
+                    ? string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "{0} upload queued{1}",
+                        snapshot.Upload.Count,
+                        PerSourceSummary(snapshot))
                     : string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} download queued", snapshot.Download.Count);
             LogUtil.Normal(_logger, "[SubDL-Seed] scan finished ({Direction}) — {Covered}", dirLabel, covered);
         }
@@ -647,8 +676,22 @@ public sealed class SubdlSeeder
     /// spezifisch."). tvst bildet in seinem Client ab, SubDL in seinem — die Kette fragt dort.
     /// </para>
     /// </summary>
-    private bool IsUploadTodo(BaseItem item, string mediaPath, Configuration.PluginConfiguration config)
+    private bool IsUploadTodo(BaseItem item, string mediaPath, Configuration.PluginConfiguration config) =>
+        UploadTodoSources(item, mediaPath, config).Count > 0;
+
+    /// <summary>
+    /// F-M546: welche Quellen dieses Item fuer sich eingereiht haetten. Dieselbe Frage wie
+    /// <see cref="IsUploadTodo"/>, nur mit der Antwort statt einem Ja/Nein — die Queue wird je Quelle
+    /// gefuehrt, damit eine Quelle die andere nicht offen haelt.
+    /// </summary>
+    /// <param name="item">The library item.</param>
+    /// <param name="mediaPath">Path of the media file.</param>
+    /// <param name="config">Plugin configuration.</param>
+    /// <returns>The sources that still have something to do for this item.</returns>
+    private List<Configuration.SubtitleProvider> UploadTodoSources(
+        BaseItem item, string mediaPath, Configuration.PluginConfiguration config)
     {
+        var offen = new List<Configuration.SubtitleProvider>();
         try
         {
             // F-M499: nur Quellen, die auch wirklich antreten — Schalter UND Konfiguration (F-M497).
@@ -660,15 +703,16 @@ public sealed class SubdlSeeder
             {
                 if (UploadTodoFor(item, mediaPath, config, quelle))
                 {
-                    return true;
+                    offen.Add(quelle);
                 }
             }
 
-            return false; // jede angetretene Quelle hat ihre Marke (oder die Spur ist ohnehin verworfen)
+            return offen; // leer heisst: jede angetretene Quelle hat ihre Marke
         }
         catch
         {
-            return true; // prefilter failure → treat as todo (pipeline decides)
+            // prefilter failure → treat as todo (pipeline decides) fuer ALLE Quellen
+            return UploadSources(config, null);
         }
     }
 
@@ -775,6 +819,29 @@ public sealed class SubdlSeeder
     /// <param name="config">Configuration (same reader as the queue gate).</param>
     /// <param name="quelle">The source this answer is about.</param>
     /// <returns>True when this source still has something to do here.</returns>
+    /// <summary>
+    /// F-M546: die Queue je Quelle in der Scan-Zeile — „61 tvsubtitles, 92 subdl" statt einer nackten
+    /// Zahl. Ohne diese Aufschluesselung sagt die Zahl nicht, wen sie meint.
+    /// </summary>
+    /// <param name="snapshot">The scan result.</param>
+    /// <returns>A suffix like " (tvsubtitles 61, subdl 92)", empty when nothing is queued.</returns>
+    private static string PerSourceSummary(SeedSnapshot snapshot)
+    {
+        if (snapshot.UploadBySource.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var teile = snapshot.UploadBySource
+            .OrderByDescending(paar => paar.Value.Count)
+            .Select(paar => string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "{0} {1}",
+                Api.Endpoints.Provenance.Name(paar.Key),
+                paar.Value.Count));
+        return " (" + string.Join(", ", teile) + ")";
+    }
+
     private bool UploadTodoFor(
         BaseItem item,
         string mediaPath,

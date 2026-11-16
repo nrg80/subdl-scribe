@@ -111,6 +111,12 @@ public sealed class SubdlEventDispatcher : IDisposable
     // F-M244: the seeder decides WHAT is to be done and hands it over in the item. The pipelines
     // carry that order out rather than re-deriving it.
     private List<QueueItem> _uploadQueue = new();
+
+    /// <summary>
+    /// F-M546: welche Quelle welches Item eingereiht hat. Leer heisst „nicht bekannt" — dann fragt die
+    /// Pipeline wie bisher alle eingeschalteten Quellen.
+    /// </summary>
+    private Dictionary<Configuration.SubtitleProvider, HashSet<string>> _uploadBySource = new();
     // F-M244: the download side reads its languages from the item and does not answer again.
     private List<QueueItem> _downloadQueue = new();
 
@@ -1297,7 +1303,9 @@ public sealed class SubdlEventDispatcher : IDisposable
 
             var progress = new Progress<double>();
             // F-M446: the scope IS the arrival statement — it hands the flags to the pipeline.
-            var (upSummary, downSummary) = await ExecutePipelineAsync(upload, config, filter, progress, trigger, scopeIds != null).ConfigureAwait(false);
+            var (upSummary, downSummary) = await ExecutePipelineAsync(
+                upload, config, filter, progress, trigger, scopeIds != null,
+                upload ? _uploadBySource : null).ConfigureAwait(false);
             // If this direction was stopped by marker, stop the whole cycle.
             // F-M293 (user decision 03.10.2026): gated on the MARKER, not on StopRequested alone.
             // A shutdown also leaves StopRequested true (the pipeline keeps its partial result and
@@ -1410,12 +1418,16 @@ public sealed class SubdlEventDispatcher : IDisposable
     /// Handles user-stop cancellation and lock-loss recovery scheduling.
     /// </summary>
     private async Task<(Pipeline.RunSummary? up, Pipeline.DownloadRunSummary? down)> ExecutePipelineAsync(
-        bool upload, PluginConfiguration config, System.Collections.Generic.HashSet<string> filter, IProgress<double> progress, string? trigger = null, bool arrivalScoped = false)
+        bool upload, PluginConfiguration config, System.Collections.Generic.HashSet<string> filter, IProgress<double> progress, string? trigger = null, bool arrivedScoped = false, Dictionary<Configuration.SubtitleProvider, HashSet<string>>? uploadBySource = null)
     {
+        bool arrivalScoped = arrivedScoped;
         if (upload)
         {
             var bundle = PluginServiceRegistrator.BuildPipeline(_loggerFactory, _libraryManager, _mediaSourceManager, config);
             bundle.Pipeline.QueueFilter = filter;
+
+            // F-M546: die Queue JE QUELLE geht mit in den Lauf.
+            bundle.Pipeline.QueueFilterBySource = uploadBySource;
             // F-M446 (operator order 05.11.2026, "Verhalten soll wie früher sein"): an arrival run is
             // recognised by its SCOPE, not by a literal. The flag had been hardcoded to false since the
             // scoping moved to QueueFilter, so both arrival exemptions — no waiting out the daily limit
@@ -2389,6 +2401,12 @@ public sealed class SubdlEventDispatcher : IDisposable
                 RecordSeeder(Registry.WorkerRunRegistry.Outcome.Failed, ex.Message);
                 throw;
             }
+            // F-M546: die Queue je Quelle mitnehmen, bevor die Items in die gespeicherte Queue wandern.
+            if (snapshot.UploadBySource.Count > 0)
+            {
+                _uploadBySource = snapshot.UploadBySource;
+            }
+
             int newUp = MergeQueue(_uploadQueue, snapshot.Upload, _lastSeedNewIdsUp);
             int newDown = MergeQueue(_downloadQueue, snapshot.Download, _lastSeedNewIdsDown);
             _lastSeedNewItems = newUp + newDown;
