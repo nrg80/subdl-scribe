@@ -1841,6 +1841,36 @@ def main():
           and 'id="MovieSubtitlesDownloadReason"' in down_part
           and "Standard: an" in down_part[down_part.index('id="MovieSubtitlesDownloadReason"'):down_part.index('id="MovieSubtitlesDownloadReason"') + 300])
 
+    # Operator-Klarstellung 17.11.2026: "Tvst one source two addresses. Weniger in der gui rumlabern.
+    # Tmdb decides." Also EIN Schalter je Richtung fuer die Familie, und die Seite sagt in einem Satz,
+    # welche Adresse welches Medium fuehrt. Die Adressen bleiben Datenfelder, nicht Bedienelemente.
+    for tab_name, part, box, reason in (("upload", up_part, "TvstUploadEnabled", "TvstUploadReason"),
+                                        ("download", down_part, "TvstDownloadEnabled", "TvstDownloadReason")):
+        check("F-M520: the %s tab shows ONE tvst switch, not one per address" % tab_name,
+              ('id="%s"' % box) in part
+              and 'id="TvSubtitlesUploadEnabled"' not in part
+              and 'id="MovieSubtitlesUploadEnabled"' not in part
+              and 'id="TvSubtitlesDownloadEnabled"' not in part
+              and 'id="MovieSubtitlesDownloadEnabled"' not in part)
+        check("F-M520: the %s tab keeps the family heading and one line naming both addresses" % tab_name,
+              part.count("<h3>tvst</h3>") == 1
+              and part.count("tvsubtitles.net") >= 1
+              and part.count("moviesubtitles.org") >= 1
+              and part.count("TMDb decides") == 1)
+        check("F-M520: the %s switch carries a short default line" % tab_name,
+              ('id="%s"' % reason) in part)
+
+    check("F-M520: saving the family switch writes BOTH address flags",
+          "config.TvSubtitlesUploadEnabled = tvstUp;" in page_src
+          and "config.MovieSubtitlesUploadEnabled = tvstUp;" in page_src
+          and "config.TvSubtitlesDownloadEnabled = tvstDown;" in page_src
+          and "config.MovieSubtitlesDownloadEnabled = tvstDown;" in page_src)
+
+    check("F-M520: loading the family switch reads the EFFECTIVE state of both addresses",
+          "config.TvSubtitlesUploadEnabled === true || config.MovieSubtitlesUploadEnabled === true" in page_src
+          and "? true : !!config.TvSubtitlesDownloadEnabled)" in page_src
+          and "? true : !!config.MovieSubtitlesDownloadEnabled);" in page_src)
+
     check("F-M509: the order field keeps exactly TWO values — the family is ordered, not its addresses",
           'id="DownloadOrder"' in down_part
           and down_part.count('<option value="TvSubtitlesFirst">') == 1

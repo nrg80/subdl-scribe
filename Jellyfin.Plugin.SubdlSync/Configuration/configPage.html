@@ -84,12 +84,12 @@
                             </div>
                             <div class="subdl-status-row" id="TvstStatus">
                                 <span class="subdl-light"></span>
-                                <span class="subdl-label">tvst (tvsubtitles.net)</span>
+                                <span class="subdl-label">tvsubtitles.net</span>
                                 <span class="subdl-msg">—</span>
                             </div>
                             <div class="subdl-status-row" id="MstStatus">
                                 <span class="subdl-light"></span>
-                                <span class="subdl-label">mst (moviesubtitles.org)</span>
+                                <span class="subdl-label">moviesubtitles.org</span>
                                 <span class="subdl-msg">—</span>
                             </div>
                             <h4 style="margin-top:0.8em;margin-bottom:0.3em;">Library directories</h4>
@@ -407,25 +407,13 @@
                             <div class="fieldDescription">Enable all upload functions against SubDL. Default: off.</div>
                         </div>
 
-                        <h3>tvst — one source, two addresses</h3>
-                        <div class="fieldDescription" style="max-width:60em;">
-                            Series → tvsubtitles.net. Films → moviesubtitles.org. TMDb decides.
-                        </div>
-
+                        <h3>tvst</h3>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
-                                <input id="TvSubtitlesUploadEnabled" name="TvSubtitlesUploadEnabled" type="checkbox" is="emby-checkbox" />
-                                <span>Upload enabled — tvsubtitles.net (series)</span>
+                                <input id="TvstUploadEnabled" name="TvstUploadEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Upload enabled — tvst</span>
                             </label>
-                            <div class="fieldDescription" id="TvSubtitlesUploadReason">Series address. Default: off.</div>
-                        </div>
-
-                        <div class="checkboxContainer checkboxContainer-withDescription">
-                            <label class="emby-checkbox-label">
-                                <input id="MovieSubtitlesUploadEnabled" name="MovieSubtitlesUploadEnabled" type="checkbox" is="emby-checkbox" />
-                                <span>Upload enabled — moviesubtitles.org (films)</span>
-                            </label>
-                            <div class="fieldDescription" id="MovieSubtitlesUploadReason">Film address. Default: off.</div>
+                            <div class="fieldDescription" id="TvstUploadReason">Series go to tvsubtitles.net, films to moviesubtitles.org. TMDb decides. Default: off.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -507,31 +495,19 @@
                             <div class="fieldDescription">Enable all download functions against SubDL. Default: on.</div>
                         </div>
 
-                        <h3>tvst — one source, two addresses</h3>
-                        <div class="fieldDescription" style="max-width:60em;">
-                            Series → tvsubtitles.net. Films → moviesubtitles.org. TMDb decides.
-                        </div>
-
+                        <h3>tvst</h3>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
-                                <input id="TvSubtitlesDownloadEnabled" name="TvSubtitlesDownloadEnabled" type="checkbox" is="emby-checkbox" />
-                                <span>Download enabled — tvsubtitles.net (series)</span>
+                                <input id="TvstDownloadEnabled" name="TvstDownloadEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Download enabled — tvst</span>
                             </label>
-                            <div class="fieldDescription" id="TvSubtitlesDownloadReason">Series address. Default: on.</div>
-                        </div>
-
-                        <div class="checkboxContainer checkboxContainer-withDescription">
-                            <label class="emby-checkbox-label">
-                                <input id="MovieSubtitlesDownloadEnabled" name="MovieSubtitlesDownloadEnabled" type="checkbox" is="emby-checkbox" />
-                                <span>Download enabled — moviesubtitles.org (films)</span>
-                            </label>
-                            <div class="fieldDescription" id="MovieSubtitlesDownloadReason">Film address. Default: on.</div>
+                            <div class="fieldDescription" id="TvstDownloadReason">Series come from tvsubtitles.net, films from moviesubtitles.org. TMDb decides. Default: on.</div>
                         </div>
 
                         <div class="selectContainer">
                             <label class="selectLabel" for="DownloadOrder">Download order</label>
                             <select id="DownloadOrder" name="DownloadOrder" is="emby-select-withcolor" class="emby-select-withcolor emby-select">
-                                <option value="TvSubtitlesFirst">tvst / mst first</option>
+                                <option value="TvSubtitlesFirst">tvst first</option>
                                 <option value="SubdlFirst">SubDL first</option>
                             </select>
                             <div class="fieldDescription">Which source is asked first.</div>
@@ -1097,9 +1073,11 @@
                         document.querySelector('#SubdlUploadEnabled').checked =
                             config.SubdlUploadEnabled === null || config.SubdlUploadEnabled === undefined
                                 ? !!config.UploadEnabled : !!config.SubdlUploadEnabled;
-                        document.querySelector('#TvSubtitlesUploadEnabled').checked = !!config.TvSubtitlesUploadEnabled;
-                        // F-M508: undecided (null) is OFF for the film address — the box shows the EFFECTIVE state.
-                        document.querySelector('#MovieSubtitlesUploadEnabled').checked = config.MovieSubtitlesUploadEnabled === true;
+                        // F-M520: ONE switch for the family. The box shows the EFFECTIVE state of both
+                        // addresses: on as soon as either one is on, because uploads follow the switch and
+                        // the address is decided by TMDb, not by the operator.
+                        document.querySelector('#TvstUploadEnabled').checked =
+                            config.TvSubtitlesUploadEnabled === true || config.MovieSubtitlesUploadEnabled === true;
                         document.querySelector('#DryRun').checked = config.DryRun;
                         document.querySelector('#LogMode').value = config.LogMode;
                         document.querySelector('#OshashRefresh').value = config.OshashRefresh || 'Monthly';
@@ -1125,13 +1103,13 @@
                             config.SubdlDownloadEnabled === null || config.SubdlDownloadEnabled === undefined
                                 ? !!config.DownloadEnabled : !!config.SubdlDownloadEnabled;
                         // F-M503: an undecided tvst download is ON — the box shows the EFFECTIVE state, not the raw null.
-                        document.querySelector('#TvSubtitlesDownloadEnabled').checked =
-                            config.TvSubtitlesDownloadEnabled === null || config.TvSubtitlesDownloadEnabled === undefined
-                                ? true : !!config.TvSubtitlesDownloadEnabled;
+                        document.querySelector('#TvstDownloadEnabled').checked =
+                            (config.TvSubtitlesDownloadEnabled === null || config.TvSubtitlesDownloadEnabled === undefined
+                                ? true : !!config.TvSubtitlesDownloadEnabled)
+                            || (config.MovieSubtitlesDownloadEnabled === null || config.MovieSubtitlesDownloadEnabled === undefined
+                                ? true : !!config.MovieSubtitlesDownloadEnabled);
                         // F-M507: undecided (null) is ON for the film address — same default as the series address.
-                        document.querySelector('#MovieSubtitlesDownloadEnabled').checked =
-                            config.MovieSubtitlesDownloadEnabled === null || config.MovieSubtitlesDownloadEnabled === undefined
-                                ? true : !!config.MovieSubtitlesDownloadEnabled;
+
                         document.querySelector('#DownloadOrder').value = config.DownloadOrder === 'SubdlFirst'
                             ? 'SubdlFirst'
                             : 'TvSubtitlesFirst';
@@ -1751,10 +1729,11 @@ workers.forEach(function (w) {
                         config.UploadOnArrival = document.querySelector('#UploadOnArrival').checked;
                         config.UploadSeasonPacks = document.querySelector('#UploadSeasonPacks').checked;
                         config.SubdlUploadEnabled = document.querySelector('#SubdlUploadEnabled').checked;
-                        // F-M485: the second source is wired, so its switch is stored as the operator set it.
-                        config.TvSubtitlesUploadEnabled = document.querySelector('#TvSubtitlesUploadEnabled').checked;
-                        // F-M508: the film address has its own switch; the page stores what is checked.
-                        config.MovieSubtitlesUploadEnabled = document.querySelector('#MovieSubtitlesUploadEnabled').checked;
+                        // F-M520: the family has ONE switch; both addresses are stored with it, so the
+                        // stored shape stays what the pipeline reads and nothing is left half-decided.
+                        var tvstUp = document.querySelector('#TvstUploadEnabled').checked;
+                        config.TvSubtitlesUploadEnabled = tvstUp;
+                        config.MovieSubtitlesUploadEnabled = tvstUp;
                         config.DryRun = document.querySelector('#DryRun').checked;
                         config.LogMode = document.querySelector('#LogMode').value;
                         config.OshashRefresh = document.querySelector('#OshashRefresh').value;
@@ -1771,10 +1750,11 @@ workers.forEach(function (w) {
                         config.SkipDirPatterns = document.querySelector('#SkipDirs').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
                         config.SkipFilePatterns = document.querySelector('#SkipFiles').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
                         config.SubdlDownloadEnabled = document.querySelector('#SubdlDownloadEnabled').checked;
-                        // F-M485: the second source is wired — the switch is stored as the operator set it.
-                        config.TvSubtitlesDownloadEnabled = document.querySelector('#TvSubtitlesDownloadEnabled').checked;
-                        // F-M507: same for the film address of the family.
-                        config.MovieSubtitlesDownloadEnabled = document.querySelector('#MovieSubtitlesDownloadEnabled').checked;
+                        // F-M520: one switch for the family, stored on both addresses (TMDb decides which
+                        // of the two is asked for a given item).
+                        var tvstDown = document.querySelector('#TvstDownloadEnabled').checked;
+                        config.TvSubtitlesDownloadEnabled = tvstDown;
+                        config.MovieSubtitlesDownloadEnabled = tvstDown;
                         config.DownloadOrder = document.querySelector('#DownloadOrder').value === 'TvSubtitlesFirst'
                             ? 'TvSubtitlesFirst'
                             : 'SubdlFirst';

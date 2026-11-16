@@ -332,6 +332,10 @@
     "T242": {
       "suite": "endpoints",
       "checks": 3
+    },
+    "T243": {
+      "suite": "gui-structure",
+      "checks": 8
     }
   }
 }
