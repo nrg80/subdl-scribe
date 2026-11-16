@@ -17,11 +17,12 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 3 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M379–F-M448 und F-M475, F-M476
  - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 7 requirements (F-M557–F-M563)
-- [4. Download Pipeline](#4-download-pipeline) — 84 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 90 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 32 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397, F-M454
+ - [4.5 Download completion criteria](#45-download-completion-criteria) — 6 requirements (F-M565–F-M570)
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 14 requirements
 - [6. Database Refresh](#6-database-refresh) — 9 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
@@ -958,6 +959,49 @@ Dieses Unterkapitel hält fest, was die Download-Seite mit Packs tut und warum d
 **Was ein Dry Run auf der Download-Seite nie erreicht.** Ein Trockenlauf holt keinen Archiv-Body, entpackt also nichts und schreibt keine Datei — die Zahlen, die er nennt, sind hypothetisch, und er hinterlässt keine `downloaded`-Zeile (F-M334).
 
 **Die eine Richtung, die daraus folgt.** Jede entpackte Datei wird als `downloaded` gebucht, und genau diese Herkunft disqualifiziert sie später als Pack-Material beim Upload: stammt nur eine `.srt` eines Packs aus SubDL, fällt der ganze Pack aus (F-M397).
+
+### 4.5 Download completion criteria
+
+**Warum ein eigenes Kapitel.** Für den Upload stand „fertig" nirgends (Kapitel 3.4) — beim Download stand
+zwar die Gegenregel im Code (`ArePositionsTerminal`: „die Antwort kommt aus den Ergebniszeilen statt aus
+parallelen settled-Zeilen"), aber nicht im Lastenheft: nicht, **was** eine Ergebniszeile sein muss, damit sie als
+Urteil zählt, nicht, was **kein** Urteil ist, und nicht, dass die Frage **je Quelle** gestellt wird. Ohne
+das bleibt dieselbe Lücke wie beim Upload, nur in der anderen Richtung: die Folge kommt wieder, weil nie
+jemand entschieden hat.
+
+**F-M565 [U]:** **Die Vollständigkeit des Downloads wird aus den Ergebniszeilen abgeleitet, nicht aus einem
+zweiten Stempel.** Es gibt keine parallelen „settled"-Zeilen neben dem Ergebnis — eine Zeile sagt, was
+passiert ist, und daraus folgt „zu" oder „offen". Dieselbe Lehre wie Kapitel 3.4, andere Richtung: eine
+Behauptung ohne Beleg wäre wieder eine zweite Wahrheit.
+
+**F-M566 [U]:** **Der Urteilsraum ist je (Zielsprache, Quelle) total — drei Urteile, mehr nicht.**
+*Geliefert:* die eigene Kennung und der eigene Zeitpunkt dieser Quelle stehen an der Spur
+(`SubdlDownloadId`/`SubdlUploadedAt`, `TvSubtitles…`, `Moviesubtitles…`). *Bewusst abgelehnt:* die Seite
+führt die Sprache nicht (F-M538), oder sie hatte nach Ausschöpfen ihrer Suche keinen Kandidaten, oder alle
+ihre Kandidaten sind an der Qualitätsprüfung gescheitert — je Quelle mit Grund. *Neutral erledigt:* die
+Sprache liegt bereits in der Datei oder in der Bibliothek; das ist keine Aussage über einen Endpunkt und
+gilt deshalb für **jede** aktive Quelle.
+
+**F-M567 [U]:** **Kein Urteil ohne Entscheidung.** Erschöpfte Quote (429), Netz- und Schreibfehler,
+gescheiterter Fit, abgebrochener Zyklus und `deferred` sind **keine** Urteile — die Sprache bleibt offen und
+wird im nächsten Zyklus erneut gefragt. Ein Urteil ist nur, was auch beim nächsten Lauf noch wahr wäre.
+
+**F-M568 [U]:** **Die Frage-Reihenfolge bricht die Vollständigkeit nicht.** Liefert die erste Quelle, gilt
+die Sprache als erledigt, und für die zweite Quelle ist „liegt schon vor" das neutrale Urteil (F-M566) —
+sonst müsste die zweite Quelle ewig weiterfragen, obwohl die Sprache vorhanden ist. Umgekehrt gilt: eine
+Quelle, die **nicht gefragt wurde**, weil sie ausgeschaltet oder nicht konfiguriert ist oder die Medienart
+nicht führt, ist **nicht aktiv** (Kapitel 3.4/F-M560) und hält nichts offen.
+
+**F-M569 [U]:** **Ein Staffelpack liefert die Sprache für seine Folgen.**
+Ein Pack schließt die Sprache für die Quelle auf jeder Folge, die es wirklich enthält. Folgen, die das Pack
+nicht enthält, bleiben offen — der bekannte Blocker (Füller liefert für Folge 1 keinen Text, S02 nur 3 von
+24 Folgen) ist damit **kein** Vollständigkeitsfall, sondern ein Pack-Fall, und wird als solcher gemeldet,
+nicht als „fertig" verbucht.
+
+**F-M570 [U]:** **Eine Frage, zwei Aufrufer — und der Status sagt je Quelle, was fehlt.**
+Einreiher und Kopf des Laufs rufen dieselbe Funktion (`IsDownloadCompleteFor(file, quelle)`), wie beim
+Upload (F-M563). Die Statuszeile nennt **je Quelle** die offenen Sprachen, nicht eine Summe: „tvst: DE fehlt,
+mst: —, SubDL: DE, FR". Eine Summe über Quellen ist die Antwort, die schon einmal falsch war.
 
 ## 5. Upload Postprocessing
 
