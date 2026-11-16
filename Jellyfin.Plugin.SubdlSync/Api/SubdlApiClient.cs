@@ -267,7 +267,7 @@ public sealed class SubdlApiClient
                     if (doc.RootElement.TryGetProperty("retryAfterSeconds", out var rEl)
                         && rEl.ValueKind == JsonValueKind.Number)
                     {
-                        int reported = rEl.GetInt32();
+                        int reported = JsonAnomalies.ToInt(rEl);
                         if (reported > 0 && reported <= 300)
                         {
                             retrySec = reported;
@@ -1393,7 +1393,7 @@ public sealed class SubdlApiClient
 
                 if (root.TryGetProperty("totalPages", out var tp) && tp.ValueKind == JsonValueKind.Number)
                 {
-                    totalPages = tp.GetInt32();
+                    totalPages = JsonAnomalies.ToInt(tp);
                 }
 
                 if (root.TryGetProperty("subtitles", out var subsEl) && subsEl.ValueKind == JsonValueKind.Array)
@@ -1401,7 +1401,19 @@ public sealed class SubdlApiClient
                     batch = new List<SubtitleCandidate>();
                     foreach (var s in subsEl.EnumerateArray())
                     {
-                        var cand = SubtitleCandidate.FromJson(s);
+                        // F-M528: ein einzelner Treffer mit unlesbarem Feld darf hoechstens sich
+                        // selbst kosten. Frueher fuhr die FormatException aus dem Parser bis in den
+                        // Zyklus durch und beendete den ganzen Download-Lauf (16.11.2026, 06:45/07:44).
+                        SubtitleCandidate? cand;
+                        try
+                        {
+                            cand = SubtitleCandidate.FromJson(s);
+                        }
+                        catch (FormatException)
+                        {
+                            continue;
+                        }
+
                         if (cand != null)
                         {
                             batch.Add(cand);
@@ -1410,6 +1422,15 @@ public sealed class SubdlApiClient
 
                     // Film-level ids from results[0] onto every candidate
                     SubtitleCandidate.StampFilmIds(batch, root);
+
+                    // F-M528: was SubDL anders geschickt hat als erwartet — eine Zeile je Suche, und
+                    // nur wenn wirklich etwas tolerant gelesen werden musste. Das ist der Beleg dafuer,
+                    // dass der Wert von der Gegenseite kam (und taugt fuer eine Meldung an SubDL).
+                    var gelesen = JsonAnomalies.Take();
+                    if (gelesen.Count > 0)
+                    {
+                        LogInfo($"[SubDL] JSON mit Nachsicht gelesen: {string.Join("; ", gelesen)}");
+                    }
                 }
             }
             catch (JsonException)
@@ -2654,7 +2675,7 @@ public sealed class SubtitleCandidate
 
             if (film.TryGetProperty("tmdb_id", out var tmEl) && tmEl.ValueKind == JsonValueKind.Number)
             {
-                tmdb = tmEl.GetInt32().ToString(System.Globalization.CultureInfo.InvariantCulture);
+                tmdb = JsonAnomalies.ToInt(tmEl).ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
             else if (film.TryGetProperty("tmdb_id", out tmEl) && tmEl.ValueKind == JsonValueKind.String)
             {
@@ -2887,12 +2908,11 @@ public sealed class SubtitleCandidate
 
     private static int GetInt(JsonElement el, string name)
     {
-        if (el.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number)
-        {
-            return v.GetInt32();
-        }
-
-        return 0;
+        // F-M528: frueher `ValueKind == Number` + `v.GetInt32()`. GetInt32 wirft bei einem Zahlwert
+        // mit Nachkomma (oder ausserhalb des Int32-Bereichs) eine FormatException — und die riss den
+        // GANZEN Zyklus mit (16.11.2026, 06:45 und 07:44). Jetzt: lesen, was da ist, und den Befund
+        // notieren (`JsonAnomalies`), statt zu werfen.
+        return JsonAnomalies.GetInt(el, name);
     }
 }
 
@@ -2979,7 +2999,7 @@ public sealed class OwnSubtitleEntry
         // `id`, so `id` fills both and the upload id overwrites when it is reported separately.
         if (sub.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number)
         {
-            e.EntryId = idEl.GetInt32();
+            e.EntryId = JsonAnomalies.ToInt(idEl, "id");
             e.UploadId = e.EntryId;
         }
 
@@ -2988,7 +3008,7 @@ public sealed class OwnSubtitleEntry
             int reportedUploadId = 0;
             if (uploadedIdEl.ValueKind == JsonValueKind.Number)
             {
-                reportedUploadId = uploadedIdEl.GetInt32();
+                reportedUploadId = JsonAnomalies.ToInt(uploadedIdEl, "upload_id");
             }
             else if (uploadedIdEl.ValueKind == JsonValueKind.String
                      && int.TryParse(uploadedIdEl.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int parsedUploadId))
@@ -3016,7 +3036,7 @@ public sealed class OwnSubtitleEntry
         {
             if (tmEl.ValueKind == JsonValueKind.Number)
             {
-                e.TmdbId = tmEl.GetInt32();
+                e.TmdbId = JsonAnomalies.ToInt(tmEl, "tmdb");
             }
             else if (tmEl.ValueKind == JsonValueKind.String && int.TryParse(tmEl.GetString(), out int tm))
             {
@@ -3065,21 +3085,21 @@ public sealed class OwnSubtitleEntry
 
         if (sub.TryGetProperty("season", out var seasonEl) && seasonEl.ValueKind == JsonValueKind.Number)
         {
-            e.Season = seasonEl.GetInt32();
+            e.Season = JsonAnomalies.ToInt(seasonEl, "season");
         }
         else if (sub.TryGetProperty("s", out seasonEl) && seasonEl.ValueKind == JsonValueKind.Number)
         {
             // F-M432: the published list reports the season as "s".
-            e.Season = seasonEl.GetInt32();
+            e.Season = JsonAnomalies.ToInt(seasonEl, "season");
         }
 
         if (sub.TryGetProperty("episode", out var epEl) && epEl.ValueKind == JsonValueKind.Number)
         {
-            e.Episode = epEl.GetInt32();
+            e.Episode = JsonAnomalies.ToInt(epEl, "episode");
         }
         else if (sub.TryGetProperty("ef", out var efEl) && efEl.ValueKind == JsonValueKind.Number)
         {
-            e.Episode = efEl.GetInt32();
+            e.Episode = JsonAnomalies.ToInt(efEl, "episode_from");
         }
 
         return e;
@@ -3156,12 +3176,12 @@ public sealed class SubtitleUnpackFile
 
         if (el.TryGetProperty("season", out var se) && se.ValueKind == JsonValueKind.Number)
         {
-            f.Season = se.GetInt32();
+            f.Season = JsonAnomalies.ToInt(se, "season");
         }
 
         if (el.TryGetProperty("episode", out var ep) && ep.ValueKind == JsonValueKind.Number)
         {
-            f.Episode = ep.GetInt32();
+            f.Episode = JsonAnomalies.ToInt(ep, "episode");
         }
 
         // Shared reader: hi is a JSON boolean in search responses, but the unpack list has been seen

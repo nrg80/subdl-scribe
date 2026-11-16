@@ -869,6 +869,51 @@ internal static class Program
         Check(dlPipeline.Contains("covers {Season}x{First}-{Last}", StringComparison.Ordinal),
             "F-M472: the run says which stretch of the season it moved forward");
 
+        // ---- F-M528: eine fremde Zahl kostet einen Treffer, nie den Lauf ------------------------
+        // Befund 16.11.2026: `FormatException` aus SubtitleCandidate.FromJson beendete zwei
+        // Download-Zyklen. GetInt32 wirft bei einem Zahlwert mit Nachkomma oder ausserhalb des
+        // Int32-Bereichs. Geprueft wird jetzt, dass solche Werte GELESEN werden.
+        string looseJson = """
+        { "url": "/subtitle/1-2.zip", "release_name": "X", "language": "de",
+          "season": 1.7, "episode": "3", "episode_from": 99999999999, "framerate": 1e3,
+          "download_count": { "n": 5 } }
+        """;
+        using (var doc = System.Text.Json.JsonDocument.Parse(looseJson))
+        {
+            Jellyfin.Plugin.SubdlScribe.Api.SubtitleCandidate? cand = null;
+            bool threw = false;
+            try
+            {
+                cand = Jellyfin.Plugin.SubdlScribe.Api.SubtitleCandidate.FromJson(doc.RootElement);
+            }
+            catch (FormatException)
+            {
+                threw = true;
+            }
+
+            Check(!threw, "F-M528: a hit with foreign number shapes no longer throws");
+            Check(cand != null && cand!.Season == 1,
+                "F-M528: a number with a fraction (1.7) is truncated, not thrown away");
+            Check(cand != null && cand!.Episode == 3,
+                "F-M528: a number sent as a string (\"3\") is understood");
+            Check(cand != null && cand!.EpisodeFrom == int.MaxValue,
+                "F-M528: a number beyond the Int32 range is clamped instead of throwing");
+            Check(cand != null && cand!.Framerate == 1000,
+                "F-M528: exponent notation (1e3) is read");
+            Check(cand != null && cand!.DownloadCount == 0,
+                "F-M528: an object where a number belongs reads as 0, and the hit survives");
+        }
+
+        string subdlClient = File.ReadAllText(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "SubdlApiClient.cs"));
+        Check(subdlClient.Contains("JsonAnomalies.GetInt(el, name)", StringComparison.Ordinal),
+            "F-M528: the shared int reader goes through the tolerant one");
+        Check(subdlClient.Contains("catch (FormatException)", StringComparison.Ordinal)
+              && subdlClient.Contains("JsonAnomalies.Take()", StringComparison.Ordinal),
+            "F-M528: one bad hit is skipped AND the foreign value is written to the log");
+        Check(!subdlClient.Contains("v.GetInt32();\n        }", StringComparison.Ordinal),
+            "F-M528: no int-only read of an API payload is left in the search path");
+
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."
             : $"seasonpack: {_checks} checks, {Failures.Count} failed.");

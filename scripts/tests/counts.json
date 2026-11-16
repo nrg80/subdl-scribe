@@ -364,6 +364,10 @@
     "T250": {
       "suite": "gui-structure",
       "checks": 7
+    },
+    "T251": {
+      "suite": "seasonpack",
+      "checks": 9
     }
   }
 }
