@@ -13,23 +13,23 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+namespace Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 /// <summary>
 /// F-M176: scheduled cleanup of rejected SubDL dashboard entries. Runs independently
 /// on its own diced anchor. The pipeline method itself holds the global run lock.
 /// </summary>
 // F-M332: der Knopf der Seite startet diese Aufgabe (nicht den Job-Endpunkt) — nur sie schreibt die dauerhafte Statuszeile.
-public class SubdlPostprocessTask : IScheduledTask
+public class ScribePostprocessTask : IScheduledTask
 {
-    private readonly ILogger<SubdlPostprocessTask> _logger;
+    private readonly ILogger<ScribePostprocessTask> _logger;
 
-    public SubdlPostprocessTask(ILogger<SubdlPostprocessTask> logger)
+    public ScribePostprocessTask(ILogger<ScribePostprocessTask> logger)
     {
         _logger = logger;
     }

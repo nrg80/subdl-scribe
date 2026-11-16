@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// F-M352 (operator order 19.10.2026): decides whether a worker is switched OFF — the note under the
@@ -14,10 +14,10 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// so the lamp states what the run would actually do:
 /// </para>
 /// <list type="bullet">
-/// <item>Download: <c>DownloadEnabled</c> false (SubdlDownloadTask), empty <c>SelectedLibraries</c>
+/// <item>Download: <c>DownloadEnabled</c> false (ScribeDownloadTask), empty <c>SelectedLibraries</c>
 /// (F-M213, hard stop for both directions), an empty target-language list (DownloadPipeline
 /// "No target languages configured"), or a missing credential (DownloadPipeline/MissingCredentials).</item>
-/// <item>Upload: <c>UploadEnabled</c> false (SubdlUploadTask), empty <c>SelectedLibraries</c>, or a
+/// <item>Upload: <c>UploadEnabled</c> false (ScribeUploadTask), empty <c>SelectedLibraries</c>, or a
 /// missing credential. The upload has no language list, so it has no language condition.</item>
 /// <item>Upload postprocessing: <c>UploadEnabled</c> false or the cadence on Never/Manual/OnArrival —
 /// exactly the gate the scheduler uses before it arms the anchor (F-M291). The library selection is
@@ -120,7 +120,7 @@ public static class WorkerOffState
     /// <summary>The OSHash-refresh task's worker key.</summary>
     public const string OshashWorkerKey = "SubdlSyncOshashRefreshTask";
 
-    /// <summary>The postprocessing task's worker key (SubdlPostprocessTask.Key).</summary>
+    /// <summary>The postprocessing task's worker key (ScribePostprocessTask.Key).</summary>
     public const string PostprocessWorkerKey = "SubDLPostprocessTask";
 
     /// <summary>An empty library selection is a hard stop for both pipelines (F-M213).</summary>

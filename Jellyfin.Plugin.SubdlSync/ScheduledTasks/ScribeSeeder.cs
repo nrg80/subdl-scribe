@@ -17,8 +17,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
@@ -26,11 +26,11 @@ using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging;
 
-using Jellyfin.Plugin.SubdlScribe.Language;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Language;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Configuration;
 
-namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+namespace Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 /// <summary>
 /// F-M313: what one sidecar observation pass produced. Two numbers, deliberately not one.
@@ -126,7 +126,7 @@ public sealed class QueueItem
 /// are preserved there).
 /// </summary>
 /// F-M38: persistent state is split by the kind of thing described (section 3.18).
-public sealed class SubdlSeeder
+public sealed class ScribeSeeder
 {
     private readonly ILibraryManager _libraryManager;
     private readonly IMediaSourceManager _mediaSourceManager;
@@ -134,12 +134,12 @@ public sealed class SubdlSeeder
     private readonly TmdbImdbResolver _tmdb;
 
     /// <summary>Initializes the seeder.</summary>
-    public SubdlSeeder(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ILoggerFactory loggerFactory, TmdbImdbResolver tmdb)
+    public ScribeSeeder(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ILoggerFactory loggerFactory, TmdbImdbResolver tmdb)
     {
         _libraryManager = libraryManager;
         _mediaSourceManager = mediaSourceManager;
         _tmdb = tmdb;
-        _logger = loggerFactory.CreateLogger("Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSeeder");
+        _logger = loggerFactory.CreateLogger("Jellyfin.Plugin.SubScribe.ScheduledTasks.ScribeSeeder");
     }
 
     /// <summary>
@@ -242,13 +242,13 @@ public sealed class SubdlSeeder
     /// not decide policy, it fills queues. The dispatcher lowers it when SubDL has no download
     /// allowance left (F-M331) — the seeder never asks the API itself.
     /// </param>
-    public SeedSnapshot Scan(Configuration.PluginConfiguration config, System.Collections.Generic.ISet<string>? onlyLibraries = null, SubdlEventDispatcher.CycleDirection dir = SubdlEventDispatcher.CycleDirection.Both, System.Collections.Generic.ISet<string>? onlyItemIds = null, bool downloadAllowed = true)
+    public SeedSnapshot Scan(Configuration.PluginConfiguration config, System.Collections.Generic.ISet<string>? onlyLibraries = null, ScribeEventDispatcher.CycleDirection dir = ScribeEventDispatcher.CycleDirection.Both, System.Collections.Generic.ISet<string>? onlyItemIds = null, bool downloadAllowed = true)
     {
         var snapshot = new SeedSnapshot();
         string dirLabel = dir switch
         {
-            SubdlEventDispatcher.CycleDirection.UploadOnly => "upload",
-            SubdlEventDispatcher.CycleDirection.DownloadOnly => "download",
+            ScribeEventDispatcher.CycleDirection.UploadOnly => "upload",
+            ScribeEventDispatcher.CycleDirection.DownloadOnly => "download",
             _ => "both"
         };
         LogUtil.Normal(_logger, "[Sub Scribe-Seed] scan started ({Direction})", dirLabel);
@@ -387,14 +387,14 @@ public sealed class SubdlSeeder
                 // SubDL-Konto noch darf; ist eine andere Quelle da, haelt es das Einreihen nicht auf.
                 bool downloadQueueable = config.AnyDownloadEnabled
                     && (downloadAllowed || config.IsDownloadEnabled(SubtitleProvider.TvSubtitles));
-                if (dir != SubdlEventDispatcher.CycleDirection.UploadOnly
+                if (dir != ScribeEventDispatcher.CycleDirection.UploadOnly
                     && downloadQueueable
                     && IsDownloadTodo(item, mediaPath, config))
                 {
                     snapshot.Download.Add(Clone(qi));
                 }
 
-                if (dir != SubdlEventDispatcher.CycleDirection.DownloadOnly && config.AnyUploadEnabled)
+                if (dir != ScribeEventDispatcher.CycleDirection.DownloadOnly && config.AnyUploadEnabled)
                 {
                     // F-M546: die Queue wird je Quelle gefuellt. Ein Item, das nur tvst noch braucht,
                     // steht danach nur in der tvst-Queue — SubDL und mst halten es nicht mehr offen.
@@ -434,8 +434,8 @@ public sealed class SubdlSeeder
             // gated to one direction and leaves the foreign queue structurally empty, so formatting
             // both counts unconditionally printed a hard `0` for the direction it was never asked
             // about — read as "nothing to do" when the truth is "not asked".
-            bool coversUp = dir != SubdlEventDispatcher.CycleDirection.DownloadOnly;
-            bool coversDown = dir != SubdlEventDispatcher.CycleDirection.UploadOnly;
+            bool coversUp = dir != ScribeEventDispatcher.CycleDirection.DownloadOnly;
+            bool coversDown = dir != ScribeEventDispatcher.CycleDirection.UploadOnly;
             string covered = coversUp && coversDown
                 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} upload, {1} download queued", snapshot.Upload.Count, snapshot.Download.Count)
                 : coversUp
@@ -654,7 +654,7 @@ public sealed class SubdlSeeder
 
             // F-M47: refetch gate.
             var searchTracker = new Registry.DownloadSearchTracker(db);
-            if (!searchTracker.IsDue(item.Id.ToString(), SubdlDownloadTask.IntervalToGap(config.RefetchInterval), TargetLanguagesOf(config)))
+            if (!searchTracker.IsDue(item.Id.ToString(), ScribeDownloadTask.IntervalToGap(config.RefetchInterval), TargetLanguagesOf(config)))
             {
                 return false;
             }
@@ -872,7 +872,7 @@ public sealed class SubdlSeeder
             // (IsDialogueStream), so the prefilter, the pipeline and the language gate cannot drift
             // apart on what counts as a track worth publishing.
             var textStreams = allSubs
-                .Where(Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream)
+                .Where(Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream)
                 .ToList();
 
             if (textStreams.Count == 0)
@@ -970,7 +970,7 @@ public sealed class SubdlSeeder
                     }
                     else
                     {
-                        needed.Add(mapped + "|" + (Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(s) ? "1" : "0"));
+                        needed.Add(mapped + "|" + (Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(s) ? "1" : "0"));
                     }
                 }
 
@@ -1109,7 +1109,7 @@ public sealed class SubdlSeeder
     /// <param name="targets">Configured target languages.</param>
     /// <param name="onlyMissing">True when embedded streams count as evidence.</param>
     /// <returns>The pairs without evidence.</returns>
-    private List<Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef> OpenPairsOf(
+    private List<Jellyfin.Plugin.SubScribe.Registry.SubtitleRef> OpenPairsOf(
         BaseItem item, string mediaPath, List<string> targets, bool onlyMissing)
     {
         // F-M246: one rule with the pipeline — a forced track does not make its language present.
@@ -1120,11 +1120,11 @@ public sealed class SubdlSeeder
         // and Jellyfin's stream list must not be fed in at all — the reader's own mode handles this,
         // so the list is left null rather than being collected and then discarded.
         IEnumerable<string>? streamLangs = onlyMissing
-            ? Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
+            ? Jellyfin.Plugin.SubScribe.Registry.SidecarNaming
                 .EmbeddedPresentLanguages(_mediaSourceManager.GetMediaStreams(item.Id))
             : null;
 
-        var required = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef.Required(
+        var required = Jellyfin.Plugin.SubScribe.Registry.SubtitleRef.Required(
             targets, Plugin.Instance?.Configuration.DownloadHearingImpaired == true);
 
         return (Plugin.Instance?.Registry
@@ -1205,7 +1205,7 @@ public sealed class SubdlSeeder
             // answers that for the price of the stream list — no ffmpeg call at all.
             bool anyUntagged = streams != null && streams.Any(s =>
                 s.Type == MediaStreamType.Subtitle && !s.IsExternal
-                && Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream(s)
+                && Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream(s)
                 && Pipeline.LanguageTagGate.IsUntagged(s.Language));
 
             if (!anyUntagged)
@@ -1323,7 +1323,7 @@ public sealed class SubdlSeeder
             // calls for one file). The observation loop below therefore only records track facts.
             registry.EnsureMedia(mediaHash, item.Id.ToString("D"), mediaPath);
 
-            var tracks = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
+            var tracks = Jellyfin.Plugin.SubScribe.Registry.SidecarNaming
                 .EmbeddedTracks(_mediaSourceManager.GetMediaStreams(item.Id));
 
             int written = 0;

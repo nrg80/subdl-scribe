@@ -13,9 +13,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Language;
+using Jellyfin.Plugin.SubScribe.Language;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// F-M234: what subtitle files are actually present on disk for a media file.

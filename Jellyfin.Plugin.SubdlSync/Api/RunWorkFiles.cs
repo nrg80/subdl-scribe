@@ -15,7 +15,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M441 (operator 04.11.2026, "kein dauerhafter store"): the working files of ONE run.

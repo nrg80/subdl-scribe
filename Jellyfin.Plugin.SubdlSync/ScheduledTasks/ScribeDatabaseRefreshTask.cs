@@ -16,14 +16,14 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+namespace Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 /// <summary>
 /// The database refresh: reconciles the stored state with reality.
@@ -53,19 +53,19 @@ namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
 ///   existence; the existence checks above are the truth source.
 /// </summary>
 // F-M274/F-M275: fester Schrittlauf in EINEM Lauf unter dem globalen Lock, gearbeitet wird auf einem Schnappschuss des Caches, entschieden je Eintrag am Fingerabdruck der Datei.
-public class SubdlDatabaseRefreshTask : IScheduledTask
+public class ScribeDatabaseRefreshTask : IScheduledTask
 {
     private readonly ILibraryManager _libraryManager;
     private readonly IMediaSourceManager _mediaSourceManager;
-    private readonly ILogger<SubdlDatabaseRefreshTask> _logger;
+    private readonly ILogger<ScribeDatabaseRefreshTask> _logger;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SubdlDatabaseRefreshTask"/> class.
+    /// Initializes a new instance of the <see cref="ScribeDatabaseRefreshTask"/> class.
     /// </summary>
     /// <param name="libraryManager">Library manager.</param>
     /// <param name="mediaSourceManager">Media source manager (for the embedded-track check, F-M258).</param>
     /// <param name="logger">Logger.</param>
-    public SubdlDatabaseRefreshTask(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ILogger<SubdlDatabaseRefreshTask> logger)
+    public ScribeDatabaseRefreshTask(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ILogger<ScribeDatabaseRefreshTask> logger)
     {
         _libraryManager = libraryManager;
         _mediaSourceManager = mediaSourceManager;
@@ -126,7 +126,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
         if (!await PipelineRunLock.AcquireAsync(_logger, "refresh", cancellationToken).ConfigureAwait(false))
         {
             var spacing = JobSpacingMinutes();
-            SubdlSchedulerCoordinator.Instance?.ScheduleRefreshFire(DateTime.UtcNow.AddMinutes(spacing));
+            ScribeSchedulerCoordinator.Instance?.ScheduleRefreshFire(DateTime.UtcNow.AddMinutes(spacing));
             _logger.LogWarning("[Sub Scribe-Refresh] Deferred — global run lock busy; re-fire scheduled in {Spacing} min.", spacing);
             // Lock busy is a DEFERRAL, not a switch-off: the work is pending and will retry, so the
             // light is yellow. Grey stays for "disabled" and "never run".
@@ -463,7 +463,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
     /// </summary>
     /// <param name="registry">Content registry (accepts the sidecar rows directly).</param>
     /// <returns>Number of sidecar rows whose forced flag was set.</returns>
-    private int BackfillForcedFlags(Data.SubdlDbContext db)
+    private int BackfillForcedFlags(Data.ScribeDbContext db)
     {
         int updated = 0;
         var changed = new List<Data.SidecarEntity>();
@@ -621,7 +621,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
     /// <param name="registry">Content registry.</param>
     /// <param name="aliveItemIds">Item ids still present in Jellyfin.</param>
     /// <returns>Number of items with at least one open required file.</returns>
-    private int CountItemsWithOpenFiles(Data.SubdlDbContext db, Registry.ContentHashRegistry registry, HashSet<string> aliveItemIds)
+    private int CountItemsWithOpenFiles(Data.ScribeDbContext db, Registry.ContentHashRegistry registry, HashSet<string> aliveItemIds)
     {
         var targets = (Plugin.Instance?.Configuration.DownloadLanguages ?? string.Empty)
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -709,7 +709,7 @@ public class SubdlDatabaseRefreshTask : IScheduledTask
     /// <param name="registry">Content registry.</param>
     /// <param name="media">The media row whose mark is being judged.</param>
     /// <returns>Languages carried by the file's own tracks.</returns>
-    private HashSet<string> EmbeddedLanguagesForCoverage(Data.SubdlDbContext db, Registry.ContentHashRegistry registry, Data.MediaEntity media)
+    private HashSet<string> EmbeddedLanguagesForCoverage(Data.ScribeDbContext db, Registry.ContentHashRegistry registry, Data.MediaEntity media)
     {
         var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 

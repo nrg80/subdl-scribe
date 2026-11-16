@@ -12,7 +12,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api
+namespace Jellyfin.Plugin.SubScribe.Api
 {
     /// <summary>
     /// In-run watchdog (NF-4): aborts a pipeline run when no heartbeat has been
@@ -57,7 +57,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Api
 
         /// <summary>
         /// Gets the fixed idle grace: 6 minutes. It covers the 5-minute file-transfer
-        /// timeout (SubdlApiClient.FileTransferTimeout) with room to spare, so a slow but
+        /// timeout (ScribeApiClient.FileTransferTimeout) with room to spare, so a slow but
         /// working transfer is never mistaken for a frozen run.
         /// </summary>
         public static TimeSpan Grace => TimeSpan.FromMinutes(6);

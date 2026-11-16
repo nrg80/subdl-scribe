@@ -20,16 +20,16 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// SubDL API v3 client (F-M8, F-M9, F-M19). Login → Bearer token; upload is a 3-step flow
 /// (getNId → uploadSingleSubtitle → uploadSubtitle).
 /// Credentials are never logged (F-M24b).
 /// </summary>
-public sealed class SubdlApiClient
+public sealed class ScribeApiClient
 {
     // F-M63 (user decision 09.09.2026 "official endpoint"): the official documented API
     // host is https://api.subdl.com (subdl.com/api-doc lists it for search, upload and /me;
@@ -83,16 +83,16 @@ public sealed class SubdlApiClient
     private DateTime _tokenObtained;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SubdlApiClient"/> class.
+    /// Initializes a new instance of the <see cref="ScribeApiClient"/> class.
     /// </summary>
     /// <param name="http">HttpClient instance.</param>
-    public SubdlApiClient(HttpClient http)
+    public ScribeApiClient(HttpClient http)
     {
         _http = http;
 
         // F-M532: die Parser der uebrigen Antworten (Quota, eigene Liste, Filmblock, Upload) haben
         // keinen eigenen Logger — ihre Befunde kommen hier durch dieselbe Tuer wie die Suchantwort.
-        SubdlFieldSchema.OnMismatch = (f, context) => LogInfo(
+        ScribeFieldSchema.OnMismatch = (f, context) => LogInfo(
             $"[Sub Scribe] Metadata format mismatch ({context}).\n"
             + $"Attribute: {f.Path} (documented: {f.Documented}, received: {f.Received})");
     }
@@ -340,7 +340,7 @@ public sealed class SubdlApiClient
             // Treated exactly like the overload variant: wait the server-reported
             // window and continue. Which of the two it is cannot be read from the
             // status code alone - the caller confirms against the live counters
-            // before it stops anything (SubdlApiClient.ReadQuotaAsync).
+            // before it stops anything (ScribeApiClient.ReadQuotaAsync).
             TransientOverload = true;
             TransientRetrySeconds = retrySec > 0 ? retrySec : 30;
             return;
@@ -360,7 +360,7 @@ public sealed class SubdlApiClient
     /// uses (<c>GET /api/v2/me</c>, <c>usage.search</c> / <c>usage.downloads</c>), so the
     /// pipeline can decide from the NUMBERS instead of guessing from a status code.
     /// </summary>
-    public SubdlQuotaSnapshot? Quota { get; private set; }
+    public ScribeQuotaSnapshot? Quota { get; private set; }
 
     /// <summary>
     /// F-M238: reads the two counters the 429 decision needs and reports what they say
@@ -402,7 +402,7 @@ public sealed class SubdlApiClient
             {
                 using (quotaDoc)
                 {
-                    if (SubdlFieldSchema.Emit(SubdlFieldSchema.CheckQuota(quotaDoc.RootElement), "quota answer"))
+                    if (ScribeFieldSchema.Emit(ScribeFieldSchema.CheckQuota(quotaDoc.RootElement), "quota answer"))
                     {
                         // Der Zaehlerstand ist unbrauchbar: melden und wie "unbekannt" behandeln.
                         return QuotaRead.Unreadable;
@@ -410,7 +410,7 @@ public sealed class SubdlApiClient
                 }
             }
 
-            var snap = SubdlQuotaSnapshot.FromJson(body);
+            var snap = ScribeQuotaSnapshot.FromJson(body);
             if (snap == null || !snap.IsKnown(forDownload))
             {
                 LogInfo("[Sub Scribe] quota read: response carries no usable limit — allowance unknown, day-long pace.");
@@ -470,7 +470,7 @@ public sealed class SubdlApiClient
     /// WHO SEES IT — traced through the tree on 10.10.2026, three counterparties: api.subdl.com
     /// (search, login, quota read, status probe), dl.subdl.com (the subtitle file download) and
     /// api.themoviedb.org. The last one is not an oversight: BuildApiClient's HttpClient is handed
-    /// to TmdbImdbResolver, and SubdlStatusController's probe client serves the TMDb configuration
+    /// to TmdbImdbResolver, and ScribeStatusController's probe client serves the TMDb configuration
     /// probe as well. Both services sit behind a TLS-terminating front, so the operator and its
     /// edge read the header; the plugin's own log, Jellyfin itself, the LAN and the ISP do not.
     /// The operator decided on 10.10.2026 that TMDb may see it too — the agent says where a call
@@ -478,7 +478,7 @@ public sealed class SubdlApiClient
     /// </para>
     /// </summary>
     public static string DefaultUserAgent { get; } =
-        "Sub Scribe/" + (typeof(SubdlApiClient).Assembly.GetName().Version?.ToString() ?? "0.0.0.0")
+        "Sub Scribe/" + (typeof(ScribeApiClient).Assembly.GetName().Version?.ToString() ?? "0.0.0.0")
         + " (+https://github.com/nrg80/sub-scribe)";
 
     /// <summary>Gets or sets the SubDL user-agent used for all requests.</summary>
@@ -494,7 +494,7 @@ public sealed class SubdlApiClient
     /// out with no User-Agent whatsoever. One factory keeps them from drifting apart again.
     /// </para>
     /// <para>
-    /// Not every client built here is a SubDL caller: SubdlStatusController holds one and uses it
+    /// Not every client built here is a SubDL caller: ScribeStatusController holds one and uses it
     /// for the SubDL search probe AND the TMDb configuration probe, so TMDb sees this agent too.
     /// That is intended — see <see cref="DefaultUserAgent"/> for who sees it and why.
     /// </para>
@@ -786,11 +786,11 @@ public sealed class SubdlApiClient
     /// <param name="comment">Comment text.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Accepted, deferred (rate limited) or failed.</returns>
-    public async Task<SubdlReportOutcome> ReportBrokenSubtitleAsync(string nId, string category, string comment, CancellationToken ct)
+    public async Task<ScribeReportOutcome> ReportBrokenSubtitleAsync(string nId, string category, string comment, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(nId) || string.IsNullOrWhiteSpace(category))
         {
-            return SubdlReportOutcome.Failed;
+            return ScribeReportOutcome.Failed;
         }
 
         // Downloads run on the api key alone; a report needs the session the upload path opens.
@@ -815,12 +815,12 @@ public sealed class SubdlApiClient
 
         if ((int)resp.StatusCode == 429)
         {
-            return SubdlReportOutcome.Deferred;
+            return ScribeReportOutcome.Deferred;
         }
 
         if (!resp.IsSuccessStatusCode)
         {
-            return SubdlReportOutcome.Failed;
+            return ScribeReportOutcome.Failed;
         }
 
         string body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
@@ -828,12 +828,12 @@ public sealed class SubdlApiClient
         {
             using var doc = JsonDocument.Parse(body);
             return doc.RootElement.TryGetProperty("success", out var ok) && ok.ValueKind == JsonValueKind.True
-                ? SubdlReportOutcome.Accepted
-                : SubdlReportOutcome.Failed;
+                ? ScribeReportOutcome.Accepted
+                : ScribeReportOutcome.Failed;
         }
         catch (JsonException)
         {
-            return SubdlReportOutcome.Failed;
+            return ScribeReportOutcome.Failed;
         }
     }
 
@@ -850,7 +850,7 @@ public sealed class SubdlApiClient
         int? episode,
         CancellationToken ct,
         bool hearingImpaired = false,
-        string framerate = Pipeline.SubdlFramerate.Unknown)
+        string framerate = Pipeline.ScribeFramerate.Unknown)
     {
         string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");
         if (string.IsNullOrWhiteSpace(imdbId))
@@ -952,7 +952,7 @@ public sealed class SubdlApiClient
             ["quality"] = quality,
             ["production_type"] = "0",
             ["releases"] = JsonSerializer.Serialize(new[] { releaseName }),
-            // F-M350: the caller's code, never a literal. SubdlFramerate returns one of the codes SubDL
+            // F-M350: the caller's code, never a literal. ScribeFramerate returns one of the codes SubDL
             // documents (0 = default/unknown), so the wire carries a value the server knows.
             ["framerate"] = framerate,
             ["comment"] = "",
@@ -1100,7 +1100,7 @@ public sealed class SubdlApiClient
         int episodeTo,
         CancellationToken ct,
         bool hearingImpaired = false,
-        string framerate = Pipeline.SubdlFramerate.Unknown)
+        string framerate = Pipeline.ScribeFramerate.Unknown)
     {
         string token = _token ?? throw new InvalidOperationException("Not logged in (call LoginAsync first)");
         if (string.IsNullOrWhiteSpace(imdbId))
@@ -1464,8 +1464,8 @@ public sealed class SubdlApiClient
                         // nur die Felder, die der Parser zufaellig liest. Ein falscher Eintrag wird
                         // benannt (Sub + Attribut), der Treffer faellt, der Lauf laeuft weiter.
                         JsonAnomalies.Take();
-                        var ident = SubdlFieldSchema.Identity(s);
-                        var falsch = SubdlFieldSchema.Check(s);
+                        var ident = ScribeFieldSchema.Identity(s);
+                        var falsch = ScribeFieldSchema.Check(s);
 
                         SubtitleCandidate? cand;
                         try
@@ -1480,7 +1480,7 @@ public sealed class SubdlApiClient
                         var auffaellig = JsonAnomalies.Take();
                         if (falsch.Count > 0 || auffaellig.Count > 0)
                         {
-                            string version = typeof(SubdlApiClient).Assembly.GetName().Version?.ToString() ?? string.Empty;
+                            string version = typeof(ScribeApiClient).Assembly.GetName().Version?.ToString() ?? string.Empty;
                             foreach (var f in falsch)
                             {
                                 var meldung = Pipeline.MetadataMismatchReports.Build(
@@ -2626,7 +2626,7 @@ public sealed class SubtitleCandidate
     /// <summary>Stable subtitle id parsed from the download url
     /// ("/subtitle/3676577-8593549.zip" → "3676577-8593549"); identifies the EXACT
     /// SubDL entry (the download), not the release family.</summary>
-    public string SubdlId { get; set; } = string.Empty;
+    public string ScribeId { get; set; } = string.Empty;
 
     /// <summary>Uploader name ("author" field).</summary>
     public string Author { get; set; } = string.Empty;
@@ -2668,7 +2668,7 @@ public sealed class SubtitleCandidate
         {
             var file = segs[^1]; // e.g. "3676577-8593549.zip"
             var dot = file.IndexOf('.', System.StringComparison.Ordinal);
-            c.SubdlId = dot > 0 ? file[..dot] : file;
+            c.ScribeId = dot > 0 ? file[..dot] : file;
         }
         if (el.TryGetProperty("release_name", out var rn) && rn.ValueKind == JsonValueKind.String)
         {
@@ -2676,7 +2676,7 @@ public sealed class SubtitleCandidate
         }
 
         // F-M529: ab hier traegt jeder Befund den Sub, zu dem er gehoert.
-        JsonAnomalies.BeginSubtitle(c.SubdlId, c.ReleaseName, c.Language);
+        JsonAnomalies.BeginSubtitle(c.ScribeId, c.ReleaseName, c.Language);
 
         if (el.TryGetProperty("language", out var lg) && lg.ValueKind == JsonValueKind.String)
         {
@@ -2765,7 +2765,7 @@ public sealed class SubtitleCandidate
 
             // F-M532: auch der Filmblock wird auf Feldgestalt geprueft. Ein falscher Wert wird
             // gemeldet und dann NICHT benutzt — die Id bleibt leer statt geraten.
-            if (SubdlFieldSchema.Emit(SubdlFieldSchema.CheckFilm(film), "search answer, film block"))
+            if (ScribeFieldSchema.Emit(ScribeFieldSchema.CheckFilm(film), "search answer, film block"))
             {
                 return;
             }
@@ -3018,7 +3018,7 @@ public sealed class SubtitleCandidate
 }
 
 /// <summary>F-M450: what came of one report to SubDL.</summary>
-public enum SubdlReportOutcome
+public enum ScribeReportOutcome
 {
     /// <summary>SubDL confirmed the report.</summary>
     Accepted,
@@ -3088,7 +3088,7 @@ public sealed class OwnSubtitleEntry
     public static OwnSubtitleEntry? FromJson(JsonElement el)
     {
         // F-M532: falsche Feldgestalt -> melden und den Eintrag fallen lassen (nicht raten).
-        if (SubdlFieldSchema.Emit(SubdlFieldSchema.CheckOwnEntry(el), "own subtitle list"))
+        if (ScribeFieldSchema.Emit(ScribeFieldSchema.CheckOwnEntry(el), "own subtitle list"))
         {
             return null;
         }

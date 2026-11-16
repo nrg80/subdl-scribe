@@ -38,10 +38,10 @@ using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Api.Endpoints;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 internal static class Program
 {
@@ -56,16 +56,16 @@ internal static class Program
 
         // ---- 1. four endpoints, two per direction ----------------------------------------------
         var tvClient = new TvSubtitlesClient(new HttpClient(new FixtureHandler(_fixtures)));
-        var subdlClient = new SubdlApiClient(new HttpClient(new FixtureHandler(_fixtures)));
+        var subdlClient = new ScribeApiClient(new HttpClient(new FixtureHandler(_fixtures)));
         var catalog = new SubtitleEndpointCatalog(
             new IDownloadEndpoint[]
             {
-                new SubdlDownloadEndpoint(subdlClient),
+                new ScribeDownloadEndpoint(subdlClient),
                 new TvSubtitlesDownloadEndpoint(tvClient),
             },
             new IUploadEndpoint[]
             {
-                new SubdlUploadEndpoint(subdlClient),
+                new ScribeUploadEndpoint(subdlClient),
                 new TvSubtitlesUploadEndpoint(tvClient, dryRun: true),
             });
 
@@ -196,7 +196,7 @@ internal static class Program
             Episode = 24,
             FullSeason = false,
         };
-        var map = SubdlDownloadEndpoint.Map(candidate);
+        var map = ScribeDownloadEndpoint.Map(candidate);
         Check("a SubDL candidate becomes a neutral hit without losing its handle",
             map.Provider == SubtitleProvider.Subdl && map.Id == candidate.Url
             && map.Language == "DE" && map.Release == candidate.ReleaseName && !map.FullSeason);
@@ -250,7 +250,7 @@ internal static class Program
             && unbekannt.Reason!.Contains("Nope-Nope", StringComparison.Ordinal));
 
         // ---- 7. the SubDL upload endpoint refuses what it cannot do ---------------------------
-        var subdlUpload = new SubdlUploadEndpoint(subdlClient);
+        var subdlUpload = new ScribeUploadEndpoint(subdlClient);
         var keinPack = await subdlUpload.SendAsync(ticket with { SeasonPack = true }).ConfigureAwait(false);
         Check("SubDL refuses a season pack here — packs are the pipeline's job (F-M372)",
             !keinPack.Ok && keinPack.Reason!.Contains("season packs", StringComparison.Ordinal));
@@ -340,7 +340,7 @@ internal static class Program
                 .Contains("subdl", StringComparison.Ordinal));
         Check("the download records the origin and the source's own id in the store",
             downloadSource.Contains("Api.Endpoints.Provenance.Name(cand.Provider)", StringComparison.Ordinal)
-            && downloadSource.Contains("cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url", StringComparison.Ordinal));
+            && downloadSource.Contains("cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.ScribeId : cand.Url", StringComparison.Ordinal));
         Check("the upload reads the origin from the store before it picks an endpoint",
             uploadSource.Contains("Registry.GetOrigin(contentHashEarly)", StringComparison.Ordinal)
             && uploadSource.Contains("UploadGate.Decide(", StringComparison.Ordinal)
@@ -348,20 +348,20 @@ internal static class Program
         Check("the store schema carries the two columns and a migration step",
             ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"))
                 .Contains("public string? OriginId { get; set; }", StringComparison.Ordinal)
-            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"))
                 .Contains("ALTER TABLE sidecars ADD COLUMN Origin TEXT NULL;", StringComparison.Ordinal)
             // F-M501: der Marker steht auf 13 (media.TvstShowId kam dazu); die Pruefung fragt den
             // AKTUELLEN Stand, weil ein stehengebliebener Marker die Migration nicht mehr anzeigt.
             // F-M507: er steht inzwischen auf 14 (die Spalten der dritten Quelle).
-            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"))
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"))
                 .Contains("CurrentSchemaVersion = 14", StringComparison.Ordinal));
 
         // ---- 10. eigene Kennzeichen je Quelle und Richtung (F-M488) ---------------------------
         var entities = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"));
-        var dbc = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"));
+        var dbc = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"));
         Check("four own fields exist, one per source and direction",
-            entities.Contains("public string? SubdlDownloadId { get; set; }", StringComparison.Ordinal)
-            && entities.Contains("public string? SubdlUploadId { get; set; }", StringComparison.Ordinal)
+            entities.Contains("public string? ScribeDownloadId { get; set; }", StringComparison.Ordinal)
+            && entities.Contains("public string? ScribeUploadId { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public string? TvSubtitlesDownloadId { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public string? TvSubtitlesUploadId { get; set; }", StringComparison.Ordinal));
         Check("schema 11 adds them to sidecars AND embeds",
@@ -369,7 +369,7 @@ internal static class Program
             && dbc.Contains("ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId TEXT NULL;", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE embeds ADD COLUMN TvSubtitlesDownloadId TEXT NULL;", StringComparison.Ordinal));
         Check("the download writes the field of its own source",
-            downloadSource.Contains("subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null", StringComparison.Ordinal)
+            downloadSource.Contains("subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.ScribeId : null", StringComparison.Ordinal)
             && downloadSource.Contains("tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null", StringComparison.Ordinal));
         Check("the upload writes SubDL's id into SubDL's field",
             uploadSource.Contains("subdlUploadId: subdlMarke.Id", StringComparison.Ordinal)
@@ -441,10 +441,10 @@ internal static class Program
         // ---- 12. "hochgeladen" je Quelle (F-M490) ---------------------------------------------
         var registrySource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
         Check("each source has its own uploaded timestamp, sidecars and embeds alike",
-            entities.Contains("public DateTime? SubdlUploadedAt { get; set; }", StringComparison.Ordinal)
+            entities.Contains("public DateTime? ScribeUploadedAt { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public DateTime? TvSubtitlesUploadedAt { get; set; }", StringComparison.Ordinal)
             && dbc.Contains("CurrentSchemaVersion = 14", StringComparison.Ordinal)
-            && dbc.Contains("ALTER TABLE sidecars ADD COLUMN SubdlUploadedAt TEXT NULL;", StringComparison.Ordinal)
+            && dbc.Contains("ALTER TABLE sidecars ADD COLUMN ScribeUploadedAt TEXT NULL;", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;", StringComparison.Ordinal));
         Check("the timestamp is set for the source that took the upload, never for another",
             uploadSource.Contains("subdlUploadedAt: subdlMarke.At", StringComparison.Ordinal)
@@ -454,7 +454,7 @@ internal static class Program
             && uploadSource.Contains("var jetzt = DateTime.UtcNow;", StringComparison.Ordinal));
         Check("\"uploaded to this source\" is read from its own timestamp first",
             registrySource.Contains("x.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.TvSubtitlesUploadId)", StringComparison.Ordinal)
-            && registrySource.Contains("x.SubdlUploadedAt != null", StringComparison.Ordinal));
+            && registrySource.Contains("x.ScribeUploadedAt != null", StringComparison.Ordinal));
         Check("a timestamp is never overwritten with nothing",
             registrySource.Contains("if (subdlUploadedAt.HasValue)", StringComparison.Ordinal)
             && registrySource.Contains("if (tvSubtitlesUploadedAt.HasValue)", StringComparison.Ordinal)
@@ -496,7 +496,7 @@ internal static class Program
 
         // ---- 14. Quellenabhaengige Vorpruefungen und Herkunft an jeder Ablage (F-M492/F-M493) -----
         var cfgSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"));
-        var dispatcherSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlEventDispatcher.cs"));
+        var dispatcherSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeEventDispatcher.cs"));
         Check("the only demanded credential is the TMDb key — SubDL's pair is a source question (F-M492/F-M497)",
             cfgSource.Contains("if (string.IsNullOrWhiteSpace(TmdbApiKey))", StringComparison.Ordinal)
             && !cfgSource.Contains("missing.Add(\"SubDL API key\")", StringComparison.Ordinal)
@@ -515,12 +515,12 @@ internal static class Program
             markCalls >= 4 && originArgs == markCalls);
         Check("the run-end line names the downloads that did not pass the significance",
             downloadSource.Contains("{NotSignificant} downloaded without significance", StringComparison.Ordinal));
-        var taskSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlDownloadTask.cs"));
+        var taskSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeDownloadTask.cs"));
         var offStateSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/WorkerOffState.cs"));
         Check("the download task asks whether ANY source downloads, not whether SubDL does",
             taskSource.Contains("if (!config.AnyDownloadEnabled)", StringComparison.Ordinal)
             && !taskSource.Contains("IsDownloadEnabled(SubtitleProvider.Subdl)", StringComparison.Ordinal));
-        var seederSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlSeeder.cs"));
+        var seederSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeSeeder.cs"));
         Check("the queue fills for the direction, not for SubDL — a spent SubDL allowance does not empty it",
             seederSource.Contains("bool downloadQueueable = config.AnyDownloadEnabled", StringComparison.Ordinal)
             && seederSource.Contains("(downloadAllowed || config.IsDownloadEnabled(SubtitleProvider.TvSubtitles))", StringComparison.Ordinal)
@@ -726,19 +726,19 @@ internal static class Program
             }
 
             Directory.CreateDirectory(settleRoot);
-            using (var settleDb = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(Path.Combine(settleRoot, "db"), null))
+            using (var settleDb = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(Path.Combine(settleRoot, "db"), null))
             {
-                var settleReg = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(settleDb, null, null);
+                var settleReg = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(settleDb, null, null);
 
                 const string fileA = "aaaa1111bbbb2222";
                 const string fileB = "cccc3333dddd4444";
                 const string de = "DE";
                 string textDe = "1\n00:00:01,000 --> 00:00:03,000\nEin Satz.\n\n";
-                string hashDe = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(textDe);
+                string hashDe = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(textDe);
 
                 // Der Inhalt liegt bei SubDL (Marke der Quelle, F-M490), unter ANDERER Dateiidentitaet.
                 settleReg.EnsureMedia(fileB, "tt7654321", "/data/movies2/film.mkv");
-                settleReg.MarkEmbed(fileB, 0, de, false, Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Uploaded,
+                settleReg.MarkEmbed(fileB, 0, de, false, Jellyfin.Plugin.SubScribe.Data.SubtitleStatus.Uploaded,
                     contentHash: hashDe, subdlUploadedAt: DateTime.UtcNow);
                 settleReg.EnsureMedia(fileA, "tt1234567", "/data/movies2/folge.mkv");
 
@@ -752,15 +752,15 @@ internal static class Program
                 // Zweimal bei DERSELBEN Quelle bleibt blockiert: der zweite SubDL-Versuch wird wieder
                 // als "schon hochgeladen" verbucht und schreibt KEINE Ablehnung.
                 bool settleSubdl = settleReg.RecordSkippedContent(fileA, false, 7, de, false, false, hashDe,
-                    Jellyfin.Plugin.SubdlScribe.Data.RejectReason.DuplicateContent,
+                    Jellyfin.Plugin.SubScribe.Data.RejectReason.DuplicateContent,
                     new[] { SubtitleProvider.Subdl });
                 bool settleTwice = settleReg.RecordSkippedContent(fileA, false, 7, de, false, false, hashDe,
-                    Jellyfin.Plugin.SubdlScribe.Data.RejectReason.DuplicateContent,
+                    Jellyfin.Plugin.SubScribe.Data.RejectReason.DuplicateContent,
                     new[] { SubtitleProvider.Subdl });
                 var rowA = settleReg.GetEmbed(fileA, 7);
                 Check("zweimal bei derselben Quelle bleibt blockiert — ohne Ablehnung (F-M500)",
                     settleSubdl && settleTwice
-                    && rowA?.Status == Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Uploaded
+                    && rowA?.Status == Jellyfin.Plugin.SubScribe.Data.SubtitleStatus.Uploaded
                     && rowA?.Reason is null
                     && settleReg.IsUploadedTo(fileA, de, false, SubtitleProvider.Subdl)
                     // die andere Quelle ist auf DIESER Spur weiterhin offen
@@ -770,38 +770,38 @@ internal static class Program
                 // Ohne Quellenbeleg (nur eine Ablehnung im Bestand) bleibt es bei der Ablehnung, und die
                 // ist quellenneutral: sie haelt BEIDE Quellen — wie festgelegt (F-M499).
                 string textFr = "1\n00:00:04,000 --> 00:00:06,000\nUne phrase.\n\n";
-                string hashFr = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(textFr);
-                settleReg.MarkEmbed(fileA, 8, "FR", false, Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Rejected,
-                    contentHash: hashFr, reason: Jellyfin.Plugin.SubdlScribe.Data.RejectReason.DuplicateRemote);
+                string hashFr = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(textFr);
+                settleReg.MarkEmbed(fileA, 8, "FR", false, Jellyfin.Plugin.SubScribe.Data.SubtitleStatus.Rejected,
+                    contentHash: hashFr, reason: Jellyfin.Plugin.SubScribe.Data.RejectReason.DuplicateRemote);
                 bool noEvidence = settleReg.RecordSkippedContent(fileA, false, 8, "FR", false, true, hashFr,
-                    Jellyfin.Plugin.SubdlScribe.Data.RejectReason.DuplicateContent,
+                    Jellyfin.Plugin.SubScribe.Data.RejectReason.DuplicateContent,
                     Array.Empty<SubtitleProvider>());
                 var rowFr = settleReg.GetEmbed(fileA, 8);
                 Check("ohne Quellenbeleg bleibt die Ablehnung quellenneutral (F-M499/F-M500)",
                     !noEvidence
-                    && rowFr?.Status == Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Rejected
-                    && rowFr?.Reason == Jellyfin.Plugin.SubdlScribe.Data.RejectReason.DuplicateContent);
+                    && rowFr?.Status == Jellyfin.Plugin.SubScribe.Data.SubtitleStatus.Rejected
+                    && rowFr?.Reason == Jellyfin.Plugin.SubScribe.Data.RejectReason.DuplicateContent);
 
                 // Das Herkunftstor steht VOR diesem Weg und wird hier nicht weicher. Drei Faelle, wie
                 // festgelegt (Operator 15.11.2026: "externe Quellen duerfen zu beiden hochgeladen werden"):
                 // unbekannt/extern -> beide, subdl -> nur SubDL, tvsubtitles -> nur tvsubtitles.
                 var torUnbekannt = UploadGate.Decide(true, true, origin: null, false, false);
                 var markenText = "1\n00:00:20,000 --> 00:00:22,000\nZwei Marken.\n\n";
-                string markenHash = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(markenText);
+                string markenHash = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(markenText);
                 settleReg.EnsureMedia("eeee5555ffff6666", "tt9999999", "/data/movies2/beide.mkv");
                 settleReg.MarkEmbed("eeee5555ffff6666", 0, de, false,
-                    Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Uploaded, contentHash: markenHash,
+                    Jellyfin.Plugin.SubScribe.Data.SubtitleStatus.Uploaded, contentHash: markenHash,
                     subdlUploadId: "sd-1", subdlUploadedAt: DateTime.UtcNow);
                 settleReg.MarkEmbed("eeee5555ffff6666", 0, de, false,
-                    Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Uploaded, contentHash: markenHash,
+                    Jellyfin.Plugin.SubScribe.Data.SubtitleStatus.Uploaded, contentHash: markenHash,
                     tvSubtitlesUploadId: "tv-1", tvSubtitlesUploadedAt: DateTime.UtcNow);
                 var beideRow = settleReg.GetEmbed("eeee5555ffff6666", 0);
                 Check("unbekannte/externe Herkunft: BEIDE Quellen duerfen hochladen, jede mit eigener Marke (F-M487/F-M500)",
                     torUnbekannt.Subdl && torUnbekannt.TvSubtitles && torUnbekannt.SkipReason is null
-                    && Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(null, SubtitleProvider.Subdl)
-                    && Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(null, SubtitleProvider.TvSubtitles)
+                    && Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.MayUploadTo(null, SubtitleProvider.Subdl)
+                    && Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.MayUploadTo(null, SubtitleProvider.TvSubtitles)
                     // beide Marken stehen nebeneinander auf DERSELBEN Zeile — die Kette schreibt je Quelle
-                    && beideRow?.SubdlUploadId == "sd-1" && beideRow?.TvSubtitlesUploadId == "tv-1"
+                    && beideRow?.ScribeUploadId == "sd-1" && beideRow?.TvSubtitlesUploadId == "tv-1"
                     && settleReg.IsUploadedTo("eeee5555ffff6666", de, false, SubtitleProvider.Subdl)
                     && settleReg.IsUploadedTo("eeee5555ffff6666", de, false, SubtitleProvider.TvSubtitles)
                     && uploadSource.Contains("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal),
@@ -810,9 +810,9 @@ internal static class Program
                 // Gesperrte Herkuenfte: ein Download ist ein Fund, kein eigener Kandidat — er geht NIRGENDS
                 // hoch (Operator 15.11.2026: "Herkunft subdl: nie zurueck zu subdl, nie zu tvst").
                 string textHer = "1\n00:00:09,000 --> 00:00:11,000\nHerkunft.\n\n";
-                string hashHer = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(textHer);
+                string hashHer = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(textHer);
                 settleReg.MarkDownloaded(hashHer, fileA, de, false,
-                    origin: Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.Name(SubtitleProvider.Subdl),
+                    origin: Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.Name(SubtitleProvider.Subdl),
                     fileName: "folge.de.srt", path: "/data/movies2/folge.de.srt");
                 string? herkunft = settleReg.GetOrigin(hashHer).Origin;
                 var torSubdl = UploadGate.Decide(true, true, herkunft, false, false);
@@ -820,8 +820,8 @@ internal static class Program
                     herkunft == "subdl"
                     && !torSubdl.Subdl && !torSubdl.TvSubtitles
                     && torSubdl.SkipReason == "origin:subdl — downloaded there, never uploaded"
-                    && !Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(herkunft, SubtitleProvider.Subdl)
-                    && !Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(herkunft, SubtitleProvider.TvSubtitles)
+                    && !Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.MayUploadTo(herkunft, SubtitleProvider.Subdl)
+                    && !Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.MayUploadTo(herkunft, SubtitleProvider.TvSubtitles)
                     && !settleReg.IsContentUploadedFor(hashHer, SubtitleProvider.TvSubtitles)
                     // der Settle-Weg fragt genau dieses Tor, bevor er einen Kandidaten weiterlaufen laesst
                     && uploadSource.Contains("Api.Endpoints.Provenance.MayUploadTo(herkunft, quelle)", StringComparison.Ordinal)
@@ -829,9 +829,9 @@ internal static class Program
                     "herkunft=" + (herkunft ?? "-") + " subdl=" + torSubdl.Subdl + " tvst=" + torSubdl.TvSubtitles);
 
                 string textHer2 = "1\n00:00:12,000 --> 00:00:14,000\nAndere Herkunft.\n\n";
-                string hashHer2 = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(textHer2);
+                string hashHer2 = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(textHer2);
                 settleReg.MarkDownloaded(hashHer2, fileA, de, false,
-                    origin: Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.Name(SubtitleProvider.TvSubtitles),
+                    origin: Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.Name(SubtitleProvider.TvSubtitles),
                     fileName: "folge2.de.srt", path: "/data/movies2/folge2.de.srt");
                 string? herkunftTv = settleReg.GetOrigin(hashHer2).Origin;
                 var torTv = UploadGate.Decide(true, true, herkunftTv, false, false);
@@ -839,8 +839,8 @@ internal static class Program
                     herkunftTv == "tvsubtitles"
                     && !torTv.Subdl && !torTv.TvSubtitles
                     && torTv.SkipReason == "origin:tvsubtitles — downloaded there, never uploaded"
-                    && !Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(herkunftTv, SubtitleProvider.Subdl)
-                    && !Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.MayUploadTo(herkunftTv, SubtitleProvider.TvSubtitles)
+                    && !Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.MayUploadTo(herkunftTv, SubtitleProvider.Subdl)
+                    && !Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.MayUploadTo(herkunftTv, SubtitleProvider.TvSubtitles)
                     && !settleReg.IsContentUploadedFor(hashHer2, SubtitleProvider.Subdl)
                     && !settleReg.IsContentUploadedFor(hashHer2, SubtitleProvider.TvSubtitles),
                     "herkunft=" + (herkunftTv ?? "-") + " subdl=" + torTv.Subdl + " tvst=" + torTv.TvSubtitles);
@@ -848,11 +848,11 @@ internal static class Program
                 // Ein bekannter Fund ist keine Upload-Arbeit mehr: die Spur ist fuer JEDE Quelle erledigt,
                 // sonst reihte der Seeder sie in jedem Lauf erneut ein (Operator: nie zurueck, nie hinueber).
                 settleReg.MarkEmbed(fileA, 9, "IT", false,
-                    Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Observed, contentHash: hashHer);
+                    Jellyfin.Plugin.SubScribe.Data.SubtitleStatus.Observed, contentHash: hashHer);
                 string textFrei = "1\n00:00:30,000 --> 00:00:32,000\nOhne Herkunft.\n\n";
-                string hashFrei = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(textFrei);
+                string hashFrei = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(textFrei);
                 settleReg.MarkEmbed(fileA, 10, "IT", false,
-                    Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Observed, contentHash: hashFrei);
+                    Jellyfin.Plugin.SubScribe.Data.SubtitleStatus.Observed, contentHash: hashFrei);
                 Check("ein Download ist fuer BEIDE Quellen erledigt — die Spur bleibt nicht ewig offen (F-M500)",
                     settleReg.IsEmbedTerminalFor(fileA, 9, SubtitleProvider.Subdl)
                     && settleReg.IsEmbedTerminalFor(fileA, 9, SubtitleProvider.TvSubtitles)
@@ -940,9 +940,9 @@ internal static class Program
             }
 
             Directory.CreateDirectory(tvstRoot);
-            using (var tvstDb = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(Path.Combine(tvstRoot, "db"), null))
+            using (var tvstDb = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(Path.Combine(tvstRoot, "db"), null))
             {
-                var tvstReg = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(tvstDb, null, null);
+                var tvstReg = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(tvstDb, null, null);
                 var mitte = new TmdbSeriesInfo("The Middle", "The Middle", 2009, 9);
 
                 // (a) Die gespeicherte Nummer fuehrt: kein Netz, kein Vergleich, keine Anlage.
@@ -1065,7 +1065,7 @@ internal static class Program
 
                 // ---- F-M552: ein bekanntes Item wird aufgefrischt, nicht eingefroren ----------------
                 string verteilerQuelle = await File.ReadAllTextAsync(Path.Combine(
-                    root, "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlEventDispatcher.cs")).ConfigureAwait(false);
+                    root, "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "ScribeEventDispatcher.cs")).ConfigureAwait(false);
                 Check("F-M552: an item already in the queue gets the seeder's fresh source list",
                     verteilerQuelle.Contains("var vorhanden = queue.First(x => string.Equals(x.ItemId, c.ItemId, StringComparison.OrdinalIgnoreCase));", StringComparison.Ordinal)
                     && verteilerQuelle.Contains("vorhanden.Sources = c.Sources;", StringComparison.Ordinal));
@@ -1309,7 +1309,7 @@ internal static class Program
                 await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
 
-            using (var legacyDb = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(legacyDir, null))
+            using (var legacyDb = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(legacyDir, null))
             {
                 var bestand = legacyDb.Media.FindById("aaaa000000000009");
                 // Der Wert wird VOR dem Schreiben festgehalten: EF haelt eine Zeile im Kontext und
@@ -1663,13 +1663,13 @@ internal static class Program
         var msubStoreDir = new TempDir("msub-store");
         try
         {
-            using (var msubStore = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(msubStoreDir.Path, null))
+            using (var msubStore = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(msubStoreDir.Path, null))
             {
                 var msubAufloeser = new MsubMovieResolver(
                     new MovieSubtitlesClient(new HttpClient(msubHandler)), null);
                 var filmAuf = await msubAufloeser
                     .ResolveForMediaAsync(
-                        new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(msubStore, null, null),
+                        new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(msubStore, null, null),
                         "bbbb000000000001",
                         new TmdbMovieInfo("Dune: Part One", "Dune", 2021),
                         dryRun: false,
@@ -1678,7 +1678,7 @@ internal static class Program
                 var gespeichert = msubStore.Media.FindById("bbbb000000000001")?.MsubMovieId;
                 var zweiteRunde = await msubAufloeser
                     .ResolveForMediaAsync(
-                        new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(msubStore, null, null),
+                        new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(msubStore, null, null),
                         "bbbb000000000001",
                         new TmdbMovieInfo("Dune: Part One", "Dune", 2021),
                         dryRun: false,
@@ -1732,7 +1732,7 @@ internal static class Program
             string? bestandTmdb;
             string? bestandMsub;
             int? marker;
-            using (var legacy = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(msubLegacyDir.Path, null))
+            using (var legacy = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(msubLegacyDir.Path, null))
             {
                 var bestand = legacy.Media.FindById("cccc000000000001");
                 bestandImdb = bestand?.ImdbId;
@@ -1762,7 +1762,7 @@ internal static class Program
                 "bestand=" + (bestandImdb ?? "-") + "/" + (bestandTmdb ?? "-") + " msub=" + (bestandMsub ?? "<null>"));
 
             // Und die Quellen-Bindung, damit ein spaeterer Umbau die Zuordnung nicht still entfernt.
-            var dbSource = ReadText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"));
+            var dbSource = ReadText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"));
             var provenanceSource = ReadText(
                 Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/Endpoints/Provenance.cs"));
             Check("Schema 14 ist der Marker, die Spalten stehen in EnsureReportColumns und EnsureMediaColumns (F-M507)",
@@ -1814,14 +1814,14 @@ internal static class Program
             }
 
             Directory.CreateDirectory(msubMarkRoot);
-            using (var markDb = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(Path.Combine(msubMarkRoot, "db"), null))
+            using (var markDb = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(Path.Combine(msubMarkRoot, "db"), null))
             {
-                var markReg = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(markDb, null, null);
+                var markReg = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(markDb, null, null);
                 const string film = "ffff000011112222";
                 string text = "1\n00:00:01,000 --> 00:00:02,000\nEin Satz.\n\n";
-                string hash = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(text);
+                string hash = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(text);
                 markReg.EnsureMedia(film, null, "/data/movies2/film.mkv");
-                markReg.MarkEmbed(film, 0, "DE", false, Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Uploaded,
+                markReg.MarkEmbed(film, 0, "DE", false, Jellyfin.Plugin.SubScribe.Data.SubtitleStatus.Uploaded,
                     contentHash: hash, moviesubtitlesUploadId: "own:moviesubtitles:20261115T180405Z:abcd1234",
                     moviesubtitlesUploadedAt: DateTime.UtcNow);
 
@@ -1837,13 +1837,13 @@ internal static class Program
                 // Und das Settle schreibt dieselbe Marke, wenn NUR die Film-Adresse den Inhalt haelt.
                 markReg.EnsureMedia("eeee000033334444", null, "/data/movies2/zweiter.mkv");
                 bool gesetzt = markReg.RecordSkippedContent("eeee000033334444", false, 1, "DE", false, false, hash,
-                    Jellyfin.Plugin.SubdlScribe.Data.RejectReason.DuplicateContent,
+                    Jellyfin.Plugin.SubScribe.Data.RejectReason.DuplicateContent,
                     new[] { SubtitleProvider.MovieSubtitles });
                 var zeile = markReg.GetEmbed("eeee000033334444", 1);
                 Check("das Settle setzt den Zeitstempel der Film-Adresse, und nur ihn (F-M508)",
                     gesetzt && zeile?.MoviesubtitlesUploadedAt != null
-                    && zeile?.TvSubtitlesUploadedAt is null && zeile?.SubdlUploadedAt is null
-                    && zeile?.Status == Jellyfin.Plugin.SubdlScribe.Data.SubtitleStatus.Uploaded,
+                    && zeile?.TvSubtitlesUploadedAt is null && zeile?.ScribeUploadedAt is null
+                    && zeile?.Status == Jellyfin.Plugin.SubScribe.Data.SubtitleStatus.Uploaded,
                     "settled=" + gesetzt + " msub=" + (zeile?.MoviesubtitlesUploadedAt?.ToString() ?? "<null>"));
             }
         }
@@ -1928,7 +1928,7 @@ internal static class Program
             && !downloadSource.Contains("\"[tvsubtitles] {File", StringComparison.Ordinal));
 
         // ---- 19. F-M512: die Medienart des Einreihers kommt aus dem STORE (TMDb-korrigiert) ----------
-        // Befund 15.11.2026: SubdlSeeder las `item is Episode ? true : item is Movie ? false : null` —
+        // Befund 15.11.2026: ScribeSeeder las `item is Episode ? true : item is Movie ? false : null` —
         // also Jellyfins Typ. Die Pipelines korrigieren die Art aber aus Dateiname und TMDb
         // (UploadPipeline:819-826, :886) und schreiben sie in die Medienzeile; der Einreiher sah das
         // nie. Folge bei Abweichung: JF sagt Film, TMDb sagt Serie → nur die Filmadresse wurde
@@ -1945,9 +1945,9 @@ internal static class Program
             }
 
             Directory.CreateDirectory(kindRoot);
-            using (var kindDb = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(Path.Combine(kindRoot, "db"), null))
+            using (var kindDb = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(Path.Combine(kindRoot, "db"), null))
             {
-                var kindReg = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(kindDb, null, null);
+                var kindReg = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(kindDb, null, null);
 
                 // Die Zeile, die ein Lauf fuer eine SERIE schreibt: Kennungen, Staffel/Folge, IsSeries.
                 const string serieHash = "a1a1a1a1b2b2b2b2";
@@ -2075,10 +2075,10 @@ internal static class Program
             int medienVorher;
             bool warfSeitentraeger = false;
 
-            using (var ghostDb = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(Path.Combine(ghostRoot, "db"), null))
+            using (var ghostDb = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(Path.Combine(ghostRoot, "db"), null))
             {
-                var ghostReg = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(ghostDb, null, null);
-                var ghostWorker = new Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry(ghostDb, null);
+                var ghostReg = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(ghostDb, null, null);
+                var ghostWorker = new Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry(ghostDb, null);
                 medienVorher = ghostDb.Media.Count();
 
                 // (a) GENAU der Aufruf des Vorfalls: Seitentraeger ohne bekannten Medien-Hash.
@@ -2104,20 +2104,20 @@ internal static class Program
                     + " randzeile=" + (geisterZeile == null ? "<fehlt>" : "'" + geisterZeile.MediaHash + "'"));
 
                 // (b) Die Aufzeichnung, die im Vorfall zuerst warnte, schreibt weiter eine Zeile.
-                ghostWorker.Start(Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.SeederKey, "Seeder", "F-M514");
-                ghostWorker.Finish(Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.SeederKey,
-                    Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Ok, "F-M514 fertig");
+                ghostWorker.Start(Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.SeederKey, "Seeder", "F-M514");
+                ghostWorker.Finish(Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.SeederKey,
+                    Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.Outcome.Ok, "F-M514 fertig");
 
                 // (c) Eine Zeile ohne Schluessel wird abgewiesen, nicht angehaengt — in beiden Formen.
                 bool warfOhneSchluessel = false;
                 try
                 {
-                    ghostDb.Media.Upsert(new Jellyfin.Plugin.SubdlScribe.Data.MediaEntity
+                    ghostDb.Media.Upsert(new Jellyfin.Plugin.SubScribe.Data.MediaEntity
                     {
                         Id = null!,
                         Path = "/data/movies2/ohne-schluessel.mkv",
                     });
-                    ghostDb.Media.Upsert(new Jellyfin.Plugin.SubdlScribe.Data.MediaEntity
+                    ghostDb.Media.Upsert(new Jellyfin.Plugin.SubScribe.Data.MediaEntity
                     {
                         Id = string.Empty,
                         Path = "/data/movies2/leerer-schluessel.mkv",
@@ -2139,9 +2139,9 @@ internal static class Program
                 bool warfDanach = false;
                 try
                 {
-                    ghostWorker.Start(Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.UploadWorkerKey, "Upload", "F-M514 danach");
-                    ghostWorker.Finish(Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.UploadWorkerKey,
-                        Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Ok, "F-M514 danach fertig");
+                    ghostWorker.Start(Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.UploadWorkerKey, "Upload", "F-M514 danach");
+                    ghostWorker.Finish(Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.UploadWorkerKey,
+                        Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.Outcome.Ok, "F-M514 danach fertig");
                 }
                 catch (Exception)
                 {
@@ -2153,13 +2153,13 @@ internal static class Program
             }
 
             // Aus der DATEI gelesen, nicht aus dem Speicher: beide Worker-Zeilen stehen da.
-            using (var ghostRead = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(Path.Combine(ghostRoot, "db"), null))
+            using (var ghostRead = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(Path.Combine(ghostRoot, "db"), null))
             {
-                var seederZeile = ghostRead.WorkerRuns.FindById(Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.SeederKey);
-                var uploadZeile = ghostRead.WorkerRuns.FindById(Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.UploadWorkerKey);
+                var seederZeile = ghostRead.WorkerRuns.FindById(Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.SeederKey);
+                var uploadZeile = ghostRead.WorkerRuns.FindById(Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.UploadWorkerKey);
                 Check("ein normaler Aufzeichnungslauf schreibt weiter eine Zeile — vor und nach dem abgewiesenen Schluessel (F-M514)",
-                    seederZeile?.Outcome == Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Ok
-                    && uploadZeile?.Outcome == Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Ok,
+                    seederZeile?.Outcome == Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.Outcome.Ok
+                    && uploadZeile?.Outcome == Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.Outcome.Ok,
                     "seeder=" + (seederZeile?.Outcome ?? "<fehlt>") + " upload=" + (uploadZeile?.Outcome ?? "<fehlt>"));
             }
 
@@ -2167,24 +2167,24 @@ internal static class Program
             //     Aenderung ueberlebt die Reparatur (sonst waere der Fix ein stiller Datenverlust).
             var heilDir = Path.Combine(ghostRoot, "heil");
             Directory.CreateDirectory(heilDir);
-            using (var seed = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(heilDir, null))
+            using (var seed = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(heilDir, null))
             {
-                seed.WorkerRuns.Upsert(new Jellyfin.Plugin.SubdlScribe.Data.WorkerRunEntity
+                seed.WorkerRuns.Upsert(new Jellyfin.Plugin.SubScribe.Data.WorkerRunEntity
                 {
                     Id = "seeder",
                     Name = "Seeder",
-                    Outcome = Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Never,
+                    Outcome = Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.Outcome.Never,
                 });
             }
 
             bool warfNachGift = false;
-            using (var gift = new Jellyfin.Plugin.SubdlScribe.Data.SubdlSqliteContext(
+            using (var gift = new Jellyfin.Plugin.SubScribe.Data.ScribeSqliteContext(
                 Path.Combine(heilDir, "subdl-scribe.sqlite")))
             {
                 // Der einzige Weg, den Geist heute noch zu erzeugen: am Set vorbei anhaengen.
                 try
                 {
-                    gift.Add(new Jellyfin.Plugin.SubdlScribe.Data.MediaEntity { Id = null!, Path = "/x.mkv" });
+                    gift.Add(new Jellyfin.Plugin.SubScribe.Data.MediaEntity { Id = null!, Path = "/x.mkv" });
                 }
                 catch (InvalidOperationException)
                 {
@@ -2192,7 +2192,7 @@ internal static class Program
                 }
 
                 var offen = gift.WorkerRunRows.First(r => r.Id == "seeder");
-                offen.Outcome = Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Ok;
+                offen.Outcome = Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.Outcome.Ok;
                 offen.Detail = "ueberlebte die Reparatur";
 
                 try
@@ -2205,13 +2205,13 @@ internal static class Program
                 }
             }
 
-            using (var heilRead = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(heilDir, null))
+            using (var heilRead = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(heilDir, null))
             {
                 var zeile = heilRead.WorkerRuns.FindById("seeder");
                 Check("ein vergifteter Change Tracker heilt beim Speichern und die offene Aenderung geht nicht verloren (F-M514)",
                     !warfNachGift
                     && zeile?.Detail == "ueberlebte die Reparatur"
-                    && zeile?.Outcome == Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Ok,
+                    && zeile?.Outcome == Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.Outcome.Ok,
                     "warf=" + warfNachGift + " outcome=" + (zeile?.Outcome ?? "<fehlt>")
                     + " detail=" + (zeile?.Detail ?? "<fehlt>"));
             }
@@ -2233,7 +2233,7 @@ internal static class Program
 
         // Die Wege, die den Geist gar nicht erst entstehen lassen — am Quelltext, damit ein spaeterer
         // Umbau sie nicht still entfernt.
-        var dbQuelle = ReadText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Data/SubdlDbContext.cs"));
+        var dbQuelle = ReadText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"));
         var registryQuelle = ReadText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
         var msubQuelle = ReadText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/Endpoints/MsubMovieResolver.cs"));
 
@@ -2280,7 +2280,7 @@ internal static class Program
             && !SidecarNaming.IsOriginalSidecar("/media/The Middle.S01E05.MULTI.1080p.WEB-DL.H265-FTMVHD.en.49.srt", ep)
             && !SidecarNaming.IsOriginalSidecar("/media/The Middle.S01E05.MULTI.1080p.WEB-DL.H265-FTMVHD.de.srt", ep));
         Check("F-M519: the upload candidate list drops the originals and keeps the corrected files",
-            Jellyfin.Plugin.SubdlScribe.Pipeline.UploadPipeline.FindLooseSrts(ep)
+            Jellyfin.Plugin.SubScribe.Pipeline.UploadPipeline.FindLooseSrts(ep)
                 .All(x => !SidecarNaming.IsOriginalSidecar(x.Path, ep)));
 
 
@@ -2312,7 +2312,7 @@ internal static class Program
 
         // ---- F-M524: ein gescheiterter Zyklus nennt die Stelle -------------------------------------
         string dispatchQuelle = await File.ReadAllTextAsync(
-            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlEventDispatcher.cs"))
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "ScribeEventDispatcher.cs"))
             .ConfigureAwait(false);
         Check(
             "F-M524: a failed cycle logs the exception with its stack — the message alone named no site",
@@ -2347,7 +2347,7 @@ internal static class Program
     private static string ReadText(string path) => File.ReadAllText(path);
 
     /// <summary>Speichert synchron aus einem nicht-async Helfer — CA1849 prueft nur den async-Pfad.</summary>
-    private static void SaveNow(Jellyfin.Plugin.SubdlScribe.Data.SubdlSqliteContext ctx) => ctx.SaveChanges();
+    private static void SaveNow(Jellyfin.Plugin.SubScribe.Data.ScribeSqliteContext ctx) => ctx.SaveChanges();
 
     /// <summary>Oeffnet einen ZIP-Eintrag im nicht-async Helfer (dieselbe CA1849-Regel).</summary>
     private static System.IO.Stream OpenForRead(this System.IO.Compression.ZipArchiveEntry entry) => entry.Open();

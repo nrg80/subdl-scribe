@@ -14,9 +14,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
+namespace Jellyfin.Plugin.SubScribe.Api.Endpoints;
 
 /// <summary>
 /// F-M483 (operator order 15.11.2026: "im Prinzip möchte ich jetzt 2 download endpoints und 2 upload
@@ -47,7 +47,7 @@ public enum SubtitleDirection
 /// </param>
 /// <param name="MovieId">
 /// F-M507: die Nummer, unter der die Quelle den FILM führt, wenn der Store sie schon kennt
-/// (<see cref="Jellyfin.Plugin.SubdlScribe.Data.MediaEntity.MsubMovieId"/>). Ist sie gesetzt, wird sie
+/// (<see cref="Jellyfin.Plugin.SubScribe.Data.MediaEntity.MsubMovieId"/>). Ist sie gesetzt, wird sie
 /// benutzt statt erneut zu suchen — dieselbe Regel wie <c>UploadTicket.TvstShowId</c> für Serien.
 /// </param>
 public sealed record SubtitleQuery(
@@ -112,7 +112,7 @@ public sealed record SubtitlePayload(string FileName, byte[] Data, string Langua
 /// </param>
 /// <param name="MsubMovieId">
 /// F-M508: die Nummer des FILMS bei moviesubtitles.org, wenn der Store sie kennt
-/// (<see cref="Jellyfin.Plugin.SubdlScribe.Data.MediaEntity.MsubMovieId"/>) — dieselbe Regel wie
+/// (<see cref="Jellyfin.Plugin.SubScribe.Data.MediaEntity.MsubMovieId"/>) — dieselbe Regel wie
 /// <paramref name="TvstShowId"/>, eine Ebene tiefer. Fehlt sie, löst der Endpunkt über Titel und Jahr
 /// auf (<paramref name="MovieYear"/>).
 /// </param>

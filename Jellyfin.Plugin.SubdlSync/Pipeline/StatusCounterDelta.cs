@@ -9,7 +9,7 @@
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// F-M247 (user decision 28.09.2026: "Dryrun geht nie in die Statistik"): the cumulative counters a
@@ -22,7 +22,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 /// dry runs.
 /// </para>
 /// <para>
-/// The rule lives HERE and only here, because <see cref="ScheduledTasks.SubdlEventDispatcher"/>
+/// The rule lives HERE and only here, because <see cref="ScheduledTasks.ScribeEventDispatcher"/>
 /// is the single writer of the statistics row. Gating the counters at each increment site would
 /// mean six places that can each drift; gating them once, at the boundary, means a new counter
 /// added later is either routed through this type or is visibly outside it.

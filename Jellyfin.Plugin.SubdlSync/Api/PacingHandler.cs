@@ -13,7 +13,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M547: zieht <see cref="ExternalApiPacer"/> nach JEDER externen Anfrage — eine Stelle fuer alle

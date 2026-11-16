@@ -34,8 +34,8 @@ using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Api.Endpoints;
 
 internal static class Program
 {
@@ -400,10 +400,10 @@ internal static class Program
 
             // (a) Zeile vorhanden, Hash nicht: schreiben über den Pfad, Zeilenzahl unverändert.
             var listenSeite = new CountingHandler { ReplyBody = Fixture("add-tvshow-select.html") };
-            using (var db = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(
+            using (var db = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(
                 Path.Combine(fm517Root, "mit-zeile"), null))
             {
-                var reg = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(db, null, null);
+                var reg = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(db, null, null);
                 reg.EnsureMedia(fm517Hash, jellyfinItemId: null, path: fm517Pfad);
                 int vorher = db.Media.Count();
 
@@ -443,10 +443,10 @@ internal static class Program
 
             // (b) Keine Zeile, kein Hash: nichts wird geschrieben, und der Text sagt warum.
             var zweiteListe = new CountingHandler { ReplyBody = Fixture("add-tvshow-select.html") };
-            using (var dbLeer = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(
+            using (var dbLeer = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(
                 Path.Combine(fm517Root, "ohne-zeile"), null))
             {
-                var regLeer = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(dbLeer, null, null);
+                var regLeer = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(dbLeer, null, null);
                 var ohneZeile = await new TvstShowResolver(new TvSubtitlesClient(new HttpClient(zweiteListe)), null)
                     .ResolveForMediaAsync(
                         regLeer,
@@ -459,7 +459,7 @@ internal static class Program
                 Check("ohne Hash UND ohne Pfad-Zeile: nichts geschrieben, die Nummer gilt nur fuer diesen Lauf (F-M517)",
                     ohneZeile.Resolved && ohneZeile.ShowId == 512
                     && dbLeer.Media.Count() == 0
-                    && MediaNumberNote.Of(Jellyfin.Plugin.SubdlScribe.Registry.MediaNumberWrite.None) == MediaNumberNote.NotStored,
+                    && MediaNumberNote.Of(Jellyfin.Plugin.SubScribe.Registry.MediaNumberWrite.None) == MediaNumberNote.NotStored,
                     "zeilen=" + dbLeer.Media.Count());
             }
         }
@@ -485,7 +485,7 @@ internal static class Program
         {
             Console.WriteLine();
             Console.WriteLine("--- live probe against tvsubtitles.net ---");
-            var liveHttp = SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(60));
+            var liveHttp = ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(60));
             var live = new TvSubtitlesClient(liveHttp);
             var liveShows = await live.ShowsAsync().ConfigureAwait(false);
             var middle = TvSubtitlesClient.ResolveShow(liveShows, "The Middle");
@@ -693,32 +693,32 @@ internal static class Program
 
         Console.WriteLine();
         // ---- F-M533: Robustheit und Meldeweg der Seite ------------------------------------------
-        var gut = new Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry("123", "de", "WEB", "FTMVHD", "3 days");
+        var gut = new Jellyfin.Plugin.SubScribe.Api.TvSubtitlesEntry("123", "de", "WEB", "FTMVHD", "3 days");
         Check("F-M533: a documented entry is not a finding",
-            Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks.CheckEntry(gut).Count == 0);
+            Jellyfin.Plugin.SubScribe.Api.TvstMetadataChecks.CheckEntry(gut).Count == 0);
 
-        var falscheSprache = new Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry("123", "xx", "WEB", "", "3 days");
+        var falscheSprache = new Jellyfin.Plugin.SubScribe.Api.TvSubtitlesEntry("123", "xx", "WEB", "", "3 days");
         Check("F-M533: an unknown language code is a finding",
-            Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks.CheckEntry(falscheSprache)
+            Jellyfin.Plugin.SubScribe.Api.TvstMetadataChecks.CheckEntry(falscheSprache)
                 .Any(f => f.Path == "language"));
 
-        var falscherRip = new Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry("123", "de", "WEB-DL", "", "3 days");
+        var falscherRip = new Jellyfin.Plugin.SubScribe.Api.TvSubtitlesEntry("123", "de", "WEB-DL", "", "3 days");
         Check("F-M533: a rip outside the site's seven values is a finding",
-            Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks.CheckEntry(falscherRip)
+            Jellyfin.Plugin.SubScribe.Api.TvstMetadataChecks.CheckEntry(falscherRip)
                 .Any(f => f.Path == "rip"));
 
         Check("F-M533: an empty rip is allowed (the site's own normal case)",
-            Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks
-                .CheckEntry(new Jellyfin.Plugin.SubdlScribe.Api.TvSubtitlesEntry("123", "de", "", "", ""))
+            Jellyfin.Plugin.SubScribe.Api.TvstMetadataChecks
+                .CheckEntry(new Jellyfin.Plugin.SubScribe.Api.TvSubtitlesEntry("123", "de", "", "", ""))
                 .Count == 0);
 
         Check("F-M533: an episode label outside 1–22 / 0–100 is a finding",
-            Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks.CheckEpisodeLabel(26, 5)
+            Jellyfin.Plugin.SubScribe.Api.TvstMetadataChecks.CheckEpisodeLabel(26, 5)
                 .Any(f => f.Path == "season")
-            && Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks.CheckEpisodeLabel(3, 140)
+            && Jellyfin.Plugin.SubScribe.Api.TvstMetadataChecks.CheckEpisodeLabel(3, 140)
                 .Any(f => f.Path == "episode"));
         Check("F-M533: a normal episode label is not a finding",
-            Jellyfin.Plugin.SubdlScribe.Api.TvstMetadataChecks.CheckEpisodeLabel(3, 9).Count == 0);
+            Jellyfin.Plugin.SubScribe.Api.TvstMetadataChecks.CheckEpisodeLabel(3, 9).Count == 0);
 
         string tvstClient = await File.ReadAllTextAsync(
             System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "TvSubtitlesClient.cs"))

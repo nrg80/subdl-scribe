@@ -35,7 +35,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
 int failures = 0;
 
@@ -49,7 +49,7 @@ void Check(bool ok, string what, string detail = "")
 }
 
 string repo = args.Length > 0 ? args[0] : "/opt/data/subdl-scribe";
-string clientPath = Path.Combine(repo, "Jellyfin.Plugin.SubdlSync", "Api", "SubdlApiClient.cs");
+string clientPath = Path.Combine(repo, "Jellyfin.Plugin.SubdlSync", "Api", "ScribeApiClient.cs");
 string pipelinePath = Path.Combine(repo, "Jellyfin.Plugin.SubdlSync", "Pipeline", "UploadPipeline.cs");
 
 // Whitespace is collapsed before any source assertion: a re-indent must not turn a check red,

@@ -158,10 +158,10 @@ def main():
     # and "Dann nur noch vom refresh bitte". It used to sit up in the SubDL/TMDb block and had TWO
     # automatic writers — the quota fetch (server-cached 5 min) and the status probe — so the line
     # could show a time unrelated to any click, and the poll moved it by itself.
-    ts = html.find('id="SubdlStatusTimestamp"')
+    ts = html.find('id="ScribeStatusTimestamp"')
     check("timestamp element exists exactly once",
-          html.count('id="SubdlStatusTimestamp"') == 1,
-          "count=%d" % html.count('id="SubdlStatusTimestamp"'))
+          html.count('id="ScribeStatusTimestamp"') == 1,
+          "count=%d" % html.count('id="ScribeStatusTimestamp"'))
     check("timestamp sits directly ABOVE the refresh button", ts != -1 and btn != -1 and ts < btn)
     if idx.get("general", -1) != -1:
         check("timestamp sits inside the general tab", idx["general"] < ts)
@@ -172,7 +172,7 @@ def main():
           "ts.textContent = 'Updated '" not in html)
     # Exactly one writer, and it is the button handler.
     check("exactly one writer of the stamp",
-          html.count("#SubdlStatusTimestamp") == 1)
+          html.count("#ScribeStatusTimestamp") == 1)
     check("the writer is the refresh button",
           "stamp.textContent = 'Manually refreshed ' + subdlFmtTime(new Date())" in html)
     # The stamp must show the click moment, NOT a server timestamp that may be server-cached.
@@ -199,7 +199,7 @@ def main():
     check("quota loader renders the SubDL downloads bar", "renderBar('SubDL downloads'" in html)
     # status covers the lights AND the library read/write rows
     check("status loader renders the library read/write rows",
-          "#SubdlDirStatusList" in html)
+          "#ScribeDirStatusList" in html)
 
     # ---- 4. Scope trap: window.* only where it IS on window ----
     check("no window.subdlLoadQuota reference (it is a plain declaration)",
@@ -261,7 +261,7 @@ def main():
     root = os.path.dirname(os.path.dirname(path))
     js_path = os.path.join(os.path.dirname(path), "configPage.js")
     check("no second page script sits next to the page", not os.path.isfile(js_path), js_path)
-    ctrl = os.path.join(root, "Api", "SubdlConfigController.cs")
+    ctrl = os.path.join(root, "Api", "ScribeConfigController.cs")
     check("the ConfigJs route controller is gone", not os.path.isfile(ctrl), ctrl)
     plugin_cs = os.path.join(root, "Plugin.cs")
     check("the .js page is no longer registered as a plugin page",
@@ -426,7 +426,7 @@ def main():
     }
     src_ent = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Data", "Entities.cs"))
     src_plg = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Plugin.cs"))
-    src_api = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Api", "SubdlStatusController.cs"))
+    src_api = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Api", "ScribeStatusController.cs"))
     carriers = {"page": html}
     if os.path.exists(src_ent):
         carriers["entity"] = open(src_ent, encoding="utf-8").read()
@@ -491,7 +491,7 @@ def main():
           "a row reads a field name the API does not publish")
 
     # Every row must name a field the plugin API actually returns.
-    api_src = os.path.join(os.path.dirname(path), "..", "Api", "SubdlStatusController.cs")
+    api_src = os.path.join(os.path.dirname(path), "..", "Api", "ScribeStatusController.cs")
     api_src = os.path.abspath(api_src)
     if os.path.exists(api_src):
         api = open(api_src, encoding="utf-8").read()
@@ -635,11 +635,11 @@ def main():
     # exactly the kind of thing that gets helpfully re-added and the page still renders either way:
     # no mirrored markup (id/class), and no second reader for it in the script.
     check("the auto-sync's light is NOT duplicated under the download switch",
-          "SubdlAutosyncLight" not in html and "SubdlAutosyncOutcome" not in html
-          and "SubdlAutosyncStatus" not in html,
+          "ScribeAutosyncLight" not in html and "ScribeAutosyncOutcome" not in html
+          and "ScribeAutosyncStatus" not in html,
           "a second auto-sync readout is still wired into the page")
     check("no second reader for the auto-sync light remains in the script",
-          "SubdlAutosyncWhen" not in html,
+          "ScribeAutosyncWhen" not in html,
           "the mirrored light's script survived the markup")
 
     # The statistics row says what it counts, and it counts the FILES THE RUN MOVED — the operator's
@@ -670,7 +670,7 @@ def main():
     # 18:21, prod .201 and test .202 alike). Asserted on the SOURCE because the throw is invisible in
     # the page: both lamps render either way, the wrong one just says "Object reference not set".
     # A guard that is only documented is exactly what a later refactor removes again.
-    disp = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "SubdlEventDispatcher.cs"))
+    disp = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "ScribeEventDispatcher.cs"))
     if os.path.exists(disp):
         dsrc = open(disp, encoding="utf-8").read()
         check("the auto-sync row takes a nullable download summary",
@@ -732,7 +732,7 @@ def main():
     # writer. An assignment here loses every number produced by a scan whose direction ended without
     # a run: the work would be on disk and absent from the statistics forever. Asserted on the
     # source because the visible symptom is only ever "the counter reads 0".
-    disp = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "SubdlEventDispatcher.cs"))
+    disp = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "ScribeEventDispatcher.cs"))
     if os.path.exists(disp):
         dsrc = open(disp, encoding="utf-8").read()
         check("the seeder's language-code count accumulates across scans",
@@ -741,7 +741,7 @@ def main():
               dsrc.count("_pendingLanguageCodesAllocated = 0;") == 1
               and dsrc.count("_pendingLanguageCodesAllocated += ") == 1)
     else:
-        check("SubdlEventDispatcher.cs reachable for the counter check", False, disp)
+        check("ScribeEventDispatcher.cs reachable for the counter check", False, disp)
 
     # ---- 6e. F-M312/F-M313: a dry run must not RENAME a loose subtitle either ----
     # The container rewrite was already suppressed (F-M263), but this rename had NO dry-run guard:
@@ -749,7 +749,7 @@ def main():
     # a dry run moved the user's files while reporting that it writes nothing (F-M22). Asserted on the
     # source because the symptom is silent and rare: it only shows on an install that has unlabelled
     # sidecars AND a dry run armed, and nothing in the log contradicts the report.
-    sd = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "SubdlSeeder.cs"))
+    sd = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "ScribeSeeder.cs"))
     if os.path.exists(sd):
         sdsrc = open(sd, encoding="utf-8").read()
         # The predicate must exist AND cover BOTH directions: the seeder serves no single direction,
@@ -775,7 +775,7 @@ def main():
               ".Renamed;" in sdsrc and "snapshot.LooseSubtitlesRenamed += ObserveSidecarFacts(mediaPath).Renamed;" in sdsrc,
               "the statistics row must read Renamed, not Rows")
     else:
-        check("SubdlSeeder.cs reachable for the dry-run check", False, sd)
+        check("ScribeSeeder.cs reachable for the dry-run check", False, sd)
 
     # ---- 6g. F-M314: the rename hangs off the SAME switch as the container write ----
     # Two switches for one act — allocating a missing language code — let the operator ask for
@@ -992,7 +992,7 @@ def main():
         check("and no longer hands the seeder's detail to the direction row",
               "IsNullOrWhiteSpace(seederDetail) ? \"cycle finished\" : seederDetail!"
               not in worker_src)
-    disp_src = read_source("ScheduledTasks", "SubdlEventDispatcher.cs")
+    disp_src = read_source("ScheduledTasks", "ScribeEventDispatcher.cs")
     if disp_src:
         check("each direction's row gets its OWN run summary",
               "DescribeDirectionRun(upload" in disp_src)
@@ -1039,8 +1039,8 @@ def main():
         check("and closes it in a finally, so a failure leaves no lamp hanging",
               disp_src.find("FinishDirectionRow(upload)") > disp_src.find("finally"))
 
-    task_src = read_source("ScheduledTasks", "SubdlUploadTask.cs")
-    task_dl = read_source("ScheduledTasks", "SubdlDownloadTask.cs")
+    task_src = read_source("ScheduledTasks", "ScribeUploadTask.cs")
+    task_dl = read_source("ScheduledTasks", "ScribeDownloadTask.cs")
     if task_src and task_dl:
         # The wait-only tasks start a cycle and WAIT for it: marking their direction running there
         # lit a lamp for the seeder's work. They still own the rows of directions that never ran.
@@ -1064,10 +1064,10 @@ def main():
     #
     # Asserted as a PAIR because either half alone is the defect: a probe nobody consults changes
     # nothing, and a flag nobody lowers never fires.
-    seed_src = read_source("ScheduledTasks", "SubdlSeeder.cs")
+    seed_src = read_source("ScheduledTasks", "ScribeSeeder.cs")
     if seed_src:
         check("the seeder does NOT query the API itself (it only reads a flag)",
-              "ReadQuotaAsync" not in seed_src and "SubdlApiClient" not in seed_src,
+              "ReadQuotaAsync" not in seed_src and "ScribeApiClient" not in seed_src,
               "the seeder fills queues; asking the API is the dispatcher's job")
         check("the download queue is gated by that flag, like the download switch",
               "downloadAllowed ||" in seed_src
@@ -1389,7 +1389,7 @@ def main():
 
     # The disabling member must be named EXPLICITLY in the OSHash switch: its fallback is Monthly, so
     # a value that fell through would start rehashing a library whose owner had switched it off.
-    _oshtask = read_source("ScheduledTasks", "SubdlOshashRefreshTask.cs")
+    _oshtask = read_source("ScheduledTasks", "ScribeOshashRefreshTask.cs")
     check("the OSHash task treats Manual as 'no revalidation'",
           "OshashRefreshMode.Manual => TimeSpan.Zero" in _oshtask,
           "the switch falls back to Monthly — an unnamed disabling value would start rehashing")
@@ -1412,7 +1412,7 @@ def main():
     _up = read_source("Pipeline", "UploadPipeline.cs")
     _dl = read_source("Pipeline", "DownloadPipeline.cs")
     _cfg = read_source("Configuration", "PluginConfiguration.cs")
-    _ref = read_source("ScheduledTasks", "SubdlDatabaseRefreshTask.cs")
+    _ref = read_source("ScheduledTasks", "ScribeDatabaseRefreshTask.cs")
     check("the F-M60 removal checks can reach their sources",
           None not in (_up, _dl, _cfg, _ref),
           "an unreadable source would silently skip every assertion below it")
@@ -1475,8 +1475,8 @@ def main():
               if _mode_at >= 0 and _file_evidence_at >= 0
               else "the mode block or the file-evidence reader was not found at all")
     _pipe = read_source("Pipeline", "DownloadPipeline.cs")
-    _seed = read_source("ScheduledTasks", "SubdlSeeder.cs")
-    _ref2 = read_source("ScheduledTasks", "SubdlDatabaseRefreshTask.cs")
+    _seed = read_source("ScheduledTasks", "ScribeSeeder.cs")
+    _ref2 = read_source("ScheduledTasks", "ScribeDatabaseRefreshTask.cs")
     if _pipe and _seed and _ref2:
         check("the pipeline passes the switch's mode to the shared reader",
               _pipe.count("onlyOwnDownloads: !_config.DownloadOnlyMissing") == 2,
@@ -1497,7 +1497,7 @@ def main():
           'id="RunPostprocessNow"' in html)
     # F-M295 (08.10.2026): the button starts the TASK, not the endpoint. The endpoint ran the work but
     # wrote no status row, so the operator saw an empty list and reported the run as not having happened
-    # (prod log 23:20:22→25: the work WAS done). Only SubdlPostprocessTask writes the "Upl. Postproc."
+    # (prod log 23:20:22→25: the work WAS done). Only ScribePostprocessTask writes the "Upl. Postproc."
     # row, so the task route is the one that leaves evidence.
     check("RunPostprocessNow starts the task, not the endpoint",
           "subdlStartTask('SubDL Postprocessing')" in html
@@ -1506,9 +1506,9 @@ def main():
     # The string above is matched against the task's Name at RUNTIME (subdlStartTask looks the task up by
     # name). A rename on either side would answer "Task not found" in the browser while every build and
     # every other check stayed green — so the literals are tied together here.
-    post_task_src = read_source("ScheduledTasks", "SubdlPostprocessTask.cs")
+    post_task_src = read_source("ScheduledTasks", "ScribePostprocessTask.cs")
     if post_task_src:
-        check("the button's task name matches SubdlPostprocessTask.Name",
+        check("the button's task name matches ScribePostprocessTask.Name",
               'Name => "SubDL Postprocessing"' in post_task_src,
               "a name mismatch fails only in the browser, as 'Task not found'")
 
@@ -1516,9 +1516,9 @@ def main():
     # binden, manuell darf immer"): the upload binding belongs to the AUTOMATIC path ONLY. This is a
     # half-removal by nature — the failure mode is not a crash but a manual run that silently declines —
     # so it is asserted from BOTH sides, and each side alone would pass on a broken file.
-    ctrl = read_source("Api", "SubdlPostprocessController.cs")
-    task = read_source("ScheduledTasks", "SubdlPostprocessTask.cs")
-    sched = read_source("ScheduledTasks", "SubdlSchedulerCoordinator.cs")
+    ctrl = read_source("Api", "ScribePostprocessController.cs")
+    task = read_source("ScheduledTasks", "ScribePostprocessTask.cs")
+    sched = read_source("ScheduledTasks", "ScribeSchedulerCoordinator.cs")
     if ctrl and task and sched:
         # Assert the GATE CONSTRUCT, not the word: both files legitimately NAME UploadEnabled in the
         # comment that explains why the gate was removed, and a word-level ban went RED on a correct
@@ -1593,7 +1593,7 @@ def main():
     # the mode can be read at the call site and never reach the label (the old two-argument call).
     # Comments are stripped before the positive assertions - the fix's own comment quotes both labels,
     # so a raw substring test would pass on a file whose code still prints the old claim.
-    disp_src = read_source("ScheduledTasks", "SubdlEventDispatcher.cs")
+    disp_src = read_source("ScheduledTasks", "ScribeEventDispatcher.cs")
     if disp_src:
         code = re.sub(r"//[^\n]*", "", disp_src)
         # The PAIRING is the claim: each count carries the hypothetical label in its dry-run arm and
@@ -1629,7 +1629,7 @@ def main():
               code.find("bool directionWasDryRun =") < code.find("DescribeDirectionRun(upload, upSummary, downSummary, directionWasDryRun)"),
               "after the write a corrected value cannot reach the row")
     # --- F-M354: a status line names the STATE, not the row's own name again -------------------
-    status_path = os.path.join(DEFAULT, "..", "..", "Api", "SubdlStatusController.cs")
+    status_path = os.path.join(DEFAULT, "..", "..", "Api", "ScribeStatusController.cs")
     status = open(os.path.normpath(status_path), encoding="utf-8").read()
     check("F-M354: the SubDL-API success line says 'reachable', not 'API reachable' (the label says SubDL API)",
           'dto.Message = "reachable";' in status and 'dto.Message = "API reachable";' not in status,
@@ -1671,9 +1671,9 @@ def main():
           "Unified refetch" not in html, "'Unified refetch' still present")
     # --- F-M358: the status rows sit on the same rhythm as the worker lines ----------------------
     check("F-M358: the status box no longer adds a flex gap of its own",
-          "gap:0.8em" not in html, "the inline gap is still on #SubdlStatusBox")
+          "gap:0.8em" not in html, "the inline gap is still on #ScribeStatusBox")
     check("F-M358: its rows carry no margin (same rhythm as the workers block)",
-          "#SubdlStatusBox .subdl-status-row { margin: 0; }" in html, "margin:0 rule missing")
+          "#ScribeStatusBox .subdl-status-row { margin: 0; }" in html, "margin:0 rule missing")
     # --- F-M359: the deferral note names the DAY of the next attempt, not just the time --------
     check("F-M359: a day+time formatter exists",
           "var subdlFmtDayTime = function (iso)" in html, "subdlFmtDayTime missing")
@@ -1750,8 +1750,8 @@ def main():
         os.path.abspath(__file__))))), "Jellyfin.Plugin.SubdlSync")
     try:
         reg_src = open(os.path.join(root_cs, "Registry/WorkerRunRegistry.cs"), encoding="utf-8").read()
-        up_src = open(os.path.join(root_cs, "ScheduledTasks/SubdlUploadTask.cs"), encoding="utf-8").read()
-        down_src = open(os.path.join(root_cs, "ScheduledTasks/SubdlDownloadTask.cs"), encoding="utf-8").read()
+        up_src = open(os.path.join(root_cs, "ScheduledTasks/ScribeUploadTask.cs"), encoding="utf-8").read()
+        down_src = open(os.path.join(root_cs, "ScheduledTasks/ScribeDownloadTask.cs"), encoding="utf-8").read()
     except OSError as exc:
         check(False, "F-M401: worker sources readable (%s)" % exc)
         reg_src = up_src = down_src = ""
@@ -1764,7 +1764,7 @@ def main():
 
     # ---- F-M402 (operator order 02.11.2026): the cycle line in the log carries the same marker.
     try:
-        disp_src = open(os.path.join(root_cs, "ScheduledTasks/SubdlEventDispatcher.cs"), encoding="utf-8").read()
+        disp_src = open(os.path.join(root_cs, "ScheduledTasks/ScribeEventDispatcher.cs"), encoding="utf-8").read()
     except OSError as exc:
         check(False, "F-M402: dispatcher source readable (%s)" % exc)
         disp_src = ""
@@ -1796,7 +1796,7 @@ def main():
 
     # ---- F-M401 (Nachtrag): während ein Worker läuft, gilt das LIVE-Flag, nicht die gespeicherte Zeile.
     try:
-        ctrl_src = open(os.path.join(root_cs, "Api/SubdlStatusController.cs"), encoding="utf-8").read()
+        ctrl_src = open(os.path.join(root_cs, "Api/ScribeStatusController.cs"), encoding="utf-8").read()
     except OSError as exc:
         check(False, "F-M401: status controller readable (%s)" % exc)
         ctrl_src = ""

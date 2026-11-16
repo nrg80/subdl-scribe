@@ -16,13 +16,13 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+namespace Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 /// <summary>
 /// THE scheduler (F-M48 08.09.2026, 12.09.2026, 14.09.2026):
@@ -37,14 +37,14 @@ namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
 /// queued via ITaskManager so they stay visible/manually triggerable in the
 /// dashboard; the event dispatcher executes them (see its header).
 /// </summary>
-public sealed class SubdlSchedulerCoordinator : IDisposable
+public sealed class ScribeSchedulerCoordinator : IDisposable
 {
     /// <summary>
     /// F-M65: singleton reference — pipelines (built outside DI by
     /// PluginServiceRegistrator) reach the coordinator to schedule recovery fires
     /// without a constructor-injection detour. Set once by the DI singleton, cleared on dispose.
     /// </summary>
-    public static SubdlSchedulerCoordinator? Instance { get; private set; }
+    public static ScribeSchedulerCoordinator? Instance { get; private set; }
 
     /// <summary>
     // F-M25: requirement marker added for traceability.
@@ -60,7 +60,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
     private const int TickSeconds = 30;
 
     private readonly ITaskManager _taskManager;
-    private readonly ILogger<SubdlSchedulerCoordinator> _logger;
+    private readonly ILogger<ScribeSchedulerCoordinator> _logger;
     private readonly string _configDirectory;
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _loop;
@@ -331,7 +331,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         try
         {
             var row = CancelledRow(upload);
-            Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns?.MarkCancelled(row.Key, row.Name, row.Detail);
+            Jellyfin.Plugin.SubScribe.Plugin.Instance?.WorkerRuns?.MarkCancelled(row.Key, row.Name, row.Detail);
             LogUtil.Detail(_logger, "[Sub Scribe] stop ({Direction}): worker row marked cancelled.", upload ? "upload" : "download");
         }
         catch (Exception ex)
@@ -779,7 +779,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         try
         {
             spacing = Math.Clamp(
-                Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.Configuration.JobSpacingMinutes ?? 15,
+                Jellyfin.Plugin.SubScribe.Plugin.Instance?.Configuration.JobSpacingMinutes ?? 15,
                 5,
                 120);
         }
@@ -881,7 +881,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         }
     }
 
-    public SubdlSchedulerCoordinator(ITaskManager taskManager, IApplicationPaths applicationPaths, ILogger<SubdlSchedulerCoordinator> logger)
+    public ScribeSchedulerCoordinator(ITaskManager taskManager, IApplicationPaths applicationPaths, ILogger<ScribeSchedulerCoordinator> logger)
     {
         Instance = this;
         _taskManager = taskManager;
@@ -908,7 +908,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         {
             foreach (var worker in _taskManager.ScheduledTasks)
             {
-                if (worker.ScheduledTask is not (SubdlDownloadTask or SubdlUploadTask or SubdlPostprocessTask))
+                if (worker.ScheduledTask is not (ScribeDownloadTask or ScribeUploadTask or ScribePostprocessTask))
                 {
                     continue;
                 }
@@ -1021,7 +1021,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             // logs 'Unable to find scheduled task' and drops the fire. Guard:
             // only fire when the task is registered; otherwise keep the fire
             // pending and retry on the next tick (30 s).
-            bool registered = IsTaskRegistered<SubdlDownloadTask>();
+            bool registered = IsTaskRegistered<ScribeDownloadTask>();
             if (!registered)
             {
                 return; // fire stays pending, file stays as backup
@@ -1040,14 +1040,14 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             ResetReschedule("download"); // really fired — clear the 16x counter
             PersistRecoveryFires();
             LogUtil.Normal(_logger, "[Sub Scribe] Recovery fire: download — {Reason}; queueing download run (F-M65, F-M475).", downReason);
-            _taskManager.QueueScheduledTask<SubdlDownloadTask>(new TaskOptions());
+            _taskManager.QueueScheduledTask<ScribeDownloadTask>(new TaskOptions());
             return;
         }
 
         if (_recoveryFireUploadUtc.HasValue && nowUtc >= _recoveryFireUploadUtc.Value)
         {
             // Same guard as download.
-            bool registeredUp = IsTaskRegistered<SubdlUploadTask>();
+            bool registeredUp = IsTaskRegistered<ScribeUploadTask>();
             if (!registeredUp)
             {
                 return; // fire stays pending
@@ -1066,7 +1066,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             ResetReschedule("upload"); // really fired — clear the 16x counter
             PersistRecoveryFires();
             LogUtil.Normal(_logger, "[Sub Scribe] Recovery fire: upload — {Reason}; queueing upload run (F-M65, F-M475).", upReason);
-            _taskManager.QueueScheduledTask<SubdlUploadTask>(new TaskOptions());
+            _taskManager.QueueScheduledTask<ScribeUploadTask>(new TaskOptions());
             return;
         }
 
@@ -1123,7 +1123,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 now, refreshAnchor, refreshCadenceDue, _lastPruneMarker, refreshMarker, refreshDeferPending);
             if (refreshDue && AnchorJobGate.DeferralElapsed(nowUtc, _pruneDeferredUntil))
             {
-                if (!IsTaskRegistered<SubdlDatabaseRefreshTask>())
+                if (!IsTaskRegistered<ScribeDatabaseRefreshTask>())
                 {
                     return; // F-M212: task not registered yet — marker not consumed, retried next tick
                 }
@@ -1137,7 +1137,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                     _stateDirty = true;
                     ResetReschedule("refresh"); // fired — clear the 16x counter
                     LogUtil.Normal(_logger, "[Sub Scribe] Database refresh fire at {Anchor:yyyy-MM-dd HH:mm} local ({Mode}).", (DateTime)refreshAnchor, config.PruneMode);
-                    _taskManager.QueueScheduledTask<SubdlDatabaseRefreshTask>(new TaskOptions());
+                    _taskManager.QueueScheduledTask<ScribeDatabaseRefreshTask>(new TaskOptions());
                 }
                 else
                 {
@@ -1171,7 +1171,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                 now, osAnchor, cadenceDue: true, _lastOshashMarker, osMarker, osDeferPending);
             if (osDue && AnchorJobGate.DeferralElapsed(nowUtc, _oshashDeferredUntil))
             {
-                if (!IsTaskRegistered<SubdlOshashRefreshTask>())
+                if (!IsTaskRegistered<ScribeOshashRefreshTask>())
                 {
                     return; // F-M212: task not registered yet — marker not consumed, retried next tick
                 }
@@ -1185,7 +1185,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                     _stateDirty = true;
                     ResetReschedule("oshash"); // fired — clear the 16x counter
                     LogUtil.Normal(_logger, "[Sub Scribe] OSHash-refresh fire at {Anchor:yyyy-MM-dd HH:mm} local.", (DateTime)osAnchor);
-                    _taskManager.QueueScheduledTask<SubdlOshashRefreshTask>(new TaskOptions());
+                    _taskManager.QueueScheduledTask<ScribeOshashRefreshTask>(new TaskOptions());
                 }
                 else
                 {
@@ -1209,7 +1209,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
         {
             if (nowUtc >= _postprocessArmUtc)
             {
-                if (!IsTaskRegistered<SubdlPostprocessTask>())
+                if (!IsTaskRegistered<ScribePostprocessTask>())
                 {
                     // F-M212: task not registered yet — keep the order, try again next tick.
                     return;
@@ -1229,7 +1229,7 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
                     LogUtil.Normal(
                         _logger,
                         "[Sub Scribe] Upload postprocessing fires now — armed 30-minute rhythm after the last upload run (F-M445).");
-                    _taskManager.QueueScheduledTask<SubdlPostprocessTask>(new TaskOptions());
+                    _taskManager.QueueScheduledTask<ScribePostprocessTask>(new TaskOptions());
                 }
             }
         }
@@ -1296,8 +1296,8 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             // QueueScheduledTask then drops the fire silently. Test this BEFORE the
             // marker is consumed so the slot stays claimable for the next tick.
             // Checked for both directions, since either may be missing.
-            if ((config.IsDownloadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<SubdlDownloadTask>())
-                || (config.IsUploadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<SubdlUploadTask>()))
+            if ((config.IsDownloadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<ScribeDownloadTask>())
+                || (config.IsUploadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<ScribeUploadTask>()))
             {
                 return; // marker NOT set → fires on a later tick
             }
@@ -1322,12 +1322,12 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
 
             if (downloadJoins)
             {
-                _taskManager.QueueScheduledTask<SubdlDownloadTask>(new TaskOptions());
+                _taskManager.QueueScheduledTask<ScribeDownloadTask>(new TaskOptions());
             }
 
             if (uploadJoins)
             {
-                _taskManager.QueueScheduledTask<SubdlUploadTask>(new TaskOptions());
+                _taskManager.QueueScheduledTask<ScribeUploadTask>(new TaskOptions());
             }
 
             return; // one fire per tick
@@ -1356,8 +1356,8 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
             // F-M212: catch-up queueing needs the same registration guard as the
             // regular fire — an early-startup miss would otherwise set _catchUpFired
             // and drop the cycle for the whole day.
-            if ((config.IsDownloadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<SubdlDownloadTask>())
-                || (config.IsUploadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<SubdlUploadTask>()))
+            if ((config.IsDownloadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<ScribeDownloadTask>())
+                || (config.IsUploadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<ScribeUploadTask>()))
             {
                 return; // retry on a later tick
             }
@@ -1372,12 +1372,12 @@ public sealed class SubdlSchedulerCoordinator : IDisposable
 
             if (downloadJoins)
             {
-                _taskManager.QueueScheduledTask<SubdlDownloadTask>(new TaskOptions());
+                _taskManager.QueueScheduledTask<ScribeDownloadTask>(new TaskOptions());
             }
 
             if (uploadJoins)
             {
-                _taskManager.QueueScheduledTask<SubdlUploadTask>(new TaskOptions());
+                _taskManager.QueueScheduledTask<ScribeUploadTask>(new TaskOptions());
             }
         }
     }

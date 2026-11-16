@@ -10,9 +10,9 @@
 // See the GNU General Public License for more details.
 
 using System;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
+namespace Jellyfin.Plugin.SubScribe.Api.Endpoints;
 
 /// <summary>
 /// F-M486/F-M487 (operator order 15.11.2026: "Kreuzkontamination bitte verhindern — ein Download von

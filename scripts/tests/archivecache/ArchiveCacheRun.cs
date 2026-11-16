@@ -24,7 +24,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using Jellyfin.Plugin.SubdlScribe.Api;
+using Jellyfin.Plugin.SubScribe.Api;
 
 namespace ArchiveCacheRun;
 
@@ -193,7 +193,7 @@ internal static class Program
 
         // ── 8. Wiring on the source: ONE layer ───────────────────────────────────
         Console.WriteLine("8. Source contract");
-        var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlApiClient.cs"));
+        var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeApiClient.cs"));
         Check(api.Contains("private readonly ArchiveDiskCache _archiveDiskCache = new();", StringComparison.Ordinal),
             "the client owns the disk cache");
         Check(!api.Contains("RunArchiveCache", StringComparison.Ordinal)
@@ -267,7 +267,7 @@ internal static class Program
         // re-derived from its name — and the code refetched the archive that was already on disk,
         // once per episode. The order is the rule: pick by name, then the episode match on the same
         // body, and only then a real refetch.
-        string apiSource = File.ReadAllText(System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "SubdlApiClient.cs"));
+        string apiSource = File.ReadAllText(System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "ScribeApiClient.cs"));
         int v1 = apiSource.IndexOf("public async Task<DownloadOutcome> DownloadSubtitleFileAsync", StringComparison.Ordinal);
         int v1Refetch = v1 < 0 ? -1 : apiSource.IndexOf("archive cache does not hold this entry", v1, StringComparison.Ordinal);
         bool v1Ordered = v1 >= 0 && v1Refetch > v1

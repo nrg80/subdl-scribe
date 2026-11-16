@@ -1,10 +1,10 @@
 using System;
 using System.Globalization;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.EntityFrameworkCore;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// F-M542 (Operator-Anweisung 16.11.2026: „Ok. In den store damit"): die TMDb-Antworten liegen im
@@ -37,14 +37,14 @@ public static class TmdbAnswerStore
 
     private static readonly object Gate = new();
 
-    private static SubdlSqliteContext? _db;
+    private static ScribeSqliteContext? _db;
 
     /// <summary>
     /// Attaches the store. Called once when the plugin builds its data context; without it the resolver
     /// keeps working exactly as before, memory only.
     /// </summary>
     /// <param name="db">The plugin's data context.</param>
-    public static void Attach(SubdlSqliteContext? db)
+    public static void Attach(ScribeSqliteContext? db)
     {
         lock (Gate)
         {
@@ -64,7 +64,7 @@ public static class TmdbAnswerStore
     public static bool TryGet((string, bool) key, out string? value)
     {
         value = null;
-        SubdlSqliteContext? db = Store();
+        ScribeSqliteContext? db = Store();
 
         if (db == null)
         {
@@ -107,7 +107,7 @@ public static class TmdbAnswerStore
     /// <param name="value">The answer, <c>null</c> for "asked and found nothing".</param>
     public static void Put((string, bool) key, string? value)
     {
-        SubdlSqliteContext? db = Store();
+        ScribeSqliteContext? db = Store();
 
         if (db == null)
         {
@@ -146,7 +146,7 @@ public static class TmdbAnswerStore
     /// </summary>
     public static void Prune()
     {
-        SubdlSqliteContext? db = Store();
+        ScribeSqliteContext? db = Store();
 
         if (db == null)
         {
@@ -189,7 +189,7 @@ public static class TmdbAnswerStore
     /// leer, waehrend 42 von 42 TMDb-Fragen eines Zyklus Wiederholungen waren.
     /// </summary>
     /// <returns>The context, or null when there is none.</returns>
-    private static SubdlSqliteContext? Store()
+    private static ScribeSqliteContext? Store()
     {
         lock (Gate)
         {

@@ -12,7 +12,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M547: die eine Pause, die an einer EXTERNEN Anfrage haengt — und nur dort.

@@ -31,10 +31,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Registry;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
 namespace ReportingRun;
 
@@ -141,19 +141,19 @@ internal static class ReportingRun
             "no defect waits for a second sighting any more");
         Check(pipeline.Contains("if (row != null && row.ReportedUtc == null)", StringComparison.Ordinal),
             "a row is filed once — ReportedUtc, not a second failure, keeps it from repeating");
-        Check(pipeline.Contains("qaKnownRejected.Contains(row.SubdlId, StringComparer.Ordinal)", StringComparison.Ordinal),
+        Check(pipeline.Contains("qaKnownRejected.Contains(row.ScribeId, StringComparer.Ordinal)", StringComparison.Ordinal),
             "the skip path still files a report — the safety net for rows remembered with the switch off");
         Check(pipeline.Contains("summary.ReportsDeferred++", StringComparison.Ordinal),
             "a report SubDL does not take stays open for the next run");
-        Check(pipeline.Contains("qaRejectedReleases.Contains(row.SubdlId, StringComparer.Ordinal)", StringComparison.Ordinal),
+        Check(pipeline.Contains("qaRejectedReleases.Contains(row.ScribeId, StringComparer.Ordinal)", StringComparison.Ordinal),
             "a measured gate verdict is reported in the same run — no second sighting is awaited");
         Check(pipeline.Contains("gateFinding += \" ('\" + packFile.Name + \"')\"", StringComparison.Ordinal),
             "the pipeline puts the resolved pack member into the finding");
         Check(pipeline.Contains("hiFinding += \" ('\" + hiDl.Member + \"')\"", StringComparison.Ordinal),
             "F-M450: the SDH path names its member too — the file the gate measured, not the pack");
-        Check(Read(plugin, "Api/SubdlApiClient.cs").Contains("Member = memberEntry ?? memberName", StringComparison.Ordinal),
+        Check(Read(plugin, "Api/ScribeApiClient.cs").Contains("Member = memberEntry ?? memberName", StringComparison.Ordinal),
             "F-M450: the outcome reports the entry that was actually resolved, not the guessed name");
-        Check(Read(plugin, "Api/SubdlApiClient.cs").Contains("return (ms.ToArray(), entry.Name);", StringComparison.Ordinal),
+        Check(Read(plugin, "Api/ScribeApiClient.cs").Contains("return (ms.ToArray(), entry.Name);", StringComparison.Ordinal),
             "F-M450: only the unpack step knows which entry it handed back — it says so");
         // F-M455 replaced the "no members" test with "at most one member": with unpack=1 an ordinary
         // single release carries exactly one member — the file itself — so the old guard silenced
@@ -174,7 +174,7 @@ internal static class ReportingRun
         Check(tracker.Contains("!string.Equals(x.Kind, \"empty\", StringComparison.Ordinal)", StringComparison.Ordinal),
             "an empty-payload memo does not turn into a skip memo");
 
-        string db = Read(plugin, "Data/SubdlDbContext.cs");
+        string db = Read(plugin, "Data/ScribeDbContext.cs");
         Check(db.Contains("ALTER TABLE rejected_candidates ADD COLUMN NId", StringComparison.Ordinal)
               && db.Contains("EnsureReportColumns();", StringComparison.Ordinal),
             "an upgraded data file gets the report columns (EnsureCreated never alters a table)");
@@ -187,12 +187,12 @@ internal static class ReportingRun
               && db.Contains("ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId", StringComparison.Ordinal),
             "the schema version is bumped with the columns (11 carries source and direction marks)");
 
-        string api = Read(plugin, "Api/SubdlApiClient.cs");
+        string api = Read(plugin, "Api/ScribeApiClient.cs");
         Check(api.Contains("\"subtitlePage\"", StringComparison.Ordinal) && api.Contains("c.NId = page[(slash + 1)..]", StringComparison.Ordinal),
             "the report id is taken from the search answer");
         Check(api.Contains("$\"{ApiBase}/report\"", StringComparison.Ordinal),
             "the report goes to the site's report endpoint");
-        Check(api.Contains("== 429", StringComparison.Ordinal) && api.Contains("SubdlReportOutcome.Deferred", StringComparison.Ordinal),
+        Check(api.Contains("== 429", StringComparison.Ordinal) && api.Contains("ScribeReportOutcome.Deferred", StringComparison.Ordinal),
             "a rate-limited report is reported back as deferred");
         Check(api.Contains("ud.TryGetProperty(\"name\"", StringComparison.Ordinal),
             "the attribution uses the account name, not the login mail");
@@ -215,12 +215,12 @@ internal static class ReportingRun
         string dir = Path.Combine(Path.GetTempPath(), "subdl-report-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var store = new SubdlDbContext(dir);
+            var store = new ScribeDbContext(dir);
             var spent = new QaFailTracker(store);
             spent.RecordSkippedCandidates("item", "EN", new[] { "9100001-111111", "9100002-222222" },
                 kind: "empty");
             spent.RecordSkippedCandidates("item", "EN", new[] { "9100003-333333" }, kind: "qa");
-            var rowToReport = store.RejectedCandidates.Find(x => x.SubdlId == "9100001-111111").First();
+            var rowToReport = store.RejectedCandidates.Find(x => x.ScribeId == "9100001-111111").First();
             spent.MarkReported(rowToReport);
 
             List<string> blocked = spent.GetSkippedCandidates("item", "EN");
@@ -325,20 +325,20 @@ internal static class ReportingRun
         Check(pipeline.Contains("_emptyRetried.Add(\"hi|\"", StringComparison.Ordinal),
             "F-M455/F-M460: the SDH fetch also asks once more after ten seconds before anything is said");
         Check(pipeline.Contains("QueueReport(row);", StringComparison.Ordinal)
-              && pipeline.Contains("string.Equals(row.SubdlId, hi.SubdlId, StringComparison.Ordinal)", StringComparison.Ordinal),
+              && pipeline.Contains("string.Equals(row.ScribeId, hi.ScribeId, StringComparison.Ordinal)", StringComparison.Ordinal),
             "F-M460: the SDH finding is queued right there, not at a run end that only runs when nothing was saved");
 
         // F-M462 (operator order 10.11.2026): a gate verdict died as soon as a LATER candidate saved
         // the language, because the only flush sat behind "nothing was saved". It is filed where it is
         // measured now — before the walk moves on.
-        int gateFact = pipeline.IndexOf("qaRejectedFacts[cand.SubdlId] = new ReportFacts", StringComparison.Ordinal);
+        int gateFact = pipeline.IndexOf("qaRejectedFacts[cand.ScribeId] = new ReportFacts", StringComparison.Ordinal);
         int gateFile = pipeline.IndexOf("F-M462", StringComparison.Ordinal);
         int runEndFlush = pipeline.IndexOf("if (!savedAny && attempts > 0)", StringComparison.Ordinal);
         Check(gateFact > 0 && gateFile > gateFact && runEndFlush > gateFile
               && pipeline[gateFile..runEndFlush].Contains("QueueReport(row);", StringComparison.Ordinal),
             "F-M462: the main-path verdict is queued where it is measured, not behind 'nothing was saved'");
 
-        string apiSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "SubdlApiClient.cs"));
+        string apiSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "ScribeApiClient.cs"));
         // F-M461 (measured 10.11.2026): the v1 download route recorded no verdict at all, so its
         // rejects quoted the previous v2 call — the source of both misleading labels we chased
         // ("HTTP 200" on a healthy upload, "no request made" on a request that happened).

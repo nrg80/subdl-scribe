@@ -2,9 +2,9 @@
 using System;
 using System.IO;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Api.Endpoints;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 // T158 / F-M352 (operator order 19.10.2026): a worker that cannot start reads "off".
 // The conditions are the code's own hard refusals, so they are driven through the REAL gate.
@@ -212,13 +212,13 @@ Check("a null language value yields no languages", WorkerOffState.ParseTargetLan
 Check("no configuration: no statement, no off", !WorkerOffState.Applies(DL, null) && !WorkerOffState.Applies(PP, null));
 
 // --- the other workers keep their palette ----------------------------------
-foreach (var other in new[] { "SubDLSeeder", "SubdlAutoSyncTask", "SubdlDatabaseRefreshTask", "SubdlOshashRefreshTask" })
+foreach (var other in new[] { "SubDLSeeder", "ScribeAutoSyncTask", "ScribeDatabaseRefreshTask", "ScribeOshashRefreshTask" })
 {
     Check($"'{other}' is not covered by the off rule", !WorkerOffState.Applies(other, Mutate(c => { c.DownloadEnabled = false; c.UploadEnabled = false; c.SelectedLibraries.Clear(); })));
 }
 
 // --- wiring on the source ---------------------------------------------------
-string ctl = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlStatusController.cs"));
+string ctl = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeStatusController.cs"));
 Check("the worker endpoint no longer carries an off block of its own", !ctl.Contains("Off = new"));
 Check("the endpoint does NOT repaint an outcome", !ctl.Contains("Outcome = off ?"));
 Check("the endpoint does NOT hide a pending fire", !ctl.Contains("Deferred = !off"));
@@ -226,12 +226,12 @@ Check("the endpoint keeps the stored detail", !ctl.Contains("Detail = off ?"));
 
 string page = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"));
 Check("the off note rides on the DEFERRAL line, not on a line of its own",
-    page.Contains("var deferLine = document.querySelector('#SubdlLocalDeferLine')")
+    page.Contains("var deferLine = document.querySelector('#ScribeLocalDeferLine')")
     && page.Contains("offNotes.forEach(function (t) { localLines.push(t); })")
-    && !page.Contains("SubdlOffLine"));
+    && !page.Contains("ScribeOffLine"));
 Check("the page reads the off facts from the same payload as the deferral", page.Contains("(loc && loc.notes)"));
 
-string quota = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlQuotaService.cs"));
+string quota = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeQuotaService.cs"));
 Check("the quota answer carries the notes in its local block",
     quota.Contains("var offEntries = StatusNotes();") && quota.Contains("notes = offEntries"));
 Check("the notes list is built from the shared gates",
@@ -295,7 +295,7 @@ Check("the postprocessing no longer rides on the deferral line",
     quota.Contains("&& !isFailed)") && quota.Contains("continue;"),
     "the armed order is shown once — by its own line (F-M445)");
 Check("the skip is gated on the postprocessing worker and on a healthy run",
-    quota.Contains("Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey, StringComparison.Ordinal)\n                    && !isFailed"),
+    quota.Contains("Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.PostprocessWorkerKey, StringComparison.Ordinal)\n                    && !isFailed"),
     "a FAILED postprocessing run still speaks here (F-M436)");
 Check("the duplicate word is gone",
     !quota.Contains("reason = \"schedule\";"),

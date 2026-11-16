@@ -33,9 +33,9 @@ using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Api.Endpoints;
+using Jellyfin.Plugin.SubScribe.Configuration;
 
 internal static class Program
 {
@@ -545,7 +545,7 @@ internal static class Program
             && angenommen.Answer == "ok" && angenommen.Reason is null,
             "ok=" + angenommen.Ok + " id=" + (angenommen.Id ?? "<null>") + " answer=" + angenommen.Answer);
 
-        var eigeneKennung = Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.OwnUploadId(
+        var eigeneKennung = Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.OwnUploadId(
             SubtitleProvider.MovieSubtitles, "abc123", "Oppenheimer.2023.1080p.WEB-DL", new DateTime(2026, 11, 15, 18, 4, 5, DateTimeKind.Utc));
         var kennungTeile = eigeneKennung.Split(':');
         Check("the mark for an id-less upload is ours, prefixed with the source (F-M488/F-M508)",
@@ -554,8 +554,8 @@ internal static class Program
             && kennungTeile[2] == "20261115T180405Z"
             && kennungTeile[3].Length == 8
             && kennungTeile[3].All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
-            && Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.IsOwnUploadId(eigeneKennung)
-            && eigeneKennung != Jellyfin.Plugin.SubdlScribe.Api.Endpoints.Provenance.OwnUploadId(
+            && Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.IsOwnUploadId(eigeneKennung)
+            && eigeneKennung != Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.OwnUploadId(
                 SubtitleProvider.MovieSubtitles, "abc124", "Oppenheimer.2023.1080p.WEB-DL", new DateTime(2026, 11, 15, 18, 4, 5, DateTimeKind.Utc)),
             "found: " + eigeneKennung);
 
@@ -952,10 +952,10 @@ internal static class Program
             // (a) Zeile vorhanden, Hash nicht: schreiben über den Pfad, Zeilenzahl unverändert.
             var pfadSeite = new AddMovieSiteHandler();
             pfadSeite.Films.Add((13392, "Hotel Transylvania 2", 2015));
-            using (var db = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(
+            using (var db = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(
                 Path.Combine(fm517Root, "mit-zeile"), null))
             {
-                var reg = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(db, null, null);
+                var reg = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(db, null, null);
                 reg.EnsureMedia(fm517Hash, jellyfinItemId: null, path: fm517Pfad);
                 int vorher = db.Media.Count();
 
@@ -997,10 +997,10 @@ internal static class Program
             // (b) Keine Zeile, kein Hash: nichts wird geschrieben, und der Text sagt warum.
             var leereSeite = new AddMovieSiteHandler();
             leereSeite.Films.Add((13392, "Hotel Transylvania 2", 2015));
-            using (var dbLeer = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(
+            using (var dbLeer = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(
                 Path.Combine(fm517Root, "ohne-zeile"), null))
             {
-                var regLeer = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(dbLeer, null, null);
+                var regLeer = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(dbLeer, null, null);
                 var ohneZeile = await new MsubMovieResolver(new MovieSubtitlesClient(new HttpClient(leereSeite)), null)
                     .ResolveForMediaAsync(
                         regLeer,
@@ -1013,23 +1013,23 @@ internal static class Program
                 Check("ohne Hash UND ohne Pfad-Zeile: nichts geschrieben, die Nummer gilt nur fuer diesen Lauf (F-M517)",
                     ohneZeile.Resolved && ohneZeile.MovieId == 13392
                     && dbLeer.Media.Count() == 0
-                    && MediaNumberNote.Of(Jellyfin.Plugin.SubdlScribe.Registry.MediaNumberWrite.None) == MediaNumberNote.NotStored
+                    && MediaNumberNote.Of(Jellyfin.Plugin.SubScribe.Registry.MediaNumberWrite.None) == MediaNumberNote.NotStored
                     && MediaNumberNote.NotStored.Contains("gilt nur für diesen Lauf", StringComparison.Ordinal)
-                    && MediaNumberNote.Of(Jellyfin.Plugin.SubdlScribe.Registry.MediaNumberWrite.ByPath)
+                    && MediaNumberNote.Of(Jellyfin.Plugin.SubScribe.Registry.MediaNumberWrite.ByPath)
                         == MediaNumberNote.ByPath,
                     "zeilen=" + dbLeer.Media.Count());
             }
 
             // (c) Zwei Zeilen mit demselben Pfad: der Pfad ist dann KEINE Adresse — keine wird gewaehlt.
-            using (var dbViel = new Jellyfin.Plugin.SubdlScribe.Data.SubdlDbContext(
+            using (var dbViel = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(
                 Path.Combine(fm517Root, "mehrdeutig"), null))
             {
-                var regViel = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(dbViel, null, null);
+                var regViel = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(dbViel, null, null);
                 regViel.EnsureMedia("1111222233334444", jellyfinItemId: null, path: fm517Pfad);
                 regViel.EnsureMedia("5555666677778888", jellyfinItemId: null, path: fm517Pfad);
                 var geschrieben = regViel.SetMsubMovieId(null, fm517Pfad, 13392);
                 Check("ein Pfad, den MEHRERE Zeilen tragen, ist keine Adresse — nichts geschrieben, nichts geraten (F-M517)",
-                    geschrieben == Jellyfin.Plugin.SubdlScribe.Registry.MediaNumberWrite.None
+                    geschrieben == Jellyfin.Plugin.SubScribe.Registry.MediaNumberWrite.None
                     && regViel.GetMedia("1111222233334444")?.MsubMovieId is null
                     && regViel.GetMedia("5555666677778888")?.MsubMovieId is null
                     && regViel.MsubMovieIdAtPath(fm517Pfad) is null,
@@ -1133,7 +1133,7 @@ internal static class Program
         {
             Console.WriteLine();
             Console.WriteLine("--- live probe against moviesubtitles.org (GET only) ---");
-            var liveHttp = SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(60));
+            var liveHttp = ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(60));
             var live = new MovieSubtitlesClient(liveHttp);
             var hits = await live.SearchAsync("oppenheimer").ConfigureAwait(false);
             Console.WriteLine("  search 'oppenheimer': " + hits.Count + " film(s)"

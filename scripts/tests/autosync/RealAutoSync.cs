@@ -39,8 +39,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
-using Jellyfin.Plugin.SubdlScribe.Qa;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Qa;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AutoSyncTest;
@@ -80,7 +80,7 @@ public static class RealAutoSync
         }
 
         string ffmpeg = FfmpegTools.ResolvePath(
-            new Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration(), NullLogger.Instance) ?? "ffmpeg";
+            new Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration(), NullLogger.Instance) ?? "ffmpeg";
         var log = NullLogger.Instance;
 
         Console.WriteLine("=== F-M296 auto-sync — end-to-end on real audio ===");

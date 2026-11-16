@@ -14,7 +14,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// Derives the media TYPE and the season/episode numbers from a FILE NAME.

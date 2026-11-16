@@ -19,7 +19,7 @@
 // Usage: optimrun <workdir>
 
 using System.Diagnostics;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 
 // `--quick` runs everything EXCEPT the two long measurement sections, so a negative control does
 // not have to sit through the deliberately slow unbatched path to prove the ASSERTIONS are attached.
@@ -57,7 +57,7 @@ const int TotalWrites = Media * TracksEach;
 // ---------------------------------------------------------------------------------------------
 long batchedMs = -1;
 if (!quick)
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     var sw = Stopwatch.StartNew();
     db.BeginBatch();
@@ -69,7 +69,7 @@ using (var db = new SubdlDbContext(workdir, null))
         {
             db.Embeds.Upsert(new EmbedTrackEntity
             {
-                Id = SubdlDbContext.EmbedKey(hash, t),
+                Id = ScribeDbContext.EmbedKey(hash, t),
                 MediaHash = hash,
                 SubPos = t,
                 Language = "en",
@@ -101,7 +101,7 @@ foreach (var f in Directory.GetFiles(unbatchedDir))
 
 long unbatchedMs = -1;
 if (!quick)
-using (var db = new SubdlDbContext(unbatchedDir, null))
+using (var db = new ScribeDbContext(unbatchedDir, null))
 {
     var sw = Stopwatch.StartNew();
     for (int i = 0; i < Media; i++)
@@ -112,7 +112,7 @@ using (var db = new SubdlDbContext(unbatchedDir, null))
         {
             db.Embeds.Upsert(new EmbedTrackEntity
             {
-                Id = SubdlDbContext.EmbedKey(hash, t),
+                Id = ScribeDbContext.EmbedKey(hash, t),
                 MediaHash = hash,
                 SubPos = t,
                 Language = "en",
@@ -160,14 +160,14 @@ foreach (var f in Directory.GetFiles(dropDir))
     File.Delete(f);
 }
 
-using (var db = new SubdlDbContext(dropDir, null))
+using (var db = new ScribeDbContext(dropDir, null))
 {
     db.BeginBatch();
     db.Media.Upsert(new MediaEntity { Id = "survivor", Path = "/lib/s.mkv" });
     // Deliberately NO EndBatch: the close is skipped, as an exception would skip it.
 }
 
-using (var verify = new SubdlDbContext(dropDir, null))
+using (var verify = new ScribeDbContext(dropDir, null))
 {
     Console.WriteLine();
     Console.WriteLine("--- an interrupted batch ---");
@@ -178,7 +178,7 @@ using (var verify = new SubdlDbContext(dropDir, null))
 // Section 4: read-after-write INSIDE an open batch. The store's readers go through its row cache,
 // so a value written a moment ago must be visible before the commit.
 // ---------------------------------------------------------------------------------------------
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     db.BeginBatch();
     db.Media.Upsert(new MediaEntity { Id = "raw", Path = "/lib/raw.mkv" });
@@ -194,7 +194,7 @@ using (var db = new SubdlDbContext(workdir, null))
 // Section 5: the row cache must not hide a second context's view forever — after EndBatch the file
 // carries it, which an independent context can read.
 // ---------------------------------------------------------------------------------------------
-using (var other = new SubdlDbContext(workdir, null))
+using (var other = new ScribeDbContext(workdir, null))
 {
     Check(other.Media.FindById("raw") != null, "an independent context reads the row after the batch closed");
 }
@@ -218,14 +218,14 @@ foreach (var f in Directory.GetFiles(stampDir))
 }
 
 string stampPath = DbFiles.PathIn(stampDir);
-using (var db = new SubdlDbContext(stampDir, null))
+using (var db = new ScribeDbContext(stampDir, null))
 {
     db.Media.Upsert(new MediaEntity { Id = "seen", Path = "/lib/seen.mkv" });
 }
 
-using (var db = new SubdlDbContext(stampDir, null))
+using (var db = new ScribeDbContext(stampDir, null))
 {
-    var registry = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(db, null);
+    var registry = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(db, null);
 
     // First pass: the tracks are NEW, so this legitimately writes.
     for (int t = 0; t < 12; t++)
@@ -271,14 +271,14 @@ using (var db = new SubdlDbContext(stampDir, null))
     bool changed = registry.ObserveEmbed("seen", 0, "de", false, false);
     db.EndBatch();
     Check(changed, "a track whose language changed is reported as written");
-    Check(string.Equals(db.Embeds.FindById(SubdlDbContext.EmbedKey("seen", 0))?.Language, "de", StringComparison.Ordinal),
+    Check(string.Equals(db.Embeds.FindById(ScribeDbContext.EmbedKey("seen", 0))?.Language, "de", StringComparison.Ordinal),
         "the changed language reached the row");
 }
 
 // A parent row that does NOT exist yet must still be created by the observation.
-using (var db = new SubdlDbContext(stampDir, null))
+using (var db = new ScribeDbContext(stampDir, null))
 {
-    var registry = new Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry(db, null);
+    var registry = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(db, null);
     registry.ObserveEmbed("brandnew", 0, "de", false, false);
 
     Check(db.Media.FindById("brandnew") != null, "an absent parent row is created by the observation");

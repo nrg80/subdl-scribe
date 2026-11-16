@@ -118,7 +118,7 @@ def sidecar_rows(store):
     try:
         return con.execute(
             "select FileName, Path, ContentHash, Origin, MediaHash, Language, "
-            "SubdlUploadId, TvSubtitlesUploadId, SubdlUploadedAt, TvSubtitlesUploadedAt "
+            "ScribeUploadId, TvSubtitlesUploadId, ScribeUploadedAt, TvSubtitlesUploadedAt "
             "from sidecars"
         ).fetchall()
     finally:
@@ -130,10 +130,10 @@ def upload_marks(store, media_hash):
     con = sqlite3.connect(store)
     try:
         return con.execute(
-            "select FileName, ContentHash, SubdlUploadId, TvSubtitlesUploadId, "
-            "SubdlUploadedAt, TvSubtitlesUploadedAt from sidecars "
-            "where MediaHash = ? and (SubdlUploadedAt is not null or TvSubtitlesUploadedAt is not null "
-            "or SubdlUploadId is not null or TvSubtitlesUploadId is not null)",
+            "select FileName, ContentHash, ScribeUploadId, TvSubtitlesUploadId, "
+            "ScribeUploadedAt, TvSubtitlesUploadedAt from sidecars "
+            "where MediaHash = ? and (ScribeUploadedAt is not null or TvSubtitlesUploadedAt is not null "
+            "or ScribeUploadId is not null or TvSubtitlesUploadId is not null)",
             (media_hash,),
         ).fetchall()
     finally:
@@ -144,7 +144,7 @@ def hash_rows_for(store, digest):
     con = sqlite3.connect(store)
     try:
         return con.execute(
-            "select FileName, Origin, SubdlUploadedAt, TvSubtitlesUploadedAt, SubdlUploadId, TvSubtitlesUploadId "
+            "select FileName, Origin, ScribeUploadedAt, TvSubtitlesUploadedAt, ScribeUploadId, TvSubtitlesUploadId "
             "from sidecars where ContentHash = ?",
             (digest,),
         ).fetchall()
@@ -302,24 +302,24 @@ def main():
         after["UploadEnabled"] = True
         # --off laesst genau diese Quelle aus: dann ist der SKIP-Fall zu sehen (genau eine Zeile,
         # die andere Quelle als SKIP gemeldet, kein FAIL).
-        after["SubdlUploadEnabled"] = "SubDL" not in args.off
+        after["ScribeUploadEnabled"] = "SubDL" not in args.off
         after["TvSubtitlesUploadEnabled"] = "tvsubtitles" not in args.off
         after["LogMode"] = "Verbose"
         jf.call(cfg_path, "POST", after)
         live = jf.call(cfg_path) or {}
         print("  [INFO] gesetzt: DryRun=%s Upload=%s SubDL-Upload=%s tvst-Upload=%s Reihenfolge=%s" % (
             live.get("DryRun"), live.get("UploadEnabled"),
-            live.get("SubdlUploadEnabled"), live.get("TvSubtitlesUploadEnabled"), live.get("DownloadOrder")))
+            live.get("ScribeUploadEnabled"), live.get("TvSubtitlesUploadEnabled"), live.get("DownloadOrder")))
 
         # die effektiven Schalter, so wie das Plugin sie liest (Alt-Wert als Rueckfall)
         def upload_on(name):
             if name == "SubDL":
-                value = live.get("SubdlUploadEnabled")
+                value = live.get("ScribeUploadEnabled")
                 return live.get("UploadEnabled") if value is None else value
             value = live.get("TvSubtitlesUploadEnabled")
             return False if value is None else value
 
-        expected = [s for s in (["SubDL", "tvsubtitles"] if order == "SubdlFirst" else ["tvsubtitles", "SubDL"])
+        expected = [s for s in (["SubDL", "tvsubtitles"] if order == "ScribeFirst" else ["tvsubtitles", "SubDL"])
                     if upload_on(s)]
         for source in set(["SubDL", "tvsubtitles"]) - set(expected):
             print("  [SKIP] Quelle %s ist per Toggle aus — sie wird nicht erwartet" % source)

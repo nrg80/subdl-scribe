@@ -10,10 +10,10 @@
 // See the GNU General Public License for more details.
 
 using System;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// Records the LAST run of each worker (scheduled task) in the data file, so the configuration page
@@ -38,7 +38,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// </summary>
 public sealed class WorkerRunRegistry
 {
-    private readonly SubdlDbContext _db;
+    private readonly ScribeDbContext _db;
     private readonly ILogger? _logger;
 
     /// <summary>
@@ -46,7 +46,7 @@ public sealed class WorkerRunRegistry
     /// </summary>
     /// <param name="db">Database context.</param>
     /// <param name="logger">Optional logger.</param>
-    public WorkerRunRegistry(SubdlDbContext db, ILogger? logger = null)
+    public WorkerRunRegistry(ScribeDbContext db, ILogger? logger = null)
     {
         _db = db;
         _logger = logger;
@@ -246,7 +246,7 @@ public sealed class WorkerRunRegistry
     /// the operator watches: a run can fetch 40 files and align none, and the Download row's single
     /// word cannot tell those two appart.
     /// </summary>
-    public const string AutoSyncWorkerKey = "SubdlAutoSyncTask";
+    public const string AutoSyncWorkerKey = "ScribeAutoSyncTask";
 
     /// <summary>
     /// F-M323 (operator order 08.10.2026): the auto-sync's display name, in one place. The worker

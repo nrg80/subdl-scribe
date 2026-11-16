@@ -14,33 +14,33 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+namespace Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 /// <summary>
 /// Scheduled task for the SubDL download pipeline ([D] F-M41/F-M47).
 /// Refetch interval comes from RefetchInterval (unified since F-M111; default: monthly).
 /// </summary>
-public class SubdlDownloadTask : IScheduledTask
+public class ScribeDownloadTask : IScheduledTask
 {
     private readonly ILibraryManager _libraryManager;
     private readonly IMediaSourceManager _mediaSourceManager;
-    private readonly ILogger<SubdlDownloadTask> _logger;
+    private readonly ILogger<ScribeDownloadTask> _logger;
     private readonly ILoggerFactory _loggerFactory;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SubdlDownloadTask"/> class.
+    /// Initializes a new instance of the <see cref="ScribeDownloadTask"/> class.
     /// </summary>
     /// <param name="libraryManager">Library manager.</param>
     /// <param name="mediaSourceManager">Media source manager.</param>
     /// <param name="logger">Logger.</param>
     /// <param name="loggerFactory">Logger factory.</param>
-    public SubdlDownloadTask(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ILogger<SubdlDownloadTask> logger, ILoggerFactory loggerFactory, SubdlEventDispatcher? dispatcher = null, ScheduledTasks.SubdlSchedulerCoordinator? coordinator = null)
+    public ScribeDownloadTask(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ILogger<ScribeDownloadTask> logger, ILoggerFactory loggerFactory, ScribeEventDispatcher? dispatcher = null, ScheduledTasks.ScribeSchedulerCoordinator? coordinator = null)
     {
         _libraryManager = libraryManager;
         _mediaSourceManager = mediaSourceManager;
@@ -65,12 +65,12 @@ public class SubdlDownloadTask : IScheduledTask
     /// <inheritdoc />
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
     {
-        // F-M48 (user decision 08.09.2026): no default triggers — the SubdlSchedulerCoordinator
+        // F-M48 (user decision 08.09.2026): no default triggers — the ScribeSchedulerCoordinator
         // owns all scheduled fires (diced per-installation anchors + jitter). OnArrival =
         // watcher only; Manual = dashboard only. JF persists these defaults once at first
         // registration; existing installs must have their stored DailyTrigger cleared once
         // (the coordinator also clears stale triggers at startup).
-        return []; // empty — scheduled fires come from SubdlSchedulerCoordinator only
+        return []; // empty — scheduled fires come from ScribeSchedulerCoordinator only
     }
 
     /// <summary>
@@ -101,7 +101,7 @@ public class SubdlDownloadTask : IScheduledTask
         // Operator order 08.10.2026: this task WAITS for a cycle whose seed may run for minutes, so
         // marking its direction running here lit a lamp for work that had not started — measured on
         // prod, the Seeder scanned while Download and Upload were both already blue. The direction
-        // marks itself when its own run begins (SubdlEventDispatcher.MarkDirectionRunning); this
+        // marks itself when its own run begins (ScribeEventDispatcher.MarkDirectionRunning); this
         // task only records the outcome it waited for.
         var config = plugin.Configuration;
         if (!config.AnyDownloadEnabled)
@@ -118,7 +118,7 @@ public class SubdlDownloadTask : IScheduledTask
         // dispatcher (seed → download → upload → reseed). Idempotent: a cycle
         // already running makes this a no-op.
         // Wait for the cycle to end so the task-completion line is real.
-        var dispatcher = SubdlEventDispatcher.Instance;
+        var dispatcher = ScribeEventDispatcher.Instance;
         if (dispatcher == null)
         {
             RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Failed, "dispatcher unavailable");

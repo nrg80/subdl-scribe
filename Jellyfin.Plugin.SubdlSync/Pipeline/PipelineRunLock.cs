@@ -16,7 +16,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// (user decision 25.09.2026): ONE lock for every state-mutating component —
@@ -72,7 +72,7 @@ public static class PipelineRunLock
     private static string? _holder;
 
     private static string BlockPath() =>
-        Path.Combine(Jellyfin.Plugin.SubdlScribe.Plugin.Instance!.DataFolderPath, BlockFileName);
+        Path.Combine(Jellyfin.Plugin.SubScribe.Plugin.Instance!.DataFolderPath, BlockFileName);
 
     /// <summary>
     /// Removes a leftover block file once at plugin startup. After a restart no

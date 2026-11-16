@@ -15,12 +15,12 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// Persistent state of the subtitle pipeline, split by the kind of thing being described:
@@ -50,7 +50,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// </summary>
 public sealed class ContentHashRegistry : IDisposable
 {
-    private readonly SubdlDbContext _db;
+    private readonly ScribeDbContext _db;
     private readonly OshashCache _cache;
     private readonly ILogger? _logger;
 
@@ -60,7 +60,7 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="db">Database context.</param>
     /// <param name="cache">OSHash cache, created from the context when omitted.</param>
     /// <param name="logger">Optional logger.</param>
-    public ContentHashRegistry(SubdlDbContext db, OshashCache? cache = null, ILogger? logger = null)
+    public ContentHashRegistry(ScribeDbContext db, OshashCache? cache = null, ILogger? logger = null)
     {
         _db = db;
         _cache = cache ?? new OshashCache(db, logger);
@@ -562,7 +562,7 @@ public sealed class ContentHashRegistry : IDisposable
         // position set is the same, a tag write does not add or remove streams.
         foreach (var row in _db.Embeds.FindAll().Where(x => x.MediaHash == oldHash).ToList())
         {
-            string newId = SubdlDbContext.EmbedKey(newHash, row.SubPos);
+            string newId = ScribeDbContext.EmbedKey(newHash, row.SubPos);
             var existing = _db.Embeds.FindById(newId);
 
             // An existing row under the new hash is left alone: it was written by a run that
@@ -672,7 +672,7 @@ public sealed class ContentHashRegistry : IDisposable
         }
 
         _db.EnsureMedia(mediaHash);
-        var id = SubdlDbContext.EmbedKey(mediaHash, subPos);
+        var id = ScribeDbContext.EmbedKey(mediaHash, subPos);
         var existing = _db.Embeds.FindById(id) ?? new EmbedTrackEntity
         {
             Id = id,
@@ -693,13 +693,13 @@ public sealed class ContentHashRegistry : IDisposable
 
         if (!string.IsNullOrEmpty(subdlId))
         {
-            existing.SubdlId = subdlId;
+            existing.ScribeId = subdlId;
         }
 
         // F-M488: die vier Kennzeichen, gleiche Regel wie bei den Sidecars — nur schreiben, wenn bekannt.
         if (!string.IsNullOrEmpty(subdlUploadId))
         {
-            existing.SubdlUploadId = subdlUploadId;
+            existing.ScribeUploadId = subdlUploadId;
         }
 
         if (!string.IsNullOrEmpty(tvSubtitlesUploadId))
@@ -709,7 +709,7 @@ public sealed class ContentHashRegistry : IDisposable
 
         if (!string.IsNullOrEmpty(subdlDownloadId))
         {
-            existing.SubdlDownloadId = subdlDownloadId;
+            existing.ScribeDownloadId = subdlDownloadId;
         }
 
         if (!string.IsNullOrEmpty(tvSubtitlesDownloadId))
@@ -732,7 +732,7 @@ public sealed class ContentHashRegistry : IDisposable
         // F-M490: "hochgeladen" je Quelle, mit Zeitpunkt.
         if (subdlUploadedAt.HasValue)
         {
-            existing.SubdlUploadedAt = subdlUploadedAt;
+            existing.ScribeUploadedAt = subdlUploadedAt;
         }
 
         if (tvSubtitlesUploadedAt.HasValue)
@@ -788,7 +788,7 @@ public sealed class ContentHashRegistry : IDisposable
             _db.EnsureMedia(mediaHash);
         }
 
-        var id = SubdlDbContext.EmbedKey(mediaHash, subPos);
+        var id = ScribeDbContext.EmbedKey(mediaHash, subPos);
         var existing = _db.Embeds.FindById(id);
 
         // A verdict stands. The observer does not argue with it — that is the difference between
@@ -832,7 +832,7 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="subPos">ffmpeg stream position.</param>
     /// <returns>Track or null.</returns>
     public EmbedTrackEntity? GetEmbed(string? mediaHash, int subPos)
-        => string.IsNullOrEmpty(mediaHash) ? null : _db.Embeds.FindById(SubdlDbContext.EmbedKey(mediaHash, subPos));
+        => string.IsNullOrEmpty(mediaHash) ? null : _db.Embeds.FindById(ScribeDbContext.EmbedKey(mediaHash, subPos));
 
     /// <summary>
     /// Records that language detection ran for this track and how it ended.
@@ -861,7 +861,7 @@ public sealed class ContentHashRegistry : IDisposable
             return false;
         }
 
-        string id = SubdlDbContext.EmbedKey(mediaHash, subPos);
+        string id = ScribeDbContext.EmbedKey(mediaHash, subPos);
         var row = _db.Embeds.FindById(id);
         if (row == null)
         {
@@ -1202,9 +1202,9 @@ public sealed class ContentHashRegistry : IDisposable
     /// (F-M488) — not from <see cref="SubtitleStatus.Uploaded"/>, which says "uploaded somewhere" and
     /// would let one source's upload block the other.
     /// <para>
-    /// A row from before schema 11 has no own mark; for SubDL its <c>SubdlId</c> plus the uploaded status
+    /// A row from before schema 11 has no own mark; for SubDL its <c>ScribeId</c> plus the uploaded status
     /// is the only trace there is, so it counts as uploaded — otherwise every old upload would be sent a
-    /// second time after the upgrade. <c>SubdlId</c> ALONE is not enough: downloads write it too.
+    /// second time after the upgrade. <c>ScribeId</c> ALONE is not enough: downloads write it too.
     /// </para>
     /// </summary>
     /// <param name="mediaHash">Parent media hash.</param>
@@ -1259,15 +1259,15 @@ public sealed class ContentHashRegistry : IDisposable
         return _db.Embeds.Exists(x => x.MediaHash == mediaHash
                 && x.Language == language
                 && x.HearingImpaired == hearingImpaired
-                && (x.SubdlUploadedAt != null
-                    || !string.IsNullOrEmpty(x.SubdlUploadId)
-                    || (x.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(x.SubdlId))))
+                && (x.ScribeUploadedAt != null
+                    || !string.IsNullOrEmpty(x.ScribeUploadId)
+                    || (x.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(x.ScribeId))))
             || _db.Sidecars.Exists(x => x.MediaHash == mediaHash
                 && x.Language == language
                 && x.HearingImpaired == hearingImpaired
-                && (x.SubdlUploadedAt != null
-                    || !string.IsNullOrEmpty(x.SubdlUploadId)
-                    || (x.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(x.SubdlId))));
+                && (x.ScribeUploadedAt != null
+                    || !string.IsNullOrEmpty(x.ScribeUploadId)
+                    || (x.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(x.ScribeId))));
     }
 
     /// <summary>
@@ -1456,7 +1456,7 @@ public sealed class ContentHashRegistry : IDisposable
         // hier der LEERE Wert — genau das reicht der beobachtende Aufrufer (`RecordSkippedContent`)
         // schon immer so herein. Vorher ging ein null bis in `EnsureMedia` und baute dort eine
         // Medienzeile ohne Schlüssel; seit EF Core 10 vergiftete die abgewiesene Instanz danach den
-        // ganzen Kontext (siehe `SubdlDbContext.EnsureMedia`). Die Zeile selbst bleibt richtig: ein
+        // ganzen Kontext (siehe `ScribeDbContext.EnsureMedia`). Die Zeile selbst bleibt richtig: ein
         // Seitenträger ist über seinen INHALT adressiert, nicht über die Datei.
         mediaHash ??= string.Empty;
 
@@ -1477,7 +1477,7 @@ public sealed class ContentHashRegistry : IDisposable
         existing.StatusAt = DateTime.UtcNow;
         if (!string.IsNullOrEmpty(subdlId))
         {
-            existing.SubdlId = subdlId;
+            existing.ScribeId = subdlId;
         }
 
         // F-M486: nur schreiben, wenn jemand die Herkunft kennt. Ein leerer Wert darf keine Angabe
@@ -1496,12 +1496,12 @@ public sealed class ContentHashRegistry : IDisposable
         // Kenntnis wird nichts geschrieben, und ein leerer Wert löscht keine Angabe.
         if (!string.IsNullOrEmpty(subdlDownloadId))
         {
-            existing.SubdlDownloadId = subdlDownloadId;
+            existing.ScribeDownloadId = subdlDownloadId;
         }
 
         if (!string.IsNullOrEmpty(subdlUploadId))
         {
-            existing.SubdlUploadId = subdlUploadId;
+            existing.ScribeUploadId = subdlUploadId;
         }
 
         if (!string.IsNullOrEmpty(tvSubtitlesDownloadId))
@@ -1529,7 +1529,7 @@ public sealed class ContentHashRegistry : IDisposable
         // F-M490: "hochgeladen" je Quelle, mit Zeitpunkt. Ein Zeitpunkt wird nie zurueckgesetzt.
         if (subdlUploadedAt.HasValue)
         {
-            existing.SubdlUploadedAt = subdlUploadedAt;
+            existing.ScribeUploadedAt = subdlUploadedAt;
         }
 
         if (tvSubtitlesUploadedAt.HasValue)
@@ -1716,8 +1716,8 @@ public sealed class ContentHashRegistry : IDisposable
     /// Schluessel der Content-Hash. Die quellenblinde <see cref="IsSidecarUploaded"/> liest
     /// <c>Status=Uploaded</c> und haelt damit die zweite Quelle aus der Queue.
     /// <para>
-    /// Fuer SubDL zaehlt zusaetzlich die Altzeile: <c>SubdlId</c> plus <c>Uploaded</c> ist der einzige
-    /// Beleg aus Schema 11 (F-M489) — <c>SubdlId</c> allein genuegt nicht, weil der Download es auch schreibt.
+    /// Fuer SubDL zaehlt zusaetzlich die Altzeile: <c>ScribeId</c> plus <c>Uploaded</c> ist der einzige
+    /// Beleg aus Schema 11 (F-M489) — <c>ScribeId</c> allein genuegt nicht, weil der Download es auch schreibt.
     /// </para>
     /// </summary>
     /// <param name="contentHash">Content hash of the sidecar.</param>
@@ -1736,9 +1736,9 @@ public sealed class ContentHashRegistry : IDisposable
             return row.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(row.TvSubtitlesUploadId);
         }
 
-        return row.SubdlUploadedAt != null
-            || !string.IsNullOrEmpty(row.SubdlUploadId)
-            || (row.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(row.SubdlId));
+        return row.ScribeUploadedAt != null
+            || !string.IsNullOrEmpty(row.ScribeUploadId)
+            || (row.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(row.ScribeId));
     }
 
     /// <summary>Recorded rejection reason for this content, else null.</summary>
@@ -1804,7 +1804,7 @@ public sealed class ContentHashRegistry : IDisposable
             return;
         }
 
-        string id = SubdlDbContext.PackKey(imdbId, season, language, hearingImpaired);
+        string id = ScribeDbContext.PackKey(imdbId, season, language, hearingImpaired);
         var existing = _db.Packs.FindById(id);
         _db.Packs.Upsert(new PackEntity
         {
@@ -1848,16 +1848,16 @@ public sealed class ContentHashRegistry : IDisposable
 
         int changed = 0;
 
-        foreach (var row in _db.Embeds.FindAll().Where(x => string.Equals(x.SubdlId, uploadId, StringComparison.Ordinal)).ToList())
+        foreach (var row in _db.Embeds.FindAll().Where(x => string.Equals(x.ScribeId, uploadId, StringComparison.Ordinal)).ToList())
         {
-            row.SubdlId = entryId;
+            row.ScribeId = entryId;
             _db.Embeds.Upsert(row);
             changed++;
         }
 
-        foreach (var row in _db.Sidecars.FindAll().Where(x => string.Equals(x.SubdlId, uploadId, StringComparison.Ordinal)).ToList())
+        foreach (var row in _db.Sidecars.FindAll().Where(x => string.Equals(x.ScribeId, uploadId, StringComparison.Ordinal)).ToList())
         {
-            row.SubdlId = entryId;
+            row.ScribeId = entryId;
             _db.Sidecars.Upsert(row);
             changed++;
         }
@@ -1917,9 +1917,9 @@ public sealed class ContentHashRegistry : IDisposable
         var carried = new HashSet<string>(StringComparer.Ordinal);
         foreach (var embed in _db.Embeds.FindAll())
         {
-            if (!string.IsNullOrEmpty(embed.SubdlId))
+            if (!string.IsNullOrEmpty(embed.ScribeId))
             {
-                carried.Add(embed.SubdlId!);
+                carried.Add(embed.ScribeId!);
             }
         }
 
@@ -1960,7 +1960,7 @@ public sealed class ContentHashRegistry : IDisposable
             return null;
         }
 
-        return _db.Packs.FindById(SubdlDbContext.PackKey(imdbId!, season, language!, hearingImpaired));
+        return _db.Packs.FindById(ScribeDbContext.PackKey(imdbId!, season, language!, hearingImpaired));
     }
 
     /// <summary>
@@ -2044,7 +2044,7 @@ public sealed class ContentHashRegistry : IDisposable
     /// </para>
     /// <para>
     /// Fuer SubDL werden dieselben drei Belege gelesen wie in <see cref="IsUploadedTo"/> (F-M488/F-M490):
-    /// Zeitstempel, eigene Id, und die Altzeile aus Schema 11 (<c>Uploaded</c> plus <c>SubdlId</c>). Dazu
+    /// Zeitstempel, eigene Id, und die Altzeile aus Schema 11 (<c>Uploaded</c> plus <c>ScribeId</c>). Dazu
     /// kommt die <c>Uploaded</c>-Zeile OHNE jede Quellenmarke: so sehen die Settles von vor F-M500 und die
     /// Pack-Zeilen aus, und vor der Zwei-Quellen-Kette (F-M495) war SubDL das einzige Ziel — sie zaehlt
     /// deshalb als SubDL-Beleg, damit dieser Inhalt nicht ein zweites Mal zu SubDL geht. Fuer tvsubtitles
@@ -2090,14 +2090,14 @@ public sealed class ContentHashRegistry : IDisposable
         }
 
         return _db.Embeds.Exists(x => x.ContentHash == contentHash
-                && (x.SubdlUploadedAt != null
-                    || !string.IsNullOrEmpty(x.SubdlUploadId)
-                    || (x.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(x.SubdlId))
+                && (x.ScribeUploadedAt != null
+                    || !string.IsNullOrEmpty(x.ScribeUploadId)
+                    || (x.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(x.ScribeId))
                     || UploadedWithoutSourceMark(x)))
             || _db.Sidecars.Exists(x => x.ContentHash == contentHash
-                && (x.SubdlUploadedAt != null
-                    || !string.IsNullOrEmpty(x.SubdlUploadId)
-                    || (x.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(x.SubdlId))
+                && (x.ScribeUploadedAt != null
+                    || !string.IsNullOrEmpty(x.ScribeUploadId)
+                    || (x.Status == SubtitleStatus.Uploaded && !string.IsNullOrEmpty(x.ScribeId))
                     || UploadedWithoutSourceMark(x)));
     }
 
@@ -2121,26 +2121,26 @@ public sealed class ContentHashRegistry : IDisposable
     /// <returns>True when the row claims an upload without naming the source.</returns>
     private static bool UploadedWithoutSourceMark(EmbedTrackEntity row)
         => row.Status == SubtitleStatus.Uploaded
-            && row.SubdlUploadedAt == null
+            && row.ScribeUploadedAt == null
             && row.TvSubtitlesUploadedAt == null
             && row.MoviesubtitlesUploadedAt == null
-            && string.IsNullOrEmpty(row.SubdlUploadId)
+            && string.IsNullOrEmpty(row.ScribeUploadId)
             && string.IsNullOrEmpty(row.TvSubtitlesUploadId)
             && string.IsNullOrEmpty(row.MoviesubtitlesUploadId)
-            && string.IsNullOrEmpty(row.SubdlId);
+            && string.IsNullOrEmpty(row.ScribeId);
 
     /// <summary>F-M500: dasselbe fuer Sidecar-Zeilen.</summary>
     /// <param name="row">Sidecar row.</param>
     /// <returns>True when the row claims an upload without naming the source.</returns>
     private static bool UploadedWithoutSourceMark(SidecarEntity row)
         => row.Status == SubtitleStatus.Uploaded
-            && row.SubdlUploadedAt == null
+            && row.ScribeUploadedAt == null
             && row.TvSubtitlesUploadedAt == null
             && row.MoviesubtitlesUploadedAt == null
-            && string.IsNullOrEmpty(row.SubdlUploadId)
+            && string.IsNullOrEmpty(row.ScribeUploadId)
             && string.IsNullOrEmpty(row.TvSubtitlesUploadId)
             && string.IsNullOrEmpty(row.MoviesubtitlesUploadId)
-            && string.IsNullOrEmpty(row.SubdlId);
+            && string.IsNullOrEmpty(row.ScribeId);
 
     /// <summary>
     /// F-M298: records the verdict for a SKIPPED candidate. The state is derived from the CONTENT and
@@ -2291,13 +2291,13 @@ public sealed class ContentHashRegistry : IDisposable
             return;
         }
 
-        var id = SubdlDbContext.CandidateKey(itemId, language, subdlId);
+        var id = ScribeDbContext.CandidateKey(itemId, language, subdlId);
         _db.RejectedCandidates.Upsert(new RejectedCandidateEntity
         {
             Id = id,
             ItemId = itemId,
             Language = language.ToUpperInvariant(),
-            SubdlId = subdlId,
+            ScribeId = subdlId,
             Reason = reason,
             Updated = DateTime.UtcNow
         });
@@ -2314,7 +2314,7 @@ public sealed class ContentHashRegistry : IDisposable
         return _db.RejectedCandidates
             .Find(x => x.ItemId == itemId)
             .Where(x => string.Equals(x.Language, language, StringComparison.OrdinalIgnoreCase))
-            .Select(x => x.SubdlId)
+            .Select(x => x.ScribeId)
             .Distinct()
             .ToList();
     }

@@ -12,7 +12,7 @@
 
 using System;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// One subtitle DATUM: a language plus the properties OF THAT DATUM — hearing-impaired and forced.

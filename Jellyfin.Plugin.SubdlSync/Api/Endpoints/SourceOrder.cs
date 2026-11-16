@@ -11,9 +11,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
+namespace Jellyfin.Plugin.SubScribe.Api.Endpoints;
 
 /// <summary>
 /// F-M504/F-M509 (Operator-Klarstellung 15.11.2026: „Seperate into subdl and tvst. Tvst is splitted into

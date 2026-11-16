@@ -32,9 +32,9 @@
 using System;
 using System.IO;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 internal static class DupSkip
 {
@@ -56,7 +56,7 @@ internal static class DupSkip
         if (Directory.Exists(root)) Directory.Delete(root, true);
         Directory.CreateDirectory(root);
 
-        using var db = new SubdlDbContext(Path.Combine(root, "db"), null);
+        using var db = new ScribeDbContext(Path.Combine(root, "db"), null);
         var reg = new ContentHashRegistry(db, null, null);
 
         const string oldHash = "e621029b4734e366";
@@ -121,7 +121,7 @@ internal static class DupSkip
     }
 
     /// <summary>Zaehlt die uploaded-Zeilen zu diesem Inhalt im ganzen Bestand.</summary>
-    private static int UploadedRows(SubdlDbContext db, string contentHash)
+    private static int UploadedRows(ScribeDbContext db, string contentHash)
     {
         int n = db.Embeds.FindAll().Count(x => x.ContentHash == contentHash && x.Status == SubtitleStatus.Uploaded);
         return n + db.Sidecars.FindAll().Count(x => x.ContentHash == contentHash && x.Status == SubtitleStatus.Uploaded);

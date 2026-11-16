@@ -13,13 +13,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Language;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Language;
+using Jellyfin.Plugin.SubScribe.Registry;
 using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// Result of one language-resolution pass over a container.

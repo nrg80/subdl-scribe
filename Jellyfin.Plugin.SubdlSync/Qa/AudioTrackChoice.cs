@@ -52,7 +52,7 @@ using System.Collections.Generic;
 using System.Linq;
 using MediaBrowser.Model.Entities;
 
-namespace Jellyfin.Plugin.SubdlScribe.Qa;
+namespace Jellyfin.Plugin.SubScribe.Qa;
 
 /// <summary>
 /// F-M296: chooses the audio stream an audio-reading gate should decode, by

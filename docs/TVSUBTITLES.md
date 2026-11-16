@@ -81,7 +81,7 @@ das ist brasilianisches Portugiesisch (`br`), während `pt` und `pt-PT` bei `pt`
 heißt `null` (kein Raten) und wird mit einer Zeile abgelehnt. Dieselbe Brücke benutzen die Prüfung in
 `BuildUpload`, das Feld `lang` und die Rücklesung `FindUploadedIdAsync`; der Dateiname behält seine
 ISO3-Endung aus der Tabelle (`gre`, `cze`, `chi`, `jpn`, `pob`, `rum`). Eine gemeinsame Tabelle mit
-SubDL gibt es **nicht** — SubDL bildet in `SubdlApiClient` ab.
+SubDL gibt es **nicht** — SubDL bildet in `ScribeApiClient` ab.
 
 **Serie neu anlegen (F-M516, belegt am 16.11.2026):** `GET /add-tvshow.php` liefert das Formular —
 und es steht, wie das Upload-Formular, in einer kaputten Verschachtelung (`<table><form …>`), die

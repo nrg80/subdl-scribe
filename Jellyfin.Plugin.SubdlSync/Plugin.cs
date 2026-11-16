@@ -14,20 +14,20 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Xml.Linq;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 // The cadence enums live in the Configuration namespace. Imported as a namespace, NOT reached
 // through the `Configuration` property of this class, which would resolve to the config object and
 // not to the type (the migration in DiceSchedulerConfig needs the TYPES).
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 using Microsoft.Extensions.Logging;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe;
+namespace Jellyfin.Plugin.SubScribe;
 
 /// <summary>
 /// Main plugin entry point for Sub Scribe (upload + download pipelines).
@@ -406,11 +406,11 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         _sharedOshashCache = null;
         _sharedRegistry = null;
         _sharedWorkerRuns = null;
-        var logger = _loggerFactory?.CreateLogger<SubdlDbContext>();
-        _sharedDbContext = new SubdlDbContext(DataFolderPath, logger);
+        var logger = _loggerFactory?.CreateLogger<ScribeDbContext>();
+        _sharedDbContext = new ScribeDbContext(DataFolderPath, logger);
 
         // F-M542: the TMDb answers live in the store now, so a restart does not re-ask them.
-        Jellyfin.Plugin.SubdlScribe.Registry.TmdbAnswerStore.Attach(_sharedDbContext.Context);
+        Jellyfin.Plugin.SubScribe.Registry.TmdbAnswerStore.Attach(_sharedDbContext.Context);
     }
 
     /// <inheritdoc />
@@ -440,13 +440,13 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// </summary>
     public static Plugin? Instance { get; private set; }
 
-    private static SubdlDbContext? _sharedDbContext;
+    private static ScribeDbContext? _sharedDbContext;
     private static ILoggerFactory? _loggerFactory;
 
     /// <summary>Guards the lazy creation of the shared context.</summary>
     /// <para>
     /// Without this, two scheduled tasks starting in the same tick both see
-    /// <c>_sharedDbContext == null</c> and each construct a SubdlDbContext over the same data
+    /// <c>_sharedDbContext == null</c> and each construct a ScribeDbContext over the same data
     /// file. The engine then in use had a non-thread-safe object mapper, so the concurrent
     /// schema setup raced and one task died with
     /// <c>System.NotSupportedException: Member Id not found on BsonMapper for type
@@ -467,7 +467,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// Shared data context. Lazy-created on first use; all registries
     /// and scheduled tasks share this one instance.
     /// </summary>
-    public SubdlDbContext SharedDbContext
+    public ScribeDbContext SharedDbContext
     {
         get
         {
@@ -477,8 +477,8 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
                 {
                     if (_sharedDbContext == null)
                     {
-                        var logger = _loggerFactory?.CreateLogger<SubdlDbContext>();
-                        _sharedDbContext = new SubdlDbContext(DataFolderPath, logger);
+                        var logger = _loggerFactory?.CreateLogger<ScribeDbContext>();
+                        _sharedDbContext = new ScribeDbContext(DataFolderPath, logger);
 
                         // Area 0: record which plugin and Jellyfin version last wrote this data file.
                         // Done once per context creation, not per run — an audit record that rewrites
@@ -492,7 +492,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
                         // Zeit leer. Die Pruefung im Prueflauf deckte nur den Store selbst ab, nicht
                         // seine Verdrahtung — deshalb steht der Aufruf jetzt an BEIDEN Stellen, an
                         // denen ein Kontext entsteht.
-                        Jellyfin.Plugin.SubdlScribe.Registry.TmdbAnswerStore.Attach(_sharedDbContext.Context);
+                        Jellyfin.Plugin.SubScribe.Registry.TmdbAnswerStore.Attach(_sharedDbContext.Context);
                     }
                 }
             }
@@ -587,7 +587,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             new PluginPageInfo
             {
                 Name = Name,
-                EmbeddedResourcePath = "Jellyfin.Plugin.SubdlScribe.Configuration.configPage.html"
+                EmbeddedResourcePath = "Jellyfin.Plugin.SubScribe.Configuration.configPage.html"
             }
         ];
     }

@@ -13,10 +13,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Registry;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
+namespace Jellyfin.Plugin.SubScribe.Api.Endpoints;
 
 /// <summary>
 /// F-M507 (Etappe 2a): die Nummer des Films bei moviesubtitles.org — ermittelt, gespeichert,

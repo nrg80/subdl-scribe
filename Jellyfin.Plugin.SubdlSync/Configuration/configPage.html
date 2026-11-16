@@ -22,7 +22,7 @@
     <div id="SubdlSyncConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
         <div data-role="content">
             <div class="content-primary">
-                <div id="SubdlTabs" class="subdl-tabs">
+                <div id="ScribeTabs" class="subdl-tabs">
                     <button type="button" is="emby-button" class="subdl-tab-btn raised" data-tab="general">General</button>
                     <button type="button" is="emby-button" class="subdl-tab-btn raised" data-tab="download">Download</button>
                     <button type="button" is="emby-button" class="subdl-tab-btn raised" data-tab="upload">Upload</button>
@@ -65,14 +65,14 @@
                         <div id="RandomScheduleInfo" style="margin-top:-0.4em; font-size:0.85em; opacity:0.8;"></div>
 
                         <h3>Status</h3>
-                        <div id="SubdlQuotaBox" style="margin-bottom:1em;"></div>
-                        <div id="SubdlStatusBox" style="display:flex;flex-direction:column;margin-bottom:1em;">
+                        <div id="ScribeQuotaBox" style="margin-bottom:1em;"></div>
+                        <div id="ScribeStatusBox" style="display:flex;flex-direction:column;margin-bottom:1em;">
                             <div class="subdl-status-row" id="SubdlLoginStatus">
                                 <span class="subdl-light"></span>
                                 <span class="subdl-label">SubDL Login</span>
                                 <span class="subdl-msg">—</span>
                             </div>
-                            <div class="subdl-status-row" id="SubdlApiStatus">
+                            <div class="subdl-status-row" id="ScribeApiStatus">
                                 <span class="subdl-light"></span>
                                 <span class="subdl-label">SubDL API</span>
                                 <span class="subdl-msg">—</span>
@@ -93,7 +93,7 @@
                                 <span class="subdl-msg">—</span>
                             </div>
                             <h4 style="margin-top:0.8em;margin-bottom:0.3em;">Library directories</h4>
-                            <div id="SubdlDirStatusList">
+                            <div id="ScribeDirStatusList">
                                 <div class="fieldDescription">Loading…</div>
                             </div>
                         </div>
@@ -175,7 +175,7 @@
                              space. It is NOT part of the quota box — those bars describe the server's
                              allowance, this line describes our own wait, and mixing the two made a
                              partly-used allowance read as a problem (user decision 03.10.2026). -->
-                        <div class="fieldDescription" id="SubdlLocalDeferLine" style="margin-top:0.5em;"></div>
+                        <div class="fieldDescription" id="ScribeLocalDeferLine" style="margin-top:0.5em;"></div>
 
                         <!-- One refresh for EVERY live readout (user order 30.09.2026: "es reicht wenn er
                              unter General tab sitzt woanders laufen keine live daten rein"). It sits at
@@ -190,7 +190,7 @@
                              cached 5 min, so its fetchedAt could be minutes old) and the status
                              probe. Two writers meant the line could report a time that had nothing
                              to do with the click, and the 10 s poll could move it on its own. -->
-                        <div id="SubdlStatusTimestamp" style="margin-top:1.2em;font-size:0.85em;opacity:0.8;">Not refreshed yet.</div>
+                        <div id="ScribeStatusTimestamp" style="margin-top:1.2em;font-size:0.85em;opacity:0.8;">Not refreshed yet.</div>
 
                         <!-- Same width and height as Save, flush left AND right with it, grey so the
                              two are never confused: Save is the blue action, this only re-reads
@@ -373,7 +373,7 @@
                                  It starts the TASK, like the two refresh buttons above — NOT the job's own
                                  endpoint. Measured 08.10.2026: the endpoint ran the work correctly (prod log
                                  23:20:22→25, two rejected uploads cleaned) but the status list stayed EMPTY,
-                                 because the "Upl. Postproc." row is written by SubdlPostprocessTask alone and
+                                 because the "Upl. Postproc." row is written by ScribePostprocessTask alone and
                                  the endpoint never wrote one. The operator pressed the button, saw no entry,
                                  and concluded nothing had run. The task route also runs in the background
                                  instead of holding the click open. The endpoint stays as an API-level trigger;
@@ -668,7 +668,7 @@
             state rows sit on the same rhythm as the worker lines. The h4 between the two groups
             keeps its own margin -- that separation is wanted.
             NO backticks in this comment: the block is a JS template literal. */
-         #SubdlStatusBox .subdl-status-row { margin: 0; }
+         #ScribeStatusBox .subdl-status-row { margin: 0; }
          .subdl-msg { opacity: 0.85; margin-left: auto; text-align: right; }
         /* Innenluft in der Zeitspalte: the cell is max-content, so padding is what separates the
            date from the column edges. Keep it small and re-check the line's minimum width. */
@@ -1315,7 +1315,7 @@ workers.forEach(function (w) {
                         window.subdlLoadWorkers = subdlLoadWorkers;
                         subdlLoadWorkers();
                         // One call that reloads EVERY live readout on the page: the API/search quota,
-                        // the download quota (both live in #SubdlQuotaBox), the SubDL/TMDb status rows,
+                        // the download quota (both live in #ScribeQuotaBox), the SubDL/TMDb status rows,
                         // the statistics counters and the Workers list. Wired to the "Refresh status"
                         // button AND used by the poll tick, so a manual run shows up without an F5
                         // (measured 30.09.2026: subdlLoadWorkers was called ONCE at init, so a worker
@@ -1360,7 +1360,7 @@ workers.forEach(function (w) {
                     }).catch(function (err) {
                         console.error('[Sub Scribe] init failed', err);
                         if (typeof Dashboard !== 'undefined' && Dashboard.hideLoadingMsg) { try { Dashboard.hideLoadingMsg(); } catch (e) { /* non-fatal */ } }
-                        var box = document.querySelector('#SubdlStatusBox');
+                        var box = document.querySelector('#ScribeStatusBox');
                         if (box) {
                             box.innerHTML = '<div class="fieldDescription" style="color:#a4262c;">Failed to load configuration: ' + (err && err.message ? err.message : String(err)) + '</div>';
                         }
@@ -1416,7 +1416,7 @@ workers.forEach(function (w) {
                     subdlQuotaTimer = setInterval(subdlLoadQuota, 60000);
                 }
                 function subdlLoadQuota() {
-                    var box = document.querySelector('#SubdlQuotaBox');
+                    var box = document.querySelector('#ScribeQuotaBox');
                     if (!box) { return; }
                     var subdlQ = ApiClient.getUrl('Plugins/SubdlQuota/Get');
                     subdlQ += (subdlQ.indexOf('?') === -1 ? '?' : '&') + '_t=' + Date.now();
@@ -1435,7 +1435,7 @@ workers.forEach(function (w) {
                             box.style.display = 'block';
                             // The deferral line is fed by this same answer — a stale line would outlive
                             // the data it came from, so it is cleared with every failed read.
-                            var dlErr = document.querySelector('#SubdlLocalDeferLine');
+                            var dlErr = document.querySelector('#ScribeLocalDeferLine');
                             if (dlErr) { dlErr.textContent = ''; }
                             return;
                         }
@@ -1446,7 +1446,7 @@ workers.forEach(function (w) {
                         if (!res || !res.search) {
                             box.textContent = 'Unavailable (bad response)';
                             box.style.display = 'block';
-                            var dlBad = document.querySelector('#SubdlLocalDeferLine');
+                            var dlBad = document.querySelector('#ScribeLocalDeferLine');
                             if (dlBad) { dlBad.textContent = ''; }
                             return;
                         }
@@ -1504,7 +1504,7 @@ workers.forEach(function (w) {
                         // the deferral notes, same separator, no second line anywhere on the page.
                         var offNotes = (loc && loc.notes) || [];
                         offNotes.forEach(function (t) { localLines.push(t); });
-                        var deferLine = document.querySelector('#SubdlLocalDeferLine');
+                        var deferLine = document.querySelector('#ScribeLocalDeferLine');
                         if (deferLine) {
                             // Plain text, page default colour. Empty when nothing is deferred and nothing
                             // is off — then the line carries no text and takes no visual space.
@@ -1577,7 +1577,7 @@ workers.forEach(function (w) {
                         // is cached server-side for 5 minutes, so its fetchedAt would show a time the
                         // click did not cause.
                         try {
-                            var stamp = document.querySelector('#SubdlStatusTimestamp');
+                            var stamp = document.querySelector('#ScribeStatusTimestamp');
                             // F-M271: the stamp has ONE writer - this click handler - and names the manual act.
                             if (stamp) { stamp.textContent = 'Manually refreshed ' + subdlFmtTime(new Date()); }
                         } catch (e) { /* the readouts matter more than the stamp */ }
@@ -1592,7 +1592,7 @@ workers.forEach(function (w) {
                 document.querySelector('#RunDatabaseRefreshNow').addEventListener('click', function () { subdlStartTask('Sub Scribe — Database Refresh'); });
                 document.querySelector('#RunOshashRefreshNow').addEventListener('click', function () { subdlStartTask('Sub Scribe — OSHash Cache Refresh'); });
                 // F-M295 (08.10.2026): the TASK, not the endpoint — only the task writes the status row.
-                // Name must match SubdlPostprocessTask.Name exactly; a mismatch answers "Task not found".
+                // Name must match ScribePostprocessTask.Name exactly; a mismatch answers "Task not found".
                 document.querySelector('#RunPostprocessNow').addEventListener('click', function () { subdlStartTask('SubDL Postprocessing'); });
                 document.querySelector('#StopAllNow').addEventListener('click', function () {
                     // NF-8: stop BOTH directions — one click, two marker files.
@@ -1811,14 +1811,14 @@ workers.forEach(function (w) {
             }
 
             function subdlLoadStatus() {
-                var box = document.querySelector('#SubdlStatusBox');
+                var box = document.querySelector('#ScribeStatusBox');
                 if (!box) { return; }
                 subdlSetLight('#SubdlLoginStatus', 'grey', 'Checking…');
-                subdlSetLight('#SubdlApiStatus', 'grey', 'Checking…');
+                subdlSetLight('#ScribeApiStatus', 'grey', 'Checking…');
                 subdlSetLight('#TmdbApiStatus', 'grey', 'Checking…');
                 subdlSetLight('#TvstStatus', 'grey', 'Checking…');
                 subdlSetLight('#MstStatus', 'grey', 'Checking…');
-                var dirList = document.querySelector('#SubdlDirStatusList');
+                var dirList = document.querySelector('#ScribeDirStatusList');
                 if (dirList) { dirList.innerHTML = '<div class="fieldDescription">Loading…</div>'; }
 
                 var statusUrl = ApiClient.getUrl('Plugins/SubdlSync/Status');
@@ -1828,7 +1828,7 @@ workers.forEach(function (w) {
                     var api = data.Subdl || {};
                     var tmdb = data.Tmdb || {};
                     subdlSetLight('#SubdlLoginStatus', (login.Light || 'grey').toLowerCase(), login.Message);
-                    subdlSetLight('#SubdlApiStatus', (api.Light || 'grey').toLowerCase(), api.Message);
+                    subdlSetLight('#ScribeApiStatus', (api.Light || 'grey').toLowerCase(), api.Message);
                     subdlSetLight('#TmdbApiStatus', (tmdb.Light || 'grey').toLowerCase(), tmdb.Message);
                     // The tvst family has two addresses; each gets its own light, because one can be
                     // reachable while the other is not.
@@ -1865,7 +1865,7 @@ workers.forEach(function (w) {
                     // Refresh. Only that button stamps it now.
                 }).catch(function (err) {
                     subdlSetLight('#SubdlLoginStatus', 'red', 'Status probe failed');
-                    subdlSetLight('#SubdlApiStatus', 'red', 'Status probe failed');
+                    subdlSetLight('#ScribeApiStatus', 'red', 'Status probe failed');
                     subdlSetLight('#TmdbApiStatus', 'red', 'Status probe failed');
                     subdlSetLight('#TvstStatus', 'red', 'Status probe failed');
                     subdlSetLight('#MstStatus', 'red', 'Status probe failed');

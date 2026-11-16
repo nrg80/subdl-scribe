@@ -34,7 +34,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Registry;
 using MediaBrowser.Model.Entities;
 
 namespace ForcedTitleRun;

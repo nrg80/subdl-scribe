@@ -9,8 +9,8 @@ Also gibt es vier Endpunkte, je einen pro Quelle und Richtung:
 
 | Richtung | SubDL | tvsubtitles.net |
 |---|---|---|
-| Download | `SubdlDownloadEndpoint` — **eingebunden** | `TvSubtitlesDownloadEndpoint` — steht, **nicht eingebunden** |
-| Upload | `SubdlUploadEndpoint` — **eingebunden** | `TvSubtitlesUploadEndpoint` — steht, **nicht eingebunden** |
+| Download | `ScribeDownloadEndpoint` — **eingebunden** | `TvSubtitlesDownloadEndpoint` — steht, **nicht eingebunden** |
+| Upload | `ScribeUploadEndpoint` — **eingebunden** | `TvSubtitlesUploadEndpoint` — steht, **nicht eingebunden** |
 
 ## Die Naht
 
@@ -60,11 +60,11 @@ nicht drei. Steht ein Endpunkt auf `Wired = false`, lautet er:
 
 ## Was die Endpunkte tun
 
-**`SubdlDownloadEndpoint`** ruft `SearchSubtitlesAsync` (eine Seite) und `DownloadSubtitleFileAsync`;
+**`ScribeDownloadEndpoint`** ruft `SearchSubtitlesAsync` (eine Seite) und `DownloadSubtitleFileAsync`;
 `Map(SubtitleCandidate)` ist eine reine Funktion und wird von der Suite ohne Netz geprüft. SubDL hat
 keine Rip-Zelle — der Treffer erfindet keine, der Rip steht im Release-Namen.
 
-**`SubdlUploadEndpoint`** deckt den **Einzelupload**. Er verweigert mit Grund statt halb zu senden:
+**`ScribeUploadEndpoint`** deckt den **Einzelupload**. Er verweigert mit Grund statt halb zu senden:
 Staffelpack (das baut die Pipeline, F-M372), fehlende IMDb-Kennung (`no-imdb`), **Bytes, die nicht
 UTF-8 sind** — SubDL nimmt Text, und ein cp1250-File als UTF-8 zu lesen macht ungarisch kaputt
 (F-M482). Ohne Sitzung kommt eine lesbare Ablehnung, keine Ausnahme.
@@ -121,8 +121,8 @@ Download schreibt sie beim Speichern mit (`Provenance.Name(cand.Provider)` plus 
 
 | Feld | Wann es gefüllt wird | Woher der Wert kommt |
 |---|---|---|
-| `SubdlDownloadId` | Download von SubDL | die SubDL-Eintrags-Id des Treffers |
-| `SubdlUploadId` | Upload zu SubDL | die Id aus der Antwort des Uploads |
+| `ScribeDownloadId` | Download von SubDL | die SubDL-Eintrags-Id des Treffers |
+| `ScribeUploadId` | Upload zu SubDL | die Id aus der Antwort des Uploads |
 | `TvSubtitlesDownloadId` | Download von tvsubtitles.net | die Untertitel-Id der Seite (z. B. `170678`) |
 | `TvSubtitlesUploadId` | Upload zu tvsubtitles.net | **zurückgelesen** von der Folgenseite; fehlt sie, eine **eigene** Id (`own:…`) |
 
@@ -157,7 +157,7 @@ gibt es keinen Fit und damit keinen Unterschied: jeder Abruf zählt.
 
 ## „Hochgeladen" je Quelle (F-M490)
 
-Zwei eigene Zeitstempel, `SubdlUploadedAt` und `TvSubtitlesUploadedAt` (Schema 12, in `sidecars` **und**
+Zwei eigene Zeitstempel, `ScribeUploadedAt` und `TvSubtitlesUploadedAt` (Schema 12, in `sidecars` **und**
 `embeds`). Ein Zeitpunkt statt eines Schalters — „hochgeladen" ohne „wann" beantwortet die halbe Frage,
 und eine Zeile kann **beide** Quellen tragen: im März zu SubDL, im November zu tvsubtitles.
 
@@ -177,7 +177,7 @@ und wird an drei Stellen benutzt: Sammelstufe für eingebettete Spuren, Sammelst
 selbst. Gründe im Log: `already-uploaded:subdl`, `already-uploaded:tvsubtitles`,
 `already-uploaded:subdl+tvsubtitles`, `cross-source`, `no-upload-source`.
 
-Altzeilen ohne eigenes Kennzeichen gelten für SubDL als hochgeladen, wenn `SubdlId` **und**
+Altzeilen ohne eigenes Kennzeichen gelten für SubDL als hochgeladen, wenn `ScribeId` **und**
 `Status=Uploaded` stehen — sonst ginge nach dem Upgrade jeder alte Upload ein zweites Mal hinaus.
 
 ## Upload: beide Endpunkte hintereinander (F-M495)

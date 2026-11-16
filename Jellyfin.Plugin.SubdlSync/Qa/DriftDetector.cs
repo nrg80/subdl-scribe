@@ -57,7 +57,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Jellyfin.Plugin.SubdlScribe.Qa;
+namespace Jellyfin.Plugin.SubScribe.Qa;
 
 /// <summary>
 /// F-M295: cue-vs-speech drift detection over a cue list and a speech envelope.

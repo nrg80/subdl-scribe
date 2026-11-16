@@ -70,7 +70,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Jellyfin.Plugin.SubdlScribe.Qa;
+namespace Jellyfin.Plugin.SubScribe.Qa;
 
 /// <summary>
 /// F-M295: the cue-vs-speech drift verdict. Answers "constant offset or moving

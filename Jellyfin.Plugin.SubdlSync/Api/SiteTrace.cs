@@ -10,7 +10,7 @@
 
 using System;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M521 (Operator-Anweisung 17.11.2026: „Und logging für uploads?"): die zwei Zeilen, die eine

@@ -82,7 +82,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Jellyfin.Plugin.SubdlScribe.Qa;
+namespace Jellyfin.Plugin.SubScribe.Qa;
 
 /// <summary>
 /// F-M307: the piecewise-constant offset fit, solved exactly by dynamic programming.

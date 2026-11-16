@@ -13,26 +13,26 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+namespace Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 /// <summary>
 /// Scheduled task for the SubDL upload run (F-M1, F-M2, F-M21).
 /// Visible in Dashboard → Scheduled Tasks; interval comes from config.
 /// </summary>
-public class SubdlUploadTask : IScheduledTask
+public class ScribeUploadTask : IScheduledTask
 {
     private readonly ILibraryManager _libraryManager;
     private readonly IMediaSourceManager _mediaSourceManager;
-    private readonly ILogger<SubdlUploadTask> _logger;
+    private readonly ILogger<ScribeUploadTask> _logger;
     private readonly ILoggerFactory _loggerFactory;
     /// <summary>
-    /// Initializes a new instance of the <see cref="SubdlUploadTask"/> class.
+    /// Initializes a new instance of the <see cref="ScribeUploadTask"/> class.
     /// The on-arrival watcher is retired — the cycle controller owns the
     /// ItemAdded subscription (no watcher dependency here, or DI would re-create it).
     /// </summary>
@@ -42,7 +42,7 @@ public class SubdlUploadTask : IScheduledTask
     /// <param name="loggerFactory">Logger factory.</param>
     /// <param name="dispatcher">Optional event dispatcher (injected via DI when present).</param>
     /// <param name="coordinator">Optional scheduler coordinator (injected via DI when present).</param>
-    public SubdlUploadTask(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ILogger<SubdlUploadTask> logger, ILoggerFactory loggerFactory, SubdlEventDispatcher? dispatcher = null, SubdlSchedulerCoordinator? coordinator = null)
+    public ScribeUploadTask(ILibraryManager libraryManager, IMediaSourceManager mediaSourceManager, ILogger<ScribeUploadTask> logger, ILoggerFactory loggerFactory, ScribeEventDispatcher? dispatcher = null, ScribeSchedulerCoordinator? coordinator = null)
     {
         _libraryManager = libraryManager;
         _mediaSourceManager = mediaSourceManager;
@@ -67,9 +67,9 @@ public class SubdlUploadTask : IScheduledTask
     /// <inheritdoc />
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
     {
-        // F-M48 (user decision 08.09.2026): no default triggers — the SubdlSchedulerCoordinator
+        // F-M48 (user decision 08.09.2026): no default triggers — the ScribeSchedulerCoordinator
         // owns all scheduled fires (diced per-installation anchors + jitter).
-        return []; // empty — scheduled fires come from SubdlSchedulerCoordinator only
+        return []; // empty — scheduled fires come from ScribeSchedulerCoordinator only
     }
 
     /// <inheritdoc />
@@ -85,7 +85,7 @@ public class SubdlUploadTask : IScheduledTask
         // Operator order 08.10.2026: this task WAITS for a cycle whose seed may run for minutes, so
         // marking its direction running here lit a lamp for work that had not started — measured on
         // prod, the Seeder scanned while Download and Upload were both already blue. The direction
-        // marks itself when its own run begins (SubdlEventDispatcher.MarkDirectionRunning); this
+        // marks itself when its own run begins (ScribeEventDispatcher.MarkDirectionRunning); this
         // task only records the outcome it waited for.
         var config = plugin.Configuration;
         if (!config.AnyUploadEnabled)
@@ -101,7 +101,7 @@ public class SubdlUploadTask : IScheduledTask
         // The task then WAITS for the cycle to end (30 min cap, user
         // cancel-aware) — so Jellyfin's "task completed" line lands after the
         // real work instead of looking like an instant no-op at start.
-        var dispatcher = SubdlEventDispatcher.Instance;
+        var dispatcher = ScribeEventDispatcher.Instance;
         if (dispatcher == null)
         {
             RecordWorker(plugin, Registry.WorkerRunRegistry.Outcome.Failed, "dispatcher unavailable");

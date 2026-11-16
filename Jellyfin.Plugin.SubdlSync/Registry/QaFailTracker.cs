@@ -12,11 +12,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// F-M320 (operator order 08.10.2026): the FAIL COUNTER is GONE. It counted saveless runs of a
@@ -32,7 +32,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// </summary>
 public sealed class QaFailTracker
 {
-    private readonly SubdlDbContext _db;
+    private readonly ScribeDbContext _db;
     private readonly ILogger? _logger;
 
     /// <summary>
@@ -40,7 +40,7 @@ public sealed class QaFailTracker
     /// </summary>
     /// <param name="db">Database context.</param>
     /// <param name="logger">Optional logger.</param>
-    public QaFailTracker(SubdlDbContext db, ILogger? logger = null)
+    public QaFailTracker(ScribeDbContext db, ILogger? logger = null)
     {
         _db = db;
         _logger = logger;
@@ -68,7 +68,7 @@ public sealed class QaFailTracker
             .Find(x => x.ItemId == itemId)
             .Where(x => string.Equals(x.Language, language, StringComparison.OrdinalIgnoreCase))
             .Where(x => !string.Equals(x.Kind, "empty", StringComparison.Ordinal) || x.ReportedUtc != null)
-            .Select(x => x.SubdlId)
+            .Select(x => x.ScribeId)
             .Distinct()
             .ToList();
     }
@@ -127,7 +127,7 @@ public sealed class QaFailTracker
             // F-M450: the row may already carry a report timestamp. Upsert replaces the whole row,
             // so it is read first — otherwise every further failure would erase "already reported"
             // and the same broken package would be reported again and again.
-            string key = SubdlDbContext.CandidateKey(itemId, language, id);
+            string key = ScribeDbContext.CandidateKey(itemId, language, id);
             var previous = _db.RejectedCandidates.Find(x => x.Id == key).FirstOrDefault();
             DateTime? reportedUtc = previous?.ReportedUtc;
             if (string.IsNullOrEmpty(nId))
@@ -151,7 +151,7 @@ public sealed class QaFailTracker
                 Id = key,
                 ItemId = itemId,
                 Language = language.ToUpperInvariant(),
-                SubdlId = id,
+                ScribeId = id,
                 Reason = reason,
                 NId = nId,
                 Finding = finding,

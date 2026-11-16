@@ -12,7 +12,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Jellyfin.Plugin.SubdlScribe.Data;
+namespace Jellyfin.Plugin.SubScribe.Data;
 
 /// <summary>
 /// The four states a subtitle can be in. Everything else is derived.
@@ -305,7 +305,7 @@ public abstract class SubtitleState
     public DateTime StatusAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>SubDL upload or download id this verdict refers to, when known.</summary>
-    public string? SubdlId { get; set; }
+    public string? ScribeId { get; set; }
 
     /// <summary>
     /// F-M486 (operator order 15.11.2026): where this subtitle CAME FROM — <c>subdl</c> or
@@ -325,12 +325,12 @@ public abstract class SubtitleState
     /// <summary>
     /// F-M488 (operator order 15.11.2026): the four marks are separate fields, one per source AND
     /// direction, so a row says by itself what happened where — no reading of <see cref="Status"/> and
-    /// no guessing. <c>SubdlDownloadId</c> is the SubDL entry the subtitle was fetched from.
+    /// no guessing. <c>ScribeDownloadId</c> is the SubDL entry the subtitle was fetched from.
     /// </summary>
-    public string? SubdlDownloadId { get; set; }
+    public string? ScribeDownloadId { get; set; }
 
     /// <summary>F-M488: the SubDL id the uploaded subtitle got.</summary>
-    public string? SubdlUploadId { get; set; }
+    public string? ScribeUploadId { get; set; }
 
     /// <summary>F-M488: the tvsubtitles.net subtitle id the subtitle was fetched from (e.g. <c>170678</c>).</summary>
     public string? TvSubtitlesDownloadId { get; set; }
@@ -346,11 +346,11 @@ public abstract class SubtitleState
     /// than a flag, because "uploaded" without "when" answers half the question — and because a row can
     /// carry both sources: uploaded to SubDL in March, to tvsubtitles.net in November.
     /// </summary>
-    public DateTime? SubdlUploadedAt { get; set; }
+    public DateTime? ScribeUploadedAt { get; set; }
 
     /// <summary>
     /// F-M490: when OUR upload to tvsubtitles.net happened (UTC). Independent of
-    /// <see cref="SubdlUploadedAt"/> — that is the whole point of two fields.
+    /// <see cref="ScribeUploadedAt"/> — that is the whole point of two fields.
     /// </summary>
     public DateTime? TvSubtitlesUploadedAt { get; set; }
 
@@ -374,7 +374,7 @@ public abstract class SubtitleState
 
     /// <summary>
     /// F-M507 (Schema 14): wann UNSER Upload zu moviesubtitles.org lief (UTC) — ein Zeitpunkt, kein
-    /// Schalter, aus demselben Grund wie <see cref="SubdlUploadedAt"/>. Geschrieben wird er in
+    /// Schalter, aus demselben Grund wie <see cref="ScribeUploadedAt"/>. Geschrieben wird er in
     /// Etappe 2b.
     /// </summary>
     public DateTime? MoviesubtitlesUploadedAt { get; set; }
@@ -511,7 +511,7 @@ public class RejectedCandidateEntity
     public string Language { get; set; } = string.Empty;
 
     /// <summary>SubDL release id that was burned.</summary>
-    public string SubdlId { get; set; } = string.Empty;
+    public string ScribeId { get; set; } = string.Empty;
 
     /// <summary>Why it was discarded (one of <see cref="RejectReason"/>, suffixes allowed).</summary>
     public string Reason { get; set; } = string.Empty;

@@ -16,9 +16,9 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
+namespace Jellyfin.Plugin.SubScribe.Api.Endpoints;
 
 /// <summary>
 /// F-M483: the SubDL download endpoint — a thin wrapper, not a rewrite. It calls exactly the client
@@ -26,15 +26,15 @@ namespace Jellyfin.Plugin.SubdlScribe.Api.Endpoints;
 /// neutral ones. Nothing about routes, quotas or caching moves: those stay in the pipeline, which is
 /// what "den rest des plugins gleich lassen" means.
 /// </summary>
-public sealed class SubdlDownloadEndpoint : IDownloadEndpoint
+public sealed class ScribeDownloadEndpoint : IDownloadEndpoint
 {
-    private readonly SubdlApiClient _client;
+    private readonly ScribeApiClient _client;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SubdlDownloadEndpoint"/> class.
+    /// Initializes a new instance of the <see cref="ScribeDownloadEndpoint"/> class.
     /// </summary>
     /// <param name="client">The SubDL API client.</param>
-    public SubdlDownloadEndpoint(SubdlApiClient client) =>
+    public ScribeDownloadEndpoint(ScribeApiClient client) =>
         _client = client ?? throw new ArgumentNullException(nameof(client));
 
     /// <inheritdoc />
@@ -105,15 +105,15 @@ public sealed class SubdlDownloadEndpoint : IDownloadEndpoint
 /// describes; a season pack needs the pipeline's own pack building (F-M372) and is refused with a
 /// reason rather than silently sent as a single file.
 /// </summary>
-public sealed class SubdlUploadEndpoint : IUploadEndpoint
+public sealed class ScribeUploadEndpoint : IUploadEndpoint
 {
-    private readonly SubdlApiClient _client;
+    private readonly ScribeApiClient _client;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SubdlUploadEndpoint"/> class.
+    /// Initializes a new instance of the <see cref="ScribeUploadEndpoint"/> class.
     /// </summary>
     /// <param name="client">The SubDL API client.</param>
-    public SubdlUploadEndpoint(SubdlApiClient client) =>
+    public ScribeUploadEndpoint(ScribeApiClient client) =>
         _client = client ?? throw new ArgumentNullException(nameof(client));
 
     /// <inheritdoc />

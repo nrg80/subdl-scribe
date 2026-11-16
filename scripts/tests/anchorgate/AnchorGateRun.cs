@@ -32,7 +32,7 @@
 
 using System;
 using System.IO;
-using Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+using Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 namespace AnchorGateRun;
 
@@ -116,7 +116,7 @@ internal static class Program
         // ── 4. Wiring on the source ────────────────────────────────────────────
         Console.WriteLine("4. Source contract");
         var src = File.ReadAllText(Path.Combine(
-            root, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlSchedulerCoordinator.cs"));
+            root, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeSchedulerCoordinator.cs"));
         Check(src.Contains("AnchorJobGate.IsDue(", StringComparison.Ordinal), "the gate is used");
         Check(src.Contains("AnchorJobGate.DeferralElapsed(", StringComparison.Ordinal), "the deadline gate is used");
         Check(!src.Contains("|| now < _pruneDeferredUntil)", StringComparison.Ordinal),

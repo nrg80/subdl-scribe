@@ -17,9 +17,9 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M70 (user decision 09.09.2026 "show API-key usage in the general menu"):
@@ -33,13 +33,13 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 /// Route: GET /Plugins/{pluginId}/Quota  (plugin controller route prefix).
 /// </summary>
 [ApiController]
-[Route("Plugins/[controller]/[action]")]
-public class SubdlQuota : ControllerBase
+[Route("Plugins/SubdlQuota/[action]")]
+public class ScribeQuota : ControllerBase
 {
-    private readonly ILogger<SubdlQuota> _logger;
+    private readonly ILogger<ScribeQuota> _logger;
 
     // F-M343: /me is a SubDL call like any other, so it identifies the plugin too.
-    private static readonly Lazy<HttpClient> SharedHttp = new(() => SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(20)));
+    private static readonly Lazy<HttpClient> SharedHttp = new(() => ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(20)));
 
     // F-M70: 5-minute cache — repeated page loads/reloads don't hit SubDL at all.
     // Key + fetch time travel WITH the cache so (a) a changed API key never shows
@@ -49,15 +49,15 @@ public class SubdlQuota : ControllerBase
     private static readonly object CacheLock = new();
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SubdlQuota"/> class.
+    /// Initializes a new instance of the <see cref="ScribeQuota"/> class.
     /// </summary>
-    public SubdlQuota(ILogger<SubdlQuota> logger)
+    public ScribeQuota(ILogger<ScribeQuota> logger)
     {
         _logger = logger;
     }
 
     /// <summary>
-    /// GET /Plugins/SubdlQuota/Get — live quota for the configured API key.
+    /// GET /Plugins/ScribeQuota/Get — live quota for the configured API key.
     /// </summary>
     /// <returns>JSON: { requestUsage:{today,total,limit}, downloadUsage:{…}, cached:bool } or { error }.</returns>
     [HttpGet]
@@ -146,19 +146,19 @@ public class SubdlQuota : ControllerBase
     /// <param name="coord">The scheduler, or null while the plugin is still starting.</param>
     /// <param name="workerKey">The worker's key.</param>
     /// <returns>The reason text, or null.</returns>
-    private static string? PendingReasonForWorker(ScheduledTasks.SubdlSchedulerCoordinator? coord, string workerKey)
+    private static string? PendingReasonForWorker(ScheduledTasks.ScribeSchedulerCoordinator? coord, string workerKey)
     {
         if (coord == null)
         {
             return null;
         }
 
-        if (string.Equals(workerKey, Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.DownloadWorkerKey, StringComparison.Ordinal))
+        if (string.Equals(workerKey, Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.DownloadWorkerKey, StringComparison.Ordinal))
         {
             return coord.PendingFireReason(upload: false);
         }
 
-        if (string.Equals(workerKey, Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.UploadWorkerKey, StringComparison.Ordinal))
+        if (string.Equals(workerKey, Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.UploadWorkerKey, StringComparison.Ordinal))
         {
             return coord.PendingFireReason(upload: true);
         }
@@ -195,7 +195,7 @@ public class SubdlQuota : ControllerBase
         var offEntries = StatusNotes();
         try
         {
-            var coord = Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSchedulerCoordinator.Instance;
+            var coord = Jellyfin.Plugin.SubScribe.ScheduledTasks.ScribeSchedulerCoordinator.Instance;
             if (coord == null)
             {
                 return new { deferred = entries, notes = offEntries };
@@ -207,18 +207,18 @@ public class SubdlQuota : ControllerBase
             // its note until it runs ok again, fire or no fire. The loop below simply finds nothing to
             // say for a healthy worker, so the old early return is gone on purpose.
 
-            var registry = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.WorkerRuns;
+            var registry = Jellyfin.Plugin.SubScribe.Plugin.Instance?.WorkerRuns;
 
             // Display order follows the Workers list, so the line reads in the same sequence as the
             // lamps above it. A worker with a fire but no known name still appears — under its key.
-            foreach (var worker in Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.KnownWorkers)
+            foreach (var worker in Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.KnownWorkers)
             {
                 var hasFire = fires.TryGetValue(worker.Key, out var due);
                 var row = registry?.Get(worker.Key);
                 var outcome = row?.Outcome ?? string.Empty;
                 var isFailed = string.Equals(
                     outcome,
-                    Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Failed,
+                    Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.Outcome.Failed,
                     StringComparison.Ordinal);
 
                 // F-M436 (operator decision 04.11.2026): a failure keeps its voice until the worker's
@@ -250,7 +250,7 @@ public class SubdlQuota : ControllerBase
                 }
                 else if (string.Equals(
                              outcome,
-                             Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.Outcome.Deferred,
+                             Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.Outcome.Deferred,
                              StringComparison.Ordinal))
                 {
                     // The pending attempt's own reason wins over the row's stored text (F-M475).
@@ -271,7 +271,7 @@ public class SubdlQuota : ControllerBase
                 // duplicate with a nicer word. The schedule is the other line's job. What stays is the one
                 // thing this line alone can say: a FAILED postprocessing run, whose cause would otherwise
                 // vanish (F-M436).
-                if (string.Equals(worker.Key, Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey, StringComparison.Ordinal)
+                if (string.Equals(worker.Key, Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.PostprocessWorkerKey, StringComparison.Ordinal)
                     && !isFailed)
                 {
                     continue;
@@ -308,17 +308,17 @@ public class SubdlQuota : ControllerBase
         var notes = new System.Collections.Generic.List<string>();
         try
         {
-            var config = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.Configuration;
+            var config = Jellyfin.Plugin.SubScribe.Plugin.Instance?.Configuration;
             if (config == null)
             {
                 return notes;
             }
 
-            var off = Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.Applies;
-            var manual = Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.IsManualOnly;
-            var keys = Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.DownloadWorkerKey;
-            var uploadKey = Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry.UploadWorkerKey;
-            var postKey = Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey;
+            var off = Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.Applies;
+            var manual = Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.IsManualOnly;
+            var keys = Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.DownloadWorkerKey;
+            var uploadKey = Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.UploadWorkerKey;
+            var postKey = Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.PostprocessWorkerKey;
 
             // "off" says the direction cannot start; "manual" says it can, but nothing starts it by itself
             // (the unified refetch rhythm stands on Manual). "off" outranks "manual" — both at once would be
@@ -350,12 +350,12 @@ public class SubdlQuota : ControllerBase
                 notes.Add("upload postprocessing manual");
             }
 
-            if (manual(Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.DatabaseWorkerKey, config))
+            if (manual(Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.DatabaseWorkerKey, config))
             {
                 notes.Add("database refresh manual");
             }
 
-            if (manual(Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.OshashWorkerKey, config))
+            if (manual(Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.OshashWorkerKey, config))
             {
                 notes.Add("oshash refresh manual");
             }
@@ -371,7 +371,7 @@ public class SubdlQuota : ControllerBase
     /// <summary>
     /// The stored outcome and detail of one worker row, or empty strings when it has none.
     /// </summary>
-    private static (string? Outcome, string? Detail) ReadWorker(Jellyfin.Plugin.SubdlScribe.Registry.WorkerRunRegistry registry, string key)
+    private static (string? Outcome, string? Detail) ReadWorker(Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry registry, string key)
     {
         var row = registry.Get(key);
         return (row?.Outcome, row?.Detail);

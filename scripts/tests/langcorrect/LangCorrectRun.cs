@@ -37,7 +37,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
-using Jellyfin.Plugin.SubdlScribe.Qa;
+using Jellyfin.Plugin.SubScribe.Qa;
 
 namespace LangCorrectRun;
 

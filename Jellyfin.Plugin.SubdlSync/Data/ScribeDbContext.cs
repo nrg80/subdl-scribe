@@ -18,10 +18,10 @@ using System.Linq.Expressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Registry;
 
-namespace Jellyfin.Plugin.SubdlScribe.Data;
+namespace Jellyfin.Plugin.SubScribe.Data;
 
 /// <summary>
 /// F-M236: what a compaction attempt left behind. Three states, because two of them need different
@@ -77,7 +77,7 @@ public enum CompactOutcome
 /// writing there would lose data on a server update.
 /// </para>
 /// </summary>
-public sealed class SubdlDbContext : IDisposable
+public sealed class ScribeDbContext : IDisposable
 {
     /// <summary>
     /// Structure version of the data file. Increase whenever the stored shape changes in a way an
@@ -115,14 +115,14 @@ public sealed class SubdlDbContext : IDisposable
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
-    private readonly SubdlSqliteContext _db;
+    private readonly ScribeSqliteContext _db;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SubdlDbContext"/> class.
+    /// Initializes a new instance of the <see cref="ScribeDbContext"/> class.
     /// </summary>
     /// <param name="dataDir">Plugin data directory.</param>
     /// <param name="logger">Optional logger.</param>
-    public SubdlDbContext(string dataDir, ILogger? logger = null)
+    public ScribeDbContext(string dataDir, ILogger? logger = null)
     {
         _logger = logger;
         Directory.CreateDirectory(dataDir);
@@ -131,7 +131,7 @@ public sealed class SubdlDbContext : IDisposable
         // F-M327: the one-time import runs BEFORE the store is opened. It is the only path that ever
         // reads the old format, it is skipped when there is nothing to import, and it never deletes
 
-        _db = new SubdlSqliteContext(_dbPath);
+        _db = new ScribeSqliteContext(_dbPath);
 
         // F-M514: the context itself warns now (a rejected row, a rebuilt tracker), so it needs the
         // same logger the registries log to — one line, one place.
@@ -145,63 +145,63 @@ public sealed class SubdlDbContext : IDisposable
         EnsureMediaColumns();
         _db.ConfigurePragmas();
 
-        Meta = new SubdlSet<MetaEntity>(_db, e => e.Id);
-        Oshashes = new SubdlSet<OshashEntity>(_db, e => e.Id);
-        Media = new SubdlSet<MediaEntity>(_db, e => e.Id);
-        Embeds = new SubdlSet<EmbedTrackEntity>(_db, e => e.Id);
-        Sidecars = new SubdlSet<SidecarEntity>(_db, e => e.Id);
-        RejectedCandidates = new SubdlSet<RejectedCandidateEntity>(_db, e => e.Id);
-        Counters = new SubdlSet<CounterEntity>(_db, e => e.Key);
-        Runs = new SubdlSet<PipelineRunEntity>(_db, e => e.Id.ToString(CultureInfo.InvariantCulture));
-        StatusStats = new SubdlSet<StatusStatsEntity>(_db, e => e.Id);
-        WorkerRuns = new SubdlSet<WorkerRunEntity>(_db, e => e.Id);
-        Packs = new SubdlSet<PackEntity>(_db, e => e.Id);
+        Meta = new ScribeSet<MetaEntity>(_db, e => e.Id);
+        Oshashes = new ScribeSet<OshashEntity>(_db, e => e.Id);
+        Media = new ScribeSet<MediaEntity>(_db, e => e.Id);
+        Embeds = new ScribeSet<EmbedTrackEntity>(_db, e => e.Id);
+        Sidecars = new ScribeSet<SidecarEntity>(_db, e => e.Id);
+        RejectedCandidates = new ScribeSet<RejectedCandidateEntity>(_db, e => e.Id);
+        Counters = new ScribeSet<CounterEntity>(_db, e => e.Key);
+        Runs = new ScribeSet<PipelineRunEntity>(_db, e => e.Id.ToString(CultureInfo.InvariantCulture));
+        StatusStats = new ScribeSet<StatusStatsEntity>(_db, e => e.Id);
+        WorkerRuns = new ScribeSet<WorkerRunEntity>(_db, e => e.Id);
+        Packs = new ScribeSet<PackEntity>(_db, e => e.Id);
 
         CheckSchemaVersion();
     }
 
     /// <summary>Area 0: the single compatibility record describing this data file.</summary>
-    public SubdlSet<MetaEntity> Meta { get; }
+    public ScribeSet<MetaEntity> Meta { get; }
 
     /// <summary>Area 1: OSHash cache, keyed by media path.</summary>
-    public SubdlSet<OshashEntity> Oshashes { get; }
+    public ScribeSet<OshashEntity> Oshashes { get; }
 
     /// <summary>Area 2: one record per video file, keyed by media hash.</summary>
-    public SubdlSet<MediaEntity> Media { get; }
+    public ScribeSet<MediaEntity> Media { get; }
 
     /// <summary>Area 2, beneath the file: embedded subtitle tracks, keyed by "&lt;media hash&gt;|&lt;position&gt;".</summary>
-    public SubdlSet<EmbedTrackEntity> Embeds { get; }
+    public ScribeSet<EmbedTrackEntity> Embeds { get; }
 
     /// <summary>Area 3: sidecar subtitle files, keyed by content hash.</summary>
-    public SubdlSet<SidecarEntity> Sidecars { get; }
+    public ScribeSet<SidecarEntity> Sidecars { get; }
 
     /// <summary>Area 4: download candidates that were fetched and discarded.</summary>
-    public SubdlSet<RejectedCandidateEntity> RejectedCandidates { get; }
+    public ScribeSet<RejectedCandidateEntity> RejectedCandidates { get; }
 
     /// <summary>Retry and fail-budget counters, keyed by the namespaced counter key.</summary>
-    public SubdlSet<CounterEntity> Counters { get; }
+    public ScribeSet<CounterEntity> Counters { get; }
 
     /// <summary>Pipeline run bookkeeping.</summary>
-    public SubdlSet<PipelineRunEntity> Runs { get; }
+    public ScribeSet<PipelineRunEntity> Runs { get; }
 
     /// <summary>
     /// Cumulative subtitle counters for the GUI (single row, key "status"). Stored here rather than
     /// in the configuration XML so a database reset resets them too — see <see cref="StatusStatsEntity"/>.
     /// </summary>
-    public SubdlSet<StatusStatsEntity> StatusStats { get; }
+    public ScribeSet<StatusStatsEntity> StatusStats { get; }
 
     /// <summary>
     /// Area 6: the LAST run of each worker, keyed by the worker's task key (one row per worker, never
     /// a history). Read by the configuration page's "Workers" section — see <see cref="WorkerRunEntity"/>.
     /// </summary>
-    public SubdlSet<WorkerRunEntity> WorkerRuns { get; }
+    public ScribeSet<WorkerRunEntity> WorkerRuns { get; }
 
     /// <summary>
     /// Area 7: the season packs this plugin published, keyed by "&lt;imdb&gt;|S&lt;season&gt;|&lt;lang&gt;|&lt;hi|plain&gt;".
     /// One row per pack, never a history — it answers "was this season already packed in this
     /// language, and with which members" — see <see cref="PackEntity"/>.
     /// </summary>
-    public SubdlSet<PackEntity> Packs { get; }
+    public ScribeSet<PackEntity> Packs { get; }
 
     /// <summary>
     /// True when the data file was written by a NEWER plugin build than this one. Callers must not
@@ -214,7 +214,7 @@ public sealed class SubdlDbContext : IDisposable
     /// wrapper's other members stay the normal way in; this is the one door for a new table that has no
     /// wrapper API yet.
     /// </summary>
-    public SubdlSqliteContext Context => _db;
+    public ScribeSqliteContext Context => _db;
 
     /// <summary>
     /// Reads area 0 and decides whether this build may write to the file.
@@ -381,19 +381,19 @@ public sealed class SubdlDbContext : IDisposable
                      ("embeds", "OriginId", "ALTER TABLE embeds ADD COLUMN OriginId TEXT NULL;"),
 
                      // F-M488 (schema 11): vier eigene Kennzeichen, je Quelle und Richtung eines.
-                     ("sidecars", "SubdlDownloadId", "ALTER TABLE sidecars ADD COLUMN SubdlDownloadId TEXT NULL;"),
-                     ("sidecars", "SubdlUploadId", "ALTER TABLE sidecars ADD COLUMN SubdlUploadId TEXT NULL;"),
+                     ("sidecars", "ScribeDownloadId", "ALTER TABLE sidecars ADD COLUMN ScribeDownloadId TEXT NULL;"),
+                     ("sidecars", "ScribeUploadId", "ALTER TABLE sidecars ADD COLUMN ScribeUploadId TEXT NULL;"),
                      ("sidecars", "TvSubtitlesDownloadId", "ALTER TABLE sidecars ADD COLUMN TvSubtitlesDownloadId TEXT NULL;"),
                      ("sidecars", "TvSubtitlesUploadId", "ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId TEXT NULL;"),
-                     ("embeds", "SubdlDownloadId", "ALTER TABLE embeds ADD COLUMN SubdlDownloadId TEXT NULL;"),
-                     ("embeds", "SubdlUploadId", "ALTER TABLE embeds ADD COLUMN SubdlUploadId TEXT NULL;"),
+                     ("embeds", "ScribeDownloadId", "ALTER TABLE embeds ADD COLUMN ScribeDownloadId TEXT NULL;"),
+                     ("embeds", "ScribeUploadId", "ALTER TABLE embeds ADD COLUMN ScribeUploadId TEXT NULL;"),
                      ("embeds", "TvSubtitlesDownloadId", "ALTER TABLE embeds ADD COLUMN TvSubtitlesDownloadId TEXT NULL;"),
                      ("embeds", "TvSubtitlesUploadId", "ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadId TEXT NULL;"),
 
                      // F-M490 (schema 12): "hochgeladen" je Quelle, mit Zeitpunkt.
-                     ("sidecars", "SubdlUploadedAt", "ALTER TABLE sidecars ADD COLUMN SubdlUploadedAt TEXT NULL;"),
+                     ("sidecars", "ScribeUploadedAt", "ALTER TABLE sidecars ADD COLUMN ScribeUploadedAt TEXT NULL;"),
                      ("sidecars", "TvSubtitlesUploadedAt", "ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;"),
-                     ("embeds", "SubdlUploadedAt", "ALTER TABLE embeds ADD COLUMN SubdlUploadedAt TEXT NULL;"),
+                     ("embeds", "ScribeUploadedAt", "ALTER TABLE embeds ADD COLUMN ScribeUploadedAt TEXT NULL;"),
                      ("embeds", "TvSubtitlesUploadedAt", "ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;"),
 
                      // F-M507 (schema 14): die dritte Quelle, je Richtung ihr eigenes Kennzeichen und
@@ -795,7 +795,7 @@ public sealed class SubdlDbContext : IDisposable
     }
 
     /// <summary>
-    /// Opens a batch on the underlying context — see <see cref="SubdlSqliteContext.BeginBatch"/>.
+    /// Opens a batch on the underlying context — see <see cref="ScribeSqliteContext.BeginBatch"/>.
     /// <para>
     /// The wrapper exposes it because this is the type the callers hold; the batch state itself
     /// lives beside <c>SaveChanges</c>, which only the context can call.
@@ -939,15 +939,15 @@ public sealed class SubdlDbContext : IDisposable
 /// being created at runtime on every open.
 /// </para>
 /// </summary>
-public sealed class SubdlSqliteContext : DbContext
+public sealed class ScribeSqliteContext : DbContext
 {
     private readonly string _path;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SubdlSqliteContext"/> class.
+    /// Initializes a new instance of the <see cref="ScribeSqliteContext"/> class.
     /// </summary>
     /// <param name="path">Path of the SQLite file, this plugin's own.</param>
-    public SubdlSqliteContext(string path)
+    public ScribeSqliteContext(string path)
     {
         _path = path;
     }
@@ -975,7 +975,7 @@ public sealed class SubdlSqliteContext : DbContext
     public object Gate { get; } = new();
 
     /// <summary>
-    /// F-M514: the plugin's logger, handed down by <see cref="SubdlDbContext"/> so a store-side guard
+    /// F-M514: the plugin's logger, handed down by <see cref="ScribeDbContext"/> so a store-side guard
     /// can warn without a second wiring path. Null in a host-free probe, so every use is optional.
     /// </summary>
     public ILogger? Logger { get; set; }
@@ -1330,7 +1330,7 @@ public sealed class SubdlSqliteContext : DbContext
             e.ToTable("rejected_candidates");
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.ItemId);
-            e.HasIndex(x => x.SubdlId);
+            e.HasIndex(x => x.ScribeId);
         });
 
         modelBuilder.Entity<CounterEntity>(e =>
@@ -1393,19 +1393,19 @@ public sealed class SubdlSqliteContext : DbContext
 /// </para>
 /// </summary>
 /// <typeparam name="TEntity">The area's row type.</typeparam>
-public sealed class SubdlSet<TEntity>
+public sealed class ScribeSet<TEntity>
     where TEntity : class
 {
-    private readonly SubdlSqliteContext _db;
+    private readonly ScribeSqliteContext _db;
     private readonly Func<TEntity, string> _keyText;
     private bool _dirty = true;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SubdlSet{TEntity}"/> class.
+    /// Initializes a new instance of the <see cref="ScribeSet{TEntity}"/> class.
     /// </summary>
     /// <param name="db">The owning context.</param>
     /// <param name="keyText">Reads the business key as text, for in-memory lookup.</param>
-    public SubdlSet(SubdlSqliteContext db, Func<TEntity, string> keyText)
+    public ScribeSet(ScribeSqliteContext db, Func<TEntity, string> keyText)
     {
         _db = db;
         _keyText = keyText;

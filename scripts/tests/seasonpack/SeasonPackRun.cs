@@ -34,7 +34,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 using Microsoft.Extensions.Logging;
 
 namespace SeasonPackRun;
@@ -154,9 +154,9 @@ internal static class Program
         IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
         ISet<(string ImdbId, int Season)> packable,
         IPackFiller filler,
-        Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration config)
+        Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration config)
         => new(
-            new Jellyfin.Plugin.SubdlScribe.Api.SubdlApiClient(new System.Net.Http.HttpClient()),
+            new Jellyfin.Plugin.SubScribe.Api.ScribeApiClient(new System.Net.Http.HttpClient()),
             null!,
             new ListLogger(log),
             config,
@@ -197,13 +197,13 @@ internal static class Program
         // ── 3. The name carries the pack's identity ─────────────────────────────
         Console.WriteLine("3. Pack name");
         var hashes8 = Enumerable.Range(1, 8)
-            .Select(e => Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e))).ToList();
+            .Select(e => Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e))).ToList();
         string packHash = SeasonPack.PackHash(hashes8);
         Check(packHash.Length == 32, "the pack hash is an MD5");
         Check(SeasonPack.PackHash(hashes8) == packHash, "the same season hashes the same");
         Check(SeasonPack.PackHash(hashes8.AsEnumerable().Reverse()) != packHash, "the episode order is part of the identity");
         var corrected = hashes8.ToList();
-        corrected[2] = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(Srt(3) + "\n99\n00:01:00,000 --> 00:01:01,000\nchanged\n");
+        corrected[2] = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(Srt(3) + "\n99\n00:01:00,000 --> 00:01:01,000\nchanged\n");
         Check(SeasonPack.PackHash(corrected) != packHash, "a corrected episode is a different pack");
 
         string name = SeasonPack.Name("tt0944947", 1, packHash, "DE");
@@ -213,7 +213,7 @@ internal static class Program
 
         // ── 4. What SubDL documents about a packed upload ───────────────────────
         Console.WriteLine("4. Documented upload shape");
-        var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSsync/Api/SubdlApiClient.cs".Replace("Ssync", "Sync")));
+        var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeApiClient.cs"));
         Check(api.Contains("JsonSerializer.Serialize(fileNIds)", StringComparison.Ordinal), "step 3 sends the ARRAY of file ids");
         Check(api.Contains("[\"is_full_season\"] = \"true\"", StringComparison.Ordinal), "the pack claims a full season");
         Check(api.Contains("[\"is_full_season\"] = \"false\"", StringComparison.Ordinal), "a single upload still claims nothing");
@@ -520,8 +520,8 @@ internal static class Program
         var filledSeason = sevenOfEight.Concat(SeasonPack.Uncovered(airedEight, sevenOfEight)).ToList();
         Check(SeasonPack.IsComplete(airedEight, filledSeason), "seven plus the filled eighth is the season");
         Check(!SeasonPack.IsComplete(airedEight, sevenOfEight), "without the fill the season stays single");
-        Check(SeasonPack.PackHash(filledSeason.Select(e => Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e))))
-              == SeasonPack.PackHash(Enumerable.Range(1, 8).Select(e => Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e)))),
+        Check(SeasonPack.PackHash(filledSeason.Select(e => Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e))))
+              == SeasonPack.PackHash(Enumerable.Range(1, 8).Select(e => Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e)))),
             "a filled pack is the same container as a fully collected one — same members, same hash");
 
         // The rules in the code: a member may only come from a subtitle that passed the gates AND is
@@ -561,7 +561,7 @@ internal static class Program
         // No network, no Jellyfin, no database: the dry run of a pack stops before the upload, and the
         // registry is never touched on that path.
         Console.WriteLine("8. Coordinator on fakes");
-        var dryConfig = new Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration { DryRun = true };
+        var dryConfig = new Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration { DryRun = true };
         var complete = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>> { [("tt1", 1)] = airedEight };
         var packable = new HashSet<(string ImdbId, int Season)> { ("tt1", 1) };
 
@@ -653,7 +653,7 @@ internal static class Program
         """;
         using (var doc = System.Text.Json.JsonDocument.Parse(published))
         {
-            var entry = Jellyfin.Plugin.SubdlScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
+            var entry = Jellyfin.Plugin.SubScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
             Check(entry != null && entry!.UploadId == 3755405,
                 "F-M432: the published list yields the upload id a delete needs");
             Check(entry!.Name.Contains("ELiTE", StringComparison.Ordinal) && entry.Language == "English",
@@ -677,7 +677,7 @@ internal static class Program
         """;
         using (var doc = System.Text.Json.JsonDocument.Parse(publishedWithBoth))
         {
-            var entry = Jellyfin.Plugin.SubdlScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
+            var entry = Jellyfin.Plugin.SubScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
             Check(entry != null && entry!.EntryId == 3758706,
                 "F-M435: the published entry carries its own entry id");
             Check(entry!.UploadId == 380828,
@@ -692,7 +692,7 @@ internal static class Program
         """;
         using (var doc = System.Text.Json.JsonDocument.Parse(pending))
         {
-            var entry = Jellyfin.Plugin.SubdlScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
+            var entry = Jellyfin.Plugin.SubScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
             Check(entry != null && entry!.EntryId == 380865 && entry.UploadId == 380865,
                 "F-M435: a submission reports its upload id as id — both fields agree");
             Check(entry!.HandleId == 380865,
@@ -704,7 +704,7 @@ internal static class Program
         var registrySrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
         Check(registrySrc.Contains("public int RemapSubdlId(string uploadId, string entryId)"),
             "F-M435: the registry can rewrite a stored handle");
-        Check(registrySrc.Contains("x.PackId, uploadId") && registrySrc.Contains("x.SubdlId, uploadId"),
+        Check(registrySrc.Contains("x.PackId, uploadId") && registrySrc.Contains("x.ScribeId, uploadId"),
             "F-M435: subtitle rows AND pack rows are rewritten");
         var coordinatorSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
         Check(coordinatorSrc.Contains("pack entry id {Id} taken from myPublishedSubtitles"),
@@ -880,11 +880,11 @@ internal static class Program
         """;
         using (var doc = System.Text.Json.JsonDocument.Parse(looseJson))
         {
-            Jellyfin.Plugin.SubdlScribe.Api.SubtitleCandidate? cand = null;
+            Jellyfin.Plugin.SubScribe.Api.SubtitleCandidate? cand = null;
             bool threw = false;
             try
             {
-                cand = Jellyfin.Plugin.SubdlScribe.Api.SubtitleCandidate.FromJson(doc.RootElement);
+                cand = Jellyfin.Plugin.SubScribe.Api.SubtitleCandidate.FromJson(doc.RootElement);
             }
             catch (FormatException)
             {
@@ -905,7 +905,7 @@ internal static class Program
         }
 
         string subdlClient = File.ReadAllText(
-            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "SubdlApiClient.cs"));
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "ScribeApiClient.cs"));
         Check(subdlClient.Contains("JsonAnomalies.GetInt(el, name)", StringComparison.Ordinal),
             "F-M528: the shared int reader goes through the tolerant one");
         Check(subdlClient.Contains("catch (FormatException)", StringComparison.Ordinal)
@@ -933,10 +933,10 @@ internal static class Program
         """;
         using (var doc = System.Text.Json.JsonDocument.Parse(sauber))
         {
-            var findings = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Check(doc.RootElement);
+            var findings = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.Check(doc.RootElement);
             Check(findings.Count == 0,
                 "F-M530: a documented entry — including numeric fps as TEXT — is not a finding");
-            var ident = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Identity(doc.RootElement);
+            var ident = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.Identity(doc.RootElement);
             Check(ident.SubId == "1-2" && ident.Name == "X" && ident.Language == "DE",
                 "F-M530: the finding can name its subtitle (id, release name, language)");
         }
@@ -948,7 +948,7 @@ internal static class Program
         """;
         using (var doc = System.Text.Json.JsonDocument.Parse(falsch))
         {
-            var findings = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Check(doc.RootElement);
+            var findings = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.Check(doc.RootElement);
             Check(findings.Count == 5,
                 "F-M530: five wrong shapes are named (got " + findings.Count + ")");
             Check(findings.Any(f => f.Path == "season"),
@@ -966,17 +966,17 @@ internal static class Program
 
         using (var doc = System.Text.Json.JsonDocument.Parse("{ \"unpack_files\": \"kaputt\" }"))
         {
-            var findings = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Check(doc.RootElement);
+            var findings = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.Check(doc.RootElement);
             Check(findings.Count == 1 && findings[0].Path == "unpack_files",
                 "F-M530: a string where the pack array belongs is a finding, not a crash");
         }
 
         // ---- F-M531: die Meldung sagt nur, was verkehrt ist ------------------------------------
-        var probe = new Jellyfin.Plugin.SubdlScribe.Api.FieldShapeFinding(
+        var probe = new Jellyfin.Plugin.SubScribe.Api.FieldShapeFinding(
             "framerate", "framerate", "23.98", "Number", "a whole number");
-        var text = Jellyfin.Plugin.SubdlScribe.Pipeline.MetadataMismatchReports.Build(
+        var text = Jellyfin.Plugin.SubScribe.Pipeline.MetadataMismatchReports.Build(
             probe, "3676577-8593549", "The.Odyssey.2026.720p.WEBRip", "en", "12.1.12.413", "konto");
-        Check(text != null && text!.Category == Jellyfin.Plugin.SubdlScribe.Pipeline.BrokenSubtitleReports.CategoryMetadata,
+        Check(text != null && text!.Category == Jellyfin.Plugin.SubScribe.Pipeline.BrokenSubtitleReports.CategoryMetadata,
             "F-M531: a format mismatch is filed as wrong release info");
         var zeilen = (text?.Comment ?? string.Empty).Split('\n');
         Check(zeilen.Length == 5 && zeilen[0] == "Metadata format mismatch.",
@@ -994,7 +994,7 @@ internal static class Program
         using (var doc = System.Text.Json.JsonDocument.Parse(
             "{ \"imdb_id\": 123, \"tmdb_id\": 1368337 }"))
         {
-            var f = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.CheckFilm(doc.RootElement);
+            var f = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.CheckFilm(doc.RootElement);
             Check(f.Count == 1 && f[0].Path == "imdb_id",
                 "F-M532: the film block is checked (a numeric imdb_id is a finding)");
         }
@@ -1002,7 +1002,7 @@ internal static class Program
         using (var doc = System.Text.Json.JsonDocument.Parse(
             "{ \"usage\": { \"search\": { \"used\": 5, \"limit\": \"100\" }, \"downloads\": { \"used\": 1.5 } } }"))
         {
-            var f = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.CheckQuota(doc.RootElement);
+            var f = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.CheckQuota(doc.RootElement);
             Check(f.Count == 2
                   && f.Any(x => x.Path == "search.limit")
                   && f.Any(x => x.Path == "downloads.used"),
@@ -1012,7 +1012,7 @@ internal static class Program
         using (var doc = System.Text.Json.JsonDocument.Parse(
             "{ \"subtitle\": { \"id\": \"3755405\", \"n_id\": \"abc\" } }"))
         {
-            var f = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.CheckOwnEntry(doc.RootElement);
+            var f = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.CheckOwnEntry(doc.RootElement);
             Check(f.Count == 1 && f[0].Path == "subtitle.id",
                 "F-M532: an own-list entry is checked (an id sent as text is a finding)");
         }
@@ -1020,22 +1020,22 @@ internal static class Program
         using (var doc = System.Text.Json.JsonDocument.Parse(
             "{ \"subtitle\": { \"sd_id\": \"x\", \"subtitle_id\": \"9\" } }"))
         {
-            var f = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.CheckUploadAnswer(doc.RootElement);
+            var f = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.CheckUploadAnswer(doc.RootElement);
             Check(f.Count == 1 && f[0].Path == "subtitle.subtitle_id",
                 "F-M532: the upload answer is checked too");
         }
 
         var gesammelt = new List<string>();
-        Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.OnMismatch = (f, ctx) => gesammelt.Add(ctx + ":" + f.Path);
+        Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.OnMismatch = (f, ctx) => gesammelt.Add(ctx + ":" + f.Path);
         using (var doc = System.Text.Json.JsonDocument.Parse("{ \"imdb_id\": 7 }"))
         {
-            bool gemeldet = Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Emit(
-                Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.CheckFilm(doc.RootElement), "search answer, film block");
+            bool gemeldet = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.Emit(
+                Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.CheckFilm(doc.RootElement), "search answer, film block");
             Check(gemeldet && gesammelt.Count == 1 && gesammelt[0] == "search answer, film block:imdb_id",
                 "F-M532: a finding from another answer reaches the same reporter");
         }
 
-        Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.OnMismatch = null;
+        Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.OnMismatch = null;
 
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."

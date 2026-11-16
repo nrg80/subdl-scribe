@@ -9,10 +9,10 @@
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 using System;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// The plugin's own log mode decides how much detail its lines carry, and every
@@ -52,7 +52,7 @@ public static class LogUtil
     /// to Normal before the plugin instance exists (e.g. during startup).
     /// </summary>
     private static LogLevelMode Mode =>
-        global::Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.Configuration.LogMode
+        global::Jellyfin.Plugin.SubScribe.Plugin.Instance?.Configuration.LogMode
         ?? LogLevelMode.Normal;
 
     /// <summary>Lifecycle/summary line — shown at every level.</summary>

@@ -14,10 +14,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 // T81: findet die Registry die vom Seeder geschriebene Sprache, wo die STREAMLISTE sie nicht sieht?
 internal static class SwapRun
@@ -42,7 +42,7 @@ internal static class SwapRun
         string work = Path.Combine(root, "item.mkv");
         File.Copy(media, work, true);
 
-        using var db = new SubdlDbContext(Path.Combine(root, "db"), null);
+        using var db = new ScribeDbContext(Path.Combine(root, "db"), null);
         var reg = new ContentHashRegistry(db, null, null);
         var cfg = new PluginConfiguration { LogMode = LogLevelMode.Normal, AllocateMissingLanguageCodes = true };
 
@@ -61,7 +61,7 @@ internal static class SwapRun
         // 2) Die STREAMLISTE, wie Jellyfin sie liefert (gecacht -> alte Tags)
         var stale = Probe(work);   // frisch gelesen, aber wir simulieren Jellyfins Cache mit dem ALTEN Stand
         var staleStreams = streams; // der Stand VOR dem Schreiben
-        var viaStreams = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.EmbeddedPresentLanguages(staleStreams);
+        var viaStreams = Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.EmbeddedPresentLanguages(staleStreams);
         var viaRegistry = reg.EmbeddedLanguages(work);
         Console.WriteLine();
         Console.WriteLine("EmbeddedPresentLanguages (Streamliste, ALTER Stand): [" + string.Join(",", viaStreams.OrderBy(x=>x)) + "]");

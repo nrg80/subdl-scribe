@@ -10,8 +10,8 @@
 using System.Reflection;
 using System.Xml.Linq;
 using System.Xml.Serialization;
-using Jellyfin.Plugin.SubdlScribe;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe;
+using Jellyfin.Plugin.SubScribe.Configuration;
 
 namespace StateFileRun;
 
@@ -155,7 +155,7 @@ internal static class Program
 
             // 6) F-M445: der Nachlauf hat keinen festen Anker mehr — ein Termin, letzter Auftrag gewinnt.
             string root = FindPluginRoot();
-            string sched = File.ReadAllText(Path.Combine(root, "ScheduledTasks", "SubdlSchedulerCoordinator.cs"));
+            string sched = File.ReadAllText(Path.Combine(root, "ScheduledTasks", "ScribeSchedulerCoordinator.cs"));
             string upload = File.ReadAllText(Path.Combine(root, "Pipeline", "UploadPipeline.cs"));
             string cfg = File.ReadAllText(Path.Combine(root, "Configuration", "PluginConfiguration.cs"));
             Check(sched.Contains("_postprocessArmUtc = fireAtUtc;", StringComparison.Ordinal),
@@ -185,7 +185,7 @@ internal static class Program
                 "F-M445: a user stop CANCELS the scheduled postprocessing run (operator order 02.11.2026)");
             Check(sched.Contains("public DateTime? GetUploadPostprocessDue()", StringComparison.Ordinal),
                 "F-M445: the armed moment is readable for the status line");
-            string ctrl = File.ReadAllText(Path.Combine(root, "Api", "SubdlStatusController.cs"));
+            string ctrl = File.ReadAllText(Path.Combine(root, "Api", "ScribeStatusController.cs"));
             Check(ctrl.Contains("PostprocessDue = postprocessDue?", StringComparison.Ordinal)
                   && ctrl.Contains("workerFires.Remove(\"SubDLPostprocessTask\")", StringComparison.Ordinal),
                 "F-M445: the moment rides on its own field — the worker row is not painted yellow forever");

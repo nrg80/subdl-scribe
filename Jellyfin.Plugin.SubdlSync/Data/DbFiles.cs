@@ -11,7 +11,7 @@
 
 using System.IO;
 
-namespace Jellyfin.Plugin.SubdlScribe.Data;
+namespace Jellyfin.Plugin.SubScribe.Data;
 
 /// <summary>
 /// The one place that knows how the plugin's data files are spelled.

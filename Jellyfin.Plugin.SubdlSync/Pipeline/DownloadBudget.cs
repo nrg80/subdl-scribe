@@ -10,7 +10,7 @@
 // See the GNU General Public License for more details.
 using System;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// F-M95 / F-M50: the ONE place that turns the candidate setting into the number the search and the

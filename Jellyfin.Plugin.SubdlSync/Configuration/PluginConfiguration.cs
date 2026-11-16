@@ -13,7 +13,7 @@ using System;
 using System.Collections.Generic;
 using MediaBrowser.Model.Plugins;
 
-namespace Jellyfin.Plugin.SubdlScribe.Configuration;
+namespace Jellyfin.Plugin.SubScribe.Configuration;
 
 /// <summary>
 /// Update interval for the scheduled upload task (F-M21).

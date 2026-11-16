@@ -10,7 +10,7 @@
 
 using System;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// F-M450: what one report to SubDL says, and which of its four categories it lands in.

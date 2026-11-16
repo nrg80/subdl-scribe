@@ -10,7 +10,7 @@
 
 using System;
 
-namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+namespace Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 /// <summary>
 /// F-M368 (28.10.2026): the two decisions every diced-anchor job needs, as PURE functions — testable

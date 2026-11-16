@@ -16,7 +16,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// Resolves an IMDb ID from a TMDB id via the TMDB REST API (user decision 08.09.2026).

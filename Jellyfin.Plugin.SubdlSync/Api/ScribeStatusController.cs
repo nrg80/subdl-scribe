@@ -17,14 +17,14 @@ using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 using MediaBrowser.Controller.Library;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// (20.09.2026): live traffic-light status for SubDL/TMDB credentials,
@@ -32,16 +32,16 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 /// </summary>
 [ApiController]
 [Route("Plugins/SubdlSync")]
-public class SubdlStatusController : ControllerBase
+public class ScribeStatusController : ControllerBase
 {
-    private readonly ILogger<SubdlStatusController> _logger;
+    private readonly ILogger<ScribeStatusController> _logger;
     private readonly ILibraryManager _libraryManager;
     // F-M343: this one client serves two probes — the SubDL search probe (a SubDL call like any
     // other, see below) and the TMDb configuration probe at the bottom of this file — so both
-    // identify the plugin. TMDb seeing it is intended; see SubdlApiClient.DefaultUserAgent.
-    private static readonly HttpClient _httpClient = SubdlApiClient.NewHttpClient();
+    // identify the plugin. TMDb seeing it is intended; see ScribeApiClient.DefaultUserAgent.
+    private static readonly HttpClient _httpClient = ScribeApiClient.NewHttpClient();
 
-    public SubdlStatusController(ILogger<SubdlStatusController> logger, ILibraryManager libraryManager)
+    public ScribeStatusController(ILogger<ScribeStatusController> logger, ILibraryManager libraryManager)
     {
         _logger = logger;
         _libraryManager = libraryManager;
@@ -170,7 +170,7 @@ public class SubdlStatusController : ControllerBase
         var pendingFires = new System.Collections.Generic.Dictionary<string, DateTime>(StringComparer.Ordinal);
         try
         {
-            var coord = Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSchedulerCoordinator.Instance;
+            var coord = Jellyfin.Plugin.SubScribe.ScheduledTasks.ScribeSchedulerCoordinator.Instance;
             if (coord != null)
             {
                 pendingFires = coord.GetPendingFires();
@@ -184,7 +184,7 @@ public class SubdlStatusController : ControllerBase
 
         // F-M352 (operator order 19.10.2026): the off state is NOT painted onto the lamps, and this
         // endpoint does not carry it either — it rides on the deferral status line, which the quota
-        // answer feeds (SubdlQuotaService.LocalRateLimitState → `local.off`). The outcome, the detail and
+        // answer feeds (ScribeQuotaService.LocalRateLimitState → `local.off`). The outcome, the detail and
         // a pending fire here stay exactly as they are, so a run never disappears behind a switch.
         // F-M445 (operator order 02.11.2026, "eine logzeile unter die worker schreiben wann ein
         // postprocessing ansteht. Zeile entfällt wenn gestartet"): the armed moment is reported on its
@@ -193,7 +193,7 @@ public class SubdlStatusController : ControllerBase
         DateTime? postprocessDue = null;
         try
         {
-            postprocessDue = Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlSchedulerCoordinator.Instance?
+            postprocessDue = Jellyfin.Plugin.SubScribe.ScheduledTasks.ScribeSchedulerCoordinator.Instance?
                 .GetUploadPostprocessDue();
         }
         catch
@@ -293,8 +293,8 @@ public class SubdlStatusController : ControllerBase
             using var http = new HttpClient();
             // F-M343: the same identity as every other SubDL call. This said
             // "SubDL-Sync-Status/1.0" — the pre-rename product name and a frozen version.
-            http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", SubdlApiClient.DefaultUserAgent);
-            var client = new SubdlApiClient(http)
+            http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", ScribeApiClient.DefaultUserAgent);
+            var client = new ScribeApiClient(http)
             {
                 ApiKey = cfg.ApiKey,
                 Username = cfg.Username,
@@ -353,7 +353,7 @@ public class SubdlStatusController : ControllerBase
             // Lightweight search probe: query for a well-known imdb id with no real expectation of hits.
             // F-M343: this hits the same documented endpoint as the real search, so it carries the
             // same integration name rather than arriving as an anonymous caller.
-            var url = $"https://api.subdl.com/api/v1/subtitles?api_key={WebUtility.UrlEncode(cfg.ApiKey)}&imdb_id=tt0137523&languages=en&subs_per_page=1&client={SubdlApiClient.IntegrationClientName}";
+            var url = $"https://api.subdl.com/api/v1/subtitles?api_key={WebUtility.UrlEncode(cfg.ApiKey)}&imdb_id=tt0137523&languages=en&subs_per_page=1&client={ScribeApiClient.IntegrationClientName}";
             using var resp = await _httpClient.GetAsync(url, cts.Token).ConfigureAwait(false);
             if (resp.StatusCode == HttpStatusCode.Unauthorized || resp.StatusCode == HttpStatusCode.Forbidden)
             {

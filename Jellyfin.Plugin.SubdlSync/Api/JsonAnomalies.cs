@@ -16,7 +16,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M528: tolerant number reads for SubDL's JSON, and a note whenever tolerance was needed.

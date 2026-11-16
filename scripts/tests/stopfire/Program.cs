@@ -2,7 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+using Jellyfin.Plugin.SubScribe.ScheduledTasks;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 // Driven on the REAL coordinator: arm both directions, cancel one, prove the other survives.
 string dir = Path.Combine(Path.GetTempPath(), "stopfire-" + Guid.NewGuid().ToString("N")[..8]);
 Directory.CreateDirectory(dir);
-var coord = new SubdlSchedulerCoordinator(null, new TestPaths(dir), NullLogger<SubdlSchedulerCoordinator>.Instance);
+var coord = new ScribeSchedulerCoordinator(null, new TestPaths(dir), NullLogger<ScribeSchedulerCoordinator>.Instance);
 
 int f = 0;
 var now = DateTime.UtcNow;
@@ -44,7 +44,7 @@ Check("the cancellation is PERSISTED (a restart cannot resurrect it)",
 
 // Source contract: the log line must print UTC without converting — the first live run claimed "UTC" on a
 // local time (02:30 for a fire armed at 00:30Z), which reads as a wrong deferral moment.
-string src = File.ReadAllText(Path.Combine("/opt/data/subdl-scribe", "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlSchedulerCoordinator.cs"));
+string src = File.ReadAllText(Path.Combine("/opt/data/subdl-scribe", "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "ScribeSchedulerCoordinator.cs"));
 int at = src.IndexOf("pending fire for", StringComparison.Ordinal);
 string block = at >= 0
     ? src.Substring(Math.Max(0, at - 500), Math.Min(900, src.Length - Math.Max(0, at - 500)))
@@ -55,8 +55,8 @@ Check("the cancel log prints UTC and does not convert to local behind the label"
     $"claimsUtc={claimsUtc}, converts={converts}");
 
 // --- F-M353: the cancelled fire must also reach the worker row -------------------------------
-var dlRow = SubdlSchedulerCoordinator.CancelledRow(upload: false);
-var ulRow = SubdlSchedulerCoordinator.CancelledRow(upload: true);
+var dlRow = ScribeSchedulerCoordinator.CancelledRow(upload: false);
+var ulRow = ScribeSchedulerCoordinator.CancelledRow(upload: true);
 Check("the download cancellation writes the DOWNLOAD row", dlRow.Key == "SubdlSyncDownloadTask" && dlRow.Name == "Download", dlRow.Key + "/" + dlRow.Name);
 Check("the upload cancellation writes the UPLOAD row", ulRow.Key == "SubdlSyncUploadTask" && ulRow.Name == "Upload", ulRow.Key + "/" + ulRow.Name);
 Check("the two rows are distinct — a stop names one direction", dlRow.Key != ulRow.Key && dlRow.Name != ulRow.Name, dlRow.Key + "/" + ulRow.Key);
@@ -103,7 +103,7 @@ Check("the row is written AFTER the cancellation is persisted",
 // run" while the deferred download never resumed).
 string dir2 = Path.Combine(Path.GetTempPath(), "scandefer-" + Guid.NewGuid().ToString("N")[..8]);
 Directory.CreateDirectory(dir2);
-var c2 = new SubdlSchedulerCoordinator(null, new TestPaths(dir2), NullLogger<SubdlSchedulerCoordinator>.Instance);
+var c2 = new ScribeSchedulerCoordinator(null, new TestPaths(dir2), NullLogger<ScribeSchedulerCoordinator>.Instance);
 var t0 = DateTime.UtcNow;
 
 c2.ScheduleRecoveryFireAt(upload: false, t0.AddMinutes(180));
@@ -129,7 +129,7 @@ Check("a scan defer never pushes an earlier attempt back", !armedLater
 Check("a download-only defer leaves the upload direction alone",
     !c2.GetPendingFires().ContainsKey("SubdlSyncUploadTask"), string.Join(",", c2.GetPendingFires().Keys));
 
-var c3 = new SubdlSchedulerCoordinator(null, new TestPaths(dir2), NullLogger<SubdlSchedulerCoordinator>.Instance);
+var c3 = new ScribeSchedulerCoordinator(null, new TestPaths(dir2), NullLogger<ScribeSchedulerCoordinator>.Instance);
 Check("moment AND reason survive a restart (the timer did not)",
     c3.GetPendingFires().ContainsKey("SubdlSyncDownloadTask")
     && c3.PendingFireReason(upload: false) == "library scan running — retry in 15 min",
@@ -140,7 +140,7 @@ Check("a respaced fire names itself and does not borrow the quota wording",
     c3.PendingFireReason(upload: true) == "rate limit or lock busy — rescheduled",
     c3.PendingFireReason(upload: true) ?? "null");
 
-string disp = File.ReadAllText(Path.Combine("/opt/data/subdl-scribe", "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlEventDispatcher.cs"));
+string disp = File.ReadAllText(Path.Combine("/opt/data/subdl-scribe", "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "ScribeEventDispatcher.cs"));
 Check("the scan defer no longer runs an in-process timer", !disp.Contains("_scanDeferTimer", StringComparison.Ordinal), "timer still present");
 int td = disp.IndexOf("private bool TryDeferForLibraryScan", StringComparison.Ordinal);
 string deferBody = td < 0 ? string.Empty : disp.Substring(td, Math.Min(4000, disp.Length - td));
@@ -148,7 +148,7 @@ Check("the deferral arms the direction's own scheduled fire", deferBody.Contains
 Check("each direction is armed only when the cycle asked for it",
     deferBody.Contains("dir != CycleDirection.UploadOnly", StringComparison.Ordinal)
     && deferBody.Contains("dir != CycleDirection.DownloadOnly", StringComparison.Ordinal), "direction guards");
-string quotaSvc = File.ReadAllText(Path.Combine("/opt/data/subdl-scribe", "Jellyfin.Plugin.SubdlSync", "Api", "SubdlQuotaService.cs"));
+string quotaSvc = File.ReadAllText(Path.Combine("/opt/data/subdl-scribe", "Jellyfin.Plugin.SubdlSync", "Api", "ScribeQuotaService.cs"));
 Check("the status line takes the reason from the pending fire, not from the worker row",
     quotaSvc.Contains("fireReason ?? row!.Detail", StringComparison.Ordinal), "row detail still wins");
 Check("the reason token is persisted next to the moment",
@@ -170,7 +170,7 @@ Check("the status accessor still refuses an elapsed deadline (F-M368 stays intac
 // beside a fresh moment just like the direction rows did.
 string dir3 = Path.Combine(Path.GetTempPath(), "maintfire-" + Guid.NewGuid().ToString("N")[..8]);
 Directory.CreateDirectory(dir3);
-var c4 = new SubdlSchedulerCoordinator(null, new TestPaths(dir3), NullLogger<SubdlSchedulerCoordinator>.Instance);
+var c4 = new ScribeSchedulerCoordinator(null, new TestPaths(dir3), NullLogger<ScribeSchedulerCoordinator>.Instance);
 Check("nothing pending, no reason — for every maintenance slot",
     c4.PendingMaintenanceReason("refresh") == null
     && c4.PendingMaintenanceReason("oshash") == null
@@ -200,7 +200,7 @@ File.WriteAllText(
     + "\"oshashDefer\":\"" + DateTime.UtcNow.AddMinutes(120).ToString("O") + "\","
     + "\"postprocessDefer\":\"\",\"refetchDefer\":\"\","
     + "\"refreshWhy\":\"lockbusy\",\"oshashWhy\":\"lockbusy\",\"postprocessWhy\":\"\"}");
-var c5 = new SubdlSchedulerCoordinator(null, new TestPaths(dir3), NullLogger<SubdlSchedulerCoordinator>.Instance);
+var c5 = new ScribeSchedulerCoordinator(null, new TestPaths(dir3), NullLogger<ScribeSchedulerCoordinator>.Instance);
 Check("the maintenance reasons survive a restart with their moments",
     c5.PendingMaintenanceReason("refresh") == "run lock busy — rescheduled"
     && c5.PendingMaintenanceReason("oshash") == "run lock busy — rescheduled",

@@ -10,7 +10,7 @@
 // Usage: dotnet run --project canonical.csproj
 
 using System;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 int failures = 0;
 void Check(bool ok, string what)

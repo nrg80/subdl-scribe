@@ -11,13 +11,13 @@
 
 using System;
 using System.IO;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using SIO = System.IO;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// (20.09.2026): stop signal via marker files. The GUI writes a file;
@@ -25,11 +25,11 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 /// </summary>
 [ApiController]
 [Route("Plugins/SubdlSync")]
-public class SubdlStopController : ControllerBase
+public class ScribeStopController : ControllerBase
 {
-    private readonly ILogger<SubdlStopController> _logger;
+    private readonly ILogger<ScribeStopController> _logger;
 
-    public SubdlStopController(ILogger<SubdlStopController> logger)
+    public ScribeStopController(ILogger<ScribeStopController> logger)
     {
         _logger = logger;
     }
@@ -76,7 +76,7 @@ public class SubdlStopController : ControllerBase
             // RequestUserStop only aborts the cycle that is RUNNING; without this the armed fire brought
             // the direction back on its own minutes later, which is the opposite of what the button says.
             bool cancelled = false;
-            var coord = ScheduledTasks.SubdlSchedulerCoordinator.Instance;
+            var coord = ScheduledTasks.ScribeSchedulerCoordinator.Instance;
             if (coord != null)
             {
                 if (string.Equals(direction, "upload", StringComparison.OrdinalIgnoreCase) || string.Equals(direction, "all", StringComparison.OrdinalIgnoreCase))
@@ -90,7 +90,7 @@ public class SubdlStopController : ControllerBase
                 }
             }
 
-            ScheduledTasks.SubdlEventDispatcher.Instance?.RequestUserStop($"stop marker {direction}");
+            ScheduledTasks.ScribeEventDispatcher.Instance?.RequestUserStop($"stop marker {direction}");
             return Ok(new { ok = true, direction, fireCancelled = cancelled });
         }
         catch (Exception ex)

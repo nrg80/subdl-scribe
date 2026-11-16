@@ -86,7 +86,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Qa;
+namespace Jellyfin.Plugin.SubScribe.Qa;
 
 /// <summary>
 /// F-M307: corrects a downloaded subtitle by the piecewise-constant offset fitted

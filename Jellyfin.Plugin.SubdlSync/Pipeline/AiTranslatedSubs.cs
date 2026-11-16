@@ -13,9 +13,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Api;
+using Jellyfin.Plugin.SubScribe.Api;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// F-M449: one SubDL account publishes machine-translated subtitles. Whether those uploads may be

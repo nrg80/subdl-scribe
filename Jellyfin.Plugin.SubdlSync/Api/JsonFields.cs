@@ -13,7 +13,7 @@ using System;
 using System.Globalization;
 using System.Text.Json;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// Readers for the fields SubDL sends.

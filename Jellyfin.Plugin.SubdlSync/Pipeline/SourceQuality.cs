@@ -12,7 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// F-M344 (operator order 10.10.2026): the SOURCE QUALITY an upload reports.

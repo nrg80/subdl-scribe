@@ -13,10 +13,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Jellyfin.Plugin.SubdlScribe.Language;
+using Jellyfin.Plugin.SubScribe.Language;
 using MediaBrowser.Model.Entities;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// F-M239: the ONE reader of a sidecar file name.

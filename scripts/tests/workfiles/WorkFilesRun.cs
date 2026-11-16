@@ -5,7 +5,7 @@
 // subtitle track of every touched file in memory for the whole run (prod 04.11.2026: 689 files,
 // ~21.000 texts, ~900 MB).
 
-using Jellyfin.Plugin.SubdlScribe.Api;
+using Jellyfin.Plugin.SubScribe.Api;
 
 namespace WorkFilesRun;
 

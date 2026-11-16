@@ -12,7 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M533: the same robustness for tvsubtitles.net that the search answer of SubDL gets — a field
@@ -51,13 +51,13 @@ public static class TvstMetadataChecks
         }
 
         string version = typeof(TvstMetadataChecks).Assembly.GetName().Version?.ToString() ?? string.Empty;
-        bool melden = Jellyfin.Plugin.SubdlScribe.Plugin.Instance?.Configuration.ReportBrokenSubtitles == true;
+        bool melden = Jellyfin.Plugin.SubScribe.Plugin.Instance?.Configuration.ReportBrokenSubtitles == true;
 
         foreach (var f in findings)
         {
             string text = string.IsNullOrWhiteSpace(subtitleId)
-                ? Jellyfin.Plugin.SubdlScribe.Pipeline.MetadataMismatchReports.BuildSite(f, "tvsubtitles.net", version).Comment
-                : Jellyfin.Plugin.SubdlScribe.Pipeline.MetadataMismatchReports
+                ? Jellyfin.Plugin.SubScribe.Pipeline.MetadataMismatchReports.BuildSite(f, "tvsubtitles.net", version).Comment
+                : Jellyfin.Plugin.SubScribe.Pipeline.MetadataMismatchReports
                     .Build(f, subtitleId, release, string.Empty, version, "tvsubtitles.net")?.Comment ?? string.Empty;
 
             if (string.IsNullOrWhiteSpace(text))

@@ -14,12 +14,12 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <!-- F-M223: the namespace says Sub Scribe (SubdlScribe); the ASSEMBLY name stays Jellyfin.Plugin.SubdlSync. -->
-    <RootNamespace>Jellyfin.Plugin.SubdlScribe</RootNamespace>
+    <!-- F-M223: the namespace says Sub Scribe (ScribeScribe); the ASSEMBLY name stays Jellyfin.Plugin.SubdlSync. -->
+    <RootNamespace>Jellyfin.Plugin.SubScribe</RootNamespace>
     <AssemblyName>Jellyfin.Plugin.SubdlSync</AssemblyName>
-    <Version>12.1.12.435</Version>
-    <AssemblyVersion>12.1.12.435</AssemblyVersion>
-    <FileVersion>12.1.12.435</FileVersion>
+    <Version>12.1.12.436</Version>
+    <AssemblyVersion>12.1.12.436</AssemblyVersion>
+    <FileVersion>12.1.12.436</FileVersion>
     <Authors>Hermes Agent</Authors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>

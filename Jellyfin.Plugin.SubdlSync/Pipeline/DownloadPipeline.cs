@@ -16,12 +16,12 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Filters;
-using Jellyfin.Plugin.SubdlScribe.Language;
-using Jellyfin.Plugin.SubdlScribe.Registry;
-using Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Filters;
+using Jellyfin.Plugin.SubScribe.Language;
+using Jellyfin.Plugin.SubScribe.Registry;
+using Jellyfin.Plugin.SubScribe.ScheduledTasks;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
@@ -33,9 +33,9 @@ using MediaBrowser.Model.IO;
 using Microsoft.Extensions.Logging;
 using Episode = MediaBrowser.Controller.Entities.TV.Episode;
 using Movie = MediaBrowser.Controller.Entities.Movies.Movie;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// F-M472: the season pack one episode was served from — the SAME release, its season, and the
@@ -225,7 +225,7 @@ public sealed class DownloadPipeline : IDisposable
     private readonly ILogger<DownloadPipeline> _logger;
     private readonly ILibraryManager _libraryManager;
     private readonly IMediaSourceManager _mediaSourceManager;
-    private readonly SubdlApiClient _api;
+    private readonly ScribeApiClient _api;
 
     /// <summary>
     /// F-M485 (operator order 15.11.2026: "beide upload und download bitte individuell schaltbar über
@@ -441,7 +441,7 @@ public sealed class DownloadPipeline : IDisposable
         IProviderManager providerManager,
         IFileSystem fileSystem,
         IMediaSourceManager mediaSourceManager,
-        SubdlApiClient api,
+        ScribeApiClient api,
         TmdbImdbResolver tmdb,
         PluginConfiguration config,
         GlobalRateLimiter limiter,
@@ -466,18 +466,18 @@ public sealed class DownloadPipeline : IDisposable
         // F-M507: die dritte Quelle (moviesubtitles.org) ist dabei — als DOWNLOAD-Endpunkt. Einen
         // Upload-Endpunkt hat sie nicht, und deshalb steht sie auch nicht in der Upload-Liste des
         // Katalogs (SubtitleEndpointCatalog.HasUploadPath).
-        _tvClient = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        _tvClient = new Api.TvSubtitlesClient(ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
         var tvClient = _tvClient;
-        _msubClient = new Api.MovieSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        _msubClient = new Api.MovieSubtitlesClient(ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
         _msubMovies = new Api.Endpoints.MsubMovieResolver(_msubClient, _logger);
         _endpoints = new Api.Endpoints.SubtitleEndpointCatalog(
             new[]
             {
-                (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.SubdlDownloadEndpoint(api),
+                (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.ScribeDownloadEndpoint(api),
                 (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.TvSubtitlesDownloadEndpoint(tvClient),
                 (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.MovieSubtitlesDownloadEndpoint(_msubClient, _logger),
             },
-            new[] { (Api.Endpoints.IUploadEndpoint)new Api.Endpoints.SubdlUploadEndpoint(api) });
+            new[] { (Api.Endpoints.IUploadEndpoint)new Api.Endpoints.ScribeUploadEndpoint(api) });
     }
 
     /// <summary>Gets the effective target languages (F-M42), parsed from config, ordered, deduped.</summary>
@@ -523,7 +523,7 @@ public sealed class DownloadPipeline : IDisposable
         {
             summary.SkippedByLock = true;
             var spacing = Math.Clamp(_config.JobSpacingMinutes, 5, 120);
-            ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: false, DateTime.UtcNow.AddMinutes(spacing));
+            ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: false, DateTime.UtcNow.AddMinutes(spacing));
             LogUtil.Normal(_logger, "[Sub Scribe-D] Download deferred by {Spacing} min — global run lock busy.", spacing);
             return summary;
         }
@@ -627,7 +627,7 @@ public sealed class DownloadPipeline : IDisposable
         // refetch runs get none. No-id items still have the per-item 15-min ladder.
 
         // F-M47: per-item refetch gap (F-M111: unified interval, user decision 12.09.2026).
-        var refetchGap = SubdlDownloadTask.IntervalToGap(_config.RefetchInterval);
+        var refetchGap = ScribeDownloadTask.IntervalToGap(_config.RefetchInterval);
 
         var items = CollectItems(_config.SelectedLibraries);
         summary.FilesSeen = items.Count;
@@ -938,7 +938,7 @@ public sealed class DownloadPipeline : IDisposable
         if (read == QuotaRead.Available)
         {
             _api.ResetRateLimitFlag();
-            ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
+            ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
             _logger.LogWarning(
                 "[Sub Scribe-D] 429 is a short-term rate limit — download allowance still has {Remaining}/{Limit} left; "
                 + "run respaced by JobSpacingMinutes, item stays due (F-M238).",
@@ -981,7 +981,7 @@ public sealed class DownloadPipeline : IDisposable
         // per fire (direction-independent, crypto RNG).
 
         string resetLocal = TimeZoneInfo.ConvertTimeFromUtc(effectiveReset, TimeZoneInfo.Local).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
-        var fireInfo = ScheduledTasks.SubdlSchedulerCoordinator.Instance?.GetPendingFireUtc(upload: false);
+        var fireInfo = ScheduledTasks.ScribeSchedulerCoordinator.Instance?.GetPendingFireUtc(upload: false);
         _logger.LogWarning(
             "[Sub Scribe-D] Daily download limit (429) — run stopped. Reset ~{ResetLocal} local; recovery fire ~{Next} local (F-M152, F-M182).",
             resetLocal,
@@ -999,7 +999,7 @@ public sealed class DownloadPipeline : IDisposable
         // consumer, so a jitter-free fire walks straight into the collective-restart
         // herd the jitter exists to avoid. ScheduleRecoveryFire leaves the dicing to the
         // coordinator (30..300 min, crypto RNG, per fire, direction-independent).
-        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFire(upload: false, effectiveReset.ToUniversalTime());
+        ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ScheduleRecoveryFire(upload: false, effectiveReset.ToUniversalTime());
         return false;
     }
 
@@ -1103,7 +1103,7 @@ public sealed class DownloadPipeline : IDisposable
         // The question is now asked once, at the grain of the subtitle datum: which of the required
         // PAIRS have no evidence? Both answers — "is this file done" and "may it be marked done" —
         // were always the same question, and with the mark deleted there is only one of them left.
-        var required = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef
+        var required = Jellyfin.Plugin.SubScribe.Registry.SubtitleRef
             .Required(TargetLanguages, _config.DownloadHearingImpaired);
         var openPairs = Registry.OpenPairs(
             mediaPath, required, EmbeddedPresentLanguagesOf(item),
@@ -1454,9 +1454,9 @@ public sealed class DownloadPipeline : IDisposable
             onlyOwnDownloads: !_config.DownloadOnlyMissing,
             countOriginals: !_config.QaDownloadAutoSync);
 
-        var regularMissing = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleCoverage
+        var regularMissing = Jellyfin.Plugin.SubScribe.Registry.SubtitleCoverage
             .RegularLanguages(openPairsNow);
-        var variantMissing = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleCoverage
+        var variantMissing = Jellyfin.Plugin.SubScribe.Registry.SubtitleCoverage
             .VariantLanguages(openPairsNow);
         var missing = new List<string>(regularMissing);
 
@@ -1604,7 +1604,7 @@ public sealed class DownloadPipeline : IDisposable
                 {
                     // F-M152 (rev.10): NO /me diagnostic call — service_busy is real
                     // server overload; the recovery fire is the short overload fire.
-                    ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
+                    ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
                     _logger.LogWarning(
                         "[Sub Scribe-D] SubDL still overloaded (429 service_busy) after {Max} retries — stopping run at {File}; item stays due for the overload fire.",
                         maxTransientRetries, Path.GetFileName(mediaPath));
@@ -1630,7 +1630,7 @@ public sealed class DownloadPipeline : IDisposable
                     {
                         _api.ResetRateLimitFlag();
                         _stopRun = false;
-                        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
+                        ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
                         _logger.LogWarning(
                             "[Sub Scribe-D] 429 at {File} is a short-term rate limit — search allowance still has {Remaining}/{Limit} left; "
                             + "run respaced by JobSpacingMinutes, item stays due (F-M238).",
@@ -1641,14 +1641,14 @@ public sealed class DownloadPipeline : IDisposable
                         // Count the stop, or the dispatcher cannot tell it from an "ok" cycle: it would
                         // paint the download light GREEN and mark every item this run never worked as
                         // Done, removing it from the queue. `QuotaStopped` is the only flag the
-                        // dispatcher reads (SubdlEventDispatcher.CleanupDirectionQueue).
+                        // dispatcher reads (ScribeEventDispatcher.CleanupDirectionQueue).
                         summary.QuotaStopped++;
                         // Day-long: anchor on the server's reset (or the fail-safe midnight),
                         // exactly like the download-429 path. Without this the search path
                         // stopped without scheduling anything and nothing retried until the
                         // next regular anchor.
                         var anchor = _api.RateLimitResetUtc ?? NextMidnightUtc();
-                        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFire(upload: false, anchor.ToUniversalTime());
+                        ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ScheduleRecoveryFire(upload: false, anchor.ToUniversalTime());
                         _logger.LogWarning(
                             "[Sub Scribe-D] Search allowance spent ({Reason}) — run stopped at {File}; one recovery fire after the reset at {Reset} local (F-M238).",
                             searchExhausted ? "counter says spent" : "allowance unreadable, treated as spent",
@@ -1986,8 +1986,8 @@ public sealed class DownloadPipeline : IDisposable
                 // Match by stable per-upload id (exact upload, not release family);
                 // candidates without a parsable id stay eligible.
                 int beforeMemoryFilter = ranked.Count;
-                ranked = ranked.Where(x => string.IsNullOrEmpty(x.Cand.SubdlId)
-                                           || !qaKnownRejected.Contains(x.Cand.SubdlId, StringComparer.Ordinal)).ToList();
+                ranked = ranked.Where(x => string.IsNullOrEmpty(x.Cand.ScribeId)
+                                           || !qaKnownRejected.Contains(x.Cand.ScribeId, StringComparer.Ordinal)).ToList();
 
                 // F-M255: the memory filter dropped candidates without a word. Name what it took
                 // out, so a shrinking candidate list is never read as a thin search result.
@@ -2009,7 +2009,7 @@ public sealed class DownloadPipeline : IDisposable
                             if (row.ReportedUtc != null
                                 || string.IsNullOrWhiteSpace(row.NId)
                                 || !string.Equals(row.Kind, "qa", StringComparison.Ordinal)
-                                || !qaKnownRejected.Contains(row.SubdlId, StringComparer.Ordinal))
+                                || !qaKnownRejected.Contains(row.ScribeId, StringComparer.Ordinal))
                             {
                                 continue;
                             }
@@ -2287,7 +2287,7 @@ public sealed class DownloadPipeline : IDisposable
                                             // F-M452: same rule for the variant — the kept original is not
                                             // evidence, so the release is remembered instead of refetched.
                                             _qaFails.RecordSkippedCandidates(
-                                                item.Id.ToString(), lang, new[] { hi.SubdlId },
+                                                item.Id.ToString(), lang, new[] { hi.ScribeId },
                                                 reason: "original kept — alignment refused", kind: "original");
                                         }
 
@@ -2334,8 +2334,8 @@ public sealed class DownloadPipeline : IDisposable
                                                         // F-M493: auch das behaltene HI-Original traegt seine Herkunft.
                                                         // Der HI-Pool ist SubDL — die Marke ist die des HI-Treffers.
                                                         origin: Api.Endpoints.Provenance.Name(hi.Provider),
-                                                        originId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : hi.Url,
-                                                        subdlDownloadId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : null,
+                                                        originId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.ScribeId : hi.Url,
+                                                        subdlDownloadId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.ScribeId : null,
                                                         tvSubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.TvSubtitles ? hi.Url : null,
                                                         moviesubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.MovieSubtitles ? hi.Url : null));
 
@@ -2356,12 +2356,12 @@ public sealed class DownloadPipeline : IDisposable
                                         }
 
                                         Registry.MarkAndFlush(() => Registry.MarkDownloaded(
-                                            hiHash, mediaHash, lang, true, hi.SubdlId,
+                                            hiHash, mediaHash, lang, true, hi.ScribeId,
                                             Path.GetFileName(hiPath), hiPath,
                                             // F-M493: jede Ablage traegt ihre Herkunft, auch die HI-Fassung.
                                             origin: Api.Endpoints.Provenance.Name(hi.Provider),
-                                            originId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : hi.Url,
-                                            subdlDownloadId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : null,
+                                            originId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.ScribeId : hi.Url,
+                                            subdlDownloadId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.ScribeId : null,
                                             tvSubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.TvSubtitles ? hi.Url : null,
                                             moviesubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.MovieSubtitles ? hi.Url : null));
                                         _qaFails.RecordSuccess(item.Id.ToString(), lang); // HI save resets the pair counter too
@@ -2374,8 +2374,8 @@ public sealed class DownloadPipeline : IDisposable
                                         if (_config.LogMode >= LogLevelMode.Verbose)
                                         {
                                             LogUtil.PerItem(_config.LogMode, _logger,(asMainTrack
-                                                ? "[Sub Scribe-D] SAVED {Source} HI as main track {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"
-                                                : "[Sub Scribe-D] SAVED {Source} HI variant {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"),
+                                                ? "[Sub Scribe-D] SAVED {Source} HI as main track {Path} (lang={Lang}, release \"{Release}\", subdl=\"{ScribeName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"
+                                                : "[Sub Scribe-D] SAVED {Source} HI variant {Path} (lang={Lang}, release \"{Release}\", subdl=\"{ScribeName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"),
                                                 Api.Endpoints.Provenance.Name(hi.Provider),
                                                 Path.GetFileName(hiPath), lang, hi.ReleaseName,
                                                 string.IsNullOrEmpty(hi.OriginalName) ? "—" : hi.OriginalName,
@@ -2441,7 +2441,7 @@ public sealed class DownloadPipeline : IDisposable
                                     : BrokenSubtitleReports.FindingFromGateFailure(hiRejectReason);
                                 if (_config.ReportBrokenSubtitles
                                     && hiFinding != null
-                                    && !string.IsNullOrEmpty(hi.SubdlId))
+                                    && !string.IsNullOrEmpty(hi.ScribeId))
                                 {
                                     // F-M450: the same rule as the main path — a pack report names
                                     // the file the gate measured. Here the name is the entry the
@@ -2453,11 +2453,11 @@ public sealed class DownloadPipeline : IDisposable
                                     }
 
                                     _qaFails.RecordSkippedCandidates(
-                                        item.Id.ToString(), lang, new[] { hi.SubdlId },
+                                        item.Id.ToString(), lang, new[] { hi.ScribeId },
                                         RejectReason.CandidateRejected,
                                         new Dictionary<string, ReportFacts>
                                         {
-                                            [hi.SubdlId] = new ReportFacts(hi.NId, hiFinding, hi.ReleaseName)
+                                            [hi.ScribeId] = new ReportFacts(hi.NId, hiFinding, hi.ReleaseName)
                                         },
                                         "qa");
 
@@ -2465,7 +2465,7 @@ public sealed class DownloadPipeline : IDisposable
                                     {
                                         if (row.ReportedUtc == null
                                             && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
-                                            && string.Equals(row.SubdlId, hi.SubdlId, StringComparison.Ordinal))
+                                            && string.Equals(row.ScribeId, hi.ScribeId, StringComparison.Ordinal))
                                         {
                                             QueueReport(row);
                                         }
@@ -2850,13 +2850,13 @@ public sealed class DownloadPipeline : IDisposable
                 {
                     // Burned fetch (QA gate): the request was spent and nothing is kept.
                     summary.RejectedCandidates++; // F-M286 / F-M387
-                    qaRejectedReleases.Add(cand.SubdlId); // burned fetch → memorized
+                    qaRejectedReleases.Add(cand.ScribeId); // burned fetch → memorized
 
                     // F-M450: keep the gate's own wording as the naked finding. The report is queued
                     // right here, at the end of the run that measured it — a verdict on delivered bytes
                     // reads the same on a second fetch, so waiting for one would confirm nothing.
                     string? gateFinding = BrokenSubtitleReports.FindingFromGateFailure(gateFail);
-                    if (gateFinding != null && !string.IsNullOrEmpty(cand.SubdlId))
+                    if (gateFinding != null && !string.IsNullOrEmpty(cand.ScribeId))
                     {
                         // F-M450: a pack has many members and the report must say WHICH one is broken —
                         // otherwise the uploader has to guess. The member name is the one the gate
@@ -2867,7 +2867,7 @@ public sealed class DownloadPipeline : IDisposable
                             gateFinding += " ('" + packFile.Name + "')";
                         }
 
-                        qaRejectedFacts[cand.SubdlId] = new ReportFacts(cand.NId, gateFinding, cand.ReleaseName);
+                        qaRejectedFacts[cand.ScribeId] = new ReportFacts(cand.NId, gateFinding, cand.ReleaseName);
 
                         // F-M462 (operator order 10.11.2026): the finding is filed HERE, not at the end
                         // of the language walk. That flush only runs when NOTHING was saved for the
@@ -2878,11 +2878,11 @@ public sealed class DownloadPipeline : IDisposable
                         if (_config.ReportBrokenSubtitles)
                         {
                             _qaFails.RecordSkippedCandidates(
-                                item.Id.ToString(), lang, new[] { cand.SubdlId },
+                                item.Id.ToString(), lang, new[] { cand.ScribeId },
                                 RejectReason.CandidateRejected,
                                 new Dictionary<string, ReportFacts>
                                 {
-                                    [cand.SubdlId] = qaRejectedFacts[cand.SubdlId]
+                                    [cand.ScribeId] = qaRejectedFacts[cand.ScribeId]
                                 },
                                 "qa");
 
@@ -2890,7 +2890,7 @@ public sealed class DownloadPipeline : IDisposable
                             {
                                 if (row.ReportedUtc == null
                                     && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
-                                    && string.Equals(row.SubdlId, cand.SubdlId, StringComparison.Ordinal))
+                                    && string.Equals(row.ScribeId, cand.ScribeId, StringComparison.Ordinal))
                                 {
                                     QueueReport(row);
                                 }
@@ -3141,7 +3141,7 @@ public sealed class DownloadPipeline : IDisposable
                         // download. Without this the open pair would re-fetch the same bad release
                         // every run and pay a quota unit for a verdict it already has.
                         _qaFails.RecordSkippedCandidates(
-                            item.Id.ToString(), lang, new[] { cand.SubdlId },
+                            item.Id.ToString(), lang, new[] { cand.ScribeId },
                             reason: "original kept — alignment refused", kind: "original");
                     }
 
@@ -3236,8 +3236,8 @@ public sealed class DownloadPipeline : IDisposable
                                     // Upload nicht, wohin die Datei gehoert (F-M487), und „kein Reup je
                                     // Quelle" (F-M489) sieht sie nicht.
                                     origin: Api.Endpoints.Provenance.Name(cand.Provider),
-                                    originId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url,
-                                    subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null,
+                                    originId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.ScribeId : cand.Url,
+                                    subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.ScribeId : null,
                                     tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null,
                                     moviesubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.MovieSubtitles ? cand.Url : null));
 
@@ -3264,15 +3264,15 @@ public sealed class DownloadPipeline : IDisposable
                     // hearing-impaired file recorded as hi=false made the HI reader (F-M254) ask
                     // for a variant that was already on disk, run after run.
                     Registry.MarkAndFlush(() => Registry.MarkDownloaded(
-                        contentHash, mediaHash, lang, effectiveHi, cand.SubdlId,
+                        contentHash, mediaHash, lang, effectiveHi, cand.ScribeId,
                         Path.GetFileName(targetPath), targetPath,
                         // F-M486: die Herkunft wandert in den Store — Quelle und deren eigene Id.
                         // Ohne sie wüsste ein späterer Upload nicht, wohin dieser Fund gehört (F-M487).
                         // F-M493: benannt uebergeben, damit alle vier Schreibstellen gleich aussehen.
                         origin: Api.Endpoints.Provenance.Name(cand.Provider),
-                        originId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url,
+                        originId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.ScribeId : cand.Url,
                         // F-M488: und zusätzlich in das eigene Feld der Quelle und Richtung.
-                        subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null,
+                        subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.ScribeId : null,
                         tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null,
                         moviesubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.MovieSubtitles ? cand.Url : null));
                     _qaFails.RecordSuccess(item.Id.ToString(), lang); // A real save resets the QA counter
@@ -3347,7 +3347,7 @@ public sealed class DownloadPipeline : IDisposable
                         // Quelle angezeigt?"): nein, stand sie nicht — die Zeile nannte Release, SubDL-Name,
                         // Autor und Ids, aber nicht die Quelle, aus der die Datei kam. Jetzt steht sie
                         // direkt hinter SAVED, wie beim Upload.
-                        LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] SAVED {Source} {Path} (lang={Lang}, score {Score}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb}) for {File}",
+                        LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] SAVED {Source} {Path} (lang={Lang}, score {Score}, release \"{Release}\", subdl=\"{ScribeName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb}) for {File}",
                             Api.Endpoints.Provenance.Name(cand.Provider),
                             Path.GetFileName(targetPath), lang, Score(cand, videoBase), cand.ReleaseName,
                             string.IsNullOrEmpty(cand.OriginalName) ? "—" : cand.OriginalName,
@@ -3466,7 +3466,7 @@ public sealed class DownloadPipeline : IDisposable
                         {
                             if (row.ReportedUtc == null
                                 && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
-                                && qaRejectedReleases.Contains(row.SubdlId, StringComparer.Ordinal))
+                                && qaRejectedReleases.Contains(row.ScribeId, StringComparer.Ordinal))
                             {
                                 QueueReport(row);
                             }
@@ -3567,7 +3567,7 @@ public sealed class DownloadPipeline : IDisposable
         try
         {
             var streams = _mediaSourceManager.GetMediaStreams(item.Id);
-            var tracks = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.EmbeddedTracks(streams);
+            var tracks = Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.EmbeddedTracks(streams);
 
             // F-M263: the gate's own verdict no longer needs to be merged in here. The seeder runs the
             // gate before the queue decision and records its result in the REGISTRY; this pass reads
@@ -3601,7 +3601,7 @@ public sealed class DownloadPipeline : IDisposable
             return Enumerable.Empty<string>();
         }
 
-        return Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
+        return Jellyfin.Plugin.SubScribe.Registry.SidecarNaming
             .EmbeddedPresentLanguages(_mediaSourceManager.GetMediaStreams(item.Id));
     }
 
@@ -3617,14 +3617,14 @@ public sealed class DownloadPipeline : IDisposable
     /// </summary>
     /// <param name="targets">Configured target languages.</param>
     /// <returns>One pair per required file.</returns>
-    private List<Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef> RequiredPairs(IReadOnlyList<string> targets)
-        => Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef
+    private List<Jellyfin.Plugin.SubScribe.Registry.SubtitleRef> RequiredPairs(IReadOnlyList<string> targets)
+        => Jellyfin.Plugin.SubScribe.Registry.SubtitleRef
             .Required(targets, _config.DownloadHearingImpaired);
 
     /// <summary>
     /// F-M282: which required PAIRS have no evidence for this file.
     /// <para>
-    /// Read through the one shared reader (<see cref="Jellyfin.Plugin.SubdlScribe.Registry.SubtitleCoverage"/>),
+    /// Read through the one shared reader (<see cref="Jellyfin.Plugin.SubScribe.Registry.SubtitleCoverage"/>),
     /// so this answer and the coverage question at the top of the run can never be fed different
     /// evidence — which is precisely how a complete item used to keep looking due.
     /// </para>
@@ -3632,7 +3632,7 @@ public sealed class DownloadPipeline : IDisposable
     /// <param name="targets">Configured target languages.</param>
     /// <param name="mediaPath">Media file path.</param>
     /// <returns>Pairs without evidence.</returns>
-    private List<Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef> OpenPairs(
+    private List<Jellyfin.Plugin.SubScribe.Registry.SubtitleRef> OpenPairs(
         IReadOnlyList<string> targets, string mediaPath)
         => Registry.OpenPairs(mediaPath, RequiredPairs(targets));
 
@@ -3734,11 +3734,11 @@ public sealed class DownloadPipeline : IDisposable
 
                 var outcome = await _api.ReportBrokenSubtitleAsync(
                     meldung.NId, meldung.Category, meldung.Comment, ct).ConfigureAwait(false);
-                if (outcome == SubdlReportOutcome.Accepted)
+                if (outcome == ScribeReportOutcome.Accepted)
                 {
                     summary.Reported++;
                 }
-                else if (outcome == SubdlReportOutcome.Deferred)
+                else if (outcome == ScribeReportOutcome.Deferred)
                 {
                     summary.ReportsDeferred++;
                 }
@@ -4321,7 +4321,7 @@ public sealed class DownloadPipeline : IDisposable
         var subTokens = Tokenize(c.ReleaseName);
         score += (long)vfTokens.Intersect(subTokens, StringComparer.OrdinalIgnoreCase).Count() * _config.DownloadScoreWeightToken;
         // (19.09.2026): tie-breaker restored — the v1 client parses
-        // download_count (SubdlApiClient line ~1526), so the criterion works
+        // download_count (ScribeApiClient line ~1526), so the criterion works
         // Again; 's removal reason ("v2 carries no count") no longer applies.
         score += Math.Min(c.DownloadCount, 500) * _config.DownloadScoreWeightDownload; // capped tie-breaker
         return score;
@@ -4635,7 +4635,7 @@ public sealed class DownloadPipeline : IDisposable
         string itemId, string lang, SubtitleCandidate cand, string finding, string kind,
         DownloadRunSummary summary, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(cand.SubdlId) || string.IsNullOrWhiteSpace(finding))
+        if (string.IsNullOrEmpty(cand.ScribeId) || string.IsNullOrWhiteSpace(finding))
         {
             return;
         }
@@ -4643,11 +4643,11 @@ public sealed class DownloadPipeline : IDisposable
         _qaFails.RecordSkippedCandidates(
             itemId,
             lang,
-            new[] { cand.SubdlId },
+            new[] { cand.ScribeId },
             RejectReason.CandidateRejected,
             new Dictionary<string, ReportFacts>
             {
-                [cand.SubdlId] = new ReportFacts(cand.NId, finding, cand.ReleaseName)
+                [cand.ScribeId] = new ReportFacts(cand.NId, finding, cand.ReleaseName)
             },
             kind);
 
@@ -4661,7 +4661,7 @@ public sealed class DownloadPipeline : IDisposable
         }
 
         var row = _qaFails.GetRows(itemId, lang)
-            .FirstOrDefault(r => string.Equals(r.SubdlId, cand.SubdlId, StringComparison.Ordinal)
+            .FirstOrDefault(r => string.Equals(r.ScribeId, cand.ScribeId, StringComparison.Ordinal)
                                  && string.Equals(r.Kind, kind, StringComparison.Ordinal));
         if (row != null && row.ReportedUtc == null)
         {
@@ -4868,14 +4868,14 @@ public sealed class DownloadPipeline : IDisposable
     private async Task FileReportAsync(RejectedCandidateEntity row, string lang, DownloadRunSummary summary, CancellationToken ct)
     {
         string version = typeof(DownloadPipeline).Assembly.GetName().Version?.ToString() ?? string.Empty;
-        var text = BrokenSubtitleReports.Build(row.SubdlId, row.ReleaseName, lang, row.Finding, version, _api.AccountName);
+        var text = BrokenSubtitleReports.Build(row.ScribeId, row.ReleaseName, lang, row.Finding, version, _api.AccountName);
         if (text == null || string.IsNullOrWhiteSpace(row.NId))
         {
             return;
         }
 
         var outcome = await _api.ReportBrokenSubtitleAsync(row.NId, text.Category, text.Comment, ct).ConfigureAwait(false);
-        if (outcome == SubdlReportOutcome.Accepted)
+        if (outcome == ScribeReportOutcome.Accepted)
         {
             _qaFails.MarkReported(row);
             summary.Reported++;

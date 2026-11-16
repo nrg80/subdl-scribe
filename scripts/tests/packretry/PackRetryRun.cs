@@ -25,9 +25,9 @@
 using System;
 using System.IO;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 namespace PackRetryRun;
 
@@ -109,7 +109,7 @@ internal static class Program
 
         // ── 4. Wiring: the retry exists and is fed from the cache ───────────────
         Console.WriteLine("4. Source contract");
-        var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlApiClient.cs"));
+        var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeApiClient.cs"));
         Check(api.Contains("public List<SubtitleUnpackFile> FindUnpackFiles(int season, int episode, bool? hearingImpaired = null)", StringComparison.Ordinal),
             "the candidate publishes the retry list with the HI filter");
         Check(api.Contains("f.HearingImpaired == hearingImpaired.Value", StringComparison.Ordinal),
@@ -296,7 +296,7 @@ internal static class Program
         Check(coord.IndexOf("_registry.GetPack(key.ImdbId, key.Season, key.Lang, key.Hi)", StringComparison.Ordinal)
               < coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
             "and it decides that BEFORE anything is deleted");
-        var refresh = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlDatabaseRefreshTask.cs"));
+        var refresh = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeDatabaseRefreshTask.cs"));
         Check(refresh.Contains("registry.PruneOrphanedPacks()", StringComparison.Ordinal),
             "the database refresh prunes orphaned pack rows");
         Check(reg.Contains("public int PruneOrphanedPacks()", StringComparison.Ordinal),
@@ -315,10 +315,10 @@ internal static class Program
                  < coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
             "and it refuses BEFORE anything is deleted");
 
-        // ── 14. F-M399: nur die packs-Zeile belegt einen Pack, keine SubdlId an den Mitgliedern ──
+        // ── 14. F-M399: nur die packs-Zeile belegt einen Pack, keine ScribeId an den Mitgliedern ──
         Console.WriteLine("14. A single upload's id is not a pack");
         Check(!upload.Contains("packed.GetValueOrDefault(pair.Key) == episodes.Count", StringComparison.Ordinal),
-            "the plan no longer treats 'has a SubdlId' as 'is inside a pack'");
+            "the plan no longer treats 'has a ScribeId' as 'is inside a pack'");
         Check(!upload.Contains("inPack.Add(pair)", StringComparison.Ordinal),
             "and the member-id heuristic is gone with it");
         Check(upload.Contains("Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi)", StringComparison.Ordinal),
@@ -412,10 +412,10 @@ internal static class Program
 
         // ── 26. F-M423: bereits veröffentlichte Uploads lassen sich in die Registry übernehmen ─
         Console.WriteLine("26. Published uploads can be adopted into the registry");
-        var adopt = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlAdoptController.cs"));
+        var adopt = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeAdoptController.cs"));
         Check(adopt.Contains("AdoptUploads", StringComparison.Ordinal)
               && adopt.Contains("SubtitleStatus.Uploaded", StringComparison.Ordinal)
-              && adopt.Contains("subdlId: entry.SubdlId", StringComparison.Ordinal),
+              && adopt.Contains("subdlId: entry.ScribeId", StringComparison.Ordinal),
             "F-M423: the adoption endpoint writes an uploaded row that carries its SubDL id");
         Check(adopt.Contains("ComputeMediaHash", StringComparison.Ordinal)
               && adopt.Contains("File.Exists", StringComparison.Ordinal),
@@ -583,7 +583,7 @@ internal static class Program
             zipBytes = ms.ToArray();
         }
 
-        var unpack = typeof(SubdlApiClient).GetMethod("UnpackAsync",
+        var unpack = typeof(ScribeApiClient).GetMethod("UnpackAsync",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         // F-M450: the unpack step hands back the entry it ACTUALLY took beside the bytes, so the
         // harness reads the same tuple the client does.
@@ -635,7 +635,7 @@ internal static class Program
         string entitySource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Data", "Entities.cs"));
         Check(entitySource.Contains("public string? Fingerprint { get; set; }", StringComparison.Ordinal),
             "F-M466: the memo row carries the fingerprint");
-        string dbSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Data", "SubdlDbContext.cs"));
+        string dbSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Data", "ScribeDbContext.cs"));
         Check(dbSource.Contains("ALTER TABLE packs ADD COLUMN Fingerprint TEXT NULL;", StringComparison.Ordinal)
               && dbSource.Contains("EnsurePackColumns();", StringComparison.Ordinal),
             "F-M466: an older data file gets the column on start, guarded by the table's own column list");

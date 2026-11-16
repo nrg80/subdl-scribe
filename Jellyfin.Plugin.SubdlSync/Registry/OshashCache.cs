@@ -14,11 +14,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// Central OSHash cache backed by the plugin's data store (F-M88c, F-M119).
@@ -27,7 +27,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// so a replaced file is re-hashed automatically.
 public sealed class OshashCache
 {
-    private readonly SubdlDbContext _db;
+    private readonly ScribeDbContext _db;
     private readonly Microsoft.Extensions.Logging.ILogger? _logger;
 
     private static StringComparer PathComparer { get; } =
@@ -40,7 +40,7 @@ public sealed class OshashCache
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
-    public OshashCache(SubdlDbContext db, Microsoft.Extensions.Logging.ILogger? logger = null)
+    public OshashCache(ScribeDbContext db, Microsoft.Extensions.Logging.ILogger? logger = null)
     {
         _db = db;
         _logger = logger;

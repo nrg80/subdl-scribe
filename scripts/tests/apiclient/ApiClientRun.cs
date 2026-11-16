@@ -8,7 +8,7 @@
 // implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 //
-// F-M343: what does the BUILT SubdlApiClient actually put on the wire?
+// F-M343: what does the BUILT ScribeApiClient actually put on the wire?
 //
 // WHY THIS IS AN INTERCEPTION AND NOT A LIVE CALL. Two facts have to hold: the search URL carries
 // the integration name, and every request carries the product agent with a REAL version. A live
@@ -28,7 +28,7 @@
 using System.Net;
 using System.Net.Http;
 using System.Text;
-using Jellyfin.Plugin.SubdlScribe.Api;
+using Jellyfin.Plugin.SubScribe.Api;
 
 int failures = 0;
 
@@ -60,20 +60,20 @@ using var http = new HttpClient(new CaptureHandler(
 
 // Exactly what PluginServiceRegistrator.BuildApiClient sets on its own client, which is what the
 // login call relies on (it builds its own request and adds no header of its own).
-http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", SubdlApiClient.DefaultUserAgent);
+http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", ScribeApiClient.DefaultUserAgent);
 
-var api = new SubdlApiClient(http) { ApiKey = args[0] };
+var api = new ScribeApiClient(http) { ApiKey = args[0] };
 
 Console.WriteLine("--- the client's own identity ---");
-Console.WriteLine("   DefaultUserAgent: " + SubdlApiClient.DefaultUserAgent);
+Console.WriteLine("   DefaultUserAgent: " + ScribeApiClient.DefaultUserAgent);
 Console.WriteLine("   IntegrationClient: " + api.IntegrationClient);
 Check(api.IntegrationClient == "other", "the integration name is other", api.IntegrationClient);
-Check(SubdlApiClient.DefaultUserAgent.StartsWith("Sub Scribe/", StringComparison.Ordinal),
-    "the agent names the product, not the assembly", SubdlApiClient.DefaultUserAgent);
-Check(!SubdlApiClient.DefaultUserAgent.EndsWith("/1.0", StringComparison.Ordinal),
-    "the agent no longer reports the frozen version 1.0", SubdlApiClient.DefaultUserAgent);
-Check(SubdlApiClient.DefaultUserAgent.Contains("12.1.", StringComparison.Ordinal),
-    "the agent carries a real assembly version", SubdlApiClient.DefaultUserAgent);
+Check(ScribeApiClient.DefaultUserAgent.StartsWith("Sub Scribe/", StringComparison.Ordinal),
+    "the agent names the product, not the assembly", ScribeApiClient.DefaultUserAgent);
+Check(!ScribeApiClient.DefaultUserAgent.EndsWith("/1.0", StringComparison.Ordinal),
+    "the agent no longer reports the frozen version 1.0", ScribeApiClient.DefaultUserAgent);
+Check(ScribeApiClient.DefaultUserAgent.Contains("12.1.", StringComparison.Ordinal),
+    "the agent carries a real assembly version", ScribeApiClient.DefaultUserAgent);
 
 Console.WriteLine();
 Console.WriteLine("--- the search request ---");
@@ -92,7 +92,7 @@ foreach (var part in new[] { "imdb_id=tt0137523", "type=movie", "languages=en", 
     Check(seenUri.Contains(part, StringComparison.Ordinal), "the search still carries " + part);
 }
 
-Check(string.Equals(seenAgent, SubdlApiClient.DefaultUserAgent, StringComparison.Ordinal),
+Check(string.Equals(seenAgent, ScribeApiClient.DefaultUserAgent, StringComparison.Ordinal),
     "the request carries the plugin agent", seenAgent ?? "none");
 
 Console.WriteLine();

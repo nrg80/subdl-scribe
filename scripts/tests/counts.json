@@ -69,7 +69,7 @@
     },
     "followup": {
       "python": "scripts/tests/followup/check.py",
-      "file": "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlEventDispatcher.cs"
+      "file": "Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeEventDispatcher.cs"
     }
   },
   "tests": {

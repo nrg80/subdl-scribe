@@ -13,7 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M530: the documented shape of every field SubDL answers, checked against what actually arrived.
@@ -32,7 +32,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 /// answer to a documentation detail.
 /// </para>
 /// </summary>
-public static class SubdlFieldSchema
+public static class ScribeFieldSchema
 {
     private enum Shape
     {

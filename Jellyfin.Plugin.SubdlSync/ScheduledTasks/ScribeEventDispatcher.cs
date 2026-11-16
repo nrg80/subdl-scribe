@@ -20,9 +20,9 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Controller.Entities;
@@ -31,7 +31,7 @@ using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+namespace Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 /// <summary>
 /// (user decision 14.09.2026): the EXECUTION engine ("EventTrigger").
@@ -43,14 +43,14 @@ namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
 ///   3. Quota recovery fire → cycle (seed finds nothing → cheap no-op).
 /// Cycle = seed → downloader → uploader (sequenced per direction, user decision
 /// 13.09.2026) → new material during cycle? → repeat, else done.
-/// The WHEN belongs to the scheduler (SubdlSchedulerCoordinator): it
+/// The WHEN belongs to the scheduler (ScribeSchedulerCoordinator): it
 /// owns due times, the lock probe and the spacing deferral; this class only
 /// decides HOW a run executes once triggered.
 /// </summary>
-public sealed class SubdlEventDispatcher : IDisposable
+public sealed class ScribeEventDispatcher : IDisposable
 {
     /// <summary>The process-wide instance (static access for task entry points).</summary>
-    public static SubdlEventDispatcher? Instance { get; private set; }
+    public static ScribeEventDispatcher? Instance { get; private set; }
 
     private const string QueueFileName = "cycle-queues.json";
     private const int MaxRetries = 3;
@@ -61,7 +61,7 @@ public sealed class SubdlEventDispatcher : IDisposable
     private readonly IFileSystem _fileSystem;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger _logger;
-    private readonly SubdlSeeder _seeder;
+    private readonly ScribeSeeder _seeder;
 
     // Debounce timer (event path). First event arms it — further events do NOT
     // reset the countdown (user decision 12.09.2026).
@@ -221,15 +221,15 @@ public sealed class SubdlEventDispatcher : IDisposable
     private string PurgedPath => Path.Combine(Plugin.Instance!.DataFolderPath, "purged-items.json");
 
     /// <summary>Initializes the dispatcher (DI singleton — eager resolution via task ctors).</summary>
-    public SubdlEventDispatcher(ILibraryManager libraryManager, IProviderManager providerManager, IFileSystem fileSystem, IMediaSourceManager mediaSourceManager, ILoggerFactory loggerFactory, TmdbImdbResolver tmdb)
+    public ScribeEventDispatcher(ILibraryManager libraryManager, IProviderManager providerManager, IFileSystem fileSystem, IMediaSourceManager mediaSourceManager, ILoggerFactory loggerFactory, TmdbImdbResolver tmdb)
     {
         _libraryManager = libraryManager;
         _providerManager = providerManager;
         _fileSystem = fileSystem;
         _mediaSourceManager = mediaSourceManager;
         _loggerFactory = loggerFactory;
-        _logger = loggerFactory.CreateLogger("Jellyfin.Plugin.SubdlScribe.ScheduledTasks.SubdlEventDispatcher");
-        _seeder = new SubdlSeeder(libraryManager, mediaSourceManager, loggerFactory, tmdb);
+        _logger = loggerFactory.CreateLogger("Jellyfin.Plugin.SubScribe.ScheduledTasks.ScribeEventDispatcher");
+        _seeder = new ScribeSeeder(libraryManager, mediaSourceManager, loggerFactory, tmdb);
         _libraryManager.ItemAdded += OnItemAdded;
         LoadQueues();
         Instance = this;
@@ -584,12 +584,12 @@ public sealed class SubdlEventDispatcher : IDisposable
                 bool accepted = true;
                 if (dir != CycleDirection.DownloadOnly)
                 {
-                    accepted &= SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: true, fireAt) ?? false;
+                    accepted &= ScribeSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: true, fireAt) ?? false;
                 }
 
                 if (dir != CycleDirection.UploadOnly)
                 {
-                    accepted &= SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: false, fireAt) ?? false;
+                    accepted &= ScribeSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: false, fireAt) ?? false;
                 }
 
                 if (accepted)
@@ -682,7 +682,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         }
 
         // An ARRIVAL cycle has no waiting scheduled task to write the direction rows: Download and
-        // Upload were only ever recorded by SubdlDownloadTask/SubdlUploadTask, and an event never
+        // Upload were only ever recorded by ScribeDownloadTask/ScribeUploadTask, and an event never
         // goes through them. Observed live 03.10.2026: two real arrival cycles ran (Ted Lasso 06:40,
         // Dark Matter 09:45), both directions did their work, yet the GUI kept showing the previous
         // scheduled run — only the Seeder row moved. The dispatcher therefore records those two rows
@@ -980,7 +980,7 @@ public sealed class SubdlEventDispatcher : IDisposable
             return false;
         }
 
-        if (SubdlSchedulerCoordinator.Instance?.IsLibraryScanRunning() != true)
+        if (ScribeSchedulerCoordinator.Instance?.IsLibraryScanRunning() != true)
         {
             return false;
         }
@@ -998,7 +998,7 @@ public sealed class SubdlEventDispatcher : IDisposable
         // survives a restart; the timer did none of the three, because GetPendingFires only knows
         // the coordinator's own fires and a Timer is disposed with the process.
         var fireAt = DateTime.UtcNow.AddMinutes(minutes);
-        var coord = SubdlSchedulerCoordinator.Instance;
+        var coord = ScribeSchedulerCoordinator.Instance;
         bool armedDown = dir != CycleDirection.UploadOnly
             && coord?.ScheduleScanDeferFire(upload: false, fireAt, minutes) == true;
         bool armedUp = dir != CycleDirection.DownloadOnly
@@ -1502,7 +1502,7 @@ public sealed class SubdlEventDispatcher : IDisposable
     private void ScheduleLockRetry(PluginConfiguration config, bool upload)
     {
         var fireAt = DateTime.UtcNow.AddMinutes(Math.Max(1, config.JobSpacingMinutes));
-        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload, fireAt);
+        ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload, fireAt);
         _logger.LogWarning("[Sub Scribe] {Dir} skipped by global run lock — self re-fire at {FireLocal} local (F-M146).", upload ? "Upload" : "Download", fireAt.ToLocalTime());
     }
 
@@ -2254,12 +2254,12 @@ public sealed class SubdlEventDispatcher : IDisposable
             var spacingSeed = Math.Clamp(Plugin.Instance?.Configuration.JobSpacingMinutes ?? 15, 5, 120);
             if (dir != CycleDirection.UploadOnly)
             {
-                SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: false, DateTime.UtcNow.AddMinutes(spacingSeed));
+                ScribeSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: false, DateTime.UtcNow.AddMinutes(spacingSeed));
             }
 
             if (dir != CycleDirection.DownloadOnly)
             {
-                SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: true, DateTime.UtcNow.AddMinutes(spacingSeed));
+                ScribeSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: true, DateTime.UtcNow.AddMinutes(spacingSeed));
             }
 
             // Lock busy → the direction is pushed forward: a deferral, not a run. The seeder never

@@ -22,11 +22,11 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
-using Jellyfin.Plugin.SubdlScribe.Registry;
-using Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Registry;
+using Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 internal static class RunOnce
 {
@@ -50,7 +50,7 @@ internal static class RunOnce
         string work = Path.Combine(root, "item.mkv");
         BuildProbe(work, ffmpeg);   // eigene Probe: 2 grosse Spuren + 1 zu kleine
 
-        using var db = new SubdlDbContext(Path.Combine(root, "db"), null);
+        using var db = new ScribeDbContext(Path.Combine(root, "db"), null);
         var reg = new ContentHashRegistry(db, null, null);
         var cfg = new PluginConfiguration { LogMode = LogLevelMode.Verbose, AllocateMissingLanguageCodes = true };
         var log = new RecLogger();
@@ -125,7 +125,7 @@ internal static class RunOnce
         Console.WriteLine("Lauf 1: " + ur1.Written + " geschrieben, " + uAttempts1 + " Spur(en) nicht aufloesbar");
 
         // Der Seeder zieht die Zeilen auf den neuen Hash — die Vermerke muessen mitwandern.
-        // Reihenfolge wie in SubdlSeeder.AllocateMissingLanguageCodes: erst der Umzug, DANN den
+        // Reihenfolge wie in ScribeSeeder.AllocateMissingLanguageCodes: erst der Umzug, DANN den
         // aktuellen Hash lesen. Andersherum haelt uCur den ALTEN Hash, die Marker suchen am neuen
         // und der Test scheitert an seinem eigenen Aufbau statt am Code.
         if (ur1.OldHash != null && ur1.NewHash != null) reg.ReplaceMediaIdentity(ur1.OldHash, ur1.NewHash);
@@ -261,13 +261,13 @@ internal static class RunOnce
         Console.WriteLine();
         Console.WriteLine("=== F-M269: Refresh-Detailzeile ===");
 
-        string dClean = SubdlDatabaseRefreshTask.BuildRefreshDetail(
+        string dClean = ScribeDatabaseRefreshTask.BuildRefreshDetail(
             null, 33, 10, 0, 0, 450, null);
-        string dRebuilt = SubdlDatabaseRefreshTask.BuildRefreshDetail(
+        string dRebuilt = ScribeDatabaseRefreshTask.BuildRefreshDetail(
             null, 33, 10, 0, 0, 450, "compaction failed — rebuilt from own rows (12419072 -> 8249344 bytes)");
-        string dNothing = SubdlDatabaseRefreshTask.BuildRefreshDetail(
+        string dNothing = ScribeDatabaseRefreshTask.BuildRefreshDetail(
             null, 0, 0, 0, 0, 0, null);
-        string dFailed = SubdlDatabaseRefreshTask.BuildRefreshDetail(
+        string dFailed = ScribeDatabaseRefreshTask.BuildRefreshDetail(
             new InvalidOperationException("boom"), 0, 0, 0, 0, 0, null);
 
         Console.WriteLine("  sauber       : \"" + dClean + "\"");

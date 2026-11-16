@@ -14,7 +14,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// Which subtitle DATA are covered for one media file — the ONE answer every reader asks.

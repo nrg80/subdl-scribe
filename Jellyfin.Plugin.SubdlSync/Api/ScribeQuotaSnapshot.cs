@@ -13,7 +13,7 @@ using System;
 using System.Globalization;
 using System.Text.Json;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M238: the two SubDL allowances, read from <c>GET /api/v2/me</c> — the same
@@ -29,7 +29,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 /// allowance is still spent and the fire would only burn another request.
 /// </para>
 /// </summary>
-public sealed class SubdlQuotaSnapshot
+public sealed class ScribeQuotaSnapshot
 {
     /// <summary>Gets or sets the search requests used today.</summary>
     public int SearchUsed { get; set; }
@@ -82,7 +82,7 @@ public sealed class SubdlQuotaSnapshot
     /// </summary>
     /// <param name="json">Response body.</param>
     /// <returns>Snapshot, or null when the body is not a usable quota object.</returns>
-    public static SubdlQuotaSnapshot? FromJson(string json)
+    public static ScribeQuotaSnapshot? FromJson(string json)
     {
         if (string.IsNullOrWhiteSpace(json))
         {
@@ -98,7 +98,7 @@ public sealed class SubdlQuotaSnapshot
                 return null;
             }
 
-            var snap = new SubdlQuotaSnapshot();
+            var snap = new ScribeQuotaSnapshot();
 
             // The counters sit under "usage" on v2; accept the flat legacy shape too,
             // because the endpoint decides the shape and a silent zero would be

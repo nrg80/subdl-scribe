@@ -12,11 +12,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// Per-file download search tracker.
@@ -35,7 +35,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// </summary>
 public sealed class DownloadSearchTracker
 {
-    private readonly SubdlDbContext _db;
+    private readonly ScribeDbContext _db;
     private readonly ILogger? _logger;
 
     /// <summary>
@@ -43,7 +43,7 @@ public sealed class DownloadSearchTracker
     /// </summary>
     /// <param name="db">Database context.</param>
     /// <param name="logger">Optional logger.</param>
-    public DownloadSearchTracker(SubdlDbContext db, ILogger? logger = null)
+    public DownloadSearchTracker(ScribeDbContext db, ILogger? logger = null)
     {
         _db = db;
         _logger = logger;

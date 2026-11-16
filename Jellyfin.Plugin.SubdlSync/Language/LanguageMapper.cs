@@ -12,7 +12,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Jellyfin.Plugin.SubdlScribe.Language;
+namespace Jellyfin.Plugin.SubScribe.Language;
 
 /// <summary>
 /// Maps ISO 639-2 (ffprobe/MediaBrowser) three-letter codes to SubDL two-letter codes (F-M10).

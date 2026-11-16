@@ -16,13 +16,13 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Api;
+using Jellyfin.Plugin.SubScribe.Api;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Filters;
-using Jellyfin.Plugin.SubdlScribe.Language;
-using Jellyfin.Plugin.SubdlScribe.Registry;
-using Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Filters;
+using Jellyfin.Plugin.SubScribe.Language;
+using Jellyfin.Plugin.SubScribe.Registry;
+using Jellyfin.Plugin.SubScribe.ScheduledTasks;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
@@ -31,9 +31,9 @@ using MediaBrowser.Controller.Persistence;
 using MediaBrowser.Model.Entities;
 using Episode = MediaBrowser.Controller.Entities.TV.Episode;
 using Movie = MediaBrowser.Controller.Entities.Movies.Movie;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// Summary of one pipeline run (F-M23 basis).
@@ -166,7 +166,7 @@ public sealed class UploadPipeline : IPackFiller
     private readonly ILogger<UploadPipeline> _logger;
     private readonly ILibraryManager _libraryManager;
     private readonly IMediaSourceManager _mediaSourceManager;
-    private readonly SubdlApiClient _api;
+    private readonly ScribeApiClient _api;
     /// <summary>Always use the current Plugin.Instance registry so a DB reset is respected.</summary>
     private ContentHashRegistry Registry => Plugin.Instance?.Registry ?? throw new InvalidOperationException("Plugin not initialized");
     private readonly TmdbImdbResolver _tmdb;
@@ -340,7 +340,7 @@ public sealed class UploadPipeline : IPackFiller
         ILogger<UploadPipeline> logger,
         ILibraryManager libraryManager,
         IMediaSourceManager mediaSourceManager,
-        SubdlApiClient api,
+        ScribeApiClient api,
         TmdbImdbResolver tmdb,
         PluginConfiguration config,
         GlobalRateLimiter limiter)
@@ -358,7 +358,7 @@ public sealed class UploadPipeline : IPackFiller
         _ffmpegPath = FfmpegTools.ResolvePath(config, logger);
 
         // F-M501: EIN Client und EIN Auflöser für den ganzen Lauf — siehe die Feldbemerkungen oben.
-        _tvstClient = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        _tvstClient = new Api.TvSubtitlesClient(ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
 
         // F-M521 (Operator-Anweisung 17.11.2026: „Und logging für uploads?"): the upload direction of
         // the tvst family is traced too — the same two Debug lines per request as SubDL, so an upload
@@ -367,7 +367,7 @@ public sealed class UploadPipeline : IPackFiller
         _tvstShows = new Api.Endpoints.TvstShowResolver(_tvstClient, logger);
 
         // F-M508: dasselbe für die Film-Adresse der Familie — ein Client, ein Auflöser, ein Lauf.
-        _msubClient = new Api.MovieSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        _msubClient = new Api.MovieSubtitlesClient(ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
         _msubClient.DebugTrace += OnApiTrace;
         _msubMovies = new Api.Endpoints.MsubMovieResolver(_msubClient, logger);
     }
@@ -386,7 +386,7 @@ public sealed class UploadPipeline : IPackFiller
         // an order left over from an earlier run is dropped the moment THIS run starts. It would fire
         // against state this run is about to change, and the run's own end sets the new moment — so the
         // order is cancelled here and armed again in the finally below.
-        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.CancelUploadPostprocessing("upload run started");
+        ScheduledTasks.ScribeSchedulerCoordinator.Instance?.CancelUploadPostprocessing("upload run started");
 
         // F-M501: die Anlege-Sperre der tvst-Serienauflösung gilt je Lauf, nicht je Prozess — hier ist
         // der Anfang des Laufs, also hier wird sie geleert.
@@ -409,7 +409,7 @@ public sealed class UploadPipeline : IPackFiller
         {
             summary.SkippedByLock = true;
             var spacingUp = JobSpacingMinutes();
-            ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: true, DateTime.UtcNow.AddMinutes(spacingUp));
+            ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: true, DateTime.UtcNow.AddMinutes(spacingUp));
             LogUtil.Normal(_logger, "[Sub Scribe] Upload deferred by {Spacing} min — global run lock busy.", spacingUp);
             return summary;
         }
@@ -644,7 +644,7 @@ public sealed class UploadPipeline : IPackFiller
                 if (_api.TransientOverload)
                 {
                     _logger.LogWarning("[Sub Scribe] {Msg}", ex.Message);
-                    ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: true, DateTime.UtcNow);
+                    ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: true, DateTime.UtcNow);
                     return summary;
                 }
 
@@ -807,7 +807,7 @@ public sealed class UploadPipeline : IPackFiller
             // F-M60 REMOVED (operator order 08.10.2026: "Dann bitte file-retry weg in code und gui.
             // Alleinige Aufgabe database refresh."). The file-missing give-up is no longer the
             // pipeline's job: the SEEDER already refuses an item whose file is gone
-            // (SubdlSeeder.Scan: `!File.Exists(mediaPath)` -> continue), so a dead catalog entry
+            // (ScribeSeeder.Scan: `!File.Exists(mediaPath)` -> continue), so a dead catalog entry
             // never reaches this loop, and what the counter used to clean up — the registry rows and
             // the OSHash entry of a vanished file — is now the DATABASE REFRESH's phase 3b
             // (PruneMissingPathMediaAndSubtitles, behind the same RootsUsable fail-safe as its
@@ -1060,7 +1060,7 @@ public sealed class UploadPipeline : IPackFiller
                 .Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal)
                 .ToList() ?? new List<MediaStream>();
             var textStreams = allSubs
-                .Where(Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream)
+                .Where(Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream)
                 .ToList();
 
             // ============================================================
@@ -1186,7 +1186,7 @@ public sealed class UploadPipeline : IPackFiller
                         // One row, one verdict: the stream is rejected with und-off. There is no
                         // second "settled" row to keep in sync — terminality is derived from this one.
                         Registry.MarkAndFlush(() => Registry.MarkEmbed(
-                            mediaHash, subPos, "UN", Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream),
+                            mediaHash, subPos, "UN", Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream),
                             SubtitleStatus.Rejected, reason: RejectReason.UndOff));
                         continue;
                     }
@@ -1206,7 +1206,7 @@ public sealed class UploadPipeline : IPackFiller
                     summary.SkippedStreams++;
                     summary.RejectedCandidates++; // F-M286
                     Registry.MarkAndFlush(() => Registry.MarkEmbed(
-                        mediaHash, subPos, rawLang, Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream),
+                        mediaHash, subPos, rawLang, Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream),
                         SubtitleStatus.Rejected, reason: RejectReason.UnmappedLanguage));
                     // F-M255: the registry row above is not visible in the log — name the tag.
                     LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] SKIP {File} s{Pos} — unmappable language tag {Tag}", Path.GetFileName(mediaPath), subPos, rawLang);
@@ -1215,7 +1215,7 @@ public sealed class UploadPipeline : IPackFiller
 
                 // F-M4/F-M61: dedup — (media content hash, language) pair already uploaded?
                 // F-M71: HI variants have their own key space — a normal upload never blocks an SDH variant.
-                bool streamHi = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream);
+                bool streamHi = Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream);
                 if (!AnyUploadSourceStillWants(mediaHash, lang, streamHi, isSeries))
                 {
                     // Pair already up. This position is NOT uploaded by itself, so it does not get
@@ -1324,7 +1324,7 @@ public sealed class UploadPipeline : IPackFiller
                         // otherwise und-skips never learn a pair and the file is re-walked forever.
                         string undContentHashFm87 = ContentHashRegistry.ComputeHash(srt);
                         Registry.MarkAndFlush(() => Registry.MarkEmbed(
-                            mediaHash, subPos, "UN", Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream),
+                            mediaHash, subPos, "UN", Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream),
                             SubtitleStatus.Rejected, contentHash: undContentHashFm87, reason: RejectReason.UndTooSmall));
                         continue;
                     }
@@ -1339,7 +1339,7 @@ public sealed class UploadPipeline : IPackFiller
                         // Same — persist detection failures so files can complete.
                         string undContentHashFm87 = ContentHashRegistry.ComputeHash(srt);
                         Registry.MarkAndFlush(() => Registry.MarkEmbed(
-                            mediaHash, subPos, "UN", Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream),
+                            mediaHash, subPos, "UN", Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream),
                             SubtitleStatus.Rejected, contentHash: undContentHashFm87, reason: RejectReason.UndDetectionFailed));
                         continue;
                     }
@@ -1959,7 +1959,7 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     _logger.LogWarning("[Sub Scribe] Upload hourly cap (500/h) — run stopped, next hourly budget.");
                     _api.ResetHourlyCapFlag();
-                    ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: true, DateTime.UtcNow);
+                    ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: true, DateTime.UtcNow);
                     return summary;
                 }
 
@@ -1979,7 +1979,7 @@ public sealed class UploadPipeline : IPackFiller
                     }
                     else
                     {
-                        var fireInfoUp = ScheduledTasks.SubdlSchedulerCoordinator.Instance?.GetPendingFireUtc(upload: true);
+                        var fireInfoUp = ScheduledTasks.ScribeSchedulerCoordinator.Instance?.GetPendingFireUtc(upload: true);
                         _logger.LogWarning("[Sub Scribe] SubDL account daily limit (HTTP 429) — stopping upload run early. Restart: {FireLocal} local time.{Pending}",
                             fireInfoUp?.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) ?? "see scheduler log", fireInfoUp.HasValue ? string.Empty : " (no pending fire — will re-fire at next scheduled run)");
                         summary.QuotaStopped++;
@@ -2094,12 +2094,12 @@ public sealed class UploadPipeline : IPackFiller
             // with the run it belonged to. The next regular upload run arms it again.
             if (summary.StopRequested)
             {
-                ScheduledTasks.SubdlSchedulerCoordinator.Instance?.CancelUploadPostprocessing(
+                ScheduledTasks.ScribeSchedulerCoordinator.Instance?.CancelUploadPostprocessing(
                     $"upload run stopped by the user ({summary.Uploaded} uploaded)");
             }
             else if (summary.Uploaded > 0)
             {
-                ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ArmUploadPostprocessing(
+                ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ArmUploadPostprocessing(
                     $"upload run ended ({summary.Uploaded} uploaded)");
             }
             else
@@ -2144,7 +2144,7 @@ public sealed class UploadPipeline : IPackFiller
         }
 
         // F-M71: forward the SDH detection (embedded stream title) — dead-code path kept consistent.
-        return await UploadSrtContentAsync(null, mediaPath, lang, imdbId, season, episode, isSeries, mediaHash, ct, srt, runtimeMs, hearingImpaired: Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream), subPos: subPos).ConfigureAwait(false);
+        return await UploadSrtContentAsync(null, mediaPath, lang, imdbId, season, episode, isSeries, mediaHash, ct, srt, runtimeMs, hearingImpaired: Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream), subPos: subPos).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -2277,8 +2277,8 @@ public sealed class UploadPipeline : IPackFiller
     /// them would put the raw take up next to the corrected one under the same episode.
     /// </remarks>
     public static List<(string Path, string Lang, bool HearingImpaired, bool Forced)> FindLooseSrts(string mediaPath)
-        => Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.List(mediaPath)
-            .Where(x => !Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsOriginalSidecar(x.Path, mediaPath))
+        => Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.List(mediaPath)
+            .Where(x => !Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsOriginalSidecar(x.Path, mediaPath))
             .ToList();
 
     /// <summary>
@@ -2359,7 +2359,7 @@ public sealed class UploadPipeline : IPackFiller
     /// </remarks>
     /// <summary>
     /// F-M350: the frame rate code this item's video reports. Hands BOTH rates to
-    /// <see cref="SubdlFramerate.CodeFor(double?, double?)"/>, which takes the average first and falls
+    /// <see cref="ScribeFramerate.CodeFor(double?, double?)"/>, which takes the average first and falls
     /// back to the real rate when the average is not a rate at all (measured on the operator's library:
     /// 27 files report 1000 in the average field with a correct real rate). Wrapped because
     /// GetMediaStreams can throw for an item that is being re-scanned, and a missing rate must cost a
@@ -2377,14 +2377,14 @@ public sealed class UploadPipeline : IPackFiller
                 .FirstOrDefault(s => s.Type == MediaStreamType.Video);
             if (video == null)
             {
-                return SubdlFramerate.Unknown;
+                return ScribeFramerate.Unknown;
             }
 
-            return SubdlFramerate.CodeFor(video.AverageFrameRate, video.RealFrameRate);
+            return ScribeFramerate.CodeFor(video.AverageFrameRate, video.RealFrameRate);
         }
         catch
         {
-            return SubdlFramerate.Unknown;
+            return ScribeFramerate.Unknown;
         }
     }
 
@@ -2436,7 +2436,7 @@ public sealed class UploadPipeline : IPackFiller
     {
         // F-M119 (user decision 14.09.2026): the uploader is LAZY-ONLY — it trusts
         // the cache until a size+mtime fingerprint mismatch (the OshashRefresh
-        // cadence is enforced by the scheduler-driven SubdlOshashRefreshTask on
+        // cadence is enforced by the scheduler-driven ScribeOshashRefreshTask on
         // its own diced WEEKLY anchor, NOT here). Cache miss (file never seen) →
         // compute self-healing so brand-new uploads keep working.
         long size = new System.IO.FileInfo(mediaPath).Length;
@@ -2482,7 +2482,7 @@ public sealed class UploadPipeline : IPackFiller
         bool hearingImpaired = false,
         int subPos = -1,
         bool forced = false,
-        string framerate = SubdlFramerate.Unknown)
+        string framerate = ScribeFramerate.Unknown)
     {
         // F-M429 (operator order 03.11.2026): a position a pack of this run already carries is not
         // uploaded single. The pack is the only carrier — a second copy beside it would be the very
@@ -2750,8 +2750,8 @@ public sealed class UploadPipeline : IPackFiller
 
                 // F-M532: die Upload-Antwort wird genauso geprueft. Ist die Gestalt falsch, wird sie
                 // gemeldet und die Id NICHT gelesen — der Eintrag bleibt ohne Id statt mit geratener.
-                bool antwortInOrdnung = !Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.Emit(
-                    Jellyfin.Plugin.SubdlScribe.Api.SubdlFieldSchema.CheckUploadAnswer(root), "upload answer");
+                bool antwortInOrdnung = !Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.Emit(
+                    Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.CheckUploadAnswer(root), "upload answer");
                 if (antwortInOrdnung
                     && root.TryGetProperty("subtitle", out var subEl)
                     && subEl.ValueKind == System.Text.Json.JsonValueKind.Object)
@@ -2927,7 +2927,7 @@ public sealed class UploadPipeline : IPackFiller
         if (read == QuotaRead.Available)
         {
             _api.ResetRateLimitFlag();
-            ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: true, DateTime.UtcNow);
+            ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: true, DateTime.UtcNow);
             _logger.LogWarning(
                 "[Sub Scribe] 429 is a short-term rate limit — search allowance still has {Remaining}/{Limit} left; "
                 + "run respaced by JobSpacingMinutes, items stay due (F-M238).",
@@ -2965,7 +2965,7 @@ public sealed class UploadPipeline : IPackFiller
         // F-M152 (rev.10): anchor = server reset (exact, from v2 headers) or
         // fail-safe next 00:00 UTC. No local dicing - the coordinator adds the
         // 30..300 min jitter per fire (direction-independent; the coordinator's dice,
-        // SubdlSchedulerCoordinator. F-M152). Not to be confused with the plain deferral
+        // ScribeSchedulerCoordinator. F-M152). Not to be confused with the plain deferral
         // (F-M26b), which offsets by JobSpacingMinutes.
         var effectiveReset = _api.Edge429NoHeaders || !_api.RateLimitResetUtc.HasValue
             ? NextMidnightUtc()
@@ -2977,10 +2977,10 @@ public sealed class UploadPipeline : IPackFiller
         // download twin: 21.09. reset 02:00 local → fire 02:00 local, +0 min).
         // ScheduleRecoveryFire lets the coordinator dice 30..300 min per fire (crypto
         // RNG, direction-independent), keeping this installation off the 00:00 UTC herd.
-        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFire(upload: true, effectiveReset.ToUniversalTime());
+        ScheduledTasks.ScribeSchedulerCoordinator.Instance?.ScheduleRecoveryFire(upload: true, effectiveReset.ToUniversalTime());
 
         string resetLocal = TimeZoneInfo.ConvertTimeFromUtc(effectiveReset, TimeZoneInfo.Local).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
-        var fireInfo = ScheduledTasks.SubdlSchedulerCoordinator.Instance?.GetPendingFireUtc(upload: true);
+        var fireInfo = ScheduledTasks.ScribeSchedulerCoordinator.Instance?.GetPendingFireUtc(upload: true);
         _logger.LogWarning(
             "[Sub Scribe] Account daily limit reached - run stopped; reset ~{ResetLocal} local, recovery fire ~{Next} local (F-M152, F-M182).",
             resetLocal,
@@ -4083,7 +4083,7 @@ public sealed class UploadPipeline : IPackFiller
         // F-M391: the id of the single upload this member replaces travels with the candidate, so the
         // coordinator can delete it BEFORE the pack goes up. Empty means "no single to remove" — the
         // row may be a download, or an upload whose answer carried no id.
-        string? absorbed = uploadedRow?.SubdlId;
+        string? absorbed = uploadedRow?.ScribeId;
         return PackCandidate(
             item, mediaHash, imdbId, TmdbOfEpisode(item), season, episode, lang, hearingImpaired,
             forced: false, subPos, srt, mediaPath, GetFramerateCode(item), width, height, codec,
@@ -4194,7 +4194,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 if (stream.Type != MediaStreamType.Subtitle
                     || stream.IsExternal
-                    || !Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream(stream))
+                    || !Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream(stream))
                 {
                     continue;
                 }
@@ -4202,7 +4202,7 @@ public sealed class UploadPipeline : IPackFiller
                 string? code = LanguageMapper.MapToSubdl(stream.Language);
                 if (!string.IsNullOrWhiteSpace(code))
                 {
-                    pairs.Add((code!, Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream)));
+                    pairs.Add((code!, Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream)));
                 }
             }
         }
@@ -4313,8 +4313,8 @@ public sealed class UploadPipeline : IPackFiller
         {
             var stream = allSubs[i];
             if (stream.IsExternal
-                || !Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream(stream)
-                || Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream) != hearingImpaired
+                || !Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream(stream)
+                || Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream) != hearingImpaired
                 || !string.Equals(LanguageMapper.MapToSubdl(stream.Language), lang, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
@@ -4477,7 +4477,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 foreach (var stream in streams)
                 {
-                    if (!Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsDialogueStream(stream))
+                    if (!Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream(stream))
                     {
                         continue;
                     }
@@ -4495,7 +4495,7 @@ public sealed class UploadPipeline : IPackFiller
 
                     pairs.Add((
                         mapped.ToUpperInvariant(),
-                        Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream)));
+                        Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream)));
                 }
             }
         }
@@ -4602,7 +4602,7 @@ public sealed class UploadPipeline : IPackFiller
             foreach (var pair in seen.Where(p => p.Value == episodes.Count))
             {
                 // F-M399 (operator doubt 02.11.2026, confirmed): the packs row is the ONLY proof. The
-                // second proof this used to accept — "every episode carries a SubdlId" — was wrong: a
+                // second proof this used to accept — "every episode carries a ScribeId" — was wrong: a
                 // single upload writes its own id there too, so a season whose episodes all went up
                 // alone looked "already packed" and was never packed at all. 98 seasons were reported
                 // as inside a pack that never existed.
@@ -4888,7 +4888,7 @@ public sealed class UploadPipeline : IPackFiller
         if (!await Pipeline.PipelineRunLock.AcquireAsync(logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, "postprocessing", CancellationToken.None).ConfigureAwait(false))
         {
             var spacing = JobSpacingMinutes();
-            SubdlSchedulerCoordinator.Instance?.SchedulePostprocessFire(DateTime.UtcNow.AddMinutes(spacing));
+            ScribeSchedulerCoordinator.Instance?.SchedulePostprocessFire(DateTime.UtcNow.AddMinutes(spacing));
             LogUtil.Normal(logger, "[Sub Scribe] Postprocessing deferred by {Spacing} min (global lock busy).", spacing);
             return;
         }
@@ -4961,8 +4961,8 @@ public sealed class UploadPipeline : IPackFiller
             var ct = runCts.Token;
 
             // F-M343: same client identity as every other SubDL call.
-            var http = SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(30));
-            var api = new SubdlApiClient(http)
+            var http = ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(30));
+            var api = new ScribeApiClient(http)
             {
                 Username = cfg.Username,
                 Password = cfg.Password,

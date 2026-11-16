@@ -13,23 +13,23 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// Manual trigger for upload postprocessing and debug endpoint for diagnostics.
 /// </summary>
 [ApiController]
 [Route("Plugins/SubdlSync")]
-public class SubdlPostprocessController : ControllerBase
+public class ScribePostprocessController : ControllerBase
 {
-    private readonly ILogger<SubdlPostprocessController> _logger;
+    private readonly ILogger<ScribePostprocessController> _logger;
 
-    public SubdlPostprocessController(ILogger<SubdlPostprocessController> logger)
+    public ScribePostprocessController(ILogger<ScribePostprocessController> logger)
     {
         _logger = logger;
     }
@@ -70,8 +70,8 @@ public class SubdlPostprocessController : ControllerBase
 
         var cfg = plugin.Configuration;
         // F-M343: this client also logs in, and the login call adds no per-request agent of its own.
-        using var http = SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(60));
-        var api = new SubdlApiClient(http)
+        using var http = ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(60));
+        var api = new ScribeApiClient(http)
         {
             Username = cfg.Username,
             Password = cfg.Password,
@@ -94,7 +94,7 @@ public class SubdlPostprocessController : ControllerBase
         int page = 1;
         bool more = true;
         bool paginationUnsupported = false;
-        // SubDL ignores page/per_page (see SubdlApiClient.ListMySubtitlesAsync), so every "page"
+        // SubDL ignores page/per_page (see ScribeApiClient.ListMySubtitlesAsync), so every "page"
         // returns the same list. Count distinct upload ids and stop at the first page without new ones.
         while (more && page <= Math.Max(1, pages))
         {

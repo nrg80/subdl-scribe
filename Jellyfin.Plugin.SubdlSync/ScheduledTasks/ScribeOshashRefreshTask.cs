@@ -15,13 +15,13 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+namespace Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 /// <summary>
 /// F-M119 (user decision 14.09.2026): OSHash refresh is a SCHEDULER job, not a
@@ -39,15 +39,15 @@ namespace Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
 /// Holds the global pipeline run lock for the whole pass (registry mutation —
 /// same rationale as the prune, F-M94h).
 /// </summary>
-public class SubdlOshashRefreshTask : IScheduledTask
+public class ScribeOshashRefreshTask : IScheduledTask
 {
-    private readonly ILogger<SubdlOshashRefreshTask> _logger;
+    private readonly ILogger<ScribeOshashRefreshTask> _logger;
     private readonly ILibraryManager _libraryManager;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SubdlOshashRefreshTask"/> class.
+    /// Initializes a new instance of the <see cref="ScribeOshashRefreshTask"/> class.
     /// </summary>
-    public SubdlOshashRefreshTask(ILibraryManager libraryManager, ILogger<SubdlOshashRefreshTask> logger)
+    public ScribeOshashRefreshTask(ILibraryManager libraryManager, ILogger<ScribeOshashRefreshTask> logger)
     {
         _libraryManager = libraryManager;
         _logger = logger;
@@ -112,7 +112,7 @@ public class SubdlOshashRefreshTask : IScheduledTask
         if (!await Pipeline.PipelineRunLock.AcquireAsync(_logger, "oshash-refresh", cancellationToken).ConfigureAwait(false))
         {
             var spacing = JobSpacingMinutes();
-            SubdlSchedulerCoordinator.Instance?.ScheduleOshashFire(DateTime.UtcNow.AddMinutes(spacing));
+            ScribeSchedulerCoordinator.Instance?.ScheduleOshashFire(DateTime.UtcNow.AddMinutes(spacing));
             _logger.LogWarning("[Sub Scribe-OshashRefresh] Deferred — global run lock busy; re-fire scheduled in {Spacing} min.", spacing);
             // Lock busy is a DEFERRAL, not a switch-off: the work is pending and will retry, so the
             // light is yellow. Grey stays for "disabled" and "never run".
@@ -201,7 +201,7 @@ public class SubdlOshashRefreshTask : IScheduledTask
         }
     }
 
-    private Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration? _config() => Plugin.Instance?.Configuration;
+    private Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration? _config() => Plugin.Instance?.Configuration;
 
     private static int JobSpacingMinutes()
     {

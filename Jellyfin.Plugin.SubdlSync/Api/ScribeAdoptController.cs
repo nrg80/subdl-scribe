@@ -13,14 +13,14 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Registry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M423 (operator order 02.11.2026): adopts uploads this account already published before the plugin
@@ -41,15 +41,15 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 /// </summary>
 [ApiController]
 [Route("Plugins/SubdlSync")]
-public class SubdlAdoptController : ControllerBase
+public class ScribeAdoptController : ControllerBase
 {
-    private readonly ILogger<SubdlAdoptController> _logger;
+    private readonly ILogger<ScribeAdoptController> _logger;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SubdlAdoptController"/> class.
+    /// Initializes a new instance of the <see cref="ScribeAdoptController"/> class.
     /// </summary>
     /// <param name="logger">Logger.</param>
-    public SubdlAdoptController(ILogger<SubdlAdoptController> logger)
+    public ScribeAdoptController(ILogger<ScribeAdoptController> logger)
     {
         _logger = logger;
     }
@@ -89,7 +89,7 @@ public class SubdlAdoptController : ControllerBase
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(entry.SubdlId))
+            if (string.IsNullOrWhiteSpace(entry.ScribeId))
             {
                 noId++;
                 continue;
@@ -122,7 +122,7 @@ public class SubdlAdoptController : ControllerBase
                 entry.Language,
                 entry.HearingImpaired,
                 SubtitleStatus.Uploaded,
-                subdlId: entry.SubdlId);
+                subdlId: entry.ScribeId);
             adopted++;
             files.Add(entry.Path);
         }
@@ -150,11 +150,11 @@ public class SubdlAdoptController : ControllerBase
 /// <param name="Path">Absolute path of the media file the subtitle came from.</param>
 /// <param name="SubPos">ffmpeg subtitle stream position (0:s:N) inside that file.</param>
 /// <param name="Language">SubDL language code.</param>
-/// <param name="SubdlId">SubDL id of the published single.</param>
+/// <param name="ScribeId">SubDL id of the published single.</param>
 /// <param name="HearingImpaired">True when the published single is the SDH/HI variant.</param>
 public sealed record AdoptEntry(
     string Path,
     int SubPos,
     string Language,
-    string SubdlId,
+    string ScribeId,
     bool HearingImpaired = false);

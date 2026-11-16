@@ -13,7 +13,7 @@ using System;
 using System.IO;
 using System.Threading;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// (20.09.2026): file-based stop signal. A marker file tells the running

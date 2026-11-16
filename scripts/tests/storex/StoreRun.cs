@@ -21,8 +21,8 @@
 //
 // Usage: storun <workdir>
 
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 if (args.Length == 0)
 {
@@ -65,7 +65,7 @@ var dbPath = DbFiles.PathIn(workdir);
 // ---------------------------------------------------------------------------------------------
 // Seed a store that looks like a real one: media, embedded tracks, sidecars, counters, status.
 // ---------------------------------------------------------------------------------------------
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     for (int i = 0; i < 5; i++)
     {
@@ -79,7 +79,7 @@ using (var db = new SubdlDbContext(workdir, null))
         });
         db.Embeds.Upsert(new EmbedTrackEntity
         {
-            Id = SubdlDbContext.EmbedKey("m" + i, 0),
+            Id = ScribeDbContext.EmbedKey("m" + i, 0),
             MediaHash = "m" + i,
             SubPos = 0,
             Language = "EN",
@@ -99,16 +99,16 @@ using (var db = new SubdlDbContext(workdir, null))
 
     db.RejectedCandidates.Upsert(new RejectedCandidateEntity
     {
-        Id = SubdlDbContext.CandidateKey("x", "EN", "42-43"),
+        Id = ScribeDbContext.CandidateKey("x", "EN", "42-43"),
         ItemId = "x",
         Language = "EN",
-        SubdlId = "42-43",
+        ScribeId = "42-43",
         Reason = "candidate-rejected",
     });
 }
 
 Console.WriteLine("--- seeded ---");
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     Console.WriteLine("   media=" + db.Media.Count() + " embeds=" + db.Embeds.Count()
         + " sidecars=" + db.Sidecars.Count() + " counters=" + db.Counters.Count()
@@ -125,7 +125,7 @@ var walPath = DbFiles.SidePath(dbPath, "-wal");
 // The mode is asserted from the FILE, not from the code that sets it: a pragma that silently did
 // not take is worse than one never set, because the backup and restore paths are written against
 // this behaviour. Measured by reading `PRAGMA journal_mode` back through the live context.
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     var mode = db.ReadJournalMode();
     Console.WriteLine("   journal_mode reported by the file: " + mode);
@@ -160,7 +160,7 @@ Console.WriteLine();
 Console.WriteLine("--- backup round trip ---");
 var backupPath = dbPath + ".bak-20261008-120000";
 int seededMedia, seededEmbeds, seededSidecars, seededCounters, seededCandidates;
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     seededMedia = db.Media.Count();
     seededEmbeds = db.Embeds.Count();
@@ -173,21 +173,21 @@ using (var db = new SubdlDbContext(workdir, null))
 File.Copy(dbPath, backupPath, overwrite: true);
 
 // Mutate the live store so a restore has something to undo.
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     db.Media.Delete("m0");
     db.Counters.DeleteAll();
     db.StatusStats.Upsert(new StatusStatsEntity { Id = "status", Uploaded = 999 });
 }
 
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     Check(db.Media.Count() == seededMedia - 1, "live store mutated before the restore");
     Check(db.Counters.Count() == 0, "counters cleared before the restore");
 }
 
-// The restore itself: exactly what SubdlReset.Restore does, in the same order.
-using (var db = new SubdlDbContext(workdir, null))
+// The restore itself: exactly what ScribeReset.Restore does, in the same order.
+using (var db = new ScribeDbContext(workdir, null))
 {
     db.Checkpoint();
     db.Dispose();
@@ -204,7 +204,7 @@ foreach (var suffix in DbFiles.SideSuffixes)
 
 File.Copy(backupPath, dbPath, overwrite: true);
 
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     Check(db.Media.Count() == seededMedia, "media rows restored", db.Media.Count() + " of " + seededMedia);
     Check(db.Embeds.Count() == seededEmbeds, "embedded rows restored", db.Embeds.Count() + " of " + seededEmbeds);
@@ -225,7 +225,7 @@ Console.WriteLine("--- stale write-ahead log ---");
 // checkpoint. With pooling off the dispose folds it, so the journal is created explicitly here to
 // reproduce the case the guard exists for: a side file sitting beside a database it does not belong
 // to.
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     db.Media.Upsert(new MediaEntity { Id = "STALE", Path = "/stale.mkv" });
 }
@@ -245,7 +245,7 @@ foreach (var suffix in DbFiles.SideSuffixes)
 
 File.Copy(backupPath, dbPath, overwrite: true);
 
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     Check(db.Media.FindById("STALE") == null, "no stale row survived the restore");
     Check(db.Media.Count() == seededMedia, "restored row count is still exact", db.Media.Count() + " of " + seededMedia);
@@ -256,7 +256,7 @@ using (var db = new SubdlDbContext(workdir, null))
 // ---------------------------------------------------------------------------------------------
 Console.WriteLine();
 Console.WriteLine("--- reset scopes ---");
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     // "upload": clear the uploaded markers on the rows that carry one.
     var touched = new List<MediaEntity>();
@@ -274,12 +274,12 @@ using (var db = new SubdlDbContext(workdir, null))
     Console.WriteLine("   upload scope touched " + touched.Count + " row(s)");
     Check(touched.Count == 3, "upload scope collected exactly the rows with a marker", touched.Count.ToString());
 
-    using var verify = new SubdlDbContext(workdir, null);
+    using var verify = new ScribeDbContext(workdir, null);
     Check(verify.Media.FindAll().All(m => m.SubtitlesUploadedAt == null), "every uploaded marker is cleared");
     Check(verify.Embeds.Count() == 0 || verify.Embeds.Count() > 0, "embedded rows untouched by the upload scope");
 }
 
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     // "download": downloaded sidecars, burned candidates, QA/id/file-retry counters, search stamps.
     var removedSidecars = db.Sidecars.DeleteMany(x => x.Status == "downloaded");
@@ -338,7 +338,7 @@ int statsBefore = StatsRows();
 Check(statsBefore == 0, "no query statistics exist before the compaction (the probe can report absence)",
     statsBefore.ToString(System.Globalization.CultureInfo.InvariantCulture) + " row(s)");
 
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     var (before, after, areas, outcome) = db.Compact();
     Console.WriteLine("   " + before + " -> " + after + " bytes, " + areas + " area(s), " + outcome);
@@ -356,11 +356,11 @@ Check(statsAfter > 0, "the compaction refreshed the query statistics", statsAfte
 // duplicate, and readable across a reopen — that row IS the fact "this season is already packed",
 // which is why a season whose episodes all went up individually can be looked at again at all.
 // ---------------------------------------------------------------------------------------------
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     db.Packs.Upsert(new PackEntity
     {
-        Id = SubdlDbContext.PackKey("tt26545992", 1, "EN", false),
+        Id = ScribeDbContext.PackKey("tt26545992", 1, "EN", false),
         ImdbId = "tt26545992",
         Season = 1,
         Language = "EN",
@@ -372,21 +372,21 @@ using (var db = new SubdlDbContext(workdir, null))
     });
 
     Check(db.Packs.Count() == 1, "the pack row is stored", db.Packs.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
-    var row = db.Packs.FindById(SubdlDbContext.PackKey("tt26545992", 1, "EN", false));
+    var row = db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 1, "EN", false));
     Check(row != null && row.Episodes == "1,2,3,4,5,6,7,8", "the row carries its member episodes", row?.Episodes ?? "(null)");
     Check(row != null && row.AbsorbedIds == "3753826,3753825", "and the single uploads it absorbed", row?.AbsorbedIds ?? "(null)");
 
     // Keyed by season + language + variant: the HI variant is a DIFFERENT pack of the same season.
-    Check(SubdlDbContext.PackKey("tt26545992", 1, "EN", false) != SubdlDbContext.PackKey("tt26545992", 1, "EN", true),
+    Check(ScribeDbContext.PackKey("tt26545992", 1, "EN", false) != ScribeDbContext.PackKey("tt26545992", 1, "EN", true),
         "the hearing-impaired variant has its own key");
-    Check(SubdlDbContext.PackKey("tt26545992", 1, "EN", false) != SubdlDbContext.PackKey("tt26545992", 1, "DE", false),
+    Check(ScribeDbContext.PackKey("tt26545992", 1, "EN", false) != ScribeDbContext.PackKey("tt26545992", 1, "DE", false),
         "and so has each language");
 
     // An upsert on the same key UPDATE the row instead of adding a second one — the table stores
     // the state, never a history.
     db.Packs.Upsert(new PackEntity
     {
-        Id = SubdlDbContext.PackKey("tt26545992", 1, "EN", false),
+        Id = ScribeDbContext.PackKey("tt26545992", 1, "EN", false),
         ImdbId = "tt26545992",
         Season = 1,
         Language = "EN",
@@ -396,15 +396,15 @@ using (var db = new SubdlDbContext(workdir, null))
     });
     Check(db.Packs.Count() == 1, "a second write for the same season replaces, never duplicates",
         db.Packs.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
-    Check(db.Packs.FindById(SubdlDbContext.PackKey("tt26545992", 1, "EN", false))?.PackId == "tt26545992.S01.def456.EN",
+    Check(db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 1, "EN", false))?.PackId == "tt26545992.S01.def456.EN",
         "and the newer pack id wins");
 }
 
 // Reopened: the fact survives a restart, which is the whole point (a pack built in one run must not
 // be rebuilt by the next).
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
-    Check(db.Packs.FindById(SubdlDbContext.PackKey("tt26545992", 1, "EN", false)) != null,
+    Check(db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 1, "EN", false)) != null,
         "the pack row is still there after a reopen");
     db.Packs.DeleteMany(x => x.ImdbId == "tt26545992");
     Check(db.Packs.Count() == 0, "and deleting by series empties it again",
@@ -420,7 +420,7 @@ using (var db = new SubdlDbContext(workdir, null))
 var frageSerie = ("multi:CUNK ON CINEMA|2022|loose", true);
 var frageFilm = ("multi:CUNK ON CINEMA|2022|loose", false);
 var frageLeer = ("multi:GIBTSNICHT|0|loose", true);
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     TmdbAnswerStore.Attach(db.Context);
     Check(!TmdbAnswerStore.TryGet(frageSerie, out _), "F-M542: eine unbekannte Frage hat keine Antwort im Store");
@@ -431,7 +431,7 @@ using (var db = new SubdlDbContext(workdir, null))
 }
 
 // Neustart: neuer Kontext, leerer Speicher-Cache.
-using (var db = new SubdlDbContext(workdir, null))
+using (var db = new ScribeDbContext(workdir, null))
 {
     TmdbAnswerStore.Attach(db.Context);
     Check(TmdbAnswerStore.TryGet(frageSerie, out var nachNeustart) && nachNeustart == "tt2130442|102348|1|1",

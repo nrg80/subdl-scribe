@@ -11,7 +11,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// F-M350 (operator order 18.10.2026): the <c>framerate</c> code an upload reports.
@@ -27,7 +27,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 /// THE VALUE LIST IS SUBDL'S, NOT AN INVENTED ONE. Measured on the live search API across 120
 /// subtitle entries: code <c>0</c> always arrives with <c>fps: null</c>, code <c>2</c> always with
 /// <c>fps: 23.976</c> — the numeric codes are a table, and the numbers below are the ones the
-/// download side of this plugin already maps (<c>SubdlApiClient</c>, "0 = unknown; 2 ⇒ 23.976,
+/// download side of this plugin already maps (<c>ScribeApiClient</c>, "0 = unknown; 2 ⇒ 23.976,
 /// 3 ⇒ 25, 4 ⇒ 29.97, 5 ⇒ 24, 7 ⇒ 30"). No other code was observed in the sample and none is
 /// invented here: a rate that is not in the table (48, 50, 59.94, 60 …) stays <c>0</c>, which is
 /// exactly what shipped before, so an unusual rate cannot regress into a wrong claim.
@@ -40,7 +40,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 /// refused. The two neighbours are 0.03 apart at worst, so nothing is ambiguous within tolerance.
 /// </para>
 /// </summary>
-public static class SubdlFramerate
+public static class ScribeFramerate
 {
     /// <summary>SubDL's "default / unknown" code. Also the answer for every rate not in the table.</summary>
     public const string Unknown = "0";

@@ -24,7 +24,7 @@ requirement, so it lived in the tree for weeks. These checks assert the rule as 
 NEGATIVE: the two flags derive from the two switches and from nothing else, both legs are
 reachable in the body, download runs before upload, and neither switch off means no reseed.
 
-Run: python3 scripts/tests/followup/check.py [path/to/SubdlEventDispatcher.cs]
+Run: python3 scripts/tests/followup/check.py [path/to/ScribeEventDispatcher.cs]
 Exit code 0 = all checks pass.
 """
 
@@ -35,7 +35,7 @@ import sys
 DEFAULT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "..", "..", "..",
-    "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlEventDispatcher.cs",
+    "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "ScribeEventDispatcher.cs",
 )
 
 results = []
@@ -158,7 +158,7 @@ def main():
     plugin = os.path.join(root, "Jellyfin.Plugin.SubdlSync")
     config = _read(os.path.join(plugin, "Configuration", "PluginConfiguration.cs"))
     page = _read(os.path.join(plugin, "Configuration", "configPage.html"))
-    coord = _read(os.path.join(plugin, "ScheduledTasks", "SubdlSchedulerCoordinator.cs"))
+    coord = _read(os.path.join(plugin, "ScheduledTasks", "ScribeSchedulerCoordinator.cs"))
 
     check("the seed waits for a running library scan (F-M448)",
           "TryDeferForLibraryScan(config, reason, dir)" in src,

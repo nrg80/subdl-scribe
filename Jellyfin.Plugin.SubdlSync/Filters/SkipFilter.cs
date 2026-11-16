@@ -12,7 +12,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Jellyfin.Plugin.SubdlScribe.Filters;
+namespace Jellyfin.Plugin.SubScribe.Filters;
 
 /// <summary>
 /// Skip filters (F-M34, F-M35): configurable directory and filename patterns.

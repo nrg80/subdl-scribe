@@ -13,7 +13,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// The pacing rhythm shared by the upload AND the download pipeline (F-M20/F-M26).

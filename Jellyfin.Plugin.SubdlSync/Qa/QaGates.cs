@@ -14,7 +14,7 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 
-namespace Jellyfin.Plugin.SubdlScribe.Qa;
+namespace Jellyfin.Plugin.SubScribe.Qa;
 
 /// <summary>
 /// QA gates for the upload pipeline (B2, F-M13–M16). Pure static logic — no I/O,

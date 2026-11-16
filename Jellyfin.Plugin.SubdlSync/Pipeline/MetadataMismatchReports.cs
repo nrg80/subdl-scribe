@@ -9,9 +9,9 @@
 // PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 using System;
-using Jellyfin.Plugin.SubdlScribe.Api;
+using Jellyfin.Plugin.SubScribe.Api;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// F-M531: the report about a metadata format mismatch — the attribute, the subtitle, nothing else.

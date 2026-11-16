@@ -12,28 +12,28 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M90: registry reset endpoint — clears the plugin's stored state.
 /// After confirmation, the database file is renamed with a timestamped backup
 /// and the shared context is recreated. The next run starts fresh: hashes
 /// recompute, streams re-screen, uploads re-check against SubDL.
-/// Route: POST /Plugins/SubdlReset/Reset?confirm=true
+/// Route: POST /Plugins/ScribeReset/Reset?confirm=true
 /// </summary>
 [ApiController]
-[Route("Plugins/[controller]/[action]")]
-public class SubdlReset : ControllerBase
+[Route("Plugins/SubdlReset/[action]")]
+public class ScribeReset : ControllerBase
 {
-    private readonly ILogger<SubdlReset> _logger;
+    private readonly ILogger<ScribeReset> _logger;
 
-    public SubdlReset(ILogger<SubdlReset> logger)
+    public ScribeReset(ILogger<ScribeReset> logger)
     {
         _logger = logger;
     }
@@ -64,7 +64,7 @@ public class SubdlReset : ControllerBase
             if (scope.Equals("all", StringComparison.OrdinalIgnoreCase))
             {
                 // Fold the WAL in BEFORE the copy. Without it the backup is the main file alone and
-                // every write since the last checkpoint is missing from it (see SubdlDbContext.
+                // every write since the last checkpoint is missing from it (see ScribeDbContext.
                 // Checkpoint). The old single-file engine had no such side file, so this is a step
                 // the format change introduced.
                 try { db.Checkpoint(); }
@@ -74,7 +74,7 @@ public class SubdlReset : ControllerBase
 
                 // Drop pooled handles before touching the file: a pooled connection would keep the
                 // old file open and the new one would not be seen.
-                Data.SubdlDbContext.ClearPoolFor(dbPath);
+                Data.ScribeDbContext.ClearPoolFor(dbPath);
 
                 if (System.IO.File.Exists(dbPath))
                 {
@@ -182,7 +182,7 @@ public class SubdlReset : ControllerBase
                 return Ok(new { ok = false, error = "bad-scope" });
             }
 
-            ScheduledTasks.SubdlEventDispatcher.Instance?.ReloadQueues();
+            ScheduledTasks.ScribeEventDispatcher.Instance?.ReloadQueues();
             _logger.LogWarning("[Sub Scribe] Registry reset ({Scope}) completed; backup {Backup}.", scope, backupPath);
             return Ok(new { ok = true, scope, backup = Path.GetFileName(backupPath) });
         }
@@ -266,7 +266,7 @@ public class SubdlReset : ControllerBase
 
             // Drop pooled handles BEFORE the copy. Without this the copied file is not what the next
             // open reads — measured in a probe: the restore silently kept the old rows and values.
-            Data.SubdlDbContext.ClearPoolFor(dbPath);
+            Data.ScribeDbContext.ClearPoolFor(dbPath);
 
             if (System.IO.File.Exists(dbPath))
             {
@@ -285,14 +285,14 @@ public class SubdlReset : ControllerBase
             return Ok(new { ok = false, error = "restore-error" });
         }
 
-        ScheduledTasks.SubdlEventDispatcher.Instance?.ReloadQueues();
+        ScheduledTasks.ScribeEventDispatcher.Instance?.ReloadQueues();
         _logger.LogWarning("[Sub Scribe] Restored database from backup {Stamp}.", stamp);
         return Ok(new { ok = true, stamp });
     }
 
     /// <summary>
     /// Removes the side files SQLite keeps beside a database. They belong to one file generation and
-    /// must never outlive it — see <see cref="Data.SubdlDbContext.Checkpoint"/>.
+    /// must never outlive it — see <see cref="Data.ScribeDbContext.Checkpoint"/>.
     /// </summary>
     /// <param name="dbPath">Path of the database file.</param>
     private static void DeleteSideFiles(string dbPath)

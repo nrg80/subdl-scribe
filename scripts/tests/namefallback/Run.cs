@@ -27,7 +27,7 @@ while (!File.Exists(Path.Combine(repo, PluginDll)) && Path.GetDirectoryName(repo
 }
 
 var asm = Assembly.LoadFrom(Path.Combine(repo, PluginDll));
-var parser = asm.GetType("Jellyfin.Plugin.SubdlScribe.Pipeline.MediaNameParser");
+var parser = asm.GetType("Jellyfin.Plugin.SubScribe.Pipeline.MediaNameParser");
 Check("the parser is reachable", parser != null);
 var parse = parser!.GetMethod("Parse", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
 var extract = parser.GetMethod("ExtractImdbId", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);

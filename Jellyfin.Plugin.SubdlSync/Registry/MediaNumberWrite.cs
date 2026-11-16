@@ -8,7 +8,7 @@
 // without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 // PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// F-M517: WIE eine Gegenseiten-Nummer (<c>MsubMovieId</c>, <c>TvstShowId</c>) ans Medium kam.

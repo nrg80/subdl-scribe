@@ -16,7 +16,7 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe;
+namespace Jellyfin.Plugin.SubScribe;
 
 /// <summary>
 /// Resolves the configured library selection to the concrete media PATHS it

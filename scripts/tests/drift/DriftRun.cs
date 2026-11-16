@@ -22,7 +22,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Qa;
+using Jellyfin.Plugin.SubScribe.Qa;
 
 namespace DriftTest;
 

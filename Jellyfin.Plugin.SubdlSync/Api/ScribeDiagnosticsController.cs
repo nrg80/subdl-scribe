@@ -13,12 +13,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// (20.09.2026): diagnostics endpoint that exposes store counters,
@@ -26,11 +26,11 @@ namespace Jellyfin.Plugin.SubdlScribe.Api;
 /// </summary>
 [ApiController]
 [Route("Plugins/SubdlSync")]
-public class SubdlDiagnosticsController : ControllerBase
+public class ScribeDiagnosticsController : ControllerBase
 {
-    private readonly ILogger<SubdlDiagnosticsController> _logger;
+    private readonly ILogger<ScribeDiagnosticsController> _logger;
 
-    public SubdlDiagnosticsController(ILogger<SubdlDiagnosticsController> logger)
+    public ScribeDiagnosticsController(ILogger<ScribeDiagnosticsController> logger)
     {
         _logger = logger;
     }
@@ -108,8 +108,8 @@ public class SubdlDiagnosticsController : ControllerBase
                     .Concat(sidecars.Where(s => s.Reason != null).Select(s => s.Reason!))
                     .GroupBy(r => r)
                     .ToDictionary(g => g.Key, g => g.Count()),
-                WithSubdlId = embeds.Count(s => !string.IsNullOrWhiteSpace(s.SubdlId))
-                            + sidecars.Count(s => !string.IsNullOrWhiteSpace(s.SubdlId))
+                WithSubdlId = embeds.Count(s => !string.IsNullOrWhiteSpace(s.ScribeId))
+                            + sidecars.Count(s => !string.IsNullOrWhiteSpace(s.ScribeId))
             };
 
             var result = new

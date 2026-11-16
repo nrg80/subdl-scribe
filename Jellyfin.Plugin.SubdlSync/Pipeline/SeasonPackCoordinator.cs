@@ -4,16 +4,16 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Language;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Language;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Registry;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// F-M372: holds back the episodes of a complete season until the season is whole, then sends ONE
@@ -77,7 +77,7 @@ public sealed class SeasonPackCoordinator
         string? VideoCodec = null,
         string? AbsorbedSingleId = null);
 
-    private readonly SubdlApiClient _api;
+    private readonly ScribeApiClient _api;
     private readonly ContentHashRegistry _registry;
     private readonly ILogger _logger;
     private readonly PluginConfiguration _config;
@@ -119,7 +119,7 @@ public sealed class SeasonPackCoordinator
     /// up the single way.
     /// </param>
     public SeasonPackCoordinator(
-        SubdlApiClient api,
+        ScribeApiClient api,
         ContentHashRegistry registry,
         ILogger logger,
         PluginConfiguration config,

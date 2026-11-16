@@ -21,7 +21,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M480 (operator order 15.11.2026): the tvsubtitles.net client — the second source, and the only
@@ -132,7 +132,7 @@ public sealed class TvSubtitlesClient
     /// </para>
     /// <para>
     /// Was hier ABSICHTLICH NICHT passiert: keine gemeinsame Tabelle mit SubDL (Operator-Anweisung
-    /// oben — SubDL bildet in <see cref="SubdlApiClient"/> ab), kein Raten ausserhalb der Liste
+    /// oben — SubDL bildet in <see cref="ScribeApiClient"/> ab), kein Raten ausserhalb der Liste
     /// (unbekannt heisst null), und die Seiten-Kuerzel selbst bleiben unveraendert gueltig.
     /// </para>
     /// </summary>
@@ -417,7 +417,7 @@ public sealed class TvSubtitlesClient
     /// <summary>
     /// Initializes a new instance of the <see cref="TvSubtitlesClient"/> class.
     /// </summary>
-    /// <param name="http">The HttpClient to use. <see cref="SubdlApiClient.NewHttpClient"/> gives one
+    /// <param name="http">The HttpClient to use. <see cref="ScribeApiClient.NewHttpClient"/> gives one
     /// that identifies itself as this plugin; a caller may pass its own for a test.</param>
     public TvSubtitlesClient(HttpClient http)
     {
@@ -869,12 +869,12 @@ public sealed class TvSubtitlesClient
     /// <param name="message">Report text.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Accepted, deferred (rate limited) or failed.</returns>
-    public async Task<SubdlReportOutcome> ReportBadAsync(
+    public async Task<ScribeReportOutcome> ReportBadAsync(
         string subtitleId, string message, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(subtitleId) || string.IsNullOrWhiteSpace(message))
         {
-            return SubdlReportOutcome.Failed;
+            return ScribeReportOutcome.Failed;
         }
 
         string url = WithClient(BaseUrl + "/report_bad.php");
@@ -890,18 +890,18 @@ public sealed class TvSubtitlesClient
 
         if ((int)response.StatusCode == 429)
         {
-            return SubdlReportOutcome.Deferred;
+            return ScribeReportOutcome.Deferred;
         }
 
         if (!response.IsSuccessStatusCode)
         {
-            return SubdlReportOutcome.Failed;
+            return ScribeReportOutcome.Failed;
         }
 
         string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return body.Contains("thank", StringComparison.OrdinalIgnoreCase)
-            ? SubdlReportOutcome.Accepted
-            : SubdlReportOutcome.Failed;
+            ? ScribeReportOutcome.Accepted
+            : ScribeReportOutcome.Failed;
     }
 
     public async Task<string?> FindUploadedIdAsync(

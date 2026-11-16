@@ -20,9 +20,9 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M506 (Etappe 1, 15.11.2026): the moviesubtitles.org client — the THIRD source, and the one that
@@ -363,7 +363,7 @@ public sealed class MovieSubtitlesClient
     /// <summary>
     /// Initializes a new instance of the <see cref="MovieSubtitlesClient"/> class.
     /// </summary>
-    /// <param name="http">The HttpClient to use. <see cref="SubdlApiClient.NewHttpClient"/> gives one
+    /// <param name="http">The HttpClient to use. <see cref="ScribeApiClient.NewHttpClient"/> gives one
     /// that identifies itself as this plugin; a caller may pass its own for a test.</param>
     public MovieSubtitlesClient(HttpClient http)
     {

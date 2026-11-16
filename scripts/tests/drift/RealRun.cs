@@ -16,7 +16,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Qa;
+using Jellyfin.Plugin.SubScribe.Qa;
 
 namespace DriftTest;
 

@@ -32,7 +32,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Qa;
+using Jellyfin.Plugin.SubScribe.Qa;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -84,7 +84,7 @@ internal static class ConvertRun
             // and ignoring them would make the old algorithm's shift look like the
             // download state and get inherited instead of removed. New archives are
             // written under the current name (F-M306).
-            string archive = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.UnsyncZipPathFor(j.Srt);
+            string archive = Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.UnsyncZipPathFor(j.Srt);
             string legacyArchive = j.Srt + ".unsynchronized.zip";
             if (!File.Exists(archive) && File.Exists(legacyArchive)) archive = legacyArchive;
             if (File.Exists(archive))
@@ -115,8 +115,8 @@ internal static class ConvertRun
 
             // STEP 2 — the fit, exactly as the plugin runs it.
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.Result r =
-                await Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.SyncAsync(
+            Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.Result r =
+                await Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.SyncAsync(
                     j.Media, text, j.AudioMap, Ffmpeg, logger, CancellationToken.None).ConfigureAwait(false);
             sw.Stop();
 
@@ -145,10 +145,10 @@ internal static class ConvertRun
                     // STEP 3b — the archive holds the RESTORED bytes, i.e. the file as
                     // downloaded. Where a restore happened this is a NEW archive over the
                     // original payload; the old archive is replaced by the identical bytes.
-                    string entry = Path.GetFileName(Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.UnsyncPathFor(j.Srt));
+                    string entry = Path.GetFileName(Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.UnsyncPathFor(j.Srt));
                     await File.WriteAllBytesAsync(
-                        Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.UnsyncZipPathFor(j.Srt),
-                        Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildUnsyncArchive(entry, working));
+                        Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.UnsyncZipPathFor(j.Srt),
+                        Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.BuildUnsyncArchive(entry, working));
                 }
             }
             else

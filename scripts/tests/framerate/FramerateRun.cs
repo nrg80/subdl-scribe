@@ -19,7 +19,7 @@
 //      called for every one of those rates plus float noise, and for the rates the table does NOT
 //      know (48, 50, 59.94, 60): those must stay 0, because that is what shipped before and a rate
 //      outside the table cannot be claimed.
-//   2. NO INVENTED CODE ESCAPES. Every result must be in SubdlFramerate.Allowed, and Allowed must
+//   2. NO INVENTED CODE ESCAPES. Every result must be in ScribeFramerate.Allowed, and Allowed must
 //      be exactly those six values — the server accepted an unknown `client` value silently for the
 //      quality field, so an invented code here would fail invisibly.
 //   3. THE FALLBACK IS EXECUTED TOO. The operator's library shows neither field as trustworthy: 27 files
@@ -42,7 +42,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
 int failures = 0;
 
@@ -56,7 +56,7 @@ void Check(bool ok, string what, string detail = "")
 }
 
 string repo = args.Length > 0 ? args[0] : "/opt/data/subdl-scribe";
-string clientPath = Path.Combine(repo, "Jellyfin.Plugin.SubdlSync", "Api", "SubdlApiClient.cs");
+string clientPath = Path.Combine(repo, "Jellyfin.Plugin.SubdlSync", "Api", "ScribeApiClient.cs");
 string pipelinePath = Path.Combine(repo, "Jellyfin.Plugin.SubdlSync", "Pipeline", "UploadPipeline.cs");
 
 // Whitespace is collapsed before any source assertion: a re-indent must not turn a check red, and a
@@ -87,7 +87,7 @@ var cases = new (double? Fps, string Want, string Why)[]
 
 foreach ((double? fps, string want, string why) in cases)
 {
-    string got = SubdlFramerate.CodeFor(fps);
+    string got = ScribeFramerate.CodeFor(fps);
     Check(got == want, $"CodeFor({(fps.HasValue ? fps.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "null")}) = {want}", $"{why} — got {got}");
 }
 
@@ -107,16 +107,16 @@ var pairCases = new (double? Avg, double? Real, string Want, string Why)[]
 
 foreach ((double? avg, double? real, string want, string why) in pairCases)
 {
-    string got = SubdlFramerate.CodeFor(avg, real);
+    string got = ScribeFramerate.CodeFor(avg, real);
     Check(got == want, $"CodeFor(avg {avg?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}, real {real?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}) = {want}", $"{why} — got {got}");
 }
 
 // --- 2. no invented code -----------------------------------------------------------------
 string[] documented = { "0", "2", "3", "4", "5", "7" };
-Check(SubdlFramerate.Allowed.OrderBy(x => x).SequenceEqual(documented.OrderBy(x => x)),
+Check(ScribeFramerate.Allowed.OrderBy(x => x).SequenceEqual(documented.OrderBy(x => x)),
       "Allowed is exactly SubDL's six codes",
-      string.Join(",", SubdlFramerate.Allowed));
-Check(cases.All(c => SubdlFramerate.Allowed.Contains(SubdlFramerate.CodeFor(c.Fps))),
+      string.Join(",", ScribeFramerate.Allowed));
+Check(cases.All(c => ScribeFramerate.Allowed.Contains(ScribeFramerate.CodeFor(c.Fps))),
       "every produced code is in Allowed");
 
 // --- 3. the wiring, on the source ---------------------------------------------------------
@@ -125,10 +125,10 @@ string pipeline = Flatten(File.ReadAllText(pipelinePath));
 
 Check(client.Contains("[\"framerate\"] = framerate"), "the client sends the framerate PARAMETER");
 Check(!client.Contains("[\"framerate\"] = \"0\""), "the old hardcoded framerate literal is gone");
-Check(client.Contains("string framerate = Pipeline.SubdlFramerate.Unknown"),
+Check(client.Contains("string framerate = Pipeline.ScribeFramerate.Unknown"),
       "the parameter defaults to SubDL's unknown code, not to a guessed rate");
-Check(pipeline.Contains("SubdlFramerate.CodeFor(video.AverageFrameRate, video.RealFrameRate)"),
-      "the pipeline hands BOTH rates to SubdlFramerate (average first, real as fallback)");
+Check(pipeline.Contains("ScribeFramerate.CodeFor(video.AverageFrameRate, video.RealFrameRate)"),
+      "the pipeline hands BOTH rates to ScribeFramerate (average first, real as fallback)");
 Check(pipeline.Contains("episode, ct, hearingImpaired, framerate)"),
       "the computed code reaches the API call");
 Check(pipeline.Contains("framerate: itemFramerate"),
