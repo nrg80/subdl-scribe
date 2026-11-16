@@ -1881,6 +1881,30 @@ def main():
           and "config.TvSubtitlesUploadEnabled" in page_src
           and "config.TvSubtitlesDownloadEnabled" in page_src)
 
+    # ---- F-M526: jede Einstellung sagt, WELCHE Quelle sie betrifft -------------------------------
+    # Operator-Anweisung 17.11.2026: „Dann sollten wir in der gui vermerken welches feature nur auf
+    # subdl oder tvst wirkt und nicht auf das andere. SubDL only/TVST only". Der Merker steht am
+    # Schalter selbst — nicht in einer Liste weiter unten, wo man ihn beim Suchen nicht liest.
+    # Nur die eindeutigen Faelle sind markiert; alles andere wirkt auf beide Quellen (TMDb, Sprachen,
+    # Qualitaetspruefungen, Auto-Abgleich, Bibliotheks-Refresh) und bleibt ohne Merker.
+    subdl_only = ("UploadContinueAfterLimit", "UploadSeasonPacks", "DownloadContinueAfterLimit",
+                  "DownloadHearingImpaired", "AllowAiTranslatedSubs", "ReportBrokenSubtitles",
+                  "DownloadArchiveCacheDays", "DownloadArchiveCacheMaxMb")
+    for cid in subdl_only:
+        # Der Merker steht mal hinter dem Kaestchen (Checkbox), mal im Label DAVOR (Zahlenfeld) —
+        # gesucht wird deshalb in einem Fenster um das Control, nicht nur dahinter.
+        pos = page_src.find('id="%s"' % cid)
+        check("F-M526: %s carries the SubDL-only marker" % cid,
+              pos > 0 and 'src-subdl' in page_src[max(0, pos - 400):pos + 400],
+              "kein Merker" if pos > 0 else "Control fehlt")
+
+    check("F-M526: the marker has its own two styles and spells the source out",
+          ".src-badge {" in page_src and ".src-subdl {" in page_src and ".src-tvst" in page_src
+          and ">SubDL only</span>" in page_src)
+
+    check("F-M526: no marker claims a tvst-only setting that does not exist",
+          page_src.count("src-tvst") == 1)  # nur die CSS-Klasse, kein gesetztes Abzeichen
+
     # F-M525: `failed` stand hier oben und wurde VOR diesen Pruefungen berechnet — alles danach war
     # fuer die Zusammenfassung unsichtbar. Die Zaehlung gehoert ans Ende.
     failed = [r for r in results if not r[1]]
