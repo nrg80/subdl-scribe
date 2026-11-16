@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.401",
-        "changelog": "v12.1.12.401: sidecars from the reserved original block (slot 50-99) are no longer uploaded - they are the unsynchronized copies a correction keeps beside its result - and the upload comment carries the TMDb and IMDb ids only.",
+        "version": "12.1.12.402",
+        "changelog": "v12.1.12.402: The tvst family is one source with one switch per direction — the two addresses stay data fields and TMDb decides which one is asked; the page says that in one line instead of two switch pairs.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.401-dev/Jellyfin.Plugin.SubdlSync_12.1.12.401.zip",
-        "checksum": "4935b6ec6a95701854128df2b419df91",
-        "timestamp": "2026-11-16T04:21:52Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.402-dev/Jellyfin.Plugin.SubdlSync_12.1.12.402.zip",
+        "checksum": "b2e622e35d136eccdf4e2f863ed5222e",
+        "timestamp": "2026-11-16T04:30:32Z"
       }
     ]
   }
