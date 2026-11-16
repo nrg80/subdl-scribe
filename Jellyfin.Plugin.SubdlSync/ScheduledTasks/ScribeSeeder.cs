@@ -1547,36 +1547,6 @@ public sealed class ScribeSeeder
         }
     }
 
-    /// <summary>Loose sidecar SRTs next to the media file.</summary>
-    private List<string> FindLooseSrts(string mediaPath)
-    {
-        var result = new List<string>();
-        try
-        {
-            string dir = System.IO.Path.GetDirectoryName(mediaPath) ?? ".";
-            string baseName = System.IO.Path.GetFileNameWithoutExtension(mediaPath);
-            foreach (var f in Directory.EnumerateFiles(dir, baseName + "*.srt"))
-            {
-                if (f.EndsWith(".part", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                string name = System.IO.Path.GetFileNameWithoutExtension(f);
-                if (!name.Equals(baseName, StringComparison.OrdinalIgnoreCase))
-                {
-                    // labelled sidecar (<base>.<lang>.srt) or unlabeled — both count
-                    result.Add(f);
-                }
-            }
-        }
-        catch
-        {
-            // listing failed — no loose SRTs assumed
-        }
-
-        return result;
-    }
 
 
     private static QueueItem Clone(QueueItem qi) => new()

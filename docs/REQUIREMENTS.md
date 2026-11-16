@@ -390,7 +390,11 @@ Quelle zu ist — eine Regel, die beide Seiten aufrufen.
 
 **F-M557 [U]:** **Zugeh-Kriterium ist ein Stempel je Quelle auf der Datei, nicht ein Urteil je Spur.**
 Am Ende des Durchlaufs für eine Quelle wird geprüft, ob **jede vorhandene Dialogspur** dieser Datei für
-diese Quelle *hochgeladen* oder *bewusst übersprungen* wurde. Gleich ⇒ Stempel der Quelle auf der
+diese Quelle *hochgeladen* oder *bewusst übersprungen* wurde. „Vorhanden" heißt dabei die Zahl der
+**verschiedenen (Sprache, HI)-Paare**, nicht die Zahl der Textspuren: eine Sprache, die zweimal in der Datei
+liegt, ist **eine** Upload-Einheit. Beleg (16.11.2026, „His & Hers" S01E06): 38 Textspuren, davon vier
+Sprachen doppelt (FRA, POR, SPA, ZHO) → **34** Einheiten; der Lauf entschied **35** (23× identischer Text,
+11 Sprach-Skips, 1 Upload ES). Mit der Spurenzahl als Nenner stünde die Datei fälschlich für immer offen. Gleich ⇒ Stempel der Quelle auf der
 Medienzeile (`Subdl…`, `TvSubtitles…`, `Moviesubtitles…`). Ungleich ⇒ **kein** Stempel. Die Spur-Urteile
 im Store bleiben Diagnose; sie entscheiden nicht mehr über „fertig". Damit entfallen die Spalte `VotedBy`
 und Schema 15 — die Regel braucht sie nicht.
@@ -423,7 +427,7 @@ offen hat. Ohne diesen Punkt bliebe tvst auf jeder Spur offen, deren Sprache es 
 16.11.2026: **174** solche Fälle, ID 28×, HE 18×, NO 18×, TH 16×, VI 16×, HR 14×, TL 12×, ET 6×).
 
 **F-M562 [U]:** **Neben dem Stempel steht die Spursignatur.**
-Anzahl der Dialogspuren plus Folge ihrer Sprach-/HI-Kennzeichen. Weicht sie beim nächsten Nachsehen ab,
+Anzahl der Paare (Sprache, HI) plus Folge ihrer Kennzeichen — dieselbe Zählweise wie F-M557. Weicht sie beim nächsten Nachsehen ab,
 gilt die Datei als offen und wird erneut eingereiht — sonst würde eine später hinzugefügte Untertitelspur
 oder ein Remux nie gesendet. Der Stempel allein wäre eine Behauptung über einen Zustand, der sich ändern
 kann.
