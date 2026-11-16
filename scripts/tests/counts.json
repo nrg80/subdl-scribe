@@ -348,6 +348,10 @@
     "T246": {
       "suite": "tvsubtitles",
       "checks": 3
+    },
+    "T247": {
+      "suite": "endpoints",
+      "checks": 1
     }
   }
 }

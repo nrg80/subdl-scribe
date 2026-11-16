@@ -2127,6 +2127,16 @@ internal static class Program
             && ulSource.Contains("_tvstClient.DebugTrace += OnApiTrace", StringComparison.Ordinal)
             && ulSource.Contains("_msubClient.DebugTrace += OnApiTrace", StringComparison.Ordinal));
 
+        // ---- F-M524: ein gescheiterter Zyklus nennt die Stelle -------------------------------------
+        string dispatchQuelle = await File.ReadAllTextAsync(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlEventDispatcher.cs"))
+            .ConfigureAwait(false);
+        Check(
+            "F-M524: a failed cycle logs the exception with its stack — the message alone named no site",
+            dispatchQuelle.Contains("_logger.LogError(\n", StringComparison.Ordinal)
+            && dispatchQuelle.Contains("MarkCycleFailure(ex.Message)", StringComparison.Ordinal)
+            && dispatchQuelle.Contains("cycle failed: {Msg} (see the exception below for the site)", StringComparison.Ordinal));
+
         if (_failures > 0)
         {
             Console.WriteLine($">>> ENDPUNKTE: {_failures} von {_checks} Pruefungen fehlgeschlagen");

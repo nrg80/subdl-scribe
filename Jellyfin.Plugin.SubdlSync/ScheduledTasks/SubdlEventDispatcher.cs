@@ -617,7 +617,19 @@ public sealed class SubdlEventDispatcher : IDisposable
             catch (Exception ex)
             {
                 MarkCycleFailure(ex.Message);
-                _logger.LogError("[SubDL-Dispatch] {Reason} cycle failed: {Msg}", reason, ex.Message);
+
+                // F-M524 (Operator-Frage 17.11.2026: „Why download fail?"): die Zeile trug bisher nur
+                // `ex.Message`. Am 16.11.2026 stand dort um 06:45:05 „One of the identified items was in
+                // an invalid format." — das ist die Vorgabe-Meldung von `FormatException` aus einem
+                // `string.Format`-artigen Aufruf und nennt KEINE Stelle. Der Lauf selbst war zu diesem
+                // Zeitpunkt fertig („download: finished — lock released."), es kippte also die
+                // Buchführung des Zyklus danach, und niemand konnte sehen, welche Zeile es war. Jetzt
+                // geht die Ausnahme mit Stapel ins Log; die Meldung bleibt daneben stehen.
+                _logger.LogError(
+                    ex,
+                    "[SubDL-Dispatch] {Reason} cycle failed: {Msg} (see the exception below for the site)",
+                    reason,
+                    ex.Message);
             }
             finally
             {
