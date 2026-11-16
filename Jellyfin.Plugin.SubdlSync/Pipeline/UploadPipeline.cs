@@ -793,16 +793,38 @@ public sealed class UploadPipeline : IPackFiller
                 .ToList();
             if (quellen.Count > 0 && offeneQuellen.Count == 0)
             {
-                summary.SkippedItems++;
-                summary.FilesSkipped++;
+                // F-M556 (Befund 16.11.2026): die eingebetteten Spuren koennen fertig sein, waehrend
+                // neben der Datei ein LOSER SEITENWAGEN offen ist. Der Einreiher fragt beides und
+                // reiht deswegen ein; dieser Kopf kannte nur die eingebetteten Spuren und warf das
+                // Item in JEDEM Zyklus weg (gemessen im 21:28-Zyklus: 292 Wegwuerfe, 0 Uploads, und
+                // der Seitenwagen wurde nie gesendet). Jetzt gilt hier dieselbe Regel wie dort —
+                // EINE Frage, zwei Aufrufer (SidecarsNeedWorkFor), und nur die Quellen, die dieses
+                // Item auch eingereiht haben, halten es offen.
+                var loseKandidaten = FindLooseSrts(mediaPath);
+                bool seitenwagenOffen = loseKandidaten.Count > 0
+                    && quellen.Any(quelle => QueuedForSource(quelle)
+                        && SidecarsNeedWorkFor(loseKandidaten, earlyHash, quelle, Registry));
+
+                if (!seitenwagenOffen)
+                {
+                    summary.SkippedItems++;
+                    summary.FilesSkipped++;
+                    LogUtil.PerItem(
+                        _config.LogMode,
+                        _logger,
+                        "[Sub Scribe] SKIP {File} — upload file-complete for every upload source ({Sources})",
+                        Path.GetFileName(mediaPath),
+                        string.Join(", ", quellen.Select(Api.Endpoints.Provenance.Name)));
+
+                    continue;
+                }
+
                 LogUtil.PerItem(
                     _config.LogMode,
                     _logger,
-                    "[Sub Scribe] SKIP {File} — upload file-complete for every upload source ({Sources})",
+                    "[Sub Scribe] keeping {File} — embedded tracks are settled, but {Count} loose sidecar(s) still need a source (F-M556)",
                     Path.GetFileName(mediaPath),
-                    string.Join(", ", quellen.Select(Api.Endpoints.Provenance.Name)));
-
-                continue;
+                    loseKandidaten.Count);
             }
 
             if (offeneQuellen.Count > 0)
@@ -2288,6 +2310,85 @@ public sealed class UploadPipeline : IPackFiller
     /// run. Those files are the unsynchronized copies a correction keeps beside its result — publishing
     /// them would put the raw take up next to the corrected one under the same episode.
     /// </remarks>
+    /// <summary>
+    /// F-M556 (Befund 16.11.2026: „Warum wird nichts gesendet?"): braucht diese Quelle fuer einen der
+    /// losen Seitenwagen neben der Datei noch Arbeit?
+    /// <para>
+    /// DIE REGEL STAND BISHER NUR IM EINREIHER: er reihte ein Item ein, wenn eingebettet alles erledigt
+    /// war, aber ein Seitenwagen offen blieb (<c>SidecarsNeedWork</c>). Der Kopf des Laufs kannte nur die
+    /// eingebetteten Spuren und warf solche Items darum in JEDEM Zyklus weg — im 21:28-Zyklus **292**
+    /// Wegwuerfe bei **0** Uploads, und der Seitenwagen wurde nie gesendet. Jetzt gibt es die Frage
+    /// EINMAL, und beide Stellen rufen sie auf.
+    /// </para>
+    /// <para>
+    /// Je Quelle, nicht „irgendwo": ein tvst-Upload haelt das Paar nicht aus dem SubDL-Lauf. Eine
+    /// ABLEHNUNG bleibt quellenneutral (Urteil ueber den Untertitel), ein bekannter Fund ohne
+    /// Quellenbeleg ebenso — das Herkunftstor sperrt ihn ohnehin. Ein nicht lesbarer Seitenwagen
+    /// antwortet „ja" (arbeiten statt ueberspringen).
+    /// </para>
+    /// </summary>
+    /// <param name="loose">Die losen Seitenwagen der Datei.</param>
+    /// <param name="mediaHash">Media hash of the file they belong to.</param>
+    /// <param name="quelle">The source in question.</param>
+    /// <param name="registry">The registry to ask.</param>
+    /// <returns>True when at least one sidecar still needs this source.</returns>
+    public static bool SidecarsNeedWorkFor(
+        List<(string Path, string Lang, bool HearingImpaired, bool Forced)> loose,
+        string? mediaHash,
+        Configuration.SubtitleProvider quelle,
+        Registry.ContentHashRegistry registry)
+    {
+        if (loose == null || loose.Count == 0)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return true; // ohne Medienhash laesst sich keine Marke lesen — arbeiten statt ueberspringen
+        }
+
+        foreach (var (loosePath, looseLang, looseHi, _) in loose)
+        {
+            if (registry.IsUploadedTo(mediaHash, looseLang, looseHi, quelle))
+            {
+                continue;
+            }
+
+            string looseContent;
+            try
+            {
+                looseContent = File.ReadAllText(loosePath);
+            }
+            catch
+            {
+                return true; // unreadable sidecar → let the pipeline decide
+            }
+
+            string looseHash = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(looseContent);
+            if (registry.IsSidecarUploadedTo(looseHash, quelle) || registry.SidecarRejectedReason(looseHash) != null)
+            {
+                continue;
+            }
+
+            if (registry.GetOrigin(looseHash).Origin is not null)
+            {
+                continue;
+            }
+
+            string contentHashProbe = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(looseContent);
+            if (registry.IsContentKnown(contentHashProbe)
+                && !registry.IsContentUploadedForAnotherSource(contentHashProbe, quelle))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
     public static List<(string Path, string Lang, bool HearingImpaired, bool Forced)> FindLooseSrts(string mediaPath)
         => Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.List(mediaPath)
             .Where(x => !Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsOriginalSidecar(x.Path, mediaPath))

@@ -643,12 +643,11 @@ internal static class Program
             seederSource.Contains("UploadTodoFor(item, mediaPath, config, quelle)", StringComparison.Ordinal)
             && seederSource.Contains("registry.ArePositionsTerminalFor(mediaHash", StringComparison.Ordinal)
             && seederSource.Contains("registry.CountKnownPairsFor(mediaHash, quelle)", StringComparison.Ordinal)
-            && seederSource.Contains("registry.IsSidecarUploadedTo(looseHash, quelle)", StringComparison.Ordinal)
+            && uploadSource.Contains("registry.IsSidecarUploadedTo(looseHash, quelle)", StringComparison.Ordinal)
             && !seederSource.Contains("registry.CountKnownPairs(mediaHash)", StringComparison.Ordinal)
-            && seederSource.Contains("registry.IsSidecarUploadedTo(looseHash, quelle)", StringComparison.Ordinal)
             && !seederSource.Contains("registry.ArePositionsTerminal(mediaHash", StringComparison.Ordinal)
             && !seederSource.Contains("registry.CountKnownPairs(mediaHash)", StringComparison.Ordinal)
-            && !seederSource.Contains("registry.IsSidecarUploaded(looseHash)", StringComparison.Ordinal));
+            && !uploadSource.Contains("registry.IsSidecarUploaded(looseHash)", StringComparison.Ordinal));
 
         Check("der Helfer nimmt nur eingeschaltete UND konfigurierte Quellen, und die Marke liest EINE Regel (F-M499)",
             seederSource.Contains("foreach (var quelle in UploadSources(config, isSeries))", StringComparison.Ordinal)
@@ -681,6 +680,20 @@ internal static class Program
                 "_config.DryRun || _config.IsConfiguredForUpload(quelle)", StringComparison.Ordinal)
             // Die blinde Frage darf im Kopf des Laufs nicht mehr stehen — sie war der Defekt.
             && !uploadSource.Contains("IsSubtitlesUploaded(", StringComparison.Ordinal));
+
+        // --- F-M556: der Kopf kennt auch die losen Seitenwagen ---------------------------------------
+        // Befund 16.11.2026: 292 Wegwuerfe bei 0 Uploads im 21:28-Zyklus. Der Einreiher reihte Items ein,
+        // deren eingebettete Spuren fertig waren, aber ein Seitenwagen noch offen; der Kopf sah nur die
+        // eingebetteten Spuren und warf sie weg — der Seitenwagen wurde nie gesendet.
+        Check("F-M556: die Seitenwagen-Regel steht EINMAL und wird von beiden Stellen gerufen",
+            uploadSource.Contains("public static bool SidecarsNeedWorkFor(", StringComparison.Ordinal)
+            && seederSource.Contains("return Pipeline.UploadPipeline.SidecarsNeedWorkFor(", StringComparison.Ordinal)
+            && !seederSource.Contains("if (registry.IsSidecarUploadedTo(looseHash, quelle) || registry.SidecarRejectedReason(looseHash) != null)", StringComparison.Ordinal));
+        Check("F-M556: der Kopf ueberspringt nur, wenn auch kein Seitenwagen offen ist",
+            uploadSource.Contains("bool seitenwagenOffen = loseKandidaten.Count > 0", StringComparison.Ordinal)
+            && uploadSource.Contains("&& SidecarsNeedWorkFor(loseKandidaten, earlyHash, quelle, Registry)", StringComparison.Ordinal)
+            && uploadSource.Contains("if (!seitenwagenOffen)", StringComparison.Ordinal)
+            && uploadSource.Contains("loose sidecar(s) still need a source (F-M556)", StringComparison.Ordinal));
 
         // --- F-M555: jede TMDb-Antwort wird an EINER Stelle abgelegt und von dort beantwortet --------
         // Befund 16.11.2026 ("Die tmdb requests sind komisch. Elle ist laengst durchgelaufen"):
@@ -904,12 +917,12 @@ internal static class Program
                     // Negativkontrolle: ohne bekannte Herkunft ist die Spur NICHT terminal — die Regel greift nur dort
                     && !settleReg.IsEmbedTerminalFor(fileA, 10, SubtitleProvider.Subdl)
                     && !settleReg.IsEmbedTerminalFor(fileA, 10, SubtitleProvider.TvSubtitles)
-                    && seederSource.Contains("if (registry.GetOrigin(looseHash).Origin is not null)", StringComparison.Ordinal));
+                    && uploadSource.Contains("if (registry.GetOrigin(looseHash).Origin is not null)", StringComparison.Ordinal));
 
                 // Die Queue fragt dieselbe Sache je Quelle (F-M500 im Seeder): ein Upload bei der anderen
                 // Quelle haelt die zweite nicht mehr aus der Queue.
                 Check("die Queue liest \"bekannt\" nicht mehr quellenblind (F-M500)",
-                    seederSource.Contains("registry.IsContentUploadedForAnotherSource(contentHashProbe, quelle)", StringComparison.Ordinal)
+                    uploadSource.Contains("registry.IsContentUploadedForAnotherSource(contentHashProbe, quelle)", StringComparison.Ordinal)
                     && !seederSource.Contains("if (registry.IsContentKnown(Registry.ContentHashRegistry.ComputeHash(content)))", StringComparison.Ordinal));
             }
         }

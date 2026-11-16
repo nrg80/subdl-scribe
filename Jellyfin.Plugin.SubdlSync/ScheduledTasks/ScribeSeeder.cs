@@ -1005,71 +1005,13 @@ public sealed class ScribeSeeder
         string mediaHash,
         Configuration.SubtitleProvider quelle)
     {
-        var db = Plugin.Instance!.SharedDbContext;
-        var registry = new Registry.ContentHashRegistry(db);
-
-        foreach (var (loosePath, looseLang, looseHi, _) in loose)
-        {
-            // F-M489/F-M499: je Quelle fragen, nicht "irgendwo hochgeladen" — ein tvst-Upload darf das
-            // Paar nicht aus dem SubDL-Lauf halten (und umgekehrt). Vorher stand hier ein UND ueber
-            // beide Quellen; seit F-M499 laeuft die Frage ohnehin JE Quelle, also zaehlt nur ihre.
-            if (registry.IsUploadedTo(mediaHash, looseLang, looseHi, quelle))
-            {
-                continue;
-            }
-
-            // Sidecars are keyed by content, so the rejection check needs the file's content —
-            // read it once, then ask both questions against the same hash.
-            string looseContent;
-            try
-            {
-                looseContent = File.ReadAllText(loosePath);
-            }
-            catch
-            {
-                return true; // unreadable sidecar → let the pipeline decide
-            }
-
-            string looseHash = Registry.ContentHashRegistry.ComputeHash(looseContent);
-            // F-M499: auch der Inhalt wird JE QUELLE gefragt — "irgendwo hochgeladen" haelt die zweite
-            // Quelle sonst aus der Queue. Eine ABLEHNUNG bleibt quellenneutral: sie ist ein Urteil
-            // ueber den Untertitel, nicht ueber den Endpunkt.
-            if (registry.IsSidecarUploadedTo(looseHash, quelle) || registry.SidecarRejectedReason(looseHash) != null)
-            {
-                continue;
-            }
-
-            // F-M500: ein bekannter Fund (Download von einer der beiden Seiten) ist keine Upload-Arbeit —
-            // fuer KEINE Quelle. Ohne diese Zeile reihte der Seeder ihn in jedem Lauf wieder ein, obwohl das
-            // Herkunftstor ihn ohnehin sperrt.
-            if (registry.GetOrigin(looseHash).Origin is not null)
-            {
-                continue;
-            }
-
-            try
-            {
-                string content = File.ReadAllText(loosePath);
-                // F-M500: die Inhaltsfrage nimmt die QUELLE mit. Ein Upload bei der ANDEREN Quelle haelt
-                // diese sonst aus der Queue — genau der Defekt von F-M499, eine Ebene tiefer. Bekannt OHNE
-                // Quellenbeleg (nur ein Download) bleibt ein Skip: diesen Text hat der Lauf nicht zu
-                // veroeffentlichen, und das Herkunftstor wuerde ihn ohnehin nur zur eigenen Quelle lassen.
-                string contentHashProbe = Registry.ContentHashRegistry.ComputeHash(content);
-                if (registry.IsContentKnown(contentHashProbe)
-                    && !registry.IsContentUploadedForAnotherSource(contentHashProbe, quelle))
-                {
-                    continue;
-                }
-            }
-            catch
-            {
-                return true; // unreadable sidecar → let the pipeline decide
-            }
-
-            return true;
-        }
-
-        return false;
+        // F-M556 (Befund 16.11.2026): die Regel steht ab jetzt EINMAL in
+        // <see cref="Pipeline.UploadPipeline.SidecarsNeedWorkFor"/> — der Seeder reihte Items ein, deren
+        // lose Seitenwagen offen waren, und der Kopf des Laufs warf sie weg, weil er nur die
+        // eingebetteten Spuren ansah (292 Wegwuerfe, 0 Uploads im 21:28-Zyklus). Zwei Kopien derselben
+        // Frage haetten den Fehler nur wieder erlaubt.
+        return Pipeline.UploadPipeline.SidecarsNeedWorkFor(
+            loose, mediaHash, quelle, new Registry.ContentHashRegistry(Plugin.Instance!.SharedDbContext));
     }
 
     private List<string> TargetLanguagesOf(Configuration.PluginConfiguration config)
