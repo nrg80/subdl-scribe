@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.428",
-        "changelog": "v12.1.12.428: the TMDb store is really attached on the normal start path (it was not) and heals itself if a context appears without it.",
+        "version": "12.1.12.429",
+        "changelog": "v12.1.12.429: one upload queue per source — a source that did not queue an item no longer keeps it open, and the scan line names the counts per source.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.428-dev/Jellyfin.Plugin.SubdlSync_12.1.12.428.zip",
-        "checksum": "a38c4fb06b49284eac1950586187d087",
-        "timestamp": "2026-11-16T15:08:19Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.429-dev/Jellyfin.Plugin.SubdlSync_12.1.12.429.zip",
+        "checksum": "38fbfae04cfbd33b916f466c830e5bff",
+        "timestamp": "2026-11-16T15:32:15Z"
       }
     ]
   }
