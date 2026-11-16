@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.434.
+**Status:** Implementation — v12.1.12.435.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -2247,6 +2247,8 @@ fix and is exactly the fingerprint F-M29 forbids).
 
 **T240:** Der Serienfall hat dasselbe Loch und denselben Weg (F-M517), in der Suite `tvsubtitles`: an einer echten Store-Datei bekommt die Zeile einer Folge (`TvstShowId` leer, Pfad gesetzt) über `TvstShowResolver.ResolveForMediaAsync(registry, mediaHash: null, …, mediaPath: …)` die Nummer **512** der Serie — Status `found`, `TvstShowId = "512"`, **Zeilenzahl unverändert**, `TvstShowIdAtPath` liest sie, und der zweite Aufruf liest statt zu suchen (`stored`, genau **eine** Anfrage an die Seitenliste, die des ersten Aufrufs). Ohne Hash und ohne Pfad-Zeile bleibt der Store **leer** (0 Zeilen), obwohl die Nummer gefunden wurde, und der Vermerk ist `MediaNumberNote.NotStored`. **3 Prüfungen**, alle in der Suite `tvsubtitles` (65 → 68).
 
+**F-M552 [U]:** **Ein Item, das schon in der Queue steht, wird aufgefrischt statt eingefroren.** Befund am 16.11.2026 auf die Frage „Wieso haben wir immer noch so viele stopped before sending?" — im letzten vollen Zyklus (18:49–20:11) standen **341** Uploads gegen rund **345** „schon oben"-Skips, und der größte Einzelposten war eine Datei mit **38 Textspuren**, für die **SubDL** gefragt wurde, obwohl sie nur noch für tvst offen war („still open: tvsubtitles"). Ursache: `MergeQueue` fügte nur **neue** Items hinzu und rührte bekannte nie an. Ein Eintrag aus einer Fassung vor F-M549 trug damit für immer keine Quellenangabe, und der Lauf fragte für ihn weiter alle Quellen — 38 Store-Abfragen für eine Quelle, die mit der Datei nichts mehr zu tun hat. Jetzt ersetzt die frische Antwort des Seeders die alte Angabe (`vorhanden.Sources = c.Sources`, dazu Pfad und Name); eine **leere** Antwort löscht eine bekannte Angabe nicht — nicht raten gilt in beide Richtungen.
+
 **F-M551 [U]:** **Auch die Download-Zeile nennt die Quelle.** Anschlussfrage des Operators am 16.11.2026 („Und Download wird im log jetzt auch die Quelle angezeigt?"). Nein — die Zeile `SAVED {Path} (lang=…, release "…", subdl="…", author=…, imdb=…, tmdb=…)` nannte Release, SubDL-Namen, Autor und Kennungen, aber nicht die Quelle; bei drei Quellen ist das die eine Angabe, die fehlte. Jetzt steht sie direkt hinter `SAVED`: `SAVED tvsubtitles {Path} …`, ebenso bei der HI-Fassung (`SAVED tvsubtitles HI variant …`). Die Quelle kommt vom Kandidaten (`cand.Provider`/`hi.Provider`), nicht aus einer Suche — die Listen beider Familienadressen sind gemischt, ein Kandidat kann also aus einer Suche stammen, die unter einem anderen Schalter lief.
 
 **F-M550 [U]:** **Die Log-Zeile nennt die Quelle, und der Log-Stempel heißt wie das Plugin.** Zwei Fragen des Operators vom 16.11.2026: „Wieso steht im log dass nach subdl hochgeladen wurde, lädt er nicht gerade zu tvst?" und „wieso heißt das plugin im log noch subdl sctibe?" (1) Die Zeile `UPLOADED {File} [{Lang}]` nannte überhaupt keine Quelle — davor stand nur der alte Stempel `[SubDL]`, und der liest sich wie „nach SubDL geladen". Jetzt trägt die Zeile die antwortende Quelle: `UPLOADED … → tvsubtitles`. Die Quelle reist im Ergebnis mit (`UploadResult.Source`), gesetzt dort, wo sie bekannt ist (Kette), nicht beim Aufrufer; unbekannt heißt `no source answered`, geraten wird nichts. `UPLOAD FAILED` und `SKIP` tragen sie ebenfalls. (2) Alle 589 Log-Stempel `[SubDL…]` heißen jetzt `[Sub Scribe…]` (34 Dateien). Der Plugin-Name im Jellyfin-Log (`Loaded plugin: "Sub Scribe"`) war bereits richtig; die 40 Zeilen „Skipping disabled plugin … of SubDL Scribe" stammen vom **alten Paket 12.1.12.380**, das noch im Plugin-Ordner liegt.
@@ -2327,6 +2329,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 **T254b:** Der Stummel im Upload-Tab (F-M534), in `gui-structure`: `<h3>tvst</h3>` kommt in **keinem** der beiden Tabs mehr vor (vorher prüfte dieselbe Stelle ihn auf **genau eins**). Dieselbe Prüfzahl (338), nur die Erwartung gedreht.
 
+
+**T273:** Das Auffrischen beim Merge (F-M552) in `endpoints`: ein bekanntes Item bekommt die frische Quellenliste des Seeders, und eine leere Antwort überschreibt keine bekannte. **2 Prüfungen** in `endpoints` (223 → 225).
 
 **T272:** Die Quelle in der Download-Zeile (F-M551) in `endpoints`: die `SAVED`-Zeile trägt `{Source}` und füllt sie aus `cand.Provider`, und beide HI-Zeilen (eigene Fassung und als Hauptspur) tragen sie aus `hi.Provider`. **2 Prüfungen** in `endpoints` (221 → 223).
 

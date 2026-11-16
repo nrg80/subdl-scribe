@@ -2457,6 +2457,29 @@ public sealed class SubdlEventDispatcher : IDisposable
                 queue.Add(c);
                 added++;
                 newIdsSink?.Add(c.ItemId); // Rev.3: sweep run scope = only the fresh arrivals
+                continue;
+            }
+
+            // F-M552 (Befund 16.11.2026, „Wieso haben wir immer noch so viele stopped before
+            // sending?"): ein schon eingereihtes Item wurde hier NIE aufgefrischt. Ein Eintrag aus einer
+            // Fassung vor F-M549 trug damit fuer immer keine Quellenangabe, und der Lauf fragte fuer ihn
+            // weiter ALLE Quellen — bei einer 38-Spur-Datei sind das 38 Store-Abfragen fuer eine Quelle,
+            // die mit der Datei nichts mehr zu tun hat. Die frische Antwort des Seeders ersetzt die alte
+            // Angabe; ohne Angabe bleibt die alte stehen (nicht raten).
+            var vorhanden = queue.First(x => string.Equals(x.ItemId, c.ItemId, StringComparison.OrdinalIgnoreCase));
+            if (c.Sources != null && c.Sources.Count > 0)
+            {
+                vorhanden.Sources = c.Sources;
+            }
+
+            if (!string.IsNullOrEmpty(c.Path))
+            {
+                vorhanden.Path = c.Path;
+            }
+
+            if (!string.IsNullOrEmpty(c.Name))
+            {
+                vorhanden.Name = c.Name;
             }
         }
         return added;

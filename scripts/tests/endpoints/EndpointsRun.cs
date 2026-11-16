@@ -1063,6 +1063,15 @@ internal static class Program
                     && uploadSource.Contains("public int SettledItems { get; set; }", StringComparison.Ordinal)
                     && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries", StringComparison.Ordinal));
 
+                // ---- F-M552: ein bekanntes Item wird aufgefrischt, nicht eingefroren ----------------
+                string verteilerQuelle = await File.ReadAllTextAsync(Path.Combine(
+                    root, "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlEventDispatcher.cs")).ConfigureAwait(false);
+                Check("F-M552: an item already in the queue gets the seeder's fresh source list",
+                    verteilerQuelle.Contains("var vorhanden = queue.First(x => string.Equals(x.ItemId, c.ItemId, StringComparison.OrdinalIgnoreCase));", StringComparison.Ordinal)
+                    && verteilerQuelle.Contains("vorhanden.Sources = c.Sources;", StringComparison.Ordinal));
+                Check("F-M552: and an empty answer does not wipe a known one",
+                    verteilerQuelle.Contains("if (c.Sources != null && c.Sources.Count > 0)", StringComparison.Ordinal));
+
                 // ---- F-M551: auch die Download-Zeile nennt die Quelle -------------------------------
                 Check("F-M551: a saved download names the source it came from",
                     downloadSource.Contains("\"[Sub Scribe-D] SAVED {Source} {Path}", StringComparison.Ordinal)
@@ -1087,8 +1096,6 @@ internal static class Program
                     uploadSource.Contains("\"no source answered\"", StringComparison.Ordinal));
 
                 // ---- F-M549: die Quellen je Item ueberleben den Neustart --------------------------
-                string verteilerQuelle = await File.ReadAllTextAsync(Path.Combine(
-                    root, "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlEventDispatcher.cs")).ConfigureAwait(false);
                 Check("F-M549: the queued item itself names the sources that queued it",
                     seederSource.Contains("public List<string> Sources { get; set; } = new();", StringComparison.Ordinal)
                     && seederSource.Contains("eintrag.Sources = todoQuellen.Select(quelle => quelle.ToString()).ToList();", StringComparison.Ordinal));
