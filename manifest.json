@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.424",
-        "changelog": "v12.1.12.424: a file whose text streams were all rejected ends before the ffmpeg pass instead of being re-extracted and skipped stream by stream on every run.",
+        "version": "12.1.12.425",
+        "changelog": "v12.1.12.425: TMDb answers are kept in the store instead of only in memory — a restart no longer re-asks the same titles and ids.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.424-dev/Jellyfin.Plugin.SubdlSync_12.1.12.424.zip",
-        "checksum": "15a39f58a9867f283a94af93c7f446d5",
-        "timestamp": "2026-11-16T13:43:11Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.425-dev/Jellyfin.Plugin.SubdlSync_12.1.12.425.zip",
+        "checksum": "c8c3c438390e27eb4a2f69a44de6ceaf",
+        "timestamp": "2026-11-16T13:54:48Z"
       }
     ]
   }
