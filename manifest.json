@@ -1,0 +1,21 @@
+[
+  {
+    "guid": "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b",
+    "name": "Sub Scribe",
+    "description": "Sub Scribe brings subtitles to Jellyfin from SubDL.com and tvsubtitles.net: it downloads what is missing and uploads your own. Each source has its own switches, nothing goes back to the other source, the order is yours. A TMDb API Key is required, SubDL is optional. Created by AI under the directions of the maintainer.",
+    "overview": "Sync subtitles with SubDL and tvsubtitles.net — download missing and upload new subtitles.",
+    "owner": "nrg80",
+    "category": "Subtitles",
+    "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
+    "versions": [
+      {
+        "version": "12.1.12.417",
+        "changelog": "v12.1.12.417: Reports are filed before the API trace is detached — every accepted report now leaves both its POST line and its per-item line, so the counter in the statistics can be recounted from the log.",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.417-dev/Jellyfin.Plugin.SubdlSync_12.1.12.417.zip",
+        "checksum": "31271503c31cde1dfdb51dcd5e9b1f80",
+        "timestamp": "2026-11-16T08:49:08Z"
+      }
+    ]
+  }
+]

@@ -1,0 +1,460 @@
+#!/usr/bin/env bash
+# This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Sub Scribe is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the
+# Free Software Foundation, either version 3 of the License, or (at your
+# option) any later version.
+# Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+
+# Release Sub Scribe — the ONE supported release path.
+#
+# We build locally, verify the artifact, and upload exactly one ZIP. The CI
+# workflows only build and test; they never touch a release. See
+# docs/RELEASE.md for why, and .github/workflows/ for the removed workflows.
+#
+# The BRANCH decides the channel: `develop` publishes a prerelease tagged
+# `v<ver>-dev`, `main` publishes the released line tagged `v<ver>`. Run it on the
+# branch whose channel you mean — there is no flag for it, so a stable release
+# cannot be produced by accident and a prerelease cannot silently become the
+# version the README hands out.
+#
+# Usage:
+#   scripts/release.sh                 # version from build.yaml
+#   scripts/release.sh --dry-run       # build + verify, print the plan, touch nothing
+#   scripts/release.sh 12.1.12.82      # explicit version (must match build.yaml)
+
+set -euo pipefail
+
+REPO_SLUG="nrg80/sub-scribe"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$ROOT"
+
+API="https://api.github.com"
+UPLOADS="https://uploads.github.com"
+
+DRY_RUN=0
+ARG=""
+for a in "$@"; do
+    case "$a" in
+        --dry-run) DRY_RUN=1 ;;
+        *)         ARG="$a" ;;
+    esac
+done
+
+say()  { printf '\n=== %s ===\n' "$*"; }
+ok()   { printf '  %s\n' "$*"; }
+die()  { echo "ABORT: $*" >&2; exit 1; }
+
+# --- 1. version + preconditions ---------------------------------------------
+say "Preconditions"
+VER_BUILD="$(grep '^version:' build.yaml | sed 's/.*"\(.*\)".*/\1/')"
+VER="${ARG:-$VER_BUILD}"
+[[ "$VER" == "$VER_BUILD" ]] || die "argument $VER != build.yaml $VER_BUILD — bump build.yaml first"
+VER_CSPROJ="$(grep -oP '(?<=<Version>)[^<]+' Jellyfin.Plugin.SubdlSync/Jellyfin.Plugin.SubdlSync.csproj | head -1)"
+ok "build.yaml : $VER_BUILD"
+ok "csproj     : $VER_CSPROJ"
+[[ "$VER_CSPROJ" == "$VER" || "$VER_CSPROJ" == "$VER-dev" ]] \
+    || die "csproj version $VER_CSPROJ does not match build.yaml $VER"
+
+# The ASSEMBLY version is a SECOND carrier of the same claim, and it drifts silently: on
+# 08.10.2026 the bump raised <Version> only, so 12.1.12.205 shipped a DLL that still identified
+# itself as 12.1.12.204. Everything downstream looked right — build.yaml, the tag, the ZIP field
+# and the manifest all said 205, and the manifest check passed — while Jellyfin's loader logged
+# `Loaded assembly "...Version=12.1.12.204"` and the installed version never took effect. The
+# catalogue installs the package but the plugin reports the old assembly, so the update is
+# invisible on the server. Checked here because a version that lies about itself cannot be
+# caught by any check that reads the packaging metadata.
+VER_ASM="$(grep -oP '(?<=<AssemblyVersion>)[^<]+' Jellyfin.Plugin.SubdlSync/Jellyfin.Plugin.SubdlSync.csproj | head -1)"
+VER_FILE="$(grep -oP '(?<=<FileVersion>)[^<]+' Jellyfin.Plugin.SubdlSync/Jellyfin.Plugin.SubdlSync.csproj | head -1)"
+ok "AssemblyVersion: $VER_ASM"
+ok "FileVersion: $VER_FILE"
+[[ "$VER_ASM" == "$VER" ]] \
+    || die "AssemblyVersion $VER_ASM != $VER — the DLL would identify itself as $VER_ASM (bump all THREE csproj version lines)"
+[[ "$VER_FILE" == "$VER" ]] \
+    || die "FileVersion $VER_FILE != $VER — same trap, bump all THREE csproj version lines"
+
+# The category check guards against the v12.1.12.80 class of bug: the release
+# must never go out with anything but the plural "Subtitles".
+CATEGORY="$(grep '^category:' build.yaml | sed 's/.*"\(.*\)".*/\1/')"
+ok "category   : $CATEGORY"
+[[ "$CATEGORY" == "Subtitles" ]] || die "category must be \"Subtitles\", found \"$CATEGORY\""
+
+# The plugin card in Dashboard → Plugins renders Plugin.Description, which is
+# compiled into the DLL — NOT the description in build.yaml, which only feeds the
+# catalog manifest. Two carriers, so they drift: a shortened build.yaml text stays
+# invisible while the card still shows the old essay. Guard both, and keep the card
+# to a glanceable length.
+python3 - <<'PY' || die "plugin description check failed"
+import re, sys, json
+
+def build_yaml_desc():
+    text = open('build.yaml', encoding='utf-8').read()
+    m = re.search(r'^description: >\n((?:[ \t].*\n|\n)*)', text, re.M)
+    if not m:
+        sys.exit('no description block in build.yaml')
+    return ' '.join(l.strip() for l in m.group(1).split('\n') if l.strip())
+
+def plugin_cs_desc():
+    text = open('Jellyfin.Plugin.SubdlSync/Plugin.cs', encoding='utf-8').read()
+    m = re.search(r'public override string Description =>\s*"((?:[^"\\]|\\.)*)"', text)
+    if not m:
+        sys.exit('no Description override in Plugin.cs')
+    return m.group(1)
+
+LIMIT = 320
+yaml_desc, cs_desc = build_yaml_desc(), plugin_cs_desc()
+for label, desc in (('build.yaml', yaml_desc), ('Plugin.cs (plugin card)', cs_desc)):
+    print(f'  {label:22s}: {len(desc)} chars')
+    if len(desc) > LIMIT:
+        sys.exit(f'  FAIL: {label} description is {len(desc)} chars (limit {LIMIT}) — '
+                 'the card is a one-glance summary, not a feature list')
+
+# The card must state the required keys; without this the text is merely short.
+if 'TMDb API Key' not in cs_desc or 'SubDL' not in cs_desc:
+    sys.exit('  FAIL: Plugin.cs description no longer names the required SubDL/TMDb keys')
+if yaml_desc != cs_desc:
+    sys.exit('  FAIL: build.yaml and Plugin.cs descriptions differ — two carriers, '
+             'one text. build.yaml:\n    ' + yaml_desc + '\n  Plugin.cs:\n    ' + cs_desc)
+print(f'  OK: both carriers identical, card within the {LIMIT}-char limit')
+
+# The CATALOGUE text (manifest.json) is a THIRD carrier of the same words. The operator's order of
+# 10.10.2026 put the AI disclosure in the manifest ("Den AI disclosure bitte auch ins manifest:
+# Created by AI under the directions of the maintainer."), and the follow-up order the same day put
+# it in the card as well — because a Jellyfin with the plugin installed builds its own copy of the
+# description from build.yaml at install time (measured 10.10.2026: its installer wrote the package's
+# build.yaml text into the plugin's meta.json, not the manifest entry), so a card without the
+# sentence would hide it exactly where the plugin is in use. ONE text in three carriers, each ending
+# with the disclosure. Guarded as identity rather than as three copied strings: a manifest
+# regenerated from build.yaml must not be able to drop the sentence in silence, and texts edited by
+# hand drift — which is the failure this whole block exists to catch.
+AI_DISCLOSURE = 'Created by AI under the directions of the maintainer.'
+CATALOGUE_DESC = json.load(open('manifest.json', encoding='utf-8'))[0].get('description', '')
+if not CATALOGUE_DESC.endswith(AI_DISCLOSURE):
+    sys.exit('  FAIL: the catalogue description does not end with the AI disclosure:\n    '
+             + CATALOGUE_DESC)
+if CATALOGUE_DESC != yaml_desc:
+    sys.exit('  FAIL: the catalogue description differs from the card text — three carriers, one\n'
+             '    expected : ' + yaml_desc + '\n'
+             '    found    : ' + CATALOGUE_DESC + '\n'
+             '  (build.yaml and Plugin.cs are compared just above; all three must be equal)')
+print(f'  OK: three carriers identical, disclosure present ({len(CATALOGUE_DESC)} chars)')
+PY
+
+CHANGELOG_ENTRY="$(python3 - "$VER" <<'PY'
+import re, sys
+ver = sys.argv[1]
+text = open('build.yaml', encoding='utf-8').read()
+m = re.search(r'^changelog: >\n((?:[ \t].*\n)*)', text, re.M)
+if not m:
+    sys.exit('no changelog block in build.yaml')
+lines, keep, on = m.group(1).split('\n'), [], False
+for line in lines:
+    if line.strip().startswith('v' + ver + ':'):
+        on = True
+    elif re.match(r'^\s{2}v\d', line):
+        on = False
+    if on:
+        keep.append(line)
+out = '\n'.join(keep).strip()
+if not out:
+    sys.exit(f'no changelog entry for v{ver} in build.yaml')
+print(out)
+PY
+)" || die "changelog extraction failed"
+ok "changelog  : $(echo "$CHANGELOG_ENTRY" | head -1 | cut -c1-64)…"
+
+# The branch picks the channel, and the tag is derived from it rather than from
+# a flag — so the channel cannot drift from the branch it was cut from, and the
+# tag name always says which channel a ZIP came from.
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+case "$BRANCH" in
+    develop) PRERELEASE=1; TAG="v${VER}-dev"; CHANNEL="prerelease" ;;
+    main)    PRERELEASE=0; TAG="v${VER}";     CHANNEL="stable"     ;;
+    *)       if [[ $DRY_RUN -eq 1 ]]; then
+                 PRERELEASE=1; TAG="v${VER}-dev"; CHANNEL="prerelease"
+                 ok "note: '$BRANCH' is not a release branch — dry run shows the develop channel"
+             else
+                 die "must release from develop or main (on $BRANCH)"
+             fi ;;
+esac
+ok "channel    : $CHANNEL  (tag $TAG)"
+
+if [[ $DRY_RUN -eq 0 ]]; then
+    [[ -z "$(git status --porcelain)" ]] || die "working tree not clean — commit first"
+    git fetch --quiet origin "$BRANCH"
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse "origin/$BRANCH")" ]] \
+        || die "$BRANCH is not pushed / behind origin"
+    git rev-parse "$TAG" >/dev/null 2>&1 && die "tag $TAG already exists"
+    TOKEN="${GITHUB_TOKEN:-}"
+    if [[ -z "$TOKEN" && -f /opt/data/.secrets.json ]]; then
+        TOKEN="$(python3 -c "import json;print(json.load(open('/opt/data/.secrets.json'))['github']['nrg80']['token'])")"
+    fi
+    [[ -n "$TOKEN" ]] || die "no GitHub token"
+    AUTH="Authorization: token $TOKEN"
+else
+    ok "(dry-run: git state and token not checked)"
+fi
+
+# --- 1b. the Lastenheft ------------------------------------------------------
+# NF-9 makes the specification the eighth suite: every Contents counter must match the definitions
+# in its section, every id must be defined once, the test numbering must stay gapless from T1, every
+# test a requirement names must exist, and the header status must name the version build.yaml
+# builds. Until 31.10.2026 it ran by hand — and drifted: two Contents counters and T160's check
+# count were behind the code, so the document described a different release than the one that
+# shipped. A gate is the only thing that keeps a document honest while the code moves.
+say "Specification"
+python3 scripts/tests/spec-doc/check.py | tail -3 \
+    || die "spec-doc check failed — the Lastenheft does not describe this build"
+
+# The check COUNTS the Lastenheft states ("**29 Prüfungen.**") are claims like any other: they were
+# never recomputed, so a suite could shrink under its stated number and nobody noticed. This gate binds
+# every stated count to the suite that carries it (scripts/tests/counts.json) and holds the suite's own
+# total against the sum of its claims.
+say "Metriken"
+python3 scripts/tests/counts/check.py | tail -3 \
+    || die "counts check failed — a stated check count is not carried by its suite"
+
+# --- 2. build ----------------------------------------------------------------
+say "Build"
+./build.sh "$VER" | tail -3
+ZIP="$ROOT/out/Jellyfin.Plugin.SubdlSync_${VER}.zip"
+[[ -f "$ZIP" ]] || die "build produced no ZIP at $ZIP"
+
+# --- 2b. the suites named by the Lastenheft ----------------------------------
+# T158/T159/T160/T161 name three projects and their check counts. They run against the DLL that
+# was just built: a stale bin/Release would let a suite pass while the shipped assembly is a
+# different one. Skipped (not silently passed) when this host has no Jellyfin to reference.
+say "Test suites"
+JFDIR="${JF_TEST_DIR:-/opt/data/jf-test/jellyfin}"
+if [[ -d "$JFDIR" ]]; then
+    for suite in anchorgate forcedtitle langcorrect archivecache seasonpack aifilter reporting; do
+        OUT="$(DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 /opt/data/.dotnet/dotnet run \
+            --project "scripts/tests/$suite/$suite.csproj" -- "$ROOT" 2>&1 | tail -2)"
+        echo "$OUT"
+        grep -q "all green" <<<"$OUT" || die "suite $suite is not green — the Lastenheft's counts and the code disagree"
+    done
+
+    OUT="$(DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 /opt/data/.dotnet/dotnet run \
+        --project "$ROOT/scripts/tests/autosync/autosync.csproj" -- "$ROOT" 2>&1 | tail -2)"
+    echo "$OUT"
+    grep -q "ALL CASES PASSED" <<<"$OUT" || die "suite autosync is not green — the slot blocks and the code disagree"
+else
+    ok "(skipped: no Jellyfin reference at $JFDIR, set JF_TEST_DIR to run them)"
+fi
+
+# --- 3. verify the artifact --------------------------------------------------
+say "Verify artifact"
+python3 - "$ZIP" "$VER" "$CATEGORY" <<'PY'
+import sys, zipfile
+zip_path, ver, want_cat = sys.argv[1:4]
+z = zipfile.ZipFile(zip_path)
+names = z.namelist()
+for req in ('Jellyfin.Plugin.SubdlSync.dll', 'LanguageDetection.dll', 'build.yaml'):
+    if req not in names:
+        sys.exit(f"  FAIL: {req} missing from the ZIP")
+# The licence texts must travel with the published ZIP: LanguageDetection is
+# Apache-2.0, which requires the licence and notice alongside a redistribution.
+for req in ('licenses/THIRD-PARTY.txt',
+            'licenses/LanguageDetection-Apache-2.0.txt',
+            'licenses/SubDL-Scribe-GPL-3.0.txt'):
+    if req not in names:
+        sys.exit(f"  FAIL: {req} missing from the ZIP — a required licence is not shipped")
+if any(n.endswith('meta.json') for n in names):
+    sys.exit("  FAIL: this ZIP carries meta.json — that is the CI format, not ours")
+txt = z.read('build.yaml').decode()
+def field(name):
+    return [l.split(':', 1)[1].strip().strip('"') for l in txt.split('\n') if l.startswith(name + ':')][0]
+if field('version') != ver:
+    sys.exit(f"  FAIL: ZIP version {field('version')} != {ver}")
+if field('category') != want_cat:
+    sys.exit(f"  FAIL: ZIP category {field('category')!r} != {want_cat!r}")
+print(f"  contents : {sorted(names)}")
+print(f"  version  : {field('version')}")
+print(f"  category : {field('category')}")
+print("  OK")
+PY
+MD5="$(md5sum "$ZIP" | cut -d' ' -f1)"
+ok "md5        : $MD5"
+
+# --- 4. manifest -------------------------------------------------------------
+say "Manifest"
+MANIFEST_OUT="$ROOT/manifest.json"
+[[ $DRY_RUN -eq 1 ]] && MANIFEST_OUT="/tmp/subdl-manifest-dryrun.json"
+python3 - "$MANIFEST_OUT" "$VER" "$MD5" "$REPO_SLUG" "$TAG" "$CHANGELOG_ENTRY" <<'PY'
+import json, sys
+from datetime import datetime, timezone
+out_path, ver, md5, slug, tag, changelog = sys.argv[1:7]
+manifest = json.load(open('manifest.json', encoding='utf-8'))
+entry = manifest[0]
+if entry['category'] != 'Subtitles':
+    sys.exit(f"  FAIL: manifest category is {entry['category']!r}")
+abi = entry['versions'][0]['targetAbi'] if entry['versions'] else '12.1.0.0'
+url = f"https://github.com/{slug}/releases/download/{tag}/Jellyfin.Plugin.SubdlSync_{ver}.zip"
+entry['versions'] = [{
+    'version': ver,
+    'changelog': changelog,
+    'targetAbi': abi,
+    'sourceUrl': url,
+    'checksum': md5,
+    'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+}]
+with open(out_path, 'w', encoding='utf-8') as fh:
+    json.dump(manifest, fh, indent=2, ensure_ascii=False)
+    fh.write('\n')
+print(f"  version  : {ver}")
+print(f"  checksum : {md5}")
+print(f"  url      : {url}")
+print(f"  written  : {out_path}")
+PY
+
+if [[ $DRY_RUN -eq 1 ]]; then
+    say "Dry run complete — nothing was committed, tagged or released"
+    ok "ZIP    : $ZIP"
+    ok "md5    : $MD5"
+    ok "tag    : $TAG (would be created)"
+    exit 0
+fi
+
+git add manifest.json
+# NO identity override (fixed 03.10.2026). This line used to force
+# "Sub Scribe <noreply@localhost>" on the release commit, so every release produced
+# one commit that belongs to nobody: GitHub counted it for no account, the contributor
+# list showed a name next to the maintainer's, and 13 commits carried an author the
+# user never wrote. The commit now inherits the repository's own identity, which is the
+# account's verified address - one author per repository, and the release commits are
+# attributed like every other commit in the history.
+git commit -q -m "release: ${VER}" || ok "(manifest unchanged)"
+git push --quiet origin "$BRANCH"
+
+# --- 5. tag, and check what the TAG carries ---------------------------------
+say "Tag $TAG"
+git tag -a "$TAG" -m "Sub Scribe $VER"
+# Tag first, release second: the release can then never point at a tag the
+# server does not know. And check the TAGGED build.yaml, not the working tree —
+# a tag left behind on an older commit is exactly how v12.1.12.80 shipped
+# category "Subtitle" while the branch already said "Subtitles".
+git push --quiet origin "$TAG"
+python3 - "$TAG" "$VER" <<'PY'
+import subprocess, sys
+tag, ver = sys.argv[1], sys.argv[2]
+txt = subprocess.run(['git', 'show', f'{tag}:build.yaml'],
+                     capture_output=True, text=True, check=True).stdout
+def field(name):
+    return [l.split(':', 1)[1].strip().strip('"') for l in txt.split('\n') if l.startswith(name + ':')][0]
+if field('version') != ver:
+    sys.exit(f"  FAIL: tag {tag} carries version {field('version')}, expected {ver}")
+if field('category') != 'Subtitles':
+    sys.exit(f"  FAIL: tag {tag} carries category {field('category')!r}, expected 'Subtitles'")
+print(f"  tag build.yaml: version {field('version')}, category {field('category')}  OK")
+PY
+
+# --- 6. release with exactly one asset ---------------------------------------
+say "Release"
+REL_ID="$(curl -sS -m 30 -H "$AUTH" "$API/repos/$REPO_SLUG/releases/tags/$TAG" \
+    | python3 -c "import json,sys;print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)"
+if [[ -n "$REL_ID" ]]; then
+    ok "release exists (id $REL_ID) — reusing"
+else
+    python3 - "$TAG" "$CHANGELOG_ENTRY" "$BRANCH" "$PRERELEASE" <<'PY' > /tmp/subdl-release-payload.json
+import json, sys
+print(json.dumps({
+    "tag_name": sys.argv[1], "target_commitish": sys.argv[3], "name": sys.argv[1],
+    "body": sys.argv[2], "draft": False, "prerelease": sys.argv[4] == "1",
+}))
+PY
+    REL_ID="$(curl -sS -m 60 -X POST -H "$AUTH" -H 'Accept: application/vnd.github+json' \
+        "$API/repos/$REPO_SLUG/releases" -d @/tmp/subdl-release-payload.json \
+        | python3 -c "import json,sys;d=json.load(sys.stdin);print(d.get('id') or sys.exit('  FAIL: '+str(d)))")"
+    ok "created release id $REL_ID"
+fi
+
+# Drop every asset that is not our verified ZIP, then (re-)upload it. The CI
+# upload workflow is gone, so extras should not appear — but an old run or a
+# manual upload can leave some, and "exactly one asset" is the contract.
+KEEP="Jellyfin.Plugin.SubdlSync_${VER}.zip"
+curl -sS -m 30 -H "$AUTH" "$API/repos/$REPO_SLUG/releases/$REL_ID/assets" \
+ | python3 -c "
+import json, sys
+for a in json.load(sys.stdin):
+    if a['name'] != '$KEEP':
+        print('%s|%s' % (a['id'], a['name']))" \
+ | while IFS='|' read -r aid aname; do
+       [[ -z "$aid" ]] && continue
+       curl -sS -m 60 -X DELETE -H "$AUTH" -o /dev/null \
+           "$API/repos/$REPO_SLUG/releases/assets/$aid"
+       ok "removed foreign asset: $aname"
+   done
+
+curl -sS -m 300 -X POST -H "$AUTH" -H 'Content-Type: application/zip' \
+    --data-binary @"$ZIP" \
+    "$UPLOADS/repos/$REPO_SLUG/releases/$REL_ID/assets?name=$KEEP" \
+ | python3 -c "import json,sys;d=json.load(sys.stdin);print('  uploaded: %s (%s, %d bytes)' % (d.get('name'), d.get('state'), d.get('size', 0)))" \
+ || die "asset upload failed"
+
+# --- 7. verify the published release ----------------------------------------
+say "Verify release"
+# Verify against the API, not against a second download. GitHub serves release downloads
+# through a CDN that answers with a short HTML error page under load (measured twice on
+# 08.11.2026: "504 Gateway Time-out", 92 bytes, always the same md5). A download-based check
+# cannot tell that page from a bad asset and aborts a perfectly good release, so the stored
+# asset's own digest and size are compared instead — that is the same bytes GitHub will serve.
+# The API itself can answer with nothing (measured 09.11.2026: an empty body raised a JSON
+# traceback and killed the run *after* the release was already published), so the answer is
+# fetched to a file, retried until it parses, and an unparsable answer is named as such.
+ASSETS_JSON=/tmp/subdl-assets.json
+for _ in 1 2 3 4 5; do
+    curl -sS -m 60 -H "$AUTH" "$API/repos/$REPO_SLUG/releases/$REL_ID/assets" -o "$ASSETS_JSON" 2>/dev/null || true
+    [[ "$(head -c 1 "$ASSETS_JSON" 2>/dev/null)" == "[" ]] && break
+    sleep 5
+done
+[[ "$(head -c 1 "$ASSETS_JSON" 2>/dev/null)" == "[" ]] \
+    || die "the releases API gave no JSON after 5 attempts — the release exists, verify it by hand"
+
+LOCAL_SIZE="$(stat -c %s "$ZIP")"
+LOCAL_SHA="$(sha256sum "$ZIP" | cut -d' ' -f1)"
+REMOTE="$(python3 -c "
+import json, sys
+assets = json.load(open('$ASSETS_JSON'))
+print('  assets: %d' % len(assets))
+for a in assets:
+    print('   %-48s %d' % (a['name'], a['size']))
+if len(assets) != 1:
+    sys.exit('  FAIL: release must carry exactly one asset')
+a = assets[0]
+if a['name'] != '$KEEP':
+    sys.exit('  FAIL: unexpected asset name ' + a['name'])
+print('%d %s' % (a['size'], (a.get('digest') or '').replace('sha256:', '') or '-'))")" \
+    || die "asset listing or identity check failed"
+printf '%s\n' "$REMOTE" | grep -v '^[0-9]'
+REMOTE_SIZE="$(printf '%s\n' "$REMOTE" | tail -1 | cut -d' ' -f1)"
+REMOTE_SHA="$(printf '%s\n' "$REMOTE" | tail -1 | cut -d' ' -f2)"
+[[ "$REMOTE_SIZE" == "$LOCAL_SIZE" ]] \
+    || die "asset size $REMOTE_SIZE != built $LOCAL_SIZE"
+if [[ "$REMOTE_SHA" != "-" ]]; then
+    [[ "$REMOTE_SHA" == "$LOCAL_SHA" ]] || die "asset sha256 $REMOTE_SHA != built $LOCAL_SHA"
+    ok "asset sha256 matches the build: $LOCAL_SHA ($LOCAL_SIZE bytes)"
+else
+    # Older GitHub responses carry no digest; fall back to a download, but insist the file is a
+    # ZIP (magic "PK") before comparing — an HTML error page is a fetch failure, not a mismatch.
+    for _ in 1 2 3; do
+        curl -sSL -m 300 -o /tmp/subdl-asset.zip \
+            "https://github.com/$REPO_SLUG/releases/download/$TAG/$KEEP" || continue
+        [[ "$(head -c 2 /tmp/subdl-asset.zip)" == "PK" ]] || continue
+        GOT="$(md5sum /tmp/subdl-asset.zip | cut -d' ' -f1)"
+        [[ "$GOT" == "$MD5" ]] || die "downloaded asset md5 $GOT != built $MD5"
+        ok "downloaded md5 matches the build: $GOT"
+        break
+    done
+    [[ "$(md5sum /tmp/subdl-asset.zip 2>/dev/null | cut -d' ' -f1)" == "$MD5" ]] \
+        || die "asset could not be fetched for verification (CDN error page, 3 attempts)"
+fi
+
+say "Done — $TAG"
+printf '  release : https://github.com/%s/releases/tag/%s\n' "$REPO_SLUG" "$TAG"
+printf '  asset   : %s  (md5 %s)\n' "$KEEP" "$MD5"
+printf '  manifest: https://raw.githubusercontent.com/%s/%s/manifest.json\n' "$REPO_SLUG" "$BRANCH"

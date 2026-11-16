@@ -1,0 +1,524 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "qualityrun/12.1.11.5": {
+        "dependencies": {
+          "Jellyfin.Plugin.SubdlSync": "12.1.12.388",
+          "MediaBrowser.Common": "12.2.0.0",
+          "MediaBrowser.Controller": "12.2.0.0",
+          "MediaBrowser.Model": "12.2.0.0",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0.0"
+        },
+        "runtime": {
+          "qualityrun.dll": {}
+        }
+      },
+      "Jellyfin.Plugin.SubdlSync/12.1.12.388": {
+        "runtime": {
+          "Jellyfin.Plugin.SubdlSync.dll": {
+            "assemblyVersion": "12.1.12.388",
+            "fileVersion": "12.1.12.388"
+          }
+        }
+      },
+      "MediaBrowser.Common/12.2.0.0": {
+        "runtime": {
+          "MediaBrowser.Common.dll": {
+            "assemblyVersion": "12.2.0.0",
+            "fileVersion": "12.2.0.0"
+          }
+        }
+      },
+      "MediaBrowser.Controller/12.2.0.0": {
+        "runtime": {
+          "MediaBrowser.Controller.dll": {
+            "assemblyVersion": "12.2.0.0",
+            "fileVersion": "12.2.0.0"
+          }
+        }
+      },
+      "MediaBrowser.Model/12.2.0.0": {
+        "runtime": {
+          "MediaBrowser.Model.dll": {
+            "assemblyVersion": "12.2.0.0",
+            "fileVersion": "12.2.0.0"
+          }
+        }
+      },
+      "Microsoft.Extensions.Logging.Abstractions/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.Logging.Abstractions.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection.Abstractions/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.EntityFrameworkCore/10.0.11.0": {
+        "runtime": {
+          "Microsoft.EntityFrameworkCore.dll": {
+            "assemblyVersion": "10.0.11.0",
+            "fileVersion": "10.0.1126.37416"
+          }
+        }
+      },
+      "LanguageDetection/1.1.0.0": {
+        "runtime": {
+          "LanguageDetection.dll": {
+            "assemblyVersion": "1.1.0.0",
+            "fileVersion": "1.1.0.0"
+          }
+        }
+      },
+      "Microsoft.EntityFrameworkCore.Relational/10.0.11.0": {
+        "runtime": {
+          "Microsoft.EntityFrameworkCore.Relational.dll": {
+            "assemblyVersion": "10.0.11.0",
+            "fileVersion": "10.0.1126.37416"
+          }
+        }
+      },
+      "Microsoft.AspNetCore.Http.Abstractions/10.0.0.0": {
+        "runtime": {
+          "Microsoft.AspNetCore.Http.Abstractions.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Jellyfin.Extensions/12.2.0.0": {
+        "runtime": {
+          "Jellyfin.Extensions.dll": {
+            "assemblyVersion": "12.2.0.0",
+            "fileVersion": "12.2.0.0"
+          }
+        }
+      },
+      "Jellyfin.Database.Implementations/12.2.0.0": {
+        "runtime": {
+          "Jellyfin.Database.Implementations.dll": {
+            "assemblyVersion": "12.2.0.0",
+            "fileVersion": "12.2.0.0"
+          }
+        }
+      },
+      "Jellyfin.Data/12.2.0.0": {
+        "runtime": {
+          "Jellyfin.Data.dll": {
+            "assemblyVersion": "12.2.0.0",
+            "fileVersion": "12.2.0.0"
+          }
+        }
+      },
+      "Jellyfin.MediaEncoding.Keyframes/12.2.0.0": {
+        "runtime": {
+          "Jellyfin.MediaEncoding.Keyframes.dll": {
+            "assemblyVersion": "12.2.0.0",
+            "fileVersion": "12.2.0.0"
+          }
+        }
+      },
+      "Microsoft.Extensions.Configuration.Abstractions/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.Configuration.Abstractions.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.Extensions.Hosting.Abstractions/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.Hosting.Abstractions.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.Extensions.Configuration.Binder/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.Configuration.Binder.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "J2N/2.0.0.0": {
+        "runtime": {
+          "J2N.dll": {
+            "assemblyVersion": "2.0.0.0",
+            "fileVersion": "2.0.0.0"
+          }
+        }
+      },
+      "Diacritics/4.1.8.0": {
+        "runtime": {
+          "Diacritics.dll": {
+            "assemblyVersion": "4.1.8.0",
+            "fileVersion": "4.1.8.0"
+          }
+        }
+      },
+      "Microsoft.AspNetCore.Http.Features/10.0.0.0": {
+        "runtime": {
+          "Microsoft.AspNetCore.Http.Features.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.Extensions.Features/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.Features.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.Extensions.Primitives/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.Primitives.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.Net.Http.Headers/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Net.Http.Headers.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "ICU4N.Transliterator/60.0.0.0": {
+        "runtime": {
+          "ICU4N.Transliterator.dll": {
+            "assemblyVersion": "60.0.0.0",
+            "fileVersion": "60.1.0.0"
+          }
+        }
+      },
+      "Polly/8.0.0.0": {
+        "runtime": {
+          "Polly.dll": {
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.7.0.5801"
+          }
+        }
+      },
+      "Microsoft.EntityFrameworkCore.Abstractions/10.0.11.0": {
+        "runtime": {
+          "Microsoft.EntityFrameworkCore.Abstractions.dll": {
+            "assemblyVersion": "10.0.11.0",
+            "fileVersion": "10.0.1126.37416"
+          }
+        }
+      },
+      "Microsoft.Extensions.Caching.Abstractions/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.Caching.Abstractions.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.DependencyInjection.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.Extensions.Logging/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.Logging.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.Extensions.Caching.Memory/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.Caching.Memory.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.Extensions.Options/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.Options.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "NEbml.Core/1.1.0.5": {
+        "runtime": {
+          "NEbml.Core.dll": {
+            "assemblyVersion": "1.1.0.5",
+            "fileVersion": "1.1.0.5"
+          }
+        }
+      },
+      "Microsoft.Extensions.Diagnostics.Abstractions/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.Diagnostics.Abstractions.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.Extensions.FileProviders.Abstractions/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.FileProviders.Abstractions.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.Extensions.Configuration/10.0.0.0": {
+        "runtime": {
+          "Microsoft.Extensions.Configuration.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "Microsoft.AspNetCore.Connections.Abstractions/10.0.0.0": {
+        "runtime": {
+          "Microsoft.AspNetCore.Connections.Abstractions.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.1226.42308"
+          }
+        }
+      },
+      "ICU4N/60.0.0.0": {
+        "runtime": {
+          "ICU4N.dll": {
+            "assemblyVersion": "60.0.0.0",
+            "fileVersion": "60.1.0.0"
+          }
+        }
+      },
+      "Polly.Core/8.0.0.0": {
+        "runtime": {
+          "Polly.Core.dll": {
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.7.0.5801"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "qualityrun/12.1.11.5": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Jellyfin.Plugin.SubdlSync/12.1.12.388": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "MediaBrowser.Common/12.2.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "MediaBrowser.Controller/12.2.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "MediaBrowser.Model/12.2.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.Logging.Abstractions/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.DependencyInjection.Abstractions/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.EntityFrameworkCore/10.0.11.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "LanguageDetection/1.1.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.EntityFrameworkCore.Relational/10.0.11.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.AspNetCore.Http.Abstractions/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Jellyfin.Extensions/12.2.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Jellyfin.Database.Implementations/12.2.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Jellyfin.Data/12.2.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Jellyfin.MediaEncoding.Keyframes/12.2.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.Configuration.Abstractions/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.Hosting.Abstractions/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.Configuration.Binder/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "J2N/2.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Diacritics/4.1.8.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.AspNetCore.Http.Features/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.Features/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.Primitives/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Net.Http.Headers/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "ICU4N.Transliterator/60.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Polly/8.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.EntityFrameworkCore.Abstractions/10.0.11.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.Caching.Abstractions/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.DependencyInjection/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.Logging/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.Caching.Memory/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.Options/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "NEbml.Core/1.1.0.5": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.Diagnostics.Abstractions/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.FileProviders.Abstractions/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.Extensions.Configuration/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.AspNetCore.Connections.Abstractions/10.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "ICU4N/60.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Polly.Core/8.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

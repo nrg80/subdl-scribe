@@ -1,0 +1,10 @@
+HTTP/1.1 302 Found
+Date: Sun, 15 Nov 2026 20:19:21 GMT
+Server: Apache/2.4.6 (CentOS) OpenSSL/1.0.2k-fips mod_fcgid/2.3.9 PHP/5.3.29
+Strict-Transport-Security: max-age=31536000; preload
+X-Powered-By: PHP/5.3.29
+Set-Cookie: visited=1; expires=Mon, 16-Nov-2026 08:19:21 GMT
+Location: files/Oppenheimer_2023.WEB-DL.MA.en.zip
+Content-Length: 0
+Content-Type: text/html
+

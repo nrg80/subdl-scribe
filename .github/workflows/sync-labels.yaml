@@ -1,0 +1,30 @@
+# This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Sub Scribe is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the
+# Free Software Foundation, either version 3 of the License, or (at your
+# option) any later version.
+# Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+name: '🏷️ Sync labels'
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+jobs:
+  call:
+    # The reusable workflow declares no permissions of its own, so it inherits whatever this job
+    # grants — and without a block it falls back to the repository default (read-only), which is why
+    # the run on main failed on 01.11.2026 with 403 "Resource not accessible by integration" on
+    # POST /repos/nrg80/sub-scribe/labels. Labels are managed through the issues API.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/sync-labels.yaml@master
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}

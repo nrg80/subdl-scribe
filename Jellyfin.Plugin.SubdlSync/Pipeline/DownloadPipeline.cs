@@ -1,0 +1,4854 @@
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Sub Scribe is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the
+// Free Software Foundation, either version 3 of the License, or (at your
+// option) any later version.
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using Jellyfin.Plugin.SubdlScribe.Api;
+using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubdlScribe.Filters;
+using Jellyfin.Plugin.SubdlScribe.Language;
+using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.Movies;
+using MediaBrowser.Controller.Entities.TV;
+using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Persistence;
+using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.IO;
+using Microsoft.Extensions.Logging;
+using Episode = MediaBrowser.Controller.Entities.TV.Episode;
+using Movie = MediaBrowser.Controller.Entities.Movies.Movie;
+using Jellyfin.Plugin.SubdlScribe.Data;
+
+namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+
+/// <summary>
+/// F-M472: the season pack one episode was served from — the SAME release, its season, and the
+/// episodes it still holds.
+/// </summary>
+/// <param name="SeriesId">Series the pack belongs to.</param>
+/// <param name="ReleaseName">Release name as SubDL lists it.</param>
+/// <param name="Season">Season the members share.</param>
+/// <param name="Episodes">Episode numbers of the other members of the same release.</param>
+internal sealed record PackCover(Guid? SeriesId, string ReleaseName, int Season, IReadOnlyCollection<int> Episodes);
+
+/// <summary>
+/// Download pipeline run summary ([D] F-M41).
+/// </summary>
+public class DownloadRunSummary
+{
+    /// <summary>F-M247: true when this run was a dry run — it searched and ranked but saved
+    /// nothing. The statistics counters ignore everything a dry run produced; the run-end log
+    /// line labels its numbers as hypothetical instead of claiming saves that never happened.</summary>
+    public bool IsDryRun { get; set; }
+
+    /// <summary>Gets or sets the number of downloaded subtitles.</summary>
+    public int Downloaded { get; set; }
+
+    /// <summary>
+    /// F-M491: downloads that were kept but did NOT pass the alignment significance while auto-sync is on.
+    /// The file exists, so it is a download; it is not a success, so the pair stays open (F-M452) and a
+    /// later candidate gets its chance.
+    /// </summary>
+    public int DownloadedWithoutSignificance { get; set; }
+
+    /// <summary>Gets or sets the number of failed downloads.</summary>
+    public int Failed { get; set; }
+
+    /// <summary>
+    /// F-M283 (user decision 02.10.2026): there is no download mark any more, so there is nothing to
+    /// invalidate or to withhold. `MarksInvalidated` and `MarksWithheld` are removed with their
+    /// subject — a counter that reports on a construct which no longer exists reads as information
+    /// while telling nobody anything. What the run reports instead is which items are open and which
+    /// searches were asked for; see the run line below.
+    /// </summary>
+
+    /// <summary>F-M282: open required files seen in this run (regular + hearing-impaired data).</summary>
+    public int OpenFilesSeen { get; set; }
+
+    /// <summary>Gets or sets the number of languages reported "not available" for an item.</summary>
+    public int NotAvailable { get; set; }
+
+    /// <summary>F-M81z-2 (user decision 10.09.2026): run ended by hitting the daily
+    /// quota (429) — a clean rescheduled stop, NOT a download failure. Surfaced as
+    /// its own "quota" counter in the Task finished line.</summary>
+    public int QuotaStopped { get; set; }
+
+    /// <summary>F-M94h: run was not started because another run holds the global lock.</summary>
+    public bool SkippedByLock { get; set; }
+
+    /// <summary>Gets or sets the number of items skipped (no id, filters, no missing languages).</summary>
+    public int SkippedItems { get; set; }
+
+    // F-M24d: skip-reason counters for the aggregate log lines (one line per reason
+    // class at run end, Normal mode too — not 284 per-item lines).
+
+    /// <summary>
+    /// F-M449: candidates dropped because they come from the machine-translation account while
+    /// the switch `Allow AI translated subs` is off. Counted per CANDIDATE at the search result —
+    /// before ranking, before any download unit is spent.
+    /// </summary>
+    public int AiUploaderFiltered { get; set; }
+
+    /// <summary>
+    /// F-M450: reports this run filed with SubDL about a subtitle that failed twice (naked finding,
+    /// no measurement history). Only counted when SubDL answered success:true.
+    /// </summary>
+    public int Reported { get; set; }
+
+    /// <summary>
+    /// F-M450: reports that SubDL did not take — rate limited (429) or refused. The rows stay
+    /// unreported, so the next run picks them up again; nothing is lost and nothing is re-sent twice.
+    /// </summary>
+    public int ReportsDeferred { get; set; }
+
+    /// <summary>
+    /// F-M504: items where NOT ONE of the asked sources had a candidate — the counter used to mean
+    /// "SubDL had nothing", which read as a verdict on a source that had never been asked.
+    /// </summary>
+    public int SkippedNoCandidates { get; set; }
+
+    /// <summary>Gets or sets the count of items skipped for id-less (hard IMDB match).</summary>
+    public int SkippedNoId { get; set; }
+
+
+    /// <summary>Gets or sets the count of items skipped by the skip filters (dir/file patterns).</summary>
+    public int SkippedByFilter { get; set; }
+
+    /// <summary>Gets or sets the count of items not due for refetch (F-M47 gap).</summary>
+    public int SkippedNotDue { get; set; }
+
+    /// <summary>
+    /// F-M286: candidates this run FETCHED and then threw away — every reject path, not the QA
+    /// gates alone. The four gates (language/structure/min-cues/runtime) are a subset; a candidate
+    /// whose bytes arrived and were discarded for any other reason (no usable data, content already
+    /// known, a hearing-impaired gate) belongs here too. Reconciles with the day's quota:
+    /// requests = saved + rejected. A candidate that was never fetched (empty HI pool, candidates
+    /// left untried by keep-best) is NOT counted — nothing was spent on it.
+    /// </summary>
+    public int RejectedCandidates { get; set; }
+
+    /// <summary>
+    /// F-M308: subtitles this run FITTED to their audio track. Counts the correction when it is
+    /// APPLIED — a fit that was measured and then refused by its own deploy rule is not a fit.
+    /// <para>
+    /// F-M322 (operator order 08.10.2026): the operator's wording is that the statistics measure
+    /// SUCCESSFUL auto-syncs only, so this counter covers the files that were really MOVED. A file
+    /// the fit found nothing wrong with is NOT added here — it was not aligned, and counting it would
+    /// make the row claim an alignment that never happened. Such files have their own counter
+    /// (<see cref="AlreadyGoodAsDownloaded"/>).
+    /// </para>
+    /// </summary>
+    public int FittedToAudio { get; set; }
+
+    /// <summary>
+    /// F-M321/F-M322: files the fit found NOTHING WRONG WITH ("no proven gain"). They ARE the good
+    /// version of their language, so they are not successful alignments — nothing was moved — and
+    /// they are reported separately. The auto-sync light turns green for them because the work was
+    /// done, while the statistics' alignment counter stays honest about what it counts.
+    /// </summary>
+    public int AlreadyGoodAsDownloaded { get; set; }
+
+    /// <summary>
+    /// F-M323: auto-sync measurements that FAILED — no ffmpeg, undecodable audio, a fit that threw.
+    /// <para>
+    /// Its own counter because the worker's row needs its own evidence: the row used to go red on
+    /// <see cref="Failed"/>, which counts the DOWNLOAD's failures, so a network error on an
+    /// unrelated subtitle painted the alignment red. A refusal is NOT counted here — declining a
+    /// correction is an outcome, not a breakdown.
+    /// </para>
+    /// </summary>
+    public int AutoSyncFailed { get; set; }
+
+    /// <summary>
+    /// F-M310: total milliseconds the run spent aligning subtitles to their audio. The counter
+    /// above says HOW MANY were aligned; this says what the alignment COST, which is the number
+    /// that tells whether the correction is a footnote or the bulk of a run's wall time.
+    /// </summary>
+    public long FitMsTotal { get; set; }
+
+    /// <summary>
+    /// User pressed the stop button during this run.
+    /// </summary>
+    public bool StopRequested { get; set; }
+
+    // Id sanity-check / backfill counters (one aggregate line at run end).
+    /// <summary>Searches where results[0] ids were compared against the searched ids.</summary>
+    public int IdChecks { get; set; }
+
+    /// <summary>Items dropped because SubDL's results[0] film disagrees with the searched id.</summary>
+    public int IdMismatches { get; set; }
+
+    /// <summary>Missing imdb/tmdb ids backfilled from SubDL's results[0] film header.</summary>
+    public int IdBackfilledFromApi { get; set; }
+
+    /// <summary>Items whose resolved id set contains an imdb id.</summary>
+    public int IdImdbOk { get; set; }
+
+    /// <summary>Items whose resolved id set contains a tmdb id.</summary>
+    public int IdTmdbOk { get; set; }
+
+    /// <summary>Items where the filename-based TMDB fallback resolved an id.</summary>
+    public int IdResolvedFromFilename { get; set; }
+
+    /// <summary>Gets or sets the count of items with no missing target languages.</summary>
+    public int SkippedNothingMissing { get; set; }
+
+    /// <summary>Gets or sets the number of media files processed.</summary>
+    public int FilesSeen { get; set; }
+}
+
+/// <summary>
+/// Download pipeline ([D] F-M41–M47): for every item in the selected libraries,
+/// find missing target-language subtitles on SubDL, pick the best candidate
+/// (release-score, F-M44), download it and place it next to the media file.
+/// Uses the same API client, registry and language mapper as the upload pipeline (F-M37).
+/// </summary>
+public sealed class DownloadPipeline : IDisposable
+{
+    private static readonly Regex FpsRegex = new(@"(\d{1,3}(?:\.\d+)?)\s*fps", RegexOptions.IgnoreCase);
+    private readonly ILogger<DownloadPipeline> _logger;
+    private readonly ILibraryManager _libraryManager;
+    private readonly IMediaSourceManager _mediaSourceManager;
+    private readonly SubdlApiClient _api;
+
+    /// <summary>
+    /// F-M485 (operator order 15.11.2026: "beide upload und download bitte individuell schaltbar über
+    /// die toggles"): the download endpoints this run may use. Built from the same clients the pipeline
+    /// already holds, so the constructor stays as it is — SubDL is the source it always was, and
+    /// tvsubtitles.net joins only when its switch is on.
+    /// </summary>
+    private readonly Api.Endpoints.SubtitleEndpointCatalog _endpoints;
+
+    /// <summary>F-M533: Eintraege, die eine Fremdquelle wegen einer falschen Feldangabe verworfen hat.</summary>
+    private int _tvstFormatRejected;
+
+    /// <summary>
+    /// F-M507: der Client der dritten Quelle und der Auflöser, der ihre Filmnummer in den Store legt.
+    /// Beide hängen am selben Katalog-Eintrag wie der Endpunkt: der Auflöser sucht, der Endpunkt holt.
+    /// </summary>
+    private readonly Api.MovieSubtitlesClient _msubClient;
+
+    // F-M521: the series address needs a name of its own here, because its debug channel is attached
+    // per run like SubDL's — and the summary line asks this instance what the site answered.
+    private Api.TvSubtitlesClient? _tvClient;
+
+    /// <summary>F-M507: welche Nummer hat dieser Film bei moviesubtitles.org — gespeichert, sonst gesucht.</summary>
+    private readonly Api.Endpoints.MsubMovieResolver _msubMovies;
+
+    /// <summary>
+    /// F-M504: die Quelle, deren Treffer die Hauptsuche oben bereits liefert. <c>RunV2SearchAsync</c>
+    /// fragt SubDL über ihren Id-Index (Ids, HI-Pool, Quota-Behandlung) und trägt das Ergebnis in
+    /// <c>candidates</c> ein; sie wird unten NICHT ein zweites Mal über ihren Endpunkt gefragt —
+    /// dieselbe Antwort zweimal zu holen kostet einen Aufruf und könnte eine andere sein.
+    /// <para>
+    /// F-M504 (Nutzerkorrektur 15.11.2026): der Name ist ein ALIAS auf
+    /// <see cref="Api.Endpoints.SourceOrder.MainSearch"/>, weil die Frage-Reihenfolge dieselbe Aussage
+    /// braucht — an welcher Stelle der Liste diese Quelle steht, entscheidet, wann ihre Suche läuft.
+    /// Die Hauptsuche selbst auf den Endpunkt-Katalog umzustellen wäre ein eigener Umbau (die
+    /// Id-Prüfung mit Backfill, der HI-Pool, die 429-/Quota-Pfade hängen an ihr).
+    /// </para>
+    /// </summary>
+    private const Configuration.SubtitleProvider MainSearchSource = Api.Endpoints.SourceOrder.MainSearch;
+    /// <summary>Always use the current Plugin.Instance registry so a DB reset is respected.</summary>
+    private ContentHashRegistry Registry => Plugin.Instance?.Registry ?? throw new InvalidOperationException("Plugin not initialized");
+    private readonly TmdbImdbResolver _tmdb;
+
+    /// <summary>F-M218: the summary of the run in flight, for event handlers.</summary>
+    private DownloadRunSummary? _runSummaryForEvents;
+
+    /// <summary>
+    /// F-M450: rows whose report is confirmed and waiting to be filed. Reporting is housekeeping: it
+    /// runs AFTER the walk, never inside a download unit, so a slow or failing report cannot delay,
+    /// fail or reorder anything the pipeline is doing.
+    /// </summary>
+    private readonly List<RejectedCandidateEntity> _pendingReports = new();
+
+    /// <summary>
+    /// F-M472: what the last processed item got out of a season pack, or null. Read by the run
+    /// loop right after the item, which then puts the remaining episodes of that SAME release in
+    /// front of the queue instead of waiting for their own turn.
+    /// </summary>
+    private PackCover? _packCover;
+
+    /// <summary>
+    /// Libraries something was actually saved into during this run. F-M473: at the end of the run
+    /// each of them gets ONE "scan for new and updated files" so the new subtitles show up in
+    /// Jellyfin right away — the full database scan is not what is wanted.
+    /// </summary>
+    private readonly IProviderManager _providerManager;
+    private readonly IFileSystem _fileSystem;
+    private readonly HashSet<Guid> _librariesSaved = new();
+    private readonly HashSet<string> _savedSubtitlePaths = new(StringComparer.Ordinal);
+    private readonly PluginConfiguration _config;
+    private readonly GlobalRateLimiter _limiter;
+    private readonly DownloadSearchTracker _searchTracker;
+
+    /// <summary>
+    /// Directories proven read-only THIS run (probe cached per run — a share can
+    /// be remounted writable between runs, so the verdict must never outlive the run).
+    /// </summary>
+    private readonly HashSet<string> _readonlyDirs = new(System.StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Directories already probed (writable) this run — probe once per run per dir.
+    /// </summary>
+    private readonly HashSet<string> _probedDirs = new(System.StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// F-M455 (operator order 10.11.2026): candidates whose empty answer was already answered with
+    /// the one refetch of this run. The refetch happens ONCE per candidate, so a second empty answer
+    /// is the second failure — and only that one is filed with SubDL. Measured that night: a single
+    /// release answered 200 with nothing at 04:0x and delivered 83,119 B a few hours later, so one
+    /// empty answer proves nothing at all.
+    /// </summary>
+    private readonly HashSet<string> _emptyRetried = new(System.StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Probe write — exactly mirrors AtomicWriteAsync's.part path. Returns false
+    /// and caches the directory on any failure (read-only share, permission, quota).
+    /// </summary>
+    private async Task<bool> ProbeWritableAsync(string dir, CancellationToken ct)
+    {
+        string probePath = Path.Combine(dir, ".subdl-write-probe");
+        try
+        {
+            await File.WriteAllBytesAsync(probePath, new byte[] { 0x70 }, ct).ConfigureAwait(false);
+            File.Delete(probePath);
+            return true;
+        }
+        catch (Exception)
+        {
+            _readonlyDirs.Add(dir);
+            LogUtil.Normal(_logger, "[SubDL-D] Directory not writable — skipped this run: {Dir}", dir);
+            return false;
+        }
+    }
+    private readonly Registry.QaFailTracker _qaFails;
+
+    /// <summary>In-run watchdog (NF-4); non-null only while a run is active.</summary>
+    private RunWatchdog? _watchdog;
+
+    /// <summary>
+    /// F-M48 fix (08.09.2026): set when the hourly rate cap or a server 429 is hit —
+    /// the item loop aborts so remaining items keep their refetch-due state instead
+    /// of being marked "searched" with fail-open empty results.
+    /// </summary>
+    private bool _stopRun;
+
+    // Per-item filename-title fallback (soft mode last rung)
+
+    /// <summary>
+    /// True only for arrival-watcher-triggered runs — the 15-min metadata
+    /// wait applies to them (the item just landed). Scheduled refetch runs skip
+    /// the wait and go straight to the TMDB ladder.
+    /// </summary>
+    public bool IsArrivalRun { get; set; }
+
+    // ── F-M111: queue-driven operation (user decision 12.09.2026) ───────────
+    // When set, the item loop processes ONLY these item ids (the seeder filled
+    // the queue). Null = classic full-scan behaviour (legacy manual runs).
+    public HashSet<string>? QueueFilter { get; set; }
+
+
+    /// <summary>Per-item outcome report for the queue bookkeeping (fired by ProcessItemAsync).</summary>
+    public event Action<string, ItemOutcome>? ItemResult;
+
+    /// <summary>Per-item result class reported back to the queue bookkeeping.</summary>
+    public enum ItemOutcome { Done, RealFailure, NotAvailable }
+
+    /// <summary>Fires ItemResult — no-op when nobody listens.</summary>
+    private void ReportOutcome(BaseItem item, ItemOutcome outcome)
+    {
+        try
+        {
+            ItemResult?.Invoke(item.Id.ToString(), outcome);
+        }
+        catch
+        {
+            // Queue bookkeeping must never break the pipeline.
+        }
+    }
+
+    /// <summary>
+    /// F-M49: daily-limit waits already performed in this run — at most ONE.
+    /// A second 429 after a successful resume stops the run; the next
+    /// scheduled run continues with the fresh quota.
+    /// </summary>
+    private int _dailyLimitWaits;
+
+    /// <summary>
+    /// F-M310/F-M323: hands one subtitle to the auto-sync worker and books what it cost.
+    /// <para>
+    /// The MEASUREMENT moved into the worker (F-M323): it reports the time it spent, so a second
+    /// fit path cannot bypass the stopwatch by forgetting to wrap it. The ACCOUNTING stays here —
+    /// the limiter's credit and the run total are the run's books, not the worker's.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaPath">Media file the subtitle belongs to.</param>
+    /// <param name="content">Decoded subtitle text.</param>
+    /// <param name="audioMap">ffmpeg map argument for the audio track.</param>
+    /// <param name="ffmpegForDrift">Resolved ffmpeg path, or null when the fit is off.</param>
+    /// <param name="summary">The run summary the credit is booked on.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The worker's outcome: a status and its output.</returns>
+    private async Task<Qa.AutoSyncWorker.Outcome> SyncMeasuredAsync(
+        string mediaPath, string content, string audioMap, string? ffmpegForDrift,
+        DownloadRunSummary summary, CancellationToken ct)
+    {
+        var outcome = await Qa.AutoSyncWorker.RunAsync(
+            mediaPath, content, audioMap, ffmpegForDrift, switchedOn: true, _logger, ct).ConfigureAwait(false);
+
+        // F-M310: the fit's time comes off the next transfer pause. Booked here because the limiter
+        // and the run total belong to the run — the worker only reports what it spent.
+        _limiter.AddFitMs(outcome.ElapsedMs);
+        summary.FitMsTotal += outcome.ElapsedMs;
+        return outcome;
+    }
+
+
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DownloadPipeline"/> class.
+    /// </summary>
+    /// <param name="logger">Logger.</param>
+    /// <param name="libraryManager">Library manager.</param>
+    /// <param name="mediaSourceManager">Media source manager.</param>
+    /// <param name="api">SubDL API client.</param>
+    /// <param name="registry">Content hash registry.</param>
+    /// <param name="tmdb">TMDB→IMDB resolver (required — gates SERIES items, F-M203).</param>
+    /// <param name="config">Plugin configuration.</param>
+    /// <param name="limiter">Global rate limiter shared with the upload pipeline (F-M20/F-M26).</param>
+    /// <param name="searchTracker">Per-item search timestamps (F-M47).</param>
+    public DownloadPipeline(
+        ILogger<DownloadPipeline> logger,
+        ILibraryManager libraryManager,
+        IProviderManager providerManager,
+        IFileSystem fileSystem,
+        IMediaSourceManager mediaSourceManager,
+        SubdlApiClient api,
+        TmdbImdbResolver tmdb,
+        PluginConfiguration config,
+        GlobalRateLimiter limiter,
+        DownloadSearchTracker searchTracker,
+        Registry.QaFailTracker qaFails)
+    {
+        _logger = logger;
+        _libraryManager = libraryManager;
+        _providerManager = providerManager;
+        _fileSystem = fileSystem;
+        _mediaSourceManager = mediaSourceManager;
+        _api = api;
+        _tmdb = tmdb;
+        _config = config;
+        _limiter = limiter;
+        _searchTracker = searchTracker;
+        _qaFails = qaFails;
+
+        // F-M485/F-M504: die Download-Quellen dieses Laufs. Der Katalog ist die EINE Stelle, an der
+        // steht, welche Endpunkte es gibt; die REIHENFOLGE kommt aus der Konfiguration (SourceOrder),
+        // nicht aus der Reihenfolge dieses Arrays.
+        // F-M507: die dritte Quelle (moviesubtitles.org) ist dabei — als DOWNLOAD-Endpunkt. Einen
+        // Upload-Endpunkt hat sie nicht, und deshalb steht sie auch nicht in der Upload-Liste des
+        // Katalogs (SubtitleEndpointCatalog.HasUploadPath).
+        _tvClient = new Api.TvSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        var tvClient = _tvClient;
+        _msubClient = new Api.MovieSubtitlesClient(SubdlApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        _msubMovies = new Api.Endpoints.MsubMovieResolver(_msubClient, _logger);
+        _endpoints = new Api.Endpoints.SubtitleEndpointCatalog(
+            new[]
+            {
+                (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.SubdlDownloadEndpoint(api),
+                (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.TvSubtitlesDownloadEndpoint(tvClient),
+                (Api.Endpoints.IDownloadEndpoint)new Api.Endpoints.MovieSubtitlesDownloadEndpoint(_msubClient, _logger),
+            },
+            new[] { (Api.Endpoints.IUploadEndpoint)new Api.Endpoints.SubdlUploadEndpoint(api) });
+    }
+
+    /// <summary>Gets the effective target languages (F-M42), parsed from config, ordered, deduped.</summary>
+    public List<string> TargetLanguages =>
+        _config.DownloadLanguages
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(l => l.ToUpperInvariant())
+            .Distinct()
+            .ToList();
+
+    /// <summary>
+    /// Runs a full download pass over the selected libraries.
+    /// </summary>
+    /// <param name="progress">Progress reporter.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Run summary.</returns>
+    public async Task<DownloadRunSummary> RunAsync(IProgress<double> progress, CancellationToken ct)
+    {
+        var summary = new DownloadRunSummary();
+
+        // F-M247: record that this run was a dry run. It searches, ranks and runs the QA gates,
+        // so its summary fills up with numbers, but it saves nothing to disk — the statistics
+        // must not receive them. Set here, at the source, so a later counter cannot forget it.
+        // F-M277: der Download-Trockenlauf läuft Suche und Auswahl und stoppt vor dem Holen — das Suchkontingent IST verbraucht.
+        summary.IsDryRun = _config.DownloadDryRun;
+        _dailyLimitWaits = 0; // F-M49: fresh per run
+
+        // F-M507: die Merkliste der Filmaulösung gilt je Lauf, nicht je Prozess — ein neuer Lauf fragt
+        // die Seite neu, ein zweiter Film desselben Mediums im selben Lauf nicht.
+        _msubMovies.BeginRun();
+
+        // F-M370: point the disk cache at this plugin's data folder and apply the two switches.
+        // Either at 0 leaves it off; the trim happens before the first request so a run never
+        // starts on a full volume, and it only deletes expired or over-ceiling archives.
+        _api.ArchiveDiskCache.Configure(
+            Plugin.Instance?.DataFolderPath, _config.DownloadArchiveCacheDays, _config.DownloadArchiveCacheMaxMb);
+        _api.ArchiveDiskCache.Reset();
+        _api.ArchiveDiskCache.Trim();
+
+        // F-M94h (rework 25.09.2026): ONE global run lock for all six components.
+        // No long wait: a brief hand-off grace only, then reschedule by JobSpacingMinutes.
+        if (!await PipelineRunLock.AcquireAsync(_logger, "download", ct).ConfigureAwait(false))
+        {
+            summary.SkippedByLock = true;
+            var spacing = Math.Clamp(_config.JobSpacingMinutes, 5, 120);
+            ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFireAt(upload: false, DateTime.UtcNow.AddMinutes(spacing));
+            LogUtil.Normal(_logger, "[SubDL-D] Download deferred by {Spacing} min — global run lock busy.", spacing);
+            return summary;
+        }
+        try
+        {
+        // F-M19/F-M203: no partial operation — same gate as the upload side, from the same
+        // source. Without all four credentials the search cannot run (the API key) and the
+        // ids cannot be resolved (the TMDb key), so the run is refused up front.
+        var missingDown = _config.MissingCredentials();
+        if (missingDown.Count > 0)
+        {
+            LogUtil.Normal(_logger, "[SubDL-D] download: NOT started — missing credential(s): {Missing}. Set them in the plugin configuration.", string.Join(", ", missingDown));
+            return summary;
+        }
+
+        var targets = TargetLanguages;
+        if (targets.Count == 0)
+        {
+            LogUtil.Normal(_logger, "[SubDL-D] No target languages configured — nothing to do.");
+            return summary;
+        }
+
+        // F-M213 (26.09.2026, user decision): an empty library selection is a
+        // hard stop for BOTH directions. UploadPipeline always had this check;
+        // DownloadPipeline did not, so a run with nothing selected still went
+        // through the full setup (watchdog, API/TMDB handler wiring, the
+        // "download: started" line) and only filtered everything away later in
+        // CollectItems — which reads like "it scanned the whole server".
+        if (_config.SelectedLibraries.Count == 0)
+        {
+            LogUtil.Normal(_logger, "[SubDL-D] No libraries selected — nothing to do.");
+            return summary;
+        }
+
+        // F-M64 (user decision 09.09.2026 "download at the next run is ok"):
+        // when the configured language list CHANGES, the recorded refetch timestamps
+        // belong to the OLD list — items missing a newly added language must not wait
+        // out the refetch gap. Reset all timestamps once; the next run treats every
+        // item as never-searched. Cost control: MissingLanguages runs BEFORE any API
+        // call, so items that already have all (new) target languages skip for free —
+        // search calls only happen where a new language is genuinely absent.
+        // The former explicit "language list changed → reset every timestamp" pass is gone: each
+        // file records the language list it was searched under, and IsDue compares that against the
+        // current configuration. A file whose stored list differs is simply due again — no global
+        // reset, no second bookkeeping row to keep in step.
+        LogUtil.Detail(_config.LogMode, _logger, "[SubDL-D] target languages: {Languages}", string.Join(",", targets));
+
+        // NF-4: in-run watchdog — fixed 6-min grace, independent of the pacing knob.
+        // ApiActivity fires after EVERY completed API round-trip (search pages,
+        // downloads, uploads, retries) — the heartbeat that keeps the watchdog
+        // quiet while the run is making legal slow progress.
+        _watchdog = new RunWatchdog(
+            "SubDL-D", ct,
+            RunWatchdog.Grace,
+            msg => _logger.LogError("{Msg}", msg));
+        _api.ApiActivity += _watchdog.Heartbeat;
+        var runCt = _watchdog.Token;
+        _watchdog.Heartbeat();
+        _watchdog.Start();
+
+        // F-M24a (fixed 09.09.2026, user decision): run START is Normal-level —
+        // critical errors, rate limits, run started/finished.
+        // F-M309: the fit is a whole-run activity, so its START belongs at Normal — one line per
+        // run, naming whether it is on. The per-file detail (which audio track, which subtitle it
+        // was fitted against) stays at Verbose. F-M24d's "one summary line per direction" is not
+        // violated: this is the run START line it already prescribes, carrying one more fact.
+        LogUtil.Normal(_logger, "[SubDL] download: started{Dry}, refetch={Refetch}, audio fit={Fit}",
+            _config.DownloadDryRun ? ", dry" : string.Empty, _config.RefetchInterval, _config.QaDownloadAutoSync ? "on" : "off");
+
+        PipelineStopSignal.ClearStaleMarkers(Plugin.Instance?.DataFolderPath ?? string.Empty);
+
+        // F-M24a: forward per-call API traces to LogLevel.Debug
+        _api.DebugTrace += OnApiTrace;
+
+        // F-M521: the tvst family gets the same channel as SubDL, in both directions. Without it the
+        // answer of tvsubtitles.net / moviesubtitles.org never reached the log, so a run that asked the
+        // site looked exactly like a run that never did.
+        if (_tvClient is not null)
+        {
+            _tvClient.DebugTrace += OnApiTrace;
+        }
+
+        _msubClient.DebugTrace += OnApiTrace;
+
+        // F-M232: the client's LogInfo channel (429 raw bodies, rate headers, login
+        // diagnostics) was subscribed only by the postprocessing path, so a download
+        // run's rate-limit diagnosis never reached the log. Subscribe it per run.
+        _api.Log += OnApiLog;
+
+        // F-M24a (user decision 09.09.2026): TMDB calls trace at VERBOSE (SubDL API calls are Debug).
+        _tmdb.Trace += OnTmdbTrace;
+        _runSummaryForEvents = summary; // F-M218: event handlers need the running summary
+        _librariesSaved.Clear(); // F-M473: this run names only the libraries IT saved into
+        _savedSubtitlePaths.Clear();
+
+        // F-M54: wrong TMDB key reported ONCE at Normal/Error level.
+        _tmdb.AuthError += msg => _logger.LogError("[SubDL-D] {Msg}", msg);
+
+        // NO run-level metadata grace here — the arrival watcher grants ONE
+        // 1-min grace per event before this (first) pipeline starts. Scheduled
+        // refetch runs get none. No-id items still have the per-item 15-min ladder.
+
+        // F-M47: per-item refetch gap (F-M111: unified interval, user decision 12.09.2026).
+        var refetchGap = SubdlDownloadTask.IntervalToGap(_config.RefetchInterval);
+
+        var items = CollectItems(_config.SelectedLibraries);
+        summary.FilesSeen = items.Count;
+
+        // (user decision 08.09.2026): id-less items go to the BACK — their
+        // 15-min metadata ladder must not block items that already have ids.
+        var withIds = new List<BaseItem>();
+        var withoutIds = new List<BaseItem>();
+        foreach (var it in items)
+        {
+            var (im, tm, _, _, _) = ResolveIds(it);
+            (string.IsNullOrWhiteSpace(im) && string.IsNullOrWhiteSpace(tm) ? withoutIds : withIds).Add(it);
+        }
+
+        if (withoutIds.Count > 0)
+        {
+            items = withIds.Concat(withoutIds).ToList();
+        }
+
+        // F-M59 (user decision 09.09.2026): LIFO within BOTH partitions — newest items
+        // (DateCreated descending) get the daily quota first. Same rationale as upload;
+        // id-partition keeps priority over recency.
+        items = items
+            .Select((it, i) => (Item: it, Pos: i, Created: it.DateCreated))
+            .OrderByDescending(x => x.Created)
+            .ThenBy(x => x.Pos)
+            .Select(x => x.Item)
+            .ToList();
+
+        var skipFilter = new SkipFilter(_config.EffectiveSkipDirPatterns, _config.EffectiveSkipFilePatterns);
+
+        // F-M183 (user report 23.09.2026): the run counters used items.Count (= every
+        // item in the selected libraries, e.g. 1125) as their denominator, but the
+        // queue filter below skips non-queued items — so a run stopped after 400 queue
+        // items reported "400/1125" (25%) while it had actually consumed 400 of only
+        // 727 queued items (55%). Count the queue as
+        // the denominator: the number the run can really work, and the one that
+        // makes the hourly-cap decision legible.
+        int queuedTotal = QueueFilter == null
+            ? items.Count
+            : items.Count(it => QueueFilter.Contains(it.Id.ToString()));
+
+        int idx = 0;
+        // F-M472: episodes pulled in from a season pack are worked even though no arrival queued
+        // them — that is the point of the rule, so they are named here and pass the queue filter.
+        var packQueued = new HashSet<string>(StringComparer.Ordinal);
+        // An index loop, not foreach: the pack hand-over INSERTS items behind the current one, and
+        // inserting into a list while it is being enumerated throws.
+        for (int pos = 0; pos < items.Count; pos++)
+        {
+            var item = items[pos];
+            // User stop marker — check BEFORE doing any work.
+            if (PipelineStopSignal.IsStopped(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: false, runCt))
+            {
+                LogUtil.Normal(_logger, "[SubDL-D] download: user stop requested — finishing current run.");
+                summary.StopRequested = true;
+                break;
+            }
+
+            runCt.ThrowIfCancellationRequested();
+            _watchdog.Heartbeat();
+
+            // F-M111: queue-driven — only queued items are worked; others stay
+            // invisible to this run (the seeder owns admission). F-M472 adds the pack hand-over:
+            // an episode that the same release already covers IS worked, queued or not.
+            if (QueueFilter != null && !QueueFilter.Contains(item.Id.ToString())
+                && !packQueued.Contains(item.Id.ToString()))
+            {
+                continue;
+            }
+
+            ct.ThrowIfCancellationRequested(); // F-M131: user stop aborts the run
+            if (_stopRun)
+            {
+                // F-M48 fix (08.09.2026): quota/rate-limit exhausted mid-run — stop
+                // instead of marking the remaining items "searched" with garbage results.
+                _logger.LogWarning(
+                    "[SubDL-D] Run aborted after {Done}/{Total} queued items — quota/rate limit hit; remaining items stay due for the next run.",
+                    idx, queuedTotal);
+                break;
+            }
+
+            idx++;
+            // Fine-grained progress: item start + item done (streams inside report via 0.5 steps)
+            progress?.Report((idx - 1 + 0.05) / Math.Max(items.Count, 1) * 100);
+            _packCover = null;
+            await ProcessItemAsync(item, targets, summary, skipFilter, refetchGap, runCt).ConfigureAwait(false);
+            progress?.Report((double)idx / Math.Max(items.Count, 1) * 100);
+
+            // F-M472 (operator order 12.11.2026): when an episode was served from a season pack, the
+            // remaining episodes of that SAME release are worked immediately after it — the archive
+            // is in the cache, so they cost neither a download nor a wait for their own turn. No
+            // completeness check: whatever the release covers gets served.
+            if (_packCover is { } cover)
+            {
+                // F-M472: the pack that just served this episode names the other episodes of its own
+                // entry, so the ones already waiting further back in THIS run's queue come along right
+                // behind it. Only the queue — an episode nobody queued stays untouched (operator
+                // order 13.11.2026: "doch nur die in der queue"). The archive is in the cache, so
+                // they cost no download, and the per-item open-pair check still drops any that have
+                // the language before an API call is made.
+                var pulled = new List<BaseItem>();
+                for (int k = items.Count - 1; k > pos; k--)
+                {
+                    if (items[k] is Episode sibling
+                        && sibling.IndexNumber is int number
+                        && cover.Episodes.Contains(number)
+                        && sibling.ParentIndexNumber == cover.Season
+                        && sibling.SeriesId == cover.SeriesId)
+                    {
+                        pulled.Insert(0, sibling);
+                        items.RemoveAt(k);
+                    }
+                }
+
+                if (pulled.Count > 0)
+                {
+                    items.InsertRange(pos + 1, pulled);
+                    foreach (var sibling in pulled)
+                    {
+                        packQueued.Add(sibling.Id.ToString());
+                        if (QueueFilter == null || !QueueFilter.Contains(sibling.Id.ToString()))
+                        {
+                            queuedTotal++;
+                        }
+                    }
+
+                    var numbers = pulled.Select(p => ((Episode)p).IndexNumber ?? 0).OrderBy(n => n).ToList();
+                    LogUtil.Normal(_logger,
+                        "[SubDL-D] pack \"{Release}\" covers {Season}x{First}-{Last} — {N} episode(s) of that release moved right after {File}",
+                        cover.ReleaseName, cover.Season, numbers[0], numbers[^1], pulled.Count, Path.GetFileName(item.Path));
+                }
+            }
+        }
+
+        _runSummaryForEvents = null;
+        Registry.Flush();
+        _searchTracker.Flush(); // F-M47: persist search timestamps after the run
+        // F-M183 (user report 23.09.2026, supersedes the "saved only" rule for
+        // the run-end line): a run that searched 400 items and saved nothing looked
+        // identical to a run that did nothing at all — the single "{N} saved" line hid
+        // whether items had no candidates, were already complete, or were skipped as
+        // not-due. Print one compact aggregate so a 0-saved run is diagnosable in
+        // Normal mode without raising LogMode to Verbose (per-item lines stay Verbose).
+        // F-M247: in a dry run nothing was saved. Keep the whole diagnostic aggregate — a dry
+        // run is exactly when those counts matter — but label the first number as what it is:
+        // the saves the run would have made.
+        string savedLabel = summary.IsDryRun ? "would have saved" : "saved";
+
+        // F-M450: reports are filed here — after the walk, before the line that counts them.
+        try
+        {
+            await FlushReportsAsync(summary, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[SubDL-D] report flush failed: {Msg}", ex.Message);
+        }
+
+        // F-M535: die Spuren werden erst NACH dem Melde-Versand abgehaengt. Vorher stand das
+        // Abhaengen davor, und damit fehlte im Log bei jeder Meldung, die im Flush hinausging, die
+        // Zeile "API call POST …/report" — der Bericht stand in der Statistik, sein Beleg nicht im
+        // Log (gemessen 16.11.: 2 Meldungen gezaehlt, 1 POST-Zeile sichtbar).
+        _api.DebugTrace -= OnApiTrace;
+        if (_tvClient is not null)
+        {
+            _tvClient.DebugTrace -= OnApiTrace;
+        }
+
+        _msubClient.DebugTrace -= OnApiTrace;
+        _api.Log -= OnApiLog; // F-M232: detach the client's LogInfo channel per run
+        _tmdb.Trace -= OnTmdbTrace;
+        // F-M473 (operator order 12.11.2026): a saved subtitle is a file Jellyfin has not seen yet.
+        // After the walk — and only when something was really saved — each affected library gets
+        // the narrow "new and updated files" scan, so the subtitles appear without waiting for the
+        // next full database scan. One call per library, never per file; the run does not wait on it.
+        TriggerLibraryRefreshForSavedSubtitles(summary);
+
+        // F-M286: {Rejected} names what was FETCHED AND THROWN AWAY. Without it a run that spent
+        // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
+        // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
+        summary.RejectedCandidates += _tvstFormatRejected; // F-M533
+
+        LogUtil.Normal(_logger, 
+            "[SubDL-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {NotSignificant} downloaded without significance | {Rejected} rejected after fetch | {NoCand} no candidates | {Ai} AI uploader filtered | {Reported} reported ({ReportsDeferred} deferred) | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",
+            summary.Downloaded,
+            summary.FittedToAudio,
+            (summary.FitMsTotal / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
+            summary.DownloadedWithoutSignificance,
+            summary.RejectedCandidates,
+            summary.SkippedNoCandidates,
+            summary.AiUploaderFiltered,
+            summary.Reported,
+            summary.ReportsDeferred,
+            summary.NotAvailable,
+            summary.SkippedItems,
+            summary.SkippedNotDue,
+            summary.SkippedByFilter,
+            summary.SkippedNoId,
+            summary.SkippedNothingMissing,
+            summary.OpenFilesSeen,
+            summary.Failed,
+            idx,
+            queuedTotal,
+            _api.ArchiveDiskCache.Hits);
+        return summary;
+        }
+        catch (OperationCanceledException)
+        {
+            // F-M23: same as the upload pipeline — a run cancelled from outside (user stop,
+            // restart, task cancel) must not discard the downloads it already completed.
+            // Return the partial summary; the caller still sees the cancel via StopRequested.
+            LogUtil.Normal(_logger, "[SubDL-D] download: cancelled — keeping the partial result. {N} saved", summary.Downloaded);
+            summary.StopRequested = true;
+            return summary;
+        }
+        finally
+        {
+            // The watchdog belongs to THIS run and must go down with it even when the run
+            // dies on an exception. Before this, disposal sat on the success path only
+            // (it was inside the try), so any exception left the monitor alive: it kept
+            // polling, and 2.5 min later reported "no progress" for a run that had been
+            // dead since the throw. Measured 25.09.2026 — six such phantom aborts, each
+            // exactly ~2.5 min after a failed cycle, all with no run in flight. Nothing
+            // was actually aborted (the token is per-run and the monitor returns right
+            // after firing), but the ERROR line made six dead runs look like six real
+            // watchdog aborts. UploadPipeline already did this correctly via `using`.
+            if (_watchdog != null)
+            {
+                _api.ApiActivity -= _watchdog.Heartbeat;
+            }
+
+            _watchdog?.Dispose();
+            _watchdog = null;
+
+            // F-M369: the archive cache is run-scoped — release its memory with the run so a
+            // finished run leaves nothing behind on the Pi.
+
+            // F-M23: keep the partial summary even when the run is cancelled — the caller
+            // reads StopRequested and the counters include the work that did land.
+            PipelineRunLock.Release(_logger, "download");
+        }
+    }
+
+    /// <summary>
+    /// F-M49: optional resume after the SubDL daily download limit. With
+    /// DownloadContinueAfterLimit enabled and a usable server-reported reset
+    /// time, waits — watchdog-kept, cancellable — until the quota window resets
+    /// and returns true. Returns false when disabled, when no usable reset time
+    /// was reported, or on a second limit hit in the same run; the caller then
+    /// stops the run.
+    /// </summary>
+    /// <param name="ct">Cancellation token (user cancel + watchdog).</param>
+    /// <returns>True when the wait completed and the download can be retried.</returns>
+    /// <summary>
+    /// F-M24a (user decision 09.09.2026): the TMDb call trace goes through ONE gate,
+    /// Verbose. F-M245 (28.09.2026): it also went through Detail, so at Debug mode every
+    /// TMDb line appeared twice — Verbose is a SUBSET of Debug, not a separate tier, and
+    /// "additionally at Debug (superset)" was the misconception behind the second call.
+    /// Measured on the 28.09. download run: 198 duplicated messages, all TMDb.
+    /// </summary>
+    private void OnTmdbTrace(string msg)
+    {
+        LogUtil.Trace(_config.LogMode, _logger, "{Tag} {Msg}", "[SubDL-D]", msg);
+    }
+
+    /// <summary>F-M24a: per-API-call trace → LogLevel.Debug (never Normal/Verbose).</summary>
+    private void OnApiTrace(string msg) => LogUtil.Detail(_config.LogMode, _logger, "[SubDL-D] {Msg}", msg);
+
+    /// <summary>
+    /// F-M232: routes the API client's LogInfo channel into the run log (429 raw bodies,
+    /// rate headers, login diagnostics). Detail keeps them at the plugin's own Debug mode.
+    /// </summary>
+    /// <param name="msg">Message from the API client.</param>
+    private void OnApiLog(string msg) => LogUtil.Detail(_config.LogMode, _logger, "[SubDL-D] {Msg}", msg);
+
+    private async Task<bool> WaitOutDailyLimitAsync(CancellationToken ct)
+    {
+        if (!_config.DownloadContinueAfterLimit)
+        {
+            // F-M152 (rev.10, user decision 17.09.2026): tick OFF = clean stop,
+            // NO recovery fire. Items stay due; the next trigger is an arrival
+            // event or the weekly anchor. (Old F-M65 fire-on-tick-off removed.)
+            LogUtil.Normal(_logger, "[SubDL-D] Daily limit reached - continue-after-limit is OFF: clean stop, no recovery fire (F-M152).");
+            return false;
+        }
+
+        // (user decision 09.09.2026, option B): arrival runs NEVER wait out the
+        // Daily limit — they stop clean; the scheduled runs own the quota wait.
+        // The sequential arrival cycle (download THEN upload) would otherwise block
+        // the upload direction for hours behind the download wait (verified live).
+        if (IsArrivalRun)
+        {
+            _logger.LogWarning("[SubDL-D] Daily limit (429), arrival run — not waiting, next scheduled run.");
+            return false;
+        }
+
+        // F-M238 (user decision 28.09.2026): the 429 alone does not prove the
+        // allowance is spent — ask the counters first (same source the settings page
+        // shows). A trip that left quota free is a rate-limit respacing, not a
+        // day-long stop: it gets one fire after JobSpacingMinutes. A spent OR
+        // unreadable allowance keeps the day-long path below.
+        var read = await _api.ReadQuotaAsync(forDownload: true, ct).ConfigureAwait(false);
+        if (read == QuotaRead.Available)
+        {
+            _api.ResetRateLimitFlag();
+            ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
+            _logger.LogWarning(
+                "[SubDL-D] 429 is a short-term rate limit — download allowance still has {Remaining}/{Limit} left; "
+                + "run respaced by JobSpacingMinutes, item stays due (F-M238).",
+                _api.Quota?.DownloadsRemaining, _api.Quota?.DownloadsLimit);
+            return false;
+        }
+
+        var reset = _api.RateLimitResetUtc;
+
+        // F-M49/F-M54 (user decision 08.09.2026 evening): the daily-limit 429 carries
+        // NO reset header in practice (verified live) — fall back to the next
+        // UTC midnight (the quota resets per UTC day, panel-verified 09.09.2026).
+        if (!reset.HasValue)
+        {
+            var nowUtc = DateTime.UtcNow;
+            reset = nowUtc.Date.AddDays(1); // next 00:00 UTC
+            LogUtil.Normal(_logger, 
+                "[SubDL-D] Daily limit reached without a server-reported reset time — waiting until {ResetUtc} UTC (next UTC midnight) instead.",
+                reset.Value.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        if (_dailyLimitWaits >= 1)
+        {
+            _logger.LogWarning("[SubDL-D] Daily limit again — run stopped, next scheduled run.");
+            return false;
+        }
+
+        _dailyLimitWaits++;
+
+        // (user decision 09.09.2026 "Neustart nach daily limit von random 2..4h nach
+        // Offiziellem Reset"): resume 5-30 min AFTER the official reset (,
+        // 11.09.2026: quota resets roll, big offset no longer needed) — not exactly at it —
+        // every API consumer hammers SubDL at 00:00 UTC (verified: the 02:05 post-reset
+        // run died on a service_busy 429 five minutes after reset, panel showed 24/2000).
+        // Same anti-synchronization rationale as F-M51's per-installation anchors.
+        var effectiveReset = _api.Edge429NoHeaders || !_api.RateLimitResetUtc.HasValue
+            ? NextMidnightUtc() // F-M152 rev.10: Edge 429 (no headers) - fail-safe anchor
+            : _api.RateLimitResetUtc.Value; // exact server reset (v2 headers)
+        // F-M152 rev.10: no local dicing - the coordinator adds 30..300 min
+        // per fire (direction-independent, crypto RNG).
+
+        string resetLocal = TimeZoneInfo.ConvertTimeFromUtc(effectiveReset, TimeZoneInfo.Local).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        var fireInfo = ScheduledTasks.SubdlSchedulerCoordinator.Instance?.GetPendingFireUtc(upload: false);
+        _logger.LogWarning(
+            "[SubDL-D] Daily download limit (429) — run stopped. Reset ~{ResetLocal} local; recovery fire ~{Next} local (F-M152, F-M182).",
+            resetLocal,
+            fireInfo.HasValue
+                ? TimeZoneInfo.ConvertTimeFromUtc(fireInfo.Value, TimeZoneInfo.Local).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+                : "next scheduled run");
+
+        // F-M152: NO in-run wait — the task stops clean and the SchedulerCoordinator
+        // re-fires this direction once at anchor + jitter (30..300 min, diced per fire —
+        // the coordinator's dice; a plain deferral uses JobSpacingMinutes instead).
+        // F-M182 (user report 23.09.2026): this used ScheduleRecoveryFireAt, which sets
+        // alreadyJittered:true — the fire landed EXACTLY on the reset (verified live:
+        // 21.09. download, reset 02:00 local → fire 02:00 local, +0 min) while the log
+        // claimed "+30..300 min jitter". SubDL reports reset_at = 00:00 UTC for every
+        // consumer, so a jitter-free fire walks straight into the collective-restart
+        // herd the jitter exists to avoid. ScheduleRecoveryFire leaves the dicing to the
+        // coordinator (30..300 min, crypto RNG, per fire, direction-independent).
+        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFire(upload: false, effectiveReset.ToUniversalTime());
+        return false;
+    }
+
+    private async Task ProcessItemAsync(BaseItem item, List<string> targets, DownloadRunSummary summary, SkipFilter skipFilter, TimeSpan refetchGap, CancellationToken ct)
+    {
+        string? mediaPath = item.Path;
+        if (string.IsNullOrWhiteSpace(mediaPath))
+        {
+            summary.SkippedItems++;
+            summary.SkippedByFilter++;
+            return;
+        }
+
+        // F-M60 REMOVED (operator order 08.10.2026): the file-missing give-up and its counter are
+        // gone from both pipelines — "Alleinige Aufgabe database refresh". The seeder already refuses
+        // an item whose file is gone before it can enter a queue, so this branch could only fire for
+        // a file that vanished mid-run, and that case is reported as a failure below rather than
+        // counted towards a give-up. The registry cleanup it performed now belongs to the refresh's
+        // phase 3b, which does it by PATH on every run and behind the same fail-safe as its
+        // neighbours.
+
+        // (10.09.2026, user decision): one probe write per directory PER RUN,
+        // lazily on first contact — runs BEFORE any API search/download work for this
+        // item. A read-only directory short-circuits the whole item (and every later
+        // item in the same directory) with a single clear log line instead of a
+        // per-file write failure + retry loop. The verdict never outlives the run.
+        string itemDir = Path.GetDirectoryName(mediaPath) ?? ".";
+        if (_readonlyDirs.Contains(itemDir))
+        {
+            summary.SkippedItems++;
+            summary.SkippedByFilter++;
+            return;
+        }
+
+        if (!_probedDirs.Add(itemDir))
+        {
+            // already probed this run and found writable — fall through
+        }
+        else if (!await ProbeWritableAsync(itemDir, ct).ConfigureAwait(false))
+        {
+            summary.SkippedItems++;
+            summary.SkippedByFilter++;
+            return;
+        }
+
+        // The bare existence read stays: it is the loop's precondition, not a give-up. A file that
+        // vanished between seeding and this run is reported as a failure instead of crashing the run
+        // halfway through its per-language work.
+        if (!File.Exists(mediaPath))
+        {
+            summary.Failed++;
+            ReportOutcome(item, ItemOutcome.RealFailure);
+            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] FILE MISSING {File} — vanished between seeding and this run", Path.GetFileName(mediaPath));
+
+            return;
+        }
+
+        // F-M263 (user decision 30.09.2026): the language gate is NOT called here any more.
+        // It was redundant: the seeder resolves untagged tracks before the queue decision, and there
+        // is no way into this pipeline that skips that scan — `SeedAndMaybeRunAsync` seeds first and
+        // only then calls `RunDirectionAsync`, and every trigger goes through it (scheduled task,
+        // arrival, follow-up, manual). So by the time an item is worked here, the seeder has already
+        // corrected its container AND moved its registry rows. Calling the gate again found nothing
+        // to do; what it could still do was harmful, because this call site passed NO registry
+        // (`new LanguageTagGate(_logger, _config)`) and therefore got no hash pair back — a write
+        // here would have left the file with two identities and the download mark on the dead one,
+        // the exact defect F-M261's `ReplaceMediaIdentity` exists to prevent. And with a dry run
+        // armed it rewrote media files before the first dry-run check in this method was reached.
+        // The coverage check below reads the seeder's result from the REGISTRY instead.
+
+        // F-M88c + F-M234 (B): media content hash for file-complete short-circuit.
+        string? mediaHash = Registry.GetMediaHash(mediaPath);
+
+        // F-M22 (defect fixed 02.10.2026): BOTH registry writes below are STORED STATE and run
+        // ahead of the dry-run exit (which sits per language, far below this method's pro-item
+        // section). A dry run must write no stored verdict, so the pair moves behind one guard.
+        // The hash itself is still read — the coverage check needs it either way; only the
+        // WRITING is held back. In a real run the behaviour is unchanged.
+        if (!_config.DownloadDryRun)
+        {
+            if (!string.IsNullOrEmpty(mediaHash))
+            {
+                Registry.MarkAndFlush(() => Registry.EnsureMedia(mediaHash, item.Id.ToString("D"), mediaPath));
+            }
+
+            // F-M257: record what the container carries, before any work decision is taken. The
+            // download side asks what subtitle data are covered (F-M282); on an install where the
+            // uploader never runs that area was empty, so the question was answered "absent" forever
+            // for a track sitting right there. This runs ahead of the open-pair check on purpose: a
+            // settled item still has facts worth having — but only a real run records them.
+            ObserveEmbeddedFacts(item, mediaHash);
+        }
+
+        // F-M283 (user decision 02.10.2026): the download mark is GONE, and with it the short-circuit
+        // this block used to be. It read a stored verdict, then re-derived a list of "open tokens"
+        // from a DIFFERENT set of evidence than the check that had written it — so a variant embedded
+        // in the container had a registry verdict and no sidecar, the withhold check refused the mark,
+        // the mark was never written, and the item stayed due forever while the regular subtitle was
+        // re-fetched on every pass.
+        //
+        // The question is now asked once, at the grain of the subtitle datum: which of the required
+        // PAIRS have no evidence? Both answers — "is this file done" and "may it be marked done" —
+        // were always the same question, and with the mark deleted there is only one of them left.
+        var required = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef
+            .Required(TargetLanguages, _config.DownloadHearingImpaired);
+        var openPairs = Registry.OpenPairs(
+            mediaPath, required, EmbeddedPresentLanguagesOf(item),
+            onlyOwnDownloads: !_config.DownloadOnlyMissing,
+            countOriginals: !_config.QaDownloadAutoSync);
+
+        // F-M320 (operator order 08.10.2026): a gate rejection no longer closes a pair. The QA retry
+        // limit is the FIT's budget (F-M318) — it says how often another candidate may be fetched
+        // hoping for a provable correction, not how often a language may be tried. The give-up filter
+        // that used to sit here removed a pair from the work list after N gate rejections, which made
+        // a file whose candidates are all badly ripped look "settled as unavailable" and stopped it
+        // ever being searched again. What still bounds the work on such a file is the download budget
+        // (F-M50) per run, plus the burned-release memory (F-M200) so the same discard is never
+        // fetched twice.
+        var openStale = openPairs.ToList();
+
+        if (openStale.Count == 0)
+        {
+            // Everything required has evidence, or SubDL settled it as unavailable. Nothing to do —
+            // and because the answer is derived, it cannot be stale: deleting a subtitle puts its
+            // pair back in this list on the next ask, with no invalidation step and no stored stamp
+            // to be overtaken. That is why `MarksInvalidated` is gone: there was never a mark to
+            // invalidate, only a deletion whose evidence disappeared.
+            summary.SkippedItems++;
+            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] SKIP {File} — nothing open", Path.GetFileName(mediaPath));
+            return;
+        }
+
+        if (openPairs.Count > openStale.Count)
+        {
+            // Something is open but settled-as-unavailable. Only informative: the QA budget is not a
+            // give-up, it says "do not ask SubDL for this again this cycle".
+            LogUtil.PerItem(
+                _config.LogMode,
+                _logger,
+                "[SubDL-D] open but QA-exhausted {File}: {Pairs}",
+                Path.GetFileName(mediaPath),
+                string.Join(",", openPairs.Select(r => r.ToString())));
+        }
+
+        // F-M47: per-item refetch gate — never-searched items (new arrivals) pass
+        // immediately; already-searched items only when the interval has elapsed
+        if (!_searchTracker.IsDue(item.Id.ToString(), refetchGap, targets))
+        {
+            summary.SkippedItems++;
+            summary.SkippedNotDue++;
+            return;
+        }
+
+        // REMOVED (user decision 11.09.2026): move detection was dropped —
+        // a moved file is simply treated as new content; MissingLanguages (file
+        // existence, zero API cost for present SRTs) drives what is searched.
+
+        // F-M34/M35: global skip filters (same as upload)
+        string? skip = skipFilter.GetSkipReason(mediaPath);
+        if (skip != null)
+        {
+            summary.SkippedItems++;
+            summary.SkippedByFilter++;
+            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] SKIP {File} — {Reason}", Path.GetFileName(mediaPath), skip);
+
+            return;
+        }
+
+        // F-M45: hard mode → no id, no download; soft mode → title-based search.
+        // F-M66 (user decision 09.09.2026, replaces the 15-min wait): id resolution
+        // in ONE pass whenever the IMDb ID is missing — 60 s metadata wait (arrival
+        // only, 30 s heartbeat loop), then the TMDB ladder (id→IMDB, title search),
+        // then requeue-with-counter.
+        // F-M151b: the download ID quality gate — first validate/correct JF ids against
+        // TMDb so JF and TMDb point at the same title. No switch: it is the standard path,
+        // and the run does not start without the TMDb key it depends on (F-M203).
+        var (imdbId, tmdbId, season, episode, isSeries) = ResolveIds(item);
+
+        // F-M217 (27.09.2026, user decision "immer typneutral suchen und uns nicht auf
+        // die JF-Klassifizierung einlassen"): the FILE NAME is the authority for the
+        // content TYPE and for the episode numbers. F-M190 already established that
+        // for the upload side ("an episode in a 'movies' library is imported as a
+        // Movie") and MediaNameParser was written for it — but the download side
+        // never applied it. Consequences measured 27.09.2026 on the test library:
+        // an episode sitting in a library typed movies arrives as a Movie, so
+        // ResolveIds reports season=0/episode=0 and the item NAME is the raw file
+        // name ("Reacher.S03E01"), which the type-neutral TMDb search/multi cannot
+        // match (0 hits for "Reacher.S03E01", immediate hits for "Reacher"). Both
+        // broke the run before it started; the pack fix (F-M215) could never fire
+        // because its guard needs season/episode > 0.
+        var parsedName = MediaNameParser.Parse(mediaPath);
+        if (parsedName.IsSeries)
+        {
+            if (!isSeries)
+            {
+                isSeries = true;
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[SubDL-D] type from file name (not Jellyfin) {File} — series, name states S{Season}E{Episode}",
+                    Path.GetFileName(mediaPath), parsedName.Season ?? 0, parsedName.Episode ?? 0);
+            }
+
+            if (parsedName.Season is int ps && ps > 0)
+            {
+                season = ps;
+            }
+
+            if (parsedName.Episode is int pe && pe > 0)
+            {
+                episode = pe;
+            }
+        }
+
+        // Title that every lookup below asks about: the series name for episodes,
+        // the parsed file-name title when the name itself stated the series (the
+        // JF NAME is the raw file name in exactly the mis-typed case this fixes).
+        string title = isSeries ? (item as Episode)?.Series?.Name ?? item.Name : item.Name;
+        if (parsedName.IsSeries && parsedName.Title is { Length: >= 2 } parsedTitle)
+        {
+            title = parsedTitle;
+        }
+
+        // F-M203 (25.09.2026, user decision "TMDb-Key wird verpflichtend, nur Serien
+        // verweigern"): a SERIES cannot be matched without TMDB — the show id that both
+        // the SubDL search and the series/episode pairing need comes from the key. Films
+        // keep working. Same fail-closed rule as the upload side.
+        // F-M231 (27.09.2026, user decision "Wir testen jfs id immer gegen tmdb"): the FILE
+        // NAME's year wins for the id test — Jellyfin's year comes from the same metadata
+        // that may be pinned to the wrong title, so asking with it can only confirm the
+        // mistake. Mayday: nfo year 2003 (documentary) vs. name year 2026 (the film); the
+        // test needs 2026 to see anything but the wrong series.
+        int? idTestYear = parsedName.Year ?? ((item as Movie)?.ProductionYear is int ipy ? ipy
+            : (item as Episode)?.Series?.ProductionYear is int isy ? isy
+            : null);
+
+        if (!string.IsNullOrWhiteSpace(imdbId) || !string.IsNullOrWhiteSpace(tmdbId))
+        {
+            // F-M231: ALWAYS test Jellyfin's ids against TMDb by TITLE and YEAR before using
+            // them. ResolveAndValidateIdsAsync below only asks whether the two ids describe
+            // the same entity — a wrongly pinned pair passes that, so it cannot catch an
+            // item whose metadata points at the wrong title.
+            var verified = await _tmdb.VerifyIdsAgainstTmdbAsync(imdbId, tmdbId, title, idTestYear, isSeries, ct).ConfigureAwait(false);
+            if (verified.Corrected)
+            {
+                imdbId = verified.Imdb;
+                tmdbId = verified.Tmdb;
+                isSeries = verified.IsSeries;
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[SubDL-D] TMDb id test corrected the item — tmdb={Tmdb} imdb={Imdb} {File}.",
+                    tmdbId ?? "-", imdbId ?? "-", Path.GetFileName(mediaPath));
+            }
+
+            // title comes from the F-M217 block above (file name wins).
+            int? year = (item as Movie)?.ProductionYear is int py ? py
+                : (item as Episode)?.Series?.ProductionYear is int sy ? sy
+                : null;
+            var (correctedImdb, correctedTmdb) = await _tmdb.ResolveAndValidateIdsAsync(imdbId, tmdbId, title, year, isSeries, ct).ConfigureAwait(false);
+            if (correctedImdb != null || correctedTmdb != null)
+            {
+                imdbId = correctedImdb ?? imdbId;
+                tmdbId = correctedTmdb ?? tmdbId;
+            }
+            else
+            {
+                imdbId = null;
+                tmdbId = null;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(imdbId))
+        {
+            // (user decision 12.09.2026 "Ne. Direkt starten."): the 60 s
+            // metadata wait is GONE — arrival runs go straight to the TMDB ladder
+            // when the JF ids are empty. The ladder itself (tmdb->imdb, title
+            // search, filename parse) is fast and idempotent; JF metadata that
+            // arrives late is picked up by the next run's ladder re-run.
+
+            // F-M66: TMDB ladder now runs in BOTH directions without RequireImdb gating —
+            // "if tmdb available, fetch imdb" (user decision 09.09.2026): TMDB→IMDB via key,
+            // then a title search.
+            if (string.IsNullOrWhiteSpace(imdbId) && !string.IsNullOrWhiteSpace(tmdbId) && _tmdb.IsConfigured)
+            {
+                imdbId = await _tmdb.ResolveImdbAsync(tmdbId, isSeries, ct).ConfigureAwait(false);
+            }
+
+            if (string.IsNullOrWhiteSpace(imdbId) && _tmdb.IsConfigured)
+            {
+                // title comes from the F-M217 block above (file name wins).
+                int? year = (item as Movie)?.ProductionYear is int py ? py
+                    : (item as Episode)?.Series?.ProductionYear is int sy ? sy
+                    : null;
+
+                // F-M219 (27.09.2026): the TYPE-NEUTRAL search runs FIRST, like the upload
+                // side (F-M190). The typed search below searches one endpoint only, so it
+                // inherits whatever type Jellyfin guessed — the very assumption F-M217
+                // stopped trusting. A name-detected series that Jellyfin typed as a Movie
+                // therefore asked search/movie and could not match. The multi-search lets
+                // TMDB decide the type, and its year check keeps that from costing
+                // precision on ambiguous titles. The typed search stays as the second
+                // rung, where a known type plus the year is the sharper query.
+                var multi = await _tmdb.ResolveByMultiSearchAsync(title, year, isSeries, ct).ConfigureAwait(false);
+                if (multi.Found)
+                {
+                    imdbId = multi.Imdb;
+                    tmdbId = multi.Tmdb;
+                    if (multi.IsSeries != isSeries)
+                    {
+                        isSeries = multi.IsSeries; // TMDB decides, not Jellyfin
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] TMDb resolved this as a {Kind} — type corrected {File}.",
+                            multi.IsSeries ? "series" : "movie", Path.GetFileName(mediaPath));
+                    }
+                }
+                else
+                {
+                    (imdbId, tmdbId) = await _tmdb.ResolveImdbByTitleAsync(title, year, isSeries, ct).ConfigureAwait(false);
+                }
+
+                // (user decision 11.09.2026): filename fallback — when the
+                // JF title search failed, parse the RELEASE FILENAME (the most
+                // honest data: user-renamed files, JF wrong content-type) and
+                // retry with the parsed title/year/type. Fixes e.g. "New Zealand
+                // Spy 2026 S01E01 …" searched as movie (JF typed it as movie) →
+                // 0 results, while search/tv finds it instantly.
+                if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId))
+                {
+                    string fnFileName = Path.GetFileName(mediaPath);
+                    var fnParsed = ParseFileNameForIds(fnFileName);
+                    string? fnTitle = fnParsed.Title;
+                    int? fnYear = fnParsed.Year;
+                    bool fnIsSeries = fnParsed.IsSeries;
+                    string? fnImdbFromName = MediaNameParser.ExtractImdbId(fnFileName);
+                    // F-M348 (11.10.2026, operator decision): a parsed title that still carries brackets or
+                    // percent signs is not a title — refusing here keeps the banal mis-hits out ("English"
+                    // → "Johnny English"; a name whose title is only "S01"). 54 of 1224 measured.
+                    bool fnTitleUsable = fnTitle != null && fnTitle.Length >= 2
+                        && !fnTitle.AsSpan().ContainsAny(UnusableTitleChars);
+                    if (fnTitle != null && !fnTitleUsable)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] filename fallback refused {File} — the name yields no usable title (\"{Title}\")",
+                            fnFileName, fnTitle);
+                    }
+
+                    if (fnTitleUsable && (fnIsSeries != isSeries || fnTitle != title))
+                    {
+                        // F-M346/F-M347 (11.10.2026, operator decisions): this fallback CONFIRMS, it never
+                        // guesses. A series without a year is resolved through the episode its name states
+                        // (61 of 70 series names carry no year, and the loose first-hit route was right 4 of
+                        // 14 times). A film without a year stays unresolved instead of being pinned to TMDb's
+                        // most popular namesake. An id the name states counts only when the title route agrees
+                        // with it — one measured entry stated an id belonging to a different film.
+                        string? fnNameImdb = null;
+                        string? fnNameTmdb = null;
+                        if (fnIsSeries && fnParsed.Season is int fnSeason && fnParsed.Episode is int fnEpisode)
+                        {
+                            (fnNameImdb, fnNameTmdb) = await _tmdb.ResolveSeriesByEpisodeAsync(fnTitle!, fnSeason, fnEpisode, ct).ConfigureAwait(false);
+                        }
+                        else if (fnYear is int fnYearAsked)
+                        {
+                            var fnStrict = await _tmdb.ResolveByTitleYearAsync(fnTitle!, fnYearAsked, fnIsSeries, ct).ConfigureAwait(false);
+                            if (fnStrict.Found)
+                            {
+                                fnNameImdb = fnStrict.Imdb;
+                                fnNameTmdb = fnStrict.Tmdb;
+                            }
+                        }
+
+                        string? fnIdTmdb = null;
+                        if (fnImdbFromName != null)
+                        {
+                            fnIdTmdb = await _tmdb.ResolveTmdbByImdbAsync(fnImdbFromName, ct).ConfigureAwait(false);
+                            if (fnIdTmdb != null && fnNameTmdb != null
+                                && !string.Equals(fnIdTmdb, fnNameTmdb, StringComparison.Ordinal))
+                            {
+                                LogUtil.PerItem(_config.LogMode, _logger,
+                                    "[SubDL-D] filename fallback refused {File} — the name states imdb={Imdb} (tmdb={IdTmdb}) while its own title \"{Title}\" ({Year}) resolves to tmdb={NameTmdb}; neither is trusted",
+                                    fnFileName, fnImdbFromName, fnIdTmdb, fnTitle,
+                                    fnYear.HasValue ? fnYear.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "no year",
+                                    fnNameTmdb);
+                                fnIdTmdb = null;
+                                fnNameTmdb = null;
+                                fnNameImdb = null;
+                            }
+                        }
+
+                        imdbId = !string.IsNullOrWhiteSpace(fnNameImdb) ? fnNameImdb : (fnNameTmdb != null ? fnImdbFromName : null);
+                        tmdbId = fnNameTmdb ?? fnIdTmdb;
+                        if (!string.IsNullOrWhiteSpace(imdbId) || !string.IsNullOrWhiteSpace(tmdbId))
+                        {
+                            isSeries = fnIsSeries; // the filename knows the content type
+                            summary.IdResolvedFromFilename++;
+                            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] filename fallback {File} — title \"{Title}\" ({Kind} {Year}) → imdb={Imdb}",
+                                Path.GetFileName(mediaPath), fnTitle, fnIsSeries ? "tv" : "movie", fnYear, imdbId);
+                        }
+                    }
+                }
+            }
+
+            // F-M45 (operator order 08.10.2026): the IMDb/TMDb match is a HARD criterion — the
+            // switch that could soften it is gone. An item with no resolvable id does not search
+            // SubDL at all. The removed soft mode ran a film_name search on a PARSED FILENAME, and a
+            // title-only hit on a wrong-year release is exactly the mis-download this gate prevents —
+            // the switch that could let it through is gone (no replacement; see F-M45).
+            if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId))
+            {
+                summary.SkippedItems++;
+                summary.SkippedNoId++;
+                if (_config.LogMode >= LogLevelMode.Verbose)
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] SKIP {File} — no id resolvable (TMDb ladder failed) — the next run tries again",
+                        Path.GetFileName(mediaPath));
+                }
+
+                return;
+            }
+
+        }
+
+        // F-M66: the ladder above already resolved TMDB→IMDB and ran the title
+        // search when the item arrived id-less. Items that entered this method
+        // WITH a tmdb id (JF metadata) still need the IMDB fetch here.
+        if (string.IsNullOrWhiteSpace(imdbId) && _tmdb.IsConfigured && !string.IsNullOrWhiteSpace(tmdbId))
+        {
+            imdbId = await _tmdb.ResolveImdbAsync(tmdbId, isSeries, ct).ConfigureAwait(false);
+        }
+
+        // F-M45 (operator order 08.10.2026): an id-less item (no IMDB, no TMDB at all) does not
+        // search SubDL, full stop — the switch that once let it continue with the TMDB id alone is
+        // gone. This second gate stays because an item can still arrive here id-less: the TMDB
+        // fetch above needs a tmdb id to begin with, and directed fires never ran the ladder.
+        if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId))
+        {
+            summary.SkippedItems++;
+            summary.SkippedNoId++;
+            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] SKIP {File} — no id resolvable (after wait + TMDB)", Path.GetFileName(mediaPath));
+
+            return;
+        }
+
+        // F-M282 (user decision 02.10.2026): the two search pools are fed from the PAIRS, separately.
+        //
+        // This is the spot that produced the wasted downloads. The old code asked which LANGUAGES had
+        // no variant and appended them to the same `missing` list that feeds the `hi=0` search — so a
+        // missing German variant made the regular German subtitle "missing", the search ran with
+        // `hi=0` on a language whose .de.srt had been on disk for days, and the file was re-fetched.
+        // SubDL serves the two sides from separate, non-overlapping pools (F-M241), so they must be
+        // fed separately here: `regularMissing` drives `&hi=0`, `variantMissing` drives `&hi=1`.
+        var requiredPairs = RequiredPairs(targets);
+        var openPairsNow = Registry.OpenPairs(
+            mediaPath, requiredPairs, EmbeddedPresentLanguagesOf(item),
+            onlyOwnDownloads: !_config.DownloadOnlyMissing,
+            countOriginals: !_config.QaDownloadAutoSync);
+
+        var regularMissing = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleCoverage
+            .RegularLanguages(openPairsNow);
+        var variantMissing = Jellyfin.Plugin.SubdlScribe.Registry.SubtitleCoverage
+            .VariantLanguages(openPairsNow);
+        var missing = new List<string>(regularMissing);
+
+        if (missing.Count == 0 && variantMissing.Count == 0)
+        {
+            summary.SkippedItems++;
+            summary.SkippedNothingMissing++;
+            // F-M283: nothing open means nothing to fetch. No mark is written any more — the question
+            // at the top of this method IS the answer, asked fresh every run, so there is no stored
+            // verdict left to settle or to contradict.
+            return;
+        }
+
+        // The variant pool is asked even when nothing regular is missing: that is the whole point of
+        // judging the datum instead of the language. A file with its German on disk but no German
+        // variant has work to do, and it must not be reached by re-requesting German.
+        if (missing.Count == 0)
+        {
+            LogUtil.PerItem(
+                _config.LogMode,
+                _logger,
+                "[SubDL-D] {File} — only the variant is open: {Pairs} (regular files present, no re-fetch)",
+                Path.GetFileName(mediaPath),
+                string.Join(",", openPairsNow.Select(p => p.ToString())));
+        }
+
+        // F-M88c: track which target languages reached a terminal state this run
+        // (downloaded, not-available, or QA-exhausted). Used at the end to decide
+        // whether the whole file can be marked complete.
+        var closedLangs = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // F-M320 (operator order 08.10.2026): the QA retry limit is the FIT's budget (F-M318), so it no
+        // longer removes a language from the search. The removal that used to sit here — "QA-exhausted
+        // pairs are removed BEFORE the search" — was the other half of the give-up the operator
+        // removed; keeping it would have left the same silence at a different place in the run. What
+        // bounds a hopeless file now is the download budget per run (F-M50) and the burned-release
+        // memory (F-M200), both of which leave the search itself intact.
+
+        // F-M504 (Nutzerkorrektur 15.11.2026: „Suchen engines werden der Reihenfolge nach befragt.
+        // Zur zeit sind es 2"): die Quellen werden in der eingestellten Reihenfolge GEFRAGT, nicht nur
+        // in ihr sortiert. Bis hierher stand die SubDL-Suche als fester Block in dieser Methode und
+        // lief deshalb IMMER zuerst; die Einstellung `DownloadOrder` entschied danach nur, wer in der
+        // Rangfolge fuehrt und wer als „Zusatzquelle" nachgefragt wird. Bei `TvSubtitlesFirst` wurde
+        // tvsubtitles damit erst NACH SubDL gefragt — die eingestellte Reihenfolge war eine Aussage
+        // ueber die Rangfolge, nicht ueber den Ablauf.
+        //
+        // Jetzt gibt es EINE Schleife ueber `DownloadQueryOrder()` — die eingestellte Quelle zuerst,
+        // danach die uebrigen in Enum-Reihenfolge, JE QUELLE gefiltert ueber `SourceAllowed` und einen
+        // verdrahteten Endpunkt:
+        //
+        //   * die Hauptsuche (SubDL) ist die Abfrage IHRER Quelle. `RunV2SearchAsync` ist mehr als
+        //     eine Suchanfrage (Id-Pruefung mit Backfill, HI-Pool, Quota-Pfade) und bleibt deshalb
+        //     genau der Block, der er war — er laeuft nur an der Stelle, die die Reihenfolge vorgibt.
+        //   * jede andere Quelle wird fuer JEDE fehlende Sprache genau einmal ueber ihren Endpunkt
+        //     gefragt (`ForeignCandidatesAsync`), in derselben Schleife, an ihrer Stelle.
+        //
+        // Innerhalb der Schleife gibt es KEINEN Ausstieg: eine leere Antwort der ersten Quelle beendet
+        // nichts, die naechste wird trotzdem gefragt (F-M504). Erst NACH der Schleife entscheidet
+        // sich, ob der Vorgang „keine Kandidaten" hat. Die Rangfolge der Treffer folgt derselben
+        // Liste: Rang 0 ist die zuerst gefragte Quelle (`quellenRang` weiter unten).
+        var quellenReihenfolge = DownloadQueryOrder(isSeries);
+
+        // Die Antworten der Quellen. Die Hauptsuche traegt ihre Kandidaten selbst ein, jede
+        // Zusatzquelle ihre Treffer je Sprache — nach der Schleife ist jede gefragte Quelle genau
+        // einmal gelaufen, und keine hat auf die andere gewartet.
+        List<SubtitleCandidate> candidates = new();
+        List<SubtitleCandidate> hiCandidates = new();
+        bool usedBackup = false;
+        int thresholdPassCount = 0;
+        var fremdProSprache = new Dictionary<string, List<SubtitleCandidate>>(StringComparer.OrdinalIgnoreCase);
+
+        // F-M504: welche Quellen dieser Vorgang TATSAECHLICH gefragt hat, in Frage-Reihenfolge. Die
+        // Abschlusszeile nennt genau diese Liste; eine uebersprungene Quelle (Schalter aus oder nicht
+        // konfiguriert) steht nicht darin.
+        var gefragteQuellen = new List<Configuration.SubtitleProvider>();
+
+        // F-M504: die Abfrage der Hauptsuche als eigener Schritt. Sie ist mehr als eine Suchanfrage
+        // (Id-Pruefung mit Backfill, HI-Pool, Quota-Pfade) und bleibt deshalb der Block, der sie war;
+        // sie laeuft nur da, wo die Reihenfolge sie hinstellt. Rueckgabe falsch = die Suche kam nicht
+        // durch (429/5xx/403): der Vorgang endet dann hier, wie bisher (F-M48).
+        async Task<bool> RunMainSearchAsync()
+        {
+            // F-M20/F-M26: the configured rate paces this search; the plugin holds no budget of
+            // its own. A per-run hourly bucket sat here until 03.10.2026 and could stop the whole run
+            // via `_stopRun`. It was our own invention — SubDL publishes DAILY counters only — and it
+            // stopped runs the server would have allowed (735 of 2000 searches still free when it
+            // fired). Enforcement belongs to SubDL: a real 429 is answered below by the
+            // QuotaStopDecision path, which reads the live counters before it decides.
+            // The pause stays (F-M48 fix 08.09.2026): without it the search path fired up to 100
+            // requests in ~9 s, SubDL answered 429 and every result was silently discarded as
+            // "no candidates".
+            await _limiter.PauseAsync(ct).ConfigureAwait(false);
+            // (16.09.2026, user decision): this pause is the only one before a search. An
+            // extra delay sat here once and doubled it — every search waited 2× MinCallPauseSec.
+
+            // One search per item with the server-side filters (season, episode, target
+            // languages) — strict, no fallbacks (user decision 08.09.2026). The client-side
+            // episode filter stays as a second safety net.
+            // F-M58 (09.09.2026): a transient service_busy 429 (retryAfterSeconds) is
+            // NOT the daily limit — wait the short window and retry the SAME search up
+            // to 3 times before giving up. Only a real daily-limit 429 aborts the run.
+            _watchdog?.Heartbeat();
+            // (16.09.2026, user decision): v2 filename batch (BACKUP) REMOVED — it added a
+            // filename-similarity second pass on top of the v1 search for nothing. With F-M45 hardened
+            // (operator order 08.10.2026) the v1 MAIN search is an ID search, period: no title anchor,
+            // no soft-mode rung. Main path is the episode-exact v1 search (GET /api/v1/subtitles by
+            // imdb/tmdb + season/episode, unpack=1); no v2 search remains in the download path.
+            var ergebnis = await RunV2SearchAsync(
+                item, mediaPath, imdbId, tmdbId, season, isSeries ? episode : 0, missing, variantMissing, summary, ct);
+
+            const int maxTransientRetries = 3;
+            int transientAttempt = 0;
+            while (ergebnis.Candidates == null && _api.TransientOverload && transientAttempt < maxTransientRetries)
+            {
+                // F-M152 (rev.10): NO /me diagnostic call - a service_busy 429 is
+                // server overload (or Edge throttling); the run retries briefly and
+                // stops with the overload fire if it persists.
+                transientAttempt++;
+                int waitSec = Math.Max(5, _api.TransientRetrySeconds);
+                _logger.LogWarning(
+                    "[SubDL-D] SubDL transiently overloaded (429 service_busy) at {File} — waiting {Sec}s, retry {Attempt}/{Max}. Not the daily limit; run continues.",
+                    Path.GetFileName(mediaPath), waitSec, transientAttempt, maxTransientRetries);
+                await Task.Delay(TimeSpan.FromSeconds(waitSec), ct).ConfigureAwait(false);
+                _watchdog?.Heartbeat();
+                _api.ResetRateLimitFlag(); // clear the transient marker before the retry
+                ergebnis = await RunV2SearchAsync(
+                    item, mediaPath, imdbId, tmdbId, season, isSeries ? episode : 0, missing, variantMissing, summary, ct);
+            }
+
+            // F-M52: requirement marker added for traceability.
+            // F-M48 fix (08.09.2026): null = search did not complete (429/5xx/403) — do NOT
+            // mark the item "searched"; abort the run so this and all remaining items
+            // stay due for the next run instead of being poisoned with garbage results.
+            if (ergebnis.Candidates == null)
+            {
+                _stopRun = true;
+                if (_api.AuthBroken)
+                {
+                    _logger.LogError("[SubDL-D] API key rejected (403) — run stopped at {File}, check credentials.",
+                        Path.GetFileName(mediaPath));
+                }
+                else if (_api.TransientOverload)
+                {
+                    // F-M152 (rev.10): NO /me diagnostic call — service_busy is real
+                    // server overload; the recovery fire is the short overload fire.
+                    ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
+                    _logger.LogWarning(
+                        "[SubDL-D] SubDL still overloaded (429 service_busy) after {Max} retries — stopping run at {File}; item stays due for the overload fire.",
+                        maxTransientRetries, Path.GetFileName(mediaPath));
+                }
+                else
+                {
+                    // F-M238: a 429 on the search endpoint is not automatically the daily
+                    // allowance — SubDL answers the same code for a short-term trip. Ask the
+                    // live counters which one it is, then let the decision name the retry
+                    // shape. A spent OR unreadable allowance earns the day-long fire; only a
+                    // free allowance is respaced. Both day-long cases MUST schedule, or the
+                    // item waits for the next regular anchor instead of the reset.
+                    var read = await _api.ReadQuotaAsync(forDownload: false, ct).ConfigureAwait(false);
+                    bool searchExhausted = read == QuotaRead.Spent;
+                    bool searchUnreadable = read == QuotaRead.Unreadable;
+                    var stop = QuotaStopDecision.Decide(
+                        _config.DownloadContinueAfterLimit,
+                        IsArrivalRun,
+                        searchExhausted,
+                        searchUnreadable);
+
+                    if (stop == QuotaStop.Respaced)
+                    {
+                        _api.ResetRateLimitFlag();
+                        _stopRun = false;
+                        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleOverloadFire(upload: false, DateTime.UtcNow);
+                        _logger.LogWarning(
+                            "[SubDL-D] 429 at {File} is a short-term rate limit — search allowance still has {Remaining}/{Limit} left; "
+                            + "run respaced by JobSpacingMinutes, item stays due (F-M238).",
+                            Path.GetFileName(mediaPath), _api.Quota?.SearchRemaining, _api.Quota?.SearchLimit);
+                    }
+                    else if (stop == QuotaStop.NextDayFire)
+                    {
+                        // Count the stop, or the dispatcher cannot tell it from an "ok" cycle: it would
+                        // paint the download light GREEN and mark every item this run never worked as
+                        // Done, removing it from the queue. `QuotaStopped` is the only flag the
+                        // dispatcher reads (SubdlEventDispatcher.CleanupDirectionQueue).
+                        summary.QuotaStopped++;
+                        // Day-long: anchor on the server's reset (or the fail-safe midnight),
+                        // exactly like the download-429 path. Without this the search path
+                        // stopped without scheduling anything and nothing retried until the
+                        // next regular anchor.
+                        var anchor = _api.RateLimitResetUtc ?? NextMidnightUtc();
+                        ScheduledTasks.SubdlSchedulerCoordinator.Instance?.ScheduleRecoveryFire(upload: false, anchor.ToUniversalTime());
+                        _logger.LogWarning(
+                            "[SubDL-D] Search allowance spent ({Reason}) — run stopped at {File}; one recovery fire after the reset at {Reset} local (F-M238).",
+                            searchExhausted ? "counter says spent" : "allowance unreadable, treated as spent",
+                            Path.GetFileName(mediaPath),
+                            TimeZoneInfo.ConvertTimeFromUtc(anchor, TimeZoneInfo.Local).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
+                    }
+                    else
+                    {
+                        // A spent allowance with a clean stop and no fire — still a quota stop (the work
+                        // did not happen), so the counter and the queue guard apply.
+                        summary.QuotaStopped++;
+                        _logger.LogWarning(
+                            "[SubDL-D] Search allowance spent — run stopped at {File}; no recovery fire (continue-after-limit is off or arrival run) (F-M238).",
+                            Path.GetFileName(mediaPath));
+                    }
+                }
+
+                return false;
+            }
+
+            candidates = ergebnis.Candidates;
+            hiCandidates = ergebnis.HiCandidates;
+            usedBackup = ergebnis.UsedFilenameFallback;
+            thresholdPassCount = ergebnis.ThresholdPassCount;
+
+            return true;
+        }
+
+        // Die Frage-Reihenfolge selbst: eine Quelle nach der anderen, jede genau einmal. Steht
+        // tvsubtitles vorn, wird ERST fuer alle fehlenden Sprachen tvst gefragt und DANACH die
+        // SubDL-Suche gefahren; steht SubDL vorn, ist es umgekehrt. In beiden Faellen laeuft
+        // dieselbe Schleife — die Reihenfolge ist Daten, kein Sonderfall im Code.
+        // F-M521: was die Adresse geantwortet hat, je Quelle EINE kurze Angabe. Sie geht in die
+        // Verdichtungszeile, damit „asked: tvsubtitles" nicht mehr behauptet werden muss: dort steht
+        // dann der Status der Seite und die Zahl der Treffer.
+        var antworten = new Dictionary<Configuration.SubtitleProvider, string>();
+
+        foreach (var quelle in quellenReihenfolge)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (quelle == MainSearchSource)
+            {
+                // F-M497: eine Quelle ohne das, was ihr Pfad braucht, tritt nicht an — sie steht
+                // dann auch nicht in der Liste der gefragten Quellen.
+                if (!_config.IsConfiguredForDownload(MainSearchSource))
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] {File} — SubDL skipped — not configured (required for SubDL only)",
+                        Path.GetFileName(mediaPath));
+                    continue;
+                }
+
+                if (!await RunMainSearchAsync().ConfigureAwait(false))
+                {
+                    return;
+                }
+
+                gefragteQuellen.Add(quelle);
+                continue;
+            }
+
+            // F-M504: eine Zusatzquelle wird fuer ALLE fehlenden Sprachen gefragt — genau einmal je
+            // Sprache —, bevor die naechste Quelle an die Reihe kommt. Ohne fehlende Sprache gibt es
+            // nichts zu fragen; dann steht sie auch nicht in der Liste der gefragten Quellen.
+            if (missing.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (string lang in missing)
+            {
+                ct.ThrowIfCancellationRequested();
+                var treffer = fremdProSprache.TryGetValue(lang, out var bisher)
+                    ? bisher
+                    : new List<SubtitleCandidate>();
+                treffer.AddRange(await ForeignCandidatesAsync(quelle, title, isSeries, season, episode, lang, tmdbId, mediaPath, mediaHash, ct).ConfigureAwait(false));
+                fremdProSprache[lang] = treffer;
+            }
+
+            // F-M521: the status of the LAST request that source made, plus the hits it produced.
+            int status = quelle == Configuration.SubtitleProvider.MovieSubtitles
+                ? _msubClient.LastStatus
+                : _tvClient?.LastStatus ?? 0;
+            int trefferZahl = fremdProSprache.Values.Sum(liste => liste.Count(c => c.Provider == quelle));
+            antworten[quelle] = Api.SiteTrace.Answer(status, trefferZahl);
+
+            gefragteQuellen.Add(quelle);
+        }
+
+        // F-M47: search performed (success OR no-candidates) — start the per-item
+        // refetch clock. Items with missing languages get re-searched after the
+        // configured interval; new arrivals pass immediately. 5xx errors don't count
+        // as a search (fail-open empty result above, but the refetch clock stays off).
+        //
+        // F-M22 (defect fixed 02.10.2026): NOT in a dry run. The stamp is a stored verdict
+        // about this item, and a dry run may write none — "what a dry run leaves behind must
+        // not change what a later run finds". Without this guard the clock ran anyway, so a
+        // dry run made every item it reported read as `not due` for the whole refetch
+        // interval: the very run meant to answer "what WOULD happen" silently suppressed the
+        // next real one. Unlike the old download mark there is no invalidation pass to undo
+        // a wrong stamp — the pipeline trusts it — so this one did not self-heal.
+        // F-M504 (Nutzerkorrektur 15.11.2026): der Takt gehoert zur HAUPTSUCHE. Lief sie in diesem
+        // Lauf nicht (ihr Schalter aus oder nicht konfiguriert), wird sie auch nicht als „gefragt"
+        // gestempelt — sonst schoebe ein tvst-only-Lauf die naechste SubDL-Suche um das ganze
+        // Intervall, obwohl SubDL gar nicht gefragt wurde.
+        if (!_config.DownloadDryRun && gefragteQuellen.Contains(MainSearchSource))
+        {
+            _searchTracker.MarkSearched(item.Id.ToString(), targets);
+        }
+
+        // ID sanity check + fallback — compare the searched id with the
+        // film header SubDL returned (results[0]) and backfill the missing one.
+        // The per-candidate ids are stamped by the client (StampFilmIds).
+        // F-M93d-fix (live evidence Moon.2009): only the ID actually SENT to the
+        // API decides a mismatch — SubDL search filters server-side on that one
+        // id, so its own secondary-id mapping (e.g. a different tmdb_id for the
+        // same imdb) is irrelevant and must NOT drop correct candidates.
+        string? resolvedImdb = imdbId;
+        string? resolvedTmdb = tmdbId;
+        if (candidates.Count > 0)
+        {
+            string? returnedImdb = candidates[0].ImdbId;
+            string? returnedTmdb = candidates[0].TmdbId;
+            summary.IdChecks++;
+
+            bool searchedByImdb = !string.IsNullOrWhiteSpace(imdbId);
+            bool searchedByTmdb = !searchedByImdb && !string.IsNullOrWhiteSpace(tmdbId);
+
+            bool mismatch =
+                (searchedByImdb && !string.IsNullOrWhiteSpace(returnedImdb) &&
+                 !string.Equals(imdbId!.Trim(), returnedImdb.Trim(), StringComparison.OrdinalIgnoreCase)) ||
+                (searchedByTmdb && !string.IsNullOrWhiteSpace(returnedTmdb) &&
+                 !string.Equals(tmdbId!.Trim(), returnedTmdb.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (mismatch)
+            {
+                summary.IdMismatches++;
+                _logger.LogWarning(
+                    "[SubDL-D] ID mismatch {File} — searched imdb={SImdb}/tmdb={STmdb}, SubDL returned imdb={RImdb}/tmdb={RTmdb}; dropping all {N} candidates for this item",
+                    Path.GetFileName(mediaPath), imdbId ?? "—", tmdbId ?? "—", returnedImdb ?? "—", returnedTmdb ?? "—", candidates.Count);
+                summary.NotAvailable += missing.Count;
+                return;
+            }
+
+            // Fallback: backfill ids we didn't have from the film header.
+            if (string.IsNullOrWhiteSpace(resolvedImdb) && !string.IsNullOrWhiteSpace(returnedImdb))
+            {
+                resolvedImdb = returnedImdb;
+                summary.IdBackfilledFromApi++;
+                LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] ID backfill {File} — imdb={Imdb} from SubDL results[0] (searched by tmdb={Tmdb})",
+                    Path.GetFileName(mediaPath), returnedImdb, tmdbId);
+            }
+
+            if (string.IsNullOrWhiteSpace(resolvedTmdb) && !string.IsNullOrWhiteSpace(returnedTmdb))
+            {
+                resolvedTmdb = returnedTmdb;
+                summary.IdBackfilledFromApi++;
+                LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] ID backfill {File} — tmdb={Tmdb} from SubDL results[0] (searched by imdb={Imdb})",
+                    Path.GetFileName(mediaPath), returnedTmdb, imdbId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(resolvedImdb))
+            {
+                summary.IdImdbOk++;
+            }
+
+            if (!string.IsNullOrWhiteSpace(resolvedTmdb))
+            {
+                summary.IdTmdbOk++;
+            }
+        }
+
+        // F-M449: machine-translated uploads leave the pool HERE — on the search result, before the
+        // ranking picks a best candidate and before any download unit is spent. The switch that
+        // allows them back is `Allow AI translated subs` (off by default). HI candidates come from
+        // the same account and are filtered with the same rule, so an item cannot get its SDH
+        // variant from a source its regular variant was denied.
+        if (!_config.AllowAiTranslatedSubs)
+        {
+            int droppedAi = AiTranslatedSubs.Remove(candidates);
+            droppedAi += AiTranslatedSubs.Remove(hiCandidates);
+            if (droppedAi > 0)
+            {
+                summary.AiUploaderFiltered += droppedAi;
+                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] {File} — {N} candidate(s) from the AI translation account dropped (switch \"Allow AI translated subs (SUBDL AI)\" off)", Path.GetFileName(mediaPath), droppedAi);
+            }
+        }
+
+        // F-M504: die Antworten BEIDER Quellen liegen seit der Schleife oben vor — `candidates` von
+        // der Hauptsuche, `fremdProSprache` von jeder Zusatzquelle (einmal je Quelle und Sprache,
+        // gefragt in der eingestellten Reihenfolge). Hier wird nichts mehr geholt und nichts mehr
+        // entschieden: die Sprachschleife unten liest nur noch, was schon da ist.
+
+        // Erst wenn ALLE gefragten Quellen nichts haben, gilt der Vorgang als „keine Kandidaten"
+        // (F-M504).
+        if (candidates.Count == 0 && !fremdProSprache.Values.Any(liste => liste.Count > 0))
+        {
+            summary.NotAvailable += missing.Count;
+            summary.SkippedNoCandidates++;
+            // F-M183: LogUtil.PerItem gates on Verbose internally, so the run-end
+            // Aggregate below is what makes this visible at Normal level (keeps
+            // per-item lines out of Normal — 400 items must not mean 400 lines).
+            // F-M504: die Zeile nennt die Quellen, die TATSAECHLICH gefragt wurden. „no candidates on
+            // SubDL" behauptete eine Suche, an der tvsubtitles gar nicht beteiligt war — und wenn es
+            // gefragt wurde, ist „nur SubDL war leer" die falsche Auskunft.
+            LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] {File} — no candidates for [{Langs}] — asked: {Sources}",
+                Path.GetFileName(mediaPath),
+                string.Join(",", missing),
+                gefragteQuellen.Count == 0
+                    ? "none"
+                    : string.Join(", ", gefragteQuellen.Select(q =>
+                        Api.Endpoints.Provenance.Name(q)
+                        + (antworten.TryGetValue(q, out var a) ? " (" + a + ")" : string.Empty))));
+            return;
+        }
+
+        // F-M504: der Rang einer Quelle in der Frage-Reihenfolge — 0 heisst „zuerst gefragt". Er ist die
+        // fuehrende Stufe der Rangfolge weiter unten. Bei zwei Quellen ist das dieselbe Aussage wie
+        // vorher (tvsubtitles-first ⇔ tvst vor SubDL), bei drei Quellen bleibt sie richtig, ohne Umbau.
+        var quellenRang = new Dictionary<Configuration.SubtitleProvider, int>();
+        for (int i = 0; i < quellenReihenfolge.Count; i++)
+        {
+            quellenRang[quellenReihenfolge[i]] = i;
+        }
+
+        string orderText = quellenReihenfolge.Count == 0
+            ? "none"
+            : string.Join(", ", quellenReihenfolge.Select(Api.Endpoints.Provenance.Name));
+
+        string videoBase = Path.GetFileNameWithoutExtension(mediaPath);
+        double? videoFps = GetVideoFps(item);
+        foreach (string lang in missing)
+        {
+            ct.ThrowIfCancellationRequested();
+            var langCands = candidates.Where(c => c.Language == lang).ToList();
+
+            // F-M485: bevor eine Sprache als „nicht verfügbar" gilt, bekommen die Zusatzquellen ihre
+            // Gelegenheit — aber nur, wenn ihr Schalter an ist. Die Treffer laufen danach durch
+            // dieselbe Rangfolge, dieselben Tore, denselben Fit und dieselbe Ablage wie ein
+            // SubDL-Treffer; sie sind nur woandersher.
+            // F-M491: die Reihenfolge aus der GUI entscheidet, wer ZUERST gefragt wird.
+            // F-M494 (Messung 15.11.2026): F-M491 liess die zuerst gefragte Quelle die andere
+            // ERSETZEN (die tvst-Liste nahm die Stelle der SubDL-Liste ein). Bei tvsubtitles-first
+            // heisst das: 27 Folgen, jede mit genau einem tvst-Treffer, keine einzige SubDL-Zeile im
+            // Log — und weil eine tvst-Fassung ohne nachweisbare Korrektur die Suche fuer diese
+            // Sprache beendet, kam SubDL nie zum Zug (6 signifikant, 19 als Original behalten, 1
+            // verworfen). Jetzt werden ALLE Endpunkte in der eingestellten Reihenfolge gefragt, und
+            // ihre Listen werden ZUSAMMENGEFUEHRT: jede Quelle bekommt ihren eigenen Versuch, auch
+            // wenn die erste Treffer geliefert hat. Wer zuerst laeuft, entscheidet die fuehrende Stufe
+            // dieser Rangfolge — hier geht keine Quelle verloren.
+            //
+            // F-M494, zweiter Teil (Operator-Anweisung 15.11.2026: „Vor Start des jeweiligen Endpunkts
+            // pruefen ob er per Toggle freigeschaltet ist"): der Start jedes Endpunkts fragt den
+            // Schalter ueber SourceAllowed, nicht ueber den Toggle direkt — dieselbe Pruefung steht
+            // vor jedem Abruf eines Kandidaten.
+            //
+            // F-M504: die Treffer wurden OBEN geholt — einmal je Quelle und Sprache, VOR dem Ausstieg
+            // bei leerer Hauptantwort. Hier wird die Antwort nur noch GELESEN, nicht erneut geholt:
+            // `fremdProSprache` ist der einzige Zugang zu ihr, und es gibt keinen zweiten Aufruf, der
+            // ihn umgehen koennte (kein Doppelabruf, fuer JEDE Quelle).
+            if (fremdProSprache.TryGetValue(lang, out var fremd) && fremd.Count > 0)
+            {
+                // Anhaengen statt ersetzen (F-M494). Der Rest des Laufs (Rangfolge, Tore, Fit,
+                // Ablage) bleibt derselbe — die Treffer sind nur woandersher.
+                candidates.AddRange(fremd);
+                langCands = candidates.Where(c => c.Language == lang).ToList();
+            }
+
+            if (gefragteQuellen.Any(quelle => quelle != MainSearchSource))
+            {
+                // Eine Zahl JE gefragter Quelle in EINER Zeile: eine Quelle, die nichts geliefert hat,
+                // ist damit im Log sichtbar und nicht mehr nur abwesend (F-M494). Die Zeile laeuft
+                // ueber die Liste der Quellen und nicht ueber zwei feste Namen (F-M504) — eine dritte
+                // Quelle steht hier ohne Umbau. Die Bedingung fragt, ob ausser der Hauptsuche
+                // ueberhaupt eine Quelle mitgelaufen ist; ohne sie waere die Zeile eine Selbstauskunft.
+                string zaehlung = string.Join(", ", quellenReihenfolge.Select(quelle =>
+                    langCands.Count(c => c.Provider == quelle).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + " " + Api.Endpoints.Provenance.Name(quelle) + " candidate(s)"
+                    + (antworten.TryGetValue(quelle, out var a) ? " (" + a + ")" : string.Empty)));
+                // F-M510 (Messung 15.11.2026, erster Film-Lauf auf jf-test): hier stand das Etikett der
+                // SERIEN-Seite fest im Text, obwohl die gefragte Adresse moviesubtitles.org war. Es
+                // nennt jetzt die Adresse, die TATSAECHLICH gefragt wurde: SourceOrder.FamilyPage(isSeries)
+                // ist die eine Stelle, an der die Medienart eine Seite auswaehlt (Serie → tvsubtitles,
+                // Film → moviesubtitles). Die Aussage der Zeile bleibt unveraendert — Kandidaten JE
+                // gefragter Quelle und die Frage-Reihenfolge; die Zaehlung laeuft weiter ueber die Liste
+                // der Quellen, nicht ueber einen festen Namen.
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[{Src}-D] {File} [{Lang}] — {Counts}, order {Order}",
+                    Api.Endpoints.Provenance.Name(Api.Endpoints.SourceOrder.FamilyPage(isSeries)),
+                    Path.GetFileName(mediaPath), lang, zaehlung, orderText);
+            }
+
+            if (langCands.Count == 0)
+            {
+                summary.NotAvailable++;
+                ReportOutcome(item, ItemOutcome.NotAvailable);
+                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] {File} [{Lang}] — not available", Path.GetFileName(mediaPath), lang);
+
+                closedLangs.Add(lang); // F-M88c: definitively not available = terminal
+                continue;
+            }
+
+            // F-M44: weighted release score, best candidate first.
+            // F-M241: the pool is ALREADY the regular side (the search ran with hi=0), so no
+            // HI filtering happens here any more. The old filter had to strip HI out of a mixed
+            // response, which meant the regular ranking silently depended on how many HI releases
+            // SubDL happened to return.
+            // F-M384 (measured 01.11.2026): one archive fetch serves every episode of the pack, so a
+            // pack candidate beats an equally good single — and a pack whose archive is ALREADY
+            // cached beats both, because it costs no download unit at all. The preference is a sort
+            // key in front of the text score, not a change to it: a pack only wins when it carries
+            // this episode (CandidateRank returns 0 otherwise), and the text similarity still
+            // decides between two packs.
+            var ranked = langCands
+                .Select(c => (Cand: c, Score: Score(c, videoBase), Pack: CandidateRank(c, season, episode)))
+                // F-M494: die fuehrende Stufe ist die QUELLE, und zwar in der eingestellten
+                // Reihenfolge. Jeder Treffer der zuerst gefragten Quelle steht damit vor jedem
+                // Treffer der naechsten, auch wenn dessen Textscore hoeher liegt — die weitere Quelle
+                // wird gefragt, aber sie verdraengt die erste nicht. Innerhalb einer Quelle bleibt die
+                // Rangfolge unveraendert (Pack vor Textscore).
+                // F-M504: „zuerst gefragt" ist ein RANG in der Frage-Reihenfolge, kein Vergleich mit
+                // einer bestimmten Quelle — bei drei Quellen sortiert dieselbe Zeile sie richtig.
+                .OrderBy(x => QuellenRang(quellenRang, x.Cand.Provider))
+                .ThenByDescending(x => x.Pack)
+                .ThenByDescending(x => x.Score)
+                .ToList();
+
+            // Skip candidates already QA-rejected in earlier runs —
+            // the next run walks ONLY fresh candidates (user decision 11.09.2026:
+            // "remember the 3 unsuitable ones and try 3 different ones next run").
+            var qaKnownRejected = _qaFails.GetSkippedCandidates(item.Id.ToString(), lang);
+            if (qaKnownRejected.Count > 0)
+            {
+                // Match by stable per-upload id (exact upload, not release family);
+                // candidates without a parsable id stay eligible.
+                int beforeMemoryFilter = ranked.Count;
+                ranked = ranked.Where(x => string.IsNullOrEmpty(x.Cand.SubdlId)
+                                           || !qaKnownRejected.Contains(x.Cand.SubdlId, StringComparer.Ordinal)).ToList();
+
+                // F-M255: the memory filter dropped candidates without a word. Name what it took
+                // out, so a shrinking candidate list is never read as a thin search result.
+                if (beforeMemoryFilter > ranked.Count)
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] {File} [{Lang}] — {N} candidate(s) skipped before the walk: QA-rejected in an earlier run ({Ids})",
+                        Path.GetFileName(mediaPath), lang, beforeMemoryFilter - ranked.Count,
+                        string.Join(",", qaKnownRejected));
+
+                    // F-M450: the safety net. These candidates were refused in an earlier run and are
+                    // refused here without another fetch. Since 349 a defect is filed in the run that
+                    // observed it, so this path normally finds nothing to do — it stays for the rows
+                    // that were remembered while the switch was off.
+                    if (_config.ReportBrokenSubtitles)
+                    {
+                        foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                        {
+                            if (row.ReportedUtc != null
+                                || string.IsNullOrWhiteSpace(row.NId)
+                                || !string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                || !qaKnownRejected.Contains(row.SubdlId, StringComparer.Ordinal))
+                            {
+                                continue;
+                            }
+
+                            QueueReport(row);
+                        }
+                    }
+                }
+            }
+
+            // F-M46 + F-M43 Stufe 1: try candidates in score order until one passes all checks
+            bool savedAny = false;
+            int attempts = 0;
+
+            // Releases tried and QA-rejected in this run — recorded at run end,
+            // so the next run walks fresh candidates only.
+            var qaRejectedReleases = new List<string>();
+            // F-M450: what a report would say about each of them — kept as the gate saw it.
+            var qaRejectedFacts = new Dictionary<string, ReportFacts>();
+            int savedCount = 0;
+            // F-M317 (operator order 08.10.2026): corrected and unprocessed files take their
+            // numbers from OPPOSITE ENDS of the range, so they need counters of their own. One
+            // shared counter would let an unprocessed file consume slot 01 and push a corrected
+            // file to 02 — the operator's rule is that a corrected file starts at 01.
+            int correctedSlotCount = 0;
+            int hiCorrectedSlotCount = 0;
+            // F-M318/F-M331 (operator order 08.10.2026): ONE number bounds this walk — the configured
+            // "Auto-Sync attempts and max. download/search limit". It is the same setting that decides
+            // how many candidates per language the SEARCH fetches (DownloadBudget), because the two
+            // were always the same intent: how many candidates the Auto-Sync may pull before it gives
+            // up on this language.
+            //
+            // The former second cap is GONE. It counted every attempt — gate rejections included — and
+            // was checked FIRST, so at equal values it always fired before the limit below: measured by
+            // replaying the loop, at 3/3 the cap stopped the walk in EVERY ordering and the limit could
+            // never trigger. It won only when raised above it, which was the keep-best raise that went
+            // with F-M319.
+            int walkLimit = Math.Max(0, _config.DownloadQaRetryLimit);
+
+            // F-M318 (operator order 08.10.2026): the Auto-Sync's refusal does NOT end the walk — the
+            // operator asked for the download to REPEAT until a candidate's correction proves itself
+            // against the audio, bounded by the ONE correction-attempts setting (walkLimit above):
+            //
+            //   refusalsThisRun — candidates pulled and handed to the Auto-Sync, which could not prove
+            //                     a correction. Each one is KEPT, so this is also the number of
+            //                     unprocessed files written. Only FITS are counted: a gate rejection
+            //                     (language, structure, min-cues, runtime, FPS) is a verdict on the
+            //                     candidate, not a pull the Auto-Sync worked on — the walk moves on
+            //                     (F-M320).
+            // F-M476 (operator finding 16.11.2026): the hearing-impaired pool is WALKED, and it also
+            // carries the main track when the regular pool ran dry.
+            //
+            // Two defects it repairs, both visible in one run of The Middle S02:
+            //  * the pool was a single grab (FirstOrDefault) — one candidate, and if it turned out to
+            //    be a duplicate or failed a gate, the pool was closed for that language although more
+            //    uploads were listed;
+            //  * the block sat INSIDE the "a subtitle was saved" branch, so an episode whose pack
+            //    produced no usable file never touched its hearing-impaired pool at all (E03: three
+            //    English single-episode uploads in the pool, episode marked "language not available").
+            //
+            // The switch decides whether this exists: with DownloadHearingImpaired off the pool is not
+            // searched, so there is nothing to walk and nothing to fall back to.
+            //
+            // The files stay as they are — SDH lines are NOT stripped. A file taken as the main track
+            // carries the same HI marker in its name and hi=true in the store, so a reader can always
+            // tell what it has.
+            async Task<bool> RunHiPoolAsync(bool asMainTrack)
+            {
+                var hiWalk = hiCandidates
+                    .Where(c => c.Language == lang && !string.IsNullOrEmpty(c.Url))
+                    .OrderByDescending(c => CandidateRank(c, season, episode))
+                    .ThenByDescending(c => Score(c, videoBase))
+                    .ThenByDescending(c => c.DownloadCount)
+                    .ToList();
+                if (hiWalk.Count == 0)
+                {
+                    // F-M255: the HI pool had no usable entry for this language — previously
+                    // indistinguishable from "the pool was empty".
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] HI reject {File} [{Lang}]: no usable candidate in the HI pool ({N} in pool)",
+                        Path.GetFileName(mediaPath), lang, hiCandidates.Count(c => c.Language == lang));
+                    return false;
+                }
+
+                // Same two facts the main walk uses, computed here because the fallback runs after the
+                // candidate walk and must not inherit a decision made for a different candidate.
+                string hiAudioMap = "0:a:0";
+                var hiAudioChoice = Qa.AudioTrackChoice.Choose(_mediaSourceManager.GetMediaStreams(item.Id), lang);
+                if (_config.QaDownloadAudioTrackByLanguage && hiAudioChoice.TrackCount > 0)
+                {
+                    hiAudioMap = "0:a:" + hiAudioChoice.Position.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+
+                string? hiFfmpeg = _config.QaDownloadAutoSync ? FfmpegTools.ResolvePath(_config, _logger) : null;
+                string hiTargetDir = Path.GetDirectoryName(mediaPath) ?? ".";
+                bool hiSaved = false;
+                foreach (var hi in hiWalk)
+                {
+                    if (hiSaved || ct.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    // F-M494, zweiter Teil: auch die SDH-Variante wird ueber ihren Endpunkt geholt —
+                    // ist die Quelle des Kandidaten aus, wird SIE uebersprungen, nicht der Durchlauf.
+                    if (!SourceAllowed(hi.Provider))
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — candidate from {Source} skipped: that source is switched off",
+                            Path.GetFileName(mediaPath), lang, Api.Endpoints.Provenance.Name(hi.Provider));
+                        continue;
+                    }
+
+                            // F-M26: the HI variant is a SECOND real download for this item, so it
+                            // carries the transfer pause (main subtitle → HI variant). The local cap that
+                            // used to skip the fetch (F-M20) is gone — nothing here can refuse it any more,
+                            // because the plugin holds no budget of its own. Only SubDL can say no.
+                            {
+                            // (16.09.2026): pause between two real downloads
+                            // (main subtitle → HI variant) = the steered rate-limit
+                            // interval (3600/cap). Bare API calls stay on
+                            // MinCallPauseSec; failed/skipped candidates get no
+                            // Transfer pause (transaction semantics intact).
+                            // F-M310: the main subtitle was aligned in exactly this gap, so that
+                            // measured time comes off the pause. Both pauses carry it, because both
+                            // gaps contain an alignment — this one the main track's, the next one the
+                            // HI track's. Floor 0.
+                            await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
+                            // F-M464: the SDH fetch carries its own outcome — no reset, no state on
+                            // the client, nothing a later request could overwrite.
+                            DownloadOutcome hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
+                            var hiBytes = CorrectInvisibleCues(hiDl.Content);
+
+                            // F-M455/F-M460: an empty answer is asked once more after ten seconds,
+                            // here as well. The SDH pool is where the uploaders put their own cuts,
+                            // so a single empty answer is even less of a verdict than on the main
+                            // track.
+                            bool hiEmptyAnswer = hiDl.GenuineEmpty;
+                            if ((hiBytes == null || hiBytes.Length < 100)
+                                && hiEmptyAnswer
+                                && _emptyRetried.Add("hi|" + lang + "|" + hi.Url))
+                            {
+                                LogUtil.PerItem(_config.LogMode, _logger,
+                                    "[SubDL-D] {File} [{Lang}] — SDH: empty answer from {Release}, asking once more in 10 s (F-M455)",
+                                    Path.GetFileName(mediaPath), lang, hi.ReleaseName);
+                                await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+                                _watchdog?.Heartbeat();
+                                _api.ResetRateLimitFlag();
+                                hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
+                                hiBytes = CorrectInvisibleCues(hiDl.Content);
+                            }
+
+                            var hiStats = hiBytes != null && hiBytes.Length >= 100 ? Qa.QaGates.ParseSrt(DecodeSrt(hiBytes)) : null;
+                            bool hiStructureOk = hiStats != null
+                                && hiStats.Monotonic
+                                && hiStats.MinCueMs > 100
+                                && hiStats.MaxCueMs < 600_000;
+                            bool hiBytesUsable = hiBytes != null && hiBytes.Length >= 100;
+                            string? hiRuntimeReason = null;
+                            bool hiRuntimeOk = false;
+                            if (hiBytesUsable)
+                            {
+                                hiRuntimeOk = RuntimeMatches(item, hiBytes!, out hiRuntimeReason);
+                            }
+                            if (hiBytesUsable && hiStructureOk && hiRuntimeOk)
+                            {
+                                // F-M296: the HI variant goes through the SAME auto-sync as the
+                                // regular one. Leaving it out would have produced the absurd case
+                                // of a corrected main subtitle beside an uncorrected HI file of
+                                // the same episode. The HI pool is exactly where the drift gate
+                                // measured its findings (all 38 measured HI files drifted), so
+                                // this is the case the sync more often CANNOT fix — and then it
+                                // writes nothing and says so.
+                                byte[] hiWriteBytes = hiBytes!;
+                                string hiContent = DecodeSrt(hiBytes!);
+                                string? hiUnsync = null;
+                                // F-M321: the HI refusal was "no proven gain" — best version already.
+                                bool hiGoodAsDownloaded = false;
+                                if (_config.QaDownloadAutoSync)
+                                {
+                                    // F-M307: the HI variant goes through the SAME correction as
+                                    // the main track — one implementation, both tracks, so the two
+                                    // cannot drift apart. The HI pool is where the drift lives,
+                                    // and the fit's own deploy rule decides per file.
+                                    Qa.AutoSyncWorker.Outcome hiSync = await SyncMeasuredAsync(
+                                        mediaPath, hiContent, hiAudioMap, hiFfmpeg, summary, ct).ConfigureAwait(false);
+                                    if (hiSync.Applied)
+                                    {
+                                        hiUnsync = hiContent;
+                                        hiWriteBytes = ContentHashRegistry.EncodeCanonical(hiSync.Corrected);
+                                        hiContent = hiSync.Corrected;
+                                        // F-M309: the HI track is a subtitle the run fitted too, so it
+                                        // counts. Without this the counter under-reported exactly the
+                                        // pool where the drift lives (all 38 measured HI files drifted).
+                                        summary.FittedToAudio++;
+                                        LogUtil.PerItem(_config.LogMode, _logger,
+                                            "[SubDL-D] HI auto-sync {Reason} for {File} [{Lang}] ({Release})",
+                                            hiSync.Reason, Path.GetFileName(mediaPath), lang, hi.ReleaseName);
+                                    }
+                                    else
+                                    {
+                                        // F-M321: the HI track follows the main track's rule — a
+                                        // "no proven gain" file needs no correction, so it is the good
+                                        // version and takes the upper range (01, 02 …), with its original
+                                        // at 99. The HI pool is where the drift lives, so this is the
+                                        // branch that fires most often.
+                                        hiGoodAsDownloaded = hiSync.AlreadyGood;
+                                        if (hiSync.IsBroken)
+                                        {
+                                            summary.AutoSyncFailed++;
+                                        }
+
+                                        if (_config.LogMode >= LogLevelMode.Verbose)
+                                        {
+                                            LogUtil.PerItem(_config.LogMode, _logger,
+                                                "[SubDL-D] HI auto-sync not applied for {File} [{Lang}]: {Reason} ({Release})",
+                                                Path.GetFileName(mediaPath), lang, hiSync.Reason, hi.ReleaseName);
+                                        }
+                                    }
+                                }
+
+                                string hiHash = ContentHashRegistry.ComputeHash(hiContent);
+                                if (!Registry.IsContentKnown(hiHash))
+                                {
+                                    if (!_config.DownloadDryRun)
+                                    {
+                                        // F-M317 (operator order 08.10.2026): the HI variant follows the
+                                        // SAME rule as the main track — aligned 01, 02, 03 … upward, not
+                                        // aligned 99, 98, 97 … downward. The HI pool is where the drift
+                                        // lives, so it is the pool most likely to land in the reserved
+                                        // block; leaving this branch on the old rule would put a corrected
+                                        // HI file at 01 beside an unaligned one at 01 as well.
+                                        // F-M260: the shared builder, not a hand-written
+                                        // concatenation — the same rule the reader parses.
+                                        bool hiAligned = hiUnsync != null || hiGoodAsDownloaded;
+                                        string? hiPath;
+                                        if (hiAligned)
+                                        {
+                                            hiPath = SidecarNaming.Build(
+                                                mediaPath, lang, hearingImpaired: true, hiCorrectedSlotCount + 1);
+                                        }
+                                        else
+                                        {
+                                            System.Collections.Generic.HashSet<string>? hiSlotNames =
+                                                SidecarNamesInDirectory(hiTargetDir);
+                                            hiPath = hiSlotNames == null
+                                                ? null
+                                                : SidecarNaming.PlanOriginalTarget(
+                                                    mediaPath, lang, hearingImpaired: true, hiSlotNames);
+                                        }
+
+                                        if (hiPath == null)
+                                        {
+                                            // Every reserved slot taken, or the directory could not be
+                                            // listed. Refusing is the safe direction — an invented name
+                                            // would overwrite an unprocessed file already kept — and it is
+                                            // counted, because this is the one path where a fetched
+                                            // subtitle is not written at all.
+                                            summary.RejectedCandidates++;
+                                            LogUtil.PerItem(_config.LogMode, _logger,
+                                                "[SubDL-D] HI SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 51–99; nothing written ({Release})",
+                                                Path.GetFileName(mediaPath), lang, hi.ReleaseName);
+                                        }
+                                        else
+                                        {
+                                        await AtomicWriteAsync(hiPath, hiWriteBytes, ct).ConfigureAwait(false);
+                                        if (hiAligned)
+                                        {
+                                            hiCorrectedSlotCount++;
+                                        }
+                                        else
+                                        {
+                                            // F-M452: same rule for the variant — the kept original is not
+                                            // evidence, so the release is remembered instead of refetched.
+                                            _qaFails.RecordSkippedCandidates(
+                                                item.Id.ToString(), lang, new[] { hi.SubdlId },
+                                                reason: "original kept — alignment refused", kind: "original");
+                                        }
+
+                                        // F-M315: the HI track's original is kept the same way — a loose
+                                        // sidecar in the reserved block, carried with the `.sdh` marker so
+                                        // it sits on the variant's own name space, and locked against
+                                        // upload by a Rejected row on its content. Canonical bytes, so the
+                                        // row and the file describe the same sequence (see the main path).
+                                        //
+                                        // It is NOT marked forced: an unsynchronized original is not a
+                                        // forced subtitle (F-M315).
+                                        // F-M321: for a "no proven gain" HI file both files are the
+                                        // original — the 99 write reuses the array that went to 01, so the
+                                        // two are byte-identical. Symmetric to the main track.
+                                        if (hiUnsync != null || hiGoodAsDownloaded)
+                                        {
+                                            System.Collections.Generic.HashSet<string>? hiNames = SidecarNamesInDirectory(hiTargetDir);
+                                            string? hiOriginalPath = hiNames == null
+                                                ? null
+                                                : SidecarNaming.PlanOriginalTarget(mediaPath, lang, hearingImpaired: true, hiNames);
+
+                                            if (hiOriginalPath == null)
+                                            {
+                                                LogUtil.PerItem(_config.LogMode, _logger,
+                                                    "[SubDL-D] HI original NOT kept for {File} [{Lang}] — no free slot in the reserved range 51–99",
+                                                    Path.GetFileName(mediaPath), lang);
+                                            }
+                                            else
+                                            {
+                                                try
+                                                {
+                                                    string hiOriginalHash = hiGoodAsDownloaded
+                                                        ? hiHash
+                                                        : ContentHashRegistry.ComputeHash(hiUnsync!);
+                                                    await AtomicWriteAsync(
+                                                        hiOriginalPath,
+                                                        hiGoodAsDownloaded ? hiWriteBytes : ContentHashRegistry.EncodeCanonical(hiUnsync!),
+                                                        ct).ConfigureAwait(false);
+
+                                                    // Same row as the HI corrected file (see the main path).
+                                                    Registry.MarkAndFlush(() => Registry.MarkDownloaded(
+                                                        hiOriginalHash, mediaHash, lang, true,
+                                                        fileName: Path.GetFileName(hiOriginalPath), path: hiOriginalPath,
+                                                        // F-M493: auch das behaltene HI-Original traegt seine Herkunft.
+                                                        // Der HI-Pool ist SubDL — die Marke ist die des HI-Treffers.
+                                                        origin: Api.Endpoints.Provenance.Name(hi.Provider),
+                                                        originId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : hi.Url,
+                                                        subdlDownloadId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : null,
+                                                        tvSubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.TvSubtitles ? hi.Url : null,
+                                                        moviesubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.MovieSubtitles ? hi.Url : null));
+
+                                                    if (_config.LogMode >= LogLevelMode.Verbose)
+                                                    {
+                                                        LogUtil.PerItem(_config.LogMode, _logger,
+                                                            "[SubDL-D] HI original kept as {Path} — locked against upload (F-M315)",
+                                                            Path.GetFileName(hiOriginalPath));
+                                                    }
+                                                }
+                                                catch (Exception ex)
+                                                {
+                                                    _logger.LogWarning(ex,
+                                                        "[SubDL-D] could not keep the unsynchronized HI original for {File}",
+                                                        Path.GetFileName(hiPath));
+                                                }
+                                            }
+                                        }
+
+                                        Registry.MarkAndFlush(() => Registry.MarkDownloaded(
+                                            hiHash, mediaHash, lang, true, hi.SubdlId,
+                                            Path.GetFileName(hiPath), hiPath,
+                                            // F-M493: jede Ablage traegt ihre Herkunft, auch die HI-Fassung.
+                                            origin: Api.Endpoints.Provenance.Name(hi.Provider),
+                                            originId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : hi.Url,
+                                            subdlDownloadId: hi.Provider == Configuration.SubtitleProvider.Subdl ? hi.SubdlId : null,
+                                            tvSubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.TvSubtitles ? hi.Url : null,
+                                            moviesubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.MovieSubtitles ? hi.Url : null));
+                                        _qaFails.RecordSuccess(item.Id.ToString(), lang); // HI save resets the pair counter too
+                                        summary.Downloaded++;
+                                        RememberSavedLibrary(item, hiPath); // F-M473
+                                        ReportOutcome(item, ItemOutcome.Done);
+                                        hiSaved = true;
+                                        if (_config.LogMode >= LogLevelMode.Verbose)
+                                        {
+                                            LogUtil.PerItem(_config.LogMode, _logger,(asMainTrack
+                                                ? "[SubDL-D] SAVED HI as main track {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"
+                                                : "[SubDL-D] SAVED HI variant {Path} (lang={Lang}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"),
+                                                Path.GetFileName(hiPath), lang, hi.ReleaseName,
+                                                string.IsNullOrEmpty(hi.OriginalName) ? "—" : hi.OriginalName,
+                                                string.IsNullOrEmpty(hi.Author) ? "—" : hi.Author,
+                                                resolvedImdb ?? "—", resolvedTmdb ?? "—");
+                                        }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Safety, not a promise: the dry run never reaches the fetch
+                                        // (it breaks before it, F-M22). If that ever changes, this
+                                        // guard still stops the HI file from being written.
+                                        LogUtil.PerItem(_config.LogMode, _logger, "[SubDL-D] DRY-RUN would save HI variant for {File} [{Lang}]", Path.GetFileName(mediaPath), lang);
+                                    }
+                                }
+                                else
+                                {
+                                    // F-M286: fetched and discarded — the bytes were spent on the
+                                    // request, so this belongs in the same number as the main-path
+                                    // rejects. It was the largest single hole: seven of nine discards
+                                    // in the audited run exited here and counted nothing.
+                                    summary.RejectedCandidates++;
+                                    // F-M255: fetched, but the content is already known — a distinct
+                                    // outcome that previously looked exactly like "not saved".
+                                    LogUtil.PerItem(_config.LogMode, _logger,
+                                        "[SubDL-D] HI reject {File} [{Lang}]: content already known ({Release})",
+                                        Path.GetFileName(mediaPath), lang, hi.ReleaseName);
+                                }
+                            }
+                            else
+                            {
+                                // F-M255: the HI fetch was thrown away by a gate, with the measured
+                                // value — four silent exits produced the "14 searches, 1 file" picture
+                                // that could not be explained from the log at all.
+                                // F-M286: fetched and threw the bytes away in a gate — same spend,
+                                // same counter. One increment for every reason in this branch.
+                                summary.RejectedCandidates++;
+                                string hiRejectReason = !hiBytesUsable
+                                    ? (hiBytes == null
+                                        ? "no bytes (" + hiDl.Label + ")"
+                                        : "only " + hiBytes.Length + " bytes (" + hiDl.Label + ")")
+                                    : !hiStructureOk
+                                        ? (hiStats == null
+                                            ? "structure: no parsable cues"
+                                            : $"structure: monotonic={hiStats.Monotonic} min={hiStats.MinCueMs}ms max={hiStats.MaxCueMs}ms")
+                                        : "runtime: " + (hiRuntimeReason ?? "no match");
+                                LogUtil.PerItem(_config.LogMode, _logger,
+                                    "[SubDL-D] HI reject {File} [{Lang}]: {Reason} ({Release})",
+                                    Path.GetFileName(mediaPath), lang, hiRejectReason, hi.ReleaseName);
+
+                                // F-M460 (operator order 10.11.2026): the SDH walk measures the SAME
+                                // verdicts as the main track — a cue running over the whole film, a
+                                // span 763 s off the runtime — and said nothing, because only the main
+                                // path filed reports. Measured that morning: two of the run's four
+                                // rejects were exactly this (Ratatouille EN structure, DE runtime).
+                                // Same categories, same wording, same switch. Filed HERE and not at run
+                                // end, because the end-of-language flush only runs when nothing was
+                                // saved — and the main subtitle usually IS saved, which is how these
+                                // two findings died.
+                                string? hiFinding = hiBytes == null
+                                    ? null // F-M456: nothing delivered, nothing measured — not a finding
+                                    : BrokenSubtitleReports.FindingFromGateFailure(hiRejectReason);
+                                if (_config.ReportBrokenSubtitles
+                                    && hiFinding != null
+                                    && !string.IsNullOrEmpty(hi.SubdlId))
+                                {
+                                    // F-M450: the same rule as the main path — a pack report names
+                                    // the file the gate measured. Here the name is the entry the
+                                    // resolution actually took (hiDl.Member), because the SDH walk
+                                    // asks the archive by episode, not by listed name.
+                                    if (!string.IsNullOrWhiteSpace(hiDl.Member))
+                                    {
+                                        hiFinding += " ('" + hiDl.Member + "')";
+                                    }
+
+                                    _qaFails.RecordSkippedCandidates(
+                                        item.Id.ToString(), lang, new[] { hi.SubdlId },
+                                        RejectReason.CandidateRejected,
+                                        new Dictionary<string, ReportFacts>
+                                        {
+                                            [hi.SubdlId] = new ReportFacts(hi.NId, hiFinding, hi.ReleaseName)
+                                        },
+                                        "qa");
+
+                                    foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                                    {
+                                        if (row.ReportedUtc == null
+                                            && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                            && string.Equals(row.SubdlId, hi.SubdlId, StringComparison.Ordinal))
+                                        {
+                                            QueueReport(row);
+                                        }
+                                    }
+                                }
+                            }
+                }
+
+                }
+                return hiSaved;
+            }
+
+
+            //   correctedSaved  — candidates whose correction WAS applied. Only these end the walk
+            //                     (F-M319): an unprocessed file is a fallback, never a "best".
+            int refusalsThisRun = 0;
+            int correctedSaved = 0;
+            bool correctionHuntAbandoned = false;
+            foreach (var (cand, _, _) in ranked)
+            {
+                // THE walk's limit (F-M318/F-M331): the configured correction attempts are spent —
+                // give up on this language for this run. Sits BEFORE the fetch on purpose: breaking
+                // after the refusal would burn one more download from the daily quota and keep a file
+                // the limit says not to keep.
+                //
+                // It bounds BOTH modes, which is the point of one setting with two effects:
+                //   Auto-Sync ON  — candidates it pulled and could not fit (only FITS are counted; a
+                //                   gate rejection is a verdict on the candidate, not a pull the
+                //                   Auto-Sync worked on, F-M320).
+                //   Auto-Sync OFF — candidates pulled through the active quality gates and kept as
+                //                   99, 98, 97 … here every pull counts, because there is no fit to
+                //                   ask whether the result "passes".
+                if (walkLimit > 0 && refusalsThisRun >= walkLimit)
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] {File} [{Lang}] — candidate limit reached: {N} candidate(s) pulled (limit {Limit}); {Kept} file(s) kept, {M} lower-ranked candidate(s) not tried",
+                        Path.GetFileName(mediaPath), lang, refusalsThisRun, walkLimit,
+                        refusalsThisRun, Math.Max(0, ranked.Count - attempts));
+                    break;
+                }
+
+                attempts++;
+
+                // F-M43 Stufe 1 — FPS pre-check (skip criterion when candidate fps unknown)
+                if (videoFps.HasValue && cand.Fps > 0 && _config.DownloadFpsTolerancePercent > 0)
+                {
+                    double diffPct = Math.Abs(cand.Fps - videoFps.Value) / videoFps.Value * 100.0;
+                    if (diffPct > _config.DownloadFpsTolerancePercent)
+                    {
+                        if (_config.LogMode >= LogLevelMode.Verbose)
+                        {
+                            LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — FPS reject {Release}: {CandFps} vs {VidFps} (>±{Tol}%)",
+                                Path.GetFileName(mediaPath), lang, cand.ReleaseName, cand.Fps, videoFps.Value, _config.DownloadFpsTolerancePercent);
+                        }
+
+                        continue; // next candidate
+                    }
+                }
+
+                // (15.09.2026): dry-run makes NO download fetch — search +
+                // threshold + ranking are logged, QA-Gates/Saves are skipped
+                // (real download quota is untouched).
+                if (_config.DownloadDryRun)
+                {
+                    if (_config.LogMode >= LogLevelMode.Verbose)
+                    {
+                        // Compact — no nId (Debug detail), file first. The HI flag of the
+                        // candidate and of the alternative is part of the line: which file
+                        // would be saved, and whether the HI variant would be fetched, is the
+                        // one thing a dry run must be able to answer.
+                        // F-M510 (Messung 15.11.2026, erster Film-Lauf): die Zeile nannte den
+                        // Gewinner, aber nicht, WOHER er kam — bei zwei gefragten Quellen ist
+                        // „wer hat gewonnen" genau die Frage, die ein Trockenlauf beantworten
+                        // soll. Die Herkunft steht als erstes Feld der Klammer, damit die
+                        // uebrigen Felder (score, hi) an ihrem Platz bleiben.
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] DRY-RUN {File} [{Lang}] → {Release} ({Source}, score {Score}, hi={Hi})",
+                            Path.GetFileName(mediaPath), lang, cand.ReleaseName,
+                            Api.Endpoints.Provenance.Name(cand.Provider),
+                            Score(cand, videoBase),
+                            cand.HearingImpaired ? "yes" : "no");
+                    }
+
+                    // F-M319: the slot preview is GONE with the setting. It existed to show the X
+                    // slots "best subtitles to keep" would fill (F-M242). One corrected file per
+                    // language means there is exactly one slot, and a one-line preview of a single
+                    // fixed name would say nothing the DRY-RUN line above does not already say.
+
+                    // F-M241: the HI answer comes from the hi=1 search's own pool. A dry run must
+                    // report it, because the real selection happens after the file download, which
+                    // a dry run never reaches — without this the run logged nothing about HI.
+                    if (_config.DownloadHearingImpaired)
+                    {
+                        var hiForLang = hiCandidates.Where(c => c.Language == lang).ToList();
+                        var hiPick = hiForLang
+                            .OrderByDescending(c => CandidateRank(c, season, episode))
+                            .ThenByDescending(c => Score(c, videoBase))
+                            .ThenByDescending(c => c.DownloadCount)
+                            .FirstOrDefault();
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] DRY-RUN HI {File} [{Lang}] → {Result} ({HiCount} in the HI pool)",
+                            Path.GetFileName(mediaPath), lang,
+                            hiPick == null ? "none on SubDL" : hiPick.ReleaseName,
+                            hiForLang.Count);
+                    }
+
+                    summary.Downloaded++;
+                    RememberSavedLibrary(item, mediaPath); // F-M473
+                    ReportOutcome(item, ItemOutcome.Done);
+                    // F-M22: `savedAny` stays set on purpose although nothing was saved. It is not
+                    // the mark's only reader: it also decides whether this language counts as a
+                    // FAILED run (the QA retry counter below). Clearing it would make every dry run
+                    // burn a retry on every language and give up after the limit. The completion
+                    // mark is guarded at its own site instead.
+                    savedAny = true;
+                    break;
+                }
+
+                // F-M494, zweiter Teil (Operator-Anweisung 15.11.2026: „Vor Start des jeweiligen
+                // Endpunkts pruefen ob er per Toggle freigeschaltet ist"): der Schalter der QUELLE
+                // entscheidet ueber den Abruf, nicht die Liste, aus der der Kandidat stammt — die
+                // Listen beider Quellen sind seit F-M494 gemischt, ein Kandidat kann also aus einer
+                // Suche stammen, die lief, als der Schalter noch an war. Aus heisst UEBERSPRINGEN,
+                // nicht abbrechen: die andere Quelle kann den Rest des Laufs tragen.
+                if (!SourceAllowed(cand.Provider))
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] {File} [{Lang}] — candidate from {Source} skipped: that source is switched off",
+                        Path.GetFileName(mediaPath), lang, Api.Endpoints.Provenance.Name(cand.Provider));
+                    continue;
+                }
+
+                // F-M26: the pause before a REAL download (download→download), ±30 %.
+                // The local call budget that stood here until 03.10.2026 is removed (F-M20): it could
+                // only ever stop the run, and the plugin no longer counts its own calls.
+                // F-M310: the alignment of the PREVIOUS subtitle (main or HI) ran inside this gap, so
+                // its measured time comes off the pause — an alignment of a whole season's files is
+                // real work the transfer rhythm should not be charging for. Floor 0.
+                await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
+
+                _watchdog?.Heartbeat();
+                DownloadOutcome dl = DownloadOutcome.None("candidate");
+                CandidateAttempt attempt = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                byte[]? bytes = attempt.Bytes;
+                SubtitleUnpackFile? packFile = attempt.PackFile;
+                dl = attempt.Outcome;
+
+                // F-M260: the file the bytes actually came from. Absent for a whole-candidate
+                // download; present for a pack, where it carries that ONE file's own HI flag —
+                // the pack header's flag says nothing about its contents (often the opposite).
+                // The candidate's own flag is the fallback, because for a single-file release the
+                // candidate IS the file.
+                bool effectiveHi = packFile?.HearingImpaired ?? cand.HearingImpaired;
+
+                // F-M58 (09.09.2026): transient service_busy 429 during the file download —
+                // wait the short window and retry the same candidate up to 3 times.
+                // DownloadSubtitleFileAsync already does 3 internal backoff attempts,
+                // so this loop only fires when the overload persisted through those.
+                const int maxDlTransientRetries = 3;
+                int dlTransientAttempt = 0;
+                while (bytes == null && _api.TransientOverload && dlTransientAttempt < maxDlTransientRetries)
+                {
+                    dlTransientAttempt++;
+                    int waitSec = Math.Max(5, _api.TransientRetrySeconds);
+                    _logger.LogWarning(
+                        "[SubDL-D] SubDL transiently overloaded during download of {File} — waiting {Sec}s, retry {Attempt}/{Max}. Not the daily limit; run continues.",
+                        Path.GetFileName(mediaPath), waitSec, dlTransientAttempt, maxDlTransientRetries);
+                    await Task.Delay(TimeSpan.FromSeconds(waitSec), ct).ConfigureAwait(false);
+                    _watchdog?.Heartbeat();
+                    _api.ResetRateLimitFlag();
+                    attempt = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                    bytes = attempt.Bytes;
+                    packFile = attempt.PackFile;
+                    dl = attempt.Outcome;
+                    effectiveHi = packFile?.HearingImpaired ?? cand.HearingImpaired;
+                }
+
+                // F-M49: optional daily-limit resume — wait out the quota window
+                // once, then retry the same candidate with the fresh quota.
+                if (_api.ServerRateLimited && !_api.TransientOverload && await WaitOutDailyLimitAsync(ct).ConfigureAwait(false))
+                {
+                    _api.ResetRateLimitFlag();
+                    _watchdog?.Heartbeat();
+                    attempt = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                    bytes = attempt.Bytes;
+                    packFile = attempt.PackFile;
+                    dl = attempt.Outcome;
+                    effectiveHi = packFile?.HearingImpaired ?? cand.HearingImpaired;
+                }
+
+                if (_api.ServerRateLimited && !_api.TransientOverload)
+                {
+                    // Quota reset info is logged once by WaitForDailyLimitResetAsync; no second line here.
+                    summary.QuotaStopped++;
+                    _stopRun = true; // F-M65 fix (09.09.2026): a download-429 must END the run, not just this item — otherwise the loop keeps hammering the dead quota item after item.
+                    return;
+                }
+
+                // F-M58: transient overload persisted through all retries — count the
+                // candidate as exhausted (same as a failed download) and move on to
+                // the next candidate; the run itself continues.
+                if (_api.TransientOverload)
+                {
+                    _api.ResetRateLimitFlag();
+                }
+
+                if (bytes == null || bytes.Length < 100)
+                {
+                    // F-M455 (operator order 10.11.2026): an empty answer is not a verdict — it is
+                    // asked ONCE more, ten seconds later. Measured that night on "A Bona Fide
+                    // Killer" S01E10/E11: the single candidate answered 200 with nothing at 04:0x
+                    // and delivered 83,119 B a few hours later. Only the SECOND empty answer is a
+                    // finding; that is what the report below is for, and it is the one place where
+                    // the two-failure rule the pipeline dropped in 12.1.12.347 still holds.
+                    bool genuineEmptyNow = dl.GenuineEmpty;
+                    if (genuineEmptyNow && _emptyRetried.Add(lang + "|" + cand.Url))
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — empty answer from {Release}, asking once more in 10 s (F-M455)",
+                            Path.GetFileName(mediaPath), lang, cand.ReleaseName);
+                        await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+                        _watchdog?.Heartbeat();
+                        _api.ResetRateLimitFlag();
+                        attempt = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                        bytes = attempt.Bytes;
+                        packFile = attempt.PackFile;
+                        dl = attempt.Outcome;
+                        effectiveHi = packFile?.HearingImpaired ?? cand.HearingImpaired;
+                    }
+                }
+
+                if (bytes == null || bytes.Length < 100)
+                {
+                    // F-M286: fetched and thrown away — the bytes came back (or the call answered
+                    // without a body) and were discarded, so the request was spent. Counted here,
+                    // like every other reject path; F-M255 added the line, F-M286 the number.
+                    summary.RejectedCandidates++;
+                    // F-M255: no candidate is discarded without a line. This exit had none, so a
+                    // fetched-and-thrown-away candidate left no trace at all.
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] {File} [{Lang}] — download reject {Release}: {Reason}",
+                        Path.GetFileName(mediaPath), lang, cand.ReleaseName,
+                        bytes == null
+                            ? "no bytes (" + dl.Label + ")"
+                            : "only " + bytes.Length + " bytes (" + dl.Label + ")");
+
+                    // F-M450: a package that answers without data is remembered, and filed once the
+                    // same package has failed a second time — but NOT when the candidate is a season
+                    // or range pack. A pack that has no file for the episode we asked for is OUR
+                    // selection outcome, not a broken upload: measured on 08.11.2026, every single
+                    // "no bytes returned" of that run was such a pack ("23 files but none for
+                    // S3E11"). Reporting those would be a false diagnosis.
+                    // F-M450 (09.11.2026): only a 200 that carries nothing is a broken upload. A 409
+                    // (subtitle exists only as an archive) or a 429 (daily limit) is OUR request
+                    // being refused — reporting those would accuse the uploader of a defect we
+                    // caused ourselves. The measured night: 43 rejects, all 409, zero reportable.
+                    // F-M455: "no members" was the wrong test — with unpack=1 a single release
+                    // carries exactly ONE member, the file itself, so the guard kept every ordinary
+                    // candidate from ever being reported. A pack is more than one member; one member
+                    // is one file.
+                    // F-M456: status 200 is REQUIRED — 0 means no request was made at all (the
+                    // candidate could not even be resolved to the episode), and a candidate we
+                    // never asked about says nothing about the upload. The old "200 or 0" let the
+                    // previous candidate's answer speak for this one.
+                    bool genuineEmpty = dl.GenuineEmpty;
+                    if (genuineEmpty && !cand.FullSeason && cand.UnpackFiles.Count <= 1)
+                    {
+                        await RememberAndReportAsync(
+                            item.Id.ToString(),
+                            lang,
+                            cand,
+                            BrokenSubtitleReports.EmptyPayload(dl.Bytes),
+                            "empty",
+                            summary,
+                            ct).ConfigureAwait(false);
+                    }
+
+                    continue; // download failed → next candidate
+                }
+
+                // (user decision 10.09.2026): no pause between a search and its
+                // own download — they are ONE transaction. The steered-rate pause runs
+                // only BETWEEN transactions (search→search, download→next search,
+                // upload→anything). Slot accounting unchanged.
+                _watchdog?.Heartbeat();
+
+                // F-M387 (operator order 02.11.2026): the four content gates are a verdict on a
+                // FILE, not on a candidate. A pack can carry several files for the same episode — a
+                // plain one and an SDH one, two release variants — and a verdict on the first says
+                // nothing about its sibling. So they live in one place here, which lets the same
+                // gates run again on the next file of the SAME archive. That retry costs nothing:
+                // the archive is already on disk (F-M386), only another entry is taken out of it.
+                //
+                // The counters and the burned candidate stay with the CALLER: they belong to the
+                // candidate, and one candidate is burned once, however many of its files failed.
+                string? QaGateFailure(byte[] candidateBytes)
+                {
+                    // Gate 2: language verification (F-M15) — detected content
+                    // language vs requested tag; fail-open when CLD2 has no verdict.
+                    if (_config.QaDownloadVerifyLanguage)
+                    {
+                        string? detected = Qa.QaGates.DetectLanguage(DecodeSrt(candidateBytes));
+                        if (detected != null
+                            && !string.Equals(detected, lang, StringComparison.OrdinalIgnoreCase)
+                            && !Qa.QaGates.IsFamilyMatch(lang, detected))
+                        {
+                            return "language " + detected;
+                        }
+                    }
+
+                    // F-M43 Stufe 2 (structure, fixed part): corruption check on the
+                    // already-downloaded bytes — free (no extra quota), rejects broken
+                    // SRTs (no timings, non-monotonic timestamps, implausible cue
+                    // durations) BEFORE they are saved next to the media file.
+                    var srtStats = Qa.QaGates.ParseSrt(DecodeSrt(candidateBytes));
+                    bool structureOk = srtStats != null
+                        && srtStats.Monotonic
+                        && srtStats.MinCueMs > 100
+                        && srtStats.MaxCueMs < 600_000;
+                    if (!structureOk)
+                    {
+                        return "structure (no valid cues / non-monotonic / implausible duration)";
+                    }
+
+                    // Gate 1: minimum cue count (≥30, F-M16 threshold) — catches
+                    // valid-but-stub SRTs the structure gate lets through.
+                    if (_config.QaDownloadMinCues && (srtStats == null || srtStats.CueCount < 30))
+                    {
+                        return "min-cues (" + (srtStats?.CueCount ?? 0) + ")";
+                    }
+
+                    // F-M43 Stufe 2 (runtime): cue span vs item runtime
+                    if (!RuntimeMatches(item, candidateBytes, out string? runtimeReason) && runtimeReason != null)
+                    {
+                        return "runtime (" + runtimeReason + ")";
+                    }
+
+                    return null;
+                }
+
+                string? gateFail = QaGateFailure(bytes);
+
+                // F-M387: before the candidate is given up, ask the archive that is already here for
+                // its next file for this episode. SDH is matched with SDH only (operator order
+                // 02.11.2026) — a plain request never takes an SDH file and vice versa.
+                if (gateFail != null && packFile != null && cand.UnpackFiles.Count >= 2)
+                {
+                    foreach (var sibling in cand.FindUnpackFiles(season, episode, effectiveHi))
+                    {
+                        if (string.Equals(sibling.Name, packFile.Name, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue; // the file the gate just refused
+                        }
+
+                        byte[]? siblingBytes = await _api
+                            .ExtractArchiveMemberAsync(cand.Url, sibling.Name, ct).ConfigureAwait(false);
+                        if (siblingBytes == null || siblingBytes.Length < 100)
+                        {
+                            continue;
+                        }
+
+                        // F-M388: the same correction the fetched candidate got — a gate must judge
+                        // the file as it would be written, not as the archive happened to store it.
+                        siblingBytes = CorrectInvisibleCues(siblingBytes) ?? siblingBytes;
+                        string? siblingFail = QaGateFailure(siblingBytes);
+                        if (siblingFail != null)
+                        {
+                            gateFail = siblingFail;
+                            continue;
+                        }
+
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — next file of the same archive accepted: {Sibling} (first refused: {First})",
+                            Path.GetFileName(mediaPath), lang, sibling.Name, gateFail);
+                        bytes = siblingBytes;
+                        packFile = sibling;
+                        effectiveHi = sibling.HearingImpaired;
+                        gateFail = null;
+                        break;
+                    }
+                }
+
+                if (gateFail != null)
+                {
+                    // Burned fetch (QA gate): the request was spent and nothing is kept.
+                    summary.RejectedCandidates++; // F-M286 / F-M387
+                    qaRejectedReleases.Add(cand.SubdlId); // burned fetch → memorized
+
+                    // F-M450: keep the gate's own wording as the naked finding. The report is queued
+                    // right here, at the end of the run that measured it — a verdict on delivered bytes
+                    // reads the same on a second fetch, so waiting for one would confirm nothing.
+                    string? gateFinding = BrokenSubtitleReports.FindingFromGateFailure(gateFail);
+                    if (gateFinding != null && !string.IsNullOrEmpty(cand.SubdlId))
+                    {
+                        // F-M450: a pack has many members and the report must say WHICH one is broken —
+                        // otherwise the uploader has to guess. The member name is the one the gate
+                        // actually measured; it goes into the finding, and the category is still read
+                        // from the part before it.
+                        if (packFile != null && !string.IsNullOrWhiteSpace(packFile.Name))
+                        {
+                            gateFinding += " ('" + packFile.Name + "')";
+                        }
+
+                        qaRejectedFacts[cand.SubdlId] = new ReportFacts(cand.NId, gateFinding, cand.ReleaseName);
+
+                        // F-M462 (operator order 10.11.2026): the finding is filed HERE, not at the end
+                        // of the language walk. That flush only runs when NOTHING was saved for the
+                        // language, so a verdict on candidate 1 died the moment candidate 2 was saved
+                        // — a measured verdict does not improve by the episode being served by another
+                        // upload. Same shape as the SDH filing (F-M460), and the ReportedUtc mark keeps
+                        // the run-end pass from filing it twice.
+                        if (_config.ReportBrokenSubtitles)
+                        {
+                            _qaFails.RecordSkippedCandidates(
+                                item.Id.ToString(), lang, new[] { cand.SubdlId },
+                                RejectReason.CandidateRejected,
+                                new Dictionary<string, ReportFacts>
+                                {
+                                    [cand.SubdlId] = qaRejectedFacts[cand.SubdlId]
+                                },
+                                "qa");
+
+                            foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                            {
+                                if (row.ReportedUtc == null
+                                    && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                    && string.Equals(row.SubdlId, cand.SubdlId, StringComparison.Ordinal))
+                                {
+                                    QueueReport(row);
+                                }
+                            }
+                        }
+                    }
+
+                    if (_config.LogMode >= LogLevelMode.Verbose)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — QA reject {Release}: {Reason} (no usable file left in this archive)",
+                            Path.GetFileName(mediaPath), lang, cand.ReleaseName, gateFail);
+                    }
+
+                    continue; // next candidate
+                }
+
+                // F-M296 (development): the auto-sync. Two settings act here.
+                //
+                // (1) WHICH TRACK the audio gates read. Both audio-reading gates used
+                // to decode 0:a:0 with a comment defending the hard index; measured on
+                // this library that picks the wrong track in ~9 % of (file, language)
+                // cases — typically an Italian release whose first track is the dub.
+                // The choice is by language now, unless the switch is off.
+                //
+                // (2) WHETHER the fetched subtitle is SHIFTED by the constant offset the
+                // audio reports, and the original kept beside it. The shift happens
+                // BEFORE the hash is computed, because the registered hash must describe
+                // the file that lies on disk (user specification). A file whose offset
+                // MOVES is never shifted.
+                string audioMap = "0:a:0";
+                var audioChoice = Qa.AudioTrackChoice.Choose(
+                    _mediaSourceManager.GetMediaStreams(item.Id), lang);
+                if (_config.QaDownloadAudioTrackByLanguage && audioChoice.TrackCount > 0)
+                {
+                    audioMap = "0:a:" + audioChoice.Position.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    // F-M309: WHICH audio track, WHICH subtitle — the two facts a Verbose reader
+                    // needs to reproduce a fit. Gated on the fit switch, because with the fit off
+                    // nothing reads the audio and a line claiming "fit reads track 2" would be a
+                    // lie; the run-level "audio fit=on|off" is the Normal line. The default case
+                    // (track 0 of N, no substitution) is as informative as a substitution — a
+                    // reader reproducing a fit needs the track that was READ, not the exceptions.
+                    if (_config.QaDownloadAutoSync)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — fit reads audio track {Pos} of {N} ({Reason}); subtitle {Sub}",
+                            Path.GetFileName(mediaPath), lang, audioChoice.Position,
+                            audioChoice.TrackCount, audioChoice.Reason,
+                            cand.ReleaseName ?? "(unknown)");
+                    }
+                }
+
+                string? ffmpegForDrift = null;
+                if (_config.QaDownloadAutoSync)
+                {
+                    ffmpegForDrift = FfmpegTools.ResolvePath(_config, _logger);
+                }
+
+                // F-M307: the auto-sync — the ONE correction method. The offset is fitted as a
+                // piecewise-constant function of time by exact DP; a constant offset is the
+                // same fit with one segment, so the constant and the staircase cases cannot
+                // disagree. The fit applies its own deploy rule (a correction must PROVE
+                // itself against the audio), so a refusal here is a measurement, not a policy.
+                // F-M388: these are the CORRECTED bytes (invisible cues dropped, renumbered), so the
+                // file on disk, the hash computed just below and the text the gates saw are one artefact.
+                byte[] writeBytes = bytes;
+                string content = DecodeSrt(bytes);
+                string? unsyncPayload = null;
+                // F-M318: does THIS candidate's refusal justify walking to the next one? Only a
+                // verdict on the file does; a verdict on the audio (or a missing ffmpeg) would be
+                // repeated identically for every candidate, so the walk stops after the save.
+                bool huntForCorrection = false;
+                string huntReason = "not measured";
+                // F-M321: the refusal was "no proven gain" — the file is already the best version.
+                bool goodAsDownloaded = false;
+                if (_config.QaDownloadAutoSync)
+                {
+                    // F-M323 (operator order 08.10.2026): the auto-sync is a worker with a contract —
+                    // it is handed the subtitle and hands back a status and its output. The run keeps
+                    // the FILES (01/99) and the counters; the worker owns the outcome.
+                    Qa.AutoSyncWorker.Outcome syncResult = await SyncMeasuredAsync(
+                        mediaPath, content, audioMap, ffmpegForDrift, summary, ct).ConfigureAwait(false);
+
+                    if (syncResult.Applied)
+                    {
+                        // F-M296: the CORRECTED file is written canonical (UTF-8, no BOM, LF) —
+                        // the same form ComputeHash below describes. The ORIGINAL is kept
+                        // untouched, exactly as fetched, as the one-entry archive (F-M306).
+                        unsyncPayload = content;
+                        writeBytes = ContentHashRegistry.EncodeCanonical(syncResult.Corrected);
+                        content = syncResult.Corrected;
+                        summary.FittedToAudio++; // F-M308
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — auto-sync {Reason}",
+                            Path.GetFileName(mediaPath), lang, syncResult.Reason);
+                    }
+                    else
+                    {
+                        // F-M323: the WORKER states what its refusal was. Deriving it here from the
+                        // reason string is what the worker exists to end — the download reads a
+                        // status, and the rules live in one place.
+                        //
+                        // F-M318: a verdict on the FILE keeps the hunt alive; a verdict on the audio
+                        // or the tooling does not (the worker's CandidateSpecific).
+                        huntForCorrection = syncResult.CandidateSpecific;
+                        huntReason = syncResult.Reason;
+
+                        // F-M321 (operator order 08.10.2026): "no proven gain" is the deploy rule
+                        // DECLINING to move the file — nothing had to move, so the file as downloaded
+                        // IS the good version of this language. The operator's order: no proven gain
+                        // writes 01 AND 99, both the original. So it goes into the upper range (01,
+                        // 02 …), advances the corrected counter, gets a byte-identical copy at 99, and
+                        // ENDS the walk. Hunting on would spend the daily quota looking for a candidate
+                        // that cannot beat a file the fit found nothing wrong with.
+                        goodAsDownloaded = syncResult.AlreadyGood;
+                        if (goodAsDownloaded)
+                        {
+                            // F-M321: no hunt, and the file is counted as ALREADY GOOD rather than as
+                            // an alignment — the statistics measure successful auto-syncs only (F-M322).
+                            huntForCorrection = false;
+                            summary.AlreadyGoodAsDownloaded++;
+                        }
+
+                        // F-M323: the worker's own failures are counted on the run so its ROW can go
+                        // red for a broken fit. Without this the row could only ever report the
+                        // DOWNLOAD's failures — a network error on an unrelated file painted the
+                        // alignment red, which is a claim the alignment never made.
+                        if (syncResult.IsBroken)
+                        {
+                            summary.AutoSyncFailed++;
+                        }
+
+                        // F-M309: ONE branch, not two. The "ffmpeg not available" case had its own
+                        // branch, but it called the same PerItem helper as the general one and was
+                        // therefore gated by the same Verbose threshold — two branches, one
+                        // outcome, and the split only suggested a policy that did not exist. A
+                        // missing ffmpeg is reported ONCE per run by FfmpegTools.LogWarning
+                        // regardless of the mode, which is where it is visible at Normal.
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — auto-sync not applied: {Reason}",
+                            Path.GetFileName(mediaPath), lang, syncResult.Reason);
+                    }
+                }
+
+                string contentHash = ContentHashRegistry.ComputeHash(content);
+
+                // 13.09.2026 (user decision): F-M39 re-download skip REMOVED — the
+                // seeder owns all pre-queue checks. The download action itself
+                // still records the content hash below so the seeder's checks
+                // keep working.
+
+                try
+                {
+                    // F-M317 (operator order 08.10.2026): the SLOT now encodes WHICH KIND of file
+                    // this is, and the two kinds number from opposite ends:
+                    //
+                    //   corrected ("aligned")          -> 01, 02, 03 … upward, its own counter
+                    //   unprocessed (fit refused, or    -> 99, 98, 97 … downward
+                    //   the fit switch is off)
+                    //
+                    // "Regardless of whether a corrected version exists" is the operator's own
+                    // wording: an unprocessed file takes a reserved slot even when nothing was
+                    // corrected beside it. So the reserved block is no longer only the home of the
+                    // ORIGINAL OF a correction — it is the home of everything that was not aligned.
+                    //
+                    // The two counters are separate ON PURPOSE. With one shared counter an
+                    // unprocessed file would consume slot 01 and push the next CORRECTED file to 02,
+                    // while the rule the operator stated is that alignment starts at 01.
+                    //
+                    // Slot 1 = "<base>.<lang>.01.srt", further slots "<base>.<lang>.02.srt", …
+                    // (F-M316, two digits) — Jellyfin lists every external file as its own
+                    // selectable track, in the order the NAMES sort.
+                    // F-M260: the name comes from the shared builder, so a name composed here is
+                    // one SidecarNaming.Parse recognizes by construction. A hearing-impaired file
+                    // gets the ".sdh" marker the reader demands — without it the file never counted
+                    // as HI again and the F-M254 reader reported the variant as absent forever.
+                    // F-M321 (operator order 08.10.2026): a "no proven gain" refusal is NOT
+                    // "unprocessed" in that sense — the file needs no correction, so it is the good
+                    // version of the language and takes the upper range (01, 02 …) like a corrected
+                    // file. Its original is written at 99 as well (both are the same bytes).
+                    // Only a refusal that says the file is WRONG (too few cues, a shift beyond the
+                    // limit) keeps the reserved range, where it is a fallback the next run may beat.
+                    bool alignedForNaming = unsyncPayload != null || goodAsDownloaded;
+                    string? targetPath;
+                    if (alignedForNaming)
+                    {
+                        // F-M333 (operator order 08.10.2026: "Doppeldatei vernünftig nummerieren"): the
+                        // slot is planned against the files ACTUALLY in the directory, not counted from
+                        // zero per run. The counter alone was correct while only MISSING languages were
+                        // fetched — nothing could collide. With "Only missing languages" off the same
+                        // language IS fetched over a file that is already there, and a per-run counter
+                        // would hand out `.01` again: `AtomicWriteAsync` moves with `overwrite: true`,
+                        // so the fetch the operator asked for would silently DESTROY the subtitle it
+                        // was meant to sit beside. `PlanTarget` is the shared planner (F-M315) and
+                        // returns the first free corrected slot; it never returns one above
+                        // `CorrectedSlotMax`, so the reserved originals (51–99) stay untouched.
+                        var namesHere = SidecarNamesInDirectory(Path.GetDirectoryName(mediaPath) ?? ".");
+                        targetPath = namesHere == null
+                            ? SidecarNaming.Build(mediaPath, lang, effectiveHi, correctedSlotCount + 1)
+                            : SidecarNaming.PlanTarget(mediaPath, lang, effectiveHi, namesHere);
+                    }
+                    else
+                    {
+                        // Unprocessed: the file IS the original, so it lands in the reserved block
+                        // itself. No corrected sibling is written beside it.
+                        System.Collections.Generic.HashSet<string>? namesForSlot =
+                            SidecarNamesInDirectory(Path.GetDirectoryName(mediaPath) ?? ".");
+                        targetPath = namesForSlot == null
+                            ? null
+                            : SidecarNaming.PlanOriginalTarget(mediaPath, lang, effectiveHi, namesForSlot);
+                        if (targetPath == null)
+                        {
+                            // All ten reserved slots taken, or the directory could not be listed.
+                            // Refusing is the safe direction — an invented name would overwrite an
+                            // unprocessed file already kept — but it is NOT silent: this is the one
+                            // path where a fetched subtitle is not written at all.
+                            summary.Failed++;
+                            ReportOutcome(item, ItemOutcome.RealFailure);
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL-D] SAVE REFUSED {File} [{Lang}] — not aligned and no free slot in the reserved range 51–99; nothing written",
+                                Path.GetFileName(mediaPath), lang);
+                            continue;
+                        }
+                    }
+
+                    // (10.09.2026, user decision): per-run read-only guard — one cheap
+                    // probe write per DIRECTORY (cached for the run) before the first real
+                    // save. On a read-only share the probe fails once with a clear log line
+                    // and every later save into that directory short-circuits BEFORE the
+                    // API download/archive work, instead of failing write-by-write with a
+                    // retry loop. Uploads are unaffected (they never write next to media);
+                    // the .part probe mirrors the AtomicWriteAsync path it protects.
+                    string targetDir = Path.GetDirectoryName(targetPath) ?? ".";
+                    if (_readonlyDirs.Contains(targetDir))
+                    {
+                        summary.Failed++;
+                        ReportOutcome(item, ItemOutcome.RealFailure);
+                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] SKIP {File} [{Lang}] — directory not writable: {Dir} (F-M89 read-only guard)", Path.GetFileName(mediaPath), lang, targetDir);
+                        continue;
+                    }
+
+                    await AtomicWriteAsync(targetPath, writeBytes, ct).ConfigureAwait(false);
+
+                    if (!alignedForNaming)
+                    {
+                        // F-M452: an original does not close the pair, so this release must not be
+                        // fetched again on the next run — the memory makes the walk skip it BEFORE any
+                        // download. Without this the open pair would re-fetch the same bad release
+                        // every run and pay a quota unit for a verdict it already has.
+                        _qaFails.RecordSkippedCandidates(
+                            item.Id.ToString(), lang, new[] { cand.SubdlId },
+                            reason: "original kept — alignment refused", kind: "original");
+                    }
+
+                    // F-M306/F-M315: the untouched original is kept beside the corrected file.
+                    //
+                    // Until 07.10.2026 it was kept as a one-entry archive (`<name>.unsynced.zip`),
+                    // which the operator could only reach by unpacking it himself. He ordered that
+                    // replaced (07.10.2026): the original now lands as a LOOSE sidecar named
+                    // `<base>.<lang>.51.srt` — numbered from 51 upward — which Jellyfin lists as
+                    // its own selectable track, titled with the number. He also ordered the archive
+                    // gone; archives already on disk are left exactly as they are.
+                    //
+                    // The name is the ONLY difference from a normal sidecar: same language token,
+                    // same `.sdh` marker when the corrected file is the variant, no marker of its
+                    // own (it is not forced — F-M315). The reserved block 51–99 keeps it away from
+                    // the corrected files, which stop at slot 49.
+                    //
+                    // WATCH THE ENCODING. The bytes written are the ORIGINAL TEXT in the canonical
+                    // form (F-M296: UTF-8, no BOM, LF), NOT the payload as fetched. Byte fidelity
+                    // matters for the archive this replaces (it existed to be the uncorrected file
+                    // bit for bit); a selectable track matters here, and — the decisive reason —
+                    // the registry row written below hashes exactly these bytes, so the lock and
+                    // the file on disk describe the same sequence. Writing the fetched style back
+                    // would leave the row pointing at bytes that exist nowhere, and the duplicate
+                    // guard would read the file as unknown and upload it.
+                    //
+                    // The row is the LOCK, and it is the SAME row the corrected file gets:
+                    // MarkDownloaded. A downloaded row already counts as known content, so both
+                    // readers stop at it without any new vocabulary — the seeder drops the file from
+                    // the queue (IsContentKnown) and the uploader returns duplicate-content. Nothing
+                    // had to be invented for this; every downloaded subtitle is treated this way
+                    // today, and the original is a downloaded subtitle. Guarded by the dry-run flag
+                    // like every other write (F-M287).
+                    // F-M321 (operator order 08.10.2026): for a "no proven gain" file there is nothing
+                    // to correct, so BOTH files are the original — the 01 file and the 99 file carry the
+                    // same subtitle, and the 99 write REUSES the array that went to 01 rather than
+                    // re-encoding the text. Only that makes them identical, and identity is what the
+                    // operator asked for ("beide original"). (For a real correction the 99 copy is the
+                    // ORIGINAL text and therefore differs from the corrected 01 file — unchanged.)
+                    byte[]? reservedBytes = unsyncPayload != null
+                        ? ContentHashRegistry.EncodeCanonical(unsyncPayload)
+                        : (goodAsDownloaded ? writeBytes : null);
+                    if (reservedBytes != null && !_config.DownloadDryRun)
+                    {
+                        try
+                        {
+                            // F-M317: the corrected file took its number from the corrected counter, and
+                            // the slot it used is now ON DISK — SidecarNamesInDirectory must see it, or
+                            // the original could be handed the same name.
+                            System.Collections.Generic.HashSet<string>? names = SidecarNamesInDirectory(targetDir);
+                            string? originalPath = names == null
+                                ? null
+                                : SidecarNaming.PlanOriginalTarget(mediaPath, lang, effectiveHi, names);
+
+                            if (originalPath == null)
+                            {
+                                // Every reserved slot taken, or the directory could not be listed.
+                                // Refusing is the safe direction: an invented name would overwrite
+                                // an original already kept.
+                                LogUtil.PerItem(_config.LogMode, _logger,
+                                    "[SubDL-D] original NOT kept for {File} [{Lang}] — no free slot in the reserved range 51–99",
+                                    Path.GetFileName(mediaPath), lang);
+                            }
+                            else
+                            {
+                                // F-M321: for a "no proven gain" file the reserved copy holds the SAME
+                                // bytes as the corrected slot, so it hashes to the SAME content hash —
+                                // which is the key of the registry row. One row therefore describes both
+                                // files, and the later write below (the .01 one) names the path. That is
+                                // the existing design rather than a new special case: identity is
+                                // content-keyed, and a downloaded row is what locks a file against
+                                // upload — so both files are locked by the one row.
+                                string originalHash = goodAsDownloaded
+                                    ? contentHash
+                                    : ContentHashRegistry.ComputeHash(unsyncPayload!);
+                                await AtomicWriteAsync(
+                                    originalPath,
+                                    reservedBytes!,
+                                    ct).ConfigureAwait(false);
+
+                                // The lock is the SAME row the corrected file gets: MarkDownloaded.
+                                // A downloaded row is already "known content", and both readers ask
+                                // IsContentKnown / the content hash before doing anything — the seeder
+                                // drops the file from the queue and the uploader returns
+                                // duplicate-content. No new vocabulary, no second mechanism.
+                                Registry.MarkAndFlush(() => Registry.MarkDownloaded(
+                                    originalHash, mediaHash, lang, effectiveHi,
+                                    fileName: Path.GetFileName(originalPath), path: originalPath,
+                                    // F-M493 (Messung jf-test 15.11.2026: 5 von 24 behaltenen Originalen
+                                    // standen ohne Herkunft im Store): das behaltene Original ist eine
+                                    // eigene Zeile, also braucht SIE die Marke — sonst weiss ein spaeterer
+                                    // Upload nicht, wohin die Datei gehoert (F-M487), und „kein Reup je
+                                    // Quelle" (F-M489) sieht sie nicht.
+                                    origin: Api.Endpoints.Provenance.Name(cand.Provider),
+                                    originId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url,
+                                    subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null,
+                                    tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null,
+                                    moviesubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.MovieSubtitles ? cand.Url : null));
+
+                                if (_config.LogMode >= LogLevelMode.Verbose)
+                                {
+                                    LogUtil.PerItem(_config.LogMode, _logger,
+                                        "[SubDL-D] original kept as {Path} — locked against upload (F-M315)",
+                                        Path.GetFileName(originalPath));
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            // The corrected file is already on disk and correct — a failure to
+                            // keep the original must not undo it, but it must be visible.
+                            _logger.LogWarning(ex,
+                                "[SubDL-D] could not keep the unsynchronized original for {File}",
+                                Path.GetFileName(targetPath));
+                        }
+                    }
+
+                    Registry.MarkAndFlush(() => Registry.PatchMediaMetadata(mediaHash, resolvedImdb, season, isSeries ? episode : null, null, resolvedTmdb));
+                    // F-M260: the real flag, not the hard-coded false it used to be. A
+                    // hearing-impaired file recorded as hi=false made the HI reader (F-M254) ask
+                    // for a variant that was already on disk, run after run.
+                    Registry.MarkAndFlush(() => Registry.MarkDownloaded(
+                        contentHash, mediaHash, lang, effectiveHi, cand.SubdlId,
+                        Path.GetFileName(targetPath), targetPath,
+                        // F-M486: die Herkunft wandert in den Store — Quelle und deren eigene Id.
+                        // Ohne sie wüsste ein späterer Upload nicht, wohin dieser Fund gehört (F-M487).
+                        // F-M493: benannt uebergeben, damit alle vier Schreibstellen gleich aussehen.
+                        origin: Api.Endpoints.Provenance.Name(cand.Provider),
+                        originId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url,
+                        // F-M488: und zusätzlich in das eigene Feld der Quelle und Richtung.
+                        subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null,
+                        tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null,
+                        moviesubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.MovieSubtitles ? cand.Url : null));
+                    _qaFails.RecordSuccess(item.Id.ToString(), lang); // A real save resets the QA counter
+
+                    // F-M491 (operator order 15.11.2026: "ein gefundenes und die signifikanz erfüllendes
+                    // (bei auto sync, sonst nur heruntergeladen) gibt als erfolgreich heruntergeladen"):
+                    // mit Auto-Sync ist nur eine Fassung erfolgreich, die die Signifikanz bestanden hat.
+                    // Eine behaltene Originalfassung ist heruntergeladen — die Datei liegt ja —, aber
+                    // nicht erfolgreich; das Paar bleibt damit offen (F-M452). Ist Auto-Sync aus, gibt es
+                    // keinen Fit und damit keinen Unterschied: jeder Abruf zählt.
+                    if (!_config.QaDownloadAutoSync || alignedForNaming)
+                    {
+                        summary.Downloaded++;
+                    }
+                    else
+                    {
+                        summary.DownloadedWithoutSignificance++;
+                    }
+                    RememberSavedLibrary(item, targetPath); // F-M473
+                    ReportOutcome(item, ItemOutcome.Done);
+                    // F-M472: this save came out of a season pack, and the archive holding the other
+                    // episodes of the SAME release is already here. Remember the cover so the run
+                    // loop can put those episodes right after this one.
+                    RememberPackCover(item, season, episode, cand);
+                    savedCount++;
+                    // F-M317: only an ALIGNED file advances the corrected counter. An unprocessed
+                    // file already took its number from the reserved block and must not consume a
+                    // corrected slot.
+                    if (alignedForNaming)
+                    {
+                        correctedSlotCount++;
+                        correctedSaved++;
+                        savedAny = true;
+                    }
+                    else
+                    {
+                        // F-M318: the refusal is MEMORIZED as a download (the file IS kept) but it is
+                        // NOT a "best" — so `savedAny` stays false here on purpose, and the walk keeps
+                        // hunting for a candidate whose correction proves itself.
+                        refusalsThisRun++;
+
+                        // ...but only a verdict about the FILE is worth another download. A verdict
+                        // about the audio or the tooling ("ffmpeg not available") would be repeated
+                        // word for word for every candidate, so the walk ends after this save instead
+                        // of spending the daily quota to reach an identical answer.
+                        //
+                        // GATED ON THE AUTO-SYNC BEING ON (operator order 08.10.2026): with the
+                        // Auto-Sync OFF there is no fit and therefore no verdict at all — nothing was
+                        // measured, so nothing can be "a reason no other candidate can change".
+                        // Without this gate the abandon fired on the FIRST candidate of every
+                        // language (huntForCorrection starts false and only a fit ever sets it), so a
+                        // run with the Auto-Sync off pulled exactly ONE candidate per language and
+                        // stopped. The operator's rule for that mode: the walk pulls n candidates
+                        // (the configured correction attempts) through the active quality gates and
+                        // keeps them as 99, 98, 97 … — n comes from the text field, and the walk's
+                        // own limit below is what ends it.
+                        if (_config.QaDownloadAutoSync && !huntForCorrection)
+                        {
+                            correctionHuntAbandoned = true;
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[SubDL-D] {File} [{Lang}] — correction hunt abandoned after {N} candidate(s): the fit refused for a reason no other candidate can change ({Reason})",
+                                Path.GetFileName(mediaPath), lang, refusalsThisRun, huntReason);
+                        }
+                    }
+                    if (_config.LogMode >= LogLevelMode.Verbose)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] SAVED {Path} (lang={Lang}, score {Score}, release \"{Release}\", subdl=\"{SubdlName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb}) for {File}",
+                            Path.GetFileName(targetPath), lang, Score(cand, videoBase), cand.ReleaseName,
+                            string.IsNullOrEmpty(cand.OriginalName) ? "—" : cand.OriginalName,
+                            string.IsNullOrEmpty(cand.Author) ? "—" : cand.Author,
+                            resolvedImdb ?? "—", resolvedTmdb ?? "—", Path.GetFileName(mediaPath), savedCount);
+                    }
+
+                    // F-M42b + F-M241: the hearing-impaired variant, from the SECOND search's own
+                    // pool. This block sits BEFORE the corrected-file break on purpose — it used to sit
+                    // after it, and with the walk ending at the first save the break always fired
+                    // first, so the block was unreachable and no HI variant was ever fetched
+                    // (measured: zero "SAVED HI variant" lines in every log). The HI candidate
+                    // comes from the hi=1 search, not from the regular pool: the two pools share
+                    // no releases (measured on tt0448694), so picking from the regular list could
+                    // only ever find what the unfiltered response happened to mix in.
+                    // F-M260: `effectiveHi` also guards this — when the file we just saved WAS
+                    // the pack's hearing-impaired entry, the HI variant is already on disk. The old
+                    // condition (`!cand.HearingImpaired`) missed exactly that case, because a pack's
+                    // header flag can be false while every file inside it is true.
+                    if (_config.DownloadHearingImpaired && !effectiveHi)
+                    {
+                        await RunHiPoolAsync(asMainTrack: false).ConfigureAwait(false);
+                    }
+
+                    // F-M319 (operator order 08.10.2026): the walk ends after the FIRST corrected file.
+                    // The "best X per language" setting is gone, so there is no count left to compare
+                    // against — what remains is the rule the setting's default always expressed: one
+                    // corrected file per language. An unprocessed file is a FALLBACK and does NOT end
+                    // the walk; only a proven correction does.
+                    if (correctedSaved >= 1)
+                    {
+                        // F-M255: name the candidates this stop leaves untried — otherwise they are
+                        // absent from the record although the next run will walk them.
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — corrected file saved; {N} lower-ranked candidate(s) not tried this run",
+                            Path.GetFileName(mediaPath), lang,
+                            Math.Max(0, ranked.Count - attempts));
+
+                        break;
+                    }
+
+                    // F-M318: a refusal no other candidate can change ends the hunt here. Continuing
+                    // would download every remaining candidate to receive the same refusal word for
+                    // word, while each one still costs daily quota and writes another unprocessed file
+                    // — up to ten of them for one episode.
+                    //
+                    // F-M494 (Messung 15.11.2026): ein Ablehnungswort stammt von EINER Quelle und sagt
+                    // nichts ueber die andere. Bei tvsubtitles-first lieferten 27 Folgen je genau einen
+                    // tvst-Treffer, und der Abbruch nach dessen Fit beendete die Suche fuer die
+                    // Sprache, bevor SubDL ueberhaupt gefragt war: 6 signifikant, 19 als Original
+                    // behalten, 1 verworfen — keine SubDL-Zeile im Log. Solange unter den noch nicht
+                    // versuchten Kandidaten (`ranked.Skip(attempts)`) einer von der ANDEREN Quelle
+                    // steht, laeuft die Suche deshalb fuer diese Quelle weiter: der Abbruch wird
+                    // zurueckgenommen und der Ablehnungszaehler, auf dem er beruhte, auf 0 gesetzt —
+                    // so bekommt der zweite Endpunkt seinen eigenen Versuch. Erst wenn keine andere
+                    // Quelle mehr uebrig ist, endet der Lauf wie bisher.
+                    if (correctionHuntAbandoned)
+                    {
+                        var offeneAndereQuelle = ranked.Skip(attempts).Where(x => x.Cand.Provider != cand.Provider).ToList();
+                        if (offeneAndereQuelle.Count == 0)
+                        {
+                            break;
+                        }
+
+                        correctionHuntAbandoned = false;
+                        refusalsThisRun = 0;
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — correction hunt continues on {Other}: the refusal came from {Source}, {N} candidate(s) of the other source are still untried (F-M494)",
+                            Path.GetFileName(mediaPath), lang,
+                            Api.Endpoints.Provenance.Name(offeneAndereQuelle[0].Cand.Provider),
+                            Api.Endpoints.Provenance.Name(cand.Provider),
+                            offeneAndereQuelle.Count);
+                    }
+
+                    // No break here. There used to be an unconditional one at this point, which
+                    // made the whole setting dead: the loop ended after the FIRST save no matter
+                    // what KeepBestPerLanguage said, so the numbered slots ("name.en.2.srt") were
+                    // never written and the GUI option had no effect (F-M242). The break above is
+                    // the only exit, and it is what implements the setting.
+                }
+                catch (Exception ex)
+                {
+                    summary.Failed++;
+                    ReportOutcome(item, ItemOutcome.RealFailure);
+                    _logger.LogError("[SubDL-D] WRITE FAILED {File} [{Lang}]: {Msg}", Path.GetFileName(mediaPath), lang, ex.Message);
+                    break; // IO error — retrying another candidate won't help
+                }
+            }
+
+            // Run end (before the next language starts): remember the burned releases so the next run
+            // walks FRESH candidates.
+            //
+            // F-M320 (operator order 08.10.2026): the failed-run counter and its give-up are GONE
+            // here. It counted every saveless run of a (item, language) pair and closed the pair after
+            // DownloadQaRetryLimit of them — the same give-up the operator removed, one layer up, and
+            // it closed a pair on GATE rejections, which are now explicitly not a budget. The counter
+            // itself survives for the FIT (F-M318 uses its value as the refusal budget), so it is no
+            // longer incremented on gate rejections: RecordSkippedCandidates below is what remembers
+            // this run's discards, and it is keyed by release id, which is the grain that matters.
+            if (!savedAny && attempts > 0)
+            {
+                if (qaRejectedReleases.Count > 0)
+                {
+                    _qaFails.RecordSkippedCandidates(
+                        item.Id.ToString(), lang, qaRejectedReleases, RejectReason.CandidateRejected,
+                        qaRejectedFacts, "qa");
+
+                    // F-M450: a gate verdict is a MEASUREMENT of the file, not a guess — the same
+                    // bytes will read the same way next run. So the report goes out now, in this
+                    // run's flush, instead of waiting for a second sighting that would only confirm
+                    // what was already counted. (Only "no bytes returned" still waits, because there
+                    // a provider hiccup is plausible.)
+                    if (_config.ReportBrokenSubtitles)
+                    {
+                        foreach (var row in _qaFails.GetRows(item.Id.ToString(), lang))
+                        {
+                            if (row.ReportedUtc == null
+                                && string.Equals(row.Kind, "qa", StringComparison.Ordinal)
+                                && qaRejectedReleases.Contains(row.SubdlId, StringComparer.Ordinal))
+                            {
+                                QueueReport(row);
+                            }
+                        }
+                    }
+
+                    if (_config.LogMode >= LogLevelMode.Verbose)
+                    {
+                        LogUtil.PerItem(_config.LogMode, _logger,
+                            "[SubDL-D] {File} [{Lang}] — run ended without save; {N} download(s) memorized, next run takes fresh candidates",
+                            Path.GetFileName(mediaPath), lang, qaRejectedReleases.Count);
+                    }
+                }
+            }
+
+            // F-M476: the regular pool ended without a proven save. Before the language is declared
+            // unavailable, the hearing-impaired pool gets its turn as a MAIN track — the same walk, the
+            // same gates, the same fit; the files keep their SDH lines and carry the HI marker.
+            if (!savedAny && _config.DownloadHearingImpaired)
+            {
+                savedAny = await RunHiPoolAsync(asMainTrack: true).ConfigureAwait(false);
+            }
+
+            if (savedAny)
+            {
+                closedLangs.Add(lang); // F-M88c: language saved = terminal
+            }
+            else if (ranked.Count > 0)
+            {
+                summary.NotAvailable++;
+                ReportOutcome(item, ItemOutcome.NotAvailable);
+                if (_config.LogMode >= LogLevelMode.Verbose)
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,"[SubDL-D] {File} [{Lang}] — no candidate passed checks (F-M46), language marked not-available",
+                        Path.GetFileName(mediaPath), lang);
+                }
+            }
+        }
+
+        // F-M283 (user decision 02.10.2026): the completion mark is GONE. This block used to decide
+        // whether to WRITE one, and that decision was a third reading of the same question — it asked
+        // `MissingTokens` (disk only) while the reader above asked disk plus the stored variant
+        // verdict, so the two disagreed on exactly the case that mattered: a variant embedded in the
+        // container. The withhold refused the mark, the item stayed due, and the regular subtitle was
+        // re-fetched on every pass.
+        //
+        // Nothing is settled here any more, so there is nothing to report as withheld or complete:
+        // the open-pair question at the top of the run is the only answer, and it is asked fresh
+        // every time. What this spot still reports is the outcome of the search itself — a language
+        // whose candidates were all rejected and whose QA budget is spent is closed for this cycle,
+        // which is informative, not a give-up (F-M42b: no expiry, no retry budget as a brake).
+        //
+        // F-M510 (Befund 15.11.2026, erster Film-Lauf auf jf-test — NICHT geaendert, Entscheidung offen):
+        // die Zeile heisst „closed by the QA budget", aber `closedLangs` hat genau ZWEI Quellen — den
+        // Ausstieg „not available" oben und den Zweig `if (savedAny)` darunter. Im Trockenlauf setzt der
+        // Trockenlauf-Zweig `savedAny = true` (F-M22, „would have saved") und laeuft damit in denselben
+        // Zweig: die Sprache gilt als geschlossen, obwohl NICHTS geladen und kein QA-Tor befragt wurde.
+        // Gemessen im Lauf 22:12: Store ohne eine einzige `rejected_candidates`-Zeile fuer den Film,
+        // Laufbilanz „1 would have saved … 0 lang not available" — und trotzdem diese Zeile mit „1".
+        // Wer hier „QA budget" liest, sucht einen QA-Fehlerzaehler, den es nicht gibt. Was die Zeile
+        // meint, ist „diese Sprache ist fuer diesen Lauf erledigt" (would-save, gespeichert oder nicht
+        // verfuegbar); der Grund steht in der Zeile eine Ebene hoeher.
+        if (!_stopRun && missing.Count > 0 && missing.All(l => closedLangs.Contains(l)))
+        {
+            LogUtil.PerItem(
+                _config.LogMode,
+                _logger,
+                "[SubDL-D] {File} — {Count} language(s) closed by the QA budget this run; nothing left to search",
+                Path.GetFileName(mediaPath),
+                missing.Count);
+        }
+    }
+
+    /// <summary>
+    /// F-M257: writes this file's embedded tracks into the registry as observations.
+    /// <para>
+    /// The download pipeline already holds the streams for its presence check (F-M246) and asks the
+    /// registry for the HI verdict (F-M254) — but on an install with <c>UploadEnabled=false</c>
+    /// nothing had ever written that area, so the verdict was always "absent". This closes the gap on
+    /// the read side's own doorstep rather than relying on the uploader having run.
+    /// </para>
+    /// <para>
+    /// An existing verdict is never overwritten (<see cref="ContentHashRegistry.ObserveEmbed"/>),
+    /// and a failure changes nothing about the download: an observation is an improvement, not a
+    /// precondition.
+    /// </para>
+    /// </summary>
+    /// <param name="item">Jellyfin item.</param>
+    /// <param name="mediaHash">Media content hash, or null when unknown.</param>
+    /// <returns>Number of rows created or changed.</returns>
+    private int ObserveEmbeddedFacts(BaseItem item, string? mediaHash)
+    {
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return 0;
+        }
+
+        try
+        {
+            var streams = _mediaSourceManager.GetMediaStreams(item.Id);
+            var tracks = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.EmbeddedTracks(streams);
+
+            // F-M263: the gate's own verdict no longer needs to be merged in here. The seeder runs the
+            // gate before the queue decision and records its result in the REGISTRY; this pass reads
+            // the stream list, which is Jellyfin's CACHED snapshot and can therefore still report the
+            // old tag for a container corrected in the same cycle. That is why this pass only ADDS
+            // what it can read (ObserveEmbed never overwrites an existing row), while the corrected
+            // language is already stored — and the coverage check reads it from there.
+            int written = 0;
+            foreach (var (subPos, lang, hi, forced) in tracks)
+            {
+                if (Registry.ObserveEmbed(mediaHash, subPos, lang, hi, forced))
+                {
+                    written++;
+                }
+            }
+
+            return written;
+        }
+        catch (Exception ex)
+        {
+            LogUtil.Detail(_config.LogMode, _logger, "[SubDL-D] embedded facts not recorded: {Msg}", ex.Message);
+            return 0;
+        }
+    }
+
+
+    private IEnumerable<string> EmbeddedPresentLanguagesOf(BaseItem item)
+    {
+        if (!_config.DownloadOnlyMissing)
+        {
+            return Enumerable.Empty<string>();
+        }
+
+        return Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming
+            .EmbeddedPresentLanguages(_mediaSourceManager.GetMediaStreams(item.Id));
+    }
+
+    /// <summary>
+    /// F-M282 (user decision 02.10.2026): the subtitle DATA this run must deliver for this file —
+    /// the regular subtitle of each configured language, plus its variant when the HI switch is on.
+    /// <para>
+    /// This replaces <c>RequiredTokens</c>. It is a pure projection of the configuration, and pairs
+    /// carry the hearing-impaired property structurally: turning the switch on ADDS the variant
+    /// pairs, so an item that already has its subtitles simply becomes due for the variant, and
+    /// turning it off removes them so nothing has to be cleaned up.
+    /// </para>
+    /// </summary>
+    /// <param name="targets">Configured target languages.</param>
+    /// <returns>One pair per required file.</returns>
+    private List<Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef> RequiredPairs(IReadOnlyList<string> targets)
+        => Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef
+            .Required(targets, _config.DownloadHearingImpaired);
+
+    /// <summary>
+    /// F-M282: which required PAIRS have no evidence for this file.
+    /// <para>
+    /// Read through the one shared reader (<see cref="Jellyfin.Plugin.SubdlScribe.Registry.SubtitleCoverage"/>),
+    /// so this answer and the coverage question at the top of the run can never be fed different
+    /// evidence — which is precisely how a complete item used to keep looking due.
+    /// </para>
+    /// </summary>
+    /// <param name="targets">Configured target languages.</param>
+    /// <param name="mediaPath">Media file path.</param>
+    /// <returns>Pairs without evidence.</returns>
+    private List<Jellyfin.Plugin.SubdlScribe.Registry.SubtitleRef> OpenPairs(
+        IReadOnlyList<string> targets, string mediaPath)
+        => Registry.OpenPairs(mediaPath, RequiredPairs(targets));
+
+    /// <summary>F-M44 weighted release score: group match × WeightGroup + token overlap × WeightToken + min(dl,500) × WeightDownload.</summary>
+    /// <summary>
+    /// (15.09.2026): MAIN = v1 id search (GET /api/v1/subtitles by
+    /// imdb/tmdb + season/episode — episode-exact server-side, live-verified).
+    /// BACKUP = v2 filename batch (POST /api/v2/files/search), only when the
+    /// id search yields nothing (or the item carries no id). v2 id search is
+    /// retired as a search path (its season/episode params are ignored
+    /// server-side); the similarity ranking is token-based and episode-blind.
+    /// Returns (candidates, usedFilenameFallback, thresholdPassCount); null only
+    /// when the search did not complete (429/5xx/403 — run must stop, F-M48).
+    /// </summary>
+    /// <param name="missing">Regular subtitle pairs without evidence — drives the <c>hi=0</c> search.</param>
+    /// <param name="variantMissing">Variant pairs without evidence — drives the <c>hi=1</c> search.</param>
+    /// <param name="summary">Run summary.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task<(List<SubtitleCandidate>? Candidates, bool UsedFilenameFallback, int ThresholdPassCount, List<SubtitleCandidate> HiCandidates)> RunV2SearchAsync(
+        BaseItem item, string mediaPath, string? imdbId, string? tmdbId, int season, int episode, List<string> missing, List<string> variantMissing, DownloadRunSummary summary, CancellationToken ct)
+    {
+        string filename = Path.GetFileName(mediaPath);
+        string langs = string.Join(",", missing);
+        var noHi = new List<SubtitleCandidate>();
+
+        // F-M497 (Operator-Anweisung 15.11.2026: „Wenn subdl nich konfiguriert -> skip subdl
+        // download"): ohne API-Schluessel gibt es keine SubDL-Suche. Sie faellt aus der Kette, statt
+        // den Lauf mit einem 403 auf ihrem ersten Aufruf zu beenden (das war der alte Reflex: der
+        // Schluessel fehlte, also starb der ganze Lauf). Die andere Quelle laeuft weiter; die Zeile
+        // nennt den Grund genau einmal pro Datei.
+        if (!_config.IsConfiguredForDownload(Configuration.SubtitleProvider.Subdl))
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[SubDL-D] {File} — SubDL skipped — not configured (required for SubDL only)",
+                filename);
+            return (new List<SubtitleCandidate>(), false, 0, new List<SubtitleCandidate>());
+        }
+
+        // ---- Main: v1 id search (episode-exact, server-side verified) ----
+        // (15.09.2026): v2 id-search ignores season/episode server-side
+        // (live: BCS S02E01 query returned 30 candidates incl. S06 packs and
+        // The Simpsons); v1 filters episode-exact. Early-stop is fed by
+        // DownloadBudget.SearchEarlyStopThreshold (F-M95), derived from the ONE correction-attempts
+        // setting (operator order 08.10.2026): the search must never fetch fewer candidates than the
+        // Auto-Sync may pull, nor more than it will discard.
+        // F-M45 (operator order 08.10.2026): the title rung is gone with the switch, so this is an
+        // id search or nothing. An item that lost its ids after the ladder (the TMDB fetch above
+        // needs one to begin with; directed fires skip the ladder) must not be searched by name —
+        // the wording names the fact instead of a fallback that no longer exists.
+        if (string.IsNullOrWhiteSpace(imdbId) && string.IsNullOrWhiteSpace(tmdbId))
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[SubDL-D] MAIN (v1 id) skipped {File} — no TMDB/IMDb ID resolvable, no title search (F-M45)",
+                filename);
+        }
+        else
+        {
+            // F-M241 (user decision 28.09.2026): TWO searches, one per side of the HI split.
+            // The API filters this server-side (&hi=0 / &hi=1) and the two pools do not overlap
+            // (measured on tt0448694: 13 regular, 30 HI, zero shared releases), so a single
+            // unfiltered search returned a MIXTURE in which the regular slot and the HI slot had
+            // to be sorted out of one list — and the regular slot's ranking depended on how many
+            // HI releases the response happened to contain. The HI search only runs when the HI
+            // switch asks for it, so a user who does not want HI variants pays exactly one search,
+            // as before.
+            // F-M95/F-M331: the search's width IS the single correction-attempts setting — the same
+            // number that bounds the walk. One setting, two effects: how many candidates per language
+            // are searched, and how many the Auto-Sync may pull before it gives up.
+            int earlyStop = DownloadBudget.SearchEarlyStopThreshold(
+                _config.DownloadQaRetryLimit);
+            // F-M282: the regular search runs only when a REGULAR file is open. When the variant is
+            // the only thing missing, `langs` is empty and this call would be a search for nothing —
+            // worse, it used to be the call that re-fetched a subtitle already on disk.
+            var main = langs.Length == 0
+                ? new List<SubtitleCandidate>()
+                : await _api.SearchSubtitlesAsync(
+                    string.IsNullOrWhiteSpace(imdbId) ? null : imdbId,
+                    string.IsNullOrWhiteSpace(tmdbId) ? null : tmdbId,
+                    season, episode, langs, 20, ct, earlyStop, hearingImpaired: false).ConfigureAwait(false);
+            if (main == null)
+            {
+                return (null, false, 0, noHi); // 429/5xx/403 → stop the run
+            }
+
+            // F-M529: Treffer, deren Feldgestalt SubDLs eigene Doku nicht erlaubt (z. B. framerate
+            // als Kommazahl 23.98), sind im Client schon verworfen worden. Der Zaehler geht in die
+            // Schlusszeile des Laufs, damit die Zahl sichtbar ist, ohne dass jemand ins Debug-Log muss.
+            summary.RejectedCandidates += _api.LastRejectedByFormat;
+
+            // F-M531: die vorbereiteten Meldungen abgeben — nur wenn der Schalter steht (derselbe wie
+            // fuer defekte Untertitel, F-M450) und nur mit Melde-Id. Ein Fehlschlag aendert am Lauf
+            // nichts: die Meldung ist Beiwerk, der Untertitel ist ohnehin verworfen.
+            foreach (var meldung in _api.TakeFormatReports())
+            {
+                if (!_config.ReportBrokenSubtitles)
+                {
+                    break;
+                }
+
+                var outcome = await _api.ReportBrokenSubtitleAsync(
+                    meldung.NId, meldung.Category, meldung.Comment, ct).ConfigureAwait(false);
+                if (outcome == SubdlReportOutcome.Accepted)
+                {
+                    summary.Reported++;
+                }
+                else if (outcome == SubdlReportOutcome.Deferred)
+                {
+                    summary.ReportsDeferred++;
+                }
+            }
+
+            if (variantMissing.Count > 0 && _config.DownloadHearingImpaired)
+            {
+                // Second search, fed from the VARIANT pairs only. A failure here must NOT lose the
+                // regular candidates: the HI variant is a bonus (F-M42b), the regular subtitle is the
+                // actual target, so an error only means "no HI pool this run".
+                //
+                // The language list is `variantMissing`, never `missing`: sending the regular list
+                // asked SubDL for the regular side of a language whose variant was missing, and the
+                // result was a regular subtitle fetched over the file already on disk.
+                var hiLangs = string.Join(",", variantMissing);
+                var hi = await _api.SearchSubtitlesAsync(
+                    string.IsNullOrWhiteSpace(imdbId) ? null : imdbId,
+                    string.IsNullOrWhiteSpace(tmdbId) ? null : tmdbId,
+                    season, episode, hiLangs, 20, ct, earlyStop, hearingImpaired: true).ConfigureAwait(false);
+                summary.RejectedCandidates += _api.LastRejectedByFormat; // F-M529, auch fuer den HI-Pool
+                if (hi != null && hi.Count > 0)
+                {
+                    noHi = hi.Where(c => c.Language != null && variantMissing.Contains(c.Language, StringComparer.OrdinalIgnoreCase)).ToList();
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] HI search {File} [{Langs}] — {N} hearing-impaired candidates (separate pool, F-M241)",
+                        filename, hiLangs, noHi.Count);
+                }
+                else if (hi == null)
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[SubDL-D] HI search {File} — failed this run; regular candidates kept (F-M241)", filename);
+                }
+            }
+
+            if (main.Count > 0)
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[SubDL-D] MAIN (v1 id) {File} [{Langs}] — {N} candidates (episode-exact)",
+                    filename, langs, main.Count);
+                return (main, false, 0, noHi);
+            }
+
+            LogUtil.Detail(_config.LogMode, _logger, "[SubDL-D] MAIN (v1 id) {File} — no candidates → filename fallback", filename);
+        }
+
+        // V2 filename batch backup REMOVED — the MAIN v1 search already
+        // Covers the title anchor (soft mode). No-candidates here means
+        // the item is genuinely without results on SubDL.
+        return (new List<SubtitleCandidate>(), false, 0, noHi);
+    }
+
+    /// <summary>
+    /// Candidate download dispatcher. v2 candidates carry an nId →
+    /// GET /api/v2/subtitles/{nId}/download?format=file (Bearer). v1-style zip
+    /// urls (backup unpack_files already carry ready single-file urls on
+    /// dl.subdl.com) → legacy DownloadSubtitleFileAsync with the url prefix logic.
+    /// </summary>
+    /// <summary>
+    /// F-M215: downloads the single file of a candidate that belongs to <paramref name="season"/>/
+    /// <paramref name="episode"/>.
+    /// <para>
+    /// F-M260: also reports WHERE the bytes came from, because a season or range pack carries one
+    /// file per episode and EACH of those files states its own hearing-impaired flag — independently
+    /// of the pack's own header, which is often the opposite of its contents (measured on
+    /// <c>Mo.S01.WEBRip.x265-ION265</c>: header <c>hi=false</c>, all 8 files <c>hi=true</c>). That
+    /// per-file flag was parsed and then never read, so a hearing-impaired file was saved as a plain
+    /// <c>.srt</c> and recorded as <c>hi=false</c>. Since <c>SidecarNaming.IsHearingImpairedToken</c>
+    /// accepts only <c>sdh</c>, such a file never counted as hearing impaired again — the F-M254 HI
+    /// reader kept answering "absent" for a variant that was sitting on disk.
+    /// </para>
+    /// </summary>
+    /// <param name="cand">Candidate to fetch.</param>
+    /// <param name="season">Wanted season (0 = none).</param>
+    /// <param name="episode">Wanted episode (0 = none).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The bytes, and the source they came from (null source = the candidate as a whole).</returns>
+    /// <summary>
+    /// F-M388 (operator order 02.11.2026): every candidate leaves here with its invisible cues
+    /// already gone. A cue that is on screen for a millimetre of time is dropped and the file is
+    /// renumbered — the same rule the upload side has had since F-M382 — instead of the file being
+    /// convicted by a gate for carrying one.
+    /// <para>
+    /// It happens HERE, before the gates and long before the write, because the state hash must
+    /// describe the file that gets written. <c>writeBytes</c> starts as these very bytes and
+    /// <c>ComputeHash</c> describes the normalized text; if the correction came later, the hash would
+    /// describe a file that exists nowhere on disk.
+    /// </para>
+    /// </summary>
+    /// <param name="cand">Candidate being fetched (only for the log line).</param>
+    /// <param name="season">Wanted season.</param>
+    /// <param name="episode">Wanted episode.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The fetched payload, corrected.</returns>
+    /// <summary>F-M464: the bytes of one candidate attempt together with the verdict that produced
+    /// them. Payload and outcome cannot be separated, so no stage can quote someone else's status.</summary>
+    private sealed record CandidateAttempt(byte[]? Bytes, SubtitleUnpackFile? PackFile, DownloadOutcome Outcome);
+
+    /// <summary>
+    /// F-M471 (operator order 12.11.2026: "Archiv immer als ganzes. In den cache, dann entpacken.
+    /// Wege auf v2 harmonisieren"): ONE way to the bytes. The archive is fetched whole, it lands in
+    /// the disk cache, and the wanted member is unpacked from that body — the HI route, the pack
+    /// route and the plain route all come through here. The address is a parameter: the nId when the
+    /// entry carries one (v2, Bearer), else the entry's own url (v1). Nothing fetches a single
+    /// member url any more.
+    /// </summary>
+    /// <param name="nId">Entry id (<c>subtitlePage</c> tail). Required — see the note below.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="season">Wanted season (0 = none).</param>
+    /// <param name="episode">Wanted episode (0 = none).</param>
+    /// <param name="member">Member name to prefer inside the archive (null = derive from season/episode).</param>
+    /// <returns>What the fetch produced, with its own outcome.</returns>
+    private async Task<DownloadOutcome> FetchArchiveAsync(string? nId, CancellationToken ct, int season, int episode, string? member)
+    {
+        if (string.IsNullOrEmpty(nId))
+        {
+            // F-M471 (measured 12.11.2026): 121 hits over 13 searches — old films from 1942, 1954,
+            // 1964 among them — and every single one carried a subtitlePage. The entry id is not a
+            // "usually present" field, so the second address (the entry's own url) was a fallback
+            // without a single measured case. It is gone: an entry without an id is skipped and SAID
+            // SO, instead of being fetched over a shape nobody has ever verified.
+            _logger.LogWarning(
+                "[SubDL-D] entry without an id (no subtitlePage) — cannot fetch S{Season}E{Episode}: {Member}",
+                season, episode, member ?? "—");
+            return DownloadOutcome.None("no-entry-id");
+        }
+
+        return await _api.DownloadV2FileAsync(nId, ct, season, episode, member).ConfigureAwait(false);
+    }
+
+    private async Task<CandidateAttempt> DownloadCandidateAsync(
+        SubtitleCandidate cand, int season, int episode, CancellationToken ct)
+    {
+        CandidateAttempt rawAttempt = await DownloadCandidateRawAsync(cand, season, episode, ct).ConfigureAwait(false);
+        byte[]? raw = rawAttempt.Bytes;
+        byte[]? corrected = CorrectInvisibleCues(raw);
+        if (corrected != null && raw != null && corrected.Length != raw.Length)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[SubDL-D] {Release} [{Lang}] — invisible cues dropped: {Before} → {After} cue(s)",
+                cand.ReleaseName, cand.Language,
+                Qa.QaGates.ParseSrt(DecodeSrt(raw))?.CueCount ?? 0,
+                Qa.QaGates.ParseSrt(DecodeSrt(corrected))?.CueCount ?? 0);
+        }
+
+        return rawAttempt with { Bytes = corrected };
+    }
+
+    /// <summary>
+    /// F-M388: drops the cues nobody can read and renumbers what is left. Wraps
+    /// <see cref="ContentHashRegistry.NormalizeSrt"/>, which is also what <c>EncodeCanonical</c> and
+    /// <c>ComputeHash</c> use — one rule, so written bytes, hashed bytes and gated bytes are the same
+    /// bytes. What comes out is always the CANONICAL form — UTF-8 without BOM, LF, no trailing blank
+    /// line — for clean input as well, because the hash describes exactly that form. A clean file
+    /// therefore keeps its cues and its text unchanged; only the byte style follows the canonical
+    /// rule (a trailing newline is dropped by the same trim the upload side has always applied).
+    /// </summary>
+    /// <param name="raw">Payload as fetched.</param>
+    /// <returns>Corrected payload, or null when nothing was fetched.</returns>
+    public static byte[]? CorrectInvisibleCues(byte[]? raw)
+    {
+        if (raw is not { Length: > 0 })
+        {
+            return raw;
+        }
+
+        return System.Text.Encoding.UTF8.GetBytes(ContentHashRegistry.NormalizeSrt(DecodeSrt(raw)));
+    }
+
+    /// <summary>
+    /// F-M485/F-M504: fragt EINE Zusatzquelle nach dieser Sprache und gibt ihre Treffer als Kandidaten
+    /// zurück — mit dem Anbieter, der sie geliefert hat, damit der Abruf weiß, wen er fragen muss. Leer,
+    /// wenn es für diese Quelle keinen Endpunkt gibt, sie für dieses Medium nicht zuständig ist oder sie
+    /// nichts hat.
+    /// <para>
+    /// Die Quelle ist ein PARAMETER (F-M504, „dritte bis n quelle"): die Methode kennt keine zweite
+    /// Quelle und keinen Namen — sie holt den Endpunkt des Anbieters aus dem Katalog und bildet die
+    /// Antwort auf den neutralen Kandidaten ab.
+    /// </para>
+    /// <para>
+    /// F-M507: WAS die Quelle zum Suchen braucht, unterscheidet sich und steht deshalb hier, EINMAL:
+    /// tvsubtitles.net sucht über Serienname, Staffel und Folge (ohne Staffel/Folge gibt es dort nichts
+    /// zu suchen), moviesubtitles.org über Film-Titel und Jahr und kennt beides nicht. Die Medienart ist
+    /// vorher schon entschieden (<see cref="Api.Endpoints.SourceOrder.AppliesTo"/>) — was hier steht, ist
+    /// die zweite Frage: hat diese Quelle für DIESE Medienart überhaupt eine Suchform?
+    /// </para>
+    /// </summary>
+    /// <param name="quelle">Die Zusatzquelle, die gefragt wird.</param>
+    /// <param name="title">Serien- bzw. Filmname (Quellen ohne Id-Index suchen daraus).</param>
+    /// <param name="isSeries">Falsch bei Filmen — dann gibt es keine Staffel und keine Folge.</param>
+    /// <param name="season">Staffel.</param>
+    /// <param name="episode">Folge.</param>
+    /// <param name="lang">Zielsprache.</param>
+    /// <param name="tmdbId">TMDb-Id des Mediums, für den Film-Datensatz der dritten Quelle.</param>
+    /// <param name="mediaPath">Pfad des Mediums (nur für die Logzeile).</param>
+    /// <param name="mediaHash">Medium (OSHash), unter dem die Filmnummer gespeichert wird; null = unbekannt.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Die Treffer dieser Quelle; leer, wenn sie nichts hat.</returns>
+    private async Task<List<SubtitleCandidate>> ForeignCandidatesAsync(
+        Configuration.SubtitleProvider quelle,
+        string title,
+        bool isSeries,
+        int season,
+        int episode,
+        string lang,
+        string? tmdbId,
+        string? mediaPath,
+        string? mediaHash,
+        CancellationToken ct)
+    {
+        var leer = new List<SubtitleCandidate>();
+        var endpoint = EndpointFor(quelle);
+        if (endpoint is null || string.IsNullOrWhiteSpace(title))
+        {
+            return leer;
+        }
+
+        // F-M497/F-M507: auch eine Zusatzquelle tritt nicht an, wenn ihr das fehlt, was ihr Weg braucht.
+        // Fuer tvst und msub ist die Antwort immer wahr (keine Zugangsdaten) — die Tuer steht trotzdem
+        // hier, damit die naechste Quelle mit Schluessel nicht an ihr vorbeilaeuft.
+        if (!_config.IsConfiguredForDownload(quelle))
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[{Source}-D] {File} [{Lang}] — skipped — not configured",
+                Api.Endpoints.Provenance.Name(quelle), Path.GetFileName(mediaPath ?? title), lang);
+            return leer;
+        }
+
+        // F-M507: die Medienart ist die erste Tuer. Sie steht hier ein zweites Mal, weil diese Methode
+        // auch aus einem spaeteren Umbau heraus aufgerufen werden koennte — der Aufrufer hat sie ueber
+        // DownloadQueryOrder schon gefiltert.
+        if (!Api.Endpoints.SourceOrder.AppliesTo(quelle, isSeries))
+        {
+            return leer;
+        }
+
+        // Die Suchform der Quelle: Serien brauchen Name + Staffel + Folge (tvst hat keinen Id-Index),
+        // Filme brauchen Titel + Jahr und haben beides nicht.
+        if (isSeries && (season <= 0 || episode <= 0))
+        {
+            return leer;
+        }
+
+        Api.Endpoints.SubtitleQuery abfrage;
+        if (quelle == Configuration.SubtitleProvider.MovieSubtitles)
+        {
+            // F-M507: Titel und Jahr kommen aus TMDb („Was was ist, Auflösung per tmdb"), nicht aus dem
+            // Dateinamen. Die Nummer, unter der die Seite den Film führt, kommt aus dem Store, wenn sie
+            // dort schon steht — sonst wird sie jetzt gesucht und abgelegt (MsubMovieResolver).
+            if (string.IsNullOrWhiteSpace(tmdbId))
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[moviesubtitles] {File} [{Lang}] — skipped: no TMDb id, so there is no leading film record (F-M507)",
+                    Path.GetFileName(mediaPath ?? title), lang);
+                return leer;
+            }
+
+            var movie = await _tmdb.MovieInfoAsync(tmdbId!, ct).ConfigureAwait(false);
+            if (movie is null)
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[moviesubtitles] {File} [{Lang}] — skipped: TMDb answered no film record for {Tmdb} (F-M507)",
+                    Path.GetFileName(mediaPath ?? title), lang, tmdbId);
+                return leer;
+            }
+
+            var film = await _msubMovies
+                .ResolveForMediaAsync(Registry, mediaHash, movie, _config.DownloadDryRun, ct, mediaPath)
+                .ConfigureAwait(false);
+            if (!film.Resolved)
+            {
+                // Filme ohne Jahr oder ohne Treffer: EINE Zeile, kein Fehler, keine Ausnahme.
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[moviesubtitles] {File} [{Lang}] — skipped: no film id ({Status}) (F-M507)",
+                    Path.GetFileName(mediaPath ?? title), lang, film.Status);
+                return leer;
+            }
+
+            abfrage = new Api.Endpoints.SubtitleQuery(
+                movie.Name,
+                null,
+                tmdbId,
+                Season: 0,
+                Episode: 0,
+                lang,
+                Year: movie.ReleaseYear ?? 0,
+                MovieId: film.MovieId!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        else
+        {
+            abfrage = new Api.Endpoints.SubtitleQuery(title, null, tmdbId, season, episode, lang);
+        }
+
+        try
+        {
+            var hits = await endpoint.SearchAsync(abfrage, ct).ConfigureAwait(false);
+
+            // F-M533: hat die tvst-Naht Eintraege wegen einer falschen Feldangabe verworfen, gehoert
+            // die Zahl in dieselbe Schlusszeile wie bei SubDL (F-M529). Diese Methode fuehrt keine
+            // Zusammenfassung, deshalb sammelt das Feld und die Schlusszeile addiert.
+            if (endpoint is Api.Endpoints.TvSubtitlesDownloadEndpoint tvstNaht)
+            {
+                _tvstFormatRejected += tvstNaht.LastRejectedByFormat;
+            }
+
+            // F-M523: die Seriennummer, die die Suche gerade aufgelöst hat, geht in den Store — der
+            // Download schrieb sie bisher nie, deshalb holte jeder Lauf die Serienliste erneut. Derselbe
+            // Weg wie die Filmnummer (F-M517): Hash zuerst, Pfad als zweite Adresse, bei Mehrdeutigkeit
+            // gar nichts. Ein Probelauf schreibt nichts (F-M22), und eine schon gespeicherte Nummer
+            // bleibt unangetastet — sie wurde geprüft, als sie geschrieben wurde.
+            if (isSeries
+                && quelle == Configuration.SubtitleProvider.TvSubtitles
+                && !_config.DryRun
+                && _tvClient?.LastResolvedShowId is int tvstId
+                && tvstId > 0)
+            {
+                string? gespeichert = !string.IsNullOrEmpty(mediaHash)
+                    ? Registry.GetMedia(mediaHash!)?.TvstShowId
+                    : Registry.TvstShowIdAtPath(mediaPath);
+                if (string.IsNullOrEmpty(gespeichert))
+                {
+                    var wie = Registry.SetTvstShowId(mediaHash, mediaPath, tvstId);
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[tvsubtitles] {Media}: \"{Title}\" ist Serie {Id} — {Note}",
+                        mediaHash ?? "?", title, tvstId, Api.Endpoints.MediaNumberNote.Of(wie));
+                }
+            }
+
+            return hits.Select(h => new SubtitleCandidate
+            {
+                Provider = quelle,
+                ReleaseName = h.Release.Length > 0 ? h.Release : Api.Endpoints.Provenance.Name(quelle) + " " + h.Rip,
+                Language = lang.ToUpperInvariant(),
+                Url = h.Id,
+
+                // F-M507: ein Film hat keine Staffel und keine Folge — die Felder bleiben 0, damit weder
+                // Pack-Rang noch Folgenfilter einen Film als Folge lesen.
+                Season = isSeries ? season : 0,
+                Episode = isSeries ? episode : 0,
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            // Eine Zusatzquelle ist ein Zusatz, kein Muss: ein Fehler dort darf den Lauf nicht kippen.
+            _logger.LogWarning("[{Source}-D] search failed for {Title} [{Lang}]: {Error}",
+                Api.Endpoints.Provenance.Name(quelle), title, lang, ex.Message);
+            return leer;
+        }
+    }
+
+    /// <summary>
+    /// F-M494 (Operator-Anweisung 15.11.2026: „Vor Start des jeweiligen Endpunkts pruefen ob er per
+    /// Toggle freigeschaltet ist"): EIN Pruefpunkt fuer „darf diese Quelle jetzt abgerufen werden".
+    ///
+    /// Die Kandidatenliste ist die falsche Frage. Ein Kandidat kann aus einer Suche stammen, die lief,
+    /// als der Schalter noch an war, und seit F-M494 tragen die Listen beider Quellen gemischt
+    /// dieselben Eintraege. Wer den Abruf an der Liste entscheidet, holt also ueber einen Endpunkt, der
+    /// abgeschaltet ist. Deshalb fragen ALLE Abrufstellen — der Hauptdurchlauf, die SDH-Variante und
+    /// der Abruf selbst — diese eine Methode und lesen den Toggle nirgends sonst: sonst laeuft die
+    /// Regel an drei Stellen auseinander, und die dritte Stelle vergisst man beim naechsten Umbau.
+    /// </summary>
+    /// <param name="provider">Die Quelle des Kandidaten, der abgerufen werden soll.</param>
+    /// <returns>Wahr, wenn diese Quelle per Download-Schalter freigeschaltet ist.</returns>
+    private bool SourceAllowed(Configuration.SubtitleProvider provider) => _config.IsDownloadEnabled(provider);
+
+    /// <summary>
+    /// F-M504: die Download-Quellen, die in DIESEM Lauf gefragt werden, in Frage-Reihenfolge — die
+    /// konfigurierte Quelle zuerst, die uebrigen in Enum-Reihenfolge (<see cref="Api.Endpoints.SourceOrder"/>).
+    /// <para>
+    /// Die Schleife, die diese Liste abarbeitet, kennt keine Anzahl: JE QUELLE entscheidet
+    /// <see cref="SourceAllowed"/>, und ein Anbieter ohne verdrahteten Endpunkt faellt hier heraus.
+    /// Eine dritte Quelle braucht deshalb nur einen Enum-Eintrag und einen Endpunkt im Katalog.
+    /// </para>
+    /// <para>
+    /// F-M507 (Nutzerauftrag 15.11.2026: „Nur das series halt nach tv show und movies nach
+    /// moviesubtitels gehen."): die MEDIENART schneidet die Seite der anderen Art heraus
+    /// (<see cref="Api.Endpoints.SourceOrder.AppliesTo"/>). Eine Serie fragt SubDL und tvsubtitles.net,
+    /// ein Film SubDL und moviesubtitles.org — nie die jeweils andere Seite. Die Medienart kommt aus der
+    /// TMDb-Aufloesung (<c>isSeries</c>), nicht aus einem Dateinamen und nicht aus einer Bibliothek.
+    /// </para>
+    /// </summary>
+    /// <param name="isSeries">Wahr fuer eine Serie, falsch fuer einen Film (aus TMDb).</param>
+    /// <returns>Die Quellen dieses Laufs, zuerst gefragte zuerst.</returns>
+    private List<Configuration.SubtitleProvider> DownloadQueryOrder(bool isSeries) =>
+        Api.Endpoints.SourceOrder.ForMedia(_config.DownloadOrder, isSeries)
+            .Where(SourceAllowed)
+            .Where(quelle => EndpointFor(quelle) is { Wired: true })
+            .ToList();
+
+    /// <summary>
+    /// F-M504: der Download-Endpunkt EINER Quelle aus dem Katalog — die einzige Stelle, an der ein
+    /// Anbieter auf seinen Endpunkt abgebildet wird (Suche und Abruf fragen beide hier). Null, wenn es
+    /// fuer diese Quelle keinen Endpunkt gibt.
+    /// </summary>
+    /// <param name="provider">Die Quelle.</param>
+    /// <returns>Ihr Endpunkt, oder null.</returns>
+    private Api.Endpoints.IDownloadEndpoint? EndpointFor(Configuration.SubtitleProvider provider) =>
+        _endpoints.AllDownloads.FirstOrDefault(endpoint => endpoint.Provider == provider);
+
+    /// <summary>
+    /// F-M504: der Rang einer Quelle in der Frage-Reihenfolge; 0 heisst „zuerst gefragt". Eine Quelle
+    /// ohne Rang (nicht freigeschaltet) steht hinten — sie kann in der Rangfolge nur auftauchen, wenn
+    /// ein Kandidat aus einer frueheren Konfiguration stammt.
+    /// </summary>
+    /// <param name="rang">Die Raenge der Quellen dieses Laufs.</param>
+    /// <param name="provider">Die Quelle des Kandidaten.</param>
+    /// <returns>Der Rang; <see cref="int.MaxValue"/> fuer unbekannte Quellen.</returns>
+    private static int QuellenRang(IReadOnlyDictionary<Configuration.SubtitleProvider, int> rang, Configuration.SubtitleProvider provider) =>
+        rang.TryGetValue(provider, out int index) ? index : int.MaxValue;
+
+    private async Task<CandidateAttempt> DownloadCandidateRawAsync(
+        SubtitleCandidate cand, int season, int episode, CancellationToken ct)
+    {
+        // F-M494: die letzte Tuer vor dem Netz. Jeder Aufrufer prueft schon selbst und ueberspringt
+        // den Kandidaten (der Durchlauf mit `continue`, damit die andere Quelle weitermacht) — hier
+        // steht die Pruefung trotzdem ein zweites Mal, weil auch die Wiederholungen dieses Abrufs
+        // (429, leere Antwort, Quota) durch diese Methode laufen und ein Lauf den Schalter waehrend
+        // seiner Laufzeit nicht neu liest.
+        if (!SourceAllowed(cand.Provider))
+        {
+            return new CandidateAttempt(null, null, DownloadOutcome.None("source-off"));
+        }
+
+        // F-M497: die zweite Tuer derselben Frage — eine Quelle ohne Konfiguration (SubDL ohne
+        // API-Schluessel bzw. ohne Login-Paar) wird nicht abgerufen, auch nicht aus einer Liste, die
+        // noch aus einer frueheren Konfiguration stammt.
+        if (!_config.IsConfiguredForDownload(cand.Provider))
+        {
+            return new CandidateAttempt(null, null, DownloadOutcome.None("source-unconfigured"));
+        }
+
+
+        // F-M485/F-M504: ein Kandidat wird bei SEINEM Endpunkt geholt — die SubDL-Routen (Archiv,
+        // Cache, v2) gelten nur für die Hauptsuche. Die Frage ist nicht „zweite Quelle?", sondern
+        // „liegt dieser Kandidat bei der Hauptsuche?"; alles andere geht ueber den Katalog, damit eine
+        // dritte Quelle ohne Umbau denselben Weg nimmt.
+        if (cand.Provider != MainSearchSource)
+        {
+            var endpoint = EndpointFor(cand.Provider);
+            if (endpoint is null)
+            {
+                return new CandidateAttempt(null, null, DownloadOutcome.None("no-source-endpoint"));
+            }
+
+            var fremd = await endpoint.FetchAsync(
+                new Api.Endpoints.SubtitleHit(
+                    cand.Provider, cand.Url, cand.Language, string.Empty, cand.ReleaseName, false), ct)
+                .ConfigureAwait(false);
+
+            return fremd is null
+                ? new CandidateAttempt(null, null, DownloadOutcome.None("second-source-empty"))
+                : new CandidateAttempt(
+                    fremd.Data,
+                    null,
+                    new DownloadOutcome
+                    {
+                        Status = 200,
+                        Bytes = fremd.Data.Length,
+                        Route = Api.Endpoints.Provenance.Name(cand.Provider),
+                        Content = fremd.Data,
+                    });
+        }
+
+        // F-M464: the verdict of this attempt travels WITH the attempt (CandidateAttempt.Outcome).
+        // A candidate that is thrown away before any request carries status 0, which reads "no
+        // request made" — it can never quote what the previous candidate's request answered.
+
+        // F-M471 (operator order 12.11.2026: "Archiv immer als ganzes. In den cache, dann
+        // entpacken. Wege auf v2 harmonisieren"): ONE way to the bytes. The archive is fetched
+        // whole, it lands in the disk cache, and the wanted episode is unpacked from that body.
+        // The address is a parameter — the nId when the entry carries one, else the entry's own
+        // url — so there is no member url and no single-file shortcut left. A whole archive costs
+        // one download unit and serves every further episode of the same pack from the cache
+        // (measured 12.11.2026: 79 member fetches from 38 packs, 41 of them for two archives);
+        // a season zip of .srt files is one or two megabytes, so the bytes never justified
+        // splitting the way in the first place.
+        // F-M215 stays: the archive is resolved to OUR episode, never "the first .srt".
+        SubtitleUnpackFile? want = null;
+        if (cand.UnpackFiles.Count > 0 && (episode > 0 || season > 0))
+        {
+            want = cand.FindUnpackFile(season, episode);
+            if (want == null)
+            {
+                // The pack carries a file list but nothing matches our episode. Taking the first
+                // entry would write the wrong episode's text next to this file — worse than not
+                // saving anything, so treat it as no candidate (F-M215).
+                _logger.LogWarning(
+                    "[SubDL-D] pack {Release} has {N} files but none for S{Season}E{Episode} — candidate skipped instead of saving the wrong episode.",
+                    cand.ReleaseName, cand.UnpackFiles.Count, season, episode);
+                return new CandidateAttempt(null, null, DownloadOutcome.None("candidate"));
+            }
+
+            if (_config.LogMode >= LogLevelMode.Debug)
+            {
+                LogUtil.Detail(_config.LogMode, _logger,
+                    "[SubDL-D] unpack pick S{Season}E{Episode} from pack {Release} → {File} (HI={Hi})",
+                    season, episode, cand.ReleaseName, want.Name, want.HearingImpaired);
+            }
+        }
+
+        DownloadOutcome archive = await FetchArchiveAsync(cand.NId, ct, season, episode, want?.Name).ConfigureAwait(false);
+
+        if (archive.Content is { Length: > 0 })
+        {
+            if (want != null)
+            {
+                // Info, not Detail: this line marks every episode served from the ARCHIVE instead
+                // of its own member URL — once per pack the archive is fetched, every further
+                // episode of the same pack is a cache hit.
+                _logger.LogInformation(
+                    "[SubDL] pack served whole — {N} file(s) per archive fetch: {Release}",
+                    cand.UnpackFiles.Count, cand.ReleaseName);
+            }
+
+            return new CandidateAttempt(archive.Content, want, archive);
+        }
+
+        if (want != null)
+        {
+            _logger.LogWarning(
+                "[SubDL-D] pack {Release} did not resolve S{Season}E{Episode} from the archive — nothing saved.",
+                cand.ReleaseName, season, episode);
+        }
+
+        return new CandidateAttempt(null, want, archive);
+
+    }
+
+
+    /// <summary>
+    /// F-M384/F-M474: what a candidate COSTS this run, and how much it covers. The scarce unit is a
+    /// download (50 a day), so nothing that costs one is taken while something free is on offer,
+    /// and a season pack is preferred over a single at the same price because one fetch serves every
+    /// episode of the season (F-M472 hands them over).
+    /// <para>
+    /// <c>4</c> pack that carries this episode, archive cached (free, and free for the season);
+    /// <c>3</c> single file, archive cached (free, this episode only);
+    /// <c>2</c> pack that carries this episode, must be fetched (one unit, whole season);
+    /// <c>1</c> single file, must be fetched (one unit, one episode);
+    /// <c>0</c> pack without this episode — it could not serve it at all.
+    /// </para>
+    /// </summary>
+    /// <param name="c">Candidate from the search.</param>
+    /// <param name="season">Wanted season (0 = unknown).</param>
+    /// <param name="episode">Wanted episode (0 = unknown).</param>
+    /// <returns>Cost rank, higher wins.</returns>
+    private long CandidateRank(SubtitleCandidate c, int season, int episode)
+    {
+        bool cached = _api.IsEntryArchiveCached(c.NId);
+
+        if (c.UnpackFiles.Count >= 2)
+        {
+            if (season <= 0 && episode <= 0)
+            {
+                return 0;
+            }
+
+            return c.FindUnpackFile(season, episode) != null
+                ? (cached ? 4 : 2)
+                : 0;
+        }
+
+        return cached ? 3 : 1;
+    }
+
+    private long Score(SubtitleCandidate c, string videoBase)
+    {
+        long score = 0;
+        string? vfGroup = videoBase.Contains('-', StringComparison.Ordinal) ? videoBase.Split('-')[^1].TrimEnd(']').Trim() : null;
+        if (vfGroup != null && c.ReleaseName.Contains('-', StringComparison.Ordinal))
+        {
+            string subGroup = c.ReleaseName.Split('-')[^1].TrimEnd(']').Trim();
+            if (string.Equals(subGroup, vfGroup, StringComparison.OrdinalIgnoreCase))
+            {
+                score += _config.DownloadScoreWeightGroup;
+            }
+        }
+
+        var vfTokens = Tokenize(videoBase);
+        var subTokens = Tokenize(c.ReleaseName);
+        score += (long)vfTokens.Intersect(subTokens, StringComparer.OrdinalIgnoreCase).Count() * _config.DownloadScoreWeightToken;
+        // (19.09.2026): tie-breaker restored — the v1 client parses
+        // download_count (SubdlApiClient line ~1526), so the criterion works
+        // Again; 's removal reason ("v2 carries no count") no longer applies.
+        score += Math.Min(c.DownloadCount, 500) * _config.DownloadScoreWeightDownload; // capped tie-breaker
+        return score;
+    }
+
+    /// <summary>Video FPS from the item's primary video stream (F-M43 Stufe 1). Null when unknown.</summary>
+    private double? GetVideoFps(BaseItem item)
+    {
+        try
+        {
+            var streams = _mediaSourceManager.GetMediaStreams(item.Id);
+            var video = streams?.FirstOrDefault(s => s.Type == MediaStreamType.Video);
+            if (video != null && video.AverageFrameRate != 0)
+            {
+                return video.AverageFrameRate;
+            }
+
+            if (video != null && video.RealFrameRate != 0)
+            {
+                return video.RealFrameRate;
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static HashSet<string> Tokenize(string s) =>
+        new(s.Split(new[] { '.', '_', ' ', '-' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase);
+
+
+    /// <summary>
+    /// Decode SRT bytes with BOM detection (UTF-8/UTF-16LE/UTF-16BE) before
+    /// any QA parse. The old hard-coded UTF-8 read mangled valid UTF-16 files
+    /// (live case Coherence.zh: valid file appeared cue-less → false-positive
+    /// structure reject). No BOM → strict UTF-8 (same as before).
+    /// </summary>
+    /// <remarks>
+    /// F-M187: this is the ONLY path from downloaded bytes to text. Every
+    /// consumer (QA parse, runtime check, content hash) must go through it —
+    /// a caller using <c>Encoding.UTF8.GetString</c> directly turns a UTF-16
+    /// payload into mojibake, and then the hash computed at download time no
+    /// longer equals the hash the upload side computes later over the same
+    /// file, so <c>IsContentKnown</c> misses and the file is uploaded again.
+    /// The runtime check degrades silently as well: NUL bytes break the
+    /// timecode regex, so it reports "matches" without actually checking.
+    /// </remarks>
+    private static string DecodeSrt(byte[] bytes)
+    {
+        if (bytes.Length >= 2)
+        {
+            if (bytes[0] == 0xFF && bytes[1] == 0xFE) return System.Text.Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+            if (bytes[0] == 0xFE && bytes[1] == 0xFF) return System.Text.Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+        }
+        return System.Text.Encoding.UTF8.GetString(bytes);
+    }
+
+    /// <summary>F-M43 Stufe 2: SRT cue span vs item runtime, tolerance from config. Returns (ok, reason).</summary>
+    private bool RuntimeMatches(BaseItem item, byte[] srtBytes, out string? reason)
+    {
+        reason = null;
+        int toleranceSec = _config.DownloadRuntimeToleranceSec;
+        if (toleranceSec <= 0 || (item.RunTimeTicks ?? 0) <= 0)
+        {
+            return true; // check disabled or no runtime metadata
+        }
+
+        string content = DecodeSrt(srtBytes);
+        long firstStart = -1, lastEnd = -1;
+        var timeRegex = new Regex(@"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})");
+        foreach (Match m in timeRegex.Matches(content))
+        {
+            long start = ToMs(m, 1);
+            long end = ToMs(m, 5);
+            if (firstStart < 0)
+            {
+                firstStart = start;
+            }
+
+            lastEnd = Math.Max(lastEnd, end);
+        }
+
+        if (firstStart < 0 || lastEnd <= firstStart)
+        {
+            return true; // unparseable SRT → skip check (fail-open)
+        }
+
+        long spanSec = (lastEnd - firstStart) / 1000;
+        long runtimeSec = (item.RunTimeTicks ?? 0) / TimeSpan.TicksPerSecond;
+        if (Math.Abs(spanSec - runtimeSec) > toleranceSec)
+        {
+            reason = $"span {spanSec}s vs runtime {runtimeSec}s (tolerance ±{toleranceSec}s)";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static long ToMs(Match m, int groupStart)
+    {
+        int h = int.Parse(m.Groups[groupStart].Value, System.Globalization.CultureInfo.InvariantCulture);
+        int min = int.Parse(m.Groups[groupStart + 1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        int s = int.Parse(m.Groups[groupStart + 2].Value, System.Globalization.CultureInfo.InvariantCulture);
+        int ms = int.Parse(m.Groups[groupStart + 3].Value, System.Globalization.CultureInfo.InvariantCulture);
+        return ((h * 60L + min) * 60L + s) * 1000L + ms;
+    }
+
+    /// <summary>
+    /// Kill-safe atomic write (NF-4): writes to a temp file next to the target,
+    /// then renames. A crash mid-write leaves the temp file (cleaned on the next
+    /// run) — the target file never exists in a half-written state, so a subtitle
+    /// is either fully there or counts as missing again.
+    /// </summary>
+    private static async Task AtomicWriteAsync(string targetPath, byte[] bytes, CancellationToken ct)
+    {
+        string tmpPath = targetPath + ".part";
+        await File.WriteAllBytesAsync(tmpPath, bytes, ct).ConfigureAwait(false);
+        File.Move(tmpPath, targetPath, overwrite: true);
+    }
+
+    /// <summary>
+    /// The file names of one directory, or null when it cannot be listed.
+    /// <para>
+    /// F-M315: used to pick a free slot out of the reserved original block. Null and "empty" are kept
+    /// apart on purpose — an empty set would hand out slot 99 to a file that may well be sitting
+    /// there, and the write would then overwrite an original the operator wants to keep. A caller
+    /// that cannot list must refuse, not guess.
+    /// </para>
+    /// </summary>
+    /// <param name="directory">Directory to list.</param>
+    /// <returns>File names, or null when the listing failed.</returns>
+    private static System.Collections.Generic.HashSet<string>? SidecarNamesInDirectory(string directory)
+    {
+        try
+        {
+            var names = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string f in Directory.EnumerateFiles(directory, "*.srt"))
+            {
+                names.Add(Path.GetFileName(f));
+            }
+
+            return names;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Parses a release file name into (title, year, isSeries) for the TMDb fallback when
+    /// Jellyfin's own metadata is unusable.
+    /// </summary>
+    /// <remarks>
+    /// F-M251 (29.09.2026): this used to be a SECOND name parser with its own SxxExx regex,
+    /// its own year regex and its own quality-tag list. It therefore kept every gap the main
+    /// parser had already closed — measured on the test instance, the download side still
+    /// resolved the Cunk name as the strand "BBC Documentaries" while the upload side had
+    /// been fixed (F-M249b) — and any future name shape would have had to be fixed twice.
+    /// It now delegates to <see cref="MediaNameParser"/>, which is the single authority for
+    /// what a file name means. The return shape is unchanged.
+    /// </remarks>
+    /// <summary>F-M348: characters that make a parsed title unusable as a search term.</summary>
+    private static readonly System.Buffers.SearchValues<char> UnusableTitleChars =
+        System.Buffers.SearchValues.Create("%[](){}");
+
+    /// <summary>F-M346: the whole parse — the fallback needs the id and the season/episode too.</summary>
+    private static ParsedMediaName ParseFileNameForIds(string fileName) => MediaNameParser.Parse(fileName);
+
+    private (string? Imdb, string? Tmdb, int Season, int Episode, bool IsSeries) ResolveIds(BaseItem item)
+    {
+        switch (item)
+        {
+            case Episode ep:
+                string? seriesImdb = null;
+                string? seriesTmdb = null;
+                ep.Series?.ProviderIds?.TryGetValue("Imdb", out seriesImdb);
+                ep.Series?.ProviderIds?.TryGetValue("Tmdb", out seriesTmdb);
+                return (NormalizeId(seriesImdb), NormalizeId(seriesTmdb), ep.ParentIndexNumber ?? 0, ep.IndexNumber ?? 0, true);
+            case Movie movie:
+                string? imdb = null;
+                string? tmdb = null;
+                movie.ProviderIds?.TryGetValue("Imdb", out imdb);
+                movie.ProviderIds?.TryGetValue("Tmdb", out tmdb);
+                return (NormalizeId(imdb), NormalizeId(tmdb), 0, 0, false);
+            default:
+                return (null, null, 0, 0, false);
+        }
+    }
+
+    /// <summary>
+    /// Treats empty/whitespace/placeholder IDs (e.g. "0") as missing so the TMDB
+    /// ladder and the skip logic handle them consistently.
+    /// </summary>
+    /// <summary>
+    /// F-M450: remembers a defect and files the report once the SAME candidate has failed a SECOND
+    /// time. The store row is the memory: first failure writes it, the next run reads it and only
+    /// then reports. Nothing is reported on a single observation — one empty answer can be a
+    /// hiccup on SubDL's side, two are a broken package.
+    /// </summary>
+    /// <param name="itemId">Jellyfin item id.</param>
+    /// <param name="lang">Language code.</param>
+    /// <param name="cand">The candidate that failed.</param>
+    /// <param name="finding">Naked finding.</param>
+    /// <param name="kind">"empty" (does not block) or "qa" (blocks, as before).</param>
+    /// <param name="summary">Run summary.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Task.</returns>
+    private async Task RememberAndReportAsync(
+        string itemId, string lang, SubtitleCandidate cand, string finding, string kind,
+        DownloadRunSummary summary, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(cand.SubdlId) || string.IsNullOrWhiteSpace(finding))
+        {
+            return;
+        }
+
+        _qaFails.RecordSkippedCandidates(
+            itemId,
+            lang,
+            new[] { cand.SubdlId },
+            RejectReason.CandidateRejected,
+            new Dictionary<string, ReportFacts>
+            {
+                [cand.SubdlId] = new ReportFacts(cand.NId, finding, cand.ReleaseName)
+            },
+            kind);
+
+        // Operator order 09.11.2026: no second sighting. Every observed defect is filed in the run
+        // that observed it — a measured gate verdict as much as an answer that carried nothing.
+        // ReportedUtc is what keeps a filing from happening twice; the wait was never a safety net,
+        // it only delayed a diagnosis that was already made.
+        if (!_config.ReportBrokenSubtitles)
+        {
+            return;
+        }
+
+        var row = _qaFails.GetRows(itemId, lang)
+            .FirstOrDefault(r => string.Equals(r.SubdlId, cand.SubdlId, StringComparison.Ordinal)
+                                 && string.Equals(r.Kind, kind, StringComparison.Ordinal));
+        if (row != null && row.ReportedUtc == null)
+        {
+            QueueReport(row);
+        }
+    }
+
+    /// <summary>
+    /// F-M473: notes the library an item belongs to, so the end of the run can tell it to look for
+    /// new and updated files. Nested libraries resolve to the folder Jellyfin itself scans (F-M189).
+    /// </summary>
+    /// <param name="item">Item a subtitle was just saved for.</param>
+    /// <param name="savedPath">The subtitle file that was written, if this call is a real save.</param>
+    private void RememberSavedLibrary(BaseItem item, string? savedPath = null)
+    {
+        try
+        {
+            foreach (var folder in _libraryManager.GetCollectionFolders(item))
+            {
+                _librariesSaved.Add(folder.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("[SubDL-D] library lookup failed for {Item}: {Msg}", item.Id, ex.Message);
+        }
+
+        if (!string.IsNullOrWhiteSpace(savedPath))
+        {
+            _savedSubtitlePaths.Add(savedPath);
+        }
+    }
+
+    /// <summary>
+    /// F-M473 (operator order 12.11.2026): "die Funktion nach neuen und aktualisierten subs für die
+    /// lib antriggern (kein vollständiger jf database scan)". Only libraries that received a
+    /// subtitle are named, exactly once each, and only when the run really saved something — a dry
+    /// run writes nothing, so it triggers nothing. Jellyfin queues the scan; the run does not wait.
+    /// </summary>
+    /// <param name="summary">The run summary that says whether anything was saved.</param>
+    private void TriggerLibraryRefreshForSavedSubtitles(DownloadRunSummary summary)
+    {
+        if (!_config.RefreshLibraryAfterDownload)
+        {
+            return; // F-M473: the operator turned the hand-over off in the download tab
+        }
+
+        if (summary.IsDryRun || summary.Downloaded <= 0 || _savedSubtitlePaths.Count == 0)
+        {
+            return;
+        }
+
+        // Exactly the dashboard's "Bibliothek scannen → nach neuen und aktualisierten Dateien suchen"
+        // (jellyfin-web refreshdialog: mode "scan" sends MetadataRefreshMode AND ImageRefreshMode as
+        // Default, Recursive, no replace), queued on the library the subtitles went into. Jellyfin 12
+        // offers this per ITEM (IProviderManager.QueueRefresh); the only library-wide call is
+        // ValidateMediaLibrary, the full database scan that was ruled out. Queued, not awaited.
+        foreach (var libraryId in _librariesSaved)
+        {
+            try
+            {
+                var options = new MetadataRefreshOptions(new DirectoryService(_fileSystem))
+                {
+                    MetadataRefreshMode = MetadataRefreshMode.Default,
+                    ImageRefreshMode = MetadataRefreshMode.Default,
+                    ReplaceAllImages = false,
+                    ReplaceAllMetadata = false,
+                    ForceSave = false,
+                    IsAutomated = false,
+                    RemoveOldMetadata = false,
+                };
+
+                _providerManager.QueueRefresh(libraryId, options, RefreshPriority.High);
+                LogUtil.Normal(_logger,
+                    "[SubDL-D] library {Library}: scan for new and updated files queued ({Count} subtitle(s) saved in this run, {Files} file(s) reported)",
+                    libraryId.ToString("N"), summary.Downloaded, _savedSubtitlePaths.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("[SubDL-D] library update for {Library} failed: {Msg}", libraryId.ToString("N"), ex.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// F-M472: remembers the season pack an episode was just served from, so the run loop can put
+    /// the remaining episodes of the SAME release right after it. Only members that name the same
+    /// release count: a pack of mixed releases is not "one release", and completeness of the season
+    /// is deliberately NOT required (operator order 12.11.2026) — whatever the pack covers is served.
+    /// </summary>
+    /// <param name="item">The item that was just saved.</param>
+    /// <param name="season">Season of that item.</param>
+    /// <param name="episode">Episode number of that item.</param>
+    /// <param name="cand">The candidate the file came from.</param>
+    private void RememberPackCover(BaseItem item, int season, int episode, SubtitleCandidate cand)
+    {
+        // Never clear here. The item starts with a clean marker, and a save from a single-file entry
+        // — the follow-up candidate after the pack already served the language — must not wipe the
+        // cover the pack just recorded. Measured on the bench 13.11.2026: the pack saved at 09:11:03,
+        // the follow-up one second later, and the hand-over found nothing.
+        if (cand.UnpackFiles.Count < 2)
+        {
+            return; // one member is a single file, not a pack
+        }
+
+        // The pack IS the release: it answered this episode, so every member of the same entry
+        // belongs to the release that just proved itself. No name comparison — measured on SubDL
+        // 13.11.2026 (The Middle S9, entry …-3055878) the pack is called
+        // "The.Middle.S09.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb" while its members are named
+        // "The Middle - S09E01 (2009) WEB.eng.srt" …, so any string comparison against the pack
+        // name — or between member names — only invents a way to drop members that are in fact
+        // the same release. What separates releases is the entry, and the entry has already matched.
+        var episodes = new SortedSet<int>();
+        foreach (var member in cand.UnpackFiles)
+        {
+            int memberSeason = member.Season > 0 ? member.Season : season;
+            if (memberSeason != season)
+            {
+                continue;
+            }
+
+            int memberEpisode = member.Episode > 0
+                ? member.Episode
+                : SubtitleCandidate.EpisodeFromFileName(member.Name, memberSeason);
+
+            // The episode that was just served, and anything the pack itself could not name, is not
+            // a lead for another item.
+            if (memberEpisode <= 0 || memberEpisode == episode)
+            {
+                continue;
+            }
+
+            episodes.Add(memberEpisode);
+        }
+
+        if (episodes.Count == 0)
+        {
+            return;
+        }
+
+        _packCover = new PackCover(item is Episode ep ? ep.SeriesId : null, cand.ReleaseName, season, episodes);
+    }
+
+    /// <summary>
+    /// F-M450: files one stored defect with SubDL and marks the row when SubDL takes it. A report
+    /// that is not taken (rate limited, refused) leaves the row unreported, so the next run picks it
+    /// up again — deferred, never dropped and never sent twice.
+    /// </summary>
+    /// <param name="row">Stored defect.</param>
+    /// <param name="lang">Language code.</param>
+    /// <param name="summary">Run summary.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Task.</returns>
+    /// <summary>
+    /// F-M450: puts a confirmed row on the report queue. Filing happens after the walk, so nothing
+    /// here can slow down or break a download unit.
+    /// </summary>
+    /// <param name="row">Confirmed defect.</param>
+    private void QueueReport(RejectedCandidateEntity row)
+    {
+        if (string.IsNullOrWhiteSpace(row.NId)
+            || _pendingReports.Any(r => string.Equals(r.Id, row.Id, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        _pendingReports.Add(row);
+    }
+
+    /// <summary>
+    /// F-M450: files every queued report. Each call is wrapped: the report route is undocumented, and
+    /// a reporting defect must never surface as a pipeline failure.
+    /// </summary>
+    /// <param name="summary">Run summary.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Task.</returns>
+    private async Task FlushReportsAsync(DownloadRunSummary summary, CancellationToken ct)
+    {
+        if (_pendingReports.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var row in _pendingReports.ToList())
+        {
+            try
+            {
+                await FileReportAsync(row, row.Language, summary, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                summary.ReportsDeferred++;
+                _logger.LogWarning("[SubDL-D] report for {Release} not filed: {Msg}", row.ReleaseName, ex.Message);
+            }
+        }
+
+        _pendingReports.Clear();
+    }
+
+    private async Task FileReportAsync(RejectedCandidateEntity row, string lang, DownloadRunSummary summary, CancellationToken ct)
+    {
+        string version = typeof(DownloadPipeline).Assembly.GetName().Version?.ToString() ?? string.Empty;
+        var text = BrokenSubtitleReports.Build(row.SubdlId, row.ReleaseName, lang, row.Finding, version, _api.AccountName);
+        if (text == null || string.IsNullOrWhiteSpace(row.NId))
+        {
+            return;
+        }
+
+        var outcome = await _api.ReportBrokenSubtitleAsync(row.NId, text.Category, text.Comment, ct).ConfigureAwait(false);
+        if (outcome == SubdlReportOutcome.Accepted)
+        {
+            _qaFails.MarkReported(row);
+            summary.Reported++;
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[SubDL-D] {Release} [{Lang}] — reported to SubDL ({Category}) for subtitle {NId}",
+                row.ReleaseName, lang, text.Category, row.NId);
+            return;
+        }
+
+        summary.ReportsDeferred++;
+    }
+
+    private static string? NormalizeId(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        var trimmed = id.Trim();
+        if (trimmed == "0")
+        {
+            return null;
+        }
+
+        return trimmed;
+    }
+
+    /// <summary>
+    /// Metadata wait (on arrival, user decision 08.09.2026): max 15 min.
+    /// Metadata is polled every 5 min (3 checks total); between polls a 30 s
+    /// heartbeat loop keeps the in-run watchdog alive. Returns the fresh item
+    /// or null on timeout.
+    /// </summary>
+
+    private List<BaseItem> CollectItems(List<string> libraryNames)
+    {
+        var result = new List<BaseItem>();
+        // F-M189 (24.09.2026): collect via the PATH scope, not by library name —
+        // a library nested inside another one owns no items of its own (JF logs
+        // "Found duplicate path"), so a name-only match returns an empty list.
+        var scope = LibraryScope.Create(_libraryManager, libraryNames, _logger);
+        if (scope.IsEmpty)
+        {
+            return result;
+        }
+
+        var root = _libraryManager.GetUserRootFolder();
+        foreach (var child in root.Children)
+        {
+            if (child is not CollectionFolder folder)
+            {
+                continue;
+            }
+
+            // Walk a library when the selection touches it — the outer library of
+            // a nested selection holds the items, so it must be enumerated too.
+            if (!scope.IsLibraryRelevant(folder.Name) && !scope.IsSelectedName(folder.Name))
+            {
+                continue;
+            }
+
+            result.AddRange(folder.GetRecursiveChildren()
+                .Where(i => (i is Movie || i is Episode) && !string.IsNullOrWhiteSpace(i.Path))
+                .Where(scope.Contains));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (_watchdog != null && _api != null)
+        {
+            _api.ApiActivity -= _watchdog.Heartbeat;
+        }
+
+        _watchdog?.Dispose();
+        _watchdog = null;
+    }
+
+    /// <summary>F-M152 (rev.10): next 00:00 UTC after now (fail-safe anchor for
+    /// Edge 429s without rate headers).</summary>
+    private DateTime NextMidnightUtc()
+    {
+        var now = DateTime.UtcNow;
+        return now.Date.AddDays(now.TimeOfDay == TimeSpan.Zero ? 0 : 1);
+    }
+}
