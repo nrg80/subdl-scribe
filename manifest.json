@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.419",
-        "changelog": "v12.1.12.419: The client now names itself on every request to tvsubtitles.net (client=sub-scribe-<version>) and carries the current product name in its user-agent instead of the retired one.",
+        "version": "12.1.12.420",
+        "changelog": "v12.1.12.420: A language the site does not carry no longer re-enters the chain every run and is no longer booked as a failure — each site keeps its own language set, SubDL keeps its own.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.419-dev/Jellyfin.Plugin.SubdlSync_12.1.12.419.zip",
-        "checksum": "7b1c5720c8db65b7413e83011e4667ee",
-        "timestamp": "2026-11-16T11:56:16Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.420-dev/Jellyfin.Plugin.SubdlSync_12.1.12.420.zip",
+        "checksum": "5c2e1635b842d09a47b79eb471b30c33",
+        "timestamp": "2026-11-16T12:07:33Z"
       }
     ]
   }
