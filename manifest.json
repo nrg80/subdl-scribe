@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.406",
-        "changelog": "v12.1.12.406: A failed cycle now logs the exception with its stack — the message alone (\"One of the identified items was in an invalid format.\") named no site.",
+        "version": "12.1.12.407",
+        "changelog": "v12.1.12.407: The download tab no longer carries a bare \"tvst\" heading, and the GUI check suite counts its failures at the end — it had been reporting 326/326 OK while ten checks were red.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.406-dev/Jellyfin.Plugin.SubdlSync_12.1.12.406.zip",
-        "checksum": "37392fd568421c1b1acc8e4f6fc4b9fe",
-        "timestamp": "2026-11-16T06:39:40Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.407-dev/Jellyfin.Plugin.SubdlSync_12.1.12.407.zip",
+        "checksum": "db5beab40dcc29e71276e75fd5b05f71",
+        "timestamp": "2026-11-16T06:50:01Z"
       }
     ]
   }
