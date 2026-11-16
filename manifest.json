@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.405",
-        "changelog": "v12.1.12.405: The download run now stores the tvsubtitles show number too — before, only the upload path wrote it, so every run fetched the show list again.",
+        "version": "12.1.12.406",
+        "changelog": "v12.1.12.406: A failed cycle now logs the exception with its stack — the message alone (\"One of the identified items was in an invalid format.\") named no site.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.405-dev/Jellyfin.Plugin.SubdlSync_12.1.12.405.zip",
-        "checksum": "b22124c10973380c964efab07e19fe82",
-        "timestamp": "2026-11-16T05:22:41Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.406-dev/Jellyfin.Plugin.SubdlSync_12.1.12.406.zip",
+        "checksum": "37392fd568421c1b1acc8e4f6fc4b9fe",
+        "timestamp": "2026-11-16T06:39:40Z"
       }
     ]
   }
