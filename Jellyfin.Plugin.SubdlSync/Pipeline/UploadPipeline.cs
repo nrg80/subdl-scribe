@@ -1055,6 +1055,26 @@ public sealed class UploadPipeline : IPackFiller
                 continue;
             }
 
+            // ============================================================
+            // F-M541 (16.11.2026): sind ALLE Textspuren dieser Datei als verworfen vermerkt, endet der
+            // Eintrag hier. Die Quellenliste am Dateikopf fragt nur nach HOCHGELADEN (F-M499) — eine
+            // verworfene Spur kann aber niemand mehr hochladen. Folge: eine Datei, deren Spuren alle
+            // verworfen waren, blieb fuer immer „still open" fuer alle drei Quellen, wurde in jedem
+            // vollen Scan erneut entpackt und dann Spur fuer Spur uebersprungen — im Log sichtbar als
+            // „SKIP … uploaded earlier in this run (self-echo lock, F-M142)" mit anschliessendem
+            // „no stream survived local screening" und ohne Datei-Marke (gemessen 16.11. an
+            // The.Assassin S02E02, Zyklus 14:26). Die Entscheidung je Spur bleibt unveraendert (F-M68):
+            // dieser Ausstieg tut nur dasselbe eine Ebene hoeher und spart den ffmpeg-Durchgang.
+            // ============================================================
+            if (textPositions.Count > 0 && textPositions.All(p => Registry.EmbedRejectedReason(mediaHash, p) != null))
+            {
+                summary.SettledItems++;
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[SubDL] SKIP {File} — every text stream was rejected earlier, nothing can be uploaded (F-M541)",
+                    Path.GetFileName(mediaPath));
+                continue;
+            }
+
             var (extracted, batchExit) = await FfmpegTools.ExtractAllAsync(_ffmpegPath, mediaPath, textPositions, _logger, _config, runCt).ConfigureAwait(false);
 
             // When the one-pass call failed as a whole (non-zero exit, spawn error or

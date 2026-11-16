@@ -1062,6 +1062,15 @@ internal static class Program
                     && uploadSource.Contains("public int SettledItems { get; set; }", StringComparison.Ordinal)
                     && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries", StringComparison.Ordinal));
 
+                // ---- F-M541: eine Datei mit lauter verworfenen Spuren endet vor dem ffmpeg-Lauf -----
+                int i541 = uploadSource.IndexOf("every text stream was rejected earlier", StringComparison.Ordinal);
+                Check("F-M541: a file whose text streams were all rejected ends before the ffmpeg pass",
+                    i541 > 0 && iExtract > 0 && i541 < iExtract
+                    && uploadSource.Contains("textPositions.All(p => Registry.EmbedRejectedReason(mediaHash, p) != null)", StringComparison.Ordinal));
+                Check("F-M541: it says why in one line per file instead of per stream",
+                    uploadSource.Contains("SKIP {File} — every text stream was rejected earlier, nothing can be uploaded (F-M541)", StringComparison.Ordinal)
+                    && uploadSource.Contains("summary.SettledItems++;", StringComparison.Ordinal));
+
                 // ---- F-M540: die Queue fragt den Store je Paar, je Quelle ----------------------
                 // Operator-Anweisung 16.11.2026: „Prüfung bereits im seeder ob sprache / sub bereits als
                 // hochgeladen markiert ist. Wenn ja skip. Prüfung für subdl und tvst, jeweils eine eigene queue"
