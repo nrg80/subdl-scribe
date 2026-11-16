@@ -400,6 +400,14 @@
     "T259": {
       "suite": "endpoints",
       "checks": 3
+    },
+    "T260": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T261": {
+      "suite": "endpoints",
+      "checks": 3
     }
   }
 }

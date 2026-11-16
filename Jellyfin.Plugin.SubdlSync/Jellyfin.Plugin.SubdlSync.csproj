@@ -1,12 +1,12 @@
 <!--
-  This file is part of SubDL Scribe (https://github.com/nrg80/sub-scribe)
+  This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
   SPDX-License-Identifier: GPL-3.0-or-later
 
-  SubDL Scribe is free software: you can redistribute it and/or modify it
+  Sub Scribe is free software: you can redistribute it and/or modify it
   under the terms of the GNU General Public License as published by the
   Free Software Foundation, either version 3 of the License, or (at your
   option) any later version.
-  SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+  Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
   warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   See the GNU General Public License for more details.
 -->
@@ -14,12 +14,12 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <!-- F-M223: namespace says SubDL Scribe; the ASSEMBLY name stays Jellyfin.Plugin.SubdlSync. -->
+    <!-- F-M223: the namespace says Sub Scribe (SubdlScribe); the ASSEMBLY name stays Jellyfin.Plugin.SubdlSync. -->
     <RootNamespace>Jellyfin.Plugin.SubdlScribe</RootNamespace>
     <AssemblyName>Jellyfin.Plugin.SubdlSync</AssemblyName>
-    <Version>12.1.12.421</Version>
-    <AssemblyVersion>12.1.12.421</AssemblyVersion>
-    <FileVersion>12.1.12.421</FileVersion>
+    <Version>12.1.12.422</Version>
+    <AssemblyVersion>12.1.12.422</AssemblyVersion>
+    <FileVersion>12.1.12.422</FileVersion>
     <Authors>Hermes Agent</Authors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>

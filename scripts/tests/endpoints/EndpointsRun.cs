@@ -640,8 +640,8 @@ internal static class Program
         // gelesen wurde — also "irgendwo hochgeladen". Der zweite Endpunkt bekam nie seinen Versuch.
         Check("die Upload-Queue fragt je Quelle statt quellenblind (F-M499)",
             seederSource.Contains("UploadTodoFor(item, mediaPath, config, quelle)", StringComparison.Ordinal)
-            && seederSource.Contains("registry.ArePositionsTerminalFor(mediaHash", StringComparison.Ordinal)
-            && seederSource.Contains("registry.CountKnownPairsFor(mediaHash, quelle)", StringComparison.Ordinal)
+            && seederSource.Contains("registry.IsUploadedTo(mediaHash, mapped, hi, quelle)", StringComparison.Ordinal)
+            && !seederSource.Contains("registry.CountKnownPairs(mediaHash)", StringComparison.Ordinal)
             && seederSource.Contains("registry.IsSidecarUploadedTo(looseHash, quelle)", StringComparison.Ordinal)
             && !seederSource.Contains("registry.ArePositionsTerminal(mediaHash", StringComparison.Ordinal)
             && !seederSource.Contains("registry.CountKnownPairs(mediaHash)", StringComparison.Ordinal)
@@ -1043,6 +1043,37 @@ internal static class Program
                     && MovieSubtitlesClient.SiteLanguage("ar") == "ar",
                     "tvst(hi)=" + (TvSubtitlesClient.SiteLanguage("hi") ?? "-")
                     + " mst(hi)=" + (MovieSubtitlesClient.SiteLanguage("hi") ?? "-"));
+
+                // ---- F-M539: erledigte Eintraege enden VOR dem ffmpeg-Durchgang ---------------
+                // Operator-Anweisung 16.11.2026: „Das kann man doch sofort skippen, ohne weitere Pruefung."
+                int iSettle = uploadSource.IndexOf("summary.SettledItems++", StringComparison.Ordinal);
+                int iExtract = uploadSource.IndexOf("FfmpegTools.ExtractAllAsync", StringComparison.Ordinal);
+                Check("F-M539: the settled-item exit stands BEFORE the one ffmpeg pass over all streams",
+                    iSettle > 0 && iExtract > 0 && iSettle < iExtract,
+                    "SettledItems@" + iSettle + " ExtractAll@" + iExtract);
+                Check("F-M539: it asks both questions — no pair still wanted AND every position terminal",
+                    uploadSource.Contains("bool settledPairs = !Registry.RecordedPairsByHash(mediaHash)", StringComparison.Ordinal)
+                    && uploadSource.Contains(".Any(pair => AnyUploadSourceStillWants(mediaHash, pair.Language, pair.HearingImpaired, isSeries));", StringComparison.Ordinal)
+                    && uploadSource.Contains("if (settledPairs && Registry.ArePositionsTerminal(mediaHash, textPositions))", StringComparison.Ordinal));
+                Check("F-M539: a switch change re-opens the item (the pair question reads the per-source switches)",
+                    uploadSource.Contains("item settled before extraction", StringComparison.Ordinal)
+                    && uploadSource.Contains("public int SettledItems { get; set; }", StringComparison.Ordinal)
+                    && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries", StringComparison.Ordinal));
+
+                // ---- F-M540: die Queue fragt den Store je Paar, je Quelle ----------------------
+                // Operator-Anweisung 16.11.2026: „Prüfung bereits im seeder ob sprache / sub bereits als
+                // hochgeladen markiert ist. Wenn ja skip. Prüfung für subdl und tvst, jeweils eine eigene queue"
+                Check("F-M540: the queue asks the store per (language, HI) pair and per source",
+                    seederSource.Contains("if (!registry.IsUploadedTo(mediaHash, mapped, hi, quelle))", StringComparison.Ordinal)
+                    && seederSource.Contains("bool hi = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.IsHearingImpairedStream(s);", StringComparison.Ordinal)
+                    && !seederSource.Contains("registry.CountKnownPairsFor(mediaHash, quelle) >= needed.Count + untagged", StringComparison.Ordinal));
+                Check("F-M540: the queue also asks whether the site carries the language at all",
+                    seederSource.Contains("Api.TvSubtitlesClient.SiteLanguage(mapped) is not null", StringComparison.Ordinal)
+                    && seederSource.Contains("Api.MovieSubtitlesClient.SiteLanguage(mapped) is not null", StringComparison.Ordinal)
+                    && seederSource.Contains("continue;", StringComparison.Ordinal));
+                Check("F-M540: an untagged stream keeps the item queued and loose .srt keep their own check",
+                    seederSource.Contains("return true; // ungetaggte Spur: die Kette entscheidet nach dem Extrahieren", StringComparison.Ordinal)
+                    && seederSource.Contains("if (looseSrts.Count > 0 && SidecarsNeedWork(looseSrts, mediaHash, quelle))", StringComparison.Ordinal));
 
                 // Anlegen hoechstens einmal je Medium und Lauf: derselbe Fehlschlag wird NICHT wiederholt.
                 var zweiterVersuch = await aufloeserKaputt

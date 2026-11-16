@@ -80,6 +80,12 @@ public class RunSummary
     /// </summary>
     public int RejectedCandidates { get; set; }
 
+    /// <summary>
+    /// F-M539: Eintraege, die vor dem ffmpeg-Durchgang als erledigt erkannt wurden — jede Textspur hat
+    /// ihren Endstand im Store und keine erlaubte Quelle will noch ein Paar dieser Datei.
+    /// </summary>
+    public int SettledItems { get; set; }
+
     /// <summary>Gets or sets the number of rate-limit hits this run.</summary>
     public int RateLimitHits { get; set; }
 
@@ -1027,6 +1033,28 @@ public sealed class UploadPipeline : IPackFiller
                 .Distinct()
                 .OrderBy(p => p)
                 .ToList();
+            // ============================================================
+            // F-M539 (Operator-Anweisung 16.11.2026: „Das kann man doch sofort skippen, ohne weitere
+            // Pruefung"): ist der Eintrag erledigt, endet er HIER — vor dem einen ffmpeg-Durchgang.
+            // Bis dahin wurde fuer JEDE Datei zuerst ueber alle Textspuren extrahiert (F-M5), und erst
+            // danach fiel die Entscheidung je Spur: am 16.11. waren das 633 Selbst-Echo-Treffer und
+            // 288 "already-uploaded" — also Arbeit an Dateien, an denen nichts zu tun war.
+            // Der Medien-Hash deckt den DATEIINHALT, eine neu gerippte Datei hat einen anderen Hash;
+            // der fruehe Ausstieg kann deshalb keine zusaetzliche Spur uebersehen. Und ein
+            // Schalterwechsel oeffnet den Eintrag wieder, weil die Paar-Frage die Schalter je Quelle
+            // liest (F-M538) und nicht nur "irgendwo hochgeladen" (F-M499).
+            // ============================================================
+            bool settledPairs = !Registry.RecordedPairsByHash(mediaHash)
+                .Any(pair => AnyUploadSourceStillWants(mediaHash, pair.Language, pair.HearingImpaired, isSeries));
+            if (settledPairs && Registry.ArePositionsTerminal(mediaHash, textPositions))
+            {
+                summary.SettledItems++;
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[SubDL] SKIP {File} — item settled before extraction (every text stream has its end state, no source still wants a pair, F-M539)",
+                    Path.GetFileName(mediaPath));
+                continue;
+            }
+
             var (extracted, batchExit) = await FfmpegTools.ExtractAllAsync(_ffmpegPath, mediaPath, textPositions, _logger, _config, runCt).ConfigureAwait(false);
 
             // When the one-pass call failed as a whole (non-zero exit, spawn error or
