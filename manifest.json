@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.402",
-        "changelog": "v12.1.12.402: The tvst family is one source with one switch per direction — the two addresses stay data fields and TMDb decides which one is asked; the page says that in one line instead of two switch pairs.",
+        "version": "12.1.12.403",
+        "changelog": "v12.1.12.403: Both addresses of the tvst family now write their requests and answers to the log (Debug, both directions), and the run summary names the status each source answered with — before, tvsubtitles and moviesubtitles were silent, so \"asked\" could not be proven.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.402-dev/Jellyfin.Plugin.SubdlSync_12.1.12.402.zip",
-        "checksum": "b2e622e35d136eccdf4e2f863ed5222e",
-        "timestamp": "2026-11-16T04:30:32Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.403-dev/Jellyfin.Plugin.SubdlSync_12.1.12.403.zip",
+        "checksum": "602ec3e6aa0b58af2b42d9a08a71319b",
+        "timestamp": "2026-11-16T04:46:01Z"
       }
     ]
   }
