@@ -315,10 +315,10 @@ internal static class Program
                  < coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
             "and it refuses BEFORE anything is deleted");
 
-        // ── 14. F-M399: nur die packs-Zeile belegt einen Pack, keine ScribeId an den Mitgliedern ──
+        // ── 14. F-M399: nur die packs-Zeile belegt einen Pack, keine SubdlId an den Mitgliedern ──
         Console.WriteLine("14. A single upload's id is not a pack");
         Check(!upload.Contains("packed.GetValueOrDefault(pair.Key) == episodes.Count", StringComparison.Ordinal),
-            "the plan no longer treats 'has a ScribeId' as 'is inside a pack'");
+            "the plan no longer treats 'has a SubdlId' as 'is inside a pack'");
         Check(!upload.Contains("inPack.Add(pair)", StringComparison.Ordinal),
             "and the member-id heuristic is gone with it");
         Check(upload.Contains("Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi)", StringComparison.Ordinal),
@@ -415,7 +415,7 @@ internal static class Program
         var adopt = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeAdoptController.cs"));
         Check(adopt.Contains("AdoptUploads", StringComparison.Ordinal)
               && adopt.Contains("SubtitleStatus.Uploaded", StringComparison.Ordinal)
-              && adopt.Contains("subdlId: entry.ScribeId", StringComparison.Ordinal),
+              && adopt.Contains("subdlId: entry.SubdlId", StringComparison.Ordinal),
             "F-M423: the adoption endpoint writes an uploaded row that carries its SubDL id");
         Check(adopt.Contains("ComputeMediaHash", StringComparison.Ordinal)
               && adopt.Contains("File.Exists", StringComparison.Ordinal),

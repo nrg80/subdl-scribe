@@ -102,7 +102,7 @@ using (var db = new ScribeDbContext(workdir, null))
         Id = ScribeDbContext.CandidateKey("x", "EN", "42-43"),
         ItemId = "x",
         Language = "EN",
-        ScribeId = "42-43",
+        SubdlId = "42-43",
         Reason = "candidate-rejected",
     });
 }

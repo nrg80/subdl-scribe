@@ -381,19 +381,19 @@ public sealed class ScribeDbContext : IDisposable
                      ("embeds", "OriginId", "ALTER TABLE embeds ADD COLUMN OriginId TEXT NULL;"),
 
                      // F-M488 (schema 11): vier eigene Kennzeichen, je Quelle und Richtung eines.
-                     ("sidecars", "ScribeDownloadId", "ALTER TABLE sidecars ADD COLUMN ScribeDownloadId TEXT NULL;"),
-                     ("sidecars", "ScribeUploadId", "ALTER TABLE sidecars ADD COLUMN ScribeUploadId TEXT NULL;"),
+                     ("sidecars", "SubdlDownloadId", "ALTER TABLE sidecars ADD COLUMN SubdlDownloadId TEXT NULL;"),
+                     ("sidecars", "SubdlUploadId", "ALTER TABLE sidecars ADD COLUMN SubdlUploadId TEXT NULL;"),
                      ("sidecars", "TvSubtitlesDownloadId", "ALTER TABLE sidecars ADD COLUMN TvSubtitlesDownloadId TEXT NULL;"),
                      ("sidecars", "TvSubtitlesUploadId", "ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId TEXT NULL;"),
-                     ("embeds", "ScribeDownloadId", "ALTER TABLE embeds ADD COLUMN ScribeDownloadId TEXT NULL;"),
-                     ("embeds", "ScribeUploadId", "ALTER TABLE embeds ADD COLUMN ScribeUploadId TEXT NULL;"),
+                     ("embeds", "SubdlDownloadId", "ALTER TABLE embeds ADD COLUMN SubdlDownloadId TEXT NULL;"),
+                     ("embeds", "SubdlUploadId", "ALTER TABLE embeds ADD COLUMN SubdlUploadId TEXT NULL;"),
                      ("embeds", "TvSubtitlesDownloadId", "ALTER TABLE embeds ADD COLUMN TvSubtitlesDownloadId TEXT NULL;"),
                      ("embeds", "TvSubtitlesUploadId", "ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadId TEXT NULL;"),
 
                      // F-M490 (schema 12): "hochgeladen" je Quelle, mit Zeitpunkt.
-                     ("sidecars", "ScribeUploadedAt", "ALTER TABLE sidecars ADD COLUMN ScribeUploadedAt TEXT NULL;"),
+                     ("sidecars", "SubdlUploadedAt", "ALTER TABLE sidecars ADD COLUMN SubdlUploadedAt TEXT NULL;"),
                      ("sidecars", "TvSubtitlesUploadedAt", "ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;"),
-                     ("embeds", "ScribeUploadedAt", "ALTER TABLE embeds ADD COLUMN ScribeUploadedAt TEXT NULL;"),
+                     ("embeds", "SubdlUploadedAt", "ALTER TABLE embeds ADD COLUMN SubdlUploadedAt TEXT NULL;"),
                      ("embeds", "TvSubtitlesUploadedAt", "ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;"),
 
                      // F-M507 (schema 14): die dritte Quelle, je Richtung ihr eigenes Kennzeichen und
@@ -1330,7 +1330,7 @@ public sealed class ScribeSqliteContext : DbContext
             e.ToTable("rejected_candidates");
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.ItemId);
-            e.HasIndex(x => x.ScribeId);
+            e.HasIndex(x => x.SubdlId);
         });
 
         modelBuilder.Entity<CounterEntity>(e =>

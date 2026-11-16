@@ -4083,7 +4083,7 @@ public sealed class UploadPipeline : IPackFiller
         // F-M391: the id of the single upload this member replaces travels with the candidate, so the
         // coordinator can delete it BEFORE the pack goes up. Empty means "no single to remove" — the
         // row may be a download, or an upload whose answer carried no id.
-        string? absorbed = uploadedRow?.ScribeId;
+        string? absorbed = uploadedRow?.SubdlId;
         return PackCandidate(
             item, mediaHash, imdbId, TmdbOfEpisode(item), season, episode, lang, hearingImpaired,
             forced: false, subPos, srt, mediaPath, GetFramerateCode(item), width, height, codec,
@@ -4602,7 +4602,7 @@ public sealed class UploadPipeline : IPackFiller
             foreach (var pair in seen.Where(p => p.Value == episodes.Count))
             {
                 // F-M399 (operator doubt 02.11.2026, confirmed): the packs row is the ONLY proof. The
-                // second proof this used to accept — "every episode carries a ScribeId" — was wrong: a
+                // second proof this used to accept — "every episode carries a SubdlId" — was wrong: a
                 // single upload writes its own id there too, so a season whose episodes all went up
                 // alone looked "already packed" and was never packed at all. 98 seasons were reported
                 // as inside a pack that never existed.

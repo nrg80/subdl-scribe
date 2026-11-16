@@ -2626,7 +2626,7 @@ public sealed class SubtitleCandidate
     /// <summary>Stable subtitle id parsed from the download url
     /// ("/subtitle/3676577-8593549.zip" → "3676577-8593549"); identifies the EXACT
     /// SubDL entry (the download), not the release family.</summary>
-    public string ScribeId { get; set; } = string.Empty;
+    public string SubdlId { get; set; } = string.Empty;
 
     /// <summary>Uploader name ("author" field).</summary>
     public string Author { get; set; } = string.Empty;
@@ -2668,7 +2668,7 @@ public sealed class SubtitleCandidate
         {
             var file = segs[^1]; // e.g. "3676577-8593549.zip"
             var dot = file.IndexOf('.', System.StringComparison.Ordinal);
-            c.ScribeId = dot > 0 ? file[..dot] : file;
+            c.SubdlId = dot > 0 ? file[..dot] : file;
         }
         if (el.TryGetProperty("release_name", out var rn) && rn.ValueKind == JsonValueKind.String)
         {
@@ -2676,7 +2676,7 @@ public sealed class SubtitleCandidate
         }
 
         // F-M529: ab hier traegt jeder Befund den Sub, zu dem er gehoert.
-        JsonAnomalies.BeginSubtitle(c.ScribeId, c.ReleaseName, c.Language);
+        JsonAnomalies.BeginSubtitle(c.SubdlId, c.ReleaseName, c.Language);
 
         if (el.TryGetProperty("language", out var lg) && lg.ValueKind == JsonValueKind.String)
         {

@@ -141,11 +141,11 @@ internal static class ReportingRun
             "no defect waits for a second sighting any more");
         Check(pipeline.Contains("if (row != null && row.ReportedUtc == null)", StringComparison.Ordinal),
             "a row is filed once — ReportedUtc, not a second failure, keeps it from repeating");
-        Check(pipeline.Contains("qaKnownRejected.Contains(row.ScribeId, StringComparer.Ordinal)", StringComparison.Ordinal),
+        Check(pipeline.Contains("qaKnownRejected.Contains(row.SubdlId, StringComparer.Ordinal)", StringComparison.Ordinal),
             "the skip path still files a report — the safety net for rows remembered with the switch off");
         Check(pipeline.Contains("summary.ReportsDeferred++", StringComparison.Ordinal),
             "a report SubDL does not take stays open for the next run");
-        Check(pipeline.Contains("qaRejectedReleases.Contains(row.ScribeId, StringComparer.Ordinal)", StringComparison.Ordinal),
+        Check(pipeline.Contains("qaRejectedReleases.Contains(row.SubdlId, StringComparer.Ordinal)", StringComparison.Ordinal),
             "a measured gate verdict is reported in the same run — no second sighting is awaited");
         Check(pipeline.Contains("gateFinding += \" ('\" + packFile.Name + \"')\"", StringComparison.Ordinal),
             "the pipeline puts the resolved pack member into the finding");
@@ -220,7 +220,7 @@ internal static class ReportingRun
             spent.RecordSkippedCandidates("item", "EN", new[] { "9100001-111111", "9100002-222222" },
                 kind: "empty");
             spent.RecordSkippedCandidates("item", "EN", new[] { "9100003-333333" }, kind: "qa");
-            var rowToReport = store.RejectedCandidates.Find(x => x.ScribeId == "9100001-111111").First();
+            var rowToReport = store.RejectedCandidates.Find(x => x.SubdlId == "9100001-111111").First();
             spent.MarkReported(rowToReport);
 
             List<string> blocked = spent.GetSkippedCandidates("item", "EN");
@@ -325,13 +325,13 @@ internal static class ReportingRun
         Check(pipeline.Contains("_emptyRetried.Add(\"hi|\"", StringComparison.Ordinal),
             "F-M455/F-M460: the SDH fetch also asks once more after ten seconds before anything is said");
         Check(pipeline.Contains("QueueReport(row);", StringComparison.Ordinal)
-              && pipeline.Contains("string.Equals(row.ScribeId, hi.ScribeId, StringComparison.Ordinal)", StringComparison.Ordinal),
+              && pipeline.Contains("string.Equals(row.SubdlId, hi.SubdlId, StringComparison.Ordinal)", StringComparison.Ordinal),
             "F-M460: the SDH finding is queued right there, not at a run end that only runs when nothing was saved");
 
         // F-M462 (operator order 10.11.2026): a gate verdict died as soon as a LATER candidate saved
         // the language, because the only flush sat behind "nothing was saved". It is filed where it is
         // measured now — before the walk moves on.
-        int gateFact = pipeline.IndexOf("qaRejectedFacts[cand.ScribeId] = new ReportFacts", StringComparison.Ordinal);
+        int gateFact = pipeline.IndexOf("qaRejectedFacts[cand.SubdlId] = new ReportFacts", StringComparison.Ordinal);
         int gateFile = pipeline.IndexOf("F-M462", StringComparison.Ordinal);
         int runEndFlush = pipeline.IndexOf("if (!savedAny && attempts > 0)", StringComparison.Ordinal);
         Check(gateFact > 0 && gateFile > gateFact && runEndFlush > gateFile

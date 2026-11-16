@@ -340,7 +340,7 @@ internal static class Program
                 .Contains("subdl", StringComparison.Ordinal));
         Check("the download records the origin and the source's own id in the store",
             downloadSource.Contains("Api.Endpoints.Provenance.Name(cand.Provider)", StringComparison.Ordinal)
-            && downloadSource.Contains("cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.ScribeId : cand.Url", StringComparison.Ordinal));
+            && downloadSource.Contains("cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : cand.Url", StringComparison.Ordinal));
         Check("the upload reads the origin from the store before it picks an endpoint",
             uploadSource.Contains("Registry.GetOrigin(contentHashEarly)", StringComparison.Ordinal)
             && uploadSource.Contains("UploadGate.Decide(", StringComparison.Ordinal)
@@ -360,8 +360,8 @@ internal static class Program
         var entities = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"));
         var dbc = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"));
         Check("four own fields exist, one per source and direction",
-            entities.Contains("public string? ScribeDownloadId { get; set; }", StringComparison.Ordinal)
-            && entities.Contains("public string? ScribeUploadId { get; set; }", StringComparison.Ordinal)
+            entities.Contains("public string? SubdlDownloadId { get; set; }", StringComparison.Ordinal)
+            && entities.Contains("public string? SubdlUploadId { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public string? TvSubtitlesDownloadId { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public string? TvSubtitlesUploadId { get; set; }", StringComparison.Ordinal));
         Check("schema 11 adds them to sidecars AND embeds",
@@ -369,7 +369,7 @@ internal static class Program
             && dbc.Contains("ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId TEXT NULL;", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE embeds ADD COLUMN TvSubtitlesDownloadId TEXT NULL;", StringComparison.Ordinal));
         Check("the download writes the field of its own source",
-            downloadSource.Contains("subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.ScribeId : null", StringComparison.Ordinal)
+            downloadSource.Contains("subdlDownloadId: cand.Provider == Configuration.SubtitleProvider.Subdl ? cand.SubdlId : null", StringComparison.Ordinal)
             && downloadSource.Contains("tvSubtitlesDownloadId: cand.Provider == Configuration.SubtitleProvider.TvSubtitles ? cand.Url : null", StringComparison.Ordinal));
         Check("the upload writes SubDL's id into SubDL's field",
             uploadSource.Contains("subdlUploadId: subdlMarke.Id", StringComparison.Ordinal)
@@ -441,10 +441,10 @@ internal static class Program
         // ---- 12. "hochgeladen" je Quelle (F-M490) ---------------------------------------------
         var registrySource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
         Check("each source has its own uploaded timestamp, sidecars and embeds alike",
-            entities.Contains("public DateTime? ScribeUploadedAt { get; set; }", StringComparison.Ordinal)
+            entities.Contains("public DateTime? SubdlUploadedAt { get; set; }", StringComparison.Ordinal)
             && entities.Contains("public DateTime? TvSubtitlesUploadedAt { get; set; }", StringComparison.Ordinal)
             && dbc.Contains("CurrentSchemaVersion = 14", StringComparison.Ordinal)
-            && dbc.Contains("ALTER TABLE sidecars ADD COLUMN ScribeUploadedAt TEXT NULL;", StringComparison.Ordinal)
+            && dbc.Contains("ALTER TABLE sidecars ADD COLUMN SubdlUploadedAt TEXT NULL;", StringComparison.Ordinal)
             && dbc.Contains("ALTER TABLE embeds ADD COLUMN TvSubtitlesUploadedAt TEXT NULL;", StringComparison.Ordinal));
         Check("the timestamp is set for the source that took the upload, never for another",
             uploadSource.Contains("subdlUploadedAt: subdlMarke.At", StringComparison.Ordinal)
@@ -454,7 +454,7 @@ internal static class Program
             && uploadSource.Contains("var jetzt = DateTime.UtcNow;", StringComparison.Ordinal));
         Check("\"uploaded to this source\" is read from its own timestamp first",
             registrySource.Contains("x.TvSubtitlesUploadedAt != null || !string.IsNullOrEmpty(x.TvSubtitlesUploadId)", StringComparison.Ordinal)
-            && registrySource.Contains("x.ScribeUploadedAt != null", StringComparison.Ordinal));
+            && registrySource.Contains("x.SubdlUploadedAt != null", StringComparison.Ordinal));
         Check("a timestamp is never overwritten with nothing",
             registrySource.Contains("if (subdlUploadedAt.HasValue)", StringComparison.Ordinal)
             && registrySource.Contains("if (tvSubtitlesUploadedAt.HasValue)", StringComparison.Ordinal)
@@ -801,7 +801,7 @@ internal static class Program
                     && Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.MayUploadTo(null, SubtitleProvider.Subdl)
                     && Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.MayUploadTo(null, SubtitleProvider.TvSubtitles)
                     // beide Marken stehen nebeneinander auf DERSELBEN Zeile — die Kette schreibt je Quelle
-                    && beideRow?.ScribeUploadId == "sd-1" && beideRow?.TvSubtitlesUploadId == "tv-1"
+                    && beideRow?.SubdlUploadId == "sd-1" && beideRow?.TvSubtitlesUploadId == "tv-1"
                     && settleReg.IsUploadedTo("eeee5555ffff6666", de, false, SubtitleProvider.Subdl)
                     && settleReg.IsUploadedTo("eeee5555ffff6666", de, false, SubtitleProvider.TvSubtitles)
                     && uploadSource.Contains("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal),
@@ -1842,7 +1842,7 @@ internal static class Program
                 var zeile = markReg.GetEmbed("eeee000033334444", 1);
                 Check("das Settle setzt den Zeitstempel der Film-Adresse, und nur ihn (F-M508)",
                     gesetzt && zeile?.MoviesubtitlesUploadedAt != null
-                    && zeile?.TvSubtitlesUploadedAt is null && zeile?.ScribeUploadedAt is null
+                    && zeile?.TvSubtitlesUploadedAt is null && zeile?.SubdlUploadedAt is null
                     && zeile?.Status == Jellyfin.Plugin.SubScribe.Data.SubtitleStatus.Uploaded,
                     "settled=" + gesetzt + " msub=" + (zeile?.MoviesubtitlesUploadedAt?.ToString() ?? "<null>"));
             }

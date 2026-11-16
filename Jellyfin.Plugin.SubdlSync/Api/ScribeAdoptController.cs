@@ -89,7 +89,7 @@ public class ScribeAdoptController : ControllerBase
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(entry.ScribeId))
+            if (string.IsNullOrWhiteSpace(entry.SubdlId))
             {
                 noId++;
                 continue;
@@ -122,7 +122,7 @@ public class ScribeAdoptController : ControllerBase
                 entry.Language,
                 entry.HearingImpaired,
                 SubtitleStatus.Uploaded,
-                subdlId: entry.ScribeId);
+                subdlId: entry.SubdlId);
             adopted++;
             files.Add(entry.Path);
         }
@@ -150,11 +150,11 @@ public class ScribeAdoptController : ControllerBase
 /// <param name="Path">Absolute path of the media file the subtitle came from.</param>
 /// <param name="SubPos">ffmpeg subtitle stream position (0:s:N) inside that file.</param>
 /// <param name="Language">SubDL language code.</param>
-/// <param name="ScribeId">SubDL id of the published single.</param>
+/// <param name="SubdlId">SubDL id of the published single.</param>
 /// <param name="HearingImpaired">True when the published single is the SDH/HI variant.</param>
 public sealed record AdoptEntry(
     string Path,
     int SubPos,
     string Language,
-    string ScribeId,
+    string SubdlId,
     bool HearingImpaired = false);

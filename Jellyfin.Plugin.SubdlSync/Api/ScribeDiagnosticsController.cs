@@ -108,8 +108,8 @@ public class ScribeDiagnosticsController : ControllerBase
                     .Concat(sidecars.Where(s => s.Reason != null).Select(s => s.Reason!))
                     .GroupBy(r => r)
                     .ToDictionary(g => g.Key, g => g.Count()),
-                WithSubdlId = embeds.Count(s => !string.IsNullOrWhiteSpace(s.ScribeId))
-                            + sidecars.Count(s => !string.IsNullOrWhiteSpace(s.ScribeId))
+                WithSubdlId = embeds.Count(s => !string.IsNullOrWhiteSpace(s.SubdlId))
+                            + sidecars.Count(s => !string.IsNullOrWhiteSpace(s.SubdlId))
             };
 
             var result = new

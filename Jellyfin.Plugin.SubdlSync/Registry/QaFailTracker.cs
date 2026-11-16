@@ -68,7 +68,7 @@ public sealed class QaFailTracker
             .Find(x => x.ItemId == itemId)
             .Where(x => string.Equals(x.Language, language, StringComparison.OrdinalIgnoreCase))
             .Where(x => !string.Equals(x.Kind, "empty", StringComparison.Ordinal) || x.ReportedUtc != null)
-            .Select(x => x.ScribeId)
+            .Select(x => x.SubdlId)
             .Distinct()
             .ToList();
     }
@@ -151,7 +151,7 @@ public sealed class QaFailTracker
                 Id = key,
                 ItemId = itemId,
                 Language = language.ToUpperInvariant(),
-                ScribeId = id,
+                SubdlId = id,
                 Reason = reason,
                 NId = nId,
                 Finding = finding,
