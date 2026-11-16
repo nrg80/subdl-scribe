@@ -1063,6 +1063,20 @@ internal static class Program
                     && uploadSource.Contains("public int SettledItems { get; set; }", StringComparison.Ordinal)
                     && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries", StringComparison.Ordinal));
 
+                // ---- F-M549: die Quellen je Item ueberleben den Neustart --------------------------
+                string verteilerQuelle = await File.ReadAllTextAsync(Path.Combine(
+                    root, "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlEventDispatcher.cs")).ConfigureAwait(false);
+                Check("F-M549: the queued item itself names the sources that queued it",
+                    seederSource.Contains("public List<string> Sources { get; set; } = new();", StringComparison.Ordinal)
+                    && seederSource.Contains("eintrag.Sources = todoQuellen.Select(quelle => quelle.ToString()).ToList();", StringComparison.Ordinal));
+                Check("F-M549: the per-source queue is rebuilt from the stored queue, not from the last scan",
+                    verteilerQuelle.Contains("RebuildUploadBySource();", StringComparison.Ordinal)
+                    && verteilerQuelle.Split("RebuildUploadBySource();").Length - 1 == 2
+                    && !verteilerQuelle.Contains("_uploadBySource = snapshot.UploadBySource;", StringComparison.Ordinal));
+                Check("F-M549: an item without a source note falls back to all sources instead of guessing",
+                    verteilerQuelle.Contains("if (item.Sources == null || item.Sources.Count == 0 || string.IsNullOrEmpty(item.ItemId))", StringComparison.Ordinal)
+                    && verteilerQuelle.Contains("Enum.TryParse<Configuration.SubtitleProvider>(name, out var quelle)", StringComparison.Ordinal));
+
                 // ---- F-M548: der Rhythmus haengt hinter der gezogenen Datei -------------------------
                 Check("F-M548: the transfer rhythm follows every saved download — two sites, both after the save",
                     downloadSource.Split("await Task.Delay(_limiter.TransferPauseMsLessFit(), ct)").Length - 1 == 2

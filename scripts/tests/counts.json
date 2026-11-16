@@ -440,6 +440,10 @@
     "T269": {
       "suite": "endpoints",
       "checks": 3
+    },
+    "T270": {
+      "suite": "endpoints",
+      "checks": 3
     }
   }
 }

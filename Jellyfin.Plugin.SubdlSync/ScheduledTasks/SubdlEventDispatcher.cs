@@ -2401,13 +2401,12 @@ public sealed class SubdlEventDispatcher : IDisposable
                 RecordSeeder(Registry.WorkerRunRegistry.Outcome.Failed, ex.Message);
                 throw;
             }
-            // F-M546: die Queue je Quelle mitnehmen, bevor die Items in die gespeicherte Queue wandern.
-            if (snapshot.UploadBySource.Count > 0)
-            {
-                _uploadBySource = snapshot.UploadBySource;
-            }
-
             int newUp = MergeQueue(_uploadQueue, snapshot.Upload, _lastSeedNewIdsUp);
+
+            // F-M546/F-M549: die Queue je Quelle kommt aus den ITEMS selbst, nicht aus dem letzten Scan.
+            // Die Queue wird ueber Scans hinweg gemerged; eine Karte, die nur der frische Scan fuellt,
+            // kennt die aelteren Eintraege nicht und laesst sie auf „alle Quellen" zurueckfallen.
+            RebuildUploadBySource();
             int newDown = MergeQueue(_downloadQueue, snapshot.Download, _lastSeedNewIdsDown);
             _lastSeedNewItems = newUp + newDown;
             SaveQueues();
@@ -2467,6 +2466,41 @@ public sealed class SubdlEventDispatcher : IDisposable
     //  PERSISTENCE
     // ────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// F-M549: baut die Queue je Quelle aus den Items der gespeicherten Queue. Items ohne Angabe (Queue
+    /// aus einer Fassung vor F-M549) bleiben ohne Eintrag — fuer sie fragt der Lauf wie bisher alle
+    /// eingeschalteten Quellen, statt zu raten.
+    /// </summary>
+    private void RebuildUploadBySource()
+    {
+        var karte = new Dictionary<Configuration.SubtitleProvider, HashSet<string>>();
+        foreach (var item in _uploadQueue)
+        {
+            if (item.Sources == null || item.Sources.Count == 0 || string.IsNullOrEmpty(item.ItemId))
+            {
+                continue;
+            }
+
+            foreach (var name in item.Sources)
+            {
+                if (!Enum.TryParse<Configuration.SubtitleProvider>(name, out var quelle))
+                {
+                    continue;
+                }
+
+                if (!karte.TryGetValue(quelle, out var menge))
+                {
+                    menge = new HashSet<string>(StringComparer.Ordinal);
+                    karte[quelle] = menge;
+                }
+
+                menge.Add(item.ItemId);
+            }
+        }
+
+        _uploadBySource = karte;
+    }
+
     private sealed class QueueFile
     {
         public List<QueueItem> Upload { get; set; } = new();
@@ -2512,6 +2546,9 @@ public sealed class SubdlEventDispatcher : IDisposable
             if (file != null)
             {
                 _uploadQueue = file.Upload ?? new List<QueueItem>();
+
+                // F-M549: die Quellen je Item stehen AM Item und kommen mit der Queue zurueck.
+                RebuildUploadBySource();
                 _downloadQueue = file.Download ?? new List<QueueItem>();
             }
 

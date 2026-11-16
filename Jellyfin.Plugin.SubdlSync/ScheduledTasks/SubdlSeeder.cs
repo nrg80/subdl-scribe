@@ -102,6 +102,16 @@ public sealed class QueueItem
     /// <summary>Queue state (done/purged act as tombstones the seeder skips).</summary>
     public ItemState State { get; set; } = ItemState.Queued;
 
+    /// <summary>
+    /// F-M549: welche Quellen dieses Item eingereiht haben — am Item selbst, damit die Angabe mit der
+    /// gespeicherten Queue den Neustart ueberlebt. Vorher hing sie als Karte neben der Queue und kannte
+    /// nur den letzten Scan; Items aus einem frueheren Scan fielen damit auf „alle Quellen" zurueck,
+    /// und eine tvst-Datei meldete wieder SubDL als offen (gemessen 16.11.2026: 116 Dateien mit
+    /// „subdl offen" gegen 67 SubDL-Eintraege in der Queue). Als Name gespeichert, nicht als Zahl: eine
+    /// Umsortierung der Aufzaehlung darf die gespeicherte Queue nicht umdeuten.
+    /// </summary>
+    public List<string> Sources { get; set; } = new();
+
     /// <summary>Item creation time (UTC) — LIFO sort key for seeding (F-M111).</summary>
     public DateTime SortCreatedUtc { get; set; }
 
@@ -391,7 +401,9 @@ public sealed class SubdlSeeder
                     var todoQuellen = UploadTodoSources(item, mediaPath, config);
                     if (todoQuellen.Count > 0)
                     {
-                        snapshot.Upload.Add(Clone(qi));
+                        var eintrag = Clone(qi);
+                        eintrag.Sources = todoQuellen.Select(quelle => quelle.ToString()).ToList();
+                        snapshot.Upload.Add(eintrag);
                         if (!string.IsNullOrEmpty(qi.ItemId))
                         {
                             foreach (var quelle in todoQuellen)
