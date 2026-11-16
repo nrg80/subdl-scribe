@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.436",
-        "changelog": "v12.1.12.436: the plugin is called Sub Scribe in the log too — namespace and type names renamed, stored keys and API routes untouched.",
+        "version": "12.1.12.437",
+        "changelog": "v12.1.12.437: store column names are back to their stored names — the rename broke the EF mapping and aborted the cycle.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.436-dev/Jellyfin.Plugin.SubdlSync_12.1.12.436.zip",
-        "checksum": "f28b611588fcbf984e6ea333c12a5c16",
-        "timestamp": "2026-11-16T19:47:41Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.437-dev/Jellyfin.Plugin.SubdlSync_12.1.12.437.zip",
+        "checksum": "95728d9610a583268b034e05044bfba9",
+        "timestamp": "2026-11-16T19:59:24Z"
       }
     ]
   }
