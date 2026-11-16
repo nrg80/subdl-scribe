@@ -380,6 +380,24 @@ public sealed class TvSubtitlesClient
     private IReadOnlyDictionary<int, string>? _showsCache;
 
     /// <summary>
+    /// F-M523 (Operator-Anweisung 17.11.2026: „Die Serien und movieid von tvst speichern wir?" — ja,
+    /// und zwar auch beim Download): die Nummer, die die letzte Suche in der Serienliste gefunden hat.
+    /// <para>
+    /// Warum sie hier steht: der Endpunkt löst die Nummer beim Suchen auf und brauchte sie bisher nur
+    /// für den einen Abruf. Schreiben konnte sie nur der Upload-Weg (<c>TvstShowResolver</c>) — deshalb
+    /// hatte The Middle 512 aus dem Staffel-Upload im Store, MobLand und Stranger Things aus dem
+    /// Download aber nicht, und jeder Lauf holte die Serienliste erneut. Der Endpunkt legt die Nummer
+    /// hier ab, die Download-Pipeline schreibt sie über denselben Weg wie die Filmnummer
+    /// (<c>Registry.SetTvstShowId</c>, F-M517).
+    /// </para>
+    /// <para>
+    /// <c>null</c> heißt „diese Suche hat keine Nummer aufgelöst" — der Wert wird am Anfang jeder Suche
+    /// zurückgesetzt, damit nie die Nummer des vorigen Titels weiterlebt.
+    /// </para>
+    /// </summary>
+    public int? LastResolvedShowId { get; set; }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="TvSubtitlesClient"/> class.
     /// </summary>
     /// <param name="http">The HttpClient to use. <see cref="SubdlApiClient.NewHttpClient"/> gives one

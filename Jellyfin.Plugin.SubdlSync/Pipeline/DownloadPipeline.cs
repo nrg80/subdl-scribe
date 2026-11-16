@@ -3983,6 +3983,29 @@ public sealed class DownloadPipeline : IDisposable
         {
             var hits = await endpoint.SearchAsync(abfrage, ct).ConfigureAwait(false);
 
+            // F-M523: die Seriennummer, die die Suche gerade aufgelöst hat, geht in den Store — der
+            // Download schrieb sie bisher nie, deshalb holte jeder Lauf die Serienliste erneut. Derselbe
+            // Weg wie die Filmnummer (F-M517): Hash zuerst, Pfad als zweite Adresse, bei Mehrdeutigkeit
+            // gar nichts. Ein Probelauf schreibt nichts (F-M22), und eine schon gespeicherte Nummer
+            // bleibt unangetastet — sie wurde geprüft, als sie geschrieben wurde.
+            if (isSeries
+                && quelle == Configuration.SubtitleProvider.TvSubtitles
+                && !_config.DryRun
+                && _tvClient?.LastResolvedShowId is int tvstId
+                && tvstId > 0)
+            {
+                string? gespeichert = !string.IsNullOrEmpty(mediaHash)
+                    ? Registry.GetMedia(mediaHash!)?.TvstShowId
+                    : Registry.TvstShowIdAtPath(mediaPath);
+                if (string.IsNullOrEmpty(gespeichert))
+                {
+                    var wie = Registry.SetTvstShowId(mediaHash, mediaPath, tvstId);
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[tvsubtitles] {Media}: \"{Title}\" ist Serie {Id} — {Note}",
+                        mediaHash ?? "?", title, tvstId, Api.Endpoints.MediaNumberNote.Of(wie));
+                }
+            }
+
             return hits.Select(h => new SubtitleCandidate
             {
                 Provider = quelle,

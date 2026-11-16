@@ -76,12 +76,19 @@ public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
             return Array.Empty<SubtitleHit>();
         }
 
+        // F-M523: was diese Suche auflöst, gilt nur für sie. Der alte Wert darf nie weiterleben.
+        _client.LastResolvedShowId = null;
+
         var shows = await _client.ShowsAsync(cancellationToken).ConfigureAwait(false);
         var showId = TvSubtitlesClient.ResolveShow(shows, query.ShowName);
         if (showId is null)
         {
             return Array.Empty<SubtitleHit>();
         }
+
+        // F-M523: die Nummer an den Aufrufer weiterreichen — der Download schreibt sie in den Store,
+        // damit der nächste Lauf die Serienliste gar nicht erst holen muss (F-M501).
+        _client.LastResolvedShowId = showId.Value;
 
         var pages = await _client.EpisodePagesAsync(showId.Value, query.Season, cancellationToken)
             .ConfigureAwait(false);

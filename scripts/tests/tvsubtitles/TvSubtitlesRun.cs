@@ -629,6 +629,44 @@ internal static class Program
             neuHandler.Requests == 3,
             "Anfragen " + neuHandler.Requests.ToString(CultureInfo.InvariantCulture));
 
+        // ---- F-M523: die aufgeloeste Seriennummer erreicht den Aufrufer ---------------------------
+        // Vorher loeste der Download die Nummer bei jeder Suche neu auf und schrieb sie nie; nur der
+        // Upload-Weg schrieb sie. Deshalb holte jeder Lauf die Serienliste erneut (F-M501).
+        string staffelSeite = await File.ReadAllTextAsync(
+            Path.Combine(_fixtures, "season-middle-s01", "tvshow-512-1.html")).ConfigureAwait(false);
+        var fm523Handler = new CountingHandler
+        {
+            BodyFor = url => url.Contains("/add.html", StringComparison.Ordinal) ? listenHtml
+                : url.Contains("/tvshow-", StringComparison.Ordinal) ? staffelSeite
+                : url.Contains("/episode-", StringComparison.Ordinal)
+                    ? File.ReadAllText(Path.Combine(
+                        _fixtures, "season-middle-s01", url[(url.LastIndexOf('/') + 1)..]))
+                    : "<html></html>",
+        };
+        var fm523Client = new TvSubtitlesClient(new HttpClient(fm523Handler));
+        var fm523Endpoint = new TvSubtitlesDownloadEndpoint(fm523Client);
+        await fm523Endpoint.SearchAsync(new SubtitleQuery("The Middle", null, null, 1, 5, "EN"))
+            .ConfigureAwait(false);
+        Check(
+            "F-M523: the download search reports the show number it resolved",
+            fm523Client.LastResolvedShowId == 512,
+            fm523Client.LastResolvedShowId?.ToString(CultureInfo.InvariantCulture) ?? "null");
+
+        await fm523Endpoint.SearchAsync(new SubtitleQuery("Gibt es nicht", null, null, 1, 5, "EN"))
+            .ConfigureAwait(false);
+        Check(
+            "F-M523: a search that resolves nothing clears the number — no stale id from the last title",
+            fm523Client.LastResolvedShowId is null,
+            fm523Client.LastResolvedShowId?.ToString(CultureInfo.InvariantCulture) ?? "null");
+
+        string dlQuelle = await File.ReadAllTextAsync(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "DownloadPipeline.cs")).ConfigureAwait(false);
+        Check(
+            "F-M523: the download writes the number — same path as the film id, nothing on a dry run",
+            dlQuelle.Contains("Registry.SetTvstShowId(mediaHash, mediaPath, tvstId)", StringComparison.Ordinal)
+            && dlQuelle.Contains("Registry.TvstShowIdAtPath(mediaPath)", StringComparison.Ordinal)
+            && dlQuelle.Contains("&& !_config.DryRun", StringComparison.Ordinal));
+
         Console.WriteLine();
         if (_failures > 0)
         {
@@ -758,6 +796,9 @@ internal static class Program
         /// <summary>F-M516: der Status, mit dem geantwortet wird (Vorgabe 200).</summary>
         public HttpStatusCode ReplyStatus { get; set; } = HttpStatusCode.OK;
 
+        /// <summary>F-M523: Rumpf je URL — eine ganze Suche braucht Liste, Staffel- und Folgenseite.</summary>
+        public Func<string, string>? BodyFor { get; set; }
+
         /// <summary>F-M516: der Rumpf der Antwort (Vorgabe „ok“).</summary>
         public string ReplyBody { get; set; } = "<html><b>ok</b>\n</html>";
 
@@ -780,9 +821,10 @@ internal static class Program
 
             await Task.Yield();
             RepliedWith = (int)ReplyStatus;
+            var body = BodyFor is null ? ReplyBody : BodyFor(LastUrl ?? string.Empty);
             var response = new HttpResponseMessage(ReplyStatus)
             {
-                Content = new StringContent(ReplyBody, Encoding.UTF8, "text/html"),
+                Content = new StringContent(body, Encoding.UTF8, "text/html"),
             };
             if (ReplyLocation is not null)
             {

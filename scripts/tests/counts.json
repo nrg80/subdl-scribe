@@ -344,6 +344,10 @@
     "T245": {
       "suite": "tvsubtitles",
       "checks": 3
+    },
+    "T246": {
+      "suite": "tvsubtitles",
+      "checks": 3
     }
   }
 }
