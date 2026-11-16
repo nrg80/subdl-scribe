@@ -38,6 +38,8 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
 - [19. Test Library](#19-test-library)
+- [21. Adding another endpoint — checklist and pitfalls](#21-adding-another-endpoint--checklist-and-pitfalls) — 1 requirement (F-M564) + Checkliste
+
 - [20. References](#20-references)
 
 ## 1. Objective and Scope
@@ -2605,3 +2607,81 @@ the wiring — the series route, the strict title+year route, the confirmation o
 the refusal of a contradiction, the refusal of an unusable title, the episode call in the resolver and
 the gate in front of the fold. The fold checks skip themselves on a runtime without ICU instead of
 failing, because normalization is a globalization feature.
+
+## 21. Adding another endpoint — checklist and pitfalls
+
+**F-M564 [U]:** **Ein weiterer Endpunkt wird über den Vertrag aufgenommen, nie über die Pipeline.**
+Die Pipeline kennt keine Quelle beim Namen: sie fragt den Katalog, welche Endpunkte da sind, ob der
+Schalter an ist und ob die Quelle die Sprache führt. Wer eine Quelle „schnell" in einer `if`-Kette der
+Pipeline unterbringt, hat zwei Wahrheiten — genau der Defekt aus Kapitel 3.4, nur an anderer Stelle.
+Die Reihenfolge der Schritte unten ist die Reihenfolge der Abhängigkeiten; jeder Schritt ohne den vorigen
+ergibt eine Quelle, die stumm nicht läuft.
+
+### 21.1 Die Schritte
+
+1. **Vertrag erfüllen.** `IDownloadEndpoint` (`Provider`, `Wired`, `SearchAsync`, `FetchAsync`) bzw.
+   `IUploadEndpoint` (`Provider`, `Wired`, `SendAsync`). `Wired` ist die Aussage „dieser Build kann es",
+   nicht „es ist eingeschaltet" (F-M484) — ein nicht verdrahteter Endpunkt wird mit Begründung angezeigt,
+   nicht verschwiegen.
+2. **Enum-Wert ans Ende** von `SubtitleProvider`. Bestehende Werte behalten ihre Zahl: die gespeicherte
+   Konfiguration enthält sie, und ein eingeschobener Wert verschiebt stillschweigend jede Zuordnung.
+3. **In den Katalog** — `SubtitleEndpointCatalog(downloads, uploads)` (gebaut in `DownloadPipeline.…`).
+   `EnabledDownloads`/`EnabledUploads` filtern `Wired` **und** den Schalter; was nicht im Katalog steht,
+   wird nie gefragt, auch bei eingeschaltetem Schalter.
+4. **`SubtitleEndpointCatalog.HasUploadPath(provider)`** um den neuen Wert ergänzen. Diese Methode
+   entscheidet, ob die Quelle überhaupt in der Upload-Reihenfolge auftaucht (`UploadSources`), und der
+   Store fragt sie ebenfalls (F-M508). Fehlt der Wert hier, läuft der Download und der Upload schweigt.
+5. **Reihenfolge** in `Api.Endpoints.SourceOrder` einordnen — nicht in der Pipeline. Dort stehen
+   Familien-Zugehörigkeit (`InFamily`), die Adresse je Medienart (`FamilyPage`) und die Einstellung, wer
+   zuerst gefragt wird (`FamilyFirst`). Eine neue Adresse derselben Familie ist keine neue Quelle (F-M509).
+6. **Sprachtafel der Seite** als eigene statische `SiteLanguage(code)` im Client, eigene Tabelle, eigene
+   ISO3-Aliase, keine geteilte Tabelle mit einer anderen Seite (F-M538). Diese Tabelle ist die Stimme der
+   Quelle: was sie nicht führt, ist ein **bewusster Skip** und zählt für ihren Stempel (F-M561). Wer sie
+   vergisst, bekommt stille Skips, und die Quelle geht nie zu.
+7. **Eigene Store-Felder je Richtung** — `<Quelle>UploadId`, `<Quelle>UploadedAt`, `<Quelle>DownloadId`
+   in `embeds` **und** `sidecars`, per `ALTER TABLE` in `ScribeDbContext` nachgezogen und
+   `CurrentSchemaVersion` erhöht (F-M488/F-M490). Nie ein Feld einer anderen Quelle mitbenutzen: sonst
+   erledigt ein Upload die andere Quelle gleich mit (F-M500).
+8. **Herkunft** — `Provenance.Name`, `Parse`, `MayUploadTo`, `OwnUploadId` um den neuen Wert ergänzen.
+   Ohne das ist das Herkunftstor offen, und Reup sowie Kreuzkontamination sind wieder möglich (F-M487).
+9. **Konfiguration** — je ein Zweig in `IsDownloadEnabled`, `IsUploadEnabled`, `IsConfiguredForUpload`
+   und `IsConfiguredForDownload`. Default für einen neuen Upload-Weg ist **aus**; „konfiguriert" heißt
+   bei einer Seite mit Zugang: Zugangsdaten vorhanden, bei einer Seite ohne: wahr.
+10. **GUI** — ein Schalter je Richtung (`Subdl…`, `Tvst…`), je Schalter ein Satz, der sagt, welche Seite
+    er bewegt; `TVST only`/`SubDL only` nur dort, wo es eine Richtung wirklich nicht gibt. Gespeicherte
+    Schlüssel bestehender Quellen nicht umbenennen (siehe 21.3).
+11. **Netz** — jeder neue Client läuft durch dieselbe HTTP-Kette (`PacingHandler`, `TmdbCacheHandler`,
+    `TransientRetryHandler`). Kein Client mit eigenem `HttpClient` ohne Kette: sonst fehlen Limit und
+    Antwortspeicher an genau dieser Stelle (gemessen: 1221 Anfragen auf 305 Adressen, 916 Wiederholungen).
+12. **Log** — jede Zeile nennt die antwortende Quelle über `Provenance.Name`; Stempel `[Sub Scribe]`,
+    keine Sondertexte je Quelle. „Welche Quelle hat geantwortet" ist die erste Frage bei jedem Befund.
+13. **Vollständigkeit** — die neue Quelle bekommt ihren eigenen Dateistempel und zählt nur, wenn sie
+    spielend ist (eingeschaltet, konfiguriert, Upload-Weg vorhanden). Kapitel 3.4 gilt für sie ohne
+    Ausnahme; eine Quelle ohne Stempel hält jede Datei für immer offen.
+14. **Belegen** — Fälle in `scripts/tests/endpoints` für Katalog, Reihenfolge, Sprachtafel und Stempel;
+    die Anforderung dieses Kapitels zählt in `spec-doc`. Ein Endpunkt ohne Prüfung ist unbelegt, auch wenn
+    er zufällig läuft.
+
+### 21.2 Was dabei schiefgeht (gemessen)
+
+- **Stiller Sprachausschluss:** Ohne Zeile im Store bleibt die Spur für die Seite offen — 174 Fälle an
+  einem Tag (F-M561).
+- **Sprachtafel geteilt:** Eine gemeinsame Tabelle für zwei Seiten lädt Sprachen hoch, die eine der beiden
+  nicht führt („Bevor wir falsche Sprachen hochladen, laden wir nix hoch").
+- **Antwortspeicher je Aufrufstelle:** hilft an 9 von 13 Stellen und fällt bei der zehnten auf die Nase.
+  Richtig ist der Handler in der Kette (F-M555).
+- **Zwei Wahrheiten über „fertig":** Einreiher und Kopf des Laufs müssen **dieselbe** Funktion rufen
+  (F-M563), sonst kehrt die Datei ewig wieder (Kapitel 3.4).
+- **Reihenfolge in der Pipeline:** Wer die Frage-Reihenfolge dort hartkodiert, umgeht die Einstellung und
+  den Trockenlauf (F-M496/F-M504).
+
+### 21.3 Was tabu bleibt
+
+- **Assembly-Name und Datenordner** (`Jellyfin.Plugin.SubdlSync`) — daran hängen Store und Konfiguration.
+- **Gespeicherte Konfigurationsschlüssel** (`SubdlUploadEnabled`, `SubdlDownloadEnabled`, `SubdlFirst`,
+  `SubdlLogin`), **API-Routen** (`Plugins/SubdlSync|SubdlReset|SubdlQuota`) und **DB-Spaltennamen**
+  bestehender Quellen (`SubdlId`, `SubdlUploadId`, `SubdlDownloadId`, `SubdlUploadedAt`).
+  Ein Umbenennungs-Sweep darüber setzt Schalter auf Default, lässt Knöpfe ins Leere laufen oder bricht
+  den Zyklus mit `SQLite Error 1: 'no such column: e.ScribeId'` (F-M553).
+- **Der Produktname im Log und in der GUI** — der ist „Sub Scribe"; der Projektname ist Geschichte.
+
