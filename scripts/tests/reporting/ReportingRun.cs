@@ -263,8 +263,12 @@ internal static class ReportingRun
         string between = runtimeAt > switchAt ? page[switchAt..runtimeAt] : string.Empty;
         Check(Regex.Matches(between, "id=\"").Count == 1,
             "the switch is the second-to-last control — only the runtime tolerance field follows");
-        Check(page.Contains("Report broken subtitles to SubDL", StringComparison.Ordinal),
+        // F-M533: der Schalter meldet an BEIDE Quellen (SubDL und tvst), deshalb nennt das Etikett
+        // keine Quelle mehr — ein "to SubDL" waere nach der Ausweitung schlicht falsch.
+        Check(page.Contains("Report broken subtitles", StringComparison.Ordinal),
             "the label names what it does");
+        Check(!page.Contains("Report broken subtitles to SubDL", StringComparison.Ordinal),
+            "the label names no single source any more");
         Check(page.Contains("config.ReportBrokenSubtitles = document.querySelector('#ReportBrokenSubtitles').checked", StringComparison.Ordinal)
               && page.Contains("document.querySelector('#ReportBrokenSubtitles').checked = config.ReportBrokenSubtitles !== false", StringComparison.Ordinal),
             "the switch is loaded and saved with the page");
