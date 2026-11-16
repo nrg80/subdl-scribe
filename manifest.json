@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.417",
-        "changelog": "v12.1.12.417: Reports are filed before the API trace is detached — every accepted report now leaves both its POST line and its per-item line, so the counter in the statistics can be recounted from the log.",
+        "version": "12.1.12.418",
+        "changelog": "v12.1.12.418: Subtitles that the site serves in a legacy codepage (Arabic cp1256, Greek cp1253, Bulgarian cp1251) are now read through the language of the candidate instead of being destroyed — strict UTF-8 first, the codepage only when that fails.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.417-dev/Jellyfin.Plugin.SubdlSync_12.1.12.417.zip",
-        "checksum": "31271503c31cde1dfdb51dcd5e9b1f80",
-        "timestamp": "2026-11-16T08:49:08Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.418-dev/Jellyfin.Plugin.SubdlSync_12.1.12.418.zip",
+        "checksum": "98728321dc4c44474a9bea877f8b51cb",
+        "timestamp": "2026-11-16T11:43:06Z"
       }
     ]
   }
