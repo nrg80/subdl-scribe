@@ -384,6 +384,10 @@
     "T255": {
       "suite": "tvsubtitles",
       "checks": 7
+    },
+    "T256": {
+      "suite": "reporting",
+      "checks": 1
     }
   }
 }

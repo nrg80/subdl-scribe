@@ -763,15 +763,6 @@ public sealed class DownloadPipeline : IDisposable
             }
         }
 
-        _api.DebugTrace -= OnApiTrace;
-        if (_tvClient is not null)
-        {
-            _tvClient.DebugTrace -= OnApiTrace;
-        }
-
-        _msubClient.DebugTrace -= OnApiTrace;
-        _api.Log -= OnApiLog; // F-M232: detach the client's LogInfo channel per run
-        _tmdb.Trace -= OnTmdbTrace;
         _runSummaryForEvents = null;
         Registry.Flush();
         _searchTracker.Flush(); // F-M47: persist search timestamps after the run
@@ -799,6 +790,20 @@ public sealed class DownloadPipeline : IDisposable
         {
             _logger.LogWarning("[SubDL-D] report flush failed: {Msg}", ex.Message);
         }
+
+        // F-M535: die Spuren werden erst NACH dem Melde-Versand abgehaengt. Vorher stand das
+        // Abhaengen davor, und damit fehlte im Log bei jeder Meldung, die im Flush hinausging, die
+        // Zeile "API call POST …/report" — der Bericht stand in der Statistik, sein Beleg nicht im
+        // Log (gemessen 16.11.: 2 Meldungen gezaehlt, 1 POST-Zeile sichtbar).
+        _api.DebugTrace -= OnApiTrace;
+        if (_tvClient is not null)
+        {
+            _tvClient.DebugTrace -= OnApiTrace;
+        }
+
+        _msubClient.DebugTrace -= OnApiTrace;
+        _api.Log -= OnApiLog; // F-M232: detach the client's LogInfo channel per run
+        _tmdb.Trace -= OnTmdbTrace;
         // F-M473 (operator order 12.11.2026): a saved subtitle is a file Jellyfin has not seen yet.
         // After the walk — and only when something was really saved — each affected library gets
         // the narrow "new and updated files" scan, so the subtitles appear without waiting for the

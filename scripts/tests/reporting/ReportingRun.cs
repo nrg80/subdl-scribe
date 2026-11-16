@@ -362,6 +362,16 @@ internal static class ReportingRun
             "F-M455: a run that only filed reports is not an empty run — the row gets written");
 
         Console.WriteLine();
+        // ---- F-M535: der Melde-Versand laeuft, solange die Spuren noch haengen ------------------
+        // Vorher wurde die API-Spur VOR dem Flush abgehaengt; dadurch fehlte im Log bei jeder Meldung
+        // die Zeile "API call POST …/report" — am 16.11. zaehlte die Statistik 2 Meldungen, sichtbar
+        // war eine. Der Quelltext muss den Flush VOR dem Abhaengen fuehren.
+        string berichtQuelle = Read(plugin, "Pipeline/DownloadPipeline.cs");
+        int flusch = berichtQuelle.IndexOf("FlushReportsAsync(summary, ct)", StringComparison.Ordinal);
+        int abhaengen = berichtQuelle.IndexOf("_api.DebugTrace -= OnApiTrace", StringComparison.Ordinal);
+        Check(flusch > 0 && abhaengen > 0 && flusch < abhaengen,
+            "F-M535: reports are filed while the API trace is still attached");
+
         Console.WriteLine(Failures.Count == 0
             ? $"reporting: {_checks} checks, all green."
             : $"reporting: {Failures.Count} of {_checks} checks FAILED:");
