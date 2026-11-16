@@ -795,9 +795,16 @@ public sealed class UploadPipeline : IPackFiller
             // Zugeh-Stempel; ein gescheiterter Upload schreibt keins von beidem und haelt die Datei
             // offen (F-M558). Die Paare — nicht die Spuren: vier Sprachen doppelt sind vier Einheiten
             // weniger (His & Hers S01E06: 38 Spuren, 34 Einheiten).
+            // Das Sprachkennzeichen der DATEI ist ISO-3 (ENG, DEU), der Store fuehrt den Code, den die
+            // Kette schreibt (EN, DE) — LanguageMapper.MapToSubdl ist dieselbe Abbildung. Ohne sie fragt
+            // die Abrechnung mit "ENG" nach Zeilen, die als "EN" gespeichert sind, findet nichts und
+            // haelt JEDE Datei offen (gemessen im ersten 441-Lauf: 839 offene tvst-Paare, 0 Stempel).
+            // Ein Kennzeichen, das die Abbildung nicht kennt, wird roh verglichen — genau so schreibt es
+            // die Kette (unmappable language tag).
             var kopfPaare = kopfAlleSubs
                 .Where(Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream)
-                .Select(s => ((s.Language ?? string.Empty).ToUpperInvariant(),
+                .Select(s => (Jellyfin.Plugin.SubScribe.Language.LanguageMapper.MapToSubdl(s.Language)
+                        ?? (s.Language ?? string.Empty).ToUpperInvariant(),
                     Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(s)))
                 .ToList();
             var kopfSignatur = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.SignatureOf(kopfPaare);

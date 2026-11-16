@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.441.
+**Status:** Implementation — v12.1.12.442.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -392,7 +392,10 @@ Quelle zu ist — eine Regel, die beide Seiten aufrufen.
 Am Ende des Durchlaufs für eine Quelle wird geprüft, ob **jede vorhandene Dialogspur** dieser Datei für
 diese Quelle *hochgeladen* oder *bewusst übersprungen* wurde. „Vorhanden" heißt dabei die Zahl der
 **verschiedenen (Sprache, HI)-Paare**, nicht die Zahl der Textspuren: eine Sprache, die zweimal in der Datei
-liegt, ist **eine** Upload-Einheit. Beleg (16.11.2026, „His & Hers" S01E06): 38 Textspuren, davon vier
+liegt, ist **eine** Upload-Einheit. Das Sprachkennzeichen wird vor der Frage **abgebildet** (ISO-3 `ENG` → Store-Code `EN`, dieselbe
+`LanguageMapper.MapToSubdl` wie in der Kette) — zwei Schlüssel auf derselben Zeile wären zwei Wahrheiten,
+und die Abrechnung fände nichts (gemessen im ersten 441-Lauf: 839 offene tvst-Paare, 0 Stempel).
+Beleg (16.11.2026, „His & Hers" S01E06): 38 Textspuren, davon vier
 Sprachen doppelt (FRA, POR, SPA, ZHO) → **34** Einheiten; der Lauf entschied **35** (23× identischer Text,
 11 Sprach-Skips, 1 Upload ES). Mit der Spurenzahl als Nenner stünde die Datei fälschlich für immer offen. Gleich ⇒ Stempel der Quelle auf der
 Medienzeile (`Subdl…`, `TvSubtitles…`, `Moviesubtitles…`). Ungleich ⇒ **kein** Stempel. Die Spur-Urteile
@@ -2451,6 +2454,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
+
+**T278:** Dieselbe Abbildung in `endpoints`: Kopf **und** Einreiher rufen `LanguageMapper.MapToSubdl`, bevor sie den Store fragen, und ein unbekanntes Kennzeichen wird roh verglichen. **1 Prüfung** in `endpoints` (236 → 237).
 
 **T277:** Die Vollständigkeit je Quelle aus Kapitel 3.4 in `endpoints`: Schema **15** trägt die vier Medien-Spalten (`CompleteSubdl`, `CompleteTvSubtitles`, `CompleteMsub`, `CompleteSignature`); `IsCompleteFor`/`MarkCompleteFor`/`SignatureOf` existieren, und „fertig" verlangt Stempel **und** gleiche Signatur; die Abrechnung `SettlementFor` liest Ablehnungen mit (`x.Status == SubtitleStatus.Rejected`) und der Kopf setzt den Stempel erst nach `offen.Count == 0`; Kopf und Einreiher stellen dieselbe Frage (`IsCompleteFor`). **4 Prüfungen** in `endpoints` (232 → 236).
 

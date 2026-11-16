@@ -681,6 +681,11 @@ internal static class Program
             // Die blinde Frage darf im Kopf des Laufs nicht mehr stehen — sie war der Defekt.
             && !uploadSource.Contains("IsSubtitlesUploaded(", StringComparison.Ordinal));
 
+        Check("F-M557: die Abrechnung bildet das Sprachkennzeichen ab, bevor sie den Store fragt",
+            uploadSource.Contains("LanguageMapper.MapToSubdl(s.Language)", StringComparison.Ordinal)
+            && seederSource.Contains("LanguageMapper.MapToSubdl(s.Language)", StringComparison.Ordinal)
+            && uploadSource.Contains("?? (s.Language ?? string.Empty).ToUpperInvariant()", StringComparison.Ordinal));
+
         // --- F-M557..F-M563: Zugeh-Stempel je Quelle, abgeleitet und nicht global -----------------
         string reg557 = await File.ReadAllTextAsync(Path.Combine(
             root, "Jellyfin.Plugin.SubdlSync", "Registry", "ContentHashRegistry.cs")).ConfigureAwait(false);
