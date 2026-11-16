@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.410",
-        "changelog": "v12.1.12.410: A foreign number in a SubDL hit (1.7, \"3\", 1e3, out of int range) no longer kills the whole download cycle — it is read tolerantly, the hit is kept, and the odd value is logged once per search.",
+        "version": "12.1.12.411",
+        "changelog": "v12.1.12.411: A hit whose field shape contradicts SubDL's own documentation is now rejected and counted instead of being rescued; the count appears in the run's closing line.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.410-dev/Jellyfin.Plugin.SubdlSync_12.1.12.410.zip",
-        "checksum": "13648e63a36b6fe786ffeec4b1588547",
-        "timestamp": "2026-11-16T07:14:34Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.411-dev/Jellyfin.Plugin.SubdlSync_12.1.12.411.zip",
+        "checksum": "200d0313fa7aceb4490e83eb20d1f82e",
+        "timestamp": "2026-11-16T07:24:39Z"
       }
     ]
   }
