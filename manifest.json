@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.440",
-        "changelog": "v12.1.12.440: the head knows loose sidecars too — 292 files were dropped every cycle while a sidecar waited for a source.",
+        "version": "12.1.12.441",
+        "changelog": "v12.1.12.441: upload completion per source -- a per-source stamp decides \"done\", derived from the pairs of the file.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.440-dev/Jellyfin.Plugin.SubdlSync_12.1.12.440.zip",
-        "checksum": "8bc12d262bb64a052c2aaa9851f018ec",
-        "timestamp": "2026-11-16T20:46:23Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.441-dev/Jellyfin.Plugin.SubdlSync_12.1.12.441.zip",
+        "checksum": "cf61a799166afaf1f302eb7c11018153",
+        "timestamp": "2026-11-16T21:53:15Z"
       }
     ]
   }
