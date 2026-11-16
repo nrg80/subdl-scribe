@@ -1062,6 +1062,20 @@ internal static class Program
                     && uploadSource.Contains("public int SettledItems { get; set; }", StringComparison.Ordinal)
                     && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries", StringComparison.Ordinal));
 
+                // ---- F-M545: der Store wird auf JEDEM Weg angehaengt, auf dem ein Kontext entsteht --
+                // Am 16.11.2026 haengte nur RecreateDbContext an, der normale Start nicht — der Store
+                // war leer, waehrend 42 von 42 TMDb-Fragen eines Zyklus Wiederholungen waren. Der
+                // Prueflauf deckte den Store ab, nicht seine Verdrahtung; das holt dieser Check nach.
+                string pluginQuelle = await File.ReadAllTextAsync(Path.Combine(
+                    root, "Jellyfin.Plugin.SubdlSync", "Plugin.cs")).ConfigureAwait(false);
+                Check("F-M545: the TMDb store is attached where the shared context is created",
+                    pluginQuelle.Split("TmdbAnswerStore.Attach(_sharedDbContext.Context)").Length - 1 == 2,
+                    (pluginQuelle.Split("TmdbAnswerStore.Attach(_sharedDbContext.Context)").Length - 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + " Stelle(n)");
+                string storeQuelle = await File.ReadAllTextAsync(Path.Combine(
+                    root, "Jellyfin.Plugin.SubdlSync", "Registry", "TmdbAnswerStore.cs")).ConfigureAwait(false);
+                Check("F-M545: and the store fetches a missing context itself instead of silently staying in memory",
+                    storeQuelle.Contains("Plugin.Instance?.SharedDbContext?.Context", StringComparison.Ordinal));
+
                 // ---- F-M544: die Medienart am Dateikopf kommt vom Item, nicht aus dem Raten --------
                 Check("F-M544: the head of the run reads the media kind from the item",
                     uploadSource.Contains("bool? medienart = item switch", StringComparison.Ordinal)

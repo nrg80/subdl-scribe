@@ -64,11 +64,7 @@ public static class TmdbAnswerStore
     public static bool TryGet((string, bool) key, out string? value)
     {
         value = null;
-        SubdlSqliteContext? db;
-        lock (Gate)
-        {
-            db = _db;
-        }
+        SubdlSqliteContext? db = Store();
 
         if (db == null)
         {
@@ -111,11 +107,7 @@ public static class TmdbAnswerStore
     /// <param name="value">The answer, <c>null</c> for "asked and found nothing".</param>
     public static void Put((string, bool) key, string? value)
     {
-        SubdlSqliteContext? db;
-        lock (Gate)
-        {
-            db = _db;
-        }
+        SubdlSqliteContext? db = Store();
 
         if (db == null)
         {
@@ -154,11 +146,7 @@ public static class TmdbAnswerStore
     /// </summary>
     public static void Prune()
     {
-        SubdlSqliteContext? db;
-        lock (Gate)
-        {
-            db = _db;
-        }
+        SubdlSqliteContext? db = Store();
 
         if (db == null)
         {
@@ -192,6 +180,32 @@ public static class TmdbAnswerStore
         catch (Exception)
         {
             // pruning is housekeeping
+        }
+    }
+
+    /// <summary>
+    /// F-M545: der angehaengte Kontext, notfalls nachgeholt. Am 16.11.2026 fehlte der Anhang im
+    /// normalen Startpfad (nur <c>RecreateDbContext</c> haengte an) — der Store war die ganze Zeit
+    /// leer, waehrend 42 von 42 TMDb-Fragen eines Zyklus Wiederholungen waren.
+    /// </summary>
+    /// <returns>The context, or null when there is none.</returns>
+    private static SubdlSqliteContext? Store()
+    {
+        lock (Gate)
+        {
+            if (_db == null)
+            {
+                try
+                {
+                    _db = Plugin.Instance?.SharedDbContext?.Context;
+                }
+                catch (Exception)
+                {
+                    // kein Plugin-Kontext erreichbar: dann bleibt es beim Speicher
+                }
+            }
+
+            return _db;
         }
     }
 

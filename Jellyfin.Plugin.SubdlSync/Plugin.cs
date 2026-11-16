@@ -484,6 +484,15 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
                         // Done once per context creation, not per run — an audit record that rewrites
                         // itself every cycle is a write amplifier and tells nobody anything.
                         _sharedDbContext.RecordVersions(Version?.ToString(), JellyfinVersionProbe());
+
+                        // F-M542/F-M545 (gemessen 16.11.2026, 16:01): der Store wurde nur in
+                        // RecreateDbContext angehaengt, also nach einem Reset — der NORMALE Start geht
+                        // ueber diesen Getter, und dort fehlte der Aufruf. Folge: 42 von 42 TMDb-Fragen
+                        // des Zyklus 15:48 waren schon einmal gestellt worden, der Store war die ganze
+                        // Zeit leer. Die Pruefung im Prueflauf deckte nur den Store selbst ab, nicht
+                        // seine Verdrahtung — deshalb steht der Aufruf jetzt an BEIDEN Stellen, an
+                        // denen ein Kontext entsteht.
+                        Jellyfin.Plugin.SubdlScribe.Registry.TmdbAnswerStore.Attach(_sharedDbContext.Context);
                     }
                 }
             }
