@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.411",
-        "changelog": "v12.1.12.411: A hit whose field shape contradicts SubDL's own documentation is now rejected and counted instead of being rescued; the count appears in the run's closing line.",
+        "version": "12.1.12.413",
+        "changelog": "v12.1.12.413: A metadata format mismatch is reported as exactly that — attribute, affected subtitle, attribution — logged and filed with SubDL when the report switch is on. The hit is dropped and counted.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.411-dev/Jellyfin.Plugin.SubdlSync_12.1.12.411.zip",
-        "checksum": "200d0313fa7aceb4490e83eb20d1f82e",
-        "timestamp": "2026-11-16T07:24:39Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.413-dev/Jellyfin.Plugin.SubdlSync_12.1.12.413.zip",
+        "checksum": "07ae588a5a31ab30687887c3393e4b20",
+        "timestamp": "2026-11-16T07:38:34Z"
       }
     ]
   }
