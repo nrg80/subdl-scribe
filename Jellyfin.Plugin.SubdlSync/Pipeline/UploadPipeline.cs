@@ -2068,6 +2068,13 @@ public sealed class UploadPipeline : IPackFiller
                 runCt.ThrowIfCancellationRequested();
                 watchdog.Heartbeat();
 
+                // F-M589 (Operator-Regel 17.11.2026, verschaerft): die Transferpause haengt an einer
+                // ECHTEN Uebertragung DIESER Spur. Vorher stand dort das Datei-Flag
+                // `itemUploadedThisRun`, das beim ersten Upload gesetzt und fuer die Datei nie
+                // zurueckgesetzt wurde — jede weitere Spur zahlte 9 s, auch wenn sie nur uebersprungen
+                // wurde (gemessen 17.11.: 41 solcher Faelle in 1.114 Dateien, rund 6 Minuten am Tag).
+                bool dieseSpurHochgeladen = false;
+
                 // Check stop marker also between streams of the same item.
                 if (PipelineStopSignal.IsStopped(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: true, runCt))
                 {
@@ -2176,6 +2183,7 @@ public sealed class UploadPipeline : IPackFiller
                         summary.Uploaded++;
                         ReportOutcome(item, ItemOutcome.Done);
                         itemUploadedThisRun = true;
+                        dieseSpurHochgeladen = true; // F-M589: nur DIESE Spur hat uebertragen
                         // A completed upload is the verdict itself — one row, no companion marker.
                         if (cand.IsLoose)
                         {
@@ -2309,7 +2317,7 @@ public sealed class UploadPipeline : IPackFiller
                 // gemessen 16.11.2026: 400/h = 9 s je Datei, ~250 Dateien je Zyklus, also rund 38
                 // Minuten Wartezeit ohne einen einzigen Netzaufruf. Die API-Pause (0,5 s) zieht der
                 // PacingHandler nach jeder externen Anfrage; hier gehoert sie nicht hin.
-                if (itemUploadedThisRun)
+                if (dieseSpurHochgeladen)
                 {
                     await Task.Delay(_limiter.TransferPauseMs(), runCt).ConfigureAwait(false);
                 }

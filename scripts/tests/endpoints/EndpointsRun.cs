@@ -794,6 +794,19 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
+        // --- F-M589: die Pause haengt an der Spur, nicht an der Datei ----------------------------
+        var uploadSource589 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        Check("F-M589: das Pausen-Flag wird je Kandidat gesetzt, nicht je Datei",
+            uploadSource589.Contains("bool dieseSpurHochgeladen = false;", StringComparison.Ordinal)
+            && uploadSource589.Contains("dieseSpurHochgeladen = true; // F-M589", StringComparison.Ordinal)
+            && uploadSource589.Contains("if (dieseSpurHochgeladen)", StringComparison.Ordinal));
+        Check("F-M589: das Datei-Flag bleibt fuer die Laufzaehlung erhalten, traegt aber keine Pause mehr",
+            uploadSource589.Contains("itemUploadedThisRun = true;", StringComparison.Ordinal)
+            && uploadSource589.Contains("summary.FilesUploaded++;", StringComparison.Ordinal)
+            && !uploadSource589.Contains("if (itemUploadedThisRun)\n                {\n                    await Task.Delay(", StringComparison.Ordinal));
+        Check("F-M589: es gibt weiterhin genau EINE Transferpause je Lauf-Pfad",
+            uploadSource589.Split("await Task.Delay(_limiter.TransferPauseMs(), runCt)").Length - 1 == 1);
+
         // --- F-M588: die SubDL-Id einmal am Laufende ----------------------------------------------
         var uploadSource588 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         var registrySource588 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
@@ -1467,8 +1480,10 @@ internal static class Program
                 Check("F-M547: a pause of zero is honoured — the pause can be switched off",
                     pacerQuelle.Contains("if (ms > 0 && !ct.IsCancellationRequested)", StringComparison.Ordinal)
                     && pacerQuelle.Contains("Volatile.Write(ref _pauseMs, ms < 0 ? 0 : ms);", StringComparison.Ordinal));
-                Check("F-M547: the transfer rhythm follows a REAL transfer, not a processed file",
-                    uploadSource.Contains("if (itemUploadedThisRun)", StringComparison.Ordinal)
+                Check("F-M547/F-M589: the transfer rhythm follows a REAL transfer of THIS track, not a processed file",
+                    uploadSource.Contains("if (dieseSpurHochgeladen)", StringComparison.Ordinal)
+                    && uploadSource.Contains("bool dieseSpurHochgeladen = false;", StringComparison.Ordinal)
+                    && uploadSource.Contains("dieseSpurHochgeladen = true;", StringComparison.Ordinal)
                     && uploadSource.Split("await Task.Delay(_limiter.TransferPauseMs(), runCt)").Length - 1 == 1);
                 Check("F-M547: the download search no longer pauses before the call",
                     !downloadSource.Contains("await _limiter.PauseAsync(ct).ConfigureAwait(false);", StringComparison.Ordinal));

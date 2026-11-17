@@ -552,6 +552,10 @@
     "T298": {
       "suite": "endpoints",
       "checks": 3
+    },
+    "T299": {
+      "suite": "endpoints",
+      "checks": 3
     }
   }
 }
