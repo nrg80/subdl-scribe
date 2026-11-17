@@ -12,11 +12,11 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 13 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 110 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 111 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 3 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M379–F-M448 und F-M475, F-M476
- - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 15 requirements (F-M557–F-M563, F-M571–F-M577, F-M580)
+ - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 16 requirements (F-M557–F-M563, F-M571–F-M577, F-M580, F-M581)
 - [4. Download Pipeline](#4-download-pipeline) — 92 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 32 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
@@ -454,6 +454,8 @@ Bibliothek abarbeitet, ohne dass dafür eigens ein inkrementeller Modus nötig w
 **F-M575 [U]:** **Beide Staffelfragen lesen ihre Tabelle einmal je Lauf, nicht einmal je Staffel.** Die Sammelfrage kostet je Aufruf einen vollen Durchlauf durch alle Untertitel-Zeilen (9.385). Bei 125 Staffeln waren das 125 Durchläufe und rund **6 Sekunden je Staffel** — gemessen im 449-Lauf (02:41:24 Start, Zeilen im 6-Sekunden-Takt). Der Store ist 4,7 MB groß (1.415 Datei-, 9.385 Untertitel-Zeilen), ein Zug alles zusammen ist billig; danach ist die Frage je Staffel eine Suche im Speicher.
 
 **F-M577 [U]:** **Ein Extraktionsfehler wird als Ablehnung `extraction-failed` geparkt — und nur, wenn die Datei überhaupt da ist.** Operator-Entscheidung 17.11.2026 (Variante B, wörtlich: „voher prufen ob Datei überhaupt vorhanden ist"). Kein eigenes Feld, kein Schema-Schritt: der Grund steht im vorhandenen Ablehnungs-Store auf der Zeile der Spur, und der Zeitpunkt ist der der Urteils-Zeile (`StatusAt`). Damit ist die Spur erledigt — die Datei kann ihre Vollständigkeits-Marke bekommen, und der billige Kopf-Ausstieg (F-M576) überspringt sie. Nach **7 Tagen** gilt die Ablehnung als veraltet (`ExtractRejectIsStale`): die Spur fällt wieder in die Extraktionsliste, ohne dass jemand etwas löschen muss. **Zuerst wird die Existenz geprüft:** eine fehlende Datei (Share weg, Pfad verschoben) ist ein Zugriffsfehler und kein Urteil über die Spur — sie bekommt keine Ablehnung und wird im nächsten Lauf erneut versucht. Sind ausschließlich geparkte Positionen offen, endet die Datei mit einer Zeile statt mit einem Lesedurchgang. Geprüft von T287.
+
+**F-M581 [U]:** **Die Paar-Frage prüft den BELEG, nicht die Umstände des Laufs — und „keine Quelle will es" ist kein Urteil.** Operator-Freigabe 17.11.2026. `AnyUploadSourceStillWants` fragte zusätzlich Queue (F-M546) und Sprachset der Seite (F-M538); stand die Queue leer oder kannte die Seite die Sprache nicht, antwortete sie „keiner will es" — und der Aufrufer schrieb das als `duplicate-self-echo` („schon hochgeladen") in den Store. Weil „abgelehnt" ein Endzustand ist, war das Paar damit **für immer** zu. Gemessen 17.11.2026: **700** solcher Zeilen an **43** Dateien, bei `Invasion.S01E03/04/08` je **38** Spuren (ET, HR, ES …) — ganze Dateien „erledigt" ohne eine einzige Sendung; **5.114** solcher Zeilen im Store, daneben 8.265 `rejected` bei nur 507 `uploaded`, obwohl 8.433 Zeilen eine SubDL-Id tragen. Regel: die Paar-Frage fragt **nur** Schalter, Medienart und Beleg; Queue und Sprachset prüft die Kette selbst, bevor sie eine Quelle antreten lässt. Ein `duplicate-self-echo` wird **nur** geschrieben, wenn eine Quelle das Paar nachweislich hat (`IrgendeineQuelleHat`); sonst bleibt die Spur ohne Urteil offen. Geprüft von T291.
 
 **F-M580 [U]:** **Ein gespeichertes Urteil schließt das Paar — auch bei einer Sidecar-Datei.** Operator-Anweisung 17.11.2026: „Die absicht wurde bereits mehrfach kommuniziert. Es ist ein verdict, paar schließen." F-M557 hat den Endzustand für eingebettete Positionen längst festgelegt („hochgeladen bei dieser Quelle, abgelehnt, oder Herkunft bekannt"); für eine Sidecar-Datei fehlte die Entsprechung, weil ihr Spruch am **Inhalt** hängt und nicht an einer Position. Die Paar-Frage `AnyUploadSourceStillWants` sah nur Hochlade-Marken — eine abgelehnte Spur hielt das Paar also weiter „gewollt". Folge in Produktion (gemessen 17.11.2026, `Best.Medicine.S02E06`): fünfmal dieselbe Abfolge aus „still open: tvsubtitles, subdl", SKIP der Sidecar als „identical subtitle already known in this file" und „no stream survived local screening" — ohne Sendung, ohne Datei-Marke, mit einem neuen Zählerstand je Runde. Die Regel ist eine Frage: trägt das Paar (Datei, Sprache, HI) ein gespeichertes `duplicate-content`-Urteil — eingebettet **oder** als Sidecar —, dann will keine Quelle es mehr (`PairIsDecided`), und die Paar-Frage endet vor dem Quellentor. Zweitens ist ein **gespeicherter** Spruch keine neue Ablehnung: er zählt den Zähler „gestoppt vor dem Senden" nicht erneut. Geprüft von T290.
 
@@ -2479,6 +2481,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
+
+**T291:** Die Paar-Frage prüft nur den Beleg (F-M581): zwischen `AnyUploadSourceStillWants` und dem nächsten Mitglied steht weder `QueuedForSource(` noch `SiteLanguage(`; `IrgendeineQuelleHat` existiert als eigenes Prüfstück, und der Selbst-Echo-Zweig schreibt nur mit Beleg — ohne Beleg steht dort die Zeile „no source asks for this pair right now, no verdict written" — **2 Prüfungen** in `endpoints` (252 → 254).
 
 **T290:** Ein gespeichertes Urteil schließt das Paar (F-M580): `PairIsDecided` fragt nach einem `duplicate-content`-Urteil auf der eingebetteten **oder** der Sidecar-Zeile des Paars; die Paar-Frage stellt diese Frage **vor** dem Quellentor, und ein gespeicherter Spruch zählt den Zähler nicht erneut — **2 Prüfungen** in `endpoints` (250 → 252).
 

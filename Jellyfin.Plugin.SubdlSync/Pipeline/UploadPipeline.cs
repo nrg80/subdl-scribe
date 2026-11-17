@@ -1437,18 +1437,31 @@ public sealed class UploadPipeline : IPackFiller
                 bool streamHi = Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream);
                 if (!AnyUploadSourceStillWants(mediaHash, lang, streamHi, isSeries))
                 {
-                    // Pair already up. This position is NOT uploaded by itself, so it does not get
-                    // an uploaded verdict of its own; it is recorded as rejected-by-self-echo, which
-                    // is what it factually is: we did not send this stream because we already had
-                    // this language. Marking it "uploaded" would claim an upload that never happened.
-                    // F-M286: a Rejected verdict and no counter was a silent discard — the row said
-                    // "rejected" while the GUI column never learned about it.
-                    summary.RejectedCandidates++; // F-M286
-                    Registry.MarkAndFlush(() => Registry.MarkEmbed(
-                        mediaHash, subPos, lang, streamHi,
-                        SubtitleStatus.Rejected, reason: RejectReason.SelfEcho));
-                    // F-M255: one line per discarded stream, whatever the reason.
-                    LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] SKIP {File} s{Pos} [{Lang}] — duplicate-self-echo (pair already uploaded, HI={Hi})", Path.GetFileName(mediaPath), subPos, lang, streamHi);
+                    if (IrgendeineQuelleHat(mediaHash, lang, streamHi, isSeries))
+                    {
+                        // Pair already up. This position is NOT uploaded by itself, so it does not get
+                        // an uploaded verdict of its own; it is recorded as rejected-by-self-echo, which
+                        // is what it factually is: we did not send this stream because we already had
+                        // this language. Marking it "uploaded" would claim an upload that never happened.
+                        // F-M286: a Rejected verdict and no counter was a silent discard — the row said
+                        // "rejected" while the GUI column never learned about it.
+                        summary.RejectedCandidates++; // F-M286
+                        Registry.MarkAndFlush(() => Registry.MarkEmbed(
+                            mediaHash, subPos, lang, streamHi,
+                            SubtitleStatus.Rejected, reason: RejectReason.SelfEcho));
+                        // F-M255: one line per discarded stream, whatever the reason.
+                        LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] SKIP {File} s{Pos} [{Lang}] — duplicate-self-echo (pair already uploaded, HI={Hi})", Path.GetFileName(mediaPath), subPos, lang, streamHi);
+                    }
+                    else
+                    {
+                        // F-M581: KEINE Quelle hat dieses Paar — „schon hochgeladen" waere eine Luege, und
+                        // weil „abgelehnt" ein Endzustand ist, haette sie das Paar fuer immer geschlossen.
+                        // Also kein Urteil, nur eine Zeile: die Spur bleibt offen und bekommt ihren
+                        // Versuch, sobald eine Quelle sie wieder fuehrt.
+                        summary.SkippedStreams++;
+                        LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] SKIP {File} s{Pos} [{Lang}] — no source asks for this pair right now, no verdict written (F-M581)", Path.GetFileName(mediaPath), subPos, lang);
+                    }
+
                     continue;
                 }
 
@@ -2057,20 +2070,30 @@ public sealed class UploadPipeline : IPackFiller
                     Registry.IsUploadedTo(mediaHash, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.TvSubtitles));
                 if (gateFrueh.SkipReason is not null)
                 {
-                    summary.SkippedStreams++;
-                    summary.RejectedCandidates++; // F-M286
-                    if (cand.IsLoose)
+                    // F-M581: das Tor kann aus drei Gruenden schweigen — Schalter aus, Herkunft bekannt,
+                    // oder eine Quelle hat das Paar schon. Nur der letzte Fall ist ein Urteil ueber den
+                    // INHALT und darf als `duplicate-self-echo` im Store stehen; die anderen beiden sind
+                    // Umstaende des Laufs und bekommen keine Zeile, sonst waere das Paar fuer immer zu.
+                    if (IrgendeineQuelleHat(mediaHash, cand.Lang, cand.HearingImpaired, isSeries))
                     {
-                        Registry.MarkAndFlush(() => Registry.MarkSidecar(
-                            contentHash, mediaHash, cand.Lang, cand.HearingImpaired, cand.Forced,
-                            SubtitleStatus.Rejected, reason: RejectReason.SelfEcho,
-                            fileName: Path.GetFileName(cand.LoosePath), path: cand.LoosePath));
+                        summary.RejectedCandidates++; // F-M286
+                        if (cand.IsLoose)
+                        {
+                            Registry.MarkAndFlush(() => Registry.MarkSidecar(
+                                contentHash, mediaHash, cand.Lang, cand.HearingImpaired, cand.Forced,
+                                SubtitleStatus.Rejected, reason: RejectReason.SelfEcho,
+                                fileName: Path.GetFileName(cand.LoosePath), path: cand.LoosePath));
+                        }
+                        else
+                        {
+                            Registry.MarkAndFlush(() => Registry.MarkEmbed(
+                                mediaHash, cand.SubPos, cand.Lang, cand.HearingImpaired,
+                                SubtitleStatus.Rejected, contentHash: contentHash, reason: RejectReason.SelfEcho));
+                        }
                     }
                     else
                     {
-                        Registry.MarkAndFlush(() => Registry.MarkEmbed(
-                            mediaHash, cand.SubPos, cand.Lang, cand.HearingImpaired,
-                            SubtitleStatus.Rejected, contentHash: contentHash, reason: RejectReason.SelfEcho));
+                        summary.SkippedStreams++;
                     }
 
                     LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] SKIP {File} [{Lang}] — {Reason} (registry gate)", gateFrueh.SkipReason, Path.GetFileName(fileName), cand.Lang);
@@ -6134,30 +6157,34 @@ public sealed class UploadPipeline : IPackFiller
         // erneut durchgegangen und zaehlte denselben Spruch erneut als „gestoppt vor dem Senden"
         // (gemessen 17.11.2026: Best.Medicine.S02E06, fuenfmal dieselbe Abfolge).
         !Registry.PairIsDecided(mediaHash, language, hearingImpaired)
+        // F-M581 (Operator-Freigabe 17.11.2026): diese Frage prueft nur noch den BELEG. Bis hierher fragte
+        // sie zusaetzlich Queue (F-M546) und Sprachset der Seite (F-M538) — und antwortete damit „keiner
+        // will es" auch dann, wenn nur die Queue leer oder die Sprache auf der Seite unbekannt war. Der
+        // Aufrufer schrieb diese Antwort als `duplicate-self-echo` („schon hochgeladen") in den Store, und
+        // weil „abgelehnt" ein Endzustand ist, war das Paar damit fuer immer zu. Gemessen 17.11.2026:
+        // 700 solcher Zeilen an 43 Dateien, bei Invasion S01E03/04/08 je 38 Spuren (ET, HR, ES …) — ganze
+        // Dateien „erledigt" ohne eine einzige Sendung; 5.114 solche Zeilen im Store.
+        // Queue und Sprachset gehoeren in die KETTE: die Kette prueft beides selbst, bevor sie eine Quelle
+        // antreten laesst (QueuedForSource im Einreiher, SiteLanguage in SendToTv/ SendToMsub, F-M538).
         && Api.Endpoints.UploadGate.Decide(
-            // F-M546: auch hier gilt die Queue JE QUELLE — eine Quelle, die dieses Item nicht
-            // eingereiht hat, „will" es nicht und haelt die Spur nicht offen.
-            SourceAllowed(Configuration.SubtitleProvider.Subdl) && QueuedForSource(Configuration.SubtitleProvider.Subdl),
-            // F-M509: nur die Adresse der Familie, die DIESE Medienart fuehrt, kann etwas wollen. Eine
-            // Serie kann der Film-Adresse nichts geben — sie hier mitzuzaehlen liesse das Paar ewig
-            // „gewollt" aussehen, und die Spur wuerde in jedem Lauf erneut durch die Kette geschickt.
-            // F-M538 (Operator-Anweisung 16.11.2026: „Sprachen die tvst nicht unterstuetzt, nicht mehr
-            // in die Kette fuer tvst"): jede Seite fuehrt ihr EIGENES Sprachset. Was tvst nicht hat
-            // (gemessen 16.11.: 174 Ablehnungen an einem Tag fuer ID/HE/NO/TH/VI/HR/TL/ET), kann die
-            // Seite nie wollen — dann ist das Paar erledigt und wird nicht in jedem Lauf erneut
-            // durch die Kette geschickt. SubDL behaelt sein eigenes, weiteres Set und wird hier
-            // NICHT gefiltert.
-            SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries
-                && QueuedForSource(Configuration.SubtitleProvider.TvSubtitles)
-                && Api.TvSubtitlesClient.SiteLanguage(language) is not null,
+            SourceAllowed(Configuration.SubtitleProvider.Subdl),
+            // F-M509: nur die Adresse der Familie, die DIESE Medienart fuehrt, kann etwas wollen.
+            SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries,
             origin: null,
             Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.Subdl),
             isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles),
-            SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles) && !isSeries
-                && QueuedForSource(Configuration.SubtitleProvider.MovieSubtitles)
-                && Api.MovieSubtitlesClient.SiteLanguage(language) is not null,
+            SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles) && !isSeries,
             !isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.MovieSubtitles))
         .SkipReason is null;
+
+    /// <summary>
+    /// F-M581: hat IRGENDEINE Quelle dieses Paar nachweislich? Nur dann ist „schon oben" eine wahre
+    /// Aussage und darf als <c>duplicate-self-echo</c> im Store stehen.
+    /// </summary>
+    private bool IrgendeineQuelleHat(string? mediaHash, string language, bool hearingImpaired, bool isSeries) =>
+        Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.Subdl)
+        || (isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles))
+        || (!isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.MovieSubtitles));
 
     /// <summary>
     /// F-M500: was ein Settle-Urteil fuer den Kandidaten bedeutet.

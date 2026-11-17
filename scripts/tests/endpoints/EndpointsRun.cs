@@ -793,6 +793,21 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
+        // --- F-M581: die Paar-Frage prueft den Beleg, nicht die Umstaende ----------------------
+        var paarStart = uploadSource.IndexOf("private bool AnyUploadSourceStillWants(", StringComparison.Ordinal);
+        var paarEnde = uploadSource.IndexOf("private bool IrgendeineQuelleHat(", StringComparison.Ordinal);
+        var paarFrage = paarStart >= 0 && paarEnde > paarStart ? uploadSource[paarStart..paarEnde] : string.Empty;
+        Check("F-M581: die Paar-Frage fragt keinen Zustand des Laufs — weder Queue noch Sprachset der Seite",
+            paarFrage.Length > 0
+            && !paarFrage.Contains("QueuedForSource(", StringComparison.Ordinal)
+            && !paarFrage.Contains("SiteLanguage(", StringComparison.Ordinal)
+            && paarFrage.Contains("Registry.IsUploadedTo(mediaHash, language, hearingImpaired", StringComparison.Ordinal));
+        Check("F-M581: ein Selbst-Echo-Urteil braucht einen Beleg — sonst bleibt die Spur ohne Urteil offen",
+            uploadSource.Contains("private bool IrgendeineQuelleHat(string? mediaHash, string language, bool hearingImpaired, bool isSeries) =>", StringComparison.Ordinal)
+            && uploadSource.Contains("if (IrgendeineQuelleHat(mediaHash, lang, streamHi, isSeries))", StringComparison.Ordinal)
+            && uploadSource.Contains("no source asks for this pair right now, no verdict written (F-M581)", StringComparison.Ordinal)
+            && uploadSource.Contains("if (IrgendeineQuelleHat(mediaHash, cand.Lang, cand.HearingImpaired, isSeries))", StringComparison.Ordinal));
+
         // --- F-M580: ein gespeichertes Urteil schliesst das Paar ------------------------------
         var registrySource580 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
         Check("F-M580: ein gespeichertes Inhalts-Urteil schliesst das Paar — eingebettet und als Sidecar",
@@ -1230,9 +1245,10 @@ internal static class Program
                 // ---- F-M538: jede Seite fuehrt ihr eigenes Sprachset --------------------------
                 // Operator-Anweisung 16.11.2026: „Sprachen die tvst nicht unterstuetzt, nicht mehr in
                 // die Kette fuer tvst. Fuer subdl gilt ein anderes sprachset."
+                // F-M581: die Sprachtafel wird in der KETTE geprueft, nicht mehr in der Paar-Frage.
                 Check("F-M538: both site families gate the chain by their OWN language table",
-                    uploadSource.Contains("Api.TvSubtitlesClient.SiteLanguage(language) is not null", StringComparison.Ordinal)
-                    && uploadSource.Contains("Api.MovieSubtitlesClient.SiteLanguage(language) is not null", StringComparison.Ordinal));
+                    uploadSource.Contains("if (Api.TvSubtitlesClient.SiteLanguage(lang) is null)", StringComparison.Ordinal)
+                    && uploadSource.Contains("if (Api.MovieSubtitlesClient.SiteLanguage(lang) is null)", StringComparison.Ordinal));
                 Check("F-M538: a language the site does not carry is a skip with its own reason, not a failure",
                     uploadSource.Contains("return UploadResult.Skipped(\"second-source-no-language\")", StringComparison.Ordinal)
                     && uploadSource.Contains("the site has no such language (F-M538)", StringComparison.Ordinal));
@@ -1352,8 +1368,8 @@ internal static class Program
                 Check("F-M546: the run narrows its sources to the ones that queued the item",
                     uploadSource.Contains("public Dictionary<Configuration.SubtitleProvider, HashSet<string>>? QueueFilterBySource", StringComparison.Ordinal)
                     && uploadSource.Contains("private HashSet<Configuration.SubtitleProvider>? _queuedSourcesForItem;", StringComparison.Ordinal)
-                    && uploadSource.Contains(".Where(QueuedForSource)", StringComparison.Ordinal)
-                    && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.Subdl) && QueuedForSource(Configuration.SubtitleProvider.Subdl),", StringComparison.Ordinal));
+                    // F-M581: die Queue wirkt in der Kette (Quellenauswahl), nicht mehr in der Paar-Frage.
+                    && uploadSource.Contains(".Where(QueuedForSource)", StringComparison.Ordinal));
                 Check("F-M546: without a per-source queue nothing is narrowed away",
                     uploadSource.Contains("_queuedSourcesForItem == null || _queuedSourcesForItem.Contains(quelle)", StringComparison.Ordinal));
                 Check("F-M546: the scan line names the queue per source instead of one bare number",
