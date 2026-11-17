@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.458",
-        "changelog": "v12.1.12.458: the SubDL upload id is read back once at the end of a run instead of after every upload -- one list fetch for all of them.",
+        "version": "12.1.12.459",
+        "changelog": "v12.1.12.459: the transfer pause follows a real transfer of the track itself; a skipped track no longer pays it.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.458-dev/Jellyfin.Plugin.SubdlSync_12.1.12.458.zip",
-        "checksum": "96403ce1b6f0868c9586af2d8844c44d",
-        "timestamp": "2026-11-17T20:45:37Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.459-dev/Jellyfin.Plugin.SubdlSync_12.1.12.459.zip",
+        "checksum": "02f63c2672d1a15b7c3bb51766088cfe",
+        "timestamp": "2026-11-17T20:55:25Z"
       }
     ]
   }
