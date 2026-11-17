@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.449",
-        "changelog": "v12.1.12.449: the comment joins its three parts with a dash -- the site turns line breaks into spaces.",
+        "version": "12.1.12.452",
+        "changelog": "v12.1.12.452: a settled file costs one look at the store instead of a stream read plus a walk over every track.\n  v12.1.12.452: a track whose extraction failed is parked for seven days, and a missing file is never parked.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.449-dev/Jellyfin.Plugin.SubdlSync_12.1.12.449.zip",
-        "checksum": "c3aac60d871664b81cdf1c2052ed1440",
-        "timestamp": "2026-11-17T01:36:07Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.452-dev/Jellyfin.Plugin.SubdlSync_12.1.12.452.zip",
+        "checksum": "d78dd8dfece7cd4ba48e90cbe77a1389",
+        "timestamp": "2026-11-17T02:52:21Z"
       }
     ]
   }
