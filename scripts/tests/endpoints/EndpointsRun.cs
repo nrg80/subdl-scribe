@@ -793,6 +793,24 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
+        // --- F-M586: eine Quelle ohne diese Sprache zaehlt nicht als offen -------------------------
+        var uploadSource586 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        var registrySource586 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
+        var entitiesSource586 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"));
+        Check("F-M586: NimmtSprache ist die eine Stelle fuer Sprache x Quelle, und die Quelle ohne Sprache faellt aus der offenen Liste",
+            uploadSource586.Contains("public static bool NimmtSprache(Configuration.SubtitleProvider quelle, string? language, bool? isSeries)", StringComparison.Ordinal)
+            && uploadSource586.Contains("Api.TvSubtitlesClient.SiteLanguage(language) is not null && isSeries != false", StringComparison.Ordinal)
+            && uploadSource586.Contains("Api.MovieSubtitlesClient.SiteLanguage(language) is not null && isSeries != true", StringComparison.Ordinal)
+            && uploadSource586.Contains("bool nurSpracheAusgeschlossen = quellen.Count < alleQuellen.Count", StringComparison.Ordinal)
+            && uploadSource586.Contains("NimmtSprache(Configuration.SubtitleProvider.TvSubtitles, language, isSeries)", StringComparison.Ordinal));
+        Check("F-M586: faellt die letzte offene Quelle nur wegen ihrer Sprachliste weg, traegt das Urteil den Grund unsupported-language",
+            entitiesSource586.Contains("public const string UnsupportedLanguage = \"unsupported-language\"", StringComparison.Ordinal)
+            && uploadSource586.Contains("if (offen.Count == 0 && nurSpracheAusgeschlossen)", StringComparison.Ordinal)
+            && uploadSource586.Contains("reason = RejectReason.UnsupportedLanguage;", StringComparison.Ordinal));
+        Check("F-M586: PairIsDecided schliesst das Paar auf ein Sprachurteil",
+            registrySource586.Contains("x.Reason == RejectReason.UnsupportedLanguage", StringComparison.Ordinal)
+            && registrySource586.Contains("return spracheNirgends", StringComparison.Ordinal));
+
         // --- F-M585: Pack und Einzel schliessen sich nicht mehr aus -------------------------------
         var uploadSource584 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         var packCoordSource585 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));

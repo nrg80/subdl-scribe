@@ -106,6 +106,17 @@ public static class RejectReason
     /// </summary>
     public const string ExtractionFailed = "extraction-failed";
 
+    /// <summary>
+    /// F-M586 (Operator-Anweisung 17.11.2026: „Die spur sollte dann für tvsubtitles oder mst geschlossen
+    /// werden, das paar. Unsupported language oder so"): keine der eingeschalteten Quellen führt diese
+    /// Sprache. tvsubtitles.net bietet 24 Sprachen (en, es, fr, de, br, ru, ua, it, gr, ar, hu, pl, tr,
+    /// nl, pt, sv, da, fi, ko, cn, jp, bg, cz, ro) — Norwegisch, Slowakisch oder Estnisch sind nicht
+    /// dabei, weder im Sprachfilter noch als Flagge (gemessen 17.11.2026: <c>sk.gif</c>/<c>no.gif</c>
+    /// antworten 404, <c>de.gif</c> 200). Ohne dieses Urteil nannte das Log das Paar in jedem Lauf
+    /// weiter „still open for tvsubtitles" (1.316 DUE-Zeilen, davon 104 für Norwegisch).
+    /// </summary>
+    public const string UnsupportedLanguage = "unsupported-language";
+
     /// <summary>Untagged stream, language could not be detected.</summary>
     public const string UndDetectionFailed = "und-detection-failed";
 

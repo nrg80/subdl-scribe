@@ -6163,6 +6163,40 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="hearingImpaired">HI flag of the pair.</param>
     /// <param name="isSeries">Wahr für eine Serie: dann zählt nur die Serien-Adresse der Familie.</param>
     /// <returns>True when at least one enabled source that could take it does not have it yet.</returns>
+    /// <summary>
+    /// F-M586 (Operator-Anweisung 17.11.2026: „Die spur sollte dann für tvsubtitles oder mst geschlossen
+    /// werden, das paar. Unsupported language oder so"): führt diese Quelle die Sprache überhaupt?
+    /// <para>
+    /// Die beiden Seiten der Familie haben je ein eigenes Sprachset, und ein Code, den das Formular nicht
+    /// kennt, fällt dort auf den ersten Eintrag zurück (der Upload landet als Englisch, F-M480/F-M538).
+    /// tvsubtitles.net bietet 24 Sprachen; Norwegisch, Slowakisch und Estnisch sind nicht dabei
+    /// (gemessen 17.11.2026 am <c>setlang</c>-Select beider Seiten und an den Flaggen-Dateien).
+    /// SubDL führt keine solche Tabelle im Plugin und bekommt deshalb keine Einschränkung.
+    /// </para>
+    /// <para>
+    /// Die Frage ist eine reine Eigenschaft von Sprache und Quelle — kein Schalter, kein Store, keine
+    /// Herkunft. Sie darf deshalb überall dort gefragt werden, wo eine Quelle als „will das noch"
+    /// gezählt wird; vorher stand tvsubtitles für Norwegisch in jedem Lauf in der DUE-Zeile.
+    /// </para>
+    /// </summary>
+    /// <param name="quelle">Die Quelle.</param>
+    /// <param name="language">Sprache des Paares.</param>
+    /// <param name="isSeries">Wahr für eine Serie, falsch für einen Film, null wenn unbekannt.</param>
+    /// <returns>True, wenn die Quelle diese Sprache annehmen kann.</returns>
+    public static bool NimmtSprache(Configuration.SubtitleProvider quelle, string? language, bool? isSeries) => quelle switch
+    {
+        // SubDL fuehrt praktisch jede Sprache; das Plugin hat fuer diese Adresse keine Tabelle.
+        Configuration.SubtitleProvider.Subdl => true,
+        // F-M509: die Serienseite ist nur fuer Serien zustaendig, die Filmseite nur fuer Filme. Ist die
+        // Medienart unbekannt, zaehlt jede Seite, die die Sprache fuehrt — das kann eine Quelle hoechstens
+        // WEITER als offen zaehlen, nie eine faelschlich schliessen.
+        Configuration.SubtitleProvider.TvSubtitles =>
+            Api.TvSubtitlesClient.SiteLanguage(language) is not null && isSeries != false,
+        Configuration.SubtitleProvider.MovieSubtitles =>
+            Api.MovieSubtitlesClient.SiteLanguage(language) is not null && isSeries != true,
+        _ => true,
+    };
+
     private bool AnyUploadSourceStillWants(string? mediaHash, string language, bool hearingImpaired, bool isSeries) =>
         // F-M580 (Operator-Anweisung 17.11.2026: „Es ist ein verdict, paar schließen."): ein gespeichertes
         // Urteil ist ein Endzustand — auch fuer eine SIDECAR-Datei, deren Spruch am Inhalt haengt und
@@ -6183,11 +6217,13 @@ public sealed class UploadPipeline : IPackFiller
         && Api.Endpoints.UploadGate.Decide(
             SourceAllowed(Configuration.SubtitleProvider.Subdl),
             // F-M509: nur die Adresse der Familie, die DIESE Medienart fuehrt, kann etwas wollen.
-            SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries,
+            SourceAllowed(Configuration.SubtitleProvider.TvSubtitles) && isSeries
+                && NimmtSprache(Configuration.SubtitleProvider.TvSubtitles, language, isSeries),
             origin: null,
             Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.Subdl),
             isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.TvSubtitles),
-            SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles) && !isSeries,
+            SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles) && !isSeries
+                && NimmtSprache(Configuration.SubtitleProvider.MovieSubtitles, language, isSeries),
             !isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.MovieSubtitles))
         .SkipReason is null;
 
@@ -6360,7 +6396,16 @@ public sealed class UploadPipeline : IPackFiller
         // ohne TMDb-Aufloesung stammen). Sie wird nicht geraten: ohne sie zaehlen beide Adressen der
         // Familie. Das kann einen Kandidaten hoechstens WEITER an die Kette schicken, nie einen Beleg
         // verschlucken.
-        var quellen = UploadSources(isSeries: null);
+        // F-M586: eine Quelle, die diese Sprache gar nicht führt, ist weder Beleg noch offene Quelle.
+        // Vorher zählte tvsubtitles für Norwegisch als „will das noch", und weil „abgelehnt" erst nach
+        // dem Beleg greift, stand das Paar in jedem Lauf erneut in der DUE-Zeile (1.316 solcher Zeilen,
+        // 104 davon für Norwegisch). Getrennt gezaehlt wird, WER aus Sprachgruenden ausfiel: nur dann
+        // traegt das Urteil den Grund `unsupported-language` statt eines Inhaltsgrundes.
+        var alleQuellen = UploadSources(isSeries: null);
+        var quellen = alleQuellen
+            .Where(quelle => NimmtSprache(quelle, lang, isSeries: null))
+            .ToList();
+        bool nurSpracheAusgeschlossen = quellen.Count < alleQuellen.Count;
         // Ohne eingeschaltete Quelle gibt es keine offene: dann zaehlt jeder Beleg im Bestand, damit ein
         // Lauf mit abgeschaltetem Upload den Inhalt nicht als "nirgends hochgeladen" ablehnt.
         var beleg = (quellen.Count > 0 ? quellen : UploadSourceOrder(isSeries: null).ToList())
@@ -6386,6 +6431,12 @@ public sealed class UploadPipeline : IPackFiller
                 return (ContentSettle.DueForAnotherSource, string.Join(", ", darfNoch.Select(Api.Endpoints.Provenance.Name)));
             }
 
+            // F-M586: bleibt nur die Sprache als Grund uebrig, heisst das Urteil so.
+            if (nurSpracheAusgeschlossen)
+            {
+                reason = RejectReason.UnsupportedLanguage;
+            }
+
             WriteReject();
             return (ContentSettle.Settled, string.Empty);
         }
@@ -6397,6 +6448,13 @@ public sealed class UploadPipeline : IPackFiller
             .ToList();
 
         var belegte = beleg.ToList();
+        // F-M586: faellt die letzte offene Quelle nur wegen ihrer Sprachliste weg, traegt das Urteil
+        // diesen Grund — das Paar ist dann fuer sie entschieden, nicht „noch offen".
+        if (offen.Count == 0 && nurSpracheAusgeschlossen)
+        {
+            reason = RejectReason.UnsupportedLanguage;
+        }
+
         Registry.MarkAndFlush(() => Registry.RecordSkippedContent(
             mediaHash, isLoose, subPos, lang, hearingImpaired, forced, contentHash, reason, belegte,
             fileName: fileName, path: path));

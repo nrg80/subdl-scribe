@@ -3165,7 +3165,21 @@ public sealed class ContentHashRegistry : IDisposable
         bool DarfNirgendsHoch(string? contentHash) =>
             !string.IsNullOrEmpty(contentHash) && GetOrigin(contentHash).Origin is not null;
 
-        return GetEmbeds(mediaHash).Any(x => x.Language == language
+        // F-M586: ein Sprachurteil schliesst das Paar ohne Inhaltsfrage — es sagt nicht „wir haben den
+        // Text", sondern „keine Quelle führt diese Sprache". Geschrieben wird es nur, wenn das Paar
+        // ohnehin belegt ist (siehe SettleDuplicateContent), damit ein spaeter eingeschalteter SubDL
+        // nicht auf einem Urteil sitzt, das nur aus der Schalterstellung entstand.
+        bool spracheNirgends = GetEmbeds(mediaHash).Any(x => x.Language == language
+                && x.HearingImpaired == hearingImpaired
+                && x.Status == SubtitleStatus.Rejected
+                && x.Reason == RejectReason.UnsupportedLanguage)
+            || GetSidecars(mediaHash).Any(x => x.Language == language
+                && x.HearingImpaired == hearingImpaired
+                && x.Status == SubtitleStatus.Rejected
+                && x.Reason == RejectReason.UnsupportedLanguage);
+
+        return spracheNirgends
+            || GetEmbeds(mediaHash).Any(x => x.Language == language
                 && x.HearingImpaired == hearingImpaired
                 && x.Status == SubtitleStatus.Rejected
                 && x.Reason == RejectReason.DuplicateContent

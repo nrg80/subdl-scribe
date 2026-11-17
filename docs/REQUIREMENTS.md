@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.455.
+**Status:** Implementation — v12.1.12.456.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -12,11 +12,11 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 13 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 114 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 115 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 3 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M379–F-M448 und F-M475, F-M476
- - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 19 requirements (F-M557–F-M563, F-M571–F-M577, F-M580–F-M585)
+ - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 20 requirements (F-M557–F-M563, F-M571–F-M577, F-M580–F-M586)
 - [4. Download Pipeline](#4-download-pipeline) — 92 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 32 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
@@ -454,6 +454,8 @@ Bibliothek abarbeitet, ohne dass dafür eigens ein inkrementeller Modus nötig w
 **F-M575 [U]:** **Beide Staffelfragen lesen ihre Tabelle einmal je Lauf, nicht einmal je Staffel.** Die Sammelfrage kostet je Aufruf einen vollen Durchlauf durch alle Untertitel-Zeilen (9.385). Bei 125 Staffeln waren das 125 Durchläufe und rund **6 Sekunden je Staffel** — gemessen im 449-Lauf (02:41:24 Start, Zeilen im 6-Sekunden-Takt). Der Store ist 4,7 MB groß (1.415 Datei-, 9.385 Untertitel-Zeilen), ein Zug alles zusammen ist billig; danach ist die Frage je Staffel eine Suche im Speicher.
 
 **F-M577 [U]:** **Ein Extraktionsfehler wird als Ablehnung `extraction-failed` geparkt — und nur, wenn die Datei überhaupt da ist.** Operator-Entscheidung 17.11.2026 (Variante B, wörtlich: „voher prufen ob Datei überhaupt vorhanden ist"). Kein eigenes Feld, kein Schema-Schritt: der Grund steht im vorhandenen Ablehnungs-Store auf der Zeile der Spur, und der Zeitpunkt ist der der Urteils-Zeile (`StatusAt`). Damit ist die Spur erledigt — die Datei kann ihre Vollständigkeits-Marke bekommen, und der billige Kopf-Ausstieg (F-M576) überspringt sie. Nach **7 Tagen** gilt die Ablehnung als veraltet (`ExtractRejectIsStale`): die Spur fällt wieder in die Extraktionsliste, ohne dass jemand etwas löschen muss. **Zuerst wird die Existenz geprüft:** eine fehlende Datei (Share weg, Pfad verschoben) ist ein Zugriffsfehler und kein Urteil über die Spur — sie bekommt keine Ablehnung und wird im nächsten Lauf erneut versucht. Sind ausschließlich geparkte Positionen offen, endet die Datei mit einer Zeile statt mit einem Lesedurchgang. Geprüft von T287.
+
+**F-M586 [U]:** **Eine Quelle, die die Sprache nicht führt, zählt nicht als „will das noch" — das Paar wird für sie mit `unsupported-language` geschlossen.** Operator-Anweisung 17.11.2026: „Wieso meldet das log dann das diese sprachen noch hochzuladen wären? Die spur sollte dann für tvsubtitles oder mst geschlossen werden, das paar. Unsupported language oder so." Befund: tvsubtitles.net bietet **24 Sprachen** (en, es, fr, de, br, ru, ua, it, gr, ar, hu, pl, tr, nl, pt, sv, da, fi, ko, cn, jp, bg, cz, ro) — Norwegisch, Slowakisch und Estnisch sind weder im `setlang`-Select (Shows-Liste und „Add TV-Show"-Formular, je 25 Einträge mit `all`) noch als Flagge vorhanden (`sk.gif`/`no.gif`/`et.gif` → HTTP 404, `de.gif`/`cz.gif`/`fi.gif` → 200). Trotzdem nannte das Log 1.316 DUE-Zeilen, davon **104 für Norwegisch** („still open for tvsubtitles"), weil die Liste der offenen Quellen nur Schalter, Medienart, Beleg und Herkunft fragte — nie die Sprachliste der Seite. Neu: (1) `NimmtSprache(quelle, sprache, istSerie)` ist die eine Stelle, an der Sprache und Quelle zusammenkommen (SubDL ohne Tabelle → immer wahr; tvst/mst über `SiteLanguage`, je nach Medienart); die Frage ist eine reine Eigenschaft von Sprache und Quelle, kein Schalter und kein Store. (2) `AnyUploadSourceStillWants` und die Listen in `SettleDuplicateContent` filtern damit — die DUE-Zeile nennt keine Quelle mehr, die die Sprache nicht führt. (3) Fällt die **letzte** offene Quelle nur wegen ihrer Sprachliste weg, trägt das Urteil den Grund `unsupported-language` statt eines Inhaltsgrundes, und `PairIsDecided` schließt das Paar darauf. Geschrieben wird es nur, wenn das Paar ohnehin belegt ist — so entsteht kein Urteil, das allein aus einer Schalterstellung stammt und einen später eingeschalteten SubDL blockieren würde. Geprüft von T296.
 
 **F-M585 [U]:** **Ein Einzel-Upload und ein Staffelpack schließen sich nicht mehr aus — der Pack tritt neben die Einzel.** Operator-Anweisung 17.11.2026: „Subdl erlaubt Einzeluploads die gleichzeitig bestandteil eines staffelpacks sind." Drei Stellen halten das Verbot von heute auf: (1) F-M391 löschte die Einzel vor dem Pack per `deletePublishedSubtitle` — der Aufruf fällt weg, die Ids werden in der `packs`-Zeile als „stehen daneben" genannt; (2) F-M429 übersprang jede Position eines Packs (`pack-carries-it`, 127 Zeilen) — sie geht jetzt zusätzlich als Einzel hoch, mit einer Log-Zeile statt einer Ablehnung; (3) der Coordinator schrieb `Uploaded` plus Pack-Id in jede Mitgliedszeile — damit war „hochgeladen" ein Wahrheitswert für drei Sachverhalte und die Folgezeile verlor ihre eigene Einzel-Id an die Pack-Id. Der Pack-Beleg steht jetzt **nur** in der `packs`-Zeile (`PackId`, `Episodes` = abgehakte Folgen), die Folgezeile ist ausschließlich der Einzel-Upload (`CoveredByPack` beantwortet die Pack-Frage getrennt). Die Quellensteuerung bleibt unberührt: Packs sind SubDL-Sache, die Herkunftssperre (`Provenance.MayUploadTo`) ändert sich nicht, und `IsUploadedTo` bedeutet nach der Umstellung eindeutig „als Einzel oben". Kein Einmal-Aufräumen: bestehende Zeilen, deren `subdlId` eine Pack-Id trägt, und die 127 `pack-carries-it`-Zeilen bleiben, wie sie sind — für bereits gepackte Staffeln bleibt der Einzel-Upload deshalb unterdrückt, „beides" gilt ab dem nächsten neu gebauten Pack. **Der Schalter in der GUI:** `Upload season packs` trägt **nur** das Häkchen (und den Quellen-Merker `SubDL only` aus F-M526/F-M527) — **kein Beschreibungstext** darunter; das Häkchen schaltet die Pack-Bildung ein und aus, mehr sagt es nicht (Operator-Anweisung 17.11.2026: „Der text zu upload season packs in der gui muss weg. Nur noch tick upload season packs. Der schaltet die packbildung ein/aus."). Geprüft von T295.
 
@@ -2489,6 +2491,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
+
+**T296:** Eine Quelle ohne diese Sprache zählt nicht als offen (F-M586): `NimmtSprache` als einzige Stelle für Sprache × Quelle, die Filterung in `AnyUploadSourceStillWants` und `SettleDuplicateContent`, der Grund `unsupported-language` und die Schließung in `PairIsDecided` — **3 Prüfungen** in `endpoints`.
 
 **T295:** Pack und Einzel schließen sich nicht mehr aus (F-M585): kein `deletePublishedSubtitle` im Pack-Pfad, die Mitgliedszeilen bekommen keine Pack-Id mehr, der Einzelpfad überspringt keine Pack-Position, und `CoveredByPack` liest die Folgenliste der `packs`-Zeile — **3 Prüfungen** in `endpoints` (260 → 263).
 
