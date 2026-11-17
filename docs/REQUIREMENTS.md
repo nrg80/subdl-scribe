@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.446.
+**Status:** Implementation — v12.1.12.447.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -12,11 +12,11 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 13 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 104 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 105 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 3 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M379–F-M448 und F-M475, F-M476
- - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 9 requirements (F-M557–F-M563, F-M571, F-M572)
+ - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 10 requirements (F-M557–F-M563, F-M571–F-M573)
 - [4. Download Pipeline](#4-download-pipeline) — 90 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 32 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
@@ -450,6 +450,8 @@ deren Quellstempel nich zu ist?" — ja, und das ist der Grund, warum der tägli
 Bibliothek abarbeitet, ohne dass dafür eigens ein inkrementeller Modus nötig wäre.
 
 **F-M571 [U]:** **Die Pack-Frage wird je Staffel EINMAL gestellt, nicht je Paar.** Packs entstehen nur bei SubDL; welche (Sprache, HI)-Paare einer Staffel schon gepackt sind, liest `PacksInSeason` in einer Abfrage, der Lauf merkt sie sich (`PacksOf`). Vorher fragte der Planer je Paar in den Store und schrieb je Paar eine Zeile — an einer Staffel („The Thundermans" S1/S2) 67 Abfragen und 67 Zeilen in einer Minute, alle mit derselben Antwort; jetzt eine Zeile je Staffel (`N of M pair(s) already up as a pack`).
+
+**F-M573 [U]:** **Die billigste Staffelfrage zuerst.** Sind alle Paare, die der Store für eine Staffel kennt, bereits gepackt, endet die Staffel mit **einer** Zeile — kein TMDb-Aufruf, kein Blick in eine Datei, kein Hash. Vorher lief die teure Kette (Folgenzahl bei TMDb, Release-Gruppen, Dateiliste) für **jede** vollständige Staffel und meldete am Ende „already up as a pack".
 
 **F-M572 [U]:** **Der Folgentitel geht als Kommentar mit — der Dateiname bleibt der der Seite.** tvsubtitles.net baut den Dateinamen aus **seinem** Folgeneintrag; an „Mo" S01E05 gemessen: die Bibliothek führt „Tombstone" (Jellyfin `ProviderIds` = TMDb 3701256), die Seite zeigt „Episode 5", und ein Titel ist kein Feld, das der Upload sendet. Also trägt der Kommentar den Titel (`TMDB 3701256 / IMDb tt16274608 / Tombstone`), und zwar nur, wenn er kein Platzhalter ist (`Episode 5`, `Folge 5`, leer). Der Author-Bleibt-leer-Beschluss und „nur ids" gelten weiter für alles andere.
 
@@ -2460,6 +2462,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
+
+**T283:** Die Reihenfolge der Staffelfragen in `endpoints`: die gepackte Staffel wird **vor** `SeasonEpisodeIndex.AiredAsync` abgewiesen — **1 Prüfung** in `endpoints` (243 → 244).
 
 **T282:** Der Kommentar in `endpoints`: das Ticket trägt `EpisodeTitle`, der tvst-Endpunkt reicht ihn als `commentExtra` weiter, die Kette füllt ihn aus der Bibliothek und filtert Platzhalter — **1 Prüfung** in `endpoints` (242 → 243).
 

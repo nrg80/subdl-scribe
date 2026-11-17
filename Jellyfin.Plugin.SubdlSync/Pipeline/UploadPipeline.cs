@@ -3605,6 +3605,27 @@ public sealed class UploadPipeline : IPackFiller
                 continue;
             }
 
+            // F-M573 (Operator-Frage 17.11.2026: „Was ist mit dem exzessiven Staffelpack-Zusammensuchen um
+            // dann festzustellen dass schon alles fertig ist?"): die BILLIGSTE Frage zuerst. Sind alle
+            // Paare, die der Store fuer diese Staffel kennt, bereits gepackt, ist die Staffel erledigt —
+            // dann kostet sie weder eine TMDb-Folgenzahl noch einen Blick in eine Datei noch einen Hash.
+            // Vorher lief die teure Kette (TMDb-Fragen + Release-Gruppen + Dateien) fuer JEDE vollstaendige
+            // Staffel, nur um am Ende „already up as a pack" zu melden.
+            var staffelBekannt = Registry.LanguagesInSeason(entry.Key.Item1, entry.Key.Item2);
+            var staffelGepackt = PacksOf(entry.Key.Item1, entry.Key.Item2);
+            if (staffelBekannt.Count > 0
+                && staffelBekannt.All(p => staffelGepackt.Contains((
+                    Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(p.Language)
+                        ?? (p.Language ?? string.Empty).ToUpperInvariant(),
+                    p.HearingImpaired))))
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[Sub Scribe] season pack: {Imdb} S{Season} — all {Count} known pair(s) already up as a pack, no TMDb call, no file read.",
+                    entry.Key.Item1, entry.Key.Item2, staffelBekannt.Count);
+                continue;
+            }
+
             tmdbOf.TryGetValue(entry.Key, out string? tmdbId);
             var aired = await SeasonEpisodeIndex.AiredAsync(entry.Key.Item1, entry.Key.Item2, tmdbId, _config.TmdbApiKey, _logger, ct).ConfigureAwait(false);
             if (aired == null)

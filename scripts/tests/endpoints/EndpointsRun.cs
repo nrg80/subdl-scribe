@@ -743,6 +743,13 @@ internal static class Program
             && uploadSource.Contains("EpisodeTitle: EpisodeTitleOf(mediaPath)", StringComparison.Ordinal)
             && uploadSource.Contains("EpisodenPlatzhalter", StringComparison.Ordinal));
 
+        // --- F-M573: die billigste Staffelfrage zuerst -------------------------------------------
+        Check("F-M573: eine vollstaendig gepackte Staffel kostet keine TMDb-Frage und keine Datei",
+            uploadSource.Contains("var staffelBekannt = Registry.LanguagesInSeason(entry.Key.Item1, entry.Key.Item2);", StringComparison.Ordinal)
+            && uploadSource.Contains("all {Count} known pair(s) already up as a pack, no TMDb call, no file read", StringComparison.Ordinal)
+            && uploadSource.IndexOf("staffelBekannt.All(", StringComparison.Ordinal)
+                < uploadSource.IndexOf("SeasonEpisodeIndex.AiredAsync", StringComparison.Ordinal));
+
         // --- F-M571: Pack-Paare einer Staffel in EINER Frage -------------------------------------
         Check("F-M571: der Pack-Planer fragt die Staffel einmal, nicht je Paar",
             reg557.Contains("public HashSet<(string Language, bool HearingImpaired)> PacksInSeason(", StringComparison.Ordinal)
