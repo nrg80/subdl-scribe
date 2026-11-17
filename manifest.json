@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.461",
-        "changelog": "v12.1.12.461: the download side gets the same rule as the upload side -- a source that times out is a failure of that source, the run goes on and ends only when no source answers.",
+        "version": "12.1.12.462",
+        "changelog": "v12.1.12.462: the file fetch and the report filing are guarded too; a source that stopped answering stays out for the rest of the run, and the run ends only when none is left.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.461-dev/Jellyfin.Plugin.SubdlSync_12.1.12.461.zip",
-        "checksum": "f93e087fd67ef70dda6dd71b063e1177",
-        "timestamp": "2026-11-17T21:38:57Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.462-dev/Jellyfin.Plugin.SubdlSync_12.1.12.462.zip",
+        "checksum": "074021235671564c80e573b54ceb0787",
+        "timestamp": "2026-11-17T21:53:30Z"
       }
     ]
   }
