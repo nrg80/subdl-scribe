@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.452",
-        "changelog": "v12.1.12.452: a settled file costs one look at the store instead of a stream read plus a walk over every track.\n  v12.1.12.452: a track whose extraction failed is parked for seven days, and a missing file is never parked.",
+        "version": "12.1.12.453",
+        "changelog": "v12.1.12.453: a stored verdict closes the pair, and a pair question asks for evidence instead of the run's own queue and language lists.\n  v12.1.12.453: a duplicate counts only at the same source -- what SubDL already has still goes to tvsubtitles.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.452-dev/Jellyfin.Plugin.SubdlSync_12.1.12.452.zip",
-        "checksum": "d78dd8dfece7cd4ba48e90cbe77a1389",
-        "timestamp": "2026-11-17T02:52:21Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.453-dev/Jellyfin.Plugin.SubdlSync_12.1.12.453.zip",
+        "checksum": "45475b772bc7ce2ab34f16de93d2596d",
+        "timestamp": "2026-11-17T07:10:10Z"
       }
     ]
   }
