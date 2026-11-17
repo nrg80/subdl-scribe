@@ -155,7 +155,7 @@ internal static class Program
         var kommentar = Jellyfin.Plugin.SubScribe.Api.Endpoints.UploadComment.Series(
             "tt1442464", "1422", 2, 24, "The Middle", "The Man Hunt", 2009);
         Check("the comment carries ids, episode line and year in three lines",
-            kommentar == "IMDb: tt1442464 / TMDb: 1422\nS02E24: The Middle / The Man Hunt\n2009",
+            kommentar == "IMDb: tt1442464 / TMDb: 1422 — S02E24: The Middle / The Man Hunt — 2009",
             "found: " + kommentar.Replace("\n", " | ", StringComparison.Ordinal));
         Check("the client tag carries the running version, read from the assembly",
             TvSubtitlesClient.ClientTag.StartsWith("Sub Scribe ", StringComparison.Ordinal)
@@ -163,12 +163,12 @@ internal static class Program
             && TvSubtitlesClient.ClientTag != "Sub Scribe 0.0.0.0");
         Check("one id is enough, an unknown part stays out",
             Jellyfin.Plugin.SubScribe.Api.Endpoints.UploadComment.Series("tt1442464", null, 2, 24, "The Middle", "The Man Hunt", 0)
-                == "IMDb: tt1442464\nS02E24: The Middle / The Man Hunt"
+                == "IMDb: tt1442464 — S02E24: The Middle / The Man Hunt"
             && Jellyfin.Plugin.SubScribe.Api.Endpoints.UploadComment.Series(null, null, 2, 24, "The Middle", null, 0)
                 == "S02E24: The Middle");
         Check("a placeholder-free episode line keeps the show title only, a film drops the line",
             Jellyfin.Plugin.SubScribe.Api.Endpoints.UploadComment.Movie("tt15398776", "872585", "Oppenheimer", 2023)
-                == "IMDb: tt15398776 / TMDb: 872585\nOppenheimer\n2023");
+                == "IMDb: tt15398776 / TMDb: 872585 — Oppenheimer — 2023");
 
         // ---- 3. the upload refuses what the form would silently swallow -------------------------
         var data = Encoding.UTF8.GetBytes("1\n00:00:01,000 --> 00:00:02,000\nhello\n");
@@ -199,7 +199,7 @@ internal static class Program
             "an absent part is the only way to keep whatever the page pre-fills");
         Check("the ids land in the comment field, the release stays its own field",
             upload.Fields.Single(f => f.Key == "comment").Value
-                == "IMDb: tt1442464 / TMDb: 1422\nS02E24"
+                == "IMDb: tt1442464 / TMDb: 1422 — S02E24"
             && upload.Fields.Single(f => f.Key == "release").Value == "FEVER");
         var flags = BuildOk(data, doubleEpisode: true, hearingImpaired: true)!;
         Check("double episode and hearing-impaired are appended as \"1\" and only when set",

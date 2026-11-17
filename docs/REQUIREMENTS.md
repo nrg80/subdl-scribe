@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.448.
+**Status:** Implementation — v12.1.12.449.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -452,12 +452,9 @@ Bibliothek abarbeitet, ohne dass dafür eigens ein inkrementeller Modus nötig w
 **F-M571 [U]:** **Die Pack-Frage wird je Staffel EINMAL gestellt, nicht je Paar.** Packs entstehen nur bei SubDL; welche (Sprache, HI)-Paare einer Staffel schon gepackt sind, liest `PacksInSeason` in einer Abfrage, der Lauf merkt sie sich (`PacksOf`). Vorher fragte der Planer je Paar in den Store und schrieb je Paar eine Zeile — an einer Staffel („The Thundermans" S1/S2) 67 Abfragen und 67 Zeilen in einer Minute, alle mit derselben Antwort; jetzt eine Zeile je Staffel (`N of M pair(s) already up as a pack`).
 
 **F-M574 [U]:** **Der Kommentar trägt drei Zeilen — Kennungen, Folge, Jahr.** Vorgabe des Operators (17.11.2026, zweimal nachgeschärft):
-```
-IMDb: tt15875168 / TMDb: 201124
-S01E05: Mo / Tombstone
-2022
-```
-Für Filme (mst) entfällt die Folgenzeile; dort steht der Filmtitel. Schreibweise **IMDb** und **TMDb** in offizieller Groß-/Kleinschreibung. Eine Zeile fällt weg, wenn ihr Inhalt fehlt (kein Titel in der Bibliothek, nur ein Platzhalter, kein Jahr) — geraten wird nichts. Ein Bauer für beide Quellen (`UploadComment`), damit tvst und mst nicht auseinanderlaufen.
+`IMDb: tt15875168 / TMDb: 201124 — S01E05: Mo / Tombstone — 2022`
+
+Die Seite macht aus jedem Zeilenumbruch ein Leerzeichen (in Produktion gesehen), deshalb trennt ein **Gedankenstrich** die drei Teile (Operator-Entscheidung). Für Filme (mst) entfällt die Folgenzeile; dort steht der Filmtitel. Schreibweise **IMDb** und **TMDb** in offizieller Groß-/Kleinschreibung. Eine Zeile fällt weg, wenn ihr Inhalt fehlt (kein Titel in der Bibliothek, nur ein Platzhalter, kein Jahr) — geraten wird nichts. Ein Bauer für beide Quellen (`UploadComment`), damit tvst und mst nicht auseinanderlaufen.
 
 **F-M573 [U]:** **Die billigste Staffelfrage zuerst.** Sind alle Paare, die der Store für eine Staffel kennt, bereits gepackt, endet die Staffel mit **einer** Zeile — kein TMDb-Aufruf, kein Blick in eine Datei, kein Hash. Vorher lief die teure Kette (Folgenzahl bei TMDb, Release-Gruppen, Dateiliste) für **jede** vollständige Staffel und meldete am Ende „already up as a pack".
 

@@ -9,10 +9,10 @@ namespace Jellyfin.Plugin.SubScribe.Api.Endpoints;
 /// F-M574 (Operator-Vorgabe 17.11.2026, zweimal nachgeschärft: „Imdb/tmdb bitte in der offiziellen
 /// groß/Kleinschreibung"):
 /// <code>
-/// IMDb: tt15875168 / TMDb: 201124
-/// S01E05: Mo / Tombstone
-/// 2022
+/// IMDb: tt15875168 / TMDb: 201124 — S01E05: Mo / Tombstone — 2022
 /// </code>
+/// Die Seite macht aus jedem Zeilenumbruch ein Leerzeichen (am 17.11.2026 in Produktion gesehen), also
+/// trennt ein sichtbarer Gedankenstrich die drei Teile.
 /// Der Kommentar ist der einzige Ort, an dem der richtige Folgentitel mitkommt — den Dateinamen baut die
 /// Seite aus ihrem eigenen Folgeneintrag (an „Mo" S01E05 gemessen: Bibliothek „Tombstone", Seite
 /// „Episode 5"). Eine Zeile fällt weg, wenn ihr Inhalt fehlt; geraten wird nichts.
@@ -89,6 +89,7 @@ public static class UploadComment
             zeilen.Add(year.ToString(CultureInfo.InvariantCulture));
         }
 
-        return string.Join("\n", zeilen);
+        // Operator-Entscheidung 17.11.2026: „Gedankenstrich bitte" — die Seite kennt keine Umbrüche.
+        return string.Join(" — ", zeilen);
     }
 }
