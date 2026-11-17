@@ -484,6 +484,14 @@
     "T280": {
       "suite": "endpoints",
       "checks": 2
+    },
+    "T281": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T282": {
+      "suite": "endpoints",
+      "checks": 1
     }
   }
 }

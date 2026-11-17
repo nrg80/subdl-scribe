@@ -215,6 +215,12 @@ public sealed class UploadPipeline : IPackFiller
     private readonly Dictionary<(string ImdbId, int Season), List<BaseItem>> _completeSeasonItems = new();
 
     /// <summary>
+    /// F-M571: die Pack-Paare je Staffel einmal je Lauf. Der Planer fragt dieselbe Staffel mehrfach
+    /// (Sammler, Ankunftszweig, Plan) — die Antwort aendert sich innerhalb eines Laufs nicht.
+    /// </summary>
+    private readonly Dictionary<(string ImdbId, int Season), HashSet<(string Language, bool HearingImpaired)>> _packsInSeason = new();
+
+    /// <summary>
     /// F-M429 (operator order 03.11.2026: "Bei packbildung identifizierte einzeluploads für später den
     /// einzelupload merken"): the (series, season, language, variant) pairs a pack of THIS run actually
     /// carried. A single position covered by such a pair is skipped later in the run — the pack is the
@@ -494,6 +500,7 @@ public sealed class UploadPipeline : IPackFiller
         _seasonAnchors.Clear();
         _seasonEpisodes.Clear();
         _completeSeasonItems.Clear();
+        _packsInSeason.Clear();
         _packAbsorbed.Clear(); // F-M429: the memory of this run's packs, not the previous run's
 
         var items = CollectItems(_config.SelectedLibraries);
@@ -3516,6 +3523,19 @@ public sealed class UploadPipeline : IPackFiller
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Complete seasons keyed by (imdb id, season).</returns>
+    /// <summary>F-M571: die gepackten Paare einer Staffel, je Lauf einmal aus dem Store.</summary>
+    private HashSet<(string Language, bool HearingImpaired)> PacksOf(string imdbId, int season)
+    {
+        var key = (imdbId, season);
+        if (!_packsInSeason.TryGetValue(key, out var gepackt))
+        {
+            gepackt = Registry.PacksInSeason(imdbId, season);
+            _packsInSeason[key] = gepackt;
+        }
+
+        return gepackt;
+    }
+
     private async Task<Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>> CompleteSeasonsAsync(CancellationToken ct)
     {
         var result = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>();
@@ -3615,15 +3635,21 @@ public sealed class UploadPipeline : IPackFiller
                 }
             }
 
+            // F-M571 (Operator: „Already up as a pack ist doch etwas das kann man mit dem ersten file
+            // prüfen und den rest dann überspringen"): EIN Blick auf die Staffel statt einer Abfrage je
+            // Paar, und EINE Zeile statt einer je Paar — gemessen an „The Thundermans" 67 Abfragen und
+            // 67 Zeilen in einer Minute, alle mit derselben Antwort.
+            var gepackt = PacksOf(entry.Key.Item1, entry.Key.Item2);
             var open = new List<(string Language, bool HearingImpaired)>();
+            int schonGepackt = 0;
             foreach (var (language, hi) in pairs)
             {
-                if (Registry.HasPack(entry.Key.Item1, entry.Key.Item2, language, hi))
+                if (gepackt.Contains((
+                        Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(language)
+                            ?? (language ?? string.Empty).ToUpperInvariant(),
+                        hi)))
                 {
-                    LogUtil.Normal(
-                        _logger,
-                        "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: already up as a pack, nothing is extracted.",
-                        entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(language, hi));
+                    schonGepackt++;
                     continue;
                 }
 
@@ -3642,6 +3668,14 @@ public sealed class UploadPipeline : IPackFiller
                         "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: neither the store nor the files of every aired episode carry this language — no pack for it, the single uploads of this run are unaffected.",
                         entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(language, hi));
                 }
+            }
+
+            if (schonGepackt > 0)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[Sub Scribe] season pack: {Imdb} S{Season} — {Packed} of {Pairs} pair(s) already up as a pack, {Open} examined, nothing is extracted for the packed ones.",
+                    entry.Key.Item1, entry.Key.Item2, schonGepackt, pairs.Count, open.Count);
             }
 
             if (pairs.Count > 0 && open.Count == 0)
@@ -4764,9 +4798,14 @@ public sealed class UploadPipeline : IPackFiller
                 // single upload writes its own id there too, so a season whose episodes all went up
                 // alone looked "already packed" and was never packed at all. 98 seasons were reported
                 // as inside a pack that never existed.
-                if (Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi))
+                // F-M571: dieselbe Staffelfrage wie im Sammler, keine zweite Abfrage je Paar.
+                if (PacksOf(entry.Key.Item1, entry.Key.Item2).Contains((
+                        Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(pair.Key.Lang)
+                            ?? (pair.Key.Lang ?? string.Empty).ToUpperInvariant(),
+                        pair.Key.Hi)))
                 {
-                    LogUtil.Normal(
+                    LogUtil.PerItem(
+                        _config.LogMode,
                         _logger,
                         "[Sub Scribe] season pack plan: {Imdb} S{Season} [{Lang}] — already inside a pack, nothing is re-sent.",
                         entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(pair.Key.Lang, pair.Key.Hi));
@@ -5609,6 +5648,42 @@ public sealed class UploadPipeline : IPackFiller
     /// weiter, denn die andere Quelle bekommt ihren Versuch unabhaengig davon.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// F-M572: der Folgentitel, den die Bibliothek kennt („Tombstone" für „Mo" S01E05). Ein Platzhalter
+    /// („Episode 5", „Folge 5", leer) geht nicht in den Kommentar — er wäre nur eine zweite falsche
+    /// Auskunft neben der, die die Seite selbst schon zeigt.
+    /// </summary>
+    /// <param name="mediaPath">Pfad der Mediendatei.</param>
+    /// <returns>Der Titel, oder null.</returns>
+    private string? EpisodeTitleOf(string? mediaPath)
+    {
+        if (string.IsNullOrWhiteSpace(mediaPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var item = _libraryManager.FindByPath(mediaPath, false);
+            string? name = item?.Name?.Trim();
+            if (string.IsNullOrWhiteSpace(name) || EpisodenPlatzhalter.IsMatch(name))
+            {
+                return null;
+            }
+
+            return name;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug("[Sub Scribe] no episode title for {Path}: {Msg}", mediaPath, ex.Message);
+            return null;
+        }
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex EpisodenPlatzhalter = new(
+        @"^(episode|folge|ep\.?)\s*\d+$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
     private async Task<UploadResult> SendToTvSubtitlesAsync(
         string srtContent, string neutralName, string lang, string releaseName, string quality,
         string? imdbId, string? tmdbId, bool isSeries, int season, int episode, bool hearingImpaired,
@@ -5692,7 +5767,8 @@ public sealed class UploadPipeline : IPackFiller
             DoubleEpisode: false,
             SeasonPack: false,
             // F-M501: die aufgeloeste Nummer — der Endpunkt holt die Serienliste damit gar nicht erst.
-            TvstShowId: show.ShowId);
+            TvstShowId: show.ShowId,
+            EpisodeTitle: EpisodeTitleOf(mediaPath));
 
         var answer = await endpoint.SendAsync(ticket, ct).ConfigureAwait(false);
         LogUtil.PerItem(_config.LogMode, _logger,

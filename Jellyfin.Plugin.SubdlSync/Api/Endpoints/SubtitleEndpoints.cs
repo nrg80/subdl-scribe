@@ -136,7 +136,8 @@ public sealed record UploadTicket(
     bool SeasonPack,
     int? TvstShowId = null,
     int? MsubMovieId = null,
-    int MovieYear = 0);
+    int MovieYear = 0,
+    string? EpisodeTitle = null);
 
 /// <summary>
 /// F-M483: what an upload endpoint answers. <paramref name="Ok"/> false plus a

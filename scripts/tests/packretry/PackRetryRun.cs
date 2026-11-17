@@ -254,9 +254,11 @@ internal static class Program
         // The planner lives in the UPLOAD pipeline — reading download source here would assert about
         // a file that never contained the line.
         var upload = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
-        Check(upload.Contains("Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi)", StringComparison.Ordinal),
+        // F-M571: die Staffel-Pack-Frage kommt jetzt aus dem Lauf-Cache (PacksOf), nicht je Paar aus dem
+        // Store — die Aussage bleibt dieselbe: ein schon gepacktes Paar wird nicht erneut geplant.
+        Check(upload.Contains("PacksOf(entry.Key.Item1, entry.Key.Item2).Contains((", StringComparison.Ordinal),
             "and the fill-only plan skips a season that is already packed");
-        Check(upload.IndexOf("Registry.HasPack(", StringComparison.Ordinal) < upload.IndexOf("already inside a pack, nothing is re-sent", StringComparison.Ordinal),
+        Check(upload.IndexOf("PacksOf(entry.Key.Item1, entry.Key.Item2).Contains((", StringComparison.Ordinal) < upload.IndexOf("already inside a pack, nothing is re-sent", StringComparison.Ordinal),
             "the check comes before the decision it guards");
 
         // ── 8. F-M391: the duplicate goes first, the pack second ────────────────
@@ -321,7 +323,7 @@ internal static class Program
             "the plan no longer treats 'has a SubdlId' as 'is inside a pack'");
         Check(!upload.Contains("inPack.Add(pair)", StringComparison.Ordinal),
             "and the member-id heuristic is gone with it");
-        Check(upload.Contains("Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi)", StringComparison.Ordinal),
+        Check(upload.Contains("PacksOf(entry.Key.Item1, entry.Key.Item2).Contains((", StringComparison.Ordinal),
             "the packs row is the only proof that a season is packed");
 
         // ── 15. F-M405: eine Extraktion je Datei, nicht je Sprache ───────────────
@@ -373,7 +375,7 @@ internal static class Program
         Console.WriteLine("21. The pack check runs before the extraction");
         var m415Start = coordPackSrc.IndexOf("FillOnlyAsync", StringComparison.Ordinal);
         var fillBody = m415Start > 0 ? coordPackSrc.Substring(m415Start) : string.Empty;
-        Check(fillBody.Contains("HasPack(", StringComparison.Ordinal)
+        Check(fillBody.Contains("HasPack(")
               && fillBody.Contains("nothing is extracted", StringComparison.Ordinal),
             "F-M415: a season already up as a pack is skipped before any extraction");
 

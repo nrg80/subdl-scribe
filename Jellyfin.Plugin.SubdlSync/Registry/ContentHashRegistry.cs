@@ -1988,6 +1988,39 @@ public sealed class ContentHashRegistry : IDisposable
     public bool HasPack(string? imdbId, int season, string? language, bool hearingImpaired)
         => GetPack(imdbId, season, language, hearingImpaired) != null;
 
+    /// <summary>
+    /// F-M571 (Operator-Anweisung 17.11.2026: „Already up as a pack ist doch etwas das kann man mit dem
+    /// ersten file prüfen und den rest dann überspringen"): alle Pack-Paare EINER Staffel in EINER Frage.
+    /// <para>
+    /// Vorher fragte der Pack-Planer je (Staffel, Sprache, HI) einzeln in den Store und schrieb je Paar
+    /// eine Zeile — an einer einzigen Staffel „The Thundermans" waren das 67 Abfragen und 67 Zeilen in
+    /// einer Minute, obwohl die Antwort für alle dieselbe war („already up as a pack"). Packs entstehen
+    /// nur bei SubDL; ein Blick auf die Staffel genügt.
+    /// </para>
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <returns>Die bereits gepackten (Sprache, HI)-Paare dieser Staffel.</returns>
+    public HashSet<(string Language, bool HearingImpaired)> PacksInSeason(string? imdbId, int season)
+    {
+        var gepackt = new HashSet<(string Language, bool HearingImpaired)>();
+        if (string.IsNullOrWhiteSpace(imdbId) || season < 1)
+        {
+            return gepackt;
+        }
+
+        foreach (var row in _db.Packs.FindAll()
+                     .Where(x => string.Equals(x.ImdbId, imdbId, StringComparison.Ordinal) && x.Season == season)
+                     .ToList())
+        {
+            gepackt.Add((
+                Language.LanguageMapper.Canonical(row.Language) ?? (row.Language ?? string.Empty).ToUpperInvariant(),
+                row.HearingImpaired ?? false));
+        }
+
+        return gepackt;
+    }
+
     public bool IsContentKnown(string? contentHash)
     {
         if (string.IsNullOrEmpty(contentHash))

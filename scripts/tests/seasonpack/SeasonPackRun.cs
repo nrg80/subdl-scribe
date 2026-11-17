@@ -439,10 +439,12 @@ internal static class Program
             int ticketAt = pipeline.IndexOf("var ticket = new Api.Endpoints.UploadTicket(", StringComparison.Ordinal);
             int ticketEnd = ticketAt < 0
                 ? -1
-                : pipeline.IndexOf("TvstShowId: show.ShowId);", ticketAt, StringComparison.Ordinal);
+                : pipeline.IndexOf("TvstShowId: show.ShowId", ticketAt, StringComparison.Ordinal);
+            // F-M572: das Ticket endet nicht mehr an "TvstShowId: show.ShowId);" — der Folgentitel steht
+            // jetzt als letztes Feld dahinter. Der Anker ist deshalb der Feldname ohne Klammer.
             string ticket = ticketAt < 0 || ticketEnd < 0
                 ? string.Empty
-                : pipeline[ticketAt..(ticketEnd + "TvstShowId: show.ShowId);".Length)];
+                : pipeline[ticketAt..(ticketEnd + "TvstShowId: show.ShowId".Length)];
             Check(ticket.Length > 0
                   && ticket.Contains("SeasonPack.ReleaseGroup(releaseName) ?? string.Empty", StringComparison.Ordinal)
                   && !ticket.Contains("GetFileNameWithoutExtension", StringComparison.Ordinal),

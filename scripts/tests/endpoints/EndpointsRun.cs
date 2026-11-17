@@ -687,6 +687,12 @@ internal static class Program
             && uploadSource.Contains("Registry.OpenPositionsFor(earlyHash, quelle, kopfPosen.Select(p => p.Position))", StringComparison.Ordinal));
 
         // --- F-M557..F-M563: Zugeh-Stempel je Quelle, abgeleitet und nicht global -----------------
+        var ticketSource = await File.ReadAllTextAsync(Path.Combine(
+            root, "Jellyfin.Plugin.SubdlSync", "Api", "Endpoints",
+            "SubtitleEndpoints.cs")).ConfigureAwait(false);
+        var tvstSource = await File.ReadAllTextAsync(Path.Combine(
+            root, "Jellyfin.Plugin.SubdlSync", "Api", "Endpoints",
+            "TvSubtitlesEndpoints.cs")).ConfigureAwait(false);
         string reg557 = await File.ReadAllTextAsync(Path.Combine(
             root, "Jellyfin.Plugin.SubdlSync", "Registry", "ContentHashRegistry.cs")).ConfigureAwait(false);
         string db557 = await File.ReadAllTextAsync(Path.Combine(
@@ -729,6 +735,20 @@ internal static class Program
             uploadSource.Contains("!Registry.IsCompleteFor(earlyHash, quelle, kopfSignatur)", StringComparison.Ordinal)
             && seederSource.Contains("registry.IsCompleteFor(", StringComparison.Ordinal)
             && seederSource.Contains("ContentHashRegistry.PositionSignatureOf(seedPosen)", StringComparison.Ordinal));
+
+        // --- F-M572: der Folgentitel steht im Kommentar ------------------------------------------
+        Check("F-M572: der Folgentitel geht als Kommentar mit, ein Platzhalter nicht",
+            ticketSource.Contains("string? EpisodeTitle = null);", StringComparison.Ordinal)
+            && tvstSource.Contains("commentExtra: ticket.EpisodeTitle", StringComparison.Ordinal)
+            && uploadSource.Contains("EpisodeTitle: EpisodeTitleOf(mediaPath)", StringComparison.Ordinal)
+            && uploadSource.Contains("EpisodenPlatzhalter", StringComparison.Ordinal));
+
+        // --- F-M571: Pack-Paare einer Staffel in EINER Frage -------------------------------------
+        Check("F-M571: der Pack-Planer fragt die Staffel einmal, nicht je Paar",
+            reg557.Contains("public HashSet<(string Language, bool HearingImpaired)> PacksInSeason(", StringComparison.Ordinal)
+            && reg557.Contains("_db.Packs.FindAll()", StringComparison.Ordinal)
+            && uploadSource.Contains("var gepackt = PacksOf(entry.Key.Item1, entry.Key.Item2);", StringComparison.Ordinal)
+            && uploadSource.Contains("private HashSet<(string Language, bool HearingImpaired)> PacksOf(string imdbId, int season)", StringComparison.Ordinal));
 
         // --- F-M556: der Kopf kennt auch die losen Seitenwagen ---------------------------------------
         // Befund 16.11.2026: 292 Wegwuerfe bei 0 Uploads im 21:28-Zyklus. Der Einreiher reihte Items ein,

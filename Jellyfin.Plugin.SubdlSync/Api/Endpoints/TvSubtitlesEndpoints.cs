@@ -253,7 +253,12 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
                 ticket.Release,
                 tmdb,
                 ticket.ImdbId,
-                commentExtra: null,
+                // F-M572 (Operator-Anweisung 17.11.2026: „Dann trag es zukünftig in die comments ein"):
+                // der Folgentitel steht im Kommentar. Die Seite baut den DATEINAMEN aus ihrem eigenen
+                // Folgeneintrag — an „Mo" S01E05 zu sehen: Jellyfin führt „Tombstone", die Seite zeigt
+                // „Episode 5", und der Name ist kein Feld, das wir senden. Der Kommentar ist der Ort, an
+                // dem der richtige Titel mitkommt.
+                commentExtra: ticket.EpisodeTitle,
                 doubleEpisode: ticket.DoubleEpisode,
                 hearingImpaired: ticket.HearingImpaired);
         }
