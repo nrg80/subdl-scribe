@@ -516,6 +516,10 @@
     "T289": {
       "suite": "endpoints",
       "checks": 1
+    },
+    "T290": {
+      "suite": "endpoints",
+      "checks": 2
     }
   }
 }

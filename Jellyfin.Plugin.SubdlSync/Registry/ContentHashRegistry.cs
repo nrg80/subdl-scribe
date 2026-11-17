@@ -3134,6 +3134,39 @@ public sealed class ContentHashRegistry : IDisposable
         mark();
     }
 
+    /// <summary>
+    /// F-M580 (Operator-Anweisung 17.11.2026: „Die absicht wurde bereits mehrfach kommuniziert. Es ist ein
+    /// verdict, paar schließen."): ein gespeichertes Urteil schließt das Paar — auch bei einer
+    /// Sidecar-Datei, deren Spruch am INHALT hängt und nicht an einer Position. F-M557 hat denselben
+    /// Endzustand für eingebettete Spuren längst festgelegt; der Paar-Frage fehlte die Entsprechung, weil
+    /// sie nur Hochlade-Marken las. Folge in Produktion (17.11.2026, `Best.Medicine.S02E06`): fünfmal
+    /// „still open: tvsubtitles, subdl" → SKIP als „identical subtitle already known in this file" →
+    /// „no stream survived local screening", jede Runde erneut gezählt, nie gesendet.
+    /// </summary>
+    /// <param name="mediaHash">Der Medienhash der Datei.</param>
+    /// <param name="language">Die Sprache des Paars.</param>
+    /// <param name="hearingImpaired">Das HI-Kennzeichen des Paars.</param>
+    /// <returns>Wahr, wenn ein gespeichertes Inhalts-Urteil das Paar entschieden hat.</returns>
+    public bool PairIsDecided(string? mediaHash, string language, bool hearingImpaired)
+    {
+        if (string.IsNullOrEmpty(mediaHash) || string.IsNullOrWhiteSpace(language))
+        {
+            return false;
+        }
+
+        // F-M557: der Store fuehrt ISO (ENG), nicht den Code der Quelle (EN).
+        language = Language.LanguageMapper.Canonical(language) ?? language;
+
+        return GetEmbeds(mediaHash).Any(x => x.Language == language
+                && x.HearingImpaired == hearingImpaired
+                && x.Status == SubtitleStatus.Rejected
+                && x.Reason == RejectReason.DuplicateContent)
+            || GetSidecars(mediaHash).Any(x => x.Language == language
+                && x.HearingImpaired == hearingImpaired
+                && x.Status == SubtitleStatus.Rejected
+                && x.Reason == RejectReason.DuplicateContent);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {

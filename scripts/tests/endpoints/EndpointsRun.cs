@@ -793,6 +793,19 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
+        // --- F-M580: ein gespeichertes Urteil schliesst das Paar ------------------------------
+        var registrySource580 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
+        Check("F-M580: ein gespeichertes Inhalts-Urteil schliesst das Paar — eingebettet und als Sidecar",
+            registrySource580.Contains("public bool PairIsDecided(string? mediaHash, string language, bool hearingImpaired)", StringComparison.Ordinal)
+            && registrySource580.Contains("&& x.Reason == RejectReason.DuplicateContent)", StringComparison.Ordinal)
+            && registrySource580.Contains("|| GetSidecars(mediaHash).Any(x => x.Language == language", StringComparison.Ordinal));
+        Check("F-M580: die Paar-Frage fragt das Urteil VOR dem Quellentor, und ein gespeicherter Spruch zaehlt nicht erneut",
+            uploadSource.Contains("!Registry.PairIsDecided(mediaHash, language, hearingImpaired)", StringComparison.Ordinal)
+            && uploadSource.IndexOf("!Registry.PairIsDecided(mediaHash, language, hearingImpaired)", StringComparison.Ordinal)
+                < uploadSource.IndexOf("&& Api.Endpoints.UploadGate.Decide(", StringComparison.Ordinal)
+            && uploadSource.Contains("// F-M580: gespeichertes Urteil — keine neue Ablehnung, also kein neuer Zaehler.", StringComparison.Ordinal)
+            && uploadSource.Contains("// F-M580: der Spruch steht schon im Store", StringComparison.Ordinal));
+
         // --- F-M573: die billigste Staffelfrage zuerst -------------------------------------------
         Check("F-M573: eine vollstaendig gepackte Staffel kostet keine TMDb-Frage und keine Datei",
             uploadSource.Contains("var staffelBekannt = LanguagesOf(entry.Key.Item1, entry.Key.Item2);", StringComparison.Ordinal)

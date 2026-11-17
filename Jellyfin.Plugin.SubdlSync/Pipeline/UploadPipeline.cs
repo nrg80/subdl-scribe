@@ -1502,8 +1502,10 @@ public sealed class UploadPipeline : IPackFiller
                     }
                     else
                     {
+                        // F-M580: der Spruch steht schon im Store — er ist keine NEUE Ablehnung. Ihn hier
+                        // erneut zu zaehlen trieb „Uploads: gestoppt vor dem Senden" in jedem Lauf hoch,
+                        // ohne dass eine einzige neue Entscheidung gefallen waere.
                         summary.SkippedStreams++;
-                        summary.RejectedCandidates++; // F-M286
                         // Known reject for THIS position — carry the original reason forward verbatim
                         // instead of replacing it with a generic note, so the cause stays readable.
                         LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(mediaPath), lang, ExplainReject(rejectReason));
@@ -1696,8 +1698,8 @@ public sealed class UploadPipeline : IPackFiller
                     }
                     else
                     {
+                        // F-M580: gespeichertes Urteil — keine neue Ablehnung, also kein neuer Zaehler.
                         summary.SkippedStreams++;
-                        summary.RejectedCandidates++; // F-M286
                         LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe] SKIP {File} [{Lang}] — {Reason}", Path.GetFileName(loosePath), looseLang, ExplainReject(looseReject));
 
                         continue;
@@ -6125,7 +6127,14 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="isSeries">Wahr für eine Serie: dann zählt nur die Serien-Adresse der Familie.</param>
     /// <returns>True when at least one enabled source that could take it does not have it yet.</returns>
     private bool AnyUploadSourceStillWants(string? mediaHash, string language, bool hearingImpaired, bool isSeries) =>
-        Api.Endpoints.UploadGate.Decide(
+        // F-M580 (Operator-Anweisung 17.11.2026: „Es ist ein verdict, paar schließen."): ein gespeichertes
+        // Urteil ist ein Endzustand — auch fuer eine SIDECAR-Datei, deren Spruch am Inhalt haengt und
+        // nicht an einer Position. Ohne diese Zeile blieb eine Datei, deren einziger Kandidat laengst als
+        // „identical subtitle already known" abgelehnt war, fuer immer „still open", wurde in jedem Lauf
+        // erneut durchgegangen und zaehlte denselben Spruch erneut als „gestoppt vor dem Senden"
+        // (gemessen 17.11.2026: Best.Medicine.S02E06, fuenfmal dieselbe Abfolge).
+        !Registry.PairIsDecided(mediaHash, language, hearingImpaired)
+        && Api.Endpoints.UploadGate.Decide(
             // F-M546: auch hier gilt die Queue JE QUELLE — eine Quelle, die dieses Item nicht
             // eingereiht hat, „will" es nicht und haelt die Spur nicht offen.
             SourceAllowed(Configuration.SubtitleProvider.Subdl) && QueuedForSource(Configuration.SubtitleProvider.Subdl),
