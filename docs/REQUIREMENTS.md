@@ -2471,7 +2471,7 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
 
-**T284:** Der Kommentar-Bauer in `tvsubtitles` und `moviesubtitles`: drei Zeilen mit offizieller Schreibweise, fehlende Teile fallen weg, der Film kennt keine Folgenzeile — **2 Prüfungen** in `tvsubtitles` (98 → 100) und die Kommentar-Prüfung in `moviesubtitles` trägt jetzt Titel und Jahr.
+**T284:** Der Kommentar-Bauer in `tvsubtitles` und `moviesubtitles`: drei Zeilen mit offizieller Schreibweise, fehlende Teile fallen weg, der Film kennt keine Folgenzeile — zwei Prüfungen in `tvsubtitles` ersetzen die alten Kommentar-Prüfungen (Suite bleibt bei **98**), die Kommentar-Prüfung in `moviesubtitles` trägt jetzt Titel und Jahr.
 
 **T283:** Die Reihenfolge der Staffelfragen in `endpoints`: die gepackte Staffel wird **vor** `SeasonEpisodeIndex.AiredAsync` abgewiesen — **1 Prüfung** in `endpoints` (243 → 244).
 
