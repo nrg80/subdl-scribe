@@ -1322,7 +1322,13 @@ public sealed class UploadPipeline : IPackFiller
             // The.Assassin S02E02, Zyklus 14:26). Die Entscheidung je Spur bleibt unveraendert (F-M68):
             // dieser Ausstieg tut nur dasselbe eine Ebene hoeher und spart den ffmpeg-Durchgang.
             // ============================================================
-            if (textPositions.Count > 0 && textPositions.All(p => Registry.EmbedRejectedReason(mediaHash, p) != null))
+            // F-M584: dieselbe Frage eine Ebene hoeher. Der Ausstieg gilt nur, wenn ausserdem KEIN Paar
+            // dieser Datei noch eine Quelle verlangt — sonst faellt die Datei wegen einer Ablehnung weg,
+            // die nur eine fremde Quelle betrifft.
+            bool nochEinPaarOffen = Registry.RecordedPairsByHash(mediaHash)
+                .Any(pair => AnyUploadSourceStillWants(mediaHash, pair.Language, pair.HearingImpaired, isSeries));
+            if (textPositions.Count > 0 && !nochEinPaarOffen
+                && textPositions.All(p => Registry.EmbedRejectedReason(mediaHash, p) != null))
             {
                 summary.SettledItems++;
                 LogUtil.PerItem(_config.LogMode, _logger,
@@ -4334,8 +4340,11 @@ public sealed class UploadPipeline : IPackFiller
         string? fillMediaHash = MediaHashFor(mediaPath);
         if (!string.IsNullOrWhiteSpace(fillMediaHash))
         {
+            // F-M584: „abgelehnt" heisst nicht „fuer alle erledigt" — ein Selbst-Echo sperrt nur die Quelle,
+            // die das Paar hat. Verlangt eine andere Quelle es noch, wird die Spur entpackt und der Pack
+            // kann gebaut werden.
             var alreadyRefused = fillPositions
-                .Where(position => Registry.EmbedRejectedReason(fillMediaHash, position) != null)
+                .Where(position => SpurIstGesperrt(fillMediaHash, position, lang, hearingImpaired, isSeries: true))
                 .ToList();
             if (alreadyRefused.Count > 0)
             {
@@ -6176,6 +6185,50 @@ public sealed class UploadPipeline : IPackFiller
             SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles) && !isSeries,
             !isSeries && Registry.IsUploadedTo(mediaHash, language, hearingImpaired, Configuration.SubtitleProvider.MovieSubtitles))
         .SkipReason is null;
+
+    /// <summary>
+    /// F-M584 (Operator-Anweisung 17.11.2026: „Dann wieder nur für die eigene source vergleichen"):
+    /// eine gespeicherte Ablehnung sperrt eine Spur nur, wenn sie für DIESE Quelle gilt.
+    /// <para>
+    /// <c>duplicate-self-echo</c> heißt „eine Quelle hat das Paar schon". Bis hierher las der Pack-Bauer
+    /// nur „abgelehnt" und warf die Spur weg — auch für die Quelle, die das Paar NICHT hat. Gemessen
+    /// 17.11.2026 an Hunting Alice Bell S01E01: die EN-HI-Spur stand bei tvsubtitles, war im Store als
+    /// <c>duplicate-self-echo</c> vermerkt, und der SubDL-Pack fiel mit „episode 1 cannot join" aus —
+    /// obwohl SubDL die Folge nie bekommen hat.
+    /// </para>
+    /// <para>
+    /// Verlangt noch irgendeine eingeschaltete Quelle das Paar (Schalter, Medienart, Beleg — F-M581),
+    /// ist die Spur verfügbar. Qualitätsurteile (zu klein, QA, Pack trägt es, Sprache unbekannt,
+    /// Extraktion gescheitert) bleiben quellenneutral und sperren weiter für alle.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaHash">Medien-Hash der Datei.</param>
+    /// <param name="position">Index der eingebetteten Textspur.</param>
+    /// <param name="language">Sprache des Paares.</param>
+    /// <param name="hearingImpaired">HI-Merker des Paares.</param>
+    /// <param name="isSeries">Wahr für eine Serie.</param>
+    /// <returns>True, wenn die Ablehnung die Spur für alle Quellen sperrt.</returns>
+    private bool SpurIstGesperrt(string? mediaHash, int position, string language, bool hearingImpaired, bool isSeries)
+    {
+        if (mediaHash is null)
+        {
+            return false;
+        }
+
+        string? reason = Registry.EmbedRejectedReason(mediaHash, position);
+        if (reason is null)
+        {
+            return false;
+        }
+
+        if (reason == RejectReason.SelfEcho
+            && AnyUploadSourceStillWants(mediaHash, language, hearingImpaired, isSeries))
+        {
+            return false;
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// F-M581: hat IRGENDEINE Quelle dieses Paar nachweislich? Nur dann ist „schon oben" eine wahre

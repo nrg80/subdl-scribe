@@ -717,8 +717,8 @@ internal static class Program
         // ── F-M442/F-M443/F-M444: die drei Vorabprüfungen und die zweite Fassung ──
         Check(uploadSrc.Contains("public (string? Quality, string? Framerate) SourceFacts("),
             "F-M442: quality and frame rate are readable without extracting anything");
-        Check(uploadSrc.Contains("Registry.EmbedRejectedReason(fillMediaHash, position)"),
-            "F-M443: the fill asks the reject store before it extracts");
+        Check(uploadSrc.Contains("SpurIstGesperrt(fillMediaHash, position, lang, hearingImpaired, isSeries: true)"),
+            "F-M443/F-M584: the fill asks the reject store before it extracts — and only for the source that owns the verdict");
         Check(uploadSrc.Contains("every track of this language is already refused in the store, nothing is extracted"),
             "F-M443: a language whose tracks are all refused costs no extraction at all");
         Check(uploadSrc.Contains("FindSeasonEpisodeItems(") && uploadSrc.Contains("trying the next file of this episode"),

@@ -793,6 +793,18 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
+        // --- F-M584: eine Ablehnung gilt je Quelle -----------------------------------------------
+        var uploadSource584 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        Check("F-M584: ein Selbst-Echo sperrt die Spur nur, solange keine Quelle das Paar mehr verlangt",
+            uploadSource584.Contains("private bool SpurIstGesperrt(string? mediaHash, int position, string language, bool hearingImpaired, bool isSeries)", StringComparison.Ordinal)
+            && uploadSource584.Contains("if (reason == RejectReason.SelfEcho", StringComparison.Ordinal)
+            && uploadSource584.Contains("&& AnyUploadSourceStillWants(mediaHash, language, hearingImpaired, isSeries))", StringComparison.Ordinal)
+            && uploadSource584.Contains("return true;", StringComparison.Ordinal));
+        Check("F-M584: der Pack-Fueller und der Kopf-Ausstieg fragen je Quelle",
+            uploadSource584.Contains(".Where(position => SpurIstGesperrt(fillMediaHash, position, lang, hearingImpaired, isSeries: true))", StringComparison.Ordinal)
+            && uploadSource584.Contains("bool nochEinPaarOffen = Registry.RecordedPairsByHash(mediaHash)", StringComparison.Ordinal)
+            && uploadSource584.Contains("if (textPositions.Count > 0 && !nochEinPaarOffen", StringComparison.Ordinal));
+
         // --- F-M583: Urteile ohne Beleg werden verworfen ---------------------------------------
         var registrySource580 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
         var refreshSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeDatabaseRefreshTask.cs"));

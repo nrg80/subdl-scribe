@@ -12,11 +12,11 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 13 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 112 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 113 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 3 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M379–F-M448 und F-M475, F-M476
- - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 17 requirements (F-M557–F-M563, F-M571–F-M577, F-M580–F-M582)
+ - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 18 requirements (F-M557–F-M563, F-M571–F-M577, F-M580–F-M584)
 - [4. Download Pipeline](#4-download-pipeline) — 92 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 32 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
@@ -454,6 +454,8 @@ Bibliothek abarbeitet, ohne dass dafür eigens ein inkrementeller Modus nötig w
 **F-M575 [U]:** **Beide Staffelfragen lesen ihre Tabelle einmal je Lauf, nicht einmal je Staffel.** Die Sammelfrage kostet je Aufruf einen vollen Durchlauf durch alle Untertitel-Zeilen (9.385). Bei 125 Staffeln waren das 125 Durchläufe und rund **6 Sekunden je Staffel** — gemessen im 449-Lauf (02:41:24 Start, Zeilen im 6-Sekunden-Takt). Der Store ist 4,7 MB groß (1.415 Datei-, 9.385 Untertitel-Zeilen), ein Zug alles zusammen ist billig; danach ist die Frage je Staffel eine Suche im Speicher.
 
 **F-M577 [U]:** **Ein Extraktionsfehler wird als Ablehnung `extraction-failed` geparkt — und nur, wenn die Datei überhaupt da ist.** Operator-Entscheidung 17.11.2026 (Variante B, wörtlich: „voher prufen ob Datei überhaupt vorhanden ist"). Kein eigenes Feld, kein Schema-Schritt: der Grund steht im vorhandenen Ablehnungs-Store auf der Zeile der Spur, und der Zeitpunkt ist der der Urteils-Zeile (`StatusAt`). Damit ist die Spur erledigt — die Datei kann ihre Vollständigkeits-Marke bekommen, und der billige Kopf-Ausstieg (F-M576) überspringt sie. Nach **7 Tagen** gilt die Ablehnung als veraltet (`ExtractRejectIsStale`): die Spur fällt wieder in die Extraktionsliste, ohne dass jemand etwas löschen muss. **Zuerst wird die Existenz geprüft:** eine fehlende Datei (Share weg, Pfad verschoben) ist ein Zugriffsfehler und kein Urteil über die Spur — sie bekommt keine Ablehnung und wird im nächsten Lauf erneut versucht. Sind ausschließlich geparkte Positionen offen, endet die Datei mit einer Zeile statt mit einem Lesedurchgang. Geprüft von T287.
+
+**F-M584 [U]:** **Eine Ablehnung sperrt eine Spur nur für die Quelle, die sie betrifft — der Pack-Bauer vergleicht je Quelle.** Operator-Anweisung 17.11.2026: „Dann wieder nur für die eigene source vergleichen." `duplicate-self-echo` heißt „eine Quelle hat das Paar schon"; bis hierher las der Pack-Füller nur „abgelehnt" (`EmbedRejectedReason`, F-M443) und warf die Spur weg — auch für die Quelle, die das Paar nicht hat. Gemessen 17.11.2026 an Hunting Alice Bell S01E01 (`tt37253101`): die EN-HI-Spur lag bei tvsubtitles, stand im Store als `duplicate-self-echo`, und der SubDL-Pack fiel mit „episode 1 cannot join, 5 of 6 episodes are up" aus (F-M442), obwohl SubDL die Folge nie bekommen hat. `SpurIstGesperrt` sperrt jetzt nur, wenn keine eingeschaltete Quelle das Paar noch verlangt (Schalter, Medienart, Beleg — F-M581); Qualitätsurteile (zu klein, QA, Pack trägt es, Sprache unbekannt, Extraktion gescheitert) bleiben quellenneutral und sperren weiter für alle. Dieselbe Frage stellt der Kopf-Ausstieg F-M541: er greift nur, wenn kein Paar der Datei mehr verlangt wird. Geprüft von T294.
 
 **F-M582 [U]:** **„Duplicate" gilt nur für dieselbe Quelle — ein Text, den SubDL hat, geht trotzdem zu tvsubtitles.** Operator-Anweisung 17.11.2026: „Es muss schon zur selben Quelle duplicate sein. Es soll bei tvst hochgeladen werden auch wenn es bei subdl schon vorliegt." Zwei Stellen verletzten das: (1) `SettleDuplicateContent` schrieb ohne Quellenbeleg eine quellenneutrale Ablehnung und warf den Kandidaten weg — lag der Text bei SubDL, bekam tvst ihn nie; jetzt geht der Kandidat an die Kette, solange **irgendeine** eingeschaltete Quelle ihn nehmen darf, und nur wenn die Herkunft bekannt ist (er wurde heruntergeladen, F-M487) ist das Paar entschieden. (2) Das Inhalts-Urteil aus F-M580 schloss das Paar für **alle** Quellen; es schließt jetzt nur noch, wenn der Text nirgends mehr hochgehen darf. Damit bleibt die Quellenprüfung quellenscharf: `IsUploadedTo` fragt je Quelle, ein Beleg bei SubDL erledigt tvsubtitles nicht. Geprüft von T292.
 
@@ -2485,6 +2487,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
+
+**T294:** „Duplicate" gilt je Quelle im Pack-Bauer (F-M584): `SpurIstGesperrt` fragt bei `duplicate-self-echo` die Paar-Frage je Quelle, der Pack-Füller benutzt sie statt der quellenneutralen Ablehnung, und der Kopf-Ausstieg F-M541 greift nur ohne offenes Paar — **2 Prüfungen** in `endpoints` (258 → 260).
 
 **T293:** Urteile ohne Beleg (F-M583): `ClearVerdictsWithoutEvidence` prüft beide Gründe, verlangt fehlende Marken und unbekannte Herkunft, löscht eingebettete **und** Sidecar-Zeilen, und der Database Refresh ruft es in seinem Lauf auf — **2 Prüfungen** in `endpoints` (256 → 258).
 
