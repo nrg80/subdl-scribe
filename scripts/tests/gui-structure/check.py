@@ -1683,12 +1683,22 @@ def main():
           "var when = d.due ? subdlFmtDayTime(d.due) : '';" in html, "deferral note still time-only")
     check("F-M359: the bare-time helper is no longer wired into the deferral note",
           "var when = d.due ? resetLocal(d.due) : '';" not in html, "resetLocal still used for the note")
-    # F-M391: a pack absorbs singles — the toggle has to say that they are deleted from SubDL.
-    check("F-M391: the season pack toggle notes that absorbed singles are deleted from SubDL",
-          "its single upload is deleted from SubDL first" in html)
-    check("F-M391: the note sits in the season pack description, not somewhere else",
-          "instead of one upload per episode. Default: on. An episode that already went up on its own"
-          in html)
+    # F-M585 (Operator-Anweisung 17.11.2026: "Der text zu upload season packs in der gui muss weg.
+    # Nur noch tick upload season packs."): der Schalter traegt nur das Haekchen — kein Beschreibungstext,
+    # und der alte F-M391-Hinweis ("deleted from SubDL first") ist mit dem Loeschstopp hinfaellig.
+    check("F-M585: the season pack toggle has no description text any more",
+          "its single upload is deleted from SubDL first" not in html
+          and "instead of one upload per episode" not in html,
+          "the old season pack description is still there")
+    _season_pack_block = ""
+    _idx = html.find('id="UploadSeasonPacks"')
+    if _idx >= 0:
+        _end = html.find("</div>", html.find("</label>", _idx))
+        _season_pack_block = html[_idx:_end] if _end > _idx else html[_idx:_idx + 400]
+    check("F-M585: only the tick and its label remain around the switch",
+          'id="UploadSeasonPacks"' in html
+          and "fieldDescription" not in _season_pack_block
+          and "Upload season packs" in _season_pack_block)
 
     # ---- F-M497 (Operator-Anweisung 15.11.2026: „Pflichtkonfiguration ist tmdb key … Kennzeichnung
     # als required for subdl"): Pflicht ist ALLEIN der TMDb-Schlüssel. Die drei SubDL-Felder sagen

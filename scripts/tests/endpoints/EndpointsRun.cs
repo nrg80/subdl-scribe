@@ -805,6 +805,13 @@ internal static class Program
             && uploadSource584.Contains("private bool CoveredByPack(string? imdbId, int season, string language, bool hearingImpaired, int episode)", StringComparison.Ordinal)
             && uploadSource584.Contains("return pack.Episodes", StringComparison.Ordinal)
             && !uploadSource584.Contains("return UploadResult.Skipped(\"pack-carries-it\")", StringComparison.Ordinal));
+        var configPage585 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"));
+        int switchAt585 = configPage585.IndexOf("id=\"UploadSeasonPacks\"", StringComparison.Ordinal);
+        int blockEnd585 = switchAt585 < 0 ? -1 : configPage585.IndexOf("</div>", configPage585.IndexOf("</label>", switchAt585, StringComparison.Ordinal), StringComparison.Ordinal);
+        Check("F-M585: der Schalter 'Upload season packs' traegt nur das Haekchen, keinen Beschreibungstext",
+            switchAt585 > 0
+            && blockEnd585 > switchAt585
+            && !configPage585.Substring(switchAt585, blockEnd585 - switchAt585).Contains("fieldDescription", StringComparison.Ordinal));
 
         // --- F-M584: eine Ablehnung gilt je Quelle -----------------------------------------------
         Check("F-M584: ein Selbst-Echo sperrt die Spur nur, solange keine Quelle das Paar mehr verlangt",

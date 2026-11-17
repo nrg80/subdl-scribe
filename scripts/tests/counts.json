@@ -539,7 +539,7 @@
     },
     "T295": {
       "suite": "endpoints",
-      "checks": 2
+      "checks": 3
     }
   }
 }
