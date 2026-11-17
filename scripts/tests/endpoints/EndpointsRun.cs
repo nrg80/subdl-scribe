@@ -794,6 +794,24 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
+        // --- F-M590: sofort notieren, Timeout je Quelle ------------------------------------------
+        var uploadSource590 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        Check("F-M590: die Marke einer Quelle wird unmittelbar nach ihrer Antwort geschrieben",
+            uploadSource590.Contains("private void MarkSourceUploadNow(", StringComparison.Ordinal)
+            && uploadSource590.Contains("lock (_sofortMarkeLock)", StringComparison.Ordinal)
+            && uploadSource590.Contains("MarkSourceUploadNow(quelle, versand.SourceId, mediaHash, subPos, lang,", StringComparison.Ordinal)
+            && uploadSource590.Contains("the other source cannot take the record with it any more (F-M590)", StringComparison.Ordinal));
+        Check("F-M590: ein Timeout ohne gesetztes ct ist ein Fehlschlag dieser Quelle, kein Lauf-Abbruch",
+            uploadSource590.Contains("catch (OperationCanceledException) when (!ct.IsCancellationRequested)", StringComparison.Ordinal)
+            && uploadSource590.Contains("return UploadResult.Failed(\"timeout\");", StringComparison.Ordinal)
+            && uploadSource590.Contains("the other source keeps going.", StringComparison.Ordinal)
+            && uploadSource590.Contains("// Ein echter Abbruch (Nutzer-Stop, Watchdog, Neustart) — der gilt fuer den ganzen Lauf.", StringComparison.Ordinal));
+        Check("F-M590: erst drei Spuren ohne Antwort irgendeiner Quelle beenden den Lauf",
+            uploadSource590.Contains("int _quellenAusfaelleInFolge;", StringComparison.Ordinal)
+            && uploadSource590.Contains("bool alleImTimeout = jeQuelle.All(r => !r.Ok && r.Reason == \"timeout\");", StringComparison.Ordinal)
+            && uploadSource590.Contains("if (_quellenAusfaelleInFolge >= 3)", StringComparison.Ordinal)
+            && uploadSource590.Contains("bool alleQuellenWeg = false;", StringComparison.Ordinal));
+
         // --- F-M589: die Pause haengt an der Spur, nicht an der Datei ----------------------------
         var uploadSource589 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         Check("F-M589: das Pausen-Flag wird je Kandidat gesetzt, nicht je Datei",

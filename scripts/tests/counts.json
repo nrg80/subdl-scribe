@@ -556,6 +556,10 @@
     "T299": {
       "suite": "endpoints",
       "checks": 3
+    },
+    "T300": {
+      "suite": "endpoints",
+      "checks": 3
     }
   }
 }

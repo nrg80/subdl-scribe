@@ -238,6 +238,23 @@ public sealed class UploadPipeline : IPackFiller
     private readonly List<PendingSubdlId> _offeneSubdlIds = new();
 
     /// <summary>
+    /// F-M590 (Operator-Anweisung 17.11.2026: „notieren muss pro quelle direkt nach dem upload
+    /// funktionieren"): die Marke einer Quelle wird geschrieben, sobald DIESE Quelle geantwortet hat —
+    /// nicht erst, wenn die ganze Kette durch ist. Vorher ging eine bereits angenommene Einreichung
+    /// verloren, wenn die zweite Quelle danach in den Timeout lief und der Lauf abbrach (gemessen
+    /// 17.11.2026, `A.Talent.for.Murder.2026`: SubDL hatte angenommen, moviesubtitles antwortete nie).
+    /// Seit F-M587 laufen die Quellen gleichzeitig — deshalb schreibt dieser Pfad unter einem Schloss.
+    /// </summary>
+    private readonly object _sofortMarkeLock = new();
+
+    /// <summary>
+    /// F-M590: wie viele Spuren hintereinander OHNE Antwort irgendeiner Quelle geblieben sind. Erst wenn
+    /// alle Quellen weg sind, bricht der Lauf ab — eine einzelne tote Seite ist ein Fehlschlag dieser
+    /// Quelle, kein Abbruch des Laufs.
+    /// </summary>
+    private int _quellenAusfaelleInFolge;
+
+    /// <summary>
     /// F-M571: die Pack-Paare je Staffel einmal je Lauf. Der Planer fragt dieselbe Staffel mehrfach
     /// (Sammler, Ankunftszweig, Plan) — die Antwort aendert sich innerhalb eines Laufs nicht.
     /// </summary>
@@ -737,8 +754,15 @@ public sealed class UploadPipeline : IPackFiller
                 _packAbsorbed.Count);
         }
 
+        bool alleQuellenWeg = false; // F-M590: erst wenn jede Quelle streikt, endet der Lauf
+
         foreach (var item in items)
         {
+            if (alleQuellenWeg)
+            {
+                break;
+            }
+
             // User stop marker — check BEFORE doing any work.
             if (PipelineStopSignal.IsStopped(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: true, runCt))
             {
@@ -2177,7 +2201,20 @@ public sealed class UploadPipeline : IPackFiller
                     subPos: cand.SubPos,
                     forced: cand.Forced,
                     framerate: itemFramerate).ConfigureAwait(false);
-                switch (result)
+
+                    // F-M590: drei Spuren hintereinander ohne Antwort irgendeiner Quelle — dann sind die
+                    // Seiten weg und der Lauf hat keinen Sinn mehr. Eine einzelne tote Seite ist KEIN
+                    // Abbruch: sie steht als Fehlschlag dieser Quelle im Log, die andere hat geliefert.
+                    if (_quellenAusfaelleInFolge >= 3)
+                    {
+                    alleQuellenWeg = true;
+                    _logger.LogWarning(
+                        "[Sub Scribe] no upload source answered for {N} track(s) in a row — stopping the run early. Nothing was uploaded to any source; next attempt at the next fire.",
+                        _quellenAusfaelleInFolge);
+                    break;
+                    }
+
+                    switch (result)
                 {
                     case { Ok: true }:
                         summary.Uploaded++;
@@ -2873,6 +2910,66 @@ public sealed class UploadPipeline : IPackFiller
     /// Shared upload path for embedded (extracted) and loose (file) SRT content (F-M48).
     /// srtContent: the subtitle text; loosePath: originating loose file or null for embedded.
     /// </summary>
+    /// <summary>
+    /// F-M590: schreibt die Marke EINER Quelle sofort nach ihrer Antwort. Nur die Felder dieser Quelle
+    /// werden gesetzt — <c>MarkEmbed</c>/<c>MarkSidecar</c> schreiben bekannte Kennzeichen einzeln und
+    /// lassen die der anderen Quelle stehen (F-M488), eine zweite Meldung derselben Spur überschreibt
+    /// also nichts. Nennt eine Seite keine Id, wird wie bisher eine eigene Marke vergeben (F-M488).
+    /// Der Aufruf kommt aus den parallel laufenden Quellen, deshalb ein Schloss.
+    /// </summary>
+    /// <param name="quelle">Which source answered.</param>
+    /// <param name="id">The id it reported, if any.</param>
+    /// <param name="mediaHash">Media hash of the row.</param>
+    /// <param name="subPos">Stream position (embedded).</param>
+    /// <param name="lang">Language code.</param>
+    /// <param name="hearingImpaired">HI flag.</param>
+    /// <param name="forced">Forced flag.</param>
+    /// <param name="loosePath">Sidecar path, when the upload came from a loose file.</param>
+    /// <param name="contentHash">Content hash of the text.</param>
+    private void MarkSourceUploadNow(
+        Configuration.SubtitleProvider quelle, string? id, string? mediaHash, int subPos, string lang,
+        bool hearingImpaired, bool forced, string? loosePath, string contentHash)
+    {
+        string marke = string.IsNullOrWhiteSpace(id) ? "own:" + Guid.NewGuid().ToString("N") : id;
+        var jetzt = DateTime.UtcNow;
+        string? subdlId = quelle == Configuration.SubtitleProvider.Subdl ? marke : null;
+        string? tvstId = quelle == Configuration.SubtitleProvider.TvSubtitles ? marke : null;
+        string? msubId = quelle == Configuration.SubtitleProvider.MovieSubtitles ? marke : null;
+
+        lock (_sofortMarkeLock)
+        {
+            if (loosePath != null)
+            {
+                Registry.MarkAndFlush(() => Registry.MarkSidecar(
+                    contentHash, mediaHash ?? contentHash, lang, hearingImpaired, forced,
+                    SubtitleStatus.Uploaded,
+                    fileName: Path.GetFileName(loosePath), path: loosePath,
+                    subdlUploadId: subdlId,
+                    tvSubtitlesUploadId: tvstId,
+                    moviesubtitlesUploadId: msubId,
+                    subdlUploadedAt: subdlId != null ? jetzt : null,
+                    tvSubtitlesUploadedAt: tvstId != null ? jetzt : null,
+                    moviesubtitlesUploadedAt: msubId != null ? jetzt : null));
+            }
+            else
+            {
+                Registry.MarkAndFlush(() => Registry.MarkEmbed(
+                    mediaHash, subPos, lang, hearingImpaired,
+                    SubtitleStatus.Uploaded, contentHash: contentHash, forced: forced,
+                    subdlUploadId: subdlId,
+                    tvSubtitlesUploadId: tvstId,
+                    moviesubtitlesUploadId: msubId,
+                    subdlUploadedAt: subdlId != null ? jetzt : null,
+                    tvSubtitlesUploadedAt: tvstId != null ? jetzt : null,
+                    moviesubtitlesUploadedAt: msubId != null ? jetzt : null));
+            }
+        }
+
+        LogUtil.PerItem(_config.LogMode, _logger,
+            "[Sub Scribe] {Source} recorded right away for {File} [{Lang}] — the other source cannot take the record with it any more (F-M590).",
+            Api.Endpoints.Provenance.Name(quelle), Path.GetFileName(loosePath ?? "?"), lang);
+    }
+
     private async Task<UploadResult> UploadSrtContentAsync(
         string? loosePath,
         string mediaPath,
@@ -3129,13 +3226,36 @@ public sealed class UploadPipeline : IPackFiller
                 // eigene Versandmethode, und welche das ist, sagt der Anbieter selbst. Ein vierter
                 // Anbieter braucht damit eine Methode und einen Eintrag in der Ablage, keine neue
                 // Fallunterscheidung hier.
-                return await SendToSourceAsync(
+                var versand = await SendToSourceAsync(
                         quelle, srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId,
                         isSeries, season, episode, hearingImpaired, mediaHash, mediaPath, framerate, ct)
                     .ConfigureAwait(false);
+
+                // F-M590: sofort notieren, was DIESE Quelle angenommen hat — bevor die andere Quelle
+                // ueberhaupt geantwortet hat. Ein Abbruch danach nimmt die Marke nicht mehr mit.
+                if (versand.Ok)
+                {
+                    MarkSourceUploadNow(quelle, versand.SourceId, mediaHash, subPos, lang,
+                        hearingImpaired, forced, loosePath, contentHashEarly);
+                }
+
+                return versand;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // F-M590: der HttpClient meldet seinen Timeout als TaskCanceledException — also als
+                // OperationCanceledException. Das ist KEIN Abbruch des Laufs: diese eine Quelle ist
+                // ausgefallen, die andere macht weiter. Vorher riss so ein Timeout den ganzen Lauf ab
+                // (gemessen 17.11.2026: moviesubtitles antwortete 90 s nicht, der Lauf endete mit
+                // „cancelled — 0 uploaded", obwohl SubDL den Untertitel schon angenommen hatte).
+                _logger.LogWarning(
+                    "[Sub Scribe] source {Source} did not answer for {Name} [{Lang}] (client timeout) — the other source keeps going.",
+                    Api.Endpoints.Provenance.Name(quelle), neutralName, lang);
+                return UploadResult.Failed("timeout");
             }
             catch (OperationCanceledException)
             {
+                // Ein echter Abbruch (Nutzer-Stop, Watchdog, Neustart) — der gilt fuer den ganzen Lauf.
                 throw;
             }
             catch (Exception ex)
@@ -3160,6 +3280,13 @@ public sealed class UploadPipeline : IPackFiller
             }
 
             var jeQuelle = await Task.WhenAll(laeufe).ConfigureAwait(false);
+
+            // F-M590: sind ALLE zustaendigen Quellen in den Timeout gelaufen, ist das ein Ausfall, kein
+            // Urteil ueber den Text. Erst wenn das mehrfach hintereinander passiert, ist der Lauf
+            // abzubrechen (die Seiten sind dann weg, nicht der Untertitel schlecht).
+            bool alleImTimeout = jeQuelle.All(r => !r.Ok && r.Reason == "timeout");
+            _quellenAusfaelleInFolge = alleImTimeout ? _quellenAusfaelleInFolge + 1 : 0;
+
             for (int i = 0; i < zustaendig.Count; i++)
             {
                 // F-M550: die antwortende Quelle reist im Ergebnis mit — der Aufrufer weiss sonst nicht,
