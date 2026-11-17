@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.443.
+**Status:** Implementation — v12.1.12.444.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -388,7 +388,7 @@ zusätzlich einen Stempel, den nur ein abgeschlossener Lauf setzt. Ergebnis: **2
 oder „verworfen" endeten, kehrten in jedem Zyklus wieder. Dieses Kapitel legt fest, wann eine Datei für eine
 Quelle zu ist — eine Regel, die beide Seiten aufrufen.
 
-**F-M557 [U]:** **Zugeh-Kriterium ist ein Stempel je Quelle auf der Datei, nicht ein Urteil je Spur.**
+**F-M557 [U]:** **Zugeh-Kriterium ist ein Stempel je Quelle auf der Datei; abgerechnet wird je Spur.** Der Stempel entsteht nicht aus einem eigenen Urteilsraum, sondern aus derselben Regel, die der Rest der Pipeline schon benutzt: `IsEmbedTerminalFor` je Dialogspur — hochgeladen bei dieser Quelle, abgelehnt, oder Herkunft bekannt. Positionen, nicht (Sprache, HI)-Paare: die Urteile im Store hängen an der Position, ein zweiter Schlüssel wäre eine zweite Wahrheit (gemessen 17.11.: „Resident.Evil.2026" meldete 9 offene Paare bei 8 gelisteten Sprachen, und alle 22 mst-Dateien mit offenen Paaren endeten im F-M541-Ausstieg, der dieselben Spuren als längst abgelehnt bewies).
 Am Ende des Durchlaufs für eine Quelle wird geprüft, ob **jede vorhandene Dialogspur** dieser Datei für
 diese Quelle *hochgeladen* oder *bewusst übersprungen* wurde. „Vorhanden" heißt dabei die Zahl der
 **verschiedenen (Sprache, HI)-Paare**, nicht die Zahl der Textspuren: eine Sprache, die zweimal in der Datei
@@ -432,7 +432,7 @@ offen hat. Ohne diesen Punkt bliebe tvst auf jeder Spur offen, deren Sprache es 
 16.11.2026: **174** solche Fälle, ID 28×, HE 18×, NO 18×, TH 16×, VI 16×, HR 14×, TL 12×, ET 6×).
 
 **F-M562 [U]:** **Neben dem Stempel steht die Spursignatur.**
-Anzahl der Paare (Sprache, HI) plus Folge ihrer Kennzeichen — dieselbe Zählweise wie F-M557. Weicht sie beim nächsten Nachsehen ab,
+Position, Sprachkennzeichen und HI je Dialogspur, in Positionsfolge (`PositionSignatureOf`) — dieselbe Zählweise wie F-M557. Weicht sie beim nächsten Nachsehen ab,
 gilt die Datei als offen und wird erneut eingereiht — sonst würde eine später hinzugefügte Untertitelspur
 oder ein Remux nie gesendet. Der Stempel allein wäre eine Behauptung über einen Zustand, der sich ändern
 kann.
@@ -2456,6 +2456,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
+
+**T280:** Die Abrechnung je Spur in `endpoints`: `OpenPositionsFor` fragt je Position `IsEmbedTerminalFor` (kein zweiter Urteilsraum), `PositionSignatureOf` trägt Position, Sprache und HI, und weder Kopf noch Einreiher kennen ein `SettlementFor` — **2 Prüfungen** in `endpoints` (239 → 241).
 
 **T279:** Der ISO-Speicher in `endpoints`: `LanguageMapper.Canonical` existiert, jede sprachschlüsselnde Registry-Methode normalisiert ihren Eingang, und Schema 16 zieht den Bestand um und leert die Zugeh-Stempel. **2 Prüfungen** in `endpoints` (237 → 239).
 

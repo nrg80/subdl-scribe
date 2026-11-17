@@ -905,15 +905,18 @@ public sealed class ScribeSeeder
             // das macht den vollen Durchlauf billig, ohne dass es einen zweiten (inkrementellen) Modus
             // braucht. Die Signatur zaehlt PAARE, nicht Spuren (F-M562), und die Frage ist dieselbe,
             // die der Kopf des Laufs stellt (IsCompleteFor).
-            // Dieselbe Abbildung wie im Kopf des Laufs: ISO-3 (ENG) → Store-Code (EN). Zwei verschiedene
-            // Schluessel auf derselben Zeile waeren zwei Wahrheiten (gemessen: 0 Stempel im 441-Lauf).
-            var seedPaare = textStreams
-                .Select(s => (Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(s.Language)
-                        ?? string.Empty,
-                    Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(s)))
+            // F-M557/F-M562 (Operator-Korrektur 17.11.2026): Signatur und Stempel fragen JE SPUR, nicht je
+            // (Sprache, HI)-Paar — die Urteile im Store haengen an der Position. Dieselbe Signatur wie im
+            // Kopf des Laufs, sonst schreibt der eine, was der andere nicht liest (PositionSignatureOf).
+            var seedPosen = textStreams
+                .Select(s => (
+                    Position: allSubs.FindIndex(x => x == s),
+                    Language: Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(s.Language) ?? string.Empty,
+                    Hi: Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(s)))
+                .Where(p => p.Position >= 0)
                 .ToList();
             if (registry.IsCompleteFor(
-                    mediaHash, quelle, Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.SignatureOf(seedPaare)))
+                    mediaHash, quelle, Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.PositionSignatureOf(seedPosen)))
             {
                 return false;
             }

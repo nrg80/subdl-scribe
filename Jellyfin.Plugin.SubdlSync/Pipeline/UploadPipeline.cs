@@ -788,40 +788,35 @@ public sealed class UploadPipeline : IPackFiller
                 .Where(p => p >= 0)
                 .Distinct()
                 .ToList();
-            // F-M557/F-M559/F-M562 (Operator-Entscheidung 16.11.2026): die Abrechnung JE QUELLE, und
-            // zwar hier — vor jeder Arbeit, aus dem Store. Ein Paar ist entschieden, wenn diese Quelle
-            // es hochgeladen hat oder ein Ablehnungs-Urteil dazu steht (Sprache fuehrt die Seite nicht,
-            // identischer Text, Text untauglich). Sind alle Paare entschieden, bekommt die Quelle ihren
-            // Zugeh-Stempel; ein gescheiterter Upload schreibt keins von beidem und haelt die Datei
-            // offen (F-M558). Die Paare — nicht die Spuren: vier Sprachen doppelt sind vier Einheiten
-            // weniger (His & Hers S01E06: 38 Spuren, 34 Einheiten).
-            // Das Sprachkennzeichen der DATEI ist ISO-3 (ENG, DEU), der Store fuehrt den Code, den die
-            // Kette schreibt (EN, DE) — LanguageMapper.MapToSubdl ist dieselbe Abbildung. Ohne sie fragt
-            // die Abrechnung mit "ENG" nach Zeilen, die als "EN" gespeichert sind, findet nichts und
-            // haelt JEDE Datei offen (gemessen im ersten 441-Lauf: 839 offene tvst-Paare, 0 Stempel).
-            // Ein Kennzeichen, das die Abbildung nicht kennt, wird roh verglichen — genau so schreibt es
-            // die Kette (unmappable language tag).
-            var kopfPaare = kopfAlleSubs
+            // F-M557/F-M559/F-M562 (Operator-Korrektur 17.11.2026: „Ist das nicht generell das ziel das
+            // verdict zu schreiben? Jetzt schon wieder ne Lücke?"): die Abrechnung JE QUELLE, hier — vor
+            // jeder Arbeit, aus dem Store. Gezaehlt wird JE SPUR, nicht je (Sprache, HI)-Paar: die
+            // Urteile im Store stehen je Position, und der Kopf beweist weiter unten an denselben
+            // Positionen, dass „jede Textspur abgelehnt" ist (F-M541). Die Paar-Fassung fragte mit einem
+            // anderen Schluessel und hielt 22 mst-Dateien offen, obwohl jede Spur ein Urteil hatte.
+            // Entschieden ist eine Spur, wenn diese Quelle sie hochgeladen hat, ein Ablehnungs-Urteil
+            // steht oder die Herkunft bekannt ist (IsEmbedTerminalFor — EINE Regel, drei Aufrufer).
+            var kopfPosen = kopfAlleSubs
                 .Where(Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream)
-                .Select(s => (Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(s.Language)
-                        ?? string.Empty,
-                    Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(s)))
+                .Select(s => (
+                    Position: kopfAlleSubs.FindIndex(x => x == s),
+                    Language: Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(s.Language) ?? string.Empty,
+                    Hi: Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(s)))
+                .Where(p => p.Position >= 0)
                 .ToList();
-            var kopfSignatur = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.SignatureOf(kopfPaare);
+            var kopfSignatur = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.PositionSignatureOf(kopfPosen);
             foreach (var quelle in quellen)
             {
-                var (einheiten, entschieden, offen) = Registry.SettlementFor(earlyHash, quelle, kopfPaare);
-                if (einheiten > 0 && offen.Count == 0)
+                var offen = Registry.OpenPositionsFor(earlyHash, quelle, kopfPosen.Select(p => p.Position));
+                if (kopfPosen.Count > 0 && offen.Count == 0)
                 {
                     Registry.MarkCompleteFor(earlyHash, quelle, kopfSignatur);
                     LogUtil.PerItem(
                         _config.LogMode,
                         _logger,
-                        "[Sub Scribe] {File} — {Tracks} track(s) → {Units} pair(s), {Settled} settled — stamp for {Source} (F-M559)",
+                        "[Sub Scribe] {File} — {Tracks} track(s), 0 open — stamp for {Source} (F-M559)",
                         Path.GetFileName(mediaPath),
-                        kopfPositionen.Count + (kopfAlleSubs.Count - kopfPositionen.Count),
-                        einheiten,
-                        entschieden,
+                        kopfPosen.Count,
                         Api.Endpoints.Provenance.Name(quelle));
                 }
                 else if (offen.Count > 0)
@@ -829,11 +824,12 @@ public sealed class UploadPipeline : IPackFiller
                     LogUtil.PerItem(
                         _config.LogMode,
                         _logger,
-                        "[Sub Scribe] {File} — {Open} pair(s) open for {Source}: {List} (no stamp, F-M559)",
+                        "[Sub Scribe] {File} — {Open} of {Tracks} track(s) open for {Source}: {List} (no stamp, F-M559)",
                         Path.GetFileName(mediaPath),
                         offen.Count,
+                        kopfPosen.Count,
                         Api.Endpoints.Provenance.Name(quelle),
-                        string.Join(", ", offen.Take(8)));
+                        string.Join(", ", offen.Take(8).Select(x => "s" + x.ToString(System.Globalization.CultureInfo.InvariantCulture))));
                 }
             }
 

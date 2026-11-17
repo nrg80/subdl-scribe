@@ -480,6 +480,10 @@
     "T279": {
       "suite": "endpoints",
       "checks": 2
+    },
+    "T280": {
+      "suite": "endpoints",
+      "checks": 2
     }
   }
 }

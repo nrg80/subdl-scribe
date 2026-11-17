@@ -2515,43 +2515,67 @@ public sealed class ContentHashRegistry : IDisposable
     }
 
     /// <summary>
-    /// F-M557/F-M559: die Abrechnung einer Datei für eine Quelle. Ein Paar gilt als entschieden, wenn
-    /// diese Quelle es hochgeladen hat (eigene Marke) **oder** ein Ablehnungs-Urteil dazu im Store steht
-    /// (Sprache führt die Seite nicht, identischer Text, Text untauglich). Ein gescheiterter Upload
-    /// schreibt keins von beidem — er zählt deshalb **nicht**, und die Datei bleibt offen (F-M558).
+    /// F-M557/F-M559 (Operator-Korrektur 17.11.2026: „Ist das nicht generell das ziel das verdict zu
+    /// schreiben? Jetzt schon wieder ne Lücke?"): die Abrechnung einer Datei für eine Quelle — **je Spur**,
+    /// nicht je (Sprache, HI)-Paar.
+    /// <para>
+    /// DER FEHLER der Paar-Fassung: die Urteile im Store stehen je Position (<see cref="MarkEmbed"/>),
+    /// die Abrechnung fragte aber nach Sprache und HI. Zwei Schluessel auf denselben Zeilen sind zwei
+    /// Wahrheiten: der Kopf konnte per Position beweisen, dass jede Textspur abgelehnt war (F-M541), und
+    /// die Abrechnung fand fuer dieselbe Datei neun offene Paare, weil das neunte kein Kennzeichen trug
+    /// (gemessen 17.11. an „Resident.Evil.2026": 9 offene Paare, 8 Sprachen gelistet, alle 22 mst-Dateien
+    /// mit offenen Paaren endeten im F-M541-Ausstieg). Deshalb gibt es hier keinen zweiten Urteilsraum:
+    /// gefragt wird <see cref="IsEmbedTerminalFor"/> — dieselbe Regel, die auch der Ausstieg und der
+    /// Einreiher benutzen.
+    /// </para>
     /// </summary>
     /// <param name="mediaHash">Der Medienhash der Datei.</param>
     /// <param name="provider">Die Quelle, für die abgerechnet wird.</param>
-    /// <param name="pairs">Die (Sprache, HI)-Paare der Datei.</param>
-    /// <returns>Einheiten, entschiedene Einheiten und die offenen Paare.</returns>
-    public (int Units, int Settled, List<string> Open) SettlementFor(
-        string? mediaHash, SubtitleProvider provider, IEnumerable<(string Language, bool HearingImpaired)> pairs)
+    /// <param name="positions">Die Positionen der Dialogspuren dieser Datei.</param>
+    /// <returns>Die Positionen, für die diese Quelle noch nichts Endgueltiges hat.</returns>
+    public List<int> OpenPositionsFor(string? mediaHash, SubtitleProvider provider, IEnumerable<int> positions)
     {
-        var offen = new List<string>();
-        int einheiten = 0;
-        int entschieden = 0;
-        foreach (var (language, hi) in pairs
-                     .Select(p => (p.Language.ToUpperInvariant(), p.HearingImpaired))
-                     .Distinct())
+        var offen = new List<int>();
+        if (string.IsNullOrEmpty(mediaHash))
         {
-            einheiten++;
-            bool erledigt = !string.IsNullOrEmpty(mediaHash)
-                && (IsUploadedTo(mediaHash, language, hi, provider)
-                    || _db.Embeds.Exists(x => x.MediaHash == mediaHash && x.Language == language
-                        && x.HearingImpaired == hi && x.Status == SubtitleStatus.Rejected)
-                    || _db.Sidecars.Exists(x => x.MediaHash == mediaHash && x.Language == language
-                        && x.HearingImpaired == hi && x.Status == SubtitleStatus.Rejected));
-            if (erledigt)
+            return positions.ToList();
+        }
+
+        // F-M560: eine Quelle ohne Upload-Weg haelt nichts offen.
+        if (!Api.Endpoints.SubtitleEndpointCatalog.HasUploadPath(provider))
+        {
+            return offen;
+        }
+
+        foreach (int pos in positions.Distinct())
+        {
+            if (!IsEmbedTerminalFor(mediaHash, pos, provider))
             {
-                entschieden++;
-            }
-            else
-            {
-                offen.Add(language + (hi ? "+HI" : string.Empty));
+                offen.Add(pos);
             }
         }
 
-        return (einheiten, entschieden, offen);
+        return offen;
+    }
+
+    /// <summary>
+    /// F-M562: die Spursignatur — Position, Sprachkennzeichen und HI je Dialogspur, in Positionsfolge.
+    /// Weicht sie bei einem spaeteren Besuch ab (Spur dazu, Sprache getauscht, Remux), ist die Datei
+    /// offen, auch wenn der Stempel noch steht. Positionen statt Paare, aus demselben Grund wie
+    /// <see cref="OpenPositionsFor"/>: das Urteil haengt an der Spur.
+    /// </summary>
+    /// <param name="positions">Position, Sprache und HI der Dialogspuren.</param>
+    /// <returns>Eine stabile Zeichenkette fuer den Vergleich.</returns>
+    public static string PositionSignatureOf(
+        IEnumerable<(int Position, string Language, bool HearingImpaired)> positions)
+    {
+        return string.Join(
+            "|",
+            positions
+                .OrderBy(p => p.Position)
+                .Select(p => p.Position.ToString("D3", System.Globalization.CultureInfo.InvariantCulture)
+                    + ":" + (p.Language ?? string.Empty).ToUpperInvariant()
+                    + (p.HearingImpaired ? "+HI" : string.Empty)));
     }
 
     /// <summary>

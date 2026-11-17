@@ -182,7 +182,7 @@ internal static class ReportingRun
         // F-M501: 13 carries media.TvstShowId — der Marker wird mit jeder Spalte gehoben, die ein
         // aelterer Build beim Schreiben verlieren wuerde.
         // F-M507: der Marker steht auf 14 — die Spalten der dritten Quelle (Filme) kamen dazu.
-        Check(db.Contains("CurrentSchemaVersion = 16", StringComparison.Ordinal)
+        Check(db.Contains("CurrentSchemaVersion = 17", StringComparison.Ordinal)
               && db.Contains("ALTER TABLE sidecars ADD COLUMN Origin", StringComparison.Ordinal)
               && db.Contains("ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId", StringComparison.Ordinal),
             "the schema version is bumped with the columns (11 carries source and direction marks)");

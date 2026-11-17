@@ -111,7 +111,7 @@ public sealed class ScribeDbContext : IDisposable
     // Gegenseite (`MsubMovieId`, dieselbe Ebene wie TvstShowId). Nachgezogen beim Start
     // (EnsureReportColumns/EnsureMediaColumns), Bestandszeilen bleiben unangetastet und lesen die neuen
     // Felder als null.
-    public const int CurrentSchemaVersion = 16;
+    public const int CurrentSchemaVersion = 17;
 
     private readonly string _dbPath;
     private readonly ILogger? _logger;
