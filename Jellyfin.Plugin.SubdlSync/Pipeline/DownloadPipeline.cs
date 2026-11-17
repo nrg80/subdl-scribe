@@ -361,6 +361,37 @@ public sealed class DownloadPipeline : IDisposable
     /// </summary>
     private bool _letzteFrageOhneAntwort;
 
+    /// <summary>
+    /// F-M592 (Operator-Anweisung 17.11.2026: „Jo"): merkt eine Quelle als in diesem Lauf ausgefallen
+    /// und prueft, ob ueberhaupt noch eine uebrig ist. Eine tote Quelle wird fuer den REST des Laufs
+    /// nicht mehr gefragt — sonst kostet jede weitere Spur erneut den vollen Client-Timeout (90 s),
+    /// ohne Aussicht auf Antwort. Bleibt keine Quelle uebrig, endet der Lauf („erst wenn alle weg sind
+    /// ist der Lauf ein Abbruch"). Der Schritt gilt nur fuer diesen Lauf; der naechste fragt wieder alle.
+    /// </summary>
+    /// <param name="quelle">The source that did not answer.</param>
+    private void MerkeQuelleTot(Configuration.SubtitleProvider quelle)
+    {
+        if (!_quellenTot.Add(quelle))
+        {
+            return;
+        }
+
+        _logger.LogWarning(
+            "[Sub Scribe-D] {Source} did not answer — it stays out for the rest of this run (F-M592).",
+            Api.Endpoints.Provenance.Name(quelle));
+
+        bool lebtNochEine = Enum.GetValues<Configuration.SubtitleProvider>()
+            .Any(p => SourceAllowed(p) && _config.IsConfiguredForDownload(p) && !_quellenTot.Contains(p));
+        if (!lebtNochEine)
+        {
+            _stopRunNoSources = true;
+            _logger.LogWarning(
+                "[Sub Scribe-D] no download source is left — every one of them stopped answering; stopping the run early (F-M592).");
+        }
+    }
+
+    /// <summary>F-M592: Quellen, die in diesem Lauf ausgefallen sind.</summary>
+
     /// <summary>F-M591: wie viele Quellen dieses Vorgangs ohne Antwort blieben.</summary>
     private int _quellenOhneAntwortInDiesemItem;
 
@@ -372,6 +403,14 @@ public sealed class DownloadPipeline : IDisposable
 
     /// <summary>F-M591: der Lauf endet, weil keine Quelle mehr antwortet (nicht: Kontingent).</summary>
     private bool _stopRunNoSources;
+
+    /// <summary>
+    /// F-M592 (Operator-Anweisung 17.11.2026: „Jo"): Quellen, die in diesem Lauf schon einmal nicht
+    /// geantwortet haben. Sie werden fuer den REST des Laufs nicht mehr gefragt — sonst kostet jede
+    /// weitere Spur erneut den vollen Client-Timeout (90 s), ohne Aussicht auf Antwort. Der Schritt
+    /// gilt nur fuer diesen Lauf; der naechste fragt wieder alle.
+    /// </summary>
+    private readonly HashSet<Configuration.SubtitleProvider> _quellenTot = new();
 
     // Per-item filename-title fallback (soft mode last rung)
 
@@ -809,6 +848,12 @@ public sealed class DownloadPipeline : IDisposable
         try
         {
             await FlushReportsAsync(summary, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // F-M592: ein Timeout beim Melden ist kein Lauf-Abbruch — die Meldungen bleiben offen.
+            _logger.LogWarning(
+                "[Sub Scribe-D] report flush stopped on a client timeout — the open reports stay due for the next run (F-M592).");
         }
         catch (OperationCanceledException)
         {
@@ -1722,6 +1767,13 @@ public sealed class DownloadPipeline : IDisposable
         {
             ct.ThrowIfCancellationRequested();
 
+            // F-M592: eine Quelle, die in diesem Lauf schon stumm geblieben ist, wird nicht erneut
+            // gefragt — der Timeout kostet sonst je Artikel 90 s ohne Aussicht auf Antwort.
+            if (_quellenTot.Contains(quelle))
+            {
+                continue;
+            }
+
             if (quelle == MainSearchSource)
             {
                 // F-M497: eine Quelle ohne das, was ihr Pfad braucht, tritt nicht an — sie steht
@@ -1748,6 +1800,7 @@ public sealed class DownloadPipeline : IDisposable
                         Api.Endpoints.Provenance.Name(quelle), Path.GetFileName(mediaPath));
                     _letzteFrageOhneAntwort = true;
                     _quellenOhneAntwortInDiesemItem++;
+                    MerkeQuelleTot(quelle);
                     continue;
                 }
                 catch (OperationCanceledException)
@@ -2684,8 +2737,39 @@ public sealed class DownloadPipeline : IDisposable
                 // eine Datei wirklich abgelegt wird (HI und Hauptspur).
                 // Die 0,5-s-API-Pause zieht der PacingHandler nach jeder externen Antwort.
                 _watchdog?.Heartbeat();
+
+                // F-M592: auch der ABRUF der Datei ist eine Frage an EINE Quelle. Antwortet sie nicht,
+                // ist das ihr Fehlschlag: der naechste Kandidat kommt dran, und die Quelle bleibt fuer
+                // den Rest des Laufs draussen. Vorher flog dieser Timeout bis zum Lauf-Ende durch —
+                // der Such-Teil war seit F-M591 abgesichert, der Abhol-Teil nicht.
+                if (_quellenTot.Contains(cand.Provider))
+                {
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        "[Sub Scribe-D] {File} [{Lang}] — candidate from {Source} skipped: that source stopped answering in this run (F-M592)",
+                        Path.GetFileName(mediaPath), lang, Api.Endpoints.Provenance.Name(cand.Provider));
+                    continue;
+                }
+
                 DownloadOutcome dl = DownloadOutcome.None("candidate");
-                CandidateAttempt attempt = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                CandidateAttempt attempt;
+                try
+                {
+                    attempt = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning(
+                        "[Sub Scribe-D] {File} [{Lang}] — {Source} did not answer while delivering the file (client timeout); trying the next candidate (F-M592).",
+                        Path.GetFileName(mediaPath), lang, Api.Endpoints.Provenance.Name(cand.Provider));
+                    _letzteFrageOhneAntwort = true;
+                    MerkeQuelleTot(cand.Provider);
+                    continue;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Ein echter Abbruch (Nutzer-Stop, Watchdog, Neustart) gilt fuer den ganzen Lauf.
+                    throw;
+                }
                 byte[]? bytes = attempt.Bytes;
                 SubtitleUnpackFile? packFile = attempt.PackFile;
                 dl = attempt.Outcome;
@@ -4118,6 +4202,7 @@ public sealed class DownloadPipeline : IDisposable
                     "[moviesubtitles] {File} [{Lang}] — the film record did not answer (client timeout) — the run keeps going with the other sources (F-M591).",
                     Path.GetFileName(mediaPath ?? title), lang);
                 _letzteFrageOhneAntwort = true;
+                MerkeQuelleTot(Configuration.SubtitleProvider.MovieSubtitles);
                 return leer;
             }
             catch (OperationCanceledException)
@@ -4186,6 +4271,7 @@ public sealed class DownloadPipeline : IDisposable
                 "[{Source}-D] search for {Title} [{Lang}] — no answer (client timeout) — the run keeps going with the other sources (F-M591).",
                 Api.Endpoints.Provenance.Name(quelle), title, lang);
             _letzteFrageOhneAntwort = true;
+            MerkeQuelleTot(quelle);
             return leer;
         }
         catch (OperationCanceledException)
@@ -4963,6 +5049,15 @@ public sealed class DownloadPipeline : IDisposable
             try
             {
                 await FileReportAsync(row, row.Language, summary, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // F-M592: die Meldung geht an SubDL — antwortet die API nicht, wird sie zurueckgestellt
+                // und im naechsten Lauf erneut versucht (F-M450), statt den Lauf zu beenden.
+                summary.ReportsDeferred++;
+                _logger.LogWarning(
+                    "[Sub Scribe-D] report for {Release} not filed: no answer from the API (client timeout) — deferred to the next run (F-M592).",
+                    row.ReleaseName);
             }
             catch (OperationCanceledException)
             {

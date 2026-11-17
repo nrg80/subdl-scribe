@@ -794,6 +794,21 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
+        // --- F-M592: Abruf und Meldungen, tote Quellen --------------------------------------------
+        var downloadSource592 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
+        Check("F-M592: der Datei-Abruf faellt bei Timeout auf den naechsten Kandidaten zurueck",
+            downloadSource592.Contains("did not answer while delivering the file (client timeout); trying the next candidate (F-M592)", StringComparison.Ordinal)
+            && downloadSource592.Contains("attempt = await DownloadCandidateAsync(cand, season, episode, ct).ConfigureAwait(false);", StringComparison.Ordinal));
+        Check("F-M592: eine ausgefallene Quelle bleibt fuer den Rest des Laufs draussen",
+            downloadSource592.Contains("private readonly HashSet<Configuration.SubtitleProvider> _quellenTot = new();", StringComparison.Ordinal)
+            && downloadSource592.Contains("private void MerkeQuelleTot(Configuration.SubtitleProvider quelle)", StringComparison.Ordinal)
+            && downloadSource592.Split("MerkeQuelleTot(").Length - 1 >= 4
+            && downloadSource592.Contains("candidate from {Source} skipped: that source stopped answering in this run (F-M592)", StringComparison.Ordinal));
+        Check("F-M592: erst wenn keine Quelle mehr uebrig ist, endet der Lauf — offene Meldungen werden zurueckgestellt",
+            downloadSource592.Contains("no download source is left — every one of them stopped answering; stopping the run early (F-M592)", StringComparison.Ordinal)
+            && downloadSource592.Contains("no answer from the API (client timeout) — deferred to the next run (F-M592)", StringComparison.Ordinal)
+            && downloadSource592.Contains("report flush stopped on a client timeout — the open reports stay due for the next run (F-M592)", StringComparison.Ordinal));
+
         // --- F-M591: derselbe Griff im Download --------------------------------------------------
         var downloadSource591 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
         Check("F-M591: der Filmweg des Downloads ist gegen einen Timeout abgesichert",
@@ -1484,7 +1499,7 @@ internal static class Program
                     downloadSource.Split("await Task.Delay(_limiter.TransferPauseMsLessFit(), ct)").Length - 1 == 2
                     && downloadSource.Contains("// F-M548: eine gezogene Datei → danach der Transfer-Rhythmus.", StringComparison.Ordinal)
                     && downloadSource.Contains("// F-M548: der Rhythmus nach der gezogenen Datei", StringComparison.Ordinal));
-                int abruf = downloadSource.IndexOf("CandidateAttempt attempt = await DownloadCandidateAsync(cand, season, episode, ct)", StringComparison.Ordinal);
+                int abruf = downloadSource.IndexOf("attempt = await DownloadCandidateAsync(cand, season, episode, ct)", StringComparison.Ordinal);
                 Check("F-M548: and it no longer stands in front of the fetch",
                     abruf > 400
                     && !downloadSource.Substring(abruf - 400, 400).Contains("TransferPauseMsLessFit", StringComparison.Ordinal));
