@@ -569,9 +569,12 @@ public sealed class SeasonPackCoordinator
             return;
         }
 
-        // F-M391 (operator order 02.11.2026): the single uploads this pack absorbs are deleted FIRST.
-        // A pack that competes with entries carrying the same content is the case we do not want to
-        // find out about on SubDL's side; deleting first makes the pack the only carrier.
+        // F-M585 (Operator-Anweisung 17.11.2026: „Subdl erlaubt Einzeluploads die gleichzeitig
+        // bestandteil eines staffelpacks sind"): die Einzel-Uploads werden NICHT mehr geloescht. Bis
+        // hierher galt F-M391 — „der Pack ist der einzige Traeger", die Einzel wurden vor dem Pack per
+        // /user/deletePublishedSubtitle entfernt. SubDL erlaubt beides; der Pack tritt jetzt NEBEN die
+        // Einzel. Die Ids wandern als „stehen daneben" in die packs-Zeile (F-M390), damit sichtbar
+        // bleibt, was ausser dem Container noch von uns oben ist.
         var absorbed = ordered
             .Where(x => !string.IsNullOrWhiteSpace(x.AbsorbedSingleId))
             .Select(x => (Episode: x.Episode, Id: x.AbsorbedSingleId!))
@@ -592,27 +595,16 @@ public sealed class SeasonPackCoordinator
                 key.ImdbId, key.Season, key.Lang, undeletable.Count, string.Join(", ", undeletable.Take(6)));
         }
 
+        // F-M585: kein Loeschaufruf mehr. Was als Einzel oben ist, bleibt oben — genannt wird es
+        // trotzdem, damit das Log die Wahrheit ueber die Staffel erzaehlt.
         var deletedIds = new List<string>();
-        foreach (var single in absorbed)
+        if (absorbed.Count > 0)
         {
-            bool gone = await _api.DeletePublishedSubtitleAsync(single.Id, ct).ConfigureAwait(false);
-            if (gone)
-            {
-                deletedIds.Add(single.Id);
-                LogUtil.Normal(
-                    _logger,
-                    "[Sub Scribe] season pack absorbs the single upload of {Imdb} S{Season}E{Episode} [{Lang}] — id {Id} deleted before the pack.",
-                    key.ImdbId, key.Season, single.Episode, SeasonPack.LangTag(key.Lang, key.Hi), single.Id);
-            }
-            else
-            {
-                // Not fatal: the pack is still the better artefact, and the entry that refused to go
-                // stays visible as a duplicate rather than silently blocking the season.
-                LogUtil.Normal(
-                    _logger,
-                    "[Sub Scribe] season pack could NOT delete the single upload of {Imdb} S{Season}E{Episode} [{Lang}] — id {Id} stays beside the pack.",
-                    key.ImdbId, key.Season, single.Episode, SeasonPack.LangTag(key.Lang, key.Hi), single.Id);
-            }
+            LogUtil.Normal(
+                _logger,
+                "[Sub Scribe] season pack {Imdb} S{Season} [{Lang}]: {Count} member(s) stay up as singles beside the pack (ids {Ids}, F-M585).",
+                key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), absorbed.Count,
+                string.Join(",", absorbed.Take(8).Select(x => x.Id)));
         }
 
         UploadResult result = await _api.UploadSeasonPackAsync(
@@ -652,15 +644,9 @@ public sealed class SeasonPackCoordinator
 
             _countFailed(ordered.Count);
             _logger.LogError("[Sub Scribe] SEASON PACK FAILED {Imdb} S{Season} [{Lang}]: {Reason}", key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), result.Reason);
-            if (deletedIds.Count > 0)
-            {
-                // The singles are gone and the pack did not land. Say it out loud: the next fill-only
-                // pass rebuilds the same pack from the library (the content is still known), and nobody
-                // should have to guess why the episodes vanished from the panel.
-                _logger.LogWarning(
-                    "[Sub Scribe] {Count} single upload(s) of {Imdb} S{Season} [{Lang}] were deleted for a pack that then failed — ids {Ids}. The next run rebuilds the pack from the library.",
-                    deletedIds.Count, key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), string.Join(",", deletedIds));
-            }
+            // F-M585: hier stand die Warnung ueber geloeschte Einzel, die ein gescheiterter Pack
+            // hinterlaesst. Sie ist hinfaellig — nichts wird mehr geloescht; die Einzel dieser Staffel
+            // stehen unveraendert oben, und der naechste Lauf baut den Container erneut.
             return;
         }
 
@@ -687,14 +673,15 @@ public sealed class SeasonPackCoordinator
             }
         }
 
+        // F-M585: der Pack-Beleg gehoert NICHT auf die Folgezeile. Bis hierher schrieb diese Schleife
+        // `Uploaded` plus die Pack-Id in jede Mitgliedszeile — danach war „hochgeladen" ein einziger
+        // Wahrheitswert fuer drei Sachverhalte (Einzel, nur im Pack, beides), und die Folgezeile
+        // verlor ihre eigene Einzel-Id an die Pack-Id. Der Pack steht jetzt allein in der packs-Zeile
+        // (PackId + Episodes = die abgehakten Folgen); die Folgezeile bleibt ausschliesslich der
+        // Einzel-Upload. Nur der Fortschritt wird weiter gemeldet.
         foreach (var candidate in ordered)
         {
-            var c = candidate;
-            _registry.MarkAndFlush(() => _registry.MarkEmbed(
-                c.MediaHash, c.SubPos, c.Lang, c.HearingImpaired,
-                SubtitleStatus.Uploaded, contentHash: ContentHashRegistry.ComputeHash(c.Srt),
-                subdlId: packId, forced: c.Forced));
-            _reportDone(c.ItemId);
+            _reportDone(candidate.ItemId);
         }
 
         // F-M390: the pack is now a fact in the store, not an inference from the subtitle rows. One row

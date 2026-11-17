@@ -710,7 +710,7 @@ public sealed class UploadPipeline : IPackFiller
 
             LogUtil.Normal(
                 _logger,
-                "[Sub Scribe] pack phase done — {Count} language(s) are carried by packs of this run; their singles are skipped, everything else goes up single.",
+                "[Sub Scribe] pack phase done — {Count} language(s) are carried by packs of this run; their singles go up beside the pack (F-M585).",
                 _packAbsorbed.Count);
         }
 
@@ -2859,14 +2859,19 @@ public sealed class UploadPipeline : IPackFiller
         // uploaded single. The pack is the only carrier — a second copy beside it would be the very
         // duplicate the pack deletes again (F-M391). Positions of a pack that failed are not in the
         // set and reach this line as usual.
+        // F-M585 (Operator-Anweisung 17.11.2026: „Subdl erlaubt Einzeluploads die gleichzeitig
+        // bestandteil eines staffelpacks sind"): hier stand bis heute der Ausstieg F-M429 — „was der
+        // Pack dieses Laufs traegt, geht nicht zusaetzlich als Einzel hoch", als Ablehnung
+        // `pack-carries-it` in den Store geschrieben (127 Zeilen). SubDL erlaubt beides, also geht die
+        // Position jetzt als Einzel hoch UND steht im Pack. Der Vermerk bleibt als Zeile im Log.
         if (isSeries && season > 0 && _packAbsorbed.Contains((imdbId, season, lang.ToUpperInvariant(), hearingImpaired)))
         {
             LogUtil.PerItem(
                 _config.LogMode,
                 _logger,
-                "[Sub Scribe] SKIP {File} [{Lang}] — carried by the pack built in this run, no single beside it (F-M429).",
-                Path.GetFileName(mediaPath), lang);
-            return UploadResult.Skipped("pack-carries-it");
+                "[Sub Scribe] {File} [{Lang}] — carried by the pack built in this run and sent as a single beside it (F-M585, the pack row lists this episode: {Covered}).",
+                Path.GetFileName(mediaPath), lang,
+                CoveredByPack(imdbId, season, lang, hearingImpaired, episode) ? "yes" : "no");
         }
 
         // F-M48: loose file — read from disk
@@ -6228,6 +6233,36 @@ public sealed class UploadPipeline : IPackFiller
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// F-M585: traegt der Staffelpack dieser Staffel die Folge? Der Pack-Beleg steht seit F-M585 nur
+    /// noch in der <c>packs</c>-Zeile (PackId + <c>Episodes</c>), nicht mehr auf der Folgezeile — die
+    /// Folgezeile ist ausschliesslich der Einzel-Upload. Damit sind die beiden Traeger getrennt und
+    /// keiner kann den anderen fuer „schon erledigt" erklaeren.
+    /// </summary>
+    /// <param name="imdbId">Serien-IMDb.</param>
+    /// <param name="season">Staffel.</param>
+    /// <param name="language">Sprache des Paares.</param>
+    /// <param name="hearingImpaired">HI-Variante.</param>
+    /// <param name="episode">Folgennummer.</param>
+    /// <returns>Wahr, wenn ein Pack dieser Staffel die Folge traegt.</returns>
+    private bool CoveredByPack(string? imdbId, int season, string language, bool hearingImpaired, int episode)
+    {
+        if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || episode < 1)
+        {
+            return false;
+        }
+
+        var pack = Registry.GetPack(imdbId, season, language, hearingImpaired);
+        if (pack is null || string.IsNullOrWhiteSpace(pack.Episodes))
+        {
+            return false;
+        }
+
+        return pack.Episodes
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(x => int.TryParse(x, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int n) && n == episode);
     }
 
     /// <summary>

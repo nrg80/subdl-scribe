@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.453"
+version: "12.1.12.454"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.454: a season pack and its single episodes no longer exclude each other -- SubDL allows both, so nothing is deleted before the pack.
   v12.1.12.453: a stored verdict closes the pair, and a pair question asks for evidence instead of the run's own queue and language lists.
   v12.1.12.453: a duplicate counts only at the same source -- what SubDL already has still goes to tvsubtitles.
   v12.1.12.452: a settled file costs one look at the store instead of a stream read plus a walk over every track.

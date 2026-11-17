@@ -793,8 +793,20 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
-        // --- F-M584: eine Ablehnung gilt je Quelle -----------------------------------------------
+        // --- F-M585: Pack und Einzel schliessen sich nicht mehr aus -------------------------------
         var uploadSource584 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        var packCoordSource585 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+        Check("F-M585: kein Loeschaufruf mehr im Pack-Pfad, und keine Pack-Id auf den Mitgliedszeilen",
+            !packCoordSource585.Contains("DeletePublishedSubtitleAsync(single.Id", StringComparison.Ordinal)
+            && !packCoordSource585.Contains("subdlId: packId", StringComparison.Ordinal)
+            && packCoordSource585.Contains("stay up as singles beside the pack", StringComparison.Ordinal));
+        Check("F-M585: der Einzelpfad ueberspringt keine Pack-Position mehr, und der Pack-Beleg kommt aus der packs-Zeile",
+            uploadSource584.Contains("sent as a single beside it (F-M585", StringComparison.Ordinal)
+            && uploadSource584.Contains("private bool CoveredByPack(string? imdbId, int season, string language, bool hearingImpaired, int episode)", StringComparison.Ordinal)
+            && uploadSource584.Contains("return pack.Episodes", StringComparison.Ordinal)
+            && !uploadSource584.Contains("return UploadResult.Skipped(\"pack-carries-it\")", StringComparison.Ordinal));
+
+        // --- F-M584: eine Ablehnung gilt je Quelle -----------------------------------------------
         Check("F-M584: ein Selbst-Echo sperrt die Spur nur, solange keine Quelle das Paar mehr verlangt",
             uploadSource584.Contains("private bool SpurIstGesperrt(string? mediaHash, int position, string language, bool hearingImpaired, bool isSeries)", StringComparison.Ordinal)
             && uploadSource584.Contains("if (reason == RejectReason.SelfEcho", StringComparison.Ordinal)

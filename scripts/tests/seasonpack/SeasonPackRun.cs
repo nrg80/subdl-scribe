@@ -269,7 +269,8 @@ internal static class Program
         Check(coordinator.Contains("season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Want} episode(s)", StringComparison.Ordinal),
             "an incomplete buffer says so and falls back to singles");
         Check(coordinator.Contains("pack-file-refused", StringComparison.Ordinal), "a refused container falls back to singles, not to loss");
-        Check(coordinator.Contains("subdlId: packId", StringComparison.Ordinal), "every episode of a pack carries the pack's id");
+        Check(!coordinator.Contains("subdlId: packId", StringComparison.Ordinal),
+            "F-M585: a pack no longer writes its id onto the episode rows — the pack row is the pack's only home");
         Check(!coordinator.Contains("c.ReleaseName).Distinct().Count() == 1", StringComparison.Ordinal),
             "differing release names do not block a pack — only quality and frame rate do");
         Check(coordinator.Contains("PackReleases(ordered, key)", StringComparison.Ordinal),
@@ -556,8 +557,8 @@ internal static class Program
             "F-M429: the packs go up first, before the item loop and before the buffers are flushed");
         Check(pipeline.Contains("_packAbsorbed.Add((packImdb, packSeason, packLang, packHi))", StringComparison.Ordinal),
             "the pairs a pack carried are remembered for the single phase");
-        Check(pipeline.Contains("carried by the pack built in this run, no single beside it", StringComparison.Ordinal),
-            "and a covered position is skipped instead of uploaded single");
+        Check(pipeline.Contains("carried by the pack built in this run and sent as a single beside it (F-M585, the pack row lists this episode", StringComparison.Ordinal),
+            "F-M585: a covered position is NOT skipped — it goes up as a single beside the pack");
 
         // ── 8. The coordinator itself, on fakes ─────────────────────────────────
         // No network, no Jellyfin, no database: the dry run of a pack stops before the upload, and the
@@ -744,9 +745,11 @@ internal static class Program
         var coordinatorSrc2 = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
         Check(!coordinatorSrc2.Contains("_ownTexts"),
             "F-M441: the pack coordinator carries no store either");
-        Check(coordinatorSrc2.Contains("DeletePublishedSubtitleAsync(single.Id")
-                && coordinatorSrc2.IndexOf("DeletePublishedSubtitleAsync(single.Id") < coordinatorSrc2.IndexOf("await _api.UploadSeasonPackAsync"),
-            "F-M391 stays as ordered: the absorbed singles are deleted BEFORE the pack goes up");
+        Check(!coordinatorSrc2.Contains("DeletePublishedSubtitleAsync(single.Id"),
+            "F-M585 replaces F-M391: no single is deleted before the pack any more — SubDL allows both");
+        Check(coordinatorSrc2.Contains("stay up as singles beside the pack", StringComparison.Ordinal)
+                && coordinatorSrc2.Contains("CoveredByPack", StringComparison.Ordinal) == false,
+            "F-M585: the pack names the singles that stay beside it instead of deleting them");
 
         // F-M467 (measured 11.11.2026 on VisionQuest tt23112594): the pack phase reads a season as
         // children of the folder it did not work this run — there Episode.Series is NULL, and every

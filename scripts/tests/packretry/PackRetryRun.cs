@@ -267,8 +267,8 @@ internal static class Program
             "the client can delete one published entry by id");
         Check(api.Contains("/user/deletePublishedSubtitle?id=", StringComparison.Ordinal),
             "over the published route — deleteSubtitle answers true and deletes nothing");
-        Check(coord.Contains("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
-            "the coordinator deletes the absorbed single");
+        Check(!coord.Contains("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
+            "F-M585: the coordinator no longer deletes the absorbed single — it stays beside the pack");
         Check(coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal)
               < coord.IndexOf("UploadSeasonPackAsync(", StringComparison.Ordinal),
             "BEFORE it uploads the pack, not after");
@@ -296,8 +296,8 @@ internal static class Program
         Check(coord.Contains("season pack already up with these members", StringComparison.Ordinal),
             "the buffer path refuses a pack that is already up with the same members");
         Check(coord.IndexOf("_registry.GetPack(key.ImdbId, key.Season, key.Lang, key.Hi)", StringComparison.Ordinal)
-              < coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
-            "and it decides that BEFORE anything is deleted");
+              < coord.IndexOf("await _api.UploadSeasonPackAsync", StringComparison.Ordinal),
+            "and it decides that BEFORE the pack is sent");
         var refresh = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeDatabaseRefreshTask.cs"));
         Check(refresh.Contains("registry.PruneOrphanedPacks()", StringComparison.Ordinal),
             "the database refresh prunes orphaned pack rows");
@@ -314,8 +314,8 @@ internal static class Program
             "the coordinator refuses the whole pack, not just that member");
         Check(coord.Contains("came from SubDL itself", StringComparison.Ordinal)
               && coord.IndexOf("_registry.IsSubdlOrigin", StringComparison.Ordinal)
-                 < coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
-            "and it refuses BEFORE anything is deleted");
+                 < coord.IndexOf("await _api.UploadSeasonPackAsync", StringComparison.Ordinal),
+            "and it refuses BEFORE the pack is sent");
 
         // ── 14. F-M399: nur die packs-Zeile belegt einen Pack, keine SubdlId an den Mitgliedern ──
         Console.WriteLine("14. A single upload's id is not a pack");
@@ -355,7 +355,7 @@ internal static class Program
         var coordPackSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
         Check(coordPackSrc.Contains("carry no SubDL id in the store"), "F-M412: a member without a SubDL id is named");
         Check(coordPackSrc.IndexOf("undeletable", StringComparison.Ordinal)
-              < coordPackSrc.IndexOf("DeletePublishedSubtitleAsync"), "F-M412: the note comes before the pack is sent");
+              < coordPackSrc.IndexOf("await _api.UploadSeasonPackAsync"), "F-M412: the note comes before the pack is sent");
 
         // ── 19. F-M413: die Id kommt aus mySubtitles ────────────────────────────
         Console.WriteLine("19. The upload id is taken from mySubtitles");
@@ -447,8 +447,8 @@ internal static class Program
             "F-M429: the pack phase sits textually before the item loop");
         Check(upload.Contains("_packAbsorbed.Add((packImdb, packSeason, packLang, packHi))", StringComparison.Ordinal),
             "a pack that went up is remembered with its series, season, language and variant");
-        Check(upload.Contains("carried by the pack built in this run, no single beside it", StringComparison.Ordinal),
-            "a position the pack carries is not uploaded single");
+        Check(upload.Contains("carried by the pack built in this run and sent as a single beside it (F-M585", StringComparison.Ordinal),
+            "F-M585: a position the pack carries IS uploaded single, beside the pack");
         Check(upload.Contains("the singles it was meant to carry go up in the single phase", StringComparison.Ordinal),
             "a pack that did not go up leaves its singles to the single phase");
         Check(upload.Contains("first publication: the pack carries this text up", StringComparison.Ordinal)
