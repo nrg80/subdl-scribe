@@ -17,7 +17,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 3 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M379–F-M448 und F-M475, F-M476
  - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 14 requirements (F-M557–F-M563, F-M571–F-M577)
-- [4. Download Pipeline](#4-download-pipeline) — 90 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 92 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 32 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
@@ -471,6 +471,10 @@ Die Seite macht aus jedem Zeilenumbruch ein Leerzeichen (in Produktion gesehen),
 **F-M151a [B3]:** **Download-side short-circuit — replaced by the derived open-pair question.**
 
 There is no download-side completion mark any more. Die Pipeline fragt die Untertitel-Deckung, welche geforderten PAARE have no evidence (14.2b) and returns when the answer is empty; that answer is derived fresh on every run, so it cannot be overtaken by a deletion and needs no stored language set and no validation pass. See F-M283 for why the stored mark had to go.
+
+**F-M578 [U]:** **Die Suche kennt keinen Kandidaten-Deckel je Sprache — sie läuft bis zum Seiten-Budget.** Der Schalter `DownloadMaxCandidatesPerLanguage` der Vorgängerfassung (Default 3) ist entfallen. `SearchSubtitlesAsync` nimmt die Schwelle nur noch als Parameter entgegen, und **keine Aufrufstelle setzt sie** (Default `0` = aus): der Früh-Ausstieg „genug Kandidaten für diese Sprache, Suche beenden" findet nicht statt. Ein Parameter, den niemand setzt, ist kein Feature — wer die Regel zurückholt, braucht eine eigene Anforderung samt Schalter. Als Anforderung festgeschrieben auf Operator-Anweisung 17.11.2026 („Als Anforderung dokumentieren"), nachdem der Wegfall bei der Prüfung der Bestandskonzepte ohne Beleg war. Geprüft von T288.
+
+**F-M579 [U]:** **Es gibt keinen IMDb-Pflicht-Schalter — die ID-Leiter läuft in beide Richtungen.** Der Schalter `DownloadRequireImdb` der Vorgängerfassung (Default `true`) ist entfallen; die Gatter-Frage existiert nicht mehr. Fehlt die IMDb-Id, holt die Leiter sie aus TMDb (`ResolveImdbAsync`), sobald ein TMDb-Schlüssel konfiguriert ist, und fällt erst danach auf die Titelsuche zurück. Inhaltlich Nutzerentscheid 9.9.2026 („if tmdb available, fetch imdb"); der Wegfall des Schalters selbst war ohne Beleg und ist hiermit am 17.11.2026 als Anforderung festgeschrieben. Geprüft von T289.
 
 **F-M187:** **Downloaded bytes have exactly one decode path.** Every conversion of downloaded subtitle bytes to text goes through one path, which honours a UTF-16 byte-order mark (LE/BE, stripped) and falls back to UTF-8. The download side hashes the decode path, and the upload side later reads the written file as UTF-8/UTF-16 text, so the two must agree. An **uncorrected** file on disk stays **byte-identical** to SubDL's payload — normalization applies in memory for hashing and upload, never to the stored file. The one exception is a file the correction CHANGED: that goes out canonical (F-M296), because the bytes on disk must be the bytes the stored hash describes. The archived original is always the fetched bytes verbatim (F-M306).
 
@@ -2473,6 +2477,10 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
+
+**T288:** Kein Kandidaten-Deckel je Sprache (F-M578): `PluginConfiguration` führt kein Feld `DownloadMaxCandidatesPerLanguage`, und der Parameter `maxCandidatesPerLanguage` kommt **nur** in `ScribeApiClient.cs` vor — keine Aufrufstelle setzt ihn — **1 Prüfung** in `endpoints` (248 → 249).
+
+**T289:** Kein IMDb-Pflicht-Schalter (F-M579): `PluginConfiguration` führt kein Feld `DownloadRequireImdb`, und die Download-Pipeline holt die fehlende IMDb-Id über `ResolveImdbAsync`, sobald TMDb konfiguriert ist — **1 Prüfung** in `endpoints` (249 → 250).
 
 **T287:** Das Parken eines Extraktionsfehlers (F-M577): der Grund `extraction-failed` steht im vorhandenen Store, die Parkfrage (`ExtractRejectIsStale`) nimmt die Spur nach sieben Tagen wieder auf, und die **Existenzprüfung steht vor** dem Schreiben der Ablehnung — eine fehlende Datei wird nicht geparkt — **2 Prüfungen** in `endpoints` (246 → 248).
 

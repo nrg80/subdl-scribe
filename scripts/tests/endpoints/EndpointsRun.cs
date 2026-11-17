@@ -780,6 +780,19 @@ internal static class Program
             && uploadSource.IndexOf("bool dateiDa = File.Exists(mediaPath);", StringComparison.Ordinal)
                 < uploadSource.IndexOf("reason: RejectReason.ExtractionFailed", StringComparison.Ordinal));
 
+        // --- F-M578 / F-M579: zwei Bestandskonzepte, deren Wegfall am 17.11.2026 ohne Beleg war
+        //     und deshalb als Anforderung festgeschrieben wurde --------------------------------
+        var apiClientSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/ScribeApiClient.cs"));
+        Check("F-M578: kein Kandidaten-Deckel je Sprache — der Schalter ist weg und keine Aufrufstelle setzt die Schwelle",
+            !cfgSource.Contains("DownloadMaxCandidatesPerLanguage", StringComparison.Ordinal)
+            && apiClientSource.Contains("int maxCandidatesPerLanguage = 0", StringComparison.Ordinal)
+            && !downloadSource.Contains("maxCandidatesPerLanguage", StringComparison.Ordinal)
+            && !uploadSource.Contains("maxCandidatesPerLanguage", StringComparison.Ordinal));
+        Check("F-M579: kein IMDb-Pflicht-Schalter — die Leiter holt die fehlende IMDb-Id aus TMDb",
+            !cfgSource.Contains("DownloadRequireImdb", StringComparison.Ordinal)
+            && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
+            && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
+
         // --- F-M573: die billigste Staffelfrage zuerst -------------------------------------------
         Check("F-M573: eine vollstaendig gepackte Staffel kostet keine TMDb-Frage und keine Datei",
             uploadSource.Contains("var staffelBekannt = LanguagesOf(entry.Key.Item1, entry.Key.Item2);", StringComparison.Ordinal)
