@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.456",
-        "changelog": "v12.1.12.456: a source whose site does not carry the language no longer counts as still wanting the pair -- it closes as unsupported-language.",
+        "version": "12.1.12.457",
+        "changelog": "v12.1.12.457: the two sources of a track are sent in parallel (second one with a 0-5 % offset), and the upload id is read from page 1 of mySubtitles only.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.456-dev/Jellyfin.Plugin.SubdlSync_12.1.12.456.zip",
-        "checksum": "0e080cc5cb94b691f11a94aeb8e4d03c",
-        "timestamp": "2026-11-17T13:22:39Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.457-dev/Jellyfin.Plugin.SubdlSync_12.1.12.457.zip",
+        "checksum": "ca7f40b5e3b36bf8071efa712e706e5d",
+        "timestamp": "2026-11-17T20:25:16Z"
       }
     ]
   }
