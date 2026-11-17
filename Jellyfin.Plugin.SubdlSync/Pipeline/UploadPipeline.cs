@@ -215,6 +215,29 @@ public sealed class UploadPipeline : IPackFiller
     private readonly Dictionary<(string ImdbId, int Season), List<BaseItem>> _completeSeasonItems = new();
 
     /// <summary>
+    /// F-M588 (Operator-Anweisung 17.11.2026: „Ok für mysubtitels"): ein zurueckgestellter Upload,
+    /// dessen SubDL-Id noch fehlt. Statt nach JEDEM Upload die vollstaendige eigene Liste zu ziehen
+    /// (gemessen: 340 kB / 798 Eintraege je Upload, 2.790-mal am Tag), wird die Id am Laufende
+    /// einmal fuer alle offenen Eintraege geholt und hier eingetragen.
+    /// </summary>
+    /// <param name="ImdbId">IMDb id of the title, when known.</param>
+    /// <param name="Season">Season, 0 for a film.</param>
+    /// <param name="Episode">Episode, 0 for a film.</param>
+    /// <param name="Lang">Language code as we store it (TR, not "Turkish").</param>
+    /// <param name="Hi">Hearing-impaired flag of this track.</param>
+    /// <param name="MediaHash">Media hash the mark belongs to.</param>
+    /// <param name="SubPos">Stream position of the embedded track.</param>
+    /// <param name="Loose">True when the upload was a sidecar file rather than an embedded stream.</param>
+    /// <param name="FileName">Sidecar file name, when loose.</param>
+    /// <param name="At">When the upload happened — the order of the claims.</param>
+    private sealed record PendingSubdlId(
+        string? ImdbId, int Season, int Episode, string Lang, bool Hi,
+        string? MediaHash, int SubPos, bool Loose, string? FileName, string? Release, DateTime At);
+
+    /// <summary>F-M588: the uploads of this run whose SubDL id still has to be read back.</summary>
+    private readonly List<PendingSubdlId> _offeneSubdlIds = new();
+
+    /// <summary>
     /// F-M571: die Pack-Paare je Staffel einmal je Lauf. Der Planer fragt dieselbe Staffel mehrfach
     /// (Sammler, Ankunftszweig, Plan) — die Antwort aendert sich innerhalb eines Laufs nicht.
     /// </summary>
@@ -2342,6 +2365,12 @@ public sealed class UploadPipeline : IPackFiller
             await packCoordinator.FlushAsync(runCt).ConfigureAwait(false);
         }
 
+        // F-M588: die SubDL-Ids der in diesem Lauf hochgeladenen Einzel EINMAL nachziehen. Steht
+        // bewusst hier und nicht im Postprocessing: dieser Lauf kennt noch jede Spur, ihre Sprache,
+        // ihr HI-Kennzeichen und ihre Reihenfolge — die Zuordnung braucht keinen zweiten Verbraucher,
+        // der mit dem Lauf um dieselbe Liste rennt.
+        await ResolveDeferredUploadIdsAsync(runCt).ConfigureAwait(false);
+
         if (summary.IsDryRun)
         {
             LogUtil.Normal(_logger, "[Sub Scribe] upload: finished — lock released. DRY-RUN would have uploaded {N} | {Rejected} rejected, {Skipped} stream(s) skipped",
@@ -3217,23 +3246,18 @@ public sealed class UploadPipeline : IPackFiller
             }
             else if (subdlGenommen)
             {
-                uploadId = await ResolveOwnUploadIdAsync(imdbId, season, episode, lang, releaseName, loosePath, ct)
-                    .ConfigureAwait(false);
-                if (uploadId != null)
-                {
-                    LogUtil.Normal(
-                        _logger,
-                        "[Sub Scribe] upload id {Id} taken from mySubtitles for {File} [{Lang}] — without it the single could never be deleted when a pack replaces it.",
-                        uploadId, Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
-                }
-                else
-                {
-                    // F-M421: silence was the wrong answer here — the row is written with a NULL id,
-                    // and nobody would ever learn why its pack could not delete the single.
-                    _logger.LogWarning(
-                        "[Sub Scribe] no upload id for {File} [{Lang}] — this single stays beside a pack that replaces it, because there is no handle to delete it.",
-                        Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
-                }
+                // F-M588 (Operator-Anweisung 17.11.2026: „Ok für mysubtitels"): die Id wird NICHT mehr
+                // je Upload geholt. Gemessen am 17.11.2026: die Antwort nennt sie nie (0 von 2.790),
+                // und die eigene Liste kostet je Abruf 340 kB / 798 Eintraege — bei ~2.790 Uploads am
+                // Tag rund 950 MB und eine knappe Stunde Wartezeit. Jetzt wird der Eintrag hier nur
+                // VORGEMERKT; am Laufende holt EIN Abruf die Ids fuer alle offenen Uploads
+                // (ResolveDeferredUploadIdsAsync) und traegt sie in die Zeilen ein.
+                _offeneSubdlIds.Add(new PendingSubdlId(
+                    imdbId, season, episode, lang, hearingImpaired,
+                    mediaHash, subPos, loosePath != null, Path.GetFileName(loosePath), releaseName, DateTime.UtcNow));
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[Sub Scribe] upload saved for {File} [{Lang}] — the SubDL id is read back once at the end of the run (F-M588).",
+                    Path.GetFileName(loosePath ?? mediaPath ?? "?"), lang);
             }
 
             // Metadata describing the file, and the verdict describing this subtitle, are two
@@ -4072,6 +4096,133 @@ public sealed class UploadPipeline : IPackFiller
     }
 
     /// <summary>
+    /// F-M588: holt die SubDL-Ids der in diesem Lauf hochgeladenen Einzel EINMAL — statt nach jedem
+    /// Upload die vollstaendige eigene Liste zu ziehen. Zugeordnet wird je Schluessel (IMDb, Staffel,
+    /// Folge, Sprache) in der Reihenfolge der Uploads gegen die Eintraege nach Erstellzeit; jeder
+    /// Eintrag wird genau einmal verbraucht, damit HI/Non-HI-Paare derselben Folge nicht vertauscht
+    /// werden. Was SubDL schon freigegeben hat, steht nicht mehr in der Einreichungsliste — dafuer
+    /// wird die veroeffentlichte Liste EINMAL nachgezogen (F-M432).
+    /// </summary>
+    /// <param name="ct">Cancellation token of the run.</param>
+    private async Task ResolveDeferredUploadIdsAsync(CancellationToken ct)
+    {
+        if (_offeneSubdlIds.Count == 0)
+        {
+            return;
+        }
+
+        int offen = _offeneSubdlIds.Count;
+        var benutzt = new HashSet<int>();
+        var erledigt = new HashSet<PendingSubdlId>();
+        int getroffen = 0;
+
+        List<OwnSubtitleEntry>? einreichungen = null;
+        try
+        {
+            einreichungen = await _api.ListMySubtitlesAsync(ct, maxPages: 1).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[Sub Scribe] deferred upload ids: mySubtitles unreadable.");
+        }
+
+        getroffen += Zuteilen(einreichungen, "mySubtitles");
+
+        if (getroffen < offen)
+        {
+            List<OwnSubtitleEntry>? veroeffentlicht = null;
+            try
+            {
+                veroeffentlicht = await _api.ListMyPublishedSubtitlesAsync(ct, maxPages: 2).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[Sub Scribe] deferred upload ids: published list unreadable.");
+            }
+
+            getroffen += Zuteilen(veroeffentlicht, "myPublishedSubtitles");
+        }
+
+        LogUtil.Normal(
+            _logger,
+            "[Sub Scribe] deferred upload ids: {Hit} of {Open} assigned with one list fetch (F-M588).",
+            getroffen, offen);
+
+        if (getroffen < offen)
+        {
+            _logger.LogWarning(
+                "[Sub Scribe] {Left} upload(s) of this run still have no SubDL id — their singles stay beside a pack that replaces them, because there is no handle to delete them (F-M421/F-M588).",
+                offen - getroffen);
+        }
+
+        int Zuteilen(List<OwnSubtitleEntry>? liste, string quelle)
+        {
+            if (liste == null || liste.Count == 0)
+            {
+                return 0;
+            }
+
+            int n = 0;
+            foreach (var gruppe in _offeneSubdlIds
+                         .Where(x => !erledigt.Contains(x))
+                         .OrderBy(x => x.At)
+                         .GroupBy(x => (x.ImdbId, x.Season, x.Episode, x.Lang)))
+            {
+                var kandidaten = liste
+                    .Where(e => !benutzt.Contains(e.HandleId) && SameLanguage(e.Language, gruppe.Key.Lang))
+                    .Where(e => gruppe.Key.ImdbId is null
+                                || string.Equals(e.ImdbId, gruppe.Key.ImdbId, StringComparison.OrdinalIgnoreCase))
+                    .Where(e => gruppe.Key.Season <= 0 || e.Season == gruppe.Key.Season)
+                    .Where(e => gruppe.Key.Episode <= 0 || e.Episode == gruppe.Key.Episode)
+                    .OrderBy(e => e.CreatedAt)
+                    .ToList();
+                if (kandidaten.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (var p in gruppe.OrderBy(x => x.At))
+                {
+                    // Erst der Release-Name, dann die Zeit: derselbe Griff wie in ResolveOwnUploadIdAsync,
+                    // nur ohne einen Netzaufruf je Spur.
+                    var treffer = kandidaten.FirstOrDefault(e => !benutzt.Contains(e.HandleId)
+                            && (MatchesRelease(e.Name, p.Release) || MatchesRelease(e.Name, p.FileName)))
+                        ?? kandidaten.FirstOrDefault(e => !benutzt.Contains(e.HandleId));
+                    if (treffer == null)
+                    {
+                        break;
+                    }
+
+                    benutzt.Add(treffer.HandleId);
+                    erledigt.Add(p);
+                    string id = treffer.HandleId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+                    // F-M413/F-M435: dieselbe Auskunft wie frueher je Upload — nur jetzt fuer alle
+                    // Uploads zusammen, deshalb auf der PerItem-Ebene statt auf der Lauf-Ebene.
+                    LogUtil.PerItem(_config.LogMode, _logger,
+                        quelle == "myPublishedSubtitles"
+                            ? "[Sub Scribe] entry id {Id} taken from myPublishedSubtitles for {File} [{Lang}] (F-M432/F-M435/F-M588)."
+                            : "[Sub Scribe] upload id {Id} taken from mySubtitles for {File} [{Lang}] (F-M588, assigned at the end of the run).",
+                        id, p.FileName ?? p.MediaHash ?? "?", p.Lang);
+                    Registry.MarkAndFlush(() => Registry.SetDeferredSubdlId(
+                        p.MediaHash, p.SubPos, p.Loose, p.FileName, p.Lang, p.Hi, id));
+                    n++;
+                }
+            }
+
+            return n;
+        }
+    }
+
+    /// <summary>
     /// The coordinator's view of one candidate — used wherever a pack may take it, so the single
     /// path and the dry run hand over exactly the same thing.
     /// </summary>
@@ -4091,90 +4242,6 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="videoHeight">Video height in pixels, when the stream reports one.</param>
     /// <param name="videoCodec">Video codec name from the stream.</param>
     /// <returns>The candidate as the coordinator expects it.</returns>
-    /// <summary>
-    /// F-M413: the upload id of a single subtitle, read back from <c>/user/mySubtitles</c>.
-    /// SubDL answers an upload with "subtitle sent for review" and no id, but the entry appears in
-    /// the account's own list with its <c>UploadId</c> — the only handle <c>deletePublishedSubtitle</c>
-    /// accepts. Matched by the name we uploaded when it is there, otherwise by IMDb id, season,
-    /// episode and language, newest first.
-    /// </summary>
-    private async Task<int?> ResolveOwnUploadIdAsync(
-        string? imdbId, int season, int episode, string lang, string? releaseName, string? filePath,
-        CancellationToken ct)
-    {
-        List<OwnSubtitleEntry>? entries;
-        try
-        {
-            // F-M587 (17.11.2026): NUR Seite 1. Die API ignoriert page/per_page — Seite 2 liefert
-            // dieselben Eintraege zurueck (gemessen: 1,58 s je Aufruf fuer nichts, bei ~1.280
-            // Uploads am Tag also gut eine halbe Stunde reine Wartezeit). Die neueste Einreichung
-            // steht auf Seite 1; mehr wird nicht gebraucht.
-            entries = await _api.ListMySubtitlesAsync(ct, maxPages: 1).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "[Sub Scribe] could not read mySubtitles for the upload id.");
-            return null;
-        }
-
-        // F-M414 (measured 02.11.2026): mySubtitles reports `name` as the RELEASE name, not the
-        // file name we uploaded ("CliffIdProbe.1080p.WEB-DL", not "…srt"), and `lang` as the written
-        // language ("Turkish", not "TR"). Both are compared the way the list delivers them.
-        string file = Path.GetFileName(filePath ?? string.Empty);
-        var exact = entries?.FirstOrDefault(e =>
-            MatchesRelease(e.Name, releaseName) || MatchesRelease(e.Name, file));
-        exact ??= entries?
-            .Where(e => string.Equals(e.ImdbId, imdbId, StringComparison.OrdinalIgnoreCase)
-                        && e.Season == season && e.Episode == episode
-                        && SameLanguage(e.Language, lang))
-            .OrderByDescending(e => e.CreatedAt)
-            .FirstOrDefault();
-
-        if (exact != null)
-        {
-            return exact.HandleId;
-        }
-
-        // F-M432 (operator order 03.11.2026): the submission list is empty as soon as SubDL has published
-        // everything we sent, so the id was lost for every upload after that — a movie has no season and no
-        // episode to fall back on, so it had no handle at all. The PUBLISHED list carries the same id and is
-        // ordered newest first, which is exactly what a fresh upload needs. Matched the same way a pack is:
-        // by its release name.
-        List<OwnSubtitleEntry>? published;
-        try
-        {
-            published = await _api.ListMyPublishedSubtitlesAsync(ct, maxPages: 2).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "[Sub Scribe] could not read myPublishedSubtitles for the upload id.");
-            return null;
-        }
-
-        var byName = published?.FirstOrDefault(e =>
-            MatchesRelease(e.Name, releaseName) || MatchesRelease(e.Name, file)
-            || MatchesRelease(e.Name, Path.GetFileNameWithoutExtension(file)));
-        if (byName != null)
-        {
-            // F-M435: the published list names BOTH numbers — take the entry id, because that is what
-            // /user/deletePublishedSubtitle expects; the upload id would miss the entry it belongs to.
-            LogUtil.Normal(
-                _logger,
-                "[Sub Scribe] entry id {Id} taken from myPublishedSubtitles for {File} [{Lang}] (upload id {UploadId}) — the submission list knows nothing, the published list names it (F-M432/F-M435).",
-                byName.HandleId, file, lang, byName.UploadId);
-            return byName.HandleId;
-        }
-
-        return null;
-    }
 
     /// <summary>F-M414: does the entry's release name carry ours, extension and case aside?</summary>
     private static bool MatchesRelease(string? entryName, string? ours)

@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.457"
+version: "12.1.12.458"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.458: the SubDL upload id is read back once at the end of a run instead of after every upload -- one list fetch for all of them.
   v12.1.12.457: the two sources of a track are sent in parallel (second one with a 0-5 % offset), and the upload id is read from page 1 of mySubtitles only.
   v12.1.12.456: a source whose site does not carry the language no longer counts as still wanting the pair -- it closes as unsupported-language.
   v12.1.12.455: the "Upload season packs" switch carries no description text any more -- the tick switches pack building on and off.

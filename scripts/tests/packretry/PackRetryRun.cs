@@ -359,10 +359,10 @@ internal static class Program
 
         // ── 19. F-M413: die Id kommt aus mySubtitles ────────────────────────────
         Console.WriteLine("19. The upload id is taken from mySubtitles");
-        Check(upload.Contains("ResolveOwnUploadIdAsync") && upload.Contains("ListMySubtitlesAsync(ct, maxPages: 1)"),
-            "F-M413: a single upload resolves its id right after the upload");
-        Check(upload.Contains("upload id {Id} taken from mySubtitles"),
-            "F-M413: the resolution is logged");
+        Check(upload.Contains("ResolveDeferredUploadIdsAsync") && upload.Contains("ListMySubtitlesAsync(ct, maxPages: 1)"),
+            "F-M413/F-M588: a single upload resolves its id from mySubtitles — once at the end of the run");
+        Check(upload.Contains("the SubDL id is read back once at the end of the run (F-M588)"),
+            "F-M413/F-M588: the deferral is logged on the upload");
 
         // ── 20. F-M414: dieselbe Methode für Packs ──────────────────────────────
         Console.WriteLine("20. Packs resolve their id the same way");
@@ -400,10 +400,10 @@ internal static class Program
         Console.WriteLine("24. Every upload names its SubDL id");
         Check(upload.Contains("upload id {Id} from the upload answer for", StringComparison.Ordinal),
             "F-M421: an id that came with the answer is named too, not only a fetched one");
-        Check(upload.Contains("upload id {Id} taken from mySubtitles for", StringComparison.Ordinal),
-            "F-M421: an id fetched from mySubtitles keeps its own line");
-        Check(upload.Contains("no upload id for {File}", StringComparison.Ordinal)
-              && upload.Contains("no handle to delete it", StringComparison.Ordinal),
+        Check(upload.Contains("deferred upload ids: {Hit} of {Open} assigned with one list fetch (F-M588)", StringComparison.Ordinal),
+            "F-M421: the fetch that brings the ids names what it assigned");
+        Check(upload.Contains("still have no SubDL id", StringComparison.Ordinal)
+              && upload.Contains("no handle to delete them", StringComparison.Ordinal),
             "F-M421: an upload without an id warns instead of staying silent");
         Check(coordPackSrc.Contains("no pack id for {Imdb} S{Season}", StringComparison.Ordinal),
             "F-M421: a pack without an id names the fallback to its name");

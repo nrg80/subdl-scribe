@@ -1925,6 +1925,59 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="uploadId">The stored upload id.</param>
     /// <param name="entryId">The published entry id the account reports for the same upload.</param>
     /// <returns>Number of rewritten rows.</returns>
+    /// <summary>
+    /// F-M588: traegt eine zurueckgestellte SubDL-Id in die Zeile ein, die der Upload geschrieben hat.
+    /// Die Marke wird beim Upload ohne Id gesetzt (die Antwort nennt keine), und am Laufende holt EIN
+    /// Listenabruf die Ids fuer alle offenen Uploads nach. Getroffen wird die Zeile ueber ihren
+    /// eigenen Schluessel: eingebettet = (Medien-Hash, Position), Sidecar = Dateiname — dazu Sprache
+    /// und HI, damit HI/Non-HI-Paare derselben Spur nicht vertauscht werden.
+    /// </summary>
+    /// <param name="mediaHash">Media hash of the mark.</param>
+    /// <param name="subPos">Stream position (embedded).</param>
+    /// <param name="loose">True for a sidecar row.</param>
+    /// <param name="fileName">Sidecar file name.</param>
+    /// <param name="language">Language code of the mark.</param>
+    /// <param name="hearingImpaired">HI flag of the mark.</param>
+    /// <returns>How many rows received the id (0 = nothing to patch).</returns>
+    public int SetDeferredSubdlId(
+        string? mediaHash, int subPos, bool loose, string? fileName, string language, bool hearingImpaired,
+        string subdlId)
+    {
+        if (string.IsNullOrWhiteSpace(subdlId))
+        {
+            return 0;
+        }
+
+        int changed = 0;
+        if (loose)
+        {
+            foreach (var row in _db.Sidecars.FindAll()
+                         .Where(x => string.Equals(x.FileName, fileName, StringComparison.Ordinal)
+                                     && string.Equals(x.Language, language, StringComparison.OrdinalIgnoreCase)
+                                     && (x.HearingImpaired ?? false) == hearingImpaired).ToList())
+            {
+                row.SubdlId = subdlId;
+                _db.Sidecars.Upsert(row);
+                changed++;
+            }
+        }
+        else
+        {
+            foreach (var row in _db.Embeds.FindAll()
+                         .Where(x => string.Equals(x.MediaHash, mediaHash, StringComparison.Ordinal)
+                                     && x.SubPos == subPos
+                                     && string.Equals(x.Language, language, StringComparison.OrdinalIgnoreCase)
+                                     && (x.HearingImpaired ?? false) == hearingImpaired).ToList())
+            {
+                row.SubdlId = subdlId;
+                _db.Embeds.Upsert(row);
+                changed++;
+            }
+        }
+
+        return changed;
+    }
+
     public int RemapSubdlId(string uploadId, string entryId)
     {
         if (string.IsNullOrWhiteSpace(uploadId) || string.IsNullOrWhiteSpace(entryId)

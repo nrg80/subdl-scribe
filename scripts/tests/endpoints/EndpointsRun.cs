@@ -794,6 +794,27 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
+        // --- F-M588: die SubDL-Id einmal am Laufende ----------------------------------------------
+        var uploadSource588 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        var registrySource588 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
+        Check("F-M588: der Upload merkt die Spur vor, statt die Id sofort zu holen",
+            uploadSource588.Contains("private sealed record PendingSubdlId(", StringComparison.Ordinal)
+            && uploadSource588.Contains("private readonly List<PendingSubdlId> _offeneSubdlIds = new();", StringComparison.Ordinal)
+            && uploadSource588.Contains("_offeneSubdlIds.Add(new PendingSubdlId(", StringComparison.Ordinal)
+            && !uploadSource588.Contains("uploadId = await ResolveOwnUploadIdAsync(imdbId, season, episode, lang, releaseName, loosePath, ct)", StringComparison.Ordinal));
+        Check("F-M588: EIN Listenabruf am Laufende traegt die Ids nach, jeden Eintrag genau einmal",
+            uploadSource588.Contains("await ResolveDeferredUploadIdsAsync(runCt)", StringComparison.Ordinal)
+            && uploadSource588.Contains("private async Task ResolveDeferredUploadIdsAsync(CancellationToken ct)", StringComparison.Ordinal)
+            && uploadSource588.Contains("benutzt.Add(treffer.HandleId);", StringComparison.Ordinal)
+            && uploadSource588.Contains(".OrderBy(e => e.CreatedAt)", StringComparison.Ordinal)
+            && uploadSource588.Contains("deferred upload ids: {Hit} of {Open} assigned with one list fetch (F-M588)", StringComparison.Ordinal));
+        Check("F-M588: die Id landet ueber den Marken-Schluessel in der Zeile, und Freigegebenes kommt aus der veroeffentlichten Liste",
+            registrySource588.Contains("public int SetDeferredSubdlId(", StringComparison.Ordinal)
+            && registrySource588.Contains("x.SubPos == subPos", StringComparison.Ordinal)
+            && uploadSource588.Contains("Registry.SetDeferredSubdlId(", StringComparison.Ordinal)
+            && uploadSource588.Contains("ListMyPublishedSubtitlesAsync(ct, maxPages: 2)", StringComparison.Ordinal)
+            && uploadSource588.Contains("their singles stay beside a pack that replaces them", StringComparison.Ordinal));
+
         // --- F-M587: Quellen gleichzeitig, mySubtitles nur Seite 1 --------------------------------
         var uploadSource587 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         var packCoordSource587 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
