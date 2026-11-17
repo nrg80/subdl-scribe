@@ -794,6 +794,21 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
+        // --- F-M591: derselbe Griff im Download --------------------------------------------------
+        var downloadSource591 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
+        Check("F-M591: der Filmweg des Downloads ist gegen einen Timeout abgesichert",
+            downloadSource591.Contains("the film record did not answer (client timeout)", StringComparison.Ordinal)
+            && downloadSource591.Contains("_letzteFrageOhneAntwort = true;", StringComparison.Ordinal));
+        Check("F-M591: Suchversuch und Hauptsuche fallen bei Timeout auf die naechste Quelle zurueck",
+            downloadSource591.Contains("no answer (client timeout) — the run keeps going with the other sources (F-M591)", StringComparison.Ordinal)
+            && downloadSource591.Contains("no answer from the main search (client timeout) — asking the other sources (F-M591)", StringComparison.Ordinal)
+            && downloadSource591.Split("catch (OperationCanceledException) when (!ct.IsCancellationRequested)").Length - 1 >= 3);
+        Check("F-M591: erst drei Artikel ohne Antwort irgendeiner Quelle beenden den Lauf",
+            downloadSource591.Contains("private bool _stopRunNoSources;", StringComparison.Ordinal)
+            && downloadSource591.Contains("if (_quellenAusfaelleInFolge >= 3)", StringComparison.Ordinal)
+            && downloadSource591.Contains("if (_stopRunNoSources)", StringComparison.Ordinal)
+            && downloadSource591.Contains("nothing was searched, the items stay due for the next run (F-M591)", StringComparison.Ordinal));
+
         // --- F-M590: sofort notieren, Timeout je Quelle ------------------------------------------
         var uploadSource590 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         Check("F-M590: die Marke einer Quelle wird unmittelbar nach ihrer Antwort geschrieben",
@@ -1792,11 +1807,13 @@ internal static class Program
         var mainSearchKopf = downloadSource.IndexOf("async Task<bool> RunMainSearchAsync()", StringComparison.Ordinal);
         var letzteSubdlSuche = downloadSource.LastIndexOf("await RunV2SearchAsync(", StringComparison.Ordinal);
         var schleife = downloadSource.IndexOf("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal);
+        var hauptAufruf = downloadSource.IndexOf("hauptsucheLief = await RunMainSearchAsync().ConfigureAwait(false);", StringComparison.Ordinal);
         Check("the SubDL search runs where the order puts it — inside the ordered loop, not before it (F-M504)",
             mainSearchKopf > 0 && letzteSubdlSuche > mainSearchKopf && letzteSubdlSuche < schleife
-            && downloadSource.Contains("if (quelle == MainSearchSource)", StringComparison.Ordinal)
-            && downloadSource.Contains("if (!await RunMainSearchAsync().ConfigureAwait(false))", StringComparison.Ordinal),
-            "main-search head @" + mainSearchKopf + ", last call @" + letzteSubdlSuche + ", loop @" + schleife);
+            && mainSearchKopf < schleife && hauptAufruf > schleife
+            && downloadSource.Contains("if (quelle == MainSearchSource)", StringComparison.Ordinal),
+            "main-search head @" + mainSearchKopf + ", last call @" + letzteSubdlSuche
+            + ", loop @" + schleife + ", ordered call @" + hauptAufruf);
 
         // (b) KEIN vorzeitiger Ausstieg: die Schleife fragt jede Quelle, und der Ausstieg „keine
         // Kandidaten" steht HINTER ihr. Im Rumpf gibt es kein `break` und keine Ausstiegszeile; die

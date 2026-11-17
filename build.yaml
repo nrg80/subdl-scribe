@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.460"
+version: "12.1.12.461"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.461: the download side gets the same rule as the upload side -- a source that times out is a failure of that source, the run goes on and ends only when no source answers.
   v12.1.12.460: each source records its own acceptance right after it answers, and a source that times out no longer aborts the run -- the run ends only when every source is gone.
   v12.1.12.459: the transfer pause follows a real transfer of the track itself; a skipped track no longer pays it.
   v12.1.12.458: the SubDL upload id is read back once at the end of a run instead of after every upload -- one list fetch for all of them.

@@ -351,6 +351,28 @@ public sealed class DownloadPipeline : IDisposable
     /// </summary>
     private bool _stopRun;
 
+    /// <summary>
+    /// F-M591 (Operator-Anweisung 17.11.2026, gleiche Regel wie F-M590 beim Upload): ob die zuletzt
+    /// gefragte Quelle gar nicht geantwortet hat — der HttpClient meldet seinen Timeout als
+    /// <c>TaskCanceledException</c>, also als <c>OperationCanceledException</c>. Bis hierher flog das
+    /// ungebremst bis zum Lauf-Ende durch: am 17.11.2026 fragte der Lauf um 22:27:45
+    /// <c>moviesubtitles.org/search.php</c> fuer einen Film, bekam 90 Sekunden keine Antwort und der
+    /// ganze Lauf endete mit „download: cancelled … 0 saved", obwohl SubDL erreichbar war.
+    /// </summary>
+    private bool _letzteFrageOhneAntwort;
+
+    /// <summary>F-M591: wie viele Quellen dieses Vorgangs ohne Antwort blieben.</summary>
+    private int _quellenOhneAntwortInDiesemItem;
+
+    /// <summary>
+    /// F-M591: Artikel in Folge, bei denen KEINE Quelle geantwortet hat. Erst dann endet der Lauf —
+    /// eine einzelne tote Seite ist ein Fehlschlag dieser Quelle, kein Abbruch.
+    /// </summary>
+    private int _quellenAusfaelleInFolge;
+
+    /// <summary>F-M591: der Lauf endet, weil keine Quelle mehr antwortet (nicht: Kontingent).</summary>
+    private bool _stopRunNoSources;
+
     // Per-item filename-title fallback (soft mode last rung)
 
     /// <summary>
@@ -700,6 +722,12 @@ public sealed class DownloadPipeline : IDisposable
             }
 
             ct.ThrowIfCancellationRequested(); // F-M131: user stop aborts the run
+            if (_stopRunNoSources)
+            {
+                // F-M591: der Ausstieg wurde oben schon begruendet protokolliert.
+                break;
+            }
+
             if (_stopRun)
             {
                 // F-M48 fix (08.09.2026): quota/rate-limit exhausted mid-run — stop
@@ -1686,6 +1714,10 @@ public sealed class DownloadPipeline : IDisposable
         // dann der Status der Seite und die Zahl der Treffer.
         var antworten = new Dictionary<Configuration.SubtitleProvider, string>();
 
+        // F-M591: welche Quellen in DIESEM Artikel gar nicht geantwortet haben.
+        var ohneAntwort = new List<Configuration.SubtitleProvider>();
+        _quellenOhneAntwortInDiesemItem = 0;
+
         foreach (var quelle in quellenReihenfolge)
         {
             ct.ThrowIfCancellationRequested();
@@ -1702,11 +1734,33 @@ public sealed class DownloadPipeline : IDisposable
                     continue;
                 }
 
-                if (!await RunMainSearchAsync().ConfigureAwait(false))
+                bool hauptsucheLief;
+                try
+                {
+                    hauptsucheLief = await RunMainSearchAsync().ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    // F-M591: dieselbe Regel fuer die Hauptsuche — faellt SIE in den Timeout, wird die
+                    // naechste Quelle gefragt statt den Lauf zu beenden.
+                    _logger.LogWarning(
+                        "[{Source}-D] {File} — no answer from the main search (client timeout) — asking the other sources (F-M591).",
+                        Api.Endpoints.Provenance.Name(quelle), Path.GetFileName(mediaPath));
+                    _letzteFrageOhneAntwort = true;
+                    _quellenOhneAntwortInDiesemItem++;
+                    continue;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+
+                if (!hauptsucheLief)
                 {
                     return;
                 }
 
+                _letzteFrageOhneAntwort = false;
                 gefragteQuellen.Add(quelle);
                 continue;
             }
@@ -1725,7 +1779,13 @@ public sealed class DownloadPipeline : IDisposable
                 var treffer = fremdProSprache.TryGetValue(lang, out var bisher)
                     ? bisher
                     : new List<SubtitleCandidate>();
+                _letzteFrageOhneAntwort = false;
                 treffer.AddRange(await ForeignCandidatesAsync(quelle, title, isSeries, season, episode, lang, tmdbId, mediaPath, mediaHash, ct).ConfigureAwait(false));
+                if (_letzteFrageOhneAntwort)
+                {
+                    ohneAntwort.Add(quelle);
+                }
+
                 fremdProSprache[lang] = treffer;
             }
 
@@ -1737,6 +1797,25 @@ public sealed class DownloadPipeline : IDisposable
             antworten[quelle] = Api.SiteTrace.Answer(status, trefferZahl);
 
             gefragteQuellen.Add(quelle);
+        }
+
+        // F-M591: hat KEINE der gefragten Quellen geantwortet, ist das ein Ausfall der Seiten und kein
+        // Urteil ueber den Film. Erst drei Artikel in Folge beenden den Lauf — sonst wuerde er
+        // stundenlang gegen tote Seiten laufen.
+        if (gefragteQuellen.Count > 0 && ohneAntwort.Count >= gefragteQuellen.Count)
+        {
+            _quellenAusfaelleInFolge++;
+            if (_quellenAusfaelleInFolge >= 3)
+            {
+                _stopRunNoSources = true;
+                _logger.LogWarning(
+                    "[Sub Scribe-D] no source answered for {N} item(s) in a row — stopping the run early; nothing was searched, the items stay due for the next run (F-M591).",
+                    _quellenAusfaelleInFolge);
+            }
+        }
+        else if (gefragteQuellen.Count > 0)
+        {
+            _quellenAusfaelleInFolge = 0;
         }
 
         // F-M47: search performed (success OR no-candidates) — start the per-item
@@ -3985,6 +4064,12 @@ public sealed class DownloadPipeline : IDisposable
         Api.Endpoints.SubtitleQuery abfrage;
         if (quelle == Configuration.SubtitleProvider.MovieSubtitles)
         {
+            // F-M591: der Filmweg fragt TMDb und dann die Filmnummer der Seite — beides VOR dem
+            // eigentlichen Suchversuch. Genau hier lief der Lauf am 17.11.2026 in den Timeout und
+            // starb. Ein Timeout ist der Ausfall DIESER Quelle: eine Zeile, leere Antwort, der Lauf
+            // laeuft mit den anderen Quellen weiter.
+            try
+            {
             // F-M507: Titel und Jahr kommen aus TMDb („Was was ist, Auflösung per tmdb"), nicht aus dem
             // Dateinamen. Die Nummer, unter der die Seite den Film führt, kommt aus dem Store, wenn sie
             // dort schon steht — sonst wird sie jetzt gesucht und abgelegt (MsubMovieResolver).
@@ -4026,6 +4111,19 @@ public sealed class DownloadPipeline : IDisposable
                 lang,
                 Year: movie.ReleaseYear ?? 0,
                 MovieId: film.MovieId!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    "[moviesubtitles] {File} [{Lang}] — the film record did not answer (client timeout) — the run keeps going with the other sources (F-M591).",
+                    Path.GetFileName(mediaPath ?? title), lang);
+                _letzteFrageOhneAntwort = true;
+                return leer;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
         }
         else
         {
@@ -4079,6 +4177,21 @@ public sealed class DownloadPipeline : IDisposable
                 Season = isSeries ? season : 0,
                 Episode = isSeries ? episode : 0,
             }).ToList();
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // F-M591: der HttpClient meldet seinen Timeout als TaskCanceledException — also als
+            // OperationCanceledException. Das ist der Ausfall DIESER Quelle, kein Abbruch des Laufs.
+            _logger.LogWarning(
+                "[{Source}-D] search for {Title} [{Lang}] — no answer (client timeout) — the run keeps going with the other sources (F-M591).",
+                Api.Endpoints.Provenance.Name(quelle), title, lang);
+            _letzteFrageOhneAntwort = true;
+            return leer;
+        }
+        catch (OperationCanceledException)
+        {
+            // Ein echter Abbruch (Nutzer-Stop, Watchdog, Neustart) gilt fuer den ganzen Lauf.
+            throw;
         }
         catch (Exception ex)
         {

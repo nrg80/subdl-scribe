@@ -560,6 +560,10 @@
     "T300": {
       "suite": "endpoints",
       "checks": 3
+    },
+    "T301": {
+      "suite": "endpoints",
+      "checks": 3
     }
   }
 }
