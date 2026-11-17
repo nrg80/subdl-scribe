@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.448",
-        "changelog": "v12.1.12.448: the comment carries IMDb/TMDb, SxxEyy with show and episode title, and the year.",
+        "version": "12.1.12.449",
+        "changelog": "v12.1.12.449: the comment joins its three parts with a dash -- the site turns line breaks into spaces.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.448-dev/Jellyfin.Plugin.SubdlSync_12.1.12.448.zip",
-        "checksum": "afb89011efde1e96e790bf3f9bf89139",
-        "timestamp": "2026-11-17T01:09:25Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.449-dev/Jellyfin.Plugin.SubdlSync_12.1.12.449.zip",
+        "checksum": "c3aac60d871664b81cdf1c2052ed1440",
+        "timestamp": "2026-11-17T01:36:07Z"
       }
     ]
   }
