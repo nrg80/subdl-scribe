@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.444",
-        "changelog": "v12.1.12.444: completion is counted per track, the same rule the head already proves (schema 17).",
+        "version": "12.1.12.446",
+        "changelog": "v12.1.12.446: the episode title rides in the tvst comment field, placeholders stay out.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.444-dev/Jellyfin.Plugin.SubdlSync_12.1.12.444.zip",
-        "checksum": "36c75fcb8f68db80ac28f3601c3b65d4",
-        "timestamp": "2026-11-17T00:08:06Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.446-dev/Jellyfin.Plugin.SubdlSync_12.1.12.446.zip",
+        "checksum": "b6e2e5d48cee4b59070b357cdb21580b",
+        "timestamp": "2026-11-17T00:36:19Z"
       }
     ]
   }
