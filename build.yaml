@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.449"
+version: "12.1.12.452"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,9 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.452: a settled file costs one look at the store instead of a stream read plus a walk over every track.
+  v12.1.12.452: a track whose extraction failed is parked for seven days, and a missing file is never parked.
+  v12.1.12.450: both season questions read their table once per run instead of once per season.
   v12.1.12.449: the comment joins its three parts with a dash -- the site turns line breaks into spaces.
   v12.1.12.448: the comment carries IMDb/TMDb, SxxEyy with show and episode title, and the year.
   v12.1.12.447: a season that is fully packed costs one line, not a TMDb question and a file walk.

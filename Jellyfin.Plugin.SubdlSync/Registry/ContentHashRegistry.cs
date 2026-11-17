@@ -1362,6 +1362,79 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="imdbId">Series IMDb id.</param>
     /// <param name="season">Season number.</param>
     /// <returns>Language and HI variant, unordered.</returns>
+    /// <summary>
+    /// F-M575: **alle** Sprachen aller Staffeln in EINEM Zug. Die Einzelfrage
+    /// (<see cref="LanguagesInSeason"/>) läuft jedes Mal über sämtliche Untertitel-Zeilen des Stores —
+    /// bei 125 Staffeln sind das 125 volle Durchläufe. Diese Fassung liest die zwei Tabellen einmal und
+    /// gruppiert sie im Speicher; gemessen sind es 1.415 Datei-Zeilen und 9.385 Untertitel-Zeilen (4,7 MB
+    /// Store), also ein Wimpernschlag statt Minuten.
+    /// </summary>
+    /// <returns>Sprachen je (Serie, Staffel).</returns>
+    public Dictionary<(string ImdbId, int Season), HashSet<(string Language, bool HearingImpaired)>> LanguagePairsBySeason()
+    {
+        var staffelVon = new Dictionary<string, (string ImdbId, int Season)>(StringComparer.Ordinal);
+        foreach (var media in _db.Media.Find(m => true))
+        {
+            if (!string.IsNullOrEmpty(media.Id) && !string.IsNullOrWhiteSpace(media.ImdbId)
+                && media.Season is { } staffelNr && staffelNr >= 1)
+            {
+                staffelVon[media.Id] = (media.ImdbId!, staffelNr);
+            }
+        }
+
+        var karte = new Dictionary<(string, int), HashSet<(string, bool)>>();
+        foreach (var embed in _db.Embeds.Find(e => true))
+        {
+            if (embed.MediaHash is null || string.IsNullOrEmpty(embed.Language)
+                || !staffelVon.TryGetValue(embed.MediaHash, out var staffel))
+            {
+                continue;
+            }
+
+            if (!karte.TryGetValue(staffel, out var paare))
+            {
+                paare = new HashSet<(string, bool)>();
+                karte[staffel] = paare;
+            }
+
+            paare.Add((
+                Language.LanguageMapper.Canonical(embed.Language) ?? embed.Language.ToUpperInvariant(),
+                embed.HearingImpaired ?? false));
+        }
+
+        return karte;
+    }
+
+    /// <summary>
+    /// F-M575: **alle** Pack-Paare aller Staffeln in EINEM Zug — Gegenstück zu
+    /// <see cref="PacksInSeason"/>.
+    /// </summary>
+    /// <returns>Gepackte (Sprache, HI)-Paare je (Serie, Staffel).</returns>
+    public Dictionary<(string ImdbId, int Season), HashSet<(string Language, bool HearingImpaired)>> PacksBySeason()
+    {
+        var karte = new Dictionary<(string, int), HashSet<(string, bool)>>();
+        foreach (var row in _db.Packs.FindAll())
+        {
+            if (string.IsNullOrWhiteSpace(row.ImdbId) || row.Season < 1)
+            {
+                continue;
+            }
+
+            var schluessel = (row.ImdbId!, row.Season);
+            if (!karte.TryGetValue(schluessel, out var paare))
+            {
+                paare = new HashSet<(string, bool)>();
+                karte[schluessel] = paare;
+            }
+
+            paare.Add((
+                Language.LanguageMapper.Canonical(row.Language) ?? (row.Language ?? string.Empty).ToUpperInvariant(),
+                row.HearingImpaired ?? false));
+        }
+
+        return karte;
+    }
+
     public List<(string Language, bool HearingImpaired)> LanguagesInSeason(string? imdbId, int season)
     {
         if (string.IsNullOrWhiteSpace(imdbId))
@@ -2514,6 +2587,63 @@ public sealed class ContentHashRegistry : IDisposable
         }
 
         return string.Equals(media.CompleteSignature ?? string.Empty, signature, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// F-M576: der jüngste Zugeh-Stempel dieser Datei, egal welcher Quelle — die Zeit, zu der die
+    /// Datei zuletzt als erledigt vermerkt wurde. Der billige Kopf-Ausstieg braucht sie für EINE
+    /// Frage: kann seitdem ein loser Seitenwagen dazugekommen sein? Ist das Verzeichnis älter als
+    /// dieser Stempel, ist die Verzeichnisliste unnötig (F-M88c: „settled files skip directory
+    /// listings too"), und der Kopf kostet wieder einen Blick statt eines Stream-Abrufs.
+    /// </summary>
+    /// <param name="mediaHash">Der Medienhash der Datei.</param>
+    /// <returns>Der jüngste Stempel, null wenn keine Quelle die Datei je abgeschlossen hat.</returns>
+    public DateTime? NewestCompletionStamp(string? mediaHash)
+    {
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return null;
+        }
+
+        var media = _db.Media.FindById(mediaHash);
+        if (media == null)
+        {
+            return null;
+        }
+
+        DateTime? neuester = null;
+        foreach (var stempel in new[] { media.CompleteSubdl, media.CompleteTvSubtitles, media.CompleteMsub })
+        {
+            if (stempel is { } wert && (neuester == null || wert > neuester.Value))
+            {
+                neuester = wert;
+            }
+        }
+
+        return neuester;
+    }
+
+    /// <summary>
+    /// F-M577 (Variante B): ist die Ablehnung dieser Spur ein Extraktions-Fehlschlag, der alt genug
+    /// fuer einen neuen Versuch ist? Die Ablehnung selbst steht im vorhandenen Store
+    /// (<see cref="RejectReason.ExtractionFailed"/>) — kein eigenes Feld, kein Schema-Schritt. Der
+    /// Zeitpunkt ist der der Urteils-Zeile (<c>StatusAt</c>), den jeder Schreibpfad ohnehin setzt.
+    /// </summary>
+    /// <param name="mediaHash">Der Medienhash der Datei.</param>
+    /// <param name="subPos">Die Stream-Position der Spur.</param>
+    /// <param name="ttl">Wie lange eine solche Ablehnung gilt.</param>
+    /// <returns>Wahr, wenn die Spur erneut versucht werden darf.</returns>
+    public bool ExtractRejectIsStale(string? mediaHash, int subPos, TimeSpan ttl)
+    {
+        if (string.IsNullOrEmpty(mediaHash) || subPos < 0)
+        {
+            return false;
+        }
+
+        var zeile = _db.Embeds.FindById(ScribeDbContext.EmbedKey(mediaHash, subPos));
+        return zeile is { Reason: RejectReason.ExtractionFailed }
+            && zeile.StatusAt is { } urteilAm
+            && DateTime.UtcNow - urteilAm >= ttl;
     }
 
     /// <summary>F-M557: setzt den Zugeh-Stempel dieser Quelle samt der Signatur, zu der er gehört.</summary>

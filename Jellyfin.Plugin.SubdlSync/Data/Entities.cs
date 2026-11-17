@@ -98,6 +98,14 @@ public static class RejectReason
     /// <summary>Untagged stream, too little text to detect a language.</summary>
     public const string UndTooSmall = "und-too-small";
 
+    /// <summary>
+    /// F-M577 (Operator-Entscheidung 17.11.2026: Variante B): die Extraktion dieser Spur ist
+    /// gescheitert — kein Urteil über den Untertitel, sondern über den Zugriff auf ihn. Die Ablehnung
+    /// steht im vorhandenen Store (kein eigenes Feld, kein Schema-Schritt) und gilt nach
+    /// sieben Tagen als veraltet: dann bekommt die Spur ihren nächsten Versuch.
+    /// </summary>
+    public const string ExtractionFailed = "extraction-failed";
+
     /// <summary>Untagged stream, language could not be detected.</summary>
     public const string UndDetectionFailed = "und-detection-failed";
 
@@ -449,6 +457,7 @@ public class EmbedTrackEntity : SubtitleState
 
     /// <summary>How the last detection attempt ended — one of <see cref="DetectionOutcome"/>, else null.</summary>
     public string? DetectionOutcome { get; set; }
+
 }
 
 /// <summary>

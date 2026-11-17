@@ -496,6 +496,18 @@
     "T283": {
       "suite": "endpoints",
       "checks": 1
+    },
+    "T285": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T286": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T287": {
+      "suite": "endpoints",
+      "checks": 2
     }
   }
 }

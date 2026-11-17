@@ -221,12 +221,28 @@ public sealed class UploadPipeline : IPackFiller
     private readonly Dictionary<(string ImdbId, int Season), HashSet<(string Language, bool HearingImpaired)>> _packsInSeason = new();
 
     /// <summary>
+    /// F-M575: die beiden Sammel-Karten — EINMAL je Lauf gefuellt, danach nur noch befragt. Gemessen:
+    /// je Staffel kostete die Einzelfrage einen vollen Durchlauf durch alle Untertitel-Zeilen (9.385), bei
+    /// 125 Staffeln also 125 Durchlaeufe und rund 6 Sekunden je Staffel.
+    /// </summary>
+    private Dictionary<(string ImdbId, int Season), HashSet<(string Language, bool HearingImpaired)>>? _allePacks;
+
+    /// <summary>F-M575: Sprachen aller Staffeln, einmal je Lauf gelesen.</summary>
+    private Dictionary<(string ImdbId, int Season), HashSet<(string Language, bool HearingImpaired)>>? _alleSprachen;
+
+    /// <summary>
     /// F-M429 (operator order 03.11.2026: "Bei packbildung identifizierte einzeluploads für später den
     /// einzelupload merken"): the (series, season, language, variant) pairs a pack of THIS run actually
     /// carried. A single position covered by such a pair is skipped later in the run — the pack is the
     /// only carrier. Positions whose pack failed are absent, so their single goes up as usual.
     /// </summary>
     private readonly HashSet<(string ImdbId, int Season, string Lang, bool Hi)> _packAbsorbed = new();
+
+    /// <summary>
+    /// F-M577 (Operator-Entscheidung 17.11.2026, Variante B): wie lange die Ablehnung
+    /// „Extraktion gescheitert" gilt, bevor die Spur ihren naechsten Versuch bekommt.
+    /// </summary>
+    private static readonly TimeSpan ExtractRetryAfter = TimeSpan.FromDays(7);
 
     /// <summary>F-M88c/d: central OSHash cache (oshash-cache.json in the plugin data dir).</summary>
     /// Always use the current Plugin.Instance cache so a DB reset is respected.<
@@ -783,6 +799,72 @@ public sealed class UploadPipeline : IPackFiller
 
             string? earlyHash = Registry.GetMediaHash(mediaPath);
             var quellen = UploadSources(medienart);
+
+            // ============================================================
+            // F-M576 (Operator-Befund 17.11.2026: „Sicherlich nicht gigabyteweise Extraktionen und
+            // hunderte db Zugriffe"): der BILLIGE KOPF-AUSSTIEG kehrt zurueck.
+            // 12.1.12.203 sprang hier mit EINEM Blick raus (GetMediaHash + IsSubtitlesUploaded,
+            // Zeile 481-492, „without touching the OSHash cache, ffprobe, streams, or directory
+            // listings"). Der Port ersetzte das durch GetMediaStreams, die Positions-Abrechnung je
+            // Quelle und ein Urteil je Textspur: bei 58 Spuren also 58 Store-Lookups — und zwar fuer
+            // JEDE Datei der Bibliothek in JEDEM Zyklus. Gemessen am 17.11.2026 (.449): 1.415
+            // Dateien, 16.395 Schreibvorgaenge und 139 ffmpeg-Paesse (94 GB gelesen) fuer 155
+            // Uploads.
+            //
+            // Der Zugeh-Stempel je Quelle steht in der Medien-Zeile (F-M557); EIN Blick darauf
+            // beantwortet dieselbe Frage, die der Kopf unten je Position beweist. Die Signatur wird
+            // hier NICHT mitgegeben: sie aendert sich nur mit den (Sprache, HI)-Paaren der Datei, und
+            // die aendern sich nur mit der Datei — und die hat dann einen neuen Hash. Der Stempel ist
+            // also nur so lange gueltig, wie er zur selben Datei gehoert.
+            //
+            // Der Seitenwagen bleibt geprueft — die Luecke von F-M556 darf nicht zurueckkommen. Die
+            // Verzeichnisliste selbst entfaellt, wenn das Verzeichnis aelter ist als der juengste
+            // Stempel: dann kann seit dem Abschluss nichts dazugekommen sein.
+            // ============================================================
+            if (quellen.Count > 0 && !string.IsNullOrEmpty(earlyHash)
+                && quellen.All(quelle => Registry.IsCompleteFor(earlyHash, quelle, null)))
+            {
+                bool seitenwagenMoeglich = true;
+                if (Registry.NewestCompletionStamp(earlyHash) is { } stempelZeit)
+                {
+                    try
+                    {
+                        var verzeichnis = Path.GetDirectoryName(mediaPath);
+                        seitenwagenMoeglich = string.IsNullOrEmpty(verzeichnis)
+                            || Directory.GetLastWriteTimeUtc(verzeichnis) > stempelZeit;
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        // Ein Verzeichnis, das sich nicht lesen laesst, ist kein Beweis fuer "nichts
+                        // dazugekommen" — dann wird gefragt, nicht angenommen.
+                        seitenwagenMoeglich = true;
+                    }
+                }
+
+                bool seitenwagenOffenFrueh = false;
+                if (seitenwagenMoeglich)
+                {
+                    var loseKandidatenFrueh = FindLooseSrts(mediaPath);
+                    seitenwagenOffenFrueh = loseKandidatenFrueh.Count > 0
+                        && quellen.Any(quelle => QueuedForSource(quelle)
+                            && SidecarsNeedWorkFor(loseKandidatenFrueh, earlyHash, quelle, Registry));
+                }
+
+                if (!seitenwagenOffenFrueh)
+                {
+                    summary.SkippedItems++;
+                    summary.FilesSkipped++;
+                    summary.SettledItems++;
+                    LogUtil.PerItem(
+                        _config.LogMode,
+                        _logger,
+                        "[Sub Scribe] SKIP {File} — stamped complete for every source, no stream read (F-M576)",
+                        Path.GetFileName(mediaPath));
+
+                    continue;
+                }
+            }
+
             // F-M554: die Spuren, die diese Datei wirklich hat — nicht nur die, die der Store kennt.
             // Dieselbe Zaehlweise wie weiter unten (F-M5): Position innerhalb der Untertitelspuren,
             // und ein forcierter Sidecar ist keine Upload-Arbeit (F-M246/F-M284).
@@ -1167,6 +1249,46 @@ public sealed class UploadPipeline : IPackFiller
                 .Distinct()
                 .OrderBy(p => p)
                 .ToList();
+
+            // ============================================================
+            // F-M577 (Operator-Entscheidung 17.11.2026, Variante B: „voher prufen ob Datei
+            // ueberhaupt vorhanden ist"): eine Spur, deren Extraktion gescheitert ist, wird als
+            // Ablehnung im VORHANDENEN Store vermerkt — Grund `extraction-failed`, kein neues Feld,
+            // kein Schema-Schritt. Damit ist die Spur erledigt: die Datei kann ihre Vollstaendigkeits-
+            // Marke bekommen, und der billige Kopf-Ausstieg ueberspringt sie. Nach
+            // `ExtractRetryAfter` (7 Tage) gilt die Ablehnung als veraltet, und die Spur bekommt
+            // ihren naechsten Versuch — auch ohne dass jemand etwas loeschen muss.
+            // ============================================================
+            var gesperrtePositionen = new List<int>();
+            if (textPositions.Count > 0)
+            {
+                var offenePositionen = new List<int>(textPositions.Count);
+                foreach (int position in textPositions)
+                {
+                    if (Registry.EmbedRejectedReason(mediaHash, position) == RejectReason.ExtractionFailed
+                        && !Registry.ExtractRejectIsStale(mediaHash, position, ExtractRetryAfter))
+                    {
+                        gesperrtePositionen.Add(position);
+                        continue;
+                    }
+
+                    offenePositionen.Add(position);
+                }
+
+                if (gesperrtePositionen.Count > 0)
+                {
+                    LogUtil.PerItem(
+                        _config.LogMode,
+                        _logger,
+                        "[Sub Scribe] {File}: {Parked} of {All} text stream(s) parked after an extraction failure ({List}, F-M577)",
+                        Path.GetFileName(mediaPath),
+                        gesperrtePositionen.Count,
+                        textPositions.Count,
+                        string.Join(", ", gesperrtePositionen.Take(8).Select(x => "s" + x.ToString(System.Globalization.CultureInfo.InvariantCulture))));
+                    textPositions = offenePositionen;
+                }
+            }
+
             // ============================================================
             // F-M539 (Operator-Anweisung 16.11.2026: „Das kann man doch sofort skippen, ohne weitere
             // Pruefung"): ist der Eintrag erledigt, endet er HIER — vor dem einen ffmpeg-Durchgang.
@@ -1205,6 +1327,17 @@ public sealed class UploadPipeline : IPackFiller
                 summary.SettledItems++;
                 LogUtil.PerItem(_config.LogMode, _logger,
                     "[Sub Scribe] SKIP {File} — every text stream was rejected earlier, nothing can be uploaded (F-M541)",
+                    Path.GetFileName(mediaPath));
+                continue;
+            }
+
+            if (textPositions.Count == 0 && gesperrtePositionen.Count > 0)
+            {
+                summary.SettledItems++;
+                LogUtil.PerItem(
+                    _config.LogMode,
+                    _logger,
+                    "[Sub Scribe] SKIP {File} — every open text stream is parked after an extraction failure, no ffmpeg pass (F-M577)",
                     Path.GetFileName(mediaPath));
                 continue;
             }
@@ -1322,6 +1455,20 @@ public sealed class UploadPipeline : IPackFiller
                 // F-M68: persistent reject store — a stream QA-rejected or dup-skipped
                 // in a PREVIOUS run never burns a search request again.
                 string? rejectReason = Registry.EmbedRejectedReason(mediaHash, subPos);
+                if (rejectReason == RejectReason.ExtractionFailed
+                    && Registry.ExtractRejectIsStale(mediaHash, subPos, ExtractRetryAfter))
+                {
+                    // F-M577: die Sperre ist abgelaufen — die Spur bekommt ihren naechsten Versuch.
+                    LogUtil.PerItem(
+                        _config.LogMode,
+                        _logger,
+                        "[Sub Scribe] {File} s{Pos} — extraction failure older than {Days} day(s), trying again (F-M577)",
+                        Path.GetFileName(mediaPath),
+                        subPos,
+                        (int)ExtractRetryAfter.TotalDays);
+                    rejectReason = null;
+                }
+
                 if (rejectReason != null)
                 {
                     // F-M298: `duplicate-content` is only a verdict while the content is NOT already up.
@@ -1382,7 +1529,35 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     summary.Failed++;
                     ReportOutcome(item, ItemOutcome.RealFailure);
-                    _logger.LogError("[Sub Scribe] EXTRACTION FAILED {File} stream {Pos}", Path.GetFileName(mediaPath), subPos);
+                    // F-M577 (Variante B): ZUERST die Frage, ob die Datei ueberhaupt da ist. Eine
+                    // fehlende Datei ist ein Zugriffsfehler (Share weg, Pfad verschoben), kein Urteil
+                    // ueber die Spur — sie bekommt keine Ablehnung und wird im naechsten Lauf erneut
+                    // versucht. Erst wenn die Datei da ist und ffmpeg trotzdem nichts liefert, wird
+                    // die Spur als gescheitert vermerkt.
+                    bool dateiDa = File.Exists(mediaPath);
+                    if (dateiDa)
+                    {
+                        Registry.MarkAndFlush(() => Registry.MarkEmbed(
+                            mediaHash, subPos, lang ?? "UN", streamHi, SubtitleStatus.Rejected,
+                            reason: RejectReason.ExtractionFailed));
+                        LogUtil.PerItem(
+                            _config.LogMode,
+                            _logger,
+                            "[Sub Scribe] EXTRACTION FAILED {File} stream {Pos} — parked as rejected, next attempt in {Days} day(s) (F-M577)",
+                            Path.GetFileName(mediaPath),
+                            subPos,
+                            (int)ExtractRetryAfter.TotalDays);
+                    }
+                    else
+                    {
+                        LogUtil.PerItem(
+                            _config.LogMode,
+                            _logger,
+                            "[Sub Scribe] EXTRACTION FAILED {File} stream {Pos} — file is gone, no park, retried next run (F-M577)",
+                            Path.GetFileName(mediaPath),
+                            subPos);
+                    }
+
                     continue;
                 }
 
@@ -3524,16 +3699,40 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Complete seasons keyed by (imdb id, season).</returns>
     /// <summary>F-M571: die gepackten Paare einer Staffel, je Lauf einmal aus dem Store.</summary>
+    /// <summary>
+    /// F-M575: die gepackten Paare einer Staffel — aus der Sammel-Karte, die einmal je Lauf gefuellt wird.
+    /// </summary>
+    /// <param name="imdbId">Serie.</param>
+    /// <param name="season">Staffel.</param>
+    /// <returns>Die Paare, leer wenn nichts gepackt ist.</returns>
     private HashSet<(string Language, bool HearingImpaired)> PacksOf(string imdbId, int season)
     {
         var key = (imdbId, season);
         if (!_packsInSeason.TryGetValue(key, out var gepackt))
         {
-            gepackt = Registry.PacksInSeason(imdbId, season);
+            _allePacks ??= Registry.PacksBySeason();
+            gepackt = _allePacks.TryGetValue(key, out var vorhanden)
+                ? vorhanden
+                : new HashSet<(string Language, bool HearingImpaired)>();
             _packsInSeason[key] = gepackt;
         }
 
         return gepackt;
+    }
+
+    /// <summary>
+    /// F-M575: die Sprachen einer Staffel aus dem Store — ebenfalls aus einer Sammel-Karte statt aus einem
+    /// vollen Tabellendurchlauf je Staffel.
+    /// </summary>
+    /// <param name="imdbId">Serie.</param>
+    /// <param name="season">Staffel.</param>
+    /// <returns>Sprache und HI-Variante, leer wenn der Store nichts kennt.</returns>
+    private HashSet<(string Language, bool HearingImpaired)> LanguagesOf(string imdbId, int season)
+    {
+        _alleSprachen ??= Registry.LanguagePairsBySeason();
+        return _alleSprachen.TryGetValue((imdbId, season), out var paare)
+            ? paare
+            : new HashSet<(string Language, bool HearingImpaired)>();
     }
 
     private async Task<Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>> CompleteSeasonsAsync(CancellationToken ct)
@@ -3611,13 +3810,10 @@ public sealed class UploadPipeline : IPackFiller
             // dann kostet sie weder eine TMDb-Folgenzahl noch einen Blick in eine Datei noch einen Hash.
             // Vorher lief die teure Kette (TMDb-Fragen + Release-Gruppen + Dateien) fuer JEDE vollstaendige
             // Staffel, nur um am Ende „already up as a pack" zu melden.
-            var staffelBekannt = Registry.LanguagesInSeason(entry.Key.Item1, entry.Key.Item2);
+            var staffelBekannt = LanguagesOf(entry.Key.Item1, entry.Key.Item2);
             var staffelGepackt = PacksOf(entry.Key.Item1, entry.Key.Item2);
             if (staffelBekannt.Count > 0
-                && staffelBekannt.All(p => staffelGepackt.Contains((
-                    Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(p.Language)
-                        ?? (p.Language ?? string.Empty).ToUpperInvariant(),
-                    p.HearingImpaired))))
+                && staffelBekannt.All(p => staffelGepackt.Contains(p)))
             {
                 LogUtil.Normal(
                     _logger,
@@ -3641,7 +3837,7 @@ public sealed class UploadPipeline : IPackFiller
             // release names. Is the season already up as a pack for the languages the store knows, and
             // does any of them cover every aired episode? Only then are release groups worth reading,
             // and only then does anything get extracted.
-            var known = Registry.LanguagesInSeason(entry.Key.Item1, entry.Key.Item2);
+            var known = LanguagesOf(entry.Key.Item1, entry.Key.Item2);
 
             // F-M433 (operator order 03.11.2026, "wieso geht Tracker einzeln hoch?"): the store names the
             // languages it has already seen. A season whose texts go up for the FIRST time names none, so

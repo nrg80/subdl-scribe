@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.449.
+**Status:** Implementation — v12.1.12.452.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -12,11 +12,11 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 
 - [1. Objective and Scope](#1-objective-and-scope) — 2 requirements
 - [2. Seeder — what enters the queue](#2-seeder-what-enters-the-queue) — 13 requirements
-- [3. Upload Pipeline](#3-upload-pipeline) — 106 requirements
+- [3. Upload Pipeline](#3-upload-pipeline) — 109 requirements
  - [3.1 Quality Gates — Upload](#31-quality-gates-upload) — 9 requirements
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 3 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M379–F-M448 und F-M475, F-M476
- - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 11 requirements (F-M557–F-M563, F-M571–F-M574)
+ - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 14 requirements (F-M557–F-M563, F-M571–F-M577)
 - [4. Download Pipeline](#4-download-pipeline) — 90 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 32 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
@@ -450,6 +450,12 @@ deren Quellstempel nich zu ist?" — ja, und das ist der Grund, warum der tägli
 Bibliothek abarbeitet, ohne dass dafür eigens ein inkrementeller Modus nötig wäre.
 
 **F-M571 [U]:** **Die Pack-Frage wird je Staffel EINMAL gestellt, nicht je Paar.** Packs entstehen nur bei SubDL; welche (Sprache, HI)-Paare einer Staffel schon gepackt sind, liest `PacksInSeason` in einer Abfrage, der Lauf merkt sie sich (`PacksOf`). Vorher fragte der Planer je Paar in den Store und schrieb je Paar eine Zeile — an einer Staffel („The Thundermans" S1/S2) 67 Abfragen und 67 Zeilen in einer Minute, alle mit derselben Antwort; jetzt eine Zeile je Staffel (`N of M pair(s) already up as a pack`).
+
+**F-M575 [U]:** **Beide Staffelfragen lesen ihre Tabelle einmal je Lauf, nicht einmal je Staffel.** Die Sammelfrage kostet je Aufruf einen vollen Durchlauf durch alle Untertitel-Zeilen (9.385). Bei 125 Staffeln waren das 125 Durchläufe und rund **6 Sekunden je Staffel** — gemessen im 449-Lauf (02:41:24 Start, Zeilen im 6-Sekunden-Takt). Der Store ist 4,7 MB groß (1.415 Datei-, 9.385 Untertitel-Zeilen), ein Zug alles zusammen ist billig; danach ist die Frage je Staffel eine Suche im Speicher.
+
+**F-M577 [U]:** **Ein Extraktionsfehler wird als Ablehnung `extraction-failed` geparkt — und nur, wenn die Datei überhaupt da ist.** Operator-Entscheidung 17.11.2026 (Variante B, wörtlich: „voher prufen ob Datei überhaupt vorhanden ist"). Kein eigenes Feld, kein Schema-Schritt: der Grund steht im vorhandenen Ablehnungs-Store auf der Zeile der Spur, und der Zeitpunkt ist der der Urteils-Zeile (`StatusAt`). Damit ist die Spur erledigt — die Datei kann ihre Vollständigkeits-Marke bekommen, und der billige Kopf-Ausstieg (F-M576) überspringt sie. Nach **7 Tagen** gilt die Ablehnung als veraltet (`ExtractRejectIsStale`): die Spur fällt wieder in die Extraktionsliste, ohne dass jemand etwas löschen muss. **Zuerst wird die Existenz geprüft:** eine fehlende Datei (Share weg, Pfad verschoben) ist ein Zugriffsfehler und kein Urteil über die Spur — sie bekommt keine Ablehnung und wird im nächsten Lauf erneut versucht. Sind ausschließlich geparkte Positionen offen, endet die Datei mit einer Zeile statt mit einem Lesedurchgang. Geprüft von T287.
+
+**F-M576 [U]:** **Der erledigte Eintrag endet mit EINEM Blick in die Medien-Zeile — vor jedem Stream-Abruf, vor jeder Positions-Abrechnung, vor jeder Verzeichnisliste.** Das ist F-M88c, wiederhergestellt nach dem Befund vom 17.11.2026 („Sicherlich nicht gigabyteweise Extraktionen und hunderte db Zugriffe"). Stand 12.1.12.449 fragte der Kopf je Datei `GetMediaStreams`, dann je Quelle die offenen Positionen, dann ein Urteil je Textspur — bei 58 Spuren also 58 Store-Lookups, und das für **jede** Datei der Bibliothek in **jedem** Zyklus. Gemessen im 449-Lauf (17.11., 3 h): 1.415 Dateien, 16.395 Schreibvorgänge, 139 ffmpeg-Pässe (94 GB gelesen) für 155 Uploads. Jetzt entscheidet der **Zugeh-Stempel je Quelle** aus derselben Medien-Zeile (F-M557): sind alle Quellen, die dieser Lauf bedient, gestempelt, endet der Eintrag hier. Die Signatur wird am Lesepfad nicht mehr mitgegeben — sie ändert sich nur mit den (Sprache, HI)-Paaren der Datei, und die ändert sich nur mit der Datei, die dann einen neuen Hash hat. Der **Seitenwagen bleibt geprüft** (F-M556 darf nicht zurückkommen): die Verzeichnisliste entfällt nur, wenn das Verzeichnis älter ist als der jüngste Stempel (`NewestCompletionStamp`), sonst wird gefragt. Ein später eingeschalteter Schalter öffnet den Eintrag wieder, weil die Quellenliste die Schalter liest. Geprüft von T286.
 
 **F-M574 [U]:** **Der Kommentar trägt drei Zeilen — Kennungen, Folge, Jahr.** Vorgabe des Operators (17.11.2026, zweimal nachgeschärft):
 `IMDb: tt15875168 / TMDb: 201124 — S01E05: Mo / Tombstone — 2022`
@@ -2467,6 +2473,12 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
+
+**T287:** Das Parken eines Extraktionsfehlers (F-M577): der Grund `extraction-failed` steht im vorhandenen Store, die Parkfrage (`ExtractRejectIsStale`) nimmt die Spur nach sieben Tagen wieder auf, und die **Existenzprüfung steht vor** dem Schreiben der Ablehnung — eine fehlende Datei wird nicht geparkt — **2 Prüfungen** in `endpoints` (246 → 248).
+
+**T286:** Der billige Kopf-Ausstieg (F-M576, F-M88c): der Ausstieg steht **vor** dem Stream-Abruf, fragt die Marke je Quelle (`IsCompleteFor(earlyHash, quelle, null)`) und `NewestCompletionStamp` liefert den jüngsten Stempel für die Seitenwagen-Frage — **1 Prüfung** in `endpoints` (245 → 246).
+
+**T285:** Die Sammel-Karten in `endpoints`: beide Tabellen werden einmal je Lauf gelesen, die Einzelfragen sind aus der Kette verschwunden — **1 Prüfung** in `endpoints` (244 → 245).
 
 **T284:** Der Kommentar-Bauer in `tvsubtitles` und `moviesubtitles`: drei Zeilen mit offizieller Schreibweise, fehlende Teile fallen weg, der Film kennt keine Folgenzeile — zwei Prüfungen in `tvsubtitles` ersetzen die alten Kommentar-Prüfungen (Suite bleibt bei **98**), die Kommentar-Prüfung in `moviesubtitles` trägt jetzt Titel und Jahr.
 

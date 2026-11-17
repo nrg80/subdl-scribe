@@ -745,9 +745,44 @@ internal static class Program
             && uploadSource.Contains("EpisodeTitle: EpisodeTitleOf(mediaPath)", StringComparison.Ordinal)
             && uploadSource.Contains("EpisodenPlatzhalter", StringComparison.Ordinal));
 
+        // --- F-M575: eine Sammel-Karte statt eines Tabellendurchlaufs je Staffel -------------------
+        Check("F-M575: beide Staffelfragen kommen aus einer Karte, die einmal je Lauf gelesen wird",
+            uploadSource.Contains("_allePacks ??= Registry.PacksBySeason();", StringComparison.Ordinal)
+            && uploadSource.Contains("_alleSprachen ??= Registry.LanguagePairsBySeason();", StringComparison.Ordinal)
+            && !uploadSource.Contains("Registry.LanguagesInSeason(", StringComparison.Ordinal)
+            && !uploadSource.Contains("Registry.PacksInSeason(", StringComparison.Ordinal)
+            && reg557.Contains("public Dictionary<(string ImdbId, int Season), HashSet<(string Language, bool HearingImpaired)>> LanguagePairsBySeason()", StringComparison.Ordinal)
+            && reg557.Contains("public Dictionary<(string ImdbId, int Season), HashSet<(string Language, bool HearingImpaired)>> PacksBySeason()", StringComparison.Ordinal));
+
+        // --- F-M576: der billige Kopf-Ausstieg (F-M88c wiederhergestellt) -------------------------
+        // Befund 17.11.2026: der Kopf fragte je Datei GetMediaStreams, die Positions-Abrechnung je
+        // Quelle und ein Urteil je Textspur — bei 1.415 Dateien pro Zyklus fuer 155 Uploads. F-M88c
+        // verlangt den Ausstieg vor ffprobe, Verzeichnisliste und API. Geprueft wird der Ort: der
+        // Ausstieg steht VOR dem Stream-Abruf, und er fragt die Marke je Quelle.
+        Check("F-M576: der billige Kopf-Ausstieg steht vor dem Stream-Abruf und fragt die Marke je Quelle",
+            uploadSource.Contains("stamped complete for every source, no stream read (F-M576)", StringComparison.Ordinal)
+            && uploadSource.Contains("Registry.IsCompleteFor(earlyHash, quelle, null)", StringComparison.Ordinal)
+            && uploadSource.IndexOf("stamped complete for every source, no stream read (F-M576)", StringComparison.Ordinal)
+                < uploadSource.IndexOf("_mediaSourceManager.GetMediaStreams(item.Id)", StringComparison.Ordinal)
+            && reg557.Contains("public DateTime? NewestCompletionStamp(string? mediaHash)", StringComparison.Ordinal));
+
+        // --- F-M577: Extraktions-Sperre je Spur (1d/7d/30d/nie) -----------------------------------
+        Check("F-M577: eine gescheiterte Spur wird als Ablehnung geparkt und faellt aus der Extraktionsliste",
+            uploadSource.Contains("Registry.EmbedRejectedReason(mediaHash, position) == RejectReason.ExtractionFailed", StringComparison.Ordinal)
+            && uploadSource.Contains("every open text stream is parked after an extraction failure, no ffmpeg pass (F-M577)", StringComparison.Ordinal)
+            && uploadSource.Contains("Registry.ExtractRejectIsStale(mediaHash, position, ExtractRetryAfter)", StringComparison.Ordinal)
+            && reg557.Contains("public bool ExtractRejectIsStale(string? mediaHash, int subPos, TimeSpan ttl)", StringComparison.Ordinal)
+            && reg557.Contains("zeile is { Reason: RejectReason.ExtractionFailed }", StringComparison.Ordinal)
+            && entities.Contains("public const string ExtractionFailed = \"extraction-failed\";", StringComparison.Ordinal));
+        Check("F-M577: eine fehlende Datei wird nicht als Extraktionsfehler geparkt",
+            uploadSource.Contains("bool dateiDa = File.Exists(mediaPath);", StringComparison.Ordinal)
+            && uploadSource.Contains("reason: RejectReason.ExtractionFailed", StringComparison.Ordinal)
+            && uploadSource.IndexOf("bool dateiDa = File.Exists(mediaPath);", StringComparison.Ordinal)
+                < uploadSource.IndexOf("reason: RejectReason.ExtractionFailed", StringComparison.Ordinal));
+
         // --- F-M573: die billigste Staffelfrage zuerst -------------------------------------------
         Check("F-M573: eine vollstaendig gepackte Staffel kostet keine TMDb-Frage und keine Datei",
-            uploadSource.Contains("var staffelBekannt = Registry.LanguagesInSeason(entry.Key.Item1, entry.Key.Item2);", StringComparison.Ordinal)
+            uploadSource.Contains("var staffelBekannt = LanguagesOf(entry.Key.Item1, entry.Key.Item2);", StringComparison.Ordinal)
             && uploadSource.Contains("all {Count} known pair(s) already up as a pack, no TMDb call, no file read", StringComparison.Ordinal)
             && uploadSource.IndexOf("staffelBekannt.All(", StringComparison.Ordinal)
                 < uploadSource.IndexOf("SeasonEpisodeIndex.AiredAsync", StringComparison.Ordinal));

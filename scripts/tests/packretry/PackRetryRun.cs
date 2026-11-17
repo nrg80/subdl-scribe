@@ -387,7 +387,9 @@ internal static class Program
 
         // ── 23. F-M417: Store vor Dateinamen vor Extraktion ─────────────────────
         Console.WriteLine("23. The store is asked before the release names");
-        var langAt = upload.IndexOf("LanguagesInSeason(", StringComparison.Ordinal);
+        // F-M575: die Staffelfrage heisst jetzt LanguagesOf (Sammel-Karte) — der Punkt der Pruefung
+        // bleibt die Reihenfolge: Store vor Release-Gruppe.
+        var langAt = upload.IndexOf("LanguagesOf(", StringComparison.Ordinal);
         var groupAt = upload.IndexOf("SeasonPack.ReleaseGroup(item.Path)", StringComparison.Ordinal);
         Check(langAt >= 0 && groupAt > langAt,
             "F-M417: languages and packs are looked up before the release group is read");
