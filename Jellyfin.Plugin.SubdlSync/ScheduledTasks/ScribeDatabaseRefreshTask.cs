@@ -171,7 +171,7 @@ public class ScribeDatabaseRefreshTask : IScheduledTask
 
             int removedSearch = 0, removedQa = 0, removedOshash = 0, removedPacks = 0;
             int forgottenSidecars = 0, openFiles = 0, forgottenEmbeds = 0, backfilledForced = 0;
-            int removedPrunedSubtitles = 0, removedPrunedMedia = 0;
+            int removedPrunedSubtitles = 0, removedPrunedMedia = 0, removedUnbackedVerdicts = 0;
             int removedGonePathSubtitles = 0, removedGonePathMedia = 0;
             Exception? refreshException = null;
             // Filled by the compaction step below; stays empty when it compacted cleanly. Names the
@@ -239,6 +239,11 @@ public class ScribeDatabaseRefreshTask : IScheduledTask
                 // row (re-hashed media, pruned files, replaced pack) would otherwise keep claiming "this
                 // season is packed" and silently disable that season forever.
                 removedPacks = registry.PruneOrphanedPacks();
+
+                // F-M583: Urteile ohne Beleg (duplicate-self-echo / duplicate-content, ohne Marke und
+                // ohne bekannte Herkunft) werden verworfen — die Paare sind damit wieder offen und der
+                // naechste Lauf urteilt neu. Idempotent: 0, sobald nichts mehr da ist.
+                removedUnbackedVerdicts = registry.ClearVerdictsWithoutEvidence();
 
                 progress.Report(65);
 
@@ -360,10 +365,11 @@ public class ScribeDatabaseRefreshTask : IScheduledTask
             {
                 LogUtil.Normal(
                     _logger,
-                    "[Sub Scribe-Refresh] Removed dead state: {Search} search / {Qa} qa-fail / {Oshash} oshash / {PrunedSubs} subtitle / {PrunedMedia} media (dead items) / {GonePathSubs} subtitle + {GonePathMedia} media (file gone from disk). Forgot {Sidecars} vanished subtitle verdict(s); {OpenFiles} item(s) with an open required file; forgot {Embeds} stale embedded row(s).",
+                    "[Sub Scribe-Refresh] Removed dead state: {Search} search / {Qa} qa-fail / {Oshash} oshash / {PrunedSubs} subtitle / {PrunedMedia} media (dead items) / {GonePathSubs} subtitle + {GonePathMedia} media (file gone from disk); {Unbacked} verdict(s) without evidence (F-M583). Forgot {Sidecars} vanished subtitle verdict(s); {OpenFiles} item(s) with an open required file; forgot {Embeds} stale embedded row(s).",
                     removedSearch, removedQa, removedOshash,
                     removedPrunedSubtitles, removedPrunedMedia,
                     removedGonePathSubtitles, removedGonePathMedia,
+                    removedUnbackedVerdicts,
                     forgottenSidecars, openFiles, forgottenEmbeds);
             }
             else if (refreshException != null)

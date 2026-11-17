@@ -3177,6 +3177,68 @@ public sealed class ContentHashRegistry : IDisposable
                 && DarfNirgendsHoch(x.ContentHash));
     }
 
+    /// <summary>
+    /// F-M583 (Operator-Anweisung 17.11.2026: „Einmal im Store duplicate self und duplicate content
+    /// zurücksetzen, danach wieder normalisieren"): verwirft Urteile, die KEINEN Beleg haben.
+    /// <para>
+    /// Ein Urteil ist hier <c>duplicate-self-echo</c> oder <c>duplicate-content</c>. Es hat nur dann
+    /// Bestand, wenn irgendeine Quelle den Text nachweislich haelt (Upload-Kennzeichen oder
+    /// Upload-Zeitpunkt) oder wenn die Herkunft bekannt ist (heruntergeladen — der Text darf nirgends
+    /// hoch, F-M487). Fehlt beides, war der Spruch eine Behauptung: er entstand aus Queue- und
+    /// Sprachpruefungen (F-M581) oder aus einem Beleg, der sich nicht wiederfindet. Die Zeile wird
+    /// geloescht — „geloescht" heisst „unbekannt", und der naechste Lauf urteilt neu.
+    /// </para>
+    /// <para>
+    /// Idempotent: was einmal weg ist, kommt nicht wieder; ein Lauf ohne solche Zeilen meldet 0.
+    /// </para>
+    /// </summary>
+    /// <returns>Anzahl der verworfenen Zeilen (eingebettet + Sidecar).</returns>
+    public int ClearVerdictsWithoutEvidence()
+    {
+        static bool OhneBeleg(SubtitleState zeile, (string? Origin, string? OriginId) herkunft)
+        {
+            if (zeile.Status != SubtitleStatus.Rejected)
+            {
+                return false;
+            }
+
+            if (zeile.Reason != RejectReason.SelfEcho && zeile.Reason != RejectReason.DuplicateContent)
+            {
+                return false;
+            }
+
+            bool marke = !string.IsNullOrEmpty(zeile.SubdlUploadId)
+                || !string.IsNullOrEmpty(zeile.TvSubtitlesUploadId)
+                || !string.IsNullOrEmpty(zeile.MoviesubtitlesUploadId)
+                || zeile.SubdlUploadedAt != null
+                || zeile.TvSubtitlesUploadedAt != null
+                || zeile.MoviesubtitlesUploadedAt != null;
+
+            return !marke && herkunft.Origin is null;
+        }
+
+        int entfernt = 0;
+        foreach (var zeile in _db.Embeds.FindAll().ToList())
+        {
+            if (OhneBeleg(zeile, GetOrigin(zeile.ContentHash)))
+            {
+                _db.Embeds.Delete(zeile.Id);
+                entfernt++;
+            }
+        }
+
+        foreach (var zeile in _db.Sidecars.FindAll().ToList())
+        {
+            if (OhneBeleg(zeile, (zeile.Origin, zeile.OriginId)))
+            {
+                _db.Sidecars.Delete(zeile.Id);
+                entfernt++;
+            }
+        }
+
+        return entfernt;
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {

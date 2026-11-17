@@ -793,8 +793,21 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
-        // --- F-M582: "duplicate" gilt je Quelle -----------------------------------------------
+        // --- F-M583: Urteile ohne Beleg werden verworfen ---------------------------------------
         var registrySource580 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
+        var refreshSource = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeDatabaseRefreshTask.cs"));
+        Check("F-M583: nur Urteile ohne Marke und ohne bekannte Herkunft werden verworfen — eingebettet und Sidecar",
+            registrySource580.Contains("public int ClearVerdictsWithoutEvidence()", StringComparison.Ordinal)
+            && registrySource580.Contains("zeile.Reason != RejectReason.SelfEcho && zeile.Reason != RejectReason.DuplicateContent", StringComparison.Ordinal)
+            && registrySource580.Contains("return !marke && herkunft.Origin is null;", StringComparison.Ordinal)
+            && registrySource580.Contains("_db.Embeds.Delete(zeile.Id);", StringComparison.Ordinal)
+            && registrySource580.Contains("_db.Sidecars.Delete(zeile.Id);", StringComparison.Ordinal));
+        Check("F-M583: der Database Refresh setzt zurueck und meldet die Zahl",
+            refreshSource.Contains("removedUnbackedVerdicts = registry.ClearVerdictsWithoutEvidence();", StringComparison.Ordinal)
+            && refreshSource.Contains("{Unbacked} verdict(s) without evidence (F-M583)", StringComparison.Ordinal)
+            && refreshSource.Contains("removedUnbackedVerdicts,", StringComparison.Ordinal));
+
+        // --- F-M582: "duplicate" gilt je Quelle -----------------------------------------------
         Check("F-M582: ohne Quellenbeleg faellt der Kandidat nicht weg — die Kette bekommt ihn",
             uploadSource.Contains("// F-M582 (Operator-Anweisung 17.11.2026", StringComparison.Ordinal)
             && uploadSource.Contains("if (darfNoch.Count > 0)", StringComparison.Ordinal)

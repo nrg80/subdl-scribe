@@ -24,7 +24,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [4.4 Season Packs — Download](#44-season-packs-download) — Querschnitt, zitiert F-M334, F-M384, F-M397, F-M454
  - [4.5 Download completion criteria](#45-download-completion-criteria) — 6 requirements (F-M565–F-M570)
 - [5. Upload Postprocessing](#5-upload-postprocessing) — 14 requirements
-- [6. Database Refresh](#6-database-refresh) — 9 requirements
+- [6. Database Refresh](#6-database-refresh) — 10 requirements
 - [7. OSHash Refresh](#7-oshash-refresh) — 3 requirements
 - [8. Rules Shared by Both Directions](#8-rules-shared-by-both-directions) — 5 requirements
 
@@ -1080,6 +1080,8 @@ The counter is cleared by the reschedule reset on a real fire and by the per-day
 **Not counted:** daily-limit quota-reset fires (a quota-reset fire) — they are driven by the reset, and dropping them would skip the direction outright.
 
 ## 6. Database Refresh
+
+**F-M583 [U]:** **Urteile ohne Beleg werden verworfen — der Refresh setzt sie zurück und der nächste Lauf normalisiert.** Operator-Anweisung 17.11.2026: „Einmal im Store duplicate self und duplicate content zurücksetzen, danach wieder normalisieren." Ein `duplicate-self-echo` oder `duplicate-content` hat nur Bestand, wenn irgendeine Quelle den Text nachweislich hält (Upload-Kennzeichen oder Upload-Zeitpunkt) **oder** die Herkunft bekannt ist (heruntergeladen, darf nirgends hoch — F-M487). Fehlt beides, war der Spruch eine Behauptung; er entstand aus Queue- und Sprachprüfungen (F-M581) oder aus einem Beleg, der sich nicht wiederfindet. `ClearVerdictsWithoutEvidence` löscht solche Zeilen (eingebettet und Sidecar) — gelöscht heißt „unbekannt", und der nächste Lauf urteilt neu. Idempotent: ein Lauf ohne solche Zeilen meldet 0. Der Refresh meldet die Zahl in seiner Zusammenfassung. Geprüft von T293.
 
 **F-M94:** **Database refresh as scheduler task:** a dedicated task reconciles the stored state with reality — it removes tracker state for Jellyfin items that are gone and verifies the file side of stored verdicts (F-M234). The task, its dashboard name and its log prefix read "database refresh" (`[SubDL-Refresh]`). It uses the global run lock and operates on the shared database.
 
@@ -2483,6 +2485,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
+
+**T293:** Urteile ohne Beleg (F-M583): `ClearVerdictsWithoutEvidence` prüft beide Gründe, verlangt fehlende Marken und unbekannte Herkunft, löscht eingebettete **und** Sidecar-Zeilen, und der Database Refresh ruft es in seinem Lauf auf — **2 Prüfungen** in `endpoints` (256 → 258).
 
 **T292:** „Duplicate" gilt je Quelle (F-M582): `SettleDuplicateContent` schickt den Kandidaten ohne Beleg an die Kette (`DueForAnotherSource`), solange eine Quelle ihn nehmen darf, und `PairIsDecided` schließt nur bei bekannter Herkunft — **2 Prüfungen** in `endpoints` (254 → 256).
 
