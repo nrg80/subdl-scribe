@@ -793,6 +793,18 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
+        // --- F-M582: "duplicate" gilt je Quelle -----------------------------------------------
+        var registrySource580 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
+        Check("F-M582: ohne Quellenbeleg faellt der Kandidat nicht weg — die Kette bekommt ihn",
+            uploadSource.Contains("// F-M582 (Operator-Anweisung 17.11.2026", StringComparison.Ordinal)
+            && uploadSource.Contains("if (darfNoch.Count > 0)", StringComparison.Ordinal)
+            && uploadSource.Contains("return (ContentSettle.DueForAnotherSource, string.Join(\", \", darfNoch.Select(Api.Endpoints.Provenance.Name)));", StringComparison.Ordinal)
+            && uploadSource.Contains("Registry.GetOrigin(contentHash).Origin;", StringComparison.Ordinal));
+        Check("F-M582: ein Inhalts-Urteil schliesst das Paar nur, wenn der Text nirgends mehr hoch darf",
+            registrySource580.Contains("bool DarfNirgendsHoch(string? contentHash) =>", StringComparison.Ordinal)
+            && registrySource580.Contains("&& DarfNirgendsHoch(x.ContentHash))", StringComparison.Ordinal)
+            && registrySource580.Contains("GetOrigin(contentHash).Origin is not null;", StringComparison.Ordinal));
+
         // --- F-M581: die Paar-Frage prueft den Beleg, nicht die Umstaende ----------------------
         var paarStart = uploadSource.IndexOf("private bool AnyUploadSourceStillWants(", StringComparison.Ordinal);
         var paarEnde = uploadSource.IndexOf("private bool IrgendeineQuelleHat(", StringComparison.Ordinal);
@@ -809,10 +821,9 @@ internal static class Program
             && uploadSource.Contains("if (IrgendeineQuelleHat(mediaHash, cand.Lang, cand.HearingImpaired, isSeries))", StringComparison.Ordinal));
 
         // --- F-M580: ein gespeichertes Urteil schliesst das Paar ------------------------------
-        var registrySource580 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
         Check("F-M580: ein gespeichertes Inhalts-Urteil schliesst das Paar — eingebettet und als Sidecar",
             registrySource580.Contains("public bool PairIsDecided(string? mediaHash, string language, bool hearingImpaired)", StringComparison.Ordinal)
-            && registrySource580.Contains("&& x.Reason == RejectReason.DuplicateContent)", StringComparison.Ordinal)
+            && registrySource580.Contains("&& x.Reason == RejectReason.DuplicateContent", StringComparison.Ordinal)
             && registrySource580.Contains("|| GetSidecars(mediaHash).Any(x => x.Language == language", StringComparison.Ordinal));
         Check("F-M580: die Paar-Frage fragt das Urteil VOR dem Quellentor, und ein gespeicherter Spruch zaehlt nicht erneut",
             uploadSource.Contains("!Registry.PairIsDecided(mediaHash, language, hearingImpaired)", StringComparison.Ordinal)

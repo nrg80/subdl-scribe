@@ -524,6 +524,10 @@
     "T291": {
       "suite": "endpoints",
       "checks": 2
+    },
+    "T292": {
+      "suite": "endpoints",
+      "checks": 2
     }
   }
 }

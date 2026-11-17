@@ -6281,8 +6281,25 @@ public sealed class UploadPipeline : IPackFiller
 
         if (beleg.Count == 0)
         {
+            // F-M582 (Operator-Anweisung 17.11.2026: „Es muss schon zur selben Quelle duplicate sein. Es soll
+            // bei tvst hochgeladen werden auch wenn es bei subdl schon vorliegt."): ohne Beleg ist der Text
+            // fuer KEINE Quelle ein Duplikat — er ist nur „in dieser Datei nochmal vorhanden". Frueher wurde
+            // hier eine quellenneutrale Ablehnung geschrieben und der Kandidat fiel weg; bei SubDL lag der
+            // Text, tvst bekam ihn nie.
+            // Jetzt gilt: darf irgendeine eingeschaltete Quelle den Text noch nehmen (Herkunft unbekannt),
+            // geht der Kandidat an die Kette. Erst wenn keine Quelle ihn nehmen DARF — Herkunft bekannt
+            // heisst: heruntergeladen, geht nirgends hoch (F-M487) —, ist das Paar entschieden.
+            string? herkunftOhneBeleg = Registry.GetOrigin(contentHash).Origin;
+            var darfNoch = quellen
+                .Where(quelle => Api.Endpoints.Provenance.MayUploadTo(herkunftOhneBeleg, quelle))
+                .ToList();
+            if (darfNoch.Count > 0)
+            {
+                return (ContentSettle.DueForAnotherSource, string.Join(", ", darfNoch.Select(Api.Endpoints.Provenance.Name)));
+            }
+
             WriteReject();
-            return (ContentSettle.Reject, string.Empty);
+            return (ContentSettle.Settled, string.Empty);
         }
 
         // Dieselbe Herkunft, die auch die Kette liest (F-M487) — hier nur als Frage "darf diese Quelle ihn".

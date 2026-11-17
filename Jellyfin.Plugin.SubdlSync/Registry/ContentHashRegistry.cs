@@ -3157,14 +3157,24 @@ public sealed class ContentHashRegistry : IDisposable
         // F-M557: der Store fuehrt ISO (ENG), nicht den Code der Quelle (EN).
         language = Language.LanguageMapper.Canonical(language) ?? language;
 
+        // F-M582 (Operator-Anweisung 17.11.2026: „Es muss schon zur selben Quelle duplicate sein. Es soll bei
+        // tvst hochgeladen werden auch wenn es bei subdl schon vorliegt."): ein Inhalts-Urteil schliesst das
+        // Paar nur, wenn der Text NIRGENDS mehr hochgehen darf — also nur bei bekannter Herkunft (er wurde
+        // heruntergeladen, F-M487). Ist die Herkunft unbekannt, ist „in dieser Datei nochmal vorhanden" kein
+        // Duplikat fuer eine Quelle, sondern ein Kandidat: das Paar bleibt offen und die Kette bekommt ihn.
+        bool DarfNirgendsHoch(string? contentHash) =>
+            !string.IsNullOrEmpty(contentHash) && GetOrigin(contentHash).Origin is not null;
+
         return GetEmbeds(mediaHash).Any(x => x.Language == language
                 && x.HearingImpaired == hearingImpaired
                 && x.Status == SubtitleStatus.Rejected
-                && x.Reason == RejectReason.DuplicateContent)
+                && x.Reason == RejectReason.DuplicateContent
+                && DarfNirgendsHoch(x.ContentHash))
             || GetSidecars(mediaHash).Any(x => x.Language == language
                 && x.HearingImpaired == hearingImpaired
                 && x.Status == SubtitleStatus.Rejected
-                && x.Reason == RejectReason.DuplicateContent);
+                && x.Reason == RejectReason.DuplicateContent
+                && DarfNirgendsHoch(x.ContentHash));
     }
 
     /// <inheritdoc />
