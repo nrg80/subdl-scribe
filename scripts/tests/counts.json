@@ -496,6 +496,10 @@
     "T283": {
       "suite": "endpoints",
       "checks": 1
+    },
+    "T284": {
+      "suite": "tvsubtitles",
+      "checks": 2
     }
   }
 }

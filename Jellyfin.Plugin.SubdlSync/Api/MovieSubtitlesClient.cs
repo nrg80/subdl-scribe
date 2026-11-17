@@ -1194,24 +1194,10 @@ public sealed class MovieSubtitlesClient
     /// <returns>The comment line, e.g. <c>TMDB 872585 / IMDb tt15398776 / Sub Scribe 12.1.12.394</c>.</returns>
     public static string Comment(long? tmdbId, string? imdbId, string? extra = null)
     {
-        var parts = new List<string>();
-        if (tmdbId is > 0)
-        {
-            parts.Add("TMDB " + tmdbId.Value.ToString(CultureInfo.InvariantCulture));
-        }
-
-        if (!string.IsNullOrWhiteSpace(imdbId))
-        {
-            parts.Add("IMDb " + imdbId.Trim());
-        }
-
-        if (!string.IsNullOrWhiteSpace(extra))
-        {
-            parts.Add(extra.Trim());
-        }
-
-        // Operator order 17.11.2026: the comment carries the ids only — no client tag.
-        return string.Join(" / ", parts);
+        // F-M574: es gibt EINEN Kommentar-Bauer (Api.Endpoints.UploadComment). Diese Fassung bleibt fuer
+        // Aufrufer ohne Titel und liefert dieselbe Schreibweise: Kennungen, dann der Zusatz, kein Client-Tag.
+        return Api.Endpoints.UploadComment.Movie(
+            imdbId, tmdbId?.ToString(CultureInfo.InvariantCulture), extra, 0);
     }
 
     /// <summary>
@@ -1250,7 +1236,9 @@ public sealed class MovieSubtitlesClient
         long? tmdbId = null,
         string? imdbId = null,
         string? commentExtra = null,
-        IReadOnlyList<MovieSubtitlesUploadFile>? extraFiles = null)
+        IReadOnlyList<MovieSubtitlesUploadFile>? extraFiles = null,
+        string? movieTitle = null,
+        int year = 0)
     {
         var problems = new List<string>();
         if (movieId <= 0)
@@ -1339,7 +1327,9 @@ public sealed class MovieSubtitlesClient
             parts.Add(MovieSubtitlesUploadPart.File("UFile3", extras[1].FileName.Trim(), extras[1].Data));
         }
 
-        parts.Add(MovieSubtitlesUploadPart.Field("comments", Comment(tmdbId, imdbId, commentExtra)));
+        // F-M574: Kennungen, Filmtitel, Jahr — beim Film entfaellt die Folgenzeile.
+        parts.Add(MovieSubtitlesUploadPart.Field("comments", Api.Endpoints.UploadComment.Movie(
+            imdbId, tmdbId?.ToString(CultureInfo.InvariantCulture), movieTitle, year)));
         parts.Add(MovieSubtitlesUploadPart.Field("go", "1"));
 
         return new MovieSubtitlesUpload(parts, Languages[siteLanguage!].Name, siteLanguage!, group);

@@ -737,9 +737,11 @@ internal static class Program
             && seederSource.Contains("ContentHashRegistry.PositionSignatureOf(seedPosen)", StringComparison.Ordinal));
 
         // --- F-M572: der Folgentitel steht im Kommentar ------------------------------------------
-        Check("F-M572: der Folgentitel geht als Kommentar mit, ein Platzhalter nicht",
+        Check("F-M572/F-M574: der Folgentitel geht ueber den Kommentar-Bauer mit, ein Platzhalter nicht",
             ticketSource.Contains("string? EpisodeTitle = null);", StringComparison.Ordinal)
-            && tvstSource.Contains("commentExtra: ticket.EpisodeTitle", StringComparison.Ordinal)
+            && tvstSource.Contains("episodeTitle: ticket.EpisodeTitle", StringComparison.Ordinal)
+            && tvstSource.Contains("showTitle: ticket.ShowName", StringComparison.Ordinal)
+            && tvstSource.Contains("year: ticket.MovieYear", StringComparison.Ordinal)
             && uploadSource.Contains("EpisodeTitle: EpisodeTitleOf(mediaPath)", StringComparison.Ordinal)
             && uploadSource.Contains("EpisodenPlatzhalter", StringComparison.Ordinal));
 

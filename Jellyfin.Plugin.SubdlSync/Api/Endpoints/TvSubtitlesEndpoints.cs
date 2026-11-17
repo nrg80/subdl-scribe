@@ -258,9 +258,12 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
                 // Folgeneintrag — an „Mo" S01E05 zu sehen: Jellyfin führt „Tombstone", die Seite zeigt
                 // „Episode 5", und der Name ist kein Feld, das wir senden. Der Kommentar ist der Ort, an
                 // dem der richtige Titel mitkommt.
-                commentExtra: ticket.EpisodeTitle,
+                commentExtra: null,
                 doubleEpisode: ticket.DoubleEpisode,
-                hearingImpaired: ticket.HearingImpaired);
+                hearingImpaired: ticket.HearingImpaired,
+                showTitle: ticket.ShowName,
+                episodeTitle: ticket.EpisodeTitle,
+                year: ticket.MovieYear);
         }
         catch (ArgumentException ex)
         {

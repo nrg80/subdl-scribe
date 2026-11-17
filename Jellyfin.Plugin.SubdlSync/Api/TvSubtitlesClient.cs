@@ -1145,26 +1145,10 @@ public sealed class TvSubtitlesClient
     /// <returns>The comment line, e.g. <c>TMDB 1422 / IMDb tt1442464 / Sub Scribe 12.1.12.380</c>.</returns>
     public static string Comment(long? tmdbId, string? imdbId, string? extra = null)
     {
-        var parts = new List<string>();
-        if (tmdbId is > 0)
-        {
-            parts.Add("TMDB " + tmdbId.Value.ToString(CultureInfo.InvariantCulture));
-        }
-
-        if (!string.IsNullOrWhiteSpace(imdbId))
-        {
-            parts.Add("IMDb " + imdbId.Trim());
-        }
-
-        if (!string.IsNullOrWhiteSpace(extra))
-        {
-            parts.Add(extra.Trim());
-        }
-
-        // Operator order 17.11.2026: "Bitte nur noch imdb tmdb" — the comment carries the ids and
-        // nothing else. The client tag is gone from here; the "no id at all" refusal below stays,
-        // because an empty comment would leave the field blank with nothing to show for it.
-        return string.Join(" / ", parts);
+        // F-M574: es gibt EINEN Kommentar-Bauer (Api.Endpoints.UploadComment). Diese Fassung bleibt fuer
+        // Aufrufer ohne Titel und liefert dieselbe Schreibweise: Kennungen, dann der Zusatz, kein Client-Tag.
+        return Api.Endpoints.UploadComment.Movie(
+            imdbId, tmdbId?.ToString(CultureInfo.InvariantCulture), extra, 0);
     }
 
     /// <summary>
@@ -1204,7 +1188,10 @@ public sealed class TvSubtitlesClient
         string? imdbId = null,
         string? commentExtra = null,
         bool doubleEpisode = false,
-        bool hearingImpaired = false)
+        bool hearingImpaired = false,
+        string? showTitle = null,
+        string? episodeTitle = null,
+        int year = 0)
     {
         var problems = new List<string>();
         if (showId <= 0)
@@ -1270,7 +1257,10 @@ public sealed class TvSubtitlesClient
             new("lang", siteLanguage!),
             new("rip", ripValue),
             new("release", release?.Trim() ?? string.Empty),
-            new("comment", Comment(tmdbId, imdbId, commentExtra)),
+            // F-M574: drei Zeilen — Kennungen, Folge mit Serien- und Folgentitel, Jahr.
+            new("comment", Api.Endpoints.UploadComment.Series(
+                imdbId, tmdbId?.ToString(CultureInfo.InvariantCulture), season, episode,
+                showTitle, episodeTitle, year)),
             new("go", "1"),
         };
 

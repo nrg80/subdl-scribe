@@ -375,12 +375,12 @@ internal static class Program
             BuildOk(data, releaseName: "Oppenheimer (2023)")!.ReleaseGroup == string.Empty
             && BuildOk(data, releaseName: null)!.ReleaseGroup == string.Empty,
             "found: '" + BuildOk(data, releaseName: "Oppenheimer (2023)")!.ReleaseGroup + "'");
-        Check("comments carries the ids only, exactly like the tvst upload",
+        Check("comments carries ids, film title and year (F-M574)",
             upload.Fields.Single(f => f.Key == "comments").Value
-                == MovieSubtitlesClient.Comment(872585, "tt15398776")
+                == Jellyfin.Plugin.SubScribe.Api.Endpoints.UploadComment.Movie("tt15398776", "872585", "Oppenheimer", 2023)
             && MovieSubtitlesClient.Comment(872585, "tt15398776")
                 == TvSubtitlesClient.Comment(872585, "tt15398776")
-            && MovieSubtitlesClient.Comment(872585, null) == "TMDB 872585"
+            && MovieSubtitlesClient.Comment(872585, null) == "TMDb: 872585"
             && !MovieSubtitlesClient.Comment(872585, "tt15398776").Contains("Sub Scribe", StringComparison.Ordinal),
             "found: " + MovieSubtitlesClient.Comment(872585, "tt15398776"));
         Check("UFile2 and UFile3 are sent only when given, and then in their slots",
@@ -1295,7 +1295,9 @@ internal static class Program
         IReadOnlyList<MovieSubtitlesUploadFile>? extraFiles = null) =>
         MovieSubtitlesClient.BuildUpload(
             24811, "gre", releaseName, "Oppenheimer.WEB-DL.MA.gr.srt", data,
-            "WEB-DL", author, 872585, "tt15398776", null, extraFiles);
+            "WEB-DL", author, 872585, "tt15398776", null, extraFiles,
+            // F-M574: Filmtitel und Jahr gehen in den Kommentar.
+            movieTitle: "Oppenheimer", year: 2023);
 
     private static MovieSubtitlesUpload? Build(
         int movieId = 24811,

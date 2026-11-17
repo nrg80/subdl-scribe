@@ -149,21 +149,26 @@ internal static class Program
             && Encoding.UTF8.GetString(isoBody)
                 .Contains("filename=\"The Middle - 2x24.gre.srt\"", StringComparison.Ordinal));
 
-        // ---- 2. the comment carries the ids, the author stays out -------------------------------
-        // Operator order 17.11.2026: "Bitte nur noch imdb tmdb" — no client tag in the comment.
-        Check("the comment names the two ids and nothing else",
-            TvSubtitlesClient.Comment(1422, "tt1442464") == "TMDB 1422 / IMDb tt1442464",
-            "found: " + TvSubtitlesClient.Comment(1422, "tt1442464"));
+        // ---- 2. the comment: three lines, the author stays out -----------------------------------
+        // F-M574 (Operator-Vorgabe 17.11.2026): "Imdb: xxx / tmdb: xxx" / "SxxEyy: Tvshow title/
+        // Episode Title" / "Year" — offizielle Schreibweise IMDb/TMDb, kein Client-Tag.
+        var kommentar = Jellyfin.Plugin.SubScribe.Api.Endpoints.UploadComment.Series(
+            "tt1442464", "1422", 2, 24, "The Middle", "The Man Hunt", 2009);
+        Check("the comment carries ids, episode line and year in three lines",
+            kommentar == "IMDb: tt1442464 / TMDb: 1422\nS02E24: The Middle / The Man Hunt\n2009",
+            "found: " + kommentar.Replace("\n", " | ", StringComparison.Ordinal));
         Check("the client tag carries the running version, read from the assembly",
             TvSubtitlesClient.ClientTag.StartsWith("Sub Scribe ", StringComparison.Ordinal)
             && TvSubtitlesClient.ClientTag.Length > "Sub Scribe ".Length
             && TvSubtitlesClient.ClientTag != "Sub Scribe 0.0.0.0");
-        Check("one id is enough, an unknown id stays out, no id leaves the comment empty",
-            TvSubtitlesClient.Comment(1422, null) == "TMDB 1422"
-            && TvSubtitlesClient.Comment(null, "tt1442464") == "IMDb tt1442464"
-            && TvSubtitlesClient.Comment(null, null) == string.Empty);
-        Check("an extra text follows the ids",
-            TvSubtitlesClient.Comment(1422, null, "recheck") == "TMDB 1422 / recheck");
+        Check("one id is enough, an unknown part stays out",
+            Jellyfin.Plugin.SubScribe.Api.Endpoints.UploadComment.Series("tt1442464", null, 2, 24, "The Middle", "The Man Hunt", 0)
+                == "IMDb: tt1442464\nS02E24: The Middle / The Man Hunt"
+            && Jellyfin.Plugin.SubScribe.Api.Endpoints.UploadComment.Series(null, null, 2, 24, "The Middle", null, 0)
+                == "S02E24: The Middle");
+        Check("a placeholder-free episode line keeps the show title only, a film drops the line",
+            Jellyfin.Plugin.SubScribe.Api.Endpoints.UploadComment.Movie("tt15398776", "872585", "Oppenheimer", 2023)
+                == "IMDb: tt15398776 / TMDb: 872585\nOppenheimer\n2023");
 
         // ---- 3. the upload refuses what the form would silently swallow -------------------------
         var data = Encoding.UTF8.GetBytes("1\n00:00:01,000 --> 00:00:02,000\nhello\n");
@@ -194,7 +199,7 @@ internal static class Program
             "an absent part is the only way to keep whatever the page pre-fills");
         Check("the ids land in the comment field, the release stays its own field",
             upload.Fields.Single(f => f.Key == "comment").Value
-                == "TMDB 1422 / IMDb tt1442464"
+                == "IMDb: tt1442464 / TMDb: 1422\nS02E24"
             && upload.Fields.Single(f => f.Key == "release").Value == "FEVER");
         var flags = BuildOk(data, doubleEpisode: true, hearingImpaired: true)!;
         Check("double episode and hearing-impaired are appended as \"1\" and only when set",

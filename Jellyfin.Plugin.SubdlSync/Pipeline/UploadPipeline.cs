@@ -5789,7 +5789,10 @@ public sealed class UploadPipeline : IPackFiller
             SeasonPack: false,
             // F-M501: die aufgeloeste Nummer — der Endpunkt holt die Serienliste damit gar nicht erst.
             TvstShowId: show.ShowId,
-            EpisodeTitle: EpisodeTitleOf(mediaPath));
+            EpisodeTitle: EpisodeTitleOf(mediaPath),
+            // F-M574: das Jahr des Titels — bei der Serie das Jahr der ERSTAUSSTRAHLUNG („Mo" 2022), nicht
+            // das der Datei.
+            MovieYear: series.FirstAirYear ?? 0);
 
         var answer = await endpoint.SendAsync(ticket, ct).ConfigureAwait(false);
         LogUtil.PerItem(_config.LogMode, _logger,

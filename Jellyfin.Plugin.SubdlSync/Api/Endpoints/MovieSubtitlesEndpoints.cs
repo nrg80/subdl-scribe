@@ -413,7 +413,9 @@ public sealed class MovieSubtitlesUploadEndpoint : IUploadEndpoint
                 author: null,
                 tmdb,
                 ticket.ImdbId,
-                commentExtra: null);
+                commentExtra: null,
+                movieTitle: ticket.ShowName,
+                year: ticket.MovieYear);
         }
         catch (ArgumentException ex)
         {
