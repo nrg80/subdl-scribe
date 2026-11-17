@@ -537,7 +537,8 @@ internal static class Program
             && orderSource.Contains("PluginConfiguration.DownloadSourceOrder.SubdlFirst", StringComparison.Ordinal)
             && uploadSource.Contains("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal)
             && uploadSource.Contains("var ergebnisse = new Dictionary<Configuration.SubtitleProvider, UploadResult>();", StringComparison.Ordinal)
-            && uploadSource.Contains("ergebnisse[quelle] = await SendToSourceAsync(", StringComparison.Ordinal)
+            && uploadSource.Contains("zustaendig.Add(quelle);", StringComparison.Ordinal)
+            && uploadSource.Contains("await Task.WhenAll(laeufe).ConfigureAwait(false);", StringComparison.Ordinal)
             && uploadSource.Contains("bool subdlGenommen = Genommen(Configuration.SubtitleProvider.Subdl);", StringComparison.Ordinal)
             && uploadSource.Contains("bool zweiteGenommen = Genommen(Configuration.SubtitleProvider.TvSubtitles);", StringComparison.Ordinal)
             && uploadSource.Contains("bool dritteGenommen = Genommen(Configuration.SubtitleProvider.MovieSubtitles);", StringComparison.Ordinal)
@@ -792,6 +793,24 @@ internal static class Program
             !cfgSource.Contains("DownloadRequireImdb", StringComparison.Ordinal)
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
+
+        // --- F-M587: Quellen gleichzeitig, mySubtitles nur Seite 1 --------------------------------
+        var uploadSource587 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        var packCoordSource587 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+        Check("F-M587: die Kette sammelt die zustaendigen Quellen und startet sie gleichzeitig statt nacheinander",
+            uploadSource587.Contains("zustaendig.Add(quelle);", StringComparison.Ordinal)
+            && uploadSource587.Contains("Task.WhenAll(laeufe)", StringComparison.Ordinal)
+            && !uploadSource587.Contains("ergebnisse[quelle] = await SendToSourceAsync(", StringComparison.Ordinal));
+        Check("F-M587: die zweite Quelle startet mit 0-5 % Versatz des Transfertakts, kein Gleichstart",
+            uploadSource587.Contains("int versatzMs = Math.Max(1, (int)(_limiter.TransferPauseMs() * 0.05));", StringComparison.Ordinal)
+            && uploadSource587.Contains("await Task.Delay(Random.Shared.Next(1, versatzMs + 1), ct)", StringComparison.Ordinal)
+            && uploadSource587.Contains("if (index > 0)", StringComparison.Ordinal));
+        Check("F-M587: mySubtitles wird nur noch von Seite 1 gelesen, und ein Quellenfehler wird zurueckgegeben statt geworfen",
+            uploadSource587.Contains("ListMySubtitlesAsync(ct, maxPages: 1)", StringComparison.Ordinal)
+            && !uploadSource587.Contains("ListMySubtitlesAsync(ct, maxPages: 2)", StringComparison.Ordinal)
+            && packCoordSource587.Contains("ListMySubtitlesAsync(ct, maxPages: 1)", StringComparison.Ordinal)
+            && uploadSource587.Contains("the other source is still tried.", StringComparison.Ordinal)
+            && uploadSource587.Contains("return UploadResult.Failed(ex.Message);", StringComparison.Ordinal));
 
         // --- F-M586: eine Quelle ohne diese Sprache zaehlt nicht als offen -------------------------
         var uploadSource586 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
@@ -1371,7 +1390,7 @@ internal static class Program
                     root, "Jellyfin.Plugin.SubdlSync", "Api", "UploadResult.cs")).ConfigureAwait(false);
                 Check("F-M550: an upload line names the source that answered",
                     uploadSource.Contains("QuellName(result)", StringComparison.Ordinal)
-                    && uploadSource.Contains("ergebnisse[quelle].Source = quelle;", StringComparison.Ordinal)
+                    && uploadSource.Contains("jeQuelle[i].Source = zustaendig[i];", StringComparison.Ordinal)
                     && uploadResultSource.Contains("public Configuration.SubtitleProvider? Source { get; set; }", StringComparison.Ordinal));
                 Check("F-M550: no log prefix still says SubDL",
                     !uploadSource.Contains("\"[SubDL", StringComparison.Ordinal)

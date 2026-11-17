@@ -718,7 +718,8 @@ public sealed class SeasonPackCoordinator
         List<OwnSubtitleEntry>? entries;
         try
         {
-            entries = await _api.ListMySubtitlesAsync(ct, maxPages: 2).ConfigureAwait(false);
+            // F-M587: nur Seite 1 — die API ignoriert page/per_page, Seite 2 wiederholt Seite 1.
+            entries = await _api.ListMySubtitlesAsync(ct, maxPages: 1).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

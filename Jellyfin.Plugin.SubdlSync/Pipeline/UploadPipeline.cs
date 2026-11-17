@@ -3001,6 +3001,22 @@ public sealed class UploadPipeline : IPackFiller
         // benannten Variablen.
         var quellenReihenfolge = UploadSourceOrder(isSeries);
         var ergebnisse = new Dictionary<Configuration.SubtitleProvider, UploadResult>();
+        var zustaendig = new List<Configuration.SubtitleProvider>();
+
+        // F-M587 (Operator-Anweisung 17.11.2026: „Parallel an subdl und tvst quasi"): die Quellen
+        // laufen je Spur GLEICHZEITIG statt nacheinander. Gemessen am 17.11.2026 an einer Spur
+        // (Elle S01E08): tvst 0,9 s, SubDL 6,8 s — die alte Kette wartete beides hintereinander ab
+        // (17,5 s je Spur, davon 9,8 s Takt). Der Takt bleibt, aber er wird nicht mehr zweimal je
+        // Spur bezahlt, und der kurze tvst-Zweig verschwindet im langen SubDL-Zweig.
+        //
+        // Versatz: die zweite Quelle startet 0-5 % des Transfertakts spaeter (bei 400/h also bis
+        // 0,45 s), damit nicht zwei Anfragen in derselben Millisekunde aus demselben Lauf gehen —
+        // der Operator wollte „kleinen Versatz plus minus 5 Prozent", keinen Gleichstart.
+        //
+        // Was UNVERAENDERT bleibt: die Pruefungen je Quelle (Schalter, Zugangsdaten, Tor) laufen
+        // weiter VOR dem Versand und in Kettenreihenfolge, damit das Log dieselbe Reihenfolge und
+        // dieselben Begruendungen zeigt; gesammelt wird je Quelle, und die Auswahl der Fassung
+        // (unten) liest die Kettenreihenfolge, nicht die Antwortzeit.
 
         foreach (var quelle in quellenReihenfolge)
         {
@@ -3046,20 +3062,40 @@ public sealed class UploadPipeline : IPackFiller
                 continue;
             }
 
+            // F-M587: was alle Pruefungen bestanden hat, wird nur noch GEMERKT — gestartet wird
+            // gesammelt hinter der Schleife, damit die Quellen gleichzeitig laufen.
+            zustaendig.Add(quelle);
+        }
+
+        // F-M587: Versatz zwischen den Quellen — 0-5 % des Transfertakts, mindestens 1 ms.
+        int versatzMs = Math.Max(1, (int)(_limiter.TransferPauseMs() * 0.05));
+
+        async Task<UploadResult> Versand(Configuration.SubtitleProvider quelle, int index)
+        {
+            // F-M587: kleiner Versatz statt Gleichstart — die erste Quelle geht sofort raus, jede
+            // weitere nach 0-5 % des Takts. Bei einer einzigen Quelle passiert hier nichts.
+            if (index > 0)
+            {
+                try
+                {
+                    await Task.Delay(Random.Shared.Next(1, versatzMs + 1), ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return UploadResult.Failed("run cancelled before the send");
+                }
+            }
+
             try
             {
                 // Ein Zweig JE QUELLE — aber nicht mehr „SubDL oder alles andere": jede Quelle hat ihre
                 // eigene Versandmethode, und welche das ist, sagt der Anbieter selbst. Ein vierter
                 // Anbieter braucht damit eine Methode und einen Eintrag in der Ablage, keine neue
                 // Fallunterscheidung hier.
-                ergebnisse[quelle] = await SendToSourceAsync(
+                return await SendToSourceAsync(
                         quelle, srtContent, neutralName, lang, releaseName, quality, imdbId, tmdbId,
                         isSeries, season, episode, hearingImpaired, mediaHash, mediaPath, framerate, ct)
                     .ConfigureAwait(false);
-
-                // F-M550: die antwortende Quelle reist im Ergebnis mit — der Aufrufer weiss sonst nicht,
-                // wer genommen hat, und schrieb frueher nur das alte Praefix „[SubDL]" davor.
-                ergebnisse[quelle].Source = quelle;
             }
             catch (OperationCanceledException)
             {
@@ -3067,13 +3103,32 @@ public sealed class UploadPipeline : IPackFiller
             }
             catch (Exception ex)
             {
-                // F-M495: ein Fehler bei DIESER Quelle darf den Versuch bei der naechsten nicht
-                // verhindern. Das Ergebnis der Quelle ist ihr eigener Fehlschlag — die Kette laeuft
-                // weiter, und niemand sonst erbt den Fehler.
+                // F-M495: ein Fehler bei DIESER Quelle darf den Versuch bei der ANDEREN nicht
+                // verhindern. Das Ergebnis der Quelle ist ihr eigener Fehlschlag — und weil die
+                // Quellen seit F-M587 gleichzeitig laufen, wird der Fehlschlag zurueckgegeben statt
+                // geworfen: sonst risse ihn Task.WhenAll mitten in den Versand der anderen Quelle.
                 _logger.LogWarning(
-                    "[Sub Scribe] upload to {Source} failed for {Name} [{Lang}]: {Msg} — the next source is still tried.",
+                    "[Sub Scribe] upload to {Source} failed for {Name} [{Lang}]: {Msg} — the other source is still tried.",
                     Api.Endpoints.Provenance.Name(quelle), neutralName, lang, ex.Message);
-                ergebnisse[quelle] = UploadResult.Failed(ex.Message);
+                return UploadResult.Failed(ex.Message);
+            }
+        }
+
+        if (zustaendig.Count > 0)
+        {
+            var laeufe = new Task<UploadResult>[zustaendig.Count];
+            for (int i = 0; i < zustaendig.Count; i++)
+            {
+                laeufe[i] = Versand(zustaendig[i], i);
+            }
+
+            var jeQuelle = await Task.WhenAll(laeufe).ConfigureAwait(false);
+            for (int i = 0; i < zustaendig.Count; i++)
+            {
+                // F-M550: die antwortende Quelle reist im Ergebnis mit — der Aufrufer weiss sonst nicht,
+                // wer genommen hat, und schrieb frueher nur das alte Praefix „[SubDL]" davor.
+                jeQuelle[i].Source = zustaendig[i];
+                ergebnisse[zustaendig[i]] = jeQuelle[i];
             }
         }
 
@@ -4050,7 +4105,11 @@ public sealed class UploadPipeline : IPackFiller
         List<OwnSubtitleEntry>? entries;
         try
         {
-            entries = await _api.ListMySubtitlesAsync(ct, maxPages: 2).ConfigureAwait(false);
+            // F-M587 (17.11.2026): NUR Seite 1. Die API ignoriert page/per_page — Seite 2 liefert
+            // dieselben Eintraege zurueck (gemessen: 1,58 s je Aufruf fuer nichts, bei ~1.280
+            // Uploads am Tag also gut eine halbe Stunde reine Wartezeit). Die neueste Einreichung
+            // steht auf Seite 1; mehr wird nicht gebraucht.
+            entries = await _api.ListMySubtitlesAsync(ct, maxPages: 1).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

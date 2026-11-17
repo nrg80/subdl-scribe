@@ -359,14 +359,14 @@ internal static class Program
 
         // ── 19. F-M413: die Id kommt aus mySubtitles ────────────────────────────
         Console.WriteLine("19. The upload id is taken from mySubtitles");
-        Check(upload.Contains("ResolveOwnUploadIdAsync") && upload.Contains("ListMySubtitlesAsync(ct, maxPages: 2)"),
+        Check(upload.Contains("ResolveOwnUploadIdAsync") && upload.Contains("ListMySubtitlesAsync(ct, maxPages: 1)"),
             "F-M413: a single upload resolves its id right after the upload");
         Check(upload.Contains("upload id {Id} taken from mySubtitles"),
             "F-M413: the resolution is logged");
 
         // ── 20. F-M414: dieselbe Methode für Packs ──────────────────────────────
         Console.WriteLine("20. Packs resolve their id the same way");
-        Check(coordPackSrc.Contains("ResolveOwnPackIdAsync") && coordPackSrc.Contains("ListMySubtitlesAsync(ct, maxPages: 2)"),
+        Check(coordPackSrc.Contains("ResolveOwnPackIdAsync") && coordPackSrc.Contains("ListMySubtitlesAsync(ct, maxPages: 1)"),
             "F-M414: a pack resolves its id from mySubtitles");
         Check(upload.Contains("MatchesRelease") && upload.Contains("MapToSubdlName"),
             "F-M414: the match runs over the release name and the written language");
