@@ -3072,6 +3072,14 @@ public sealed class UploadPipeline : IPackFiller
         bool forced = false,
         string framerate = ScribeFramerate.Unknown)
     {
+        // F-M597 (Operator-Freigabe 18.11.2026: „Ja", nach der Messung „8,4 s ohne eine einzige
+        // Logzeile"): die Spur wird vermessen. Gemessen am 18.11.2026 lag der Abstand zwischen zwei
+        // Uploads bei 9,6 s (Median, Rate 500/h) — davon 2,0 s Netz und der Rest in einem Block, der
+        // nichts protokollierte. Diese Zeile macht ihn sichtbar: QA, Quellen-Tore, Slot, Versand.
+        // Sie steht auf `Detail` und ist damit nur im Detail-LogMode zu sehen.
+        var takt = System.Diagnostics.Stopwatch.StartNew();
+        long qaMs = 0, quellenMs = 0, slotMs = 0, versandMs = 0;
+
         // F-M429 (operator order 03.11.2026): a position a pack of this run already carries is not
         // uploaded single. The pack is the only carrier — a second copy beside it would be the very
         // duplicate the pack deletes again (F-M391). Positions of a pack that failed are not in the
@@ -3136,6 +3144,8 @@ public sealed class UploadPipeline : IPackFiller
             // F-M375: the retry path corrects the same way the phase-1 precheck does.
             lang = correctedLang ?? lang;
         }
+
+        qaMs = takt.ElapsedMilliseconds; // F-M597
 
 
         // F-M29/F-M30: neutral filename, no user-identifying data; the content hash keeps two uploads
@@ -3354,6 +3364,8 @@ public sealed class UploadPipeline : IPackFiller
             }
         }
 
+        quellenMs = takt.ElapsedMilliseconds; // F-M597
+
         if (zustaendig.Count > 0)
         {
             // F-M594: der Slot wird VOR dem Versand dieser Spur abgewartet — gemessen ab dem Ende
@@ -3362,6 +3374,7 @@ public sealed class UploadPipeline : IPackFiller
             // Eine Spur bekommt EINEN Slot, auch wenn zwei Quellen bedient werden (F-M587): die
             // Rate zaehlt Spuren, sonst halbierte sie sich bei jeder zweiten Quelle.
             await _limiter.WaitForTransferSlotAsync(ct).ConfigureAwait(false);
+            slotMs = takt.ElapsedMilliseconds; // F-M597
 
             var laeufe = new Task<UploadResult>[zustaendig.Count];
             for (int i = 0; i < zustaendig.Count; i++)
@@ -3370,6 +3383,14 @@ public sealed class UploadPipeline : IPackFiller
             }
 
             var jeQuelle = await Task.WhenAll(laeufe).ConfigureAwait(false);
+            versandMs = takt.ElapsedMilliseconds; // F-M597
+
+            // F-M597: eine Zeile je Spur, die die Zeit zeigt statt sie zu vermuten.
+            LogUtil.Detail(
+                _logger,
+                "[Sub Scribe] TAKT {Name} [{Lang}] — qa {Qa} ms, sources {Quellen} ms, slot wait {Slot} ms, send {Versand} ms, total {Gesamt} ms (F-M597)",
+                neutralName, lang,
+                qaMs, quellenMs - qaMs, slotMs - quellenMs, versandMs - slotMs, takt.ElapsedMilliseconds);
 
             // F-M594: der Anker fuer den naechsten Slot. Gesetzt nur, wenn mindestens eine Quelle
             // die Spur angenommen hat — ein Fehlschlag ohne Uebertragung soll den Takt nicht kosten

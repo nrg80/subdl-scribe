@@ -809,6 +809,21 @@ internal static class Program
         Check("F-M593: die Vorgabe im Konfigurationsmodell ist 450",
             configSource593.Contains("UploadsPerHour = 450;", StringComparison.Ordinal));
 
+        // --- F-M597: die Spur wird vermessen -------------------------------------------------------
+        var uploadSource597 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        Check("F-M597: die Spur traegt eine Stoppuhr ueber den ganzen Weg",
+            uploadSource597.Contains("var takt = System.Diagnostics.Stopwatch.StartNew();", StringComparison.Ordinal)
+            && uploadSource597.Contains("long qaMs = 0, quellenMs = 0, slotMs = 0, versandMs = 0;", StringComparison.Ordinal));
+        Check("F-M597: jede der vier Phasen setzt ihre Marke",
+            uploadSource597.Contains("qaMs = takt.ElapsedMilliseconds; // F-M597", StringComparison.Ordinal)
+            && uploadSource597.Contains("quellenMs = takt.ElapsedMilliseconds; // F-M597", StringComparison.Ordinal)
+            && uploadSource597.Contains("slotMs = takt.ElapsedMilliseconds; // F-M597", StringComparison.Ordinal)
+            && uploadSource597.Contains("versandMs = takt.ElapsedMilliseconds; // F-M597", StringComparison.Ordinal));
+        Check("F-M597: die Zeile nennt alle vier Phasen und liegt auf Detail",
+            uploadSource597.Contains("[Sub Scribe] TAKT {Name} [{Lang}] — qa {Qa} ms, sources {Quellen} ms, slot wait {Slot} ms, send {Versand} ms, total {Gesamt} ms (F-M597)", StringComparison.Ordinal)
+            && uploadSource597.Contains("qaMs, quellenMs - qaMs, slotMs - quellenMs, versandMs - slotMs, takt.ElapsedMilliseconds", StringComparison.Ordinal)
+            && uploadSource597.Contains("LogUtil.Detail(\n                _logger,\n                \"[Sub Scribe] TAKT", StringComparison.Ordinal));
+
         // --- F-M596: der Vorlauf (Extraktion der naechsten Datei) ---------------------------------
         var lookaheadSource596 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/ExtractionLookahead.cs"));
         var ffmpegSource596 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/FfmpegTools.cs"));
