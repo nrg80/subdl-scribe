@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.488",
-        "changelog": "v12.1.12.488: every store is attached on both start paths — the title ladder wrote into nothing.",
+        "version": "12.1.12.489",
+        "changelog": "v12.1.12.489: every store fetches a missing context itself, like the TMDb store does.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.488-dev/Jellyfin.Plugin.SubdlSync_12.1.12.488.zip",
-        "checksum": "33c5d32fc0a761bb53969e04dd1d8099",
-        "timestamp": "2026-11-18T20:08:18Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.489-dev/Jellyfin.Plugin.SubdlSync_12.1.12.489.zip",
+        "checksum": "ba7eb351377370a4e05279328a2fb5ec",
+        "timestamp": "2026-11-18T20:19:51Z"
       }
     ]
   }
