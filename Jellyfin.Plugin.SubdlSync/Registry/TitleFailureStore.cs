@@ -117,13 +117,13 @@ public static class TitleFailureStore
                 var row = db.TitleFailureRows.AsNoTracking().FirstOrDefault(r => r.Id == id);
                 if (row == null)
                 {
-                    _log?.LogDebug("[Sub Scribe] title store: {Key} not in the store (F-M615)", id);
+                    _log?.LogInformation("[Sub Scribe] title store: {Key} NOT in the store — the ladder runs again (F-M618)", id);
                     return false;
                 }
 
                 if (!row.Closed)
                 {
-                    _log?.LogDebug("[Sub Scribe] title store: {Key} open, attempts {Attempts} ({Reason}) (F-M615)", id, row.Attempts, row.Reason);
+                    _log?.LogInformation("[Sub Scribe] title store: {Key} open, attempts {Attempts} ({Reason}) (F-M618)", id, row.Attempts, row.Reason);
                     return false;
                 }
 
