@@ -824,8 +824,8 @@ internal static class Program
         Check("F-M595: die Statistik liest den QA-Zaehler, nicht alle Ablehnungen",
             deltaSource595.Contains("rejectedUpload: uploadDry ? 0 : upload?.RejectedQaFail ?? 0", StringComparison.Ordinal)
             && !deltaSource595.Contains("upload?.RejectedCandidates", StringComparison.Ordinal));
-        Check("F-M595: die Zeile heisst \"Uploads qa fails not uploaded\"",
-            guiSource595.Contains("['Uploads qa fails not uploaded', s.RejectedUpload || 0]", StringComparison.Ordinal)
+        Check("F-M595: die Zeile heisst \"Uploads: QA fails not sent\"",
+            guiSource595.Contains("['Uploads: QA fails not sent', s.RejectedUpload || 0]", StringComparison.Ordinal)
             && !guiSource595.Contains("Uploads: stopped before sending", StringComparison.Ordinal));
 
         // --- F-M594: der Takt als Slot vor dem Transfer -------------------------------------------

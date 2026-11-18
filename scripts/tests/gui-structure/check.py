@@ -462,8 +462,8 @@ def main():
     # Statistik. Wording: Uploads qa fails not uploaded" — the row counts ONLY the quality-gate
     # verdicts now, and it says so. The point of the assertion stays: no upload row may claim a
     # fetch, and a rename has to be deliberate.
-    check("the upload row says qa fails not uploaded, not fetched",
-          "Uploads qa fails not uploaded" in order,
+    check("the upload row says QA fails not sent, not fetched",
+          "Uploads: QA fails not sent" in order,
           "row missing or reverted: %s" % [o for o in order if o.startswith("Uploads")])
     check("and no upload row claims a fetch",
           not any(o.startswith("Uploads:") and "fetch" in o for o in order),

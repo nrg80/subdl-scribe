@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.466.
+**Status:** Implementation — v12.1.12.467.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -1707,7 +1707,7 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M479 [P]:** **Die vier Schalter stehen im Tab ihrer Richtung, nicht in einem eigenen Anbieter-Tab.** Download-Schalter im Download-Tab, Upload-Schalter im Upload-Tab, je Anbieter eine Zeile mit dem Anbieternamen im Label (`Download enabled — SubDL`). Ein Anbieter-Tab hätte die Richtung von ihrer Schaltung getrennt und den Weg „erst hier, dann dort" erzwungen; die Richtung ist die Frage, die der Nutzer hat.
 
-**F-M595 [U]:** **Die Statistikzeile „stopped before sending" zählt nur noch QA-Urteile — und heißt so.** Operator-Anweisung 18.11.2026: „Stopped before sending bitte nur noch für qa fails in die Statistik. Wording: Uploads qa fails not uploaded". Befund: `StatusCounterDelta.rejectedUpload` speiste sich aus `summary.RejectedCandidates`, und dieser Zähler stand an **zwölf** Stellen — Duplikate (`duplicate-remote`, `duplicate-content`), nicht abbildbare Sprachkennungen, Extraktionsfehler, gesperrte Quellen, Selbst-Echo. Die Zeile behauptete damit ein Qualitätsurteil über Spuren, die nie ein Gate gesehen hatten. Neu: `summary.RejectedQaFail` zählt ausschließlich die Urteile aus `GateReject` (Größenboden 2 KB, Cue-Zahl < 30, SRT-Struktur, Sync-Plausibilität) — `ScreenContentQa` gibt dafür `out bool qaFail` zurück und setzt es an genau einer Stelle; die Statistik liest `RejectedQaFail`, `RejectedCandidates` bleibt als Laufzahl im Protokoll. Die Zeile heißt jetzt „Uploads qa fails not uploaded" (30 Zeichen, unter der Tabellenbreite von 41). Geprüft von T305.
+**F-M595 [U]:** **Die Statistikzeile „stopped before sending" zählt nur noch QA-Urteile — und heißt so.** Operator-Anweisung 18.11.2026: „Stopped before sending bitte nur noch für qa fails in die Statistik. Wording: Uploads qa fails not uploaded". Befund: `StatusCounterDelta.rejectedUpload` speiste sich aus `summary.RejectedCandidates`, und dieser Zähler stand an **zwölf** Stellen — Duplikate (`duplicate-remote`, `duplicate-content`), nicht abbildbare Sprachkennungen, Extraktionsfehler, gesperrte Quellen, Selbst-Echo. Die Zeile behauptete damit ein Qualitätsurteil über Spuren, die nie ein Gate gesehen hatten. Neu: `summary.RejectedQaFail` zählt ausschließlich die Urteile aus `GateReject` (Größenboden 2 KB, Cue-Zahl < 30, SRT-Struktur, Sync-Plausibilität) — `ScreenContentQa` gibt dafür `out bool qaFail` zurück und setzt es an genau einer Stelle; die Statistik liest `RejectedQaFail`, `RejectedCandidates` bleibt als Laufzahl im Protokoll. Die Zeile heißt jetzt „Uploads: QA fails not sent" — auf Nachkorrektur des Operators vom 18.11.2026 („Wording nochmal Uploads: QA fails not sent"), 25 Zeichen, unter der Tabellenbreite von 41. Geprüft von T305.
 
 ## 14. Data Model and Persistence
 
@@ -2512,7 +2512,7 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 **T303:** Der Takt ist 50–500 einstellbar, Vorgabe 450, und der Hinweis nennt SubDLs 500/h (F-M593) — ein Feld für Upload und Download: die Beschriftung im Formular, `max="500"` am Feld, die Prüfung beim Speichern samt Rückfall und die Beschreibung OHNE SubDL-Hinweis und die Vorgabe im Konfigurationsmodell — **4 Prüfungen** in `endpoints` (284 → 288).
 
-**T305:** Die Statistik zählt nur die QA-Urteile (F-M595): eigener Zähler neben den Ablehnungen, `qaFail` nur an der Stelle des Gate-Urteils, die Statistik liest `RejectedQaFail` statt `RejectedCandidates`, und die Zeile heißt „Uploads qa fails not uploaded" — **4 Prüfungen** in `endpoints` (292 → 296).
+**T305:** Die Statistik zählt nur die QA-Urteile (F-M595): eigener Zähler neben den Ablehnungen, `qaFail` nur an der Stelle des Gate-Urteils, die Statistik liest `RejectedQaFail` statt `RejectedCandidates`, und die Zeile heißt „Uploads: QA fails not sent" — **4 Prüfungen** in `endpoints` (292 → 296).
 
 **T304:** Der Takt ist ein Slot vor dem Transfer (F-M594): der Limiter hält den statischen Anker und bietet `WaitForTransferSlotAsync`/`MarkTransferDone`, gewartet wird nur die Differenz zum Ziel, der Upload belegt den Slot vor dem Versand und setzt die Marke nur nach einer Annahme, der Download belegt ihn vor dem Abruf und setzt sie erst bei Bytes — **4 Prüfungen** in `endpoints` (288 → 292).
 
