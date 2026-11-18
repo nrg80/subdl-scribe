@@ -296,9 +296,62 @@ public sealed class SeasonPackCoordinator
     /// <param name="hi">HI/SDH variant.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Task.</returns>
+    /// <summary>
+    /// F-M611 (Operator-Anweisung 18.11.2026: „1x ist ok. Dann verdict und status speichern, wenn der
+    /// status sich ändert, neu versuchen ein pack zu bilden"): die Signatur der Staffel — Luftzahl plus
+    /// Groesse und Speicherdatum jeder Folgedatei. Solange sie gleich bleibt, wird ein gefälltes
+    /// „kein Pack"-Urteil befolgt; aendert sie sich, wird neu geprueft.
+    /// </summary>
+    public Func<string, int, string>? SeasonSignature { get; set; }
+
+    /// <summary>
+    /// F-M611: der Grund, aus dem dieser Füllversuch keinen Pack ergab — null, wenn er aufging oder
+    /// nichts zu tun war. Der Aufrufer schreibt ihn als Urteil in den Store.
+    /// </summary>
+    public string? LastRefusal { get; private set; }
+
+    /// <summary>F-M611: das Urteil „kein Pack" wird mit Signatur gespeichert, damit der naechste Lauf nicht wieder entpackt.</summary>
+    private const string FillTagSuffix = "|fill";
+
+    /// <summary>
+    /// F-M611: merkt einen Fehlschlag und schreibt ihn als Urteil in den Store. Ohne das wurde dieselbe
+    /// Staffel am 18.11.2026 <b>17 Mal an einem Tag</b> entpackt und jedes Mal an derselben Folge
+    /// abgebrochen — der Befund war bekannt, nur nicht gespeichert.
+    /// </summary>
+    /// <param name="imdbId">Serie.</param>
+    /// <param name="season">Staffel.</param>
+    /// <param name="lang">Sprache.</param>
+    /// <param name="hi">HI-Variante.</param>
+    /// <param name="reason">Warum kein Pack entsteht.</param>
+    private void Refuse(string imdbId, int season, string lang, bool hi, string reason)
+    {
+        LastRefusal = reason;
+        string? signatur = SeasonSignature?.Invoke(imdbId, season);
+        if (string.IsNullOrEmpty(signatur))
+        {
+            return;
+        }
+
+        try
+        {
+            Registry.PackSeasonStore.Put(
+                imdbId, season, SeasonPack.LangTag(lang, hi) + FillTagSuffix, signatur!,
+                Registry.PackSeasonStore.NoPack, reason);
+            LogUtil.Normal(
+                _logger,
+                "[Sub Scribe] season pack — {Imdb} S{Season} [{Lang}]: no pack ({Reason}); the verdict is stored with the files' signature (F-M611).",
+                imdbId, season, SeasonPack.LangTag(lang, hi), reason);
+        }
+        catch (Exception ex)
+        {
+            LogUtil.Detail(_logger, "[Sub Scribe] pack verdict not stored: {Msg}", ex.Message);
+        }
+    }
+
     public async Task FillOnlyAsync(string imdbId, int season, string lang, bool hi, CancellationToken ct)
     {
         var key = (imdbId, season, lang, hi);
+        LastRefusal = null;
         if (_filler == null || !_complete.TryGetValue((imdbId, season), out var aired))
         {
             return;
@@ -313,6 +366,20 @@ public sealed class SeasonPackCoordinator
                 _logger,
                 "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: already up as a pack, nothing is extracted.",
                 imdbId, season, SeasonPack.LangTag(lang, hi));
+            return;
+        }
+
+        // F-M611: steht das Urteil „kein Pack" schon, und hat sich an den Dateien nichts geaendert, wird
+        // gar nicht erst entpackt. Genau dafuer gibt es die Signatur.
+        string? fillSignatur = SeasonSignature?.Invoke(imdbId, season);
+        if (!string.IsNullOrEmpty(fillSignatur)
+            && Registry.PackSeasonStore.StillImpossible(
+                imdbId, season, SeasonPack.LangTag(lang, hi) + FillTagSuffix, fillSignatur!, out string altGrund))
+        {
+            LogUtil.Detail(
+                _logger,
+                "[Sub Scribe] season pack — {Imdb} S{Season} [{Lang}] unchanged since the last judgement ({Reason}), nothing extracted (F-M611)",
+                imdbId, season, SeasonPack.LangTag(lang, hi), altGrund);
             return;
         }
 
@@ -357,6 +424,7 @@ public sealed class SeasonPackCoordinator
                         _logger,
                         "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Aired} episode(s) carry this language in the store and {Carried} of {Aired} in their own file — no pack for it, this pass sends nothing.",
                         imdbId, season, SeasonPack.LangTag(lang, hi), withLanguage.Count, aired.Count, carried.Count);
+                    Refuse(imdbId, season, lang, hi, "the files do not carry this language in every aired episode");
                     return;
                 }
 
@@ -418,6 +486,7 @@ public sealed class SeasonPackCoordinator
                     _logger,
                     "[Sub Scribe] season pack skipped before any extraction — {Imdb} S{Season} [{Lang}]: episode {Episode} cannot join ({Reason}), and {State} (F-M600).",
                     imdbId, season, SeasonPack.LangTag(lang, hi), episode, vorabGrund, stateSentence);
+                Refuse(imdbId, season, lang, hi, $"episode {episode} cannot join ({vorabGrund})");
                 return;
             }
         }
@@ -436,6 +505,7 @@ public sealed class SeasonPackCoordinator
                     _logger,
                     "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: episode {Episode} cannot join, and {State} (F-M442).",
                     imdbId, season, SeasonPack.LangTag(lang, hi), episode, stateSentence);
+                Refuse(imdbId, season, lang, hi, $"episode {episode} cannot join");
                 return;
             }
 

@@ -831,6 +831,26 @@ internal static class Program
             db605.Contains("CREATE TABLE IF NOT EXISTS source_refusals (", StringComparison.Ordinal)
             && db605.Contains("e.ToTable(\"source_refusals\");", StringComparison.Ordinal));
 
+        // --- F-M611: das Pack-Urteil zum Fuellversuch speichern -------------------------------------
+        var coord611 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+        Check("F-M611: der Fuellversuch schreibt sein Urteil mit der Signatur der Staffel",
+            coord611.Contains("public Func<string, int, string>? SeasonSignature { get; set; }", StringComparison.Ordinal)
+            && coord611.Contains("private void Refuse(string imdbId, int season, string lang, bool hi, string reason)", StringComparison.Ordinal)
+            && coord611.Contains("SeasonPack.LangTag(lang, hi) + FillTagSuffix", StringComparison.Ordinal)
+            && coord611.Contains("Registry.PackSeasonStore.NoPack, reason);", StringComparison.Ordinal));
+        Check("F-M611: ein gespeichertes Urteil verhindert die naechste Extraktion, solange die Signatur gleich bleibt",
+            coord611.Contains("Registry.PackSeasonStore.StillImpossible(", StringComparison.Ordinal)
+            && coord611.Contains("unchanged since the last judgement ({Reason}), nothing extracted (F-M611)", StringComparison.Ordinal)
+            && coord611.Contains("LastRefusal = null;", StringComparison.Ordinal));
+        Check("F-M611: beide Abbruchwege (vor und nach der Extraktion) hinterlassen ein Urteil",
+            coord611.Contains("Refuse(imdbId, season, lang, hi, $\"episode {episode} cannot join ({vorabGrund})\");", StringComparison.Ordinal)
+            && coord611.Contains("Refuse(imdbId, season, lang, hi, $\"episode {episode} cannot join\");", StringComparison.Ordinal)
+            && coord611.Contains("Refuse(imdbId, season, lang, hi, \"the files do not carry this language in every aired episode\");", StringComparison.Ordinal));
+        Check("F-M611: die Pipeline reicht die Signatur aus der Planung an den Koordinator",
+            up605.Contains("_saisonSignatur[(entry.Key.Item1, entry.Key.Item2)] = saisonSignatur;", StringComparison.Ordinal)
+            && up605.Contains("packCoordinator.SeasonSignature =", StringComparison.Ordinal)
+            && up605.Contains("packCoordinator.LastRefusal", StringComparison.Ordinal));
+
         // --- F-M610: nicht zu viel schliessen ----------------------------------------------------------
         var store610 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/TitleFailureStore.cs"));
         Check("F-M610: ein Beleg schliesst den Titel nicht — er wird beim Lesen sogar verworfen",

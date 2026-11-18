@@ -640,6 +640,10 @@
     "T320": {
       "suite": "endpoints",
       "checks": 4
+    },
+    "T321": {
+      "suite": "endpoints",
+      "checks": 4
     }
   }
 }

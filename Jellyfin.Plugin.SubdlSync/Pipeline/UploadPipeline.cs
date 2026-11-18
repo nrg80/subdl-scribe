@@ -713,6 +713,11 @@ public sealed class UploadPipeline : IPackFiller
                     this,
                     // F-M406: the pack loop reports progress so the watchdog does not abort it.
                     watchdog.Heartbeat);
+
+                // F-M611: der Koordinator schreibt seine Urteile mit der Datei-Signatur der Staffel,
+                // die die Planung gerade berechnet hat (Luftzahl + Groesse + Speicherdatum je Folge).
+                packCoordinator.SeasonSignature =
+                    (imdb, season) => _saisonSignatur.TryGetValue((imdb, season), out var sig) ? sig : string.Empty;
             }
         }
 
@@ -774,6 +779,15 @@ public sealed class UploadPipeline : IPackFiller
                 if (Registry.HasPack(packImdb, packSeason, packLang, packHi))
                 {
                     _packAbsorbed.Add((packImdb, packSeason, packLang, packHi));
+                }
+                else if (!string.IsNullOrEmpty(packCoordinator.LastRefusal))
+                {
+                    // F-M611: der Grund steht schon als Urteil im Store (Refuse im Koordinator). Hier
+                    // steht nur noch, dass dieser Lauf nichts mehr dafuer tut.
+                    LogUtil.Detail(
+                        _logger,
+                        "[Sub Scribe] PACK — {Imdb} S{Season} [{Lang}] no pack this run ({Reason}); the verdict with the files' signature is stored (F-M611)",
+                        packImdb, packSeason, SeasonPack.LangTag(packLang, packHi), packCoordinator.LastRefusal);
                 }
                 else
                 {
@@ -4425,6 +4439,10 @@ public sealed class UploadPipeline : IPackFiller
             // and only then does anything get extracted.
             string saisonSignatur = SeasonSignatureOf(itemsOf[entry.Key], aired);
 
+            // F-M611: die Signatur bleibt fuer den Koordinator liegen — er schreibt damit die Urteile
+            // „kein Pack" (Füllversuch gescheitert) und befolgt sie beim naechsten Lauf.
+            _saisonSignatur[(entry.Key.Item1, entry.Key.Item2)] = saisonSignatur;
+
             // F-M604: gilt das gespeicherte Urteil „kein Pack" noch fuer genau diese Mitglieder, ist die
             // Staffel in einem Schritt erledigt — kein Sprachenscan, keine Gruppenwanderung.
             if (Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.StillImpossible(
@@ -6411,6 +6429,12 @@ public sealed class UploadPipeline : IPackFiller
     /// Leiter fuer jede EN-Datei erneut ab.
     /// </summary>
     private readonly System.Collections.Generic.HashSet<string> _titelGeschlossen = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// F-M611: die Datei-Signatur je Staffel, wie sie in der Pack-Planung berechnet wurde. Der
+    /// Koordinator schreibt damit seine Urteile, ohne die Bibliothek ein zweites Mal zu befragen.
+    /// </summary>
+    private readonly System.Collections.Generic.Dictionary<(string ImdbId, int Season), string> _saisonSignatur = new();
 
     /// <summary>
     /// F-M609: ist dieser HTTP-Status eine STOERUNG statt einer Ablehnung? 429 („spaeter nochmal") und
