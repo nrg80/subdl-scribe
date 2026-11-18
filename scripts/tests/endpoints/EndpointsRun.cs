@@ -831,6 +831,21 @@ internal static class Program
             db605.Contains("CREATE TABLE IF NOT EXISTS source_refusals (", StringComparison.Ordinal)
             && db605.Contains("e.ToTable(\"source_refusals\");", StringComparison.Ordinal));
 
+        // --- F-M614: der Store wird je Gegenstand geschrieben -----------------------------------------
+        var reg614 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
+        Check("F-M614: Flush schreibt wirklich, statt leer zu bleiben",
+            reg614.Contains("public void Flush() => _db.FlushPending();", StringComparison.Ordinal)
+            && !System.Text.RegularExpressions.Regex.IsMatch(reg614, @"public void Flush\(\)\s*\{\s*\}"));
+        var dl614 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
+        int fl614d = dl614.IndexOf("Registry.Flush();", StringComparison.Ordinal);
+        int la614d = fl614d > 0 ? dl614.IndexOf("LAUF download", fl614d, StringComparison.Ordinal) : -1;
+        Check("F-M614: das gilt generell — auch die Download-Pipeline schreibt je Gegenstand",
+            fl614d > 0 && la614d > fl614d && la614d - fl614d < 800);
+        int fl614 = up605.IndexOf("Registry.Flush();", StringComparison.Ordinal);
+        int la614 = fl614 > 0 ? up605.IndexOf("LAUF upload", fl614, StringComparison.Ordinal) : -1;
+        Check("F-M614: die Pipeline schreibt am Ende jedes Gegenstands",
+            fl614 > 0 && la614 > fl614 && la614 - fl614 < 800);
+
         // --- F-M613: die Pumpe bleibt gefuettert ------------------------------------------------------
         var la613 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/ExtractionLookahead.cs"));
         Check("F-M613: der Vorlauf wird an jedem Gegenstand angemeldet, auch wenn er uebersprungen wird",

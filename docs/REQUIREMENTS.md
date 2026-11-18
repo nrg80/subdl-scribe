@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.484.
+**Status:** Implementation — v12.1.12.485.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -32,7 +32,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 24 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 27 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
-- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 40 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 41 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 19 requirements
 - [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 48 requirements
 - [16. Non-Goals](#16-non-goals)
@@ -1709,6 +1709,8 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M605 [U]:** **Das Nein einer Quelle wird gemerkt.** Operator-Freigabe 18.11.2026 („Ok", nach der Frage „Ja aber legen wir nicht auch bei tvst neu an?"): F-M603 schloss nur den Fall „angelegt, Kennung nicht lesbar". Jeder andere Zustand einer Adresse — bei tvsubtitles `would-create`, `create-already-tried`, `refused`, `unclear`, `no-title`, `no-year`, bei moviesubtitles die entsprechenden Film-Zustände — endete weiterhin als SKIP **ohne** Marke, das Paar blieb offen und die Datei kehrte in jeden Lauf zurück. Jetzt merkt der Store das inhaltliche Nein je **Spur, Quelle und Inhalt** (`source_refusals`, Schlüssel `mediaHash|subPos|langTag|quelle`, Signatur = Inhalts-Hash): dieselbe Spur wird bei demselben Text nicht erneut gefragt, ein anderer Text (oder ein neu geripptes Medium) fragt wieder. **Nicht** gemerkt werden vorübergehende Neins (Rate Limit, Zeitüberschreitung, Abbruch) — die dürfen und müssen beim nächsten Lauf neu gefragt werden; hat eine Quelle den Inhalt genommen, wird ein altes Nein vergessen. Geprüft von T315.
 
+**F-M614 [U]:** **Der Store wird am Ende jedes Gegenstands geschrieben, nicht erst am Laufende.** Operator-Frage 18.11.2026: „Wieso schreiben wir den store nicht pro file am ende?" — es gab keinen guten Grund, nur einen Fehler: `ContentHashRegistry.Flush()` war eine **leere Methode**. Die Aufrufer glaubten an einen Flush, die Zeilen lagen aber bis zum Laufende in der F-M602-Klammer. Folge, live erlebt: nach einem Neustart mitten im Lauf (zweimal am 18.11. durch Deploys von 483 und 484) waren die Titelsperren weg, und dieselben acht Titel (`tt35538033`, `tt34685692`, `tt34379051`, `tt27613895`, `tt34564059`, `tt27419466`, `tt32547691`, `tt28638842`) liefen in 482, 483 **und** 484 erneut durch die Titel-Leiter — je 4 Versuche mit 2/4/8 s Pause. Jetzt ruft die Pipeline zu Beginn jedes Gegenstands `Registry.Flush()` (jetzt `_db.FlushPending()`); offen ist damit höchstens noch die Arbeit des laufenden Gegenstands. `FlushPending` ist ein No-Op ohne offene Zeilen, kostet also nur bei Gegenständen mit Schreibvorgang einen Commit. **Generell** (Operator: „Und das generell. Also nicht pro track, nicht pro lauf, pro file"): dieselbe Zeile steht jetzt auch in der Download-Pipeline. Geprüft von T324.
+
 **F-M613 [U]:** **Die Extraktions-Pumpe läuft dauerhaft eine Datei voraus.** Operator-Entscheidung 18.11.2026 auf die Frage „8 s pro Datei bleiben, oder zwei ffmpeg gleichzeitig zulassen?" — **„Ersteres"**. Der Vorlauf (F-M596) wurde bisher nur **nach** einer echten Extraktion angemeldet; bei 541 übersprungenen Gegenständen je Lauf bekam die Pumpe deshalb fast nie Auftrag und lief leer — gemessen **2 von 34** Extraktionen aus dem Vorlauf. Jetzt meldet `MeldeVorlauf` bei **jedem** Gegenstand die nächsten bis zu drei Dateien an, die wirklich Arbeit brauchen (in der Warteschlange, mit Textspuren) — auch auf dem Pfad „item settled before extraction". Damit hat die Pumpe in den Skip-Strecken lange ungestörte Fenster und die nächste Datei, die wirklich extrahieren muss, ist schon fertig. Die Ein-Prozess-Regel bleibt: vor einer frischen Extraktion gibt `ExtractionLookahead.Freigeben()` die Pumpe frei (Abbruch + kurzes Warten), danach meldet sich der Plan neu an und die Pumpe startet wieder — **nie zwei ffmpeg gleichzeitig**. Geprüft von T323.
 
 **F-M612 [U]:** **Die tvst-Kennung wird nicht mehr nachgelesen.** Operator-Frage 18.11.2026: „Brauchen wir die kennung irgendwo für? Wenn nicht kann es weg, schreiben wir keine oder eine eigene". Antwort: nein — die Nummer adressiert nichts. Sie stand nur als Marke im Store („für tvst hochgeladen"), und dafür schreibt `MarkOf` seit jeher die eigene Marke `own:tvsubtitles:<Zeit>:<hex>`. F-M488 hatte das Nachlesen eingebaut, weil die Seite auf den Upload keine Id zurückgibt; die 60-s-Frist war der teuerste Posten des Laufs: gemessen 18.11.2026 **88 Versuche, 0 lesbare Kennungen, je ~15 s** (größte `send`-Werte 15,3 / 16,0 / 17,3 s), bei einer Datei mit ~24 Spuren sechs Minuten für nichts. Der Aufruf ist entfernt; die Logzeile sagt jetzt „none — we write our own marker". Die Methode `FindUploadedIdAsync` bleibt im Client (sie ist belegt und getestet), wird aber von keinem Upload mehr benutzt. Geprüft von T322.
@@ -2547,6 +2549,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
 
 **T303:** Der Takt ist 50–500 einstellbar, Vorgabe 450, und der Hinweis nennt SubDLs 500/h (F-M593) — ein Feld für Upload und Download: die Beschriftung im Formular, `max="500"` am Feld, die Prüfung beim Speichern samt Rückfall und die Beschreibung OHNE SubDL-Hinweis und die Vorgabe im Konfigurationsmodell — **4 Prüfungen** in `endpoints` (284 → 288).
+
+**T324:** Der Store je Gegenstand (F-M614): echter Flush, Aufruf in Upload- **und** Download-Pipeline — **3 Prüfungen** in `endpoints`.
 
 **T323:** Die Pumpe bleibt gefüttert (F-M613): Anmeldung an jedem Gegenstand, auch im Skip-Pfad, und Freigabe vor frischer Extraktion — **3 Prüfungen** in `endpoints`.
 

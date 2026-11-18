@@ -3188,9 +3188,12 @@ public sealed class ContentHashRegistry : IDisposable
     public void EndBatch() => _db.EndBatch();
 
     /// <summary>No-op flush: the store persists at the point of the write.</summary>
-    public void Flush()
-    {
-    }
+    /// <summary>
+    /// F-M614: schreibt, was im Speicher offen ist, sofort in die Datei. Bis 18.11.2026 war das eine
+    /// leere Methode — die Aufrufer glaubten an einen Flush, und die Zeilen lagen bis zum Laufende in
+    /// der F-M602-Klammer. Ein Neustart mitten im Lauf rollte sie zurueck.
+    /// </summary>
+    public void Flush() => _db.FlushPending();
 
     /// <summary>Runs a write and flushes. Kept so call sites read as a unit of work.</summary>
     /// <param name="mark">The write to perform.</param>

@@ -747,6 +747,12 @@ public sealed class DownloadPipeline : IDisposable
         var itemTakt = System.Diagnostics.Stopwatch.StartNew();
         for (int pos = 0; pos < items.Count; pos++)
         {
+            // F-M614 (Operator-Anweisung 18.11.2026: „Und das generell. Also nicht pro track, nicht
+            // pro lauf, pro file"): was der VORIGE Gegenstand geschrieben hat, geht jetzt in die Datei.
+            // Bis heute lag alles bis zum Laufende in der F-M602-Klammer, und ein Neustart mitten im
+            // Lauf rollte es zurueck. No-Op, wenn nichts offen ist.
+            Registry.Flush();
+
             // F-M598: wie lange das vorige Item gedauert hat.
             LogUtil.Detail(_logger, "[Sub Scribe-D] LAUF download — item {Index}/{Count} \"{Name}\" — previous item took {Ms} ms (F-M598)",
                 pos + 1, items.Count, items[pos].Name, itemTakt.ElapsedMilliseconds);

@@ -869,6 +869,14 @@ public sealed class UploadPipeline : IPackFiller
 
             // F-M598: das vorige Item ist so lange gelaufen — die Zahl macht sichtbar, ob die Zeit in
             // einem einzelnen Item steckt (Extraktion, viele Spuren) oder zwischen den Items.
+            // F-M614 (Operator-Frage 18.11.2026: „Wieso schreiben wir den store nicht pro file am
+            // ende?"): was der VORIGE Gegenstand geschrieben hat, geht jetzt in die Datei. Bis heute
+            // hing alles in der F-M602-Klammer bis zum Laufende — und ein Neustart mitten im Lauf
+            // (zweimal passiert am 18.11.) rollte die Urteile zurueck: dieselben acht Titel liefen
+            // 482, 483 und 484 erneut durch die Titel-Leiter. FlushPending ist ein No-Op, wenn nichts
+            // offen ist, kostet also nur bei Gegenstaenden mit Schreibvorgang einen Commit.
+            Registry.Flush();
+
             LogUtil.Detail(_logger, "[Sub Scribe] LAUF upload — item {Index}/{Count} \"{Name}\" — previous item took {Ms} ms (F-M598)",
                 itemIndex + 1, items.Count, item.Name, itemTakt.ElapsedMilliseconds);
             itemTakt.Restart();
