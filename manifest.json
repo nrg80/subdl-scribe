@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.484",
-        "changelog": "v12.1.12.484: the extraction pump stays fed on every item (skips included) — one ffmpeg at a time.",
+        "version": "12.1.12.485",
+        "changelog": "v12.1.12.485: the store is written per file (upload and download), not per run — Flush was empty.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.484-dev/Jellyfin.Plugin.SubdlSync_12.1.12.484.zip",
-        "checksum": "cc70c591b3dc20999c0d8bec10d38768",
-        "timestamp": "2026-11-18T19:03:34Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.485-dev/Jellyfin.Plugin.SubdlSync_12.1.12.485.zip",
+        "checksum": "8e9e85c4a65f57b294ba7b0cf7afdf23",
+        "timestamp": "2026-11-18T19:24:45Z"
       }
     ]
   }
