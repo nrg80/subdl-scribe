@@ -668,10 +668,6 @@
     "T327": {
       "suite": "endpoints",
       "checks": 1
-    },
-    "T328": {
-      "suite": "endpoints",
-      "checks": 1
     }
   }
 }
