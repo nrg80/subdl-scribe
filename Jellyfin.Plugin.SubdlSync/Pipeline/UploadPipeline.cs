@@ -491,6 +491,8 @@ public sealed class UploadPipeline : IPackFiller
             return summary;
         }
 
+        Registry.BeginBatch(); // F-M602: ein Commit je Lauf (bzw. je 500 Zeilen) statt zwei je Spur
+
         try
         {
         // F-M441: a run that was killed leaves its working directory behind — swept here, so a crash
@@ -2363,6 +2365,26 @@ public sealed class UploadPipeline : IPackFiller
                         string skipReason = RejectReason.DuplicateRemote == result.Reason
                             ? RejectReason.DuplicateRemote
                             : result.Reason ?? RejectReason.CandidateRejected;
+                        // F-M603 (Operator-Entscheidung 18.11.2026, Weg „A"): ein ANGENOMMENER Versuch ohne
+                        // Kennung bekommt seine Marke, BEVOR das Urteil faellt. Sonst rechnet
+                        // SettleDuplicateContent die Quelle wieder als offen (ihr fehlt der Beleg), die Spur
+                        // bleibt „still open", und der naechste Lauf entpackt dieselbe Datei erneut —
+                        // gemessen an „The End Of Oak Street" (18.11.2026): 209 offen-Zeilen, 176 SKIPs,
+                        // 0 Uploads, ~20 s je Lauf, seit dem fruehen Morgen.
+                        if (result.SourceAccepted && result.Source is { } angenommeneQuelle)
+                        {
+                            DateTime angenommenAm = DateTime.UtcNow;
+                            string angenommeneId = Api.Endpoints.Provenance.OwnUploadId(
+                                angenommeneQuelle, skippedContentHash, skipReason, angenommenAm);
+                            MarkAcceptedSource(
+                                cand.IsLoose, cand.LoosePath, mediaHash, cand.SubPos, cand.Lang,
+                                cand.HearingImpaired, cand.Forced, skippedContentHash, angenommeneQuelle,
+                                angenommeneId, angenommenAm);
+                            LogUtil.PerItem(_config.LogMode, _logger,
+                                "[Sub Scribe] ACCEPTED {File} [{Lang}] — {Source} took the attempt without naming an id, the pair is settled (F-M603)",
+                                Path.GetFileName(fileName), cand.Lang, Api.Endpoints.Provenance.Name(angenommeneQuelle));
+                        }
+
                         // F-M500: auch hier fragt "schon hochgeladen" je Quelle. Die Kette hat alle Quellen
                         // gefragt; hat eine den Inhalt, bekommt SIE ihre Marke, und die andere bleibt offen
                         // statt quellenneutral abgelehnt zu werden.
@@ -2548,6 +2570,8 @@ public sealed class UploadPipeline : IPackFiller
         }
         finally
         {
+            Registry.EndBatch(); // F-M602: schreibt, was die Klammer gesammelt hat
+
             // F-M441: the run's working files are its own business — the run ends, they go.
             int workFiles = _workFiles.Purge();
             if (workFiles > 0)
@@ -6335,6 +6359,14 @@ public sealed class UploadPipeline : IPackFiller
                 LogUtil.Detail(_logger, "[moviesubtitles] the site answered: {Answer}", aufloesung.Answer);
             }
 
+            // F-M603 (Operator-Entscheidung 18.11.2026, Weg „A"): „angelegt, aber die Id ist nicht
+            // lesbar" ist ein ANGENOMMENER Versuch. Ohne Marke blieb das Paar ewig offen und die Datei
+            // kam in jedem Lauf wieder (Oak Street, 18.11.2026).
+            if (string.Equals(aufloesung.Status, "created-id-not-readable", StringComparison.Ordinal))
+            {
+                return UploadResult.AcceptedWithoutId("film-source-movie-created-id-not-readable");
+            }
+
             return UploadResult.Skipped("film-source-movie-" + aufloesung.Status);
         }
 
@@ -6404,12 +6436,51 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="releaseName">Release-Name (Grundlage der eigenen Marke).</param>
     /// <param name="jetzt">Der Zeitpunkt des Uploads — fuer Id und Stempel derselbe.</param>
     /// <returns>Die Id (oder null) und der Zeitpunkt (oder null).</returns>
+    /// <summary>
+    /// F-M603: schreibt die Marke EINER Quelle, die den Versuch angenommen, aber keine Kennung genannt hat.
+    /// Die uebrigen Quellenfelder bleiben unberuehrt (<c>MarkEmbed</c>/<c>MarkSidecar</c> schreiben nur,
+    /// was bekannt ist), und der Status bleibt „uploaded" — der Inhaltsbeleg ist das, was das Paar
+    /// schliesst; die Statistik zaehlt den Versuch weiterhin als SKIP, nicht als Upload.
+    /// </summary>
+    private void MarkAcceptedSource(
+        bool isLoose, string? loosePath, string? mediaHash, int subPos, string lang, bool hearingImpaired,
+        bool forced, string contentHash, Configuration.SubtitleProvider quelle, string id, DateTime at)
+    {
+        string? subdl = quelle == Configuration.SubtitleProvider.Subdl ? id : null;
+        string? tvst = quelle == Configuration.SubtitleProvider.TvSubtitles ? id : null;
+        string? msub = quelle == Configuration.SubtitleProvider.MovieSubtitles ? id : null;
+        DateTime? subdlAt = quelle == Configuration.SubtitleProvider.Subdl ? at : null;
+        DateTime? tvstAt = quelle == Configuration.SubtitleProvider.TvSubtitles ? at : null;
+        DateTime? msubAt = quelle == Configuration.SubtitleProvider.MovieSubtitles ? at : null;
+
+        Registry.MarkAndFlush(() =>
+        {
+            if (isLoose && !string.IsNullOrEmpty(loosePath))
+            {
+                Registry.MarkSidecar(
+                    contentHash, mediaHash ?? contentHash, lang, hearingImpaired, forced, SubtitleStatus.Uploaded,
+                    fileName: Path.GetFileName(loosePath), path: loosePath,
+                    subdlUploadId: subdl, tvSubtitlesUploadId: tvst, moviesubtitlesUploadId: msub,
+                    subdlUploadedAt: subdlAt, tvSubtitlesUploadedAt: tvstAt, moviesubtitlesUploadedAt: msubAt);
+            }
+            else
+            {
+                Registry.MarkEmbed(
+                    mediaHash, subPos, lang, hearingImpaired, SubtitleStatus.Uploaded, contentHash: contentHash,
+                    subdlUploadId: subdl, tvSubtitlesUploadId: tvst, moviesubtitlesUploadId: msub,
+                    subdlUploadedAt: subdlAt, tvSubtitlesUploadedAt: tvstAt, moviesubtitlesUploadedAt: msubAt);
+            }
+        });
+    }
+
     private static (string? Id, DateTime? At) MarkOf(
         IReadOnlyDictionary<Configuration.SubtitleProvider, UploadResult> ergebnisse,
         Configuration.SubtitleProvider quelle, string? knownId, string contentHash, string releaseName,
         DateTime jetzt)
     {
-        if (!ergebnisse.TryGetValue(quelle, out var ergebnis) || !ergebnis.Ok)
+        // F-M603: auch ein ANGENOMMENER Versuch ohne Id bekommt seine Marke — sonst bleibt das Paar
+        // offen und der Lauf wiederholt ihn ewig.
+        if (!ergebnisse.TryGetValue(quelle, out var ergebnis) || (!ergebnis.Ok && !ergebnis.SourceAccepted))
         {
             return (null, null);
         }
@@ -6512,6 +6583,19 @@ public sealed class UploadPipeline : IPackFiller
             .ConfigureAwait(false);
         if (!show.Resolved)
         {
+            // F-M603 (Operator-Frage 18.11.2026: „Müsste ja derselbe uploader sein?"): JA — dieselbe
+            // Luecke wie bei der Film-Adresse. `created-id-unknown` heisst „die Seite hat die Serie
+            // angelegt, die Nummer ist nicht lesbar"; ohne Marke bleibt das Paar fuer tvst offen und
+            // die Datei kehrt in jeden Lauf zurueck. Der angenommene Versuch bekommt deshalb seine
+            // Marke (Weg „A"), die Statistik zaehlt ihn weiterhin als SKIP.
+            if (string.Equals(show.Status, Api.Endpoints.TvstShowStatus.CreatedIdUnknown, StringComparison.Ordinal))
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[tvsubtitles] {Name} [{Lang}] — created, the id is not readable ({Status}); the pair is settled (F-M603)",
+                    neutralName, lang, show.Status);
+                return UploadResult.AcceptedWithoutId("second-source-show-created-id-unknown");
+            }
+
             // F-M501: KEIN Blocker. Die Zeile nennt den Grund (Status), damit im Lauf steht, warum tvst
             // fuer dieses Medium nichts bekommt, und die Kette laeuft weiter.
             LogUtil.PerItem(_config.LogMode, _logger,

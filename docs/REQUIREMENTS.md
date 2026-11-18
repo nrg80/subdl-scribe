@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.474.
+**Status:** Implementation — v12.1.12.475.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -32,7 +32,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 24 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 27 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
-- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 28 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 30 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 19 requirements
 - [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 48 requirements
 - [16. Non-Goals](#16-non-goals)
@@ -1707,6 +1707,10 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M479 [P]:** **Die vier Schalter stehen im Tab ihrer Richtung, nicht in einem eigenen Anbieter-Tab.** Download-Schalter im Download-Tab, Upload-Schalter im Upload-Tab, je Anbieter eine Zeile mit dem Anbieternamen im Label (`Download enabled — SubDL`). Ein Anbieter-Tab hätte die Richtung von ihrer Schaltung getrennt und den Weg „erst hier, dann dort" erzwungen; die Richtung ist die Frage, die der Nutzer hat.
 
+**F-M603 [U]:** **Ein angenommener Versuch ohne Kennung schließt das Paar.** Operator-Entscheidung 18.11.2026 (Weg „A", nach der Diagnose „Oak Street ist alt, das klingt eher danach, dass da ein Pair nicht geschlossen wird"): gemessen wurde die Datei „The End Of Oak Street" am 18.11. mit **465 Logzeilen, 209 × „still open", 176 SKIP duplicate-self-echo und 0 Uploads** — und sie kehrte in jeden Lauf zurück, jedes Mal mit Extraktion (2,7 s) und 26 Store-Schreibvorgängen (~20 s). Ursache: die Film-Adresse meldete für die Spur EN nach einem echten Versuch (`search.php` → 500 mit Body, `add-movie.php` → **200**) `created-id-not-readable`, also „angelegt, Kennung nicht lesbar" — nach dem Befund des Operators existiert der Film dort **gar nicht** („Osk street existiert auf moviesubtitels als film nicht"), die `200` hat also nichts angelegt. Genau deshalb bleibt es bei einem SKIP ohne Upload-Behauptung: der Versuch ist belegt, der Erfolg nicht. Das wurde als SKIP ohne Marke verbucht — der Beleg fehlte, das Paar blieb offen, der nächste Lauf wiederholte alles. Jetzt gibt es `UploadResult.AcceptedWithoutId` (SKIP **mit** Beleg: `SourceAccepted`), die Marke wird **vor** dem Urteil geschrieben (`MarkAcceptedSource`, eigene `own:`-Kennung) und `MarkOf` lässt sie durch. **Die Statistik behauptet weiterhin keinen Upload** (`Ok = false`) — der Versuch zählt als übersprungen, nicht als hochgeladen. Dieselbe Lücke hatte die Serien-Adresse (`TvstShowStatus.CreatedIdUnknown`, „angelegt, Nummer nicht lesbar", Operator-Frage „Müsste ja derselbe uploader sein?"): auch dort schließt der angenommene Versuch jetzt das Paar. Geprüft von T312.
+
+**F-M602 [U]:** **Die Schreibvorgänge eines Laufs werden gebündelt.** Gemessen 18.11.2026 im Upload-Lauf: **320 `media upsert` + 123 `embed`-Schreibvorgänge**, Median-Abstand 99 ms, Mittel 238 ms — in Summe **105 s von 257 s Laufzeit (41 %)** gingen für einzelne Store-Schreibvorgänge weg, und ein Item mit 26 Textspuren kostete allein ~20 s. Der Store **kann** das längst bündeln (`ScribeSqliteContext.BeginBatch`/`EndBatch`, `BatchFloor = 500`, im Seeder seit Oktober in Gebrauch); die Upload- und Download-Läufe haben es nur nie aufgemacht. Jetzt öffnet der Lauf eine Klammer und schließt sie im vorhandenen `finally`: ein Commit je Lauf (bzw. je 500 Zeilen) statt zwei je Spur. Lesen bleibt davon unberührt, weil alle Leser über den Zeilen-Cache der Areas gehen.
+
 **F-M601 [U]:** **Die Folgenzahl einer Staffel liegt im Store — erst der Store, dann IMDb/TMDb, dann einspeichern.** Operator-Anweisung 18.11.2026: „Die imdb/tmdb folgenzahlabfragen könnte man auch beim pack im store nach dem ersten mal speichern." Gemessen 18.11.2026 (Lauf 14:29): die Pack-Planung fragte für 79 Staffeln die Folgenzahl ab — **16.248 ms für 79 Aufrufe** (206 ms je Aufruf), gut ein Fünftel der Pack-Phase, und nach jedem Neustart erneut, weil `SeasonEpisodeIndex` nur im Arbeitsspeicher hält. Neu: `AiredSeasonStore` (Tabelle `aired_seasons`, Schlüssel `imdbId|season`, Wert die Folgennummern) hält die Antwort. **Erst der Store**, erst wenn er nichts hat (oder die gespeicherte Liste nicht alle Folgen abdeckt, die auf der Platte liegen — eine Staffel wächst) wird IMDb/TMDb gefragt und das Ergebnis eingespeichert. Ein Alter von 180 Tagen lässt eine Antwort verfallen, damit eine korrigierte Staffel irgendwann neu geholt wird. Tabellenname in `OnModelCreating` und in `EnsureAiredSeasonsTable` ist **derselbe** (`aired_seasons`) — eine Tabelle, die unter einem Namen angelegt und unter einem anderen gelesen wird, ist toter Ballast, der wie ein funktionierender Cache aussieht. Die Planungszeile nennt jetzt auch, wie viele Antworten aus dem Store kamen. Geprüft von T311.
 
 **F-M600 [U]:** **Ein Pack, der an einer Folge scheitert, entpackt die Folgen davor nicht mehr.** Operator-Freigabe 18.11.2026 („Ja"), nach der Messung der Pack-Phase: Lauf 14:29 hatte **8 Füll-Versuche in 45,7 s und 0 Packs** — jeder scheiterte an „episode N cannot join", der teuerste (tt9737326) nach 20 s, weil erst Episode 3 das Sprach-Tor riss. Vor der ersten Extraktion fragt der Pack den Store jetzt je Folge: hat die Datei überhaupt eine Textspur dieser Sprache, und ist nicht jede dieser Spuren schon gesperrt (`SpurIstGesperrt`, F-M443/F-M584)? Beides kostet eine Spurenliste und ein paar Store-Blicke. **Das Urteil ist unverändert** — die Extraktion hätte dieselbe Folge genauso abgelehnt; es kommt nur früher, und die Zeile nennt den Grund („cannot join (no embedded text track …)" / „(every track … already refused …)"). Geprüft von T310.
@@ -2523,6 +2527,10 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
 
 **T303:** Der Takt ist 50–500 einstellbar, Vorgabe 450, und der Hinweis nennt SubDLs 500/h (F-M593) — ein Feld für Upload und Download: die Beschriftung im Formular, `max="500"` am Feld, die Prüfung beim Speichern samt Rückfall und die Beschreibung OHNE SubDL-Hinweis und die Vorgabe im Konfigurationsmodell — **4 Prüfungen** in `endpoints` (284 → 288).
+
+**T313:** Die Schreibklammer (F-M602): `BeginBatch`/`EndBatch` am Store, beide Läufe öffnen sie und schließen sie im `finally` — **3 Prüfungen** in `endpoints` (328 → 331).
+
+**T312:** Der angenommene Versuch (F-M603): Ergebnisform, beide Adressen (Film und Serie), Marke vor dem Urteil und `MarkOf` lässt sie durch, Statistik ohne Upload-Behauptung — **5 Prüfungen** in `endpoints` (323 → 328).
 
 **T311:** Die Folgenzahl im Store (F-M601): Lesen/Schreiben/Anhängen/Decken, gleicher Tabellenname in Schema und Anlage, Store vor Netz mit Einspeichern, Anhängen an beiden Kontextstellen und die Zahl in der Planungszeile — **5 Prüfungen** in `endpoints` (318 → 323).
 

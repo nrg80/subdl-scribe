@@ -3175,6 +3175,18 @@ public sealed class ContentHashRegistry : IDisposable
 
     // --------------------------------------------------------------- plumbing
 
+    /// <summary>
+    /// F-M602 (Operator-Freigabe 18.11.2026: „Ja"): oeffnet eine Schreibklammer auf dem Store. Gemessen
+    /// am 18.11.2026 im Upload-Lauf: 320 <c>media upsert</c> + 123 <c>embed</c>-Schreibvorgaenge mit
+    /// Median 99 ms / Mittel 238 ms — 105 s von 257 s Laufzeit (41 %) gingen fuer einzelne Commits weg.
+    /// Der Store kann das laengst buendeln (<c>ScribeSqliteContext.BeginBatch</c>, Grenze 500 Zeilen);
+    /// die Laeufe haben die Klammer nur nie geoeffnet.
+    /// </summary>
+    public void BeginBatch() => _db.BeginBatch();
+
+    /// <summary>F-M602: schliesst die Schreibklammer und schreibt, was sie gesammelt hat.</summary>
+    public void EndBatch() => _db.EndBatch();
+
     /// <summary>No-op flush: the store persists at the point of the write.</summary>
     public void Flush()
     {

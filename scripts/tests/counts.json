@@ -604,6 +604,14 @@
     "T311": {
       "suite": "endpoints",
       "checks": 5
+    },
+    "T312": {
+      "suite": "endpoints",
+      "checks": 5
+    },
+    "T313": {
+      "suite": "endpoints",
+      "checks": 3
     }
   }
 }

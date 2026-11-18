@@ -38,6 +38,21 @@ public class UploadResult
     public string? SourceId { get; init; }
 
     /// <summary>
+    /// F-M603 (Operator-Entscheidung 18.11.2026, Weg „A"): die Quelle hat den Versuch ANGENOMMEN, aber
+    /// keine verwertbare Kennung zurückgegeben. Gemessen an moviesubtitles.org: <c>add-movie.php</c>
+    /// antwortet <c>200</c>, die angelegte Filmnummer ist danach nicht auslesbar — und ohne Marke blieb
+    /// das Paar für immer offen. Die Datei kehrte in JEDEN Lauf zurück, wurde erneut entpackt und
+    /// endete mit 0 Uploads (18.11.2026, „The End Of Oak Street": 209 „still open"-Zeilen, 176 SKIPs,
+    /// 0 Uploads, ~20 s je Lauf).
+    /// <para>
+    /// Das Ergebnis ist bewusst KEIN <see cref="Ok"/>: die Statistik soll nicht „hochgeladen" behaupten,
+    /// was die Seite nicht bestätigt hat. Es ist ein SKIP mit Beleg — die Marke wird geschrieben, das
+    /// Paar ist damit entschieden, und der Lauf wiederholt den Versuch nicht.
+    /// </para>
+    /// </summary>
+    public bool SourceAccepted { get; private init; }
+
+    /// <summary>
     /// F-M550: the source that actually answered. The log used to name no source at all, and the old
     /// <c>[SubDL]</c> prefix in front of an upload line read like "uploaded to SubDL" even when the
     /// upload went to tvsubtitles. Set by the chain where the source is known, not by its caller.
@@ -70,4 +85,13 @@ public class UploadResult
     /// Creates a skip result.
     /// </summary>
     public static UploadResult Skipped(string reason) => new() { Ok = false, SkippedItem = true, Reason = reason };
+
+    /// <summary>
+    /// F-M603: the source took the attempt but returned no usable id — evidence enough to close the pair,
+    /// but not a success to report.
+    /// </summary>
+    /// <param name="reason">Why the source named no id.</param>
+    /// <returns>The result.</returns>
+    public static UploadResult AcceptedWithoutId(string reason)
+        => new() { Ok = false, SkippedItem = true, SourceAccepted = true, Reason = reason };
 }

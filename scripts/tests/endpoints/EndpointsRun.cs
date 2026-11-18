@@ -391,8 +391,9 @@ internal static class Program
             uploadSource.Contains("subdlUploadId: subdlMarke.Id", StringComparison.Ordinal)
             && uploadSource.Contains("tvSubtitlesUploadId: tvstMarke.Id", StringComparison.Ordinal)
             && uploadSource.Contains("moviesubtitlesUploadId: msubMarke.Id", StringComparison.Ordinal)
-            // MarkOf gibt (null, null) fuer eine Quelle, die nicht genommen hat — keine Marke ohne Upload
-            && uploadSource.Contains("if (!ergebnisse.TryGetValue(quelle, out var ergebnis) || !ergebnis.Ok)", StringComparison.Ordinal)
+            // MarkOf gibt (null, null) fuer eine Quelle, die nicht genommen hat — keine Marke ohne Upload.
+            // F-M603: ein ANGENOMMENER Versuch ohne Kennung ist die Ausnahme (SKIP mit Beleg).
+            && uploadSource.Contains("if (!ergebnisse.TryGetValue(quelle, out var ergebnis) || (!ergebnis.Ok && !ergebnis.SourceAccepted))", StringComparison.Ordinal)
             && !uploadSource.Contains("subdlUploadId: vonZweiter", StringComparison.Ordinal));
         Check("the id is read back from the episode page, never invented",
             ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/TvSubtitlesClient.cs"))
@@ -808,6 +809,40 @@ internal static class Program
             && guiSource593.Contains("document.querySelector('#UploadsPerHour').value) || 450", StringComparison.Ordinal));
         Check("F-M593: die Vorgabe im Konfigurationsmodell ist 450",
             configSource593.Contains("UploadsPerHour = 450;", StringComparison.Ordinal));
+
+        // --- F-M602: die Schreibvorgaenge eines Laufs werden gebuendelt ------------------------------
+        var reg602 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
+        var up602 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        var down602 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
+        Check("F-M602: der Store bietet die Klammer an",
+            reg602.Contains("public void BeginBatch() => _db.BeginBatch();", StringComparison.Ordinal)
+            && reg602.Contains("public void EndBatch() => _db.EndBatch();", StringComparison.Ordinal));
+        Check("F-M602: der Upload-Lauf oeffnet und schliesst sie",
+            up602.Contains("Registry.BeginBatch(); // F-M602", StringComparison.Ordinal)
+            && up602.Contains("Registry.EndBatch(); // F-M602", StringComparison.Ordinal));
+        Check("F-M602: der Download-Lauf oeffnet und schliesst sie ebenfalls",
+            down602.Contains("Registry.BeginBatch(); // F-M602", StringComparison.Ordinal)
+            && down602.Contains("Registry.EndBatch(); // F-M602", StringComparison.Ordinal));
+
+        // --- F-M603: ein angenommener Versuch ohne Kennung schliesst das Paar ------------------------
+        var result603 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/UploadResult.cs"));
+        var upload603 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        Check("F-M603: es gibt ein Ergebnis 'angenommen ohne Kennung' — SKIP, aber mit Beleg",
+            result603.Contains("public bool SourceAccepted { get; private init; }", StringComparison.Ordinal)
+            && result603.Contains("public static UploadResult AcceptedWithoutId(string reason)", StringComparison.Ordinal)
+            && result603.Contains("new() { Ok = false, SkippedItem = true, SourceAccepted = true, Reason = reason }", StringComparison.Ordinal));
+        Check("F-M603: die Film-Adresse meldet 'angelegt, Id nicht lesbar' als angenommen",
+            upload603.Contains("if (string.Equals(aufloesung.Status, \"created-id-not-readable\", StringComparison.Ordinal))", StringComparison.Ordinal)
+            && upload603.Contains("return UploadResult.AcceptedWithoutId(\"film-source-movie-created-id-not-readable\");", StringComparison.Ordinal));
+        Check("F-M603: die Serien-Adresse (tvst) genauso — derselbe Uploader, dieselbe Luecke",
+            upload603.Contains("if (string.Equals(show.Status, Api.Endpoints.TvstShowStatus.CreatedIdUnknown, StringComparison.Ordinal))", StringComparison.Ordinal)
+            && upload603.Contains("return UploadResult.AcceptedWithoutId(\"second-source-show-created-id-unknown\");", StringComparison.Ordinal));
+        Check("F-M603: die Marke wird geschrieben, BEVOR das Urteil faellt, und MarkOf laesst sie durch",
+            upload603.Contains("if (result.SourceAccepted && result.Source is { } angenommeneQuelle)", StringComparison.Ordinal)
+            && upload603.Contains("MarkAcceptedSource(", StringComparison.Ordinal)
+            && upload603.Contains("(!ergebnis.Ok && !ergebnis.SourceAccepted)", StringComparison.Ordinal));
+        Check("F-M603: die Statistik behauptet keinen Upload — das Ergebnis bleibt Ok=false",
+            upload603.Contains("ACCEPTED {File} [{Lang}] — {Source} took the attempt without naming an id, the pair is settled (F-M603)", StringComparison.Ordinal));
 
         // --- F-M601: die Folgenzahl liegt im Store ---------------------------------------------------
         var upload601 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));

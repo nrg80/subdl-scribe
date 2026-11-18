@@ -649,6 +649,8 @@ public sealed class DownloadPipeline : IDisposable
         _watchdog.Heartbeat();
         _watchdog.Start();
 
+        Registry.BeginBatch(); // F-M602: ein Commit je Lauf (bzw. je 500 Zeilen) statt einem je Zeile
+
         // F-M24a (fixed 09.09.2026, user decision): run START is Normal-level —
         // critical errors, rate limits, run started/finished.
         // F-M309: the fit is a whole-run activity, so its START belongs at Normal — one line per
@@ -935,6 +937,8 @@ public sealed class DownloadPipeline : IDisposable
         }
         finally
         {
+            Registry.EndBatch(); // F-M602: schreibt, was die Klammer gesammelt hat
+
             // The watchdog belongs to THIS run and must go down with it even when the run
             // dies on an exception. Before this, disposal sat on the success path only
             // (it was inside the try), so any exception left the monitor alive: it kept
