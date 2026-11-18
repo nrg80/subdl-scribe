@@ -708,7 +708,8 @@ def main():
     if os.path.exists(dl):
         src = open(dl, encoding="utf-8").read()
         check("the run START line names the fit switch at Normal",
-              "audio fit={Fit}" in src)
+              # LOGGING.md 1.11: `:l` druckt das Wort ohne Anführungszeichen
+              "audio fit={Fit:l}" in src)
         check("the run DONE line carries the fit counter at Normal",
               "fitted to audio" in src)
         # The track line must be per-item (Verbose) AND gated on the switch: with the fit off
@@ -1115,9 +1116,12 @@ def main():
               "_downHeldByAllowance = true" in disp_src
               and "Outcome.Deferred, _downloadAllowanceHeld" not in disp_src,
               "F-M365: no direction outcome, so no row")
+        # LOGGING.md 1.10: genau EIN Ereignis-Code pro Zeile — der Code der Zeile ist F-M331
+        # („queued items stay due"), F-M365 steht als Kommentar an der Fundstelle.
         check("and the log line carries the reason the direction was held back",
               "download held back \u2014 {Reason}" in disp_src
-              and "no worker row (F-M365)" in disp_src)
+              and "(F-M331)" in disp_src
+              and "(F-M331); no worker row" not in disp_src)
         check("the flag is handed to the seeder, so the queue stays empty too",
               "downloadAllowed: _downloadAllowanceHeld == null" in disp_src)
 
@@ -1796,10 +1800,15 @@ def main():
     except OSError as exc:
         check(False, "F-M403: pipeline sources readable (%s)" % exc)
         up_src2 = down_src2 = ""
-    check('"[SubDL] upload: started{Dry}"' in up_src2,
-          "F-M403: the upload start line says ', dry' inline instead of dry-run=True")
-    check('"[SubDL] download: started{Dry}, refetch={Refetch}' in down_src2,
-          "F-M403: the download start line does the same")
+    # LOGGING.md 1.11: kein leeres Suffix mehr — das ", dry" hängt an einer eigenen Vorlage, damit
+    # die Zeile ohne Trockenlauf kein `""` mehr druckt. Die Prüfung stand hier über lange Zeit mit
+    # vertauschten Argumenten (`check(name, ok, detail)`) und war deshalb immer grün.
+    check("F-M403: die Upload-Startzeile sagt ', dry' inline statt dry-run=True",
+          '"[Sub Scribe] upload: started, dry"' in up_src2
+          and '"[Sub Scribe] upload: started"' in up_src2)
+    check("F-M403: die Download-Startzeile tut dasselbe",
+          '"[Sub Scribe] download: started, dry, refetch={Refetch}, audio fit={Fit:l}"' in down_src2
+          and '"[Sub Scribe] download: started, refetch={Refetch}, audio fit={Fit:l}"' in down_src2)
     check("dry-run={" not in up_src2 and "dry-run={" not in down_src2,
           "F-M403: no dry-run=Key=Value form is left in either pipeline")
     check("DRY-RUN would have uploaded" in up_src2,

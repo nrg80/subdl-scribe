@@ -799,7 +799,9 @@ public sealed class ScribeEventDispatcher : IDisposable
         _stopCts = new CancellationTokenSource();
         // F-M402 (operator order 02.11.2026): the cycle line says whether this cycle runs dry — the
         // log has to answer "was that a dry run?" the same way the workers line does.
-        LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] cycle start ({Trigger}, dir {Dir}{Dry}).", trigger, initialDirection, DrySuffix());
+        LogUtil.Normal(_logger, DrySuffix().Length == 0
+            ? "[Sub Scribe-Dispatch] cycle start ({Trigger}, dir {Dir})."
+            : "[Sub Scribe-Dispatch] cycle start ({Trigger}, dir {Dir}{Dry}).", trigger, initialDirection, DrySuffix());
 
         CycleDirection dir;
         lock (_lock)
@@ -838,11 +840,15 @@ public sealed class ScribeEventDispatcher : IDisposable
     {
         if (_userStopActive)
         {
-            LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] cycle end ({Trigger}, dir {Dir}{Dry}) — user stop.", trigger, dir, DrySuffix());
+            LogUtil.Normal(_logger, DrySuffix().Length == 0
+                ? "[Sub Scribe-Dispatch] cycle end ({Trigger}, dir {Dir}) — user stop."
+                : "[Sub Scribe-Dispatch] cycle end ({Trigger}, dir {Dir}{Dry}) — user stop.", trigger, dir, DrySuffix());
         }
         else
         {
-            LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] cycle end ({Trigger}, dir {Dir}{Dry}).", trigger, dir, DrySuffix());
+            LogUtil.Normal(_logger, DrySuffix().Length == 0
+                ? "[Sub Scribe-Dispatch] cycle end ({Trigger}, dir {Dir})."
+                : "[Sub Scribe-Dispatch] cycle end ({Trigger}, dir {Dir}{Dry}).", trigger, dir, DrySuffix());
         }
     }
 
@@ -1043,7 +1049,7 @@ public sealed class ScribeEventDispatcher : IDisposable
                 // F-M365: no direction outcome, so no row — nothing ran, and a status row would
                 // have to invent a time for work that did not happen.
                 _downHeldByAllowance = true;
-                LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] download held back — {Reason}. Queued items stay due (F-M331); no worker row (F-M365).", _downloadAllowanceHeld);
+                LogUtil.Normal(_logger, "[Sub Scribe-Dispatch] download held back — {Reason}. Queued items stay due (F-M331).", _downloadAllowanceHeld);
             }
 
             return true; // toggle off (or no allowance) = direction permanently "done" for this cycle

@@ -657,8 +657,10 @@ public sealed class DownloadPipeline : IDisposable
         // run, naming whether it is on. The per-file detail (which audio track, which subtitle it
         // was fitted against) stays at Verbose. F-M24d's "one summary line per direction" is not
         // violated: this is the run START line it already prescribes, carrying one more fact.
-        LogUtil.Normal(_logger, "[Sub Scribe] download: started{Dry}, refetch={Refetch}, audio fit={Fit}",
-            _config.DownloadDryRun ? ", dry" : string.Empty, _config.RefetchInterval, _config.QaDownloadAutoSync ? "on" : "off");
+        LogUtil.Normal(_logger, _config.DownloadDryRun
+                ? "[Sub Scribe] download: started, dry, refetch={Refetch}, audio fit={Fit:l}"
+                : "[Sub Scribe] download: started, refetch={Refetch}, audio fit={Fit:l}",
+            _config.RefetchInterval, _config.QaDownloadAutoSync ? "on" : "off");
 
         PipelineStopSignal.ClearStaleMarkers(Plugin.Instance?.DataFolderPath ?? string.Empty);
 
@@ -754,7 +756,7 @@ public sealed class DownloadPipeline : IDisposable
             Registry.Flush();
 
             // F-M598: wie lange das vorige Item gedauert hat.
-            LogUtil.Detail(_logger, "[Sub Scribe-D] LAUF download — item {Index}/{Count} \"{Name}\" — previous item took {Ms} ms (F-M598)",
+            LogUtil.Detail(_logger, "[Sub Scribe-D] LAUF download — item {Index}/{Count} {Name} — previous item took {Ms} ms (F-M598)",
                 pos + 1, items.Count, items[pos].Name, itemTakt.ElapsedMilliseconds);
             itemTakt.Restart();
             var item = items[pos];
@@ -1486,7 +1488,7 @@ public sealed class DownloadPipeline : IDisposable
                         {
                             isSeries = fnIsSeries; // the filename knows the content type
                             summary.IdResolvedFromFilename++;
-                            LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe-D] filename fallback {File} — title \"{Title}\" ({Kind} {Year}) → imdb={Imdb}",
+                            LogUtil.PerItem(_config.LogMode, _logger,"[Sub Scribe-D] filename fallback {File} — title {Title} ({Kind} {Year}) → imdb={Imdb}",
                                 Path.GetFileName(mediaPath), fnTitle, fnIsSeries ? "tv" : "movie", fnYear, imdbId);
                         }
                     }
@@ -1988,7 +1990,7 @@ public sealed class DownloadPipeline : IDisposable
             if (droppedAi > 0)
             {
                 summary.AiUploaderFiltered += droppedAi;
-                LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] {File} — {N} candidate(s) from the AI translation account dropped (switch \"Allow AI translated subs (SUBDL AI)\" off)", Path.GetFileName(mediaPath), droppedAi);
+                LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] {File} — {N} candidate(s) from the AI translation account dropped (switch »Allow AI translated subs (SUBDL AI)« off)", Path.GetFileName(mediaPath), droppedAi);
             }
         }
 
@@ -2531,8 +2533,8 @@ public sealed class DownloadPipeline : IDisposable
                                         if (_config.LogMode >= LogLevelMode.Verbose)
                                         {
                                             LogUtil.PerItem(_config.LogMode, _logger,(asMainTrack
-                                                ? "[Sub Scribe-D] SAVED {Source} HI as main track {Path} (lang={Lang}, release \"{Release}\", subdl=\"{ScribeName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"
-                                                : "[Sub Scribe-D] SAVED {Source} HI variant {Path} (lang={Lang}, release \"{Release}\", subdl=\"{ScribeName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb})"),
+                                                ? "[Sub Scribe-D] SAVED {Source} HI as main track {Path} (lang={Lang}, release {Release}, subdl={ScribeName}, author={Author}, imdb={Imdb}, tmdb={Tmdb})"
+                                                : "[Sub Scribe-D] SAVED {Source} HI variant {Path} (lang={Lang}, release {Release}, subdl={ScribeName}, author={Author}, imdb={Imdb}, tmdb={Tmdb})"),
                                                 Api.Endpoints.Provenance.Name(hi.Provider),
                                                 Path.GetFileName(hiPath), lang, hi.ReleaseName,
                                                 string.IsNullOrEmpty(hi.OriginalName) ? "—" : hi.OriginalName,
@@ -3534,7 +3536,7 @@ public sealed class DownloadPipeline : IDisposable
                         // Quelle angezeigt?"): nein, stand sie nicht — die Zeile nannte Release, SubDL-Name,
                         // Autor und Ids, aber nicht die Quelle, aus der die Datei kam. Jetzt steht sie
                         // direkt hinter SAVED, wie beim Upload.
-                        LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] SAVED {Source} {Path} (lang={Lang}, score {Score}, release \"{Release}\", subdl=\"{ScribeName}\", author={Author}, imdb={Imdb}, tmdb={Tmdb}) for {File}",
+                        LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe-D] SAVED {Source} {Path} (lang={Lang}, score {Score}, release {Release}, subdl={ScribeName}, author={Author}, imdb={Imdb}, tmdb={Tmdb}) for {File}",
                             Api.Endpoints.Provenance.Name(cand.Provider),
                             Path.GetFileName(targetPath), lang, Score(cand, videoBase), cand.ReleaseName,
                             string.IsNullOrEmpty(cand.OriginalName) ? "—" : cand.OriginalName,

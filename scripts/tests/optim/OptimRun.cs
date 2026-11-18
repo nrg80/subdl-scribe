@@ -25,6 +25,20 @@ using Jellyfin.Plugin.SubScribe.Data;
 // not have to sit through the deliberately slow unbatched path to prove the ASSERTIONS are attached.
 bool quick = args.Contains("--quick");
 var workdir = args.First(a => !a.StartsWith("--", StringComparison.Ordinal));
+
+// T178 wie in storex: dieser Lauf LOESCHT jede Datei in seinem Arbeitsverzeichnis. Ein
+// Repository-Root, versehentlich als Arbeitsverzeichnis uebergeben, kostet die Wurzeldateien
+// (build.yaml, manifest.json, logo.*, README …) — am 18.11.2026 genau so passiert, als ein
+// Alle-Suiten-Skript jeder Suite denselben Pfad gab. Ein Verzeichnis mit Repo-Marker ist
+// kein Arbeitsverzeichnis.
+if (File.Exists(Path.Combine(workdir, "build.yaml"))
+    || Directory.Exists(Path.Combine(workdir, ".git"))
+    || File.Exists(Path.Combine(workdir, ".gitignore")))
+{
+    Console.WriteLine($">>> FEHLER: '{workdir}' ist ein Repository, kein Arbeitsverzeichnis — dieser Lauf loescht dort alle Dateien.");
+    return 3;
+}
+
 Directory.CreateDirectory(workdir);
 foreach (var f in Directory.GetFiles(workdir))
 {

@@ -25,6 +25,17 @@ using Jellyfin.Plugin.SubScribe.Registry;
 var workdir = args[0];
 int seconds = args.Length > 1 ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 6;
 
+// T178 wie in storex: dieser Lauf LOESCHT jede Datei in seinem Arbeitsverzeichnis. Ein
+// Repository-Root, versehentlich als Arbeitsverzeichnis uebergeben, kostet die Wurzeldateien
+// — am 18.11.2026 passiert, als ein Alle-Suiten-Skript jeder Suite denselben Pfad gab.
+if (File.Exists(Path.Combine(workdir, "build.yaml"))
+    || Directory.Exists(Path.Combine(workdir, ".git"))
+    || File.Exists(Path.Combine(workdir, ".gitignore")))
+{
+    Console.WriteLine($">>> FEHLER: '{workdir}' ist ein Repository, kein Arbeitsverzeichnis — dieser Lauf loescht dort alle Dateien.");
+    return 3;
+}
+
 Directory.CreateDirectory(workdir);
 foreach (var f in Directory.GetFiles(workdir))
 {

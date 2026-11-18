@@ -594,7 +594,9 @@ public sealed class UploadPipeline : IPackFiller
         // logging "0 items queued" although the scan runs 15 lines later and found 304.
         // F-M403 (operator order 02.11.2026): one spelling for the mode. Inline it is the lowercase
         // word "dry" (as in the workers line), on an event line it is the prefix "DRY-RUN".
-        LogUtil.Normal(_logger, "[Sub Scribe] upload: started{Dry}", _config.DryRun ? ", dry" : string.Empty);
+        LogUtil.Normal(_logger, _config.DryRun
+            ? "[Sub Scribe] upload: started, dry"
+            : "[Sub Scribe] upload: started");
 
         PipelineStopSignal.ClearStaleMarkers(Plugin.Instance?.DataFolderPath ?? string.Empty);
 
@@ -702,7 +704,7 @@ public sealed class UploadPipeline : IPackFiller
                 var have = arrived.Where(n => aired.Contains(n)).Distinct().OrderBy(n => n).ToList();
                 if (aired.Count == 0 || have.Count < aired.Count)
                 {
-                    LogUtil.Normal(
+                    LogUtil.PerItem(_config.LogMode,
                         _logger,
                         "[Sub Scribe] queue: {Imdb} S{Season} brought {Have} of {Aired} episode(s) — the queued items are not the whole season, so no pack is built from this run.",
                         entry.Key.Item1, entry.Key.Item2, have.Count, aired.Count);
@@ -712,7 +714,7 @@ public sealed class UploadPipeline : IPackFiller
                 // F-M426: only investigated when something is still open — a fully packed season is not.
                 if (!HasOpenLanguage(entry.Key, have))
                 {
-                    LogUtil.Normal(
+                    LogUtil.PerItem(_config.LogMode,
                         _logger,
                         "[Sub Scribe] queue: {Imdb} S{Season} — every language is already inside a pack, nothing is investigated.",
                         entry.Key.Item1, entry.Key.Item2);
@@ -720,7 +722,7 @@ public sealed class UploadPipeline : IPackFiller
                 }
 
                 arrivalSeasons[entry.Key] = have;
-                LogUtil.Normal(
+                LogUtil.PerItem(_config.LogMode,
                     _logger,
                     "[Sub Scribe] queue: {Imdb} S{Season} brought all {Aired} episode(s) — the pack is built from the queued items of this run only.",
                     entry.Key.Item1, entry.Key.Item2, aired.Count);
@@ -834,7 +836,7 @@ public sealed class UploadPipeline : IPackFiller
                 }
                 else
                 {
-                    LogUtil.Normal(
+                    LogUtil.PerItem(_config.LogMode,
                         _logger,
                         "[Sub Scribe] pack did not go up for {Imdb} S{Season} [{Lang}] — the singles it was meant to carry go up in the single phase (F-M429).",
                         packImdb, packSeason, packLang);
@@ -877,7 +879,7 @@ public sealed class UploadPipeline : IPackFiller
             // offen ist, kostet also nur bei Gegenstaenden mit Schreibvorgang einen Commit.
             Registry.Flush();
 
-            LogUtil.Detail(_logger, "[Sub Scribe] LAUF upload — item {Index}/{Count} \"{Name}\" — previous item took {Ms} ms (F-M598)",
+            LogUtil.Detail(_logger, "[Sub Scribe] LAUF upload — item {Index}/{Count} {Name} — previous item took {Ms} ms (F-M598)",
                 itemIndex + 1, items.Count, item.Name, itemTakt.ElapsedMilliseconds);
             itemTakt.Restart();
             if (alleQuellenWeg)
@@ -4426,7 +4428,7 @@ public sealed class UploadPipeline : IPackFiller
             if (staffelBekannt.Count > 0
                 && staffelBekannt.All(p => staffelGepackt.Contains(p)))
             {
-                LogUtil.Normal(
+                LogUtil.PerItem(_config.LogMode,
                     _logger,
                     "[Sub Scribe] season pack: {Imdb} S{Season} — all {Count} known pair(s) already up as a pack, no TMDb call, no file read.",
                     entry.Key.Item1, entry.Key.Item2, staffelBekannt.Count);
@@ -4458,7 +4460,7 @@ public sealed class UploadPipeline : IPackFiller
             }
             if (aired == null)
             {
-                LogUtil.Normal(
+                LogUtil.PerItem(_config.LogMode,
                     _logger,
                     "[Sub Scribe] season pack skipped: {Imdb} S{Season} — no episode count (IMDb and TMDB both silent), stays single.",
                     entry.Key.Item1, entry.Key.Item2);
@@ -4551,7 +4553,7 @@ public sealed class UploadPipeline : IPackFiller
                     Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.Put(
                         entry.Key.Item1, entry.Key.Item2, paarTag, paarSignatur, Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.NoPack,
                         "neither the store nor the files of every aired episode carry this language");
-                    LogUtil.Normal(
+                    LogUtil.PerItem(_config.LogMode,
                         _logger,
                         "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: neither the store nor the files of every aired episode carry this language — no pack for it, the single uploads of this run are unaffected.",
                         entry.Key.Item1, entry.Key.Item2, paarTag);
@@ -4560,7 +4562,7 @@ public sealed class UploadPipeline : IPackFiller
 
             if (schonGepackt > 0)
             {
-                LogUtil.Normal(
+                LogUtil.PerItem(_config.LogMode,
                     _logger,
                     "[Sub Scribe] season pack: {Imdb} S{Season} — {Packed} of {Pairs} pair(s) already up as a pack, {Open} examined, nothing is extracted for the packed ones.",
                     entry.Key.Item1, entry.Key.Item2, schonGepackt, pairs.Count, open.Count);
@@ -4611,7 +4613,7 @@ public sealed class UploadPipeline : IPackFiller
                         SeasonPack.ReleaseGroup(x.Path) ?? SeasonPack.UnknownGroup, completeGroup,
                         StringComparison.OrdinalIgnoreCase))
                     .ToList();
-                LogUtil.Normal(
+                LogUtil.PerItem(_config.LogMode,
                     _logger,
                     "[Sub Scribe] season pack candidate: {Imdb} S{Season} — {Count} of {Aired} episode(s) on disk, season complete, release group {Group}.",
                     entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count, completeGroup);
@@ -4624,7 +4626,7 @@ public sealed class UploadPipeline : IPackFiller
                     entry.Key.Item1, entry.Key.Item2, Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.SeasonTag, saisonSignatur,
                     Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.NoPack,
                     "all aired episodes are on disk but split over " + groupOf.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) + " release(s)");
-                LogUtil.Normal(
+                LogUtil.PerItem(_config.LogMode,
                     _logger,
                     "[Sub Scribe] season pack skipped: {Imdb} S{Season} — all {Aired} episode(s) are on disk but split over {Groups} release(s) ({List}), a pack carries one release, stays single.",
                     entry.Key.Item1, entry.Key.Item2, aired.Count, groupOf.Count,
@@ -4638,7 +4640,7 @@ public sealed class UploadPipeline : IPackFiller
                         SeasonPack.ReleaseGroup(x.Path) ?? SeasonPack.UnknownGroup, completeGroup,
                         StringComparison.OrdinalIgnoreCase))
                     .ToList();
-                LogUtil.Normal(
+                LogUtil.PerItem(_config.LogMode,
                     _logger,
                     "[Sub Scribe] season pack candidate: {Imdb} S{Season} — release group {Group} supplies all {Aired} episode(s), season complete.",
                     entry.Key.Item1, entry.Key.Item2, completeGroup, aired.Count);
@@ -4648,7 +4650,7 @@ public sealed class UploadPipeline : IPackFiller
                 Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.Put(
                     entry.Key.Item1, entry.Key.Item2, Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.SeasonTag, saisonSignatur,
                     Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.NoPack, "no release group covers the season");
-                LogUtil.Normal(
+                LogUtil.PerItem(_config.LogMode,
                     _logger,
                     "[Sub Scribe] season pack skipped: {Imdb} S{Season} — {Have} episode(s) on disk against {Aired} aired, no release group covers the season, stays single.",
                     entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count);
@@ -4660,7 +4662,7 @@ public sealed class UploadPipeline : IPackFiller
                     // Summe, mit der niemand etwas optimieren kann.
                     LogUtil.Detail(
                     _logger,
-                    "[Sub Scribe] PACK — planning done: {Count} season(s), aired lookups {Calls} call(s) {Aired} ms ({FromStore} from the store), file language scans {Scans} {Datei} ms, total {Gesamt} ms (F-M599/F-M601)",
+                    "[Sub Scribe] PACK — planning done: {Count} season(s), aired lookups {Calls} call(s) {Aired} ms ({FromStore} from the store), file language scans {Scans} {Datei} ms, total {Gesamt} ms (F-M601)",
                     result.Count, airedCalls, airedMs, airedAusStore, dateiScans, dateiMs, paketTakt.ElapsedMilliseconds);
 
                     return result;
@@ -7110,11 +7112,15 @@ public sealed class UploadPipeline : IPackFiller
             MovieYear: series.FirstAirYear ?? 0);
 
         var answer = await endpoint.SendAsync(ticket, ct).ConfigureAwait(false);
+        // LOGGING.md 1.9/1.11: kein leeres Suffix und kein gequotetes Wort — zwei Vorlagen
+        // statt eines angehängten Leerstrings, `:l` druckt das Wort ohne Anführungszeichen.
         LogUtil.PerItem(_config.LogMode, _logger,
-            "[tvsubtitles] {Name} [{Lang}] — {Result}{Reason}",
+            string.IsNullOrEmpty(answer.Reason)
+                ? "[tvsubtitles] {Name} [{Lang}] — {Result:l}"
+                : "[tvsubtitles] {Name} [{Lang}] — {Result:l}: {Reason}",
             neutralName, lang,
             answer.Ok ? "sent" : "refused",
-            string.IsNullOrEmpty(answer.Reason) ? string.Empty : ": " + answer.Reason);
+            answer.Reason);
         LogUtil.PerItem(_config.LogMode, _logger,
             "[tvsubtitles] id of our upload: {Id}", answer.Id ?? "none — we write our own marker (F-M612)");
         // F-M609: dasselbe Urteil fuer die Serien-Adresse.

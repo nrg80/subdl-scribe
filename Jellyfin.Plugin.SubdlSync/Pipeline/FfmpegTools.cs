@@ -213,8 +213,11 @@ public static class FfmpegTools
             if (!proc.HasExited)
             {
                 proc.Kill(entireProcessTree: true);
+                // LOGGING.md 1.6: hier endet die Extraktion EINES Items, nicht der Lauf. „the run was
+                // cancelled" war eine Falschaussage im Log (gemessen 18.11.2026: viermal, und der Lauf
+                // lief danach hunderte Positionen weiter).
                 logger.LogInformation(
-                    "[Sub Scribe] ffmpeg for {File} was stopped — the run was cancelled (F-M596)",
+                    "[Sub Scribe] EXTRACT CANCELLED {File} — the pass ended before its result was used (F-M596)",
                     Path.GetFileName(mediaPath));
             }
         }

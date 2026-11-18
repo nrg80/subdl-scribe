@@ -149,7 +149,7 @@ public class ScribeReset : ControllerBase
                     db.Media.Update(touched);
                 }
 
-                LogUtil.Normal(_logger, "[Sub Scribe] Reset \"upload\": {Count} file-complete marker(s) cleared.", touched.Count);
+                LogUtil.Normal(_logger, "[Sub Scribe] Reset upload: {Count} file-complete marker(s) cleared.", touched.Count);
             }
             else if (scope.Equals("download", StringComparison.OrdinalIgnoreCase))
             {
@@ -175,7 +175,7 @@ public class ScribeReset : ControllerBase
                 // burned candidates, the QA counters and the search stamps — and drops the sweep
                 // over `SubtitlesDownloadedAt`, because the item is re-asked from its evidence on
                 // the very next run. Nothing needs clearing to make it due again.
-                LogUtil.Normal(_logger, "[Sub Scribe] Reset \"download\": downloaded sidecars, burned candidates and search stamps cleared. No completion mark exists (F-M283).");
+                LogUtil.Normal(_logger, "[Sub Scribe] Reset download: downloaded sidecars, burned candidates and search stamps cleared. No completion mark exists (F-M283).");
             }
             else
             {

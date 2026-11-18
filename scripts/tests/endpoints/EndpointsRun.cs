@@ -1140,7 +1140,7 @@ internal static class Program
             && uploadSource599.Contains("airedMs += paketTakt.ElapsedMilliseconds - airedVorher;", StringComparison.Ordinal)
             && uploadSource599.Contains("dateiMs += paketTakt.ElapsedMilliseconds - dateiVorher;", StringComparison.Ordinal));
         Check("F-M599: die Planung schliesst mit einer Summenzeile ab",
-            uploadSource599.Contains("PACK — planning done: {Count} season(s), aired lookups {Calls} call(s) {Aired} ms ({FromStore} from the store), file language scans {Scans} {Datei} ms, total {Gesamt} ms (F-M599/F-M601)", StringComparison.Ordinal));
+            uploadSource599.Contains("PACK — planning done: {Count} season(s), aired lookups {Calls} call(s) {Aired} ms ({FromStore} from the store), file language scans {Scans} {Datei} ms, total {Gesamt} ms (F-M601)", StringComparison.Ordinal));
         Check("F-M599: die Fuell-Phase (Netz) ist von der Planung getrennt gemessen",
             uploadSource599.Contains("var fuellTakt = System.Diagnostics.Stopwatch.StartNew();", StringComparison.Ordinal)
             && uploadSource599.Contains("PACK — fill phase: {N} attempt(s) in {Ms} ms (F-M599)", StringComparison.Ordinal));
