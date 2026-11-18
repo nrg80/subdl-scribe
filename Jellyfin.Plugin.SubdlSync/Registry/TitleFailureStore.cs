@@ -141,7 +141,7 @@ public static class TitleFailureStore
                     return false;
                 }
 
-                _log?.LogDebug(
+                _log?.LogInformation(
                     "[Sub Scribe] title store: {Key} is closed ({Reason}, attempts {Attempts}) — the ladder is skipped (F-M615)",
                     id, row.Reason, row.Attempts);
                 reason = row.Reason ?? string.Empty;
@@ -186,7 +186,7 @@ public static class TitleFailureStore
                 row.Reason = Trunc(reason, 200);
                 row.Written = DateTime.UtcNow;
                 db.SaveChanges();
-                _log?.LogDebug("[Sub Scribe] title store: {Key} attempt {Attempts} written ({Reason}) (F-M615)", id, row.Attempts, row.Reason);
+                _log?.LogInformation("[Sub Scribe] title store: {Key} attempt {Attempts} written ({Reason}) (F-M615)", id, row.Attempts, row.Reason);
                 return row.Attempts;
             }
         }
@@ -228,7 +228,7 @@ public static class TitleFailureStore
                 row.Reason = Trunc(reason, 200);
                 row.Written = DateTime.UtcNow;
                 db.SaveChanges();
-                _log?.LogDebug("[Sub Scribe] title store: {Key} closed and written ({Reason}) (F-M615)", id, reason);
+                _log?.LogInformation("[Sub Scribe] title store: {Key} closed and written ({Reason}) (F-M615)", id, reason);
             }
         }
         catch (Exception ex)
