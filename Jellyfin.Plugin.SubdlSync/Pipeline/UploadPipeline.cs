@@ -2152,6 +2152,11 @@ public sealed class UploadPipeline : IPackFiller
             // handed to every candidate below — not once per uploadable track. (Computed above the
             // dry-run gate since F-M373 — the pack decision needs it there as well.)
 
+            // F-M597 (Nachtrag 18.11.2026: die Messung zeigte, dass die Zeit NICHT in der Spur liegt —
+            // `send` 0,7–3,0 s, `qa`/`sources`/`slot` je unter 100 ms, der Abstand zwischen zwei Uploads
+            // aber 9,5 s. Also wird jetzt auch die Schleife selbst vermessen: wie lange von der letzten
+            // Spur bis zum Aufruf der Kette (Urteil, Store, Buchführung) und wie lange die Kette.
+            var abstand = System.Diagnostics.Stopwatch.StartNew();
             foreach (var cand in qaSurvivors)
             {
                 runCt.ThrowIfCancellationRequested();
@@ -2248,6 +2253,8 @@ public sealed class UploadPipeline : IPackFiller
                     continue;
                 }
 
+                long bisKette = abstand.ElapsedMilliseconds;
+                var ketteTakt = System.Diagnostics.Stopwatch.StartNew();
                 var result = await UploadSrtContentAsync(
                     cand.IsLoose ? cand.LoosePath : null,
                     mediaPath,
@@ -2266,6 +2273,14 @@ public sealed class UploadPipeline : IPackFiller
                     subPos: cand.SubPos,
                     forced: cand.Forced,
                     framerate: itemFramerate).ConfigureAwait(false);
+
+                // F-M597: die Schleife selbst. `Abstand` = Ende der letzten Spur bis zum Aufruf dieser
+                // Kette (Urteil, Store-Zeilen, Vorbereitung), `Kette` = die vermessene Spur selbst.
+                LogUtil.Detail(
+                    _logger,
+                    "[Sub Scribe] TAKT-SPUR {Lang} — gap since the last track {Abstand} ms, of which the chain {Kette} ms (F-M597)",
+                    cand.Lang, bisKette, ketteTakt.ElapsedMilliseconds);
+                abstand.Restart();
 
                     // F-M590: drei Spuren hintereinander ohne Antwort irgendeiner Quelle — dann sind die
                     // Seiten weg und der Lauf hat keinen Sinn mehr. Eine einzelne tote Seite ist KEIN

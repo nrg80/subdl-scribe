@@ -819,6 +819,11 @@ internal static class Program
             && uploadSource597.Contains("quellenMs = takt.ElapsedMilliseconds; // F-M597", StringComparison.Ordinal)
             && uploadSource597.Contains("slotMs = takt.ElapsedMilliseconds; // F-M597", StringComparison.Ordinal)
             && uploadSource597.Contains("versandMs = takt.ElapsedMilliseconds; // F-M597", StringComparison.Ordinal));
+        Check("F-M597: auch die Schleife zwischen zwei Spuren wird vermessen",
+            uploadSource597.Contains("var abstand = System.Diagnostics.Stopwatch.StartNew();", StringComparison.Ordinal)
+            && uploadSource597.Contains("long bisKette = abstand.ElapsedMilliseconds;", StringComparison.Ordinal)
+            && uploadSource597.Contains("[Sub Scribe] TAKT-SPUR {Lang} — gap since the last track {Abstand} ms, of which the chain {Kette} ms (F-M597)", StringComparison.Ordinal)
+            && uploadSource597.Contains("abstand.Restart();", StringComparison.Ordinal));
         Check("F-M597: die Zeile nennt alle vier Phasen und liegt auf Detail",
             uploadSource597.Contains("[Sub Scribe] TAKT {Name} [{Lang}] — qa {Qa} ms, sources {Quellen} ms, slot wait {Slot} ms, send {Versand} ms, total {Gesamt} ms (F-M597)", StringComparison.Ordinal)
             && uploadSource597.Contains("qaMs, quellenMs - qaMs, slotMs - quellenMs, versandMs - slotMs, takt.ElapsedMilliseconds", StringComparison.Ordinal)

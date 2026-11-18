@@ -587,7 +587,7 @@
     },
     "T307": {
       "suite": "endpoints",
-      "checks": 3
+      "checks": 4
     }
   }
 }

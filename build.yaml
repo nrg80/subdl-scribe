@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.470"
+version: "12.1.12.471"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.471: the loop between two tracks is timed too — the gap since the last track and the chain's share of it.
   v12.1.12.470: every track carries a stopwatch — qa, sources, slot wait and send are timed and logged on detail.
   v12.1.12.469: the look-ahead holds three files instead of one, worked off by a single pump, so skipped files no longer waste it.
   v12.1.12.468: the next file is extracted while the current one uploads, so the rate setting becomes the actual rate; a cancelled run now really stops ffmpeg.
