@@ -32,7 +32,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 24 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 27 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
-- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 44 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 45 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 19 requirements
 - [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 48 requirements
 - [16. Non-Goals](#16-non-goals)
