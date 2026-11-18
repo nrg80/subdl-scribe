@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.476",
-        "changelog": "v12.1.12.476: the pack verdict is stored with a signature of its members; a new signature means a new attempt.",
+        "version": "12.1.12.477",
+        "changelog": "v12.1.12.477: create, look again, and if the title is not there the pair is settled; the film id is probed before any upload; a source's no is remembered per content.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.476-dev/Jellyfin.Plugin.SubdlSync_12.1.12.476.zip",
-        "checksum": "4c58eb4dc8a8c451e40614a2ce866194",
-        "timestamp": "2026-11-18T14:25:37Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.477-dev/Jellyfin.Plugin.SubdlSync_12.1.12.477.zip",
+        "checksum": "af4ee931c8e329bc4d02adfe017bcda6",
+        "timestamp": "2026-11-18T14:47:49Z"
       }
     ]
   }
