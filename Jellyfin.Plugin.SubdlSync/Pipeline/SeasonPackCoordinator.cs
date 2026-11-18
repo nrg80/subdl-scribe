@@ -404,6 +404,24 @@ public sealed class SeasonPackCoordinator
             }
         }
 
+        // F-M600 (Operator-Freigabe 18.11.2026: „Ja", nach der Messung „8 Versuche, 45,7 s, 0 Packs"):
+        // bevor die erste Folge entpackt wird, fragt der Pack den Store, ob eine Folge ohnehin nicht
+        // beitreten kann — keine Spur dieser Sprache, oder alle Spuren schon gesperrt. Ein Pack, der an
+        // Episode 3 scheitert, hat vorher Episode 1 und 2 umsonst entpackt (tt9737326: 20 s). Der Grund
+        // wird genannt, damit die Zeile nicht wie ein stiller Ausfall aussieht.
+        foreach (int episode in SeasonPack.AiredNumbers(aired))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (_filler.EpisodeCannotJoin(imdbId, season, episode, lang, hi, out string vorabGrund))
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[Sub Scribe] season pack skipped before any extraction — {Imdb} S{Season} [{Lang}]: episode {Episode} cannot join ({Reason}), and {State} (F-M600).",
+                    imdbId, season, SeasonPack.LangTag(lang, hi), episode, vorabGrund, stateSentence);
+                return;
+            }
+        }
+
         var group = new List<Candidate>(aired.Count);
         foreach (int episode in SeasonPack.AiredNumbers(aired))
         {

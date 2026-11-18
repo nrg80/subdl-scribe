@@ -115,6 +115,15 @@ internal static class Program
         public IReadOnlyCollection<(string Language, bool HearingImpaired)> FileLanguages(string imdbId, int season)
             => InFiles;
 
+        /// <summary>F-M600: Folgen, von denen der Store schon weiss, dass sie nicht beitreten koennen.</summary>
+        public HashSet<int> CannotJoin { get; } = new();
+
+        public bool EpisodeCannotJoin(string imdbId, int season, int episode, string lang, bool hearingImpaired, out string reason)
+        {
+            reason = CannotJoin.Contains(episode) ? "every track of this language is already refused in the store (1)" : string.Empty;
+            return CannotJoin.Contains(episode);
+        }
+
         public Task<SeasonPackCoordinator.Candidate?> FillAsync(
             string imdbId, int season, int episode, string lang, bool hearingImpaired, CancellationToken ct)
         {

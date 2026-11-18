@@ -4160,7 +4160,7 @@ public sealed class UploadPipeline : IPackFiller
         // Folgenzahl-Abfragen (IMDb/TMDb) und der Sprachblick in die Dateien. Alles auf `Detail`.
         var paketTakt = System.Diagnostics.Stopwatch.StartNew();
         long walkMs = 0, airedMs = 0, dateiMs = 0;
-        int airedCalls = 0, dateiScans = 0;
+        int airedCalls = 0, dateiScans = 0, airedAusStore = 0;
 
         // The same collection the run itself uses (path scope, not library name — F-M189), so the
         // seasons judged here are the seasons this run can actually see.
@@ -4247,11 +4247,29 @@ public sealed class UploadPipeline : IPackFiller
                 continue;
             }
 
-            tmdbOf.TryGetValue(entry.Key, out string? tmdbId);
+            // F-M601 (Operator 18.11.2026: „erst store, wenn der nix hat von tmdb ziehen und dann in
+            // den store einspeichern"): die Folgenzahl steht im Store. Gemessen 18.11.2026: 79 Aufrufe
+            // = 16.248 ms, gut ein Fuenftel der Pack-Phase — und nach jedem Neustart wieder, weil
+            // SeasonEpisodeIndex nur im Arbeitsspeicher haelt.
+            IReadOnlyList<int>? aired = null;
             long airedVorher = paketTakt.ElapsedMilliseconds;
-            var aired = await SeasonEpisodeIndex.AiredAsync(entry.Key.Item1, entry.Key.Item2, tmdbId, _config.TmdbApiKey, _logger, ct).ConfigureAwait(false);
-            airedMs += paketTakt.ElapsedMilliseconds - airedVorher;
-            airedCalls++;
+            if (AiredSeasonStore.TryGet(entry.Key.Item1, entry.Key.Item2, out var gespeichert)
+                && AiredSeasonStore.Covers(gespeichert, entry.Value))
+            {
+                aired = gespeichert;
+                airedAusStore++;
+            }
+            else
+            {
+                tmdbOf.TryGetValue(entry.Key, out string? tmdbId);
+                aired = await SeasonEpisodeIndex.AiredAsync(entry.Key.Item1, entry.Key.Item2, tmdbId, _config.TmdbApiKey, _logger, ct).ConfigureAwait(false);
+                airedMs += paketTakt.ElapsedMilliseconds - airedVorher;
+                airedCalls++;
+                if (aired is { Count: > 0 })
+                {
+                    AiredSeasonStore.Put(entry.Key.Item1, entry.Key.Item2, aired);
+                }
+            }
             if (aired == null)
             {
                 LogUtil.Normal(
@@ -4414,8 +4432,8 @@ public sealed class UploadPipeline : IPackFiller
                     // Summe, mit der niemand etwas optimieren kann.
                     LogUtil.Detail(
                     _logger,
-                    "[Sub Scribe] PACK — planning done: {Count} season(s), aired lookups {Calls} call(s) {Aired} ms, file language scans {Scans} {Datei} ms, total {Gesamt} ms (F-M599)",
-                    result.Count, airedCalls, airedMs, dateiScans, dateiMs, paketTakt.ElapsedMilliseconds);
+                    "[Sub Scribe] PACK — planning done: {Count} season(s), aired lookups {Calls} call(s) {Aired} ms ({FromStore} from the store), file language scans {Scans} {Datei} ms, total {Gesamt} ms (F-M599/F-M601)",
+                    result.Count, airedCalls, airedMs, airedAusStore, dateiScans, dateiMs, paketTakt.ElapsedMilliseconds);
 
                     return result;
                     }
@@ -4690,6 +4708,64 @@ public sealed class UploadPipeline : IPackFiller
         });
 
         return item?.Path != null && FindFillStreams(item, lang, hearingImpaired).Count > 0;
+    }
+
+    /// <summary>
+    /// F-M600: die billige Vorabfrage fuer die Pack-Phase. Zwei Gruende, die der Store schon kennt:
+    /// die Datei hat keine Textspur dieser Sprache (dann kann die Folge nie beitreten), oder jede
+    /// Spur dieser Sprache ist im Store bereits gesperrt (dann wird sie nicht mehr entpackt, F-M443).
+    /// Beides kostet eine Spurenliste und ein paar Store-Blicke — keine Extraktion.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="lang">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <param name="reason">Why the episode cannot join.</param>
+    /// <returns>True when the episode is provably unable to join.</returns>
+    public bool EpisodeCannotJoin(string imdbId, int season, int episode, string lang, bool hearingImpaired, out string reason)
+    {
+        reason = string.Empty;
+
+        BaseItem? item = SeasonItems(imdbId, season).FirstOrDefault(candidate =>
+        {
+            var (candidateImdb, _, candidateSeason, candidateNumber, isSeries) = ResolveIdsRaw(candidate);
+            return isSeries
+                   && candidateNumber == episode
+                   && candidateSeason == season
+                   && string.Equals(candidateImdb, imdbId, StringComparison.OrdinalIgnoreCase);
+        });
+
+        if (item?.Path == null)
+        {
+            reason = "the episode is not in the library";
+            return true;
+        }
+
+        var positions = FindFillStreams(item, lang, hearingImpaired);
+        if (positions.Count == 0)
+        {
+            reason = "no embedded text track for this language and variant";
+            return true;
+        }
+
+        string? mediaHash = MediaHashFor(item.Path);
+        if (string.IsNullOrWhiteSpace(mediaHash))
+        {
+            // Ohne Hash kein Urteil aus dem Store — dann entscheidet wie bisher die Extraktion.
+            return false;
+        }
+
+        var gesperrt = positions
+            .Where(position => SpurIstGesperrt(mediaHash, position, lang, hearingImpaired, isSeries: true))
+            .ToList();
+        if (gesperrt.Count == positions.Count)
+        {
+            reason = $"every track of this language is already refused in the store ({gesperrt.Count})";
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

@@ -411,7 +411,10 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
 
         // F-M542: the TMDb answers live in the store now, so a restart does not re-ask them.
         Jellyfin.Plugin.SubScribe.Registry.TmdbAnswerStore.Attach(_sharedDbContext.Context);
-    }
+
+        // F-M601: the aired episode numbers of a season live in the store too.
+        Jellyfin.Plugin.SubScribe.Registry.AiredSeasonStore.Attach(_sharedDbContext.Context);
+        }
 
     /// <inheritdoc />
     public override string Name => "Sub Scribe";
@@ -493,6 +496,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
                         // seine Verdrahtung — deshalb steht der Aufruf jetzt an BEIDEN Stellen, an
                         // denen ein Kontext entsteht.
                         Jellyfin.Plugin.SubScribe.Registry.TmdbAnswerStore.Attach(_sharedDbContext.Context);
+                        Jellyfin.Plugin.SubScribe.Registry.AiredSeasonStore.Attach(_sharedDbContext.Context);
                     }
                 }
             }

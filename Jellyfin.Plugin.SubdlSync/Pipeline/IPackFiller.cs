@@ -74,4 +74,20 @@ public interface IPackFiller
     /// <param name="season">Season number.</param>
     /// <returns>The pairs found in the files of that season.</returns>
     IReadOnlyCollection<(string Language, bool HearingImpaired)> FileLanguages(string imdbId, int season);
+
+    /// <summary>
+    /// F-M600 (Operator-Freigabe 18.11.2026: „Ja"): kann diese Folge gar nicht in den Pack, und zwar
+    /// aus einem Grund, den der Store schon kennt? Gefragt wird ohne jede Extraktion — nur die
+    /// Spurenliste der Datei und die Urteile im Store. Zweck: ein Pack, der an einer einzigen Folge
+    /// scheitert, soll nicht erst die Folgen davor entpacken. Gemessen 18.11.2026: 8 Versuche,
+    /// 45,7 s, **0 Packs** — der teuerste (tt9737326) brauchte 20 s, weil erst Episode 3 das Tor riss.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="lang">SubDL language code.</param>
+    /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <param name="reason">Why the episode cannot join, when it cannot.</param>
+    /// <returns>True when the store and the stream list already prove the episode cannot join.</returns>
+    bool EpisodeCannotJoin(string imdbId, int season, int episode, string lang, bool hearingImpaired, out string reason);
 }

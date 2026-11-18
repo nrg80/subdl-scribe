@@ -139,6 +139,7 @@ public sealed class ScribeDbContext : IDisposable
         _db.Database.EnsureCreated();
         EnsurePacksTable();
         EnsureTmdbAnswersTable();
+        EnsureAiredSeasonsTable();
         EnsureReportColumns();
         EnsureStatusColumns();
         EnsurePackColumns();
@@ -316,6 +317,30 @@ public sealed class ScribeDbContext : IDisposable
         catch (Exception ex)
         {
             _logger?.LogWarning("[Sub Scribe] could not create the tmdb_answers table (continuing): {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// F-M601: creates the <c>aired_seasons</c> table on a data file that predates it. Same shape and
+    /// same reason as <see cref="EnsureTmdbAnswersTable"/>: <c>EnsureCreated</c> builds a schema only
+    /// when the FILE is new, and a missing table would throw on the first stored answer instead of at
+    /// startup. Name and mapping are identical on purpose (<c>aired_seasons</c> both here and in
+    /// <c>OnModelCreating</c>) — a table that is created under one name and read under another is
+    /// dead weight that looks like a working cache.
+    /// </summary>
+    private void EnsureAiredSeasonsTable()
+    {
+        try
+        {
+            _db.Database.ExecuteSqlRaw(
+                "CREATE TABLE IF NOT EXISTS aired_seasons ("
+                + "Id TEXT NOT NULL PRIMARY KEY, "
+                + "Value TEXT NOT NULL DEFAULT '', "
+                + "Written TEXT NOT NULL DEFAULT '');");
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("[Sub Scribe] could not create the aired_seasons table (continuing): {Msg}", ex.Message);
         }
     }
 
@@ -1260,6 +1285,9 @@ public sealed class ScribeSqliteContext : DbContext
     /// <summary>The published season packs — one row per season, language and variant (F-M390).</summary>
     public DbSet<PackEntity> PackRows => Set<PackEntity>();
 
+    /// <summary>F-M601: the aired episode numbers per season, so a restart does not re-ask IMDb/TMDb.</summary>
+    public DbSet<AiredSeasonEntity> AiredSeasonRows => Set<AiredSeasonEntity>();
+
     /// <summary>
     /// Sets the pragmas this store runs with. Called once per context, right after the schema exists.
     /// <para>
@@ -1438,6 +1466,13 @@ public sealed class ScribeSqliteContext : DbContext
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.ImdbId);
             e.HasIndex(x => x.Season);
+        });
+
+        // F-M601: explicit name, so the table created by EnsureAiredSeasonsTable is the one EF reads.
+        modelBuilder.Entity<AiredSeasonEntity>(e =>
+        {
+            e.ToTable("aired_seasons");
+            e.HasKey(x => x.Id);
         });
     }
 }

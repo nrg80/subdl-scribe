@@ -809,6 +809,51 @@ internal static class Program
         Check("F-M593: die Vorgabe im Konfigurationsmodell ist 450",
             configSource593.Contains("UploadsPerHour = 450;", StringComparison.Ordinal));
 
+        // --- F-M601: die Folgenzahl liegt im Store ---------------------------------------------------
+        var upload601 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        var store601 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/AiredSeasonStore.cs"));
+        var ctx601 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"));
+        var plugin601 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Plugin.cs"));
+        Check("F-M601: der Store kann lesen, schreiben, anhaengen und decken",
+            store601.Contains("public static class AiredSeasonStore", StringComparison.Ordinal)
+            && store601.Contains("public static bool TryGet(string imdbId, int season, out IReadOnlyList<int> numbers)", StringComparison.Ordinal)
+            && store601.Contains("public static void Put(string imdbId, int season, IReadOnlyList<int> numbers)", StringComparison.Ordinal)
+            && store601.Contains("public static void Attach(ScribeSqliteContext? db)", StringComparison.Ordinal)
+            && store601.Contains("public static bool Covers(IReadOnlyList<int> stored, IEnumerable<int> onDisk)", StringComparison.Ordinal));
+        Check("F-M601: Tabellenname in Schema und Anlage ist DERSELBE",
+            ctx601.Contains("CREATE TABLE IF NOT EXISTS aired_seasons (", StringComparison.Ordinal)
+            && ctx601.Contains("e.ToTable(\"aired_seasons\");", StringComparison.Ordinal));
+        Check("F-M601: erst der Store, dann IMDb/TMDb, dann einspeichern",
+            upload601.Contains("if (AiredSeasonStore.TryGet(entry.Key.Item1, entry.Key.Item2, out var gespeichert)", StringComparison.Ordinal)
+            && upload601.Contains("&& AiredSeasonStore.Covers(gespeichert, entry.Value)", StringComparison.Ordinal)
+            && upload601.Contains("aired = await SeasonEpisodeIndex.AiredAsync(", StringComparison.Ordinal)
+            && upload601.Contains("AiredSeasonStore.Put(entry.Key.Item1, entry.Key.Item2, aired);", StringComparison.Ordinal));
+        Check("F-M601: der Store haengt an BEIDEN Stellen, an denen ein Kontext entsteht (F-M545)",
+            plugin601.Split("AiredSeasonStore.Attach(_sharedDbContext.Context);").Length - 1 == 2);
+        Check("F-M601: die Planungszeile nennt, wie viele Antworten aus dem Store kamen",
+            upload601.Contains("({FromStore} from the store)", StringComparison.Ordinal)
+            && upload601.Contains("airedAusStore++", StringComparison.Ordinal));
+
+        // --- F-M600: die Pack-Phase fragt vorher, ob eine Folge ohnehin nicht beitreten kann ---------
+        var ipack600 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/IPackFiller.cs"));
+        var coord600 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+        var upload600 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        Check("F-M600: der Pack-Filler kann vorab sagen, ob eine Folge nicht beitreten kann",
+            ipack600.Contains("bool EpisodeCannotJoin(string imdbId, int season, int episode, string lang, bool hearingImpaired, out string reason);", StringComparison.Ordinal)
+            && upload600.Contains("public bool EpisodeCannotJoin(string imdbId, int season, int episode, string lang, bool hearingImpaired, out string reason)", StringComparison.Ordinal));
+        Check("F-M600: die Vorabfrage kostet keine Extraktion — Spurenliste und Store-Urteile",
+            upload600.Contains("var positions = FindFillStreams(item, lang, hearingImpaired);", StringComparison.Ordinal)
+            && upload600.Contains("SpurIstGesperrt(mediaHash, position, lang, hearingImpaired, isSeries: true)", StringComparison.Ordinal)
+            && !upload600.Substring(upload600.IndexOf("public bool EpisodeCannotJoin(", StringComparison.Ordinal), 2600).Contains("ExtractAllAsync", StringComparison.Ordinal));
+        Check("F-M600: die Staffel wird VOR der ersten Extraktion geprueft und der Grund genannt",
+            coord600.Contains("season pack skipped before any extraction — {Imdb} S{Season} [{Lang}]: episode {Episode} cannot join ({Reason}), and {State} (F-M600).", StringComparison.Ordinal)
+            && coord600.IndexOf("_filler.EpisodeCannotJoin(", StringComparison.Ordinal)
+               < coord600.IndexOf("var group = new List<Candidate>(aired.Count);", StringComparison.Ordinal));
+        Check("F-M600: das Urteil ist dasselbe wie vorher — es kommt nur frueher",
+            upload600.Contains("reason = $\"every track of this language is already refused in the store ({gesperrt.Count})\"", StringComparison.Ordinal)
+            && upload600.Contains("reason = \"no embedded text track for this language and variant\";", StringComparison.Ordinal)
+            && upload600.Contains("return (null, \"every track of this language is already refused in the store\");", StringComparison.Ordinal));
+
         // --- F-M599: die Pack-Phase wird von innen vermessen ----------------------------------------
         var uploadSource599 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         Check("F-M599: die Pack-Planung nennt Bibliotheks-Walk, Folgenzahl-Abfragen und Datei-Sprachscan",
@@ -817,7 +862,7 @@ internal static class Program
             && uploadSource599.Contains("airedMs += paketTakt.ElapsedMilliseconds - airedVorher;", StringComparison.Ordinal)
             && uploadSource599.Contains("dateiMs += paketTakt.ElapsedMilliseconds - dateiVorher;", StringComparison.Ordinal));
         Check("F-M599: die Planung schliesst mit einer Summenzeile ab",
-            uploadSource599.Contains("PACK — planning done: {Count} season(s), aired lookups {Calls} call(s) {Aired} ms, file language scans {Scans} {Datei} ms, total {Gesamt} ms (F-M599)", StringComparison.Ordinal));
+            uploadSource599.Contains("PACK — planning done: {Count} season(s), aired lookups {Calls} call(s) {Aired} ms ({FromStore} from the store), file language scans {Scans} {Datei} ms, total {Gesamt} ms (F-M599/F-M601)", StringComparison.Ordinal));
         Check("F-M599: die Fuell-Phase (Netz) ist von der Planung getrennt gemessen",
             uploadSource599.Contains("var fuellTakt = System.Diagnostics.Stopwatch.StartNew();", StringComparison.Ordinal)
             && uploadSource599.Contains("PACK — fill phase: {N} attempt(s) in {Ms} ms (F-M599)", StringComparison.Ordinal));
