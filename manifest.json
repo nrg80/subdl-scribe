@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.469",
-        "changelog": "v12.1.12.469: the look-ahead holds three files instead of one, worked off by a single pump, so skipped files no longer waste it.",
+        "version": "12.1.12.470",
+        "changelog": "v12.1.12.470: every track carries a stopwatch — qa, sources, slot wait and send are timed and logged on detail.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.469-dev/Jellyfin.Plugin.SubdlSync_12.1.12.469.zip",
-        "checksum": "49880f33eea46e1929985552192c97db",
-        "timestamp": "2026-11-18T11:55:51Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.470-dev/Jellyfin.Plugin.SubdlSync_12.1.12.470.zip",
+        "checksum": "c6d6349727385854bb9ca8a4604bb761",
+        "timestamp": "2026-11-18T12:25:01Z"
       }
     ]
   }
