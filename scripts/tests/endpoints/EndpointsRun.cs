@@ -871,7 +871,8 @@ internal static class Program
             && tfs615.Contains("title store: reading {Key} failed", StringComparison.Ordinal));
         Check("F-M615: auch ein nicht angehaengter Store und ein fehlender Eintrag sind sichtbar",
             tfs615.Contains("NOT attached — the ladder can only count within the run", StringComparison.Ordinal)
-            && tfs615.Contains("not in the store (F-M615)", StringComparison.Ordinal)
+            && (tfs615.Contains("NOT in the store — the ladder runs again (F-M618)", StringComparison.Ordinal)
+                || tfs615.Contains("not in the store (F-M615)", StringComparison.Ordinal))
             && tfs615.Contains("is closed ({Reason}, attempts {Attempts})", StringComparison.Ordinal));
         Check("F-M615: das Plugin haengt das Protokoll beim Start an",
             pl615.Contains("TitleFailureStore.AttachLogger(logger);", StringComparison.Ordinal));
