@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.482",
-        "changelog": "v12.1.12.482: the pack's fill verdict is stored with the season signature — no re-extraction while nothing changed.",
+        "version": "12.1.12.483",
+        "changelog": "v12.1.12.483: no tvst id read-back — 88 tries, 0 readable ids, ~15 s each; own marker instead.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.482-dev/Jellyfin.Plugin.SubdlSync_12.1.12.482.zip",
-        "checksum": "8d24562fa91198fc17fa1f8e93835372",
-        "timestamp": "2026-11-18T17:32:04Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.483-dev/Jellyfin.Plugin.SubdlSync_12.1.12.483.zip",
+        "checksum": "d2ae50e191af6b10ad563428593ce3ca",
+        "timestamp": "2026-11-18T18:14:24Z"
       }
     ]
   }
