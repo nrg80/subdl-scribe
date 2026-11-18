@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.482.
+**Status:** Implementation — v12.1.12.483.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -32,7 +32,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 24 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 27 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
-- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 38 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 39 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 19 requirements
 - [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 48 requirements
 - [16. Non-Goals](#16-non-goals)
@@ -1709,6 +1709,8 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M605 [U]:** **Das Nein einer Quelle wird gemerkt.** Operator-Freigabe 18.11.2026 („Ok", nach der Frage „Ja aber legen wir nicht auch bei tvst neu an?"): F-M603 schloss nur den Fall „angelegt, Kennung nicht lesbar". Jeder andere Zustand einer Adresse — bei tvsubtitles `would-create`, `create-already-tried`, `refused`, `unclear`, `no-title`, `no-year`, bei moviesubtitles die entsprechenden Film-Zustände — endete weiterhin als SKIP **ohne** Marke, das Paar blieb offen und die Datei kehrte in jeden Lauf zurück. Jetzt merkt der Store das inhaltliche Nein je **Spur, Quelle und Inhalt** (`source_refusals`, Schlüssel `mediaHash|subPos|langTag|quelle`, Signatur = Inhalts-Hash): dieselbe Spur wird bei demselben Text nicht erneut gefragt, ein anderer Text (oder ein neu geripptes Medium) fragt wieder. **Nicht** gemerkt werden vorübergehende Neins (Rate Limit, Zeitüberschreitung, Abbruch) — die dürfen und müssen beim nächsten Lauf neu gefragt werden; hat eine Quelle den Inhalt genommen, wird ein altes Nein vergessen. Geprüft von T315.
 
+**F-M612 [U]:** **Die tvst-Kennung wird nicht mehr nachgelesen.** Operator-Frage 18.11.2026: „Brauchen wir die kennung irgendwo für? Wenn nicht kann es weg, schreiben wir keine oder eine eigene". Antwort: nein — die Nummer adressiert nichts. Sie stand nur als Marke im Store („für tvst hochgeladen"), und dafür schreibt `MarkOf` seit jeher die eigene Marke `own:tvsubtitles:<Zeit>:<hex>`. F-M488 hatte das Nachlesen eingebaut, weil die Seite auf den Upload keine Id zurückgibt; die 60-s-Frist war der teuerste Posten des Laufs: gemessen 18.11.2026 **88 Versuche, 0 lesbare Kennungen, je ~15 s** (größte `send`-Werte 15,3 / 16,0 / 17,3 s), bei einer Datei mit ~24 Spuren sechs Minuten für nichts. Der Aufruf ist entfernt; die Logzeile sagt jetzt „none — we write our own marker". Die Methode `FindUploadedIdAsync` bleibt im Client (sie ist belegt und getestet), wird aber von keinem Upload mehr benutzt. Geprüft von T322.
+
 **F-M611 [U]:** **Das Pack-Urteil wird jetzt auch für den Füllversuch gespeichert.** Operator-Anweisung 18.11.2026: „1x ist ok. Dann verdict und status speichern, wenn der status sich ändert, neu versuchen ein pack zu bilden" — und er hatte recht: die Skips des Füllversuchs (`episode N cannot join`) wurden **nie** gespeichert, nur die der Planung. Gemessen: dieselbe Staffel wurde am 18.11. **17 Mal an einem Tag** komplett entpackt und jedes Mal an derselben Folge abgebrochen (`tt8806524` S2 [JA]: „none of the 1 track(s) of this language qualifies (the text speaks ZH)"). Jetzt gibt die Pipeline dem Koordinator die Datei-Signatur der Staffel (Luftzahl + Größe + Speicherdatum je Folgedatei, wie F-M604); jeder Abbruch — vor der Extraktion (F-M600), nach der Extraktion (F-M442) und bei fehlender Sprache in den Dateien — schreibt `NoPack` mit dieser Signatur in `pack_seasons`, und der nächste Lauf prüft zuerst die Signatur: gleich ⇒ **keine Extraktion**, geändert ⇒ neuer Versuch. Geprüft von T321.
 
 **F-M610 [U]:** **Die Leiter schließt nur noch, was sie belegen kann.** Operator-Frage 18.11.2026: „Anzeichen dafür das wir zuviel schließen/ uberblocken?" — ja, zwei. **(1)** `MitTitelLeiterAsync` schloss nach dem vierten Fehlschlag **unabhängig vom Grund**, also auch nach einem Timeout oder einer Serverstörung — im Widerspruch zu F-M609, das genau das für die Paare verbietet. **(2)** `created-id-not-readable` und `exists-id-not-readable` sind ein **Beleg** („die Seite führt den Titel, nur die Kennung ist nicht lesbar") und **kein Nein** — trotzdem lag danach der ganze Titel für immer in der Sperre, samt aller seiner Spuren; gemessen 18.11.2026: **12 Titel**, 57 Zeilen `exists-id-not-readable`, 29 Zeilen `exists-other-year`. Jetzt gilt: ein Beleg zählt als Erfolg der Leiter und das Paar wird über F-M603 geschlossen, der Titel bleibt offen; `unclear` zählt nicht als Fehlschlag und schließt nichts (Antwort `NoVerdict`, nächster Lauf fragt neu); geschlossen wird nur ein inhaltliches Nein (`not-found` nach dem Anlegen, `exists-other-year`, `create-failed`, `refused`). Bestehende Sperrzeilen, die auf einem Beleg beruhen, werden beim Lesen **verworfen** und aus dem Store entfernt — kein Aufräumlauf nötig. Geprüft von T320.
@@ -2543,6 +2545,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
 
 **T303:** Der Takt ist 50–500 einstellbar, Vorgabe 450, und der Hinweis nennt SubDLs 500/h (F-M593) — ein Feld für Upload und Download: die Beschriftung im Formular, `max="500"` am Feld, die Prüfung beim Speichern samt Rückfall und die Beschreibung OHNE SubDL-Hinweis und die Vorgabe im Konfigurationsmodell — **4 Prüfungen** in `endpoints` (284 → 288).
+
+**T322:** Die tvst-Kennung (F-M612): kein Nachlesen mehr, eigene Marke — **2 Prüfungen** in `endpoints`.
 
 **T321:** Das Pack-Urteil zum Füllversuch (F-M611): Signatur, gespeichertes Nein, beide Abbruchwege, Weitergabe aus der Planung — **4 Prüfungen** in `endpoints`.
 

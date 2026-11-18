@@ -831,6 +831,16 @@ internal static class Program
             db605.Contains("CREATE TABLE IF NOT EXISTS source_refusals (", StringComparison.Ordinal)
             && db605.Contains("e.ToTable(\"source_refusals\");", StringComparison.Ordinal));
 
+        // --- F-M612: die tvst-Kennung wird nicht mehr nachgelesen -------------------------------------
+        var tvstEp612 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/Endpoints/TvSubtitlesEndpoints.cs"));
+        Check("F-M612: der tvst-Versand wartet nicht mehr auf eine Kennung, die es nicht gibt",
+            tvstEp612.Contains("das Nachlesen der Kennung ist WEG", StringComparison.Ordinal)
+            && !tvstEp612.Contains("FindUploadedIdAsync(", StringComparison.Ordinal)
+            && tvstEp612.Contains("string? id = null;", StringComparison.Ordinal));
+        Check("F-M612: die eigene Marke steht bereit, damit das Paar trotzdem geschlossen wird",
+            up605.Contains("we write our own marker (F-M612)", StringComparison.Ordinal)
+            && up605.Contains("Provenance.OwnUploadId", StringComparison.Ordinal));
+
         // --- F-M611: das Pack-Urteil zum Fuellversuch speichern -------------------------------------
         var coord611 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
         Check("F-M611: der Fuellversuch schreibt sein Urteil mit der Signatur der Staffel",

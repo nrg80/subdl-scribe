@@ -7075,7 +7075,7 @@ public sealed class UploadPipeline : IPackFiller
             answer.Ok ? "sent" : "refused",
             string.IsNullOrEmpty(answer.Reason) ? string.Empty : ": " + answer.Reason);
         LogUtil.PerItem(_config.LogMode, _logger,
-            "[tvsubtitles] id of our upload: {Id}", answer.Id ?? "not readable");
+            "[tvsubtitles] id of our upload: {Id}", answer.Id ?? "none — we write our own marker (F-M612)");
         // F-M609: dasselbe Urteil fuer die Serien-Adresse.
         if (answer.Ok)
         {

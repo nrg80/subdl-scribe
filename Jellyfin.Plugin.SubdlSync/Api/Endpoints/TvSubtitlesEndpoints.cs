@@ -273,25 +273,15 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
         var result = await _client.UploadAsync(upload, _dryRun, cancellationToken).ConfigureAwait(false);
         var ok = !_dryRun && result.Status is >= 200 and < 300;
 
-        // F-M488: the site does not answer the upload with an id, so the id is read back from the
-        // episode page afterwards. Best effort with a short leash: an upload that went through must not
-        // be reported as failed because the read-back did not work.
+        // F-M612 (Operator-Entscheidung 18.11.2026: „Brauchen wir die kennung irgendwo für? Wenn nicht
+        // kann es weg, schreiben wir keine oder eine eigene"): das Nachlesen der Kennung ist WEG.
+        // F-M488 hatte es eingebaut, weil die Seite auf den Upload keine Id zurueckgibt; nachgelesen
+        // wurde sie von der Folgenseite, mit 60 s Frist. Gemessen am 18.11.2026: **88 Versuche, 0
+        // lesbare Kennungen, je ~15 s Wartezeit** — bei einer Datei mit ~24 Spuren sechs Minuten
+        // Laufzeit fuer nichts. Gebraucht wird die Zahl nirgends: sie steht nur als Marke im Store
+        // („fuer tvst hochgeladen"), und `MarkOf` schreibt ohne sie die eigene Marke
+        // `own:tvsubtitles:<Zeit>:<hex>`. Adressiert wird die Seite nie mit dieser Nummer.
         string? id = null;
-        if (ok)
-        {
-            try
-            {
-                using var leash = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                leash.CancelAfter(TimeSpan.FromSeconds(60));
-                id = await _client.FindUploadedIdAsync(
-                    ticket.ShowName, ticket.Season, ticket.Episode, ticket.Language, ticket.Release, leash.Token)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning("[tvsubtitles] upload id could not be read back: {Error}", ex.Message);
-            }
-        }
 
         return new EndpointAnswer(
             Provider,
