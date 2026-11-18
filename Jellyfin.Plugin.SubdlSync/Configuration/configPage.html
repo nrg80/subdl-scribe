@@ -249,7 +249,7 @@
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="UploadsPerHour">Transfer rate per hour (50&ndash;500)</label>
                             <input id="UploadsPerHour" name="UploadsPerHour" type="number" is="emby-input" min="50" max="500" />
-                            <div class="fieldDescription">Paces the gap between two real transfers (uploads or downloads). Default: 450. SubDL temporarily blocks any prolonged upload/downloads at a rate above 500 per hour.</div>
+                            <div class="fieldDescription">Paces the gap between two real transfers (uploads or downloads). Default: 450.</div>
                         </div>
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="MinCallPauseSec">Min. pause between API calls, seconds (0.1&#8211;10)</label>
@@ -1180,7 +1180,7 @@
                                 // F-M458b (operator order 10.11.2026): plural, like every other row —
                                 // at 36 characters it still stays under the longest label the table carries.
                                 ['Downloads: Broken subtitles reported', s.BrokenReported || 0],
-                                ['Uploads: stopped before sending', s.RejectedUpload || 0],
+                                ['Uploads qa fails not uploaded', s.RejectedUpload || 0],
                                 ['Media files: language codes added', s.LanguageCodesAllocated || 0],
                                 ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0]
                             ];

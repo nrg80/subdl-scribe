@@ -380,8 +380,8 @@ def main():
     check("the volume rows lead, download first",
           order[:2] == expected_prefix,
           "got: %s" % " | ".join(order[:2]))
-    dl = [i for i, o in enumerate(order) if o.startswith("Downloads:")]
-    up = [i for i, o in enumerate(order) if o.startswith("Uploads:")]
+    dl = [i for i, o in enumerate(order) if o.startswith("Downloads")]
+    up = [i for i, o in enumerate(order) if o.startswith("Uploads")]
     check("the remaining rows are grouped by direction, downloads before uploads",
           bool(dl) and bool(up) and max(dl) < min(up),
           "downloads at %s, uploads at %s" % (dl, up))
@@ -457,11 +457,14 @@ def main():
     # breaks, the number is right, only the sentence is false. Also asserted positively, so a rename
     # to something else has to be a deliberate act rather than a silent drift.
     # 02.11.2026 (operator): the word "discarded" read as "SubDL threw an upload away" — the row
-    # counts attempts that never left, so it now says "stopped before sending". The point of the
-    # assertion stays the same: no upload row may claim a fetch, and a rename has to be deliberate.
-    check("the upload row says stopped before sending, not fetched",
-          "Uploads: stopped before sending" in order,
-          "row missing or reverted: %s" % [o for o in order if o.startswith("Uploads:")])
+    # counted attempts that never left, so it said "stopped before sending".
+    # 18.11.2026 (operator, F-M595): „Stopped before sending bitte nur noch für qa fails in die
+    # Statistik. Wording: Uploads qa fails not uploaded" — the row counts ONLY the quality-gate
+    # verdicts now, and it says so. The point of the assertion stays: no upload row may claim a
+    # fetch, and a rename has to be deliberate.
+    check("the upload row says qa fails not uploaded, not fetched",
+          "Uploads qa fails not uploaded" in order,
+          "row missing or reverted: %s" % [o for o in order if o.startswith("Uploads")])
     check("and no upload row claims a fetch",
           not any(o.startswith("Uploads:") and "fetch" in o for o in order),
           "an upload row still speaks of fetching: %s" % [o for o in order if o.startswith("Uploads:")])

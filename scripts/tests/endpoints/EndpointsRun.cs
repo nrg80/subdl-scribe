@@ -800,14 +800,33 @@ internal static class Program
         Check("F-M593: das Feld heisst 50-500 und laesst nicht mehr zu",
             guiSource593.Contains("Transfer rate per hour (50&ndash;500)", StringComparison.Ordinal)
             && guiSource593.Contains("id=\"UploadsPerHour\" name=\"UploadsPerHour\" type=\"number\" is=\"emby-input\" min=\"50\" max=\"500\"", StringComparison.Ordinal));
-        Check("F-M593: der Hinweis nennt die Sperre oberhalb von 500 Uebertragungen pro Stunde",
-            guiSource593.Contains("SubDL temporarily blocks any prolonged upload/downloads at a rate above 500 per hour", StringComparison.Ordinal)
-            && guiSource593.Contains("Default: 450.", StringComparison.Ordinal));
+        Check("F-M593: die Beschreibung nennt nur noch Takt und Vorgabe — kein SubDL-Hinweis mehr",
+            guiSource593.Contains("Paces the gap between two real transfers (uploads or downloads). Default: 450.", StringComparison.Ordinal)
+            && !guiSource593.Contains("SubDL temporarily blocks", StringComparison.Ordinal));
         Check("F-M593: beim Speichern wird auf 50-500 begrenzt, der Rueckfall ist 450",
             guiSource593.Contains("Math.min(500, Math.max(50, uph))", StringComparison.Ordinal)
             && guiSource593.Contains("document.querySelector('#UploadsPerHour').value) || 450", StringComparison.Ordinal));
         Check("F-M593: die Vorgabe im Konfigurationsmodell ist 450",
             configSource593.Contains("UploadsPerHour = 450;", StringComparison.Ordinal));
+
+        // --- F-M595: die Statistik zaehlt nur die QA-Urteile --------------------------------------
+        var deltaSource595 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/StatusCounterDelta.cs"));
+        var uploadSource595 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        var guiSource595 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"));
+        Check("F-M595: der Upload-Lauf fuehrt einen eigenen QA-Zaehler neben allen Ablehnungen",
+            uploadSource595.Contains("public int RejectedQaFail { get; set; }", StringComparison.Ordinal)
+            && uploadSource595.Contains("public int RejectedCandidates { get; set; }", StringComparison.Ordinal));
+        Check("F-M595: nur das Urteil der Qualitaets-Gates setzt qaFail",
+            uploadSource595.Contains("out bool qaFail)", StringComparison.Ordinal)
+            && uploadSource595.Contains("qaFail = true;", StringComparison.Ordinal)
+            && uploadSource595.Contains("if (qaFail)", StringComparison.Ordinal)
+            && uploadSource595.Split("qaFail = true;").Length - 1 == 1);
+        Check("F-M595: die Statistik liest den QA-Zaehler, nicht alle Ablehnungen",
+            deltaSource595.Contains("rejectedUpload: uploadDry ? 0 : upload?.RejectedQaFail ?? 0", StringComparison.Ordinal)
+            && !deltaSource595.Contains("upload?.RejectedCandidates", StringComparison.Ordinal));
+        Check("F-M595: die Zeile heisst \"Uploads qa fails not uploaded\"",
+            guiSource595.Contains("['Uploads qa fails not uploaded', s.RejectedUpload || 0]", StringComparison.Ordinal)
+            && !guiSource595.Contains("Uploads: stopped before sending", StringComparison.Ordinal));
 
         // --- F-M594: der Takt als Slot vor dem Transfer -------------------------------------------
         var limiterSource594 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/GlobalRateLimiter.cs"));

@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.465"
+version: "12.1.12.466"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.466: the upload statistics row counts only quality-gate verdicts and is called "Uploads qa fails not uploaded"; the SubDL note leaves the rate-limit description.
   v12.1.12.465: the transfer rhythm is a slot before the transfer, measured from the end of the last real one, and the rate is adjustable from 50 to 500 per hour again.
   v12.1.12.464: the rate-limit note now states what SubDL actually does -- it temporarily blocks prolonged transfers above 500 per hour.
   v12.1.12.463: the transfer rate is adjustable from 60 to 600 per hour, default 450, and the field says that SubDL allows 500 uploads or downloads per hour.

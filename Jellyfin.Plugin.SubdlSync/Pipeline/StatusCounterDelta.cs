@@ -106,7 +106,8 @@ public readonly struct StatusCounterDelta
             uploaded: uploadDry ? 0 : upload?.Uploaded ?? 0,
             downloaded: downloadDry ? 0 : download?.Downloaded ?? 0,
             rejectedDownload: downloadDry ? 0 : download?.RejectedCandidates ?? 0,
-            rejectedUpload: uploadDry ? 0 : upload?.RejectedCandidates ?? 0,
+            // F-M595: die Statistik zaehlt nur die QA-Urteile, nicht jede verworfene Spur.
+            rejectedUpload: uploadDry ? 0 : upload?.RejectedQaFail ?? 0,
             fittedToAudio: downloadDry ? 0 : download?.FittedToAudio ?? 0,
             languageCodesAllocated: languageCodesAllocated,
             looseSubtitlesRenamed: looseSubtitlesRenamed,

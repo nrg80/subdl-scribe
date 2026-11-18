@@ -81,6 +81,15 @@ public class RunSummary
     public int RejectedCandidates { get; set; }
 
     /// <summary>
+    /// F-M595 (Operator-Anweisung 18.11.2026: „Stopped before sending bitte nur noch für qa fails in
+    /// die Statistik. Wording: Uploads qa fails not uploaded"): die Zahl, die als Statistik geht.
+    /// Nur Urteile der QUALITAETS-Gates (Groessenboden, Cue-Zahl, SRT-Struktur, Sync) zaehlen hier —
+    /// Duplikate, fehlende Kennungen, Extraktionsfehler und gesperrte Quellen sind Umstaende des
+    /// Laufs, kein Urteil ueber den Untertitel. `RejectedCandidates` bleibt als Laufzahl stehen.
+    /// </summary>
+    public int RejectedQaFail { get; set; }
+
+    /// <summary>
     /// F-M539: Eintraege, die vor dem ffmpeg-Durchgang als erledigt erkannt wurden — jede Textspur hat
     /// ihren Endstand im Store und keine erlaubte Quelle will noch ein Paar dieser Datei.
     /// </summary>
@@ -1886,7 +1895,7 @@ public sealed class UploadPipeline : IPackFiller
             {
                 runCt.ThrowIfCancellationRequested();
                 watchdog.Heartbeat();
-                string? qaReject = ScreenContentQa(cand.Srt, cand.Lang, runtimeMs, out string contentHash, out string? correctedLang);
+                string? qaReject = ScreenContentQa(cand.Srt, cand.Lang, runtimeMs, out string contentHash, out string? correctedLang, out bool qaFail);
                 if (qaReject != null)
                 {
                     // F-M298: `duplicate-content` says "this text is already known" — and IsContentKnown
@@ -1934,6 +1943,11 @@ public sealed class UploadPipeline : IPackFiller
                     // non-QA reasons (duplicates, missing ids), so it cannot serve as the
                     // rejected number either.
                     summary.RejectedCandidates++;
+                    // F-M595: in die STATISTIK geht nur das Qualitaets-Urteil.
+                    if (qaFail)
+                    {
+                        summary.RejectedQaFail++;
+                    }
                     summary.SkippedStreams++;
                     // The reject row itself was already written by RecordSkippedContent above —
                     // it flushes immediately (F-M68 kill-safety: a hard JF kill between reject and
@@ -2513,14 +2527,17 @@ public sealed class UploadPipeline : IPackFiller
     /// (or null when the content passes) plus the computed content hash.
     /// </summary>
 
-    private string? ScreenContentQa(string srtContent, string lang, long runtimeMs, out string contentHash, out string? correctedLang)
+    private string? ScreenContentQa(string srtContent, string lang, long runtimeMs, out string contentHash, out string? correctedLang, out bool qaFail)
     {
         correctedLang = null;
         contentHash = ContentHashRegistry.ComputeHash(srtContent);
+        qaFail = false;
 
         string? gate = GateReject(srtContent, lang, runtimeMs, out correctedLang);
         if (gate != null)
         {
+            // F-M595: ein Urteil der QUALITAETS-Gates — das ist der einzige Fall, den die Statistik zaehlt.
+            qaFail = true;
             return gate;
         }
 
@@ -3038,7 +3055,7 @@ public sealed class UploadPipeline : IPackFiller
             // incremented in the phase-1 precheck (the normal path, where the run
             // summary is in scope); counting this safety net as well would report
             // one rejection twice. This branch only runs for a direct/retry call.
-            string? qaReject = ScreenContentQa(srtContent, lang, runtimeMs, out _, out string? correctedLang);
+            string? qaReject = ScreenContentQa(srtContent, lang, runtimeMs, out _, out string? correctedLang, out _);
             if (qaReject != null)
             {
                 return UploadResult.Skipped(qaReject);
