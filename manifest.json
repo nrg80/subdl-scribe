@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.467",
-        "changelog": "v12.1.12.467: the statistics row is worded \"Uploads: QA fails not sent\".",
+        "version": "12.1.12.468",
+        "changelog": "v12.1.12.468: the next file is extracted while the current one uploads, so the rate setting becomes the actual rate; a cancelled run now really stops ffmpeg.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.467-dev/Jellyfin.Plugin.SubdlSync_12.1.12.467.zip",
-        "checksum": "e21d468860067fff7a2b2237a6fd6230",
-        "timestamp": "2026-11-18T08:55:21Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.468-dev/Jellyfin.Plugin.SubdlSync_12.1.12.468.zip",
+        "checksum": "f27c0efac1e01c227ff462c4cfbedd3c",
+        "timestamp": "2026-11-18T09:55:06Z"
       }
     ]
   }
