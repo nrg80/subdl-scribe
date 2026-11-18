@@ -2347,17 +2347,11 @@ public sealed class UploadPipeline : IPackFiller
                     }
                 }
 
-                // F-M547 (Operator-Regel 16.11.2026): „Ja. Oder gezogen wurde. Nur dann einstellbares
-                // rate limit 400/h. Immer danach. Sonst keine limits." Das Transfer-Rhythmus
-                // (3600/UploadsPerHour, ±30 %) haengt jetzt an einer ECHTEN Uebertragung dieser Datei.
-                // Vorher zahlte jede verarbeitete Datei die Pause, auch wenn nur der Store antwortete —
-                // gemessen 16.11.2026: 400/h = 9 s je Datei, ~250 Dateien je Zyklus, also rund 38
-                // Minuten Wartezeit ohne einen einzigen Netzaufruf. Die API-Pause (0,5 s) zieht der
-                // PacingHandler nach jeder externen Anfrage; hier gehoert sie nicht hin.
-                if (dieseSpurHochgeladen)
-                {
-                    await Task.Delay(_limiter.TransferPauseMs(), runCt).ConfigureAwait(false);
-                }
+                // F-M594 (Operator-Anweisung 18.11.2026): Die Pause steht nicht mehr HIER, sondern
+                // als Slot VOR dem Versand der naechsten Spur (siehe `WaitForTransferSlotAsync`).
+                // Der Grund ist gemessen: blind nach dem Transfer gewartet ergab bei 600/h 8,2 s je
+                // Spur statt 6 s, weil Extraktion und Vorbereitung obendrauf kamen. `dieseSpurHochgeladen`
+                // bleibt als Zaehler fuer die Zusammenfassung stehen — die Pause haengt nicht mehr daran.
             }
 
             // F-M88c: when every candidate of this media file has been settled and none
@@ -3273,6 +3267,13 @@ public sealed class UploadPipeline : IPackFiller
 
         if (zustaendig.Count > 0)
         {
+            // F-M594: der Slot wird VOR dem Versand dieser Spur abgewartet — gemessen ab dem Ende
+            // des letzten echten Transfers, nicht blind nach dem vorigen. Extraktion und
+            // Gate-Pruefungen der Spur sind damit Teil der Pause statt ein Zuschlag darauf.
+            // Eine Spur bekommt EINEN Slot, auch wenn zwei Quellen bedient werden (F-M587): die
+            // Rate zaehlt Spuren, sonst halbierte sie sich bei jeder zweiten Quelle.
+            await _limiter.WaitForTransferSlotAsync(ct).ConfigureAwait(false);
+
             var laeufe = new Task<UploadResult>[zustaendig.Count];
             for (int i = 0; i < zustaendig.Count; i++)
             {
@@ -3280,6 +3281,14 @@ public sealed class UploadPipeline : IPackFiller
             }
 
             var jeQuelle = await Task.WhenAll(laeufe).ConfigureAwait(false);
+
+            // F-M594: der Anker fuer den naechsten Slot. Gesetzt nur, wenn mindestens eine Quelle
+            // die Spur angenommen hat — ein Fehlschlag ohne Uebertragung soll den Takt nicht kosten
+            // (F-M547/F-M589).
+            if (jeQuelle.Any(r => r.Ok))
+            {
+                _limiter.MarkTransferDone();
+            }
 
             // F-M590: sind ALLE zustaendigen Quellen in den Timeout gelaufen, ist das ein Ausfall, kein
             // Urteil ueber den Text. Erst wenn das mehrfach hintereinander passiert, ist der Lauf

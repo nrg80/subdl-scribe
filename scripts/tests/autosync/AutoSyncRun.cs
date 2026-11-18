@@ -261,10 +261,15 @@ public static class AutoSyncRun
         if (System.IO.File.Exists(pipe))
         {
             string src = System.IO.File.ReadAllText(pipe);
+            // F-M594 (18.11.2026): the crediting pause is GONE from the pipeline — the rhythm is a
+            // slot BEFORE the fetch, measured from the end of the last real transfer, so the
+            // alignment time sits inside the pause by construction and needs no credit. The
+            // assertion follows: no crediting pause in the pipeline, and the slot instead.
             int creditSites = src.Split("_limiter.TransferPauseMsLessFit()").Length - 1;
-            bool bothGaps = creditSites == 2;
-            Check("both transfer gaps use the crediting pause",
-                bothGaps, $"{creditSites} site(s), expected 2 (main and HI)");
+            int slotSites = src.Split("await _limiter.WaitForTransferSlotAsync(ct)").Length - 1;
+            bool bothGaps = creditSites == 0 && slotSites == 1;
+            Check("the crediting pause is replaced by the transfer slot before the fetch",
+                bothGaps, $"{creditSites} crediting site(s), expected 0; {slotSites} slot(s), expected 1");
             f += bothGaps ? 0 : 1;
 
             bool measured = src.Split("SyncMeasuredAsync(").Length - 1 == 3;

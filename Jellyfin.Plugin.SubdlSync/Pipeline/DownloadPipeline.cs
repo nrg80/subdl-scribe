@@ -2498,8 +2498,11 @@ public sealed class DownloadPipeline : IDisposable
                                             moviesubtitlesDownloadId: hi.Provider == Configuration.SubtitleProvider.MovieSubtitles ? hi.Url : null));
                                         _qaFails.RecordSuccess(item.Id.ToString(), lang); // HI save resets the pair counter too
                                         summary.Downloaded++;
-                                        // F-M548: eine gezogene Datei → danach der Transfer-Rhythmus.
-                                        await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
+                                        // F-M594: keine Pause mehr HIER — der Takt sitzt als Slot vor dem
+                                        // naechsten Abruf (`WaitForTransferSlotAsync` in
+                                        // `DownloadCandidateRawAsync`) und rechnet ab dem Ende des letzten
+                                        // echten Transfers. Der Anker wurde dort gesetzt, als die Bytes kamen;
+                                        // eine Pause nach dem Ablegen zaehlte den Tonabgleich doppelt.
                                         RememberSavedLibrary(item, hiPath); // F-M473
                                         ReportOutcome(item, ItemOutcome.Done);
                                         hiSaved = true;
@@ -3455,9 +3458,8 @@ public sealed class DownloadPipeline : IDisposable
                         summary.DownloadedWithoutSignificance++;
                     }
 
-                    // F-M548: der Rhythmus nach der gezogenen Datei — beide Zweige haben Bytes geholt
-                    // und abgelegt, nur die Signifikanz unterscheidet sie.
-                    await Task.Delay(_limiter.TransferPauseMsLessFit(), ct).ConfigureAwait(false);
+                    // F-M594: derselbe Griff wie bei der HI-Fassung — der Takt ist der Slot vor dem
+                    // naechsten Abruf, nicht eine Pause nach dem Ablegen.
                     RememberSavedLibrary(item, targetPath); // F-M473
                     ReportOutcome(item, ItemOutcome.Done);
                     // F-M472: this save came out of a season pack, and the archive holding the other
@@ -4046,6 +4048,13 @@ public sealed class DownloadPipeline : IDisposable
                 Qa.QaGates.ParseSrt(DecodeSrt(corrected, cand.Language))?.CueCount ?? 0);
         }
 
+        // F-M594: Anker setzen, sobald wirklich Bytes geholt wurden. Ein Kandidat ohne Antwort
+        // (Timeout, leere Antwort, Quota) kostet den Takt nicht.
+        if (rawAttempt.Bytes is { Length: >= 100 })
+        {
+            _limiter.MarkTransferDone();
+        }
+
         return rawAttempt with { Bytes = corrected };
     }
 
@@ -4368,6 +4377,13 @@ public sealed class DownloadPipeline : IDisposable
         {
             return new CandidateAttempt(null, null, DownloadOutcome.None("source-unconfigured"));
         }
+
+        // F-M594: der Slot VOR dem Abruf — gemessen ab dem Ende des letzten echten Transfers,
+        // nicht blind nach dem Ablegen. Damit ist die eingestellte Rate die tatsaechliche Rate:
+        // Tonabgleich und Gate-Pruefungen der naechsten Spur sind Teil der Pause, kein Zuschlag.
+        // Auch die Wiederholungen dieses Abrufs (429, leere Antwort, F-M455) laufen hier durch und
+        // bekommen ihren eigenen Slot — eine Wiederholung ist ebenfalls eine Uebertragung.
+        await _limiter.WaitForTransferSlotAsync(ct).ConfigureAwait(false);
 
 
         // F-M485/F-M504: ein Kandidat wird bei SEINEM Endpunkt geholt — die SubDL-Routen (Archiv,

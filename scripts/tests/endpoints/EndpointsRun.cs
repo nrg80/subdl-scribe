@@ -797,17 +797,38 @@ internal static class Program
         // --- F-M593: Takt 100-650, Vorgabe 450, Hinweis auf SubDLs 500/h ---------------------------
         var guiSource593 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"));
         var configSource593 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"));
-        Check("F-M593: das Feld heisst 60-600 und laesst nicht mehr zu",
-            guiSource593.Contains("Transfer rate per hour (60&ndash;600)", StringComparison.Ordinal)
-            && guiSource593.Contains("id=\"UploadsPerHour\" name=\"UploadsPerHour\" type=\"number\" is=\"emby-input\" min=\"60\" max=\"600\"", StringComparison.Ordinal));
+        Check("F-M593: das Feld heisst 50-500 und laesst nicht mehr zu",
+            guiSource593.Contains("Transfer rate per hour (50&ndash;500)", StringComparison.Ordinal)
+            && guiSource593.Contains("id=\"UploadsPerHour\" name=\"UploadsPerHour\" type=\"number\" is=\"emby-input\" min=\"50\" max=\"500\"", StringComparison.Ordinal));
         Check("F-M593: der Hinweis nennt die Sperre oberhalb von 500 Uebertragungen pro Stunde",
             guiSource593.Contains("SubDL temporarily blocks any prolonged upload/downloads at a rate above 500 per hour", StringComparison.Ordinal)
             && guiSource593.Contains("Default: 450.", StringComparison.Ordinal));
-        Check("F-M593: beim Speichern wird auf 60-600 begrenzt, der Rueckfall ist 450",
-            guiSource593.Contains("Math.min(600, Math.max(60, uph))", StringComparison.Ordinal)
+        Check("F-M593: beim Speichern wird auf 50-500 begrenzt, der Rueckfall ist 450",
+            guiSource593.Contains("Math.min(500, Math.max(50, uph))", StringComparison.Ordinal)
             && guiSource593.Contains("document.querySelector('#UploadsPerHour').value) || 450", StringComparison.Ordinal));
         Check("F-M593: die Vorgabe im Konfigurationsmodell ist 450",
             configSource593.Contains("UploadsPerHour = 450;", StringComparison.Ordinal));
+
+        // --- F-M594: der Takt als Slot vor dem Transfer -------------------------------------------
+        var limiterSource594 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/GlobalRateLimiter.cs"));
+        var upSource594 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        var downSource594 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
+        Check("F-M594: der Limiter haelt einen Zeitanker und bietet Slot und Marke an",
+            limiterSource594.Contains("private static DateTime _lastTransferDoneUtc = DateTime.MinValue;", StringComparison.Ordinal)
+            && limiterSource594.Contains("public async Task WaitForTransferSlotAsync(CancellationToken ct)", StringComparison.Ordinal)
+            && limiterSource594.Contains("public void MarkTransferDone()", StringComparison.Ordinal));
+        Check("F-M594: gewartet wird nur die DIFFERENZ zum Ziel, in der Vergangenheit gar nicht",
+            limiterSource594.Contains("TimeSpan warten = anchor.AddMilliseconds(interval) - DateTime.UtcNow;", StringComparison.Ordinal)
+            && limiterSource594.Contains("if (warten <= TimeSpan.Zero)", StringComparison.Ordinal)
+            && limiterSource594.Contains("await Task.Delay(warten, ct).ConfigureAwait(false);", StringComparison.Ordinal));
+        Check("F-M594: der Upload belegt den Slot vor dem Versand und setzt die Marke nur nach einer Annahme",
+            upSource594.Contains("await _limiter.WaitForTransferSlotAsync(ct).ConfigureAwait(false);", StringComparison.Ordinal)
+            && upSource594.Contains("if (jeQuelle.Any(r => r.Ok))", StringComparison.Ordinal)
+            && upSource594.Contains("_limiter.MarkTransferDone();", StringComparison.Ordinal));
+        Check("F-M594: der Download belegt den Slot vor dem Abruf und setzt die Marke erst bei Bytes",
+            downSource594.Contains("await _limiter.WaitForTransferSlotAsync(ct).ConfigureAwait(false);", StringComparison.Ordinal)
+            && downSource594.Contains("if (rawAttempt.Bytes is { Length: >= 100 })", StringComparison.Ordinal)
+            && downSource594.Contains("_limiter.MarkTransferDone();", StringComparison.Ordinal));
 
         // --- F-M592: Abruf und Meldungen, tote Quellen --------------------------------------------
         var downloadSource592 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
@@ -861,14 +882,15 @@ internal static class Program
         var uploadSource589 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         Check("F-M589: das Pausen-Flag wird je Kandidat gesetzt, nicht je Datei",
             uploadSource589.Contains("bool dieseSpurHochgeladen = false;", StringComparison.Ordinal)
-            && uploadSource589.Contains("dieseSpurHochgeladen = true; // F-M589", StringComparison.Ordinal)
-            && uploadSource589.Contains("if (dieseSpurHochgeladen)", StringComparison.Ordinal));
+            && uploadSource589.Contains("dieseSpurHochgeladen = true; // F-M589", StringComparison.Ordinal));
         Check("F-M589: das Datei-Flag bleibt fuer die Laufzaehlung erhalten, traegt aber keine Pause mehr",
             uploadSource589.Contains("itemUploadedThisRun = true;", StringComparison.Ordinal)
             && uploadSource589.Contains("summary.FilesUploaded++;", StringComparison.Ordinal)
             && !uploadSource589.Contains("if (itemUploadedThisRun)\n                {\n                    await Task.Delay(", StringComparison.Ordinal));
-        Check("F-M589: es gibt weiterhin genau EINE Transferpause je Lauf-Pfad",
-            uploadSource589.Split("await Task.Delay(_limiter.TransferPauseMs(), runCt)").Length - 1 == 1);
+        Check("F-M589/F-M594: der Takt steht als EIN Slot vor dem Versand, keine Pause mehr danach",
+            uploadSource589.Split("await Task.Delay(_limiter.TransferPauseMs(), runCt)").Length - 1 == 0
+            && uploadSource589.Split("await _limiter.WaitForTransferSlotAsync(ct)").Length - 1 == 1
+            && uploadSource589.Contains("_limiter.MarkTransferDone();", StringComparison.Ordinal));
 
         // --- F-M588: die SubDL-Id einmal am Laufende ----------------------------------------------
         var uploadSource588 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
@@ -1510,17 +1532,20 @@ internal static class Program
                     && verteilerQuelle.Contains("Enum.TryParse<Configuration.SubtitleProvider>(name, out var quelle)", StringComparison.Ordinal));
 
                 // ---- F-M548: der Rhythmus haengt hinter der gezogenen Datei -------------------------
-                Check("F-M548: the transfer rhythm follows every saved download — two sites, both after the save",
-                    downloadSource.Split("await Task.Delay(_limiter.TransferPauseMsLessFit(), ct)").Length - 1 == 2
-                    && downloadSource.Contains("// F-M548: eine gezogene Datei → danach der Transfer-Rhythmus.", StringComparison.Ordinal)
-                    && downloadSource.Contains("// F-M548: der Rhythmus nach der gezogenen Datei", StringComparison.Ordinal));
-                int abruf = downloadSource.IndexOf("attempt = await DownloadCandidateAsync(cand, season, episode, ct)", StringComparison.Ordinal);
-                Check("F-M548: and it no longer stands in front of the fetch",
-                    abruf > 400
-                    && !downloadSource.Substring(abruf - 400, 400).Contains("TransferPauseMsLessFit", StringComparison.Ordinal));
+                Check("F-M548/F-M594: der Takt haengt am Abruf, nicht am Ablegen — kein Nachlauf mehr",
+                    downloadSource.Split("TransferPauseMsLessFit()").Length - 1 == 0
+                    && downloadSource.Split("await _limiter.WaitForTransferSlotAsync(ct)").Length - 1 == 1
+                    && downloadSource.Contains("if (rawAttempt.Bytes is { Length: >= 100 })", StringComparison.Ordinal));
+                int abrufStelle594 = downloadSource.IndexOf("await endpoint.FetchAsync(", StringComparison.Ordinal);
+                string vorDemAbruf594 = abrufStelle594 > 400
+                    ? downloadSource.Substring(0, abrufStelle594)
+                    : string.Empty;
+                Check("F-M548/F-M594: der Slot steht VOR dem Abruf",
+                    vorDemAbruf594.Contains("await _limiter.WaitForTransferSlotAsync(ct)", StringComparison.Ordinal));
                 int dryStelle = downloadSource.IndexOf("DRY-RUN HI", StringComparison.Ordinal);
                 Check("F-M548: a dry run transfers nothing and therefore waits for nothing",
-                    dryStelle > 800
+                    dryStelle > 0
+                    && !downloadSource.Substring(Math.Max(0, dryStelle - 200), 400).Contains("WaitForTransferSlotAsync", StringComparison.Ordinal)
                     && !downloadSource.Substring(dryStelle - 800, 800).Contains("TransferPauseMsLessFit", StringComparison.Ordinal)
                     && !downloadSource.Substring(dryStelle, 800).Contains("TransferPauseMsLessFit", StringComparison.Ordinal));
 
@@ -1543,11 +1568,11 @@ internal static class Program
                 Check("F-M547: a pause of zero is honoured — the pause can be switched off",
                     pacerQuelle.Contains("if (ms > 0 && !ct.IsCancellationRequested)", StringComparison.Ordinal)
                     && pacerQuelle.Contains("Volatile.Write(ref _pauseMs, ms < 0 ? 0 : ms);", StringComparison.Ordinal));
-                Check("F-M547/F-M589: the transfer rhythm follows a REAL transfer of THIS track, not a processed file",
-                    uploadSource.Contains("if (dieseSpurHochgeladen)", StringComparison.Ordinal)
-                    && uploadSource.Contains("bool dieseSpurHochgeladen = false;", StringComparison.Ordinal)
+                Check("F-M547/F-M589/F-M594: the rhythm follows a REAL transfer of THIS track, not a processed file",
+                    uploadSource.Contains("bool dieseSpurHochgeladen = false;", StringComparison.Ordinal)
                     && uploadSource.Contains("dieseSpurHochgeladen = true;", StringComparison.Ordinal)
-                    && uploadSource.Split("await Task.Delay(_limiter.TransferPauseMs(), runCt)").Length - 1 == 1);
+                    && uploadSource.Split("await Task.Delay(_limiter.TransferPauseMs(), runCt)").Length - 1 == 0
+                    && uploadSource.Contains("if (jeQuelle.Any(r => r.Ok))", StringComparison.Ordinal));
                 Check("F-M547: the download search no longer pauses before the call",
                     !downloadSource.Contains("await _limiter.PauseAsync(ct).ConfigureAwait(false);", StringComparison.Ordinal));
 

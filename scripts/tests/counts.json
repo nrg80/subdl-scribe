@@ -572,6 +572,10 @@
     "T303": {
       "suite": "endpoints",
       "checks": 4
+    },
+    "T304": {
+      "suite": "endpoints",
+      "checks": 4
     }
   }
 }

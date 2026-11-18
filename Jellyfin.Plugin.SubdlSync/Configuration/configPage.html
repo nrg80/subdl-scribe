@@ -247,8 +247,8 @@
 <!-- F-M329: der Download-Tab liest in der Reihenfolge des Zyklus: Weiter-nach-Tageslimit, Nachlauf-Runden, Automatische Synchronisierung — alle drei über den Quality Gates. F-M385: jede Gate-Beschriftung nennt ihre eigene Aktion, Upload und Download teilen keine Formulierung. -->
 <h3>Rate Limit</h3>
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="UploadsPerHour">Transfer rate per hour (60&ndash;600)</label>
-                            <input id="UploadsPerHour" name="UploadsPerHour" type="number" is="emby-input" min="60" max="600" />
+                            <label class="inputLabel inputLabelUnfocused" for="UploadsPerHour">Transfer rate per hour (50&ndash;500)</label>
+                            <input id="UploadsPerHour" name="UploadsPerHour" type="number" is="emby-input" min="50" max="500" />
                             <div class="fieldDescription">Paces the gap between two real transfers (uploads or downloads). Default: 450. SubDL temporarily blocks any prolonged upload/downloads at a rate above 500 per hour.</div>
                         </div>
                         <div class="inputContainer">
@@ -1721,7 +1721,7 @@ workers.forEach(function (w) {
                         config.ArrivalDebounceMinutes = (function () { var v = parseInt(document.querySelector('#ArrivalDebounceMinutes').value, 10); return isNaN(v) ? 2 : Math.min(120, Math.max(1, v)); })();                                                config.RefetchInterval = document.querySelector('#RefetchInterval').value;
                         config.JobSpacingMinutes = (function () { var v = parseInt(document.querySelector('#JobSpacingMinutes').value, 10); return isNaN(v) ? 15 : Math.min(120, Math.max(5, v)); })();
 
-                        config.UploadsPerHour = Math.min(600, Math.max(60, uph)); // Rate 60..600 (F-M20/F-M593)
+                        config.UploadsPerHour = Math.min(500, Math.max(50, uph)); // Rate 50..500 (F-M20/F-M593)
                         var mcp = parseFloat(String(document.querySelector('#MinCallPauseSec').value).replace(',', '.'));
                         if (isNaN(mcp)) { mcp = 0.5; }
                         config.MinCallPauseSec = Math.min(10, Math.max(0.1, mcp)); // 0.1..10
