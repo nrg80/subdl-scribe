@@ -809,6 +809,22 @@ internal static class Program
         Check("F-M593: die Vorgabe im Konfigurationsmodell ist 450",
             configSource593.Contains("UploadsPerHour = 450;", StringComparison.Ordinal));
 
+        // --- F-M599: die Pack-Phase wird von innen vermessen ----------------------------------------
+        var uploadSource599 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        Check("F-M599: die Pack-Planung nennt Bibliotheks-Walk, Folgenzahl-Abfragen und Datei-Sprachscan",
+            uploadSource599.Contains("LAUF upload — {Count} item(s) collected and ordered after {Ms} ms (F-M598)", StringComparison.Ordinal)
+            && uploadSource599.Contains("PACK — library walk {Count} item(s) in {Ms} ms (F-M599)", StringComparison.Ordinal)
+            && uploadSource599.Contains("airedMs += paketTakt.ElapsedMilliseconds - airedVorher;", StringComparison.Ordinal)
+            && uploadSource599.Contains("dateiMs += paketTakt.ElapsedMilliseconds - dateiVorher;", StringComparison.Ordinal));
+        Check("F-M599: die Planung schliesst mit einer Summenzeile ab",
+            uploadSource599.Contains("PACK — planning done: {Count} season(s), aired lookups {Calls} call(s) {Aired} ms, file language scans {Scans} {Datei} ms, total {Gesamt} ms (F-M599)", StringComparison.Ordinal));
+        Check("F-M599: die Fuell-Phase (Netz) ist von der Planung getrennt gemessen",
+            uploadSource599.Contains("var fuellTakt = System.Diagnostics.Stopwatch.StartNew();", StringComparison.Ordinal)
+            && uploadSource599.Contains("PACK — fill phase: {N} attempt(s) in {Ms} ms (F-M599)", StringComparison.Ordinal));
+        Check("F-M599: die Pack-Zeilen liegen auf Detail",
+            uploadSource599.Contains("LogUtil.Detail(_logger, \"[Sub Scribe] PACK — library walk", StringComparison.Ordinal)
+            && uploadSource599.Contains("LogUtil.Detail(\n                _logger,\n                \"[Sub Scribe] PACK — fill phase", StringComparison.Ordinal));
+
         // --- F-M598: der ganze Lauf wird vermessen (Upload mit Pack-Phase, Download) ---------------
         var uploadSource598 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         var downloadSource598 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));

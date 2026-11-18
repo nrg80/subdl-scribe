@@ -749,8 +749,13 @@ public sealed class UploadPipeline : IPackFiller
         // single phase: nothing is lost, the plan is remembered instead of assumed.
         if (packCoordinator != null && completeSeasons.Count > 0)
         {
+            // F-M599: die Füll-Phase (FillOnly) getrennt vermessen — sie spricht mit dem Netz, die
+            // Planung nicht. Nur so ist zu sehen, welcher der beiden Teile die Zeit hält.
+            var fuellTakt = System.Diagnostics.Stopwatch.StartNew();
+            int fuellVersuche = 0;
             foreach (var (packImdb, packSeason, packLang, packHi) in PlanPacksFromStore(completeSeasons))
             {
+                fuellVersuche++;
                 await packCoordinator.FillOnlyAsync(packImdb, packSeason, packLang, packHi, runCt).ConfigureAwait(false);
                 if (Registry.HasPack(packImdb, packSeason, packLang, packHi))
                 {
@@ -764,6 +769,11 @@ public sealed class UploadPipeline : IPackFiller
                         packImdb, packSeason, packLang);
                 }
             }
+
+            LogUtil.Detail(
+                _logger,
+                "[Sub Scribe] PACK — fill phase: {N} attempt(s) in {Ms} ms (F-M599)",
+                fuellVersuche, fuellTakt.ElapsedMilliseconds);
 
             LogUtil.Normal(
                 _logger,
@@ -4144,12 +4154,22 @@ public sealed class UploadPipeline : IPackFiller
     {
         var result = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>();
 
+        // F-M599 (Operator: „Ich mein wenn an der packphase was geht, ich würde die gerne immer noch
+        // optimieren"): die Pack-Phase wird von innen vermessen, damit die Optimierung an der großen
+        // Zahl ansetzt und nicht an der auffälligsten Zeile. Drei Posten: Bibliotheks-Walk,
+        // Folgenzahl-Abfragen (IMDb/TMDb) und der Sprachblick in die Dateien. Alles auf `Detail`.
+        var paketTakt = System.Diagnostics.Stopwatch.StartNew();
+        long walkMs = 0, airedMs = 0, dateiMs = 0;
+        int airedCalls = 0, dateiScans = 0;
+
         // The same collection the run itself uses (path scope, not library name — F-M189), so the
         // seasons judged here are the seasons this run can actually see.
         List<BaseItem> episodes;
         try
         {
             episodes = CollectItems(_config.SelectedLibraries);
+            walkMs = paketTakt.ElapsedMilliseconds;
+            LogUtil.Detail(_logger, "[Sub Scribe] PACK — library walk {Count} item(s) in {Ms} ms (F-M599)", episodes.Count, walkMs);
         }
         catch (Exception ex)
         {
@@ -4228,7 +4248,10 @@ public sealed class UploadPipeline : IPackFiller
             }
 
             tmdbOf.TryGetValue(entry.Key, out string? tmdbId);
+            long airedVorher = paketTakt.ElapsedMilliseconds;
             var aired = await SeasonEpisodeIndex.AiredAsync(entry.Key.Item1, entry.Key.Item2, tmdbId, _config.TmdbApiKey, _logger, ct).ConfigureAwait(false);
+            airedMs += paketTakt.ElapsedMilliseconds - airedVorher;
+            airedCalls++;
             if (aired == null)
             {
                 LogUtil.Normal(
@@ -4249,7 +4272,11 @@ public sealed class UploadPipeline : IPackFiller
             // the plan refused the pack and the single phase sent 13 episodes one by one. The files are
             // asked as well — a stream list costs no extraction — and the pair is planned from them.
             var pairs = new List<(string Language, bool HearingImpaired)>(known);
-            foreach (var pair in FileLanguages(entry.Key.Item1, entry.Key.Item2))
+            long dateiVorher = paketTakt.ElapsedMilliseconds;
+            var dateiSprachen = FileLanguages(entry.Key.Item1, entry.Key.Item2).ToList();
+            dateiMs += paketTakt.ElapsedMilliseconds - dateiVorher;
+            dateiScans++;
+            foreach (var pair in dateiSprachen)
             {
                 if (!pairs.Contains(pair))
                 {
@@ -4379,11 +4406,19 @@ public sealed class UploadPipeline : IPackFiller
                     _logger,
                     "[Sub Scribe] season pack skipped: {Imdb} S{Season} — {Have} episode(s) on disk against {Aired} aired, no release group covers the season, stays single.",
                     entry.Key.Item1, entry.Key.Item2, entry.Value.Count, aired.Count);
-            }
-        }
+                    }
+                    }
 
-        return result;
-    }
+                    // F-M599: die Zahlen der Pack-Planung in einer Zeile — Season-Anzahl, Folgenzahl-Abfragen und
+                    // der Sprachblick in die Dateien. Ohne diese Trennung ist „die Pack-Phase dauert 70 s" nur eine
+                    // Summe, mit der niemand etwas optimieren kann.
+                    LogUtil.Detail(
+                    _logger,
+                    "[Sub Scribe] PACK — planning done: {Count} season(s), aired lookups {Calls} call(s) {Aired} ms, file language scans {Scans} {Datei} ms, total {Gesamt} ms (F-M599)",
+                    result.Count, airedCalls, airedMs, dateiScans, dateiMs, paketTakt.ElapsedMilliseconds);
+
+                    return result;
+                    }
 
     /// <summary>
     /// F-M588: holt die SubDL-Ids der in diesem Lauf hochgeladenen Einzel EINMAL — statt nach jedem

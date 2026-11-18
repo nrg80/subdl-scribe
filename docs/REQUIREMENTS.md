@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.472.
+**Status:** Implementation — v12.1.12.473.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -32,7 +32,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 24 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 27 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
-- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 25 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 26 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 19 requirements
 - [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 48 requirements
 - [16. Non-Goals](#16-non-goals)
@@ -1707,6 +1707,8 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M479 [P]:** **Die vier Schalter stehen im Tab ihrer Richtung, nicht in einem eigenen Anbieter-Tab.** Download-Schalter im Download-Tab, Upload-Schalter im Upload-Tab, je Anbieter eine Zeile mit dem Anbieternamen im Label (`Download enabled — SubDL`). Ein Anbieter-Tab hätte die Richtung von ihrer Schaltung getrennt und den Weg „erst hier, dann dort" erzwungen; die Richtung ist die Frage, die der Nutzer hat.
 
+**F-M599 [U]:** **Die Pack-Phase wird von innen vermessen.** Operator 18.11.2026: „Ich mein wenn an der packphase was geht, ich würde die gerne immer noch optimieren." Die Phasen-Zeile aus F-M598 nennt nur die Summe (gemessen 70,7 s bei 1.416 Items), mit der sich nichts optimieren lässt. Deshalb vier weitere Zeilen auf `Detail`: **Bibliotheks-Walk** (die Episodenliste, die `CompleteSeasonsAsync` selbst noch einmal holt), **Folgenzahl-Abfragen** (Anzahl und Summe der IMDb/TMDb-Aufrufe über `SeasonEpisodeIndex.AiredAsync`), **Datei-Sprachscan** (Anzahl und Summe der Blicke in die Dateien über `FileLanguages`) und die **Füll-Phase** (`FillOnly` je Pack) getrennt von der Planung — Planung rechnet, Füllen spricht mit dem Netz; wer beide in einer Zahl wirft, optimiert den falschen Teil. Geprüft von T309.
+
 **F-M598 [U]:** **Auch der ganze Lauf wird vermessen — Upload mit Pack-Phase, und der Download.** Operator-Anweisung 18.11.2026: „Auch gerne Diagnose Punkte (log level detail) für den ganzen upload vorlauf (pack usw) und den download einführen." Vier Zeilen auf `Detail` je Richtung: **Item-Liste** (Anzahl nach Sammeln und Sortieren), **Pack-Phase** (Dauer bis zum Ende der Staffelpack-Planung, nur Upload), **Item-Schleife** (je Item eine Zeile mit der Dauer des vorigen Items, damit ein einzelnes teures Item nicht in der Summe verschwindet) und **Lauf-Ende** (Item-Schleife und Gesamtdauer). Zusammen mit F-M597 (Spur) und F-M596 (Vorlauf) lässt sich damit jede Sekunde eines Laufs zuordnen: Lauf → Item → Spur → Phase. Die Zeilen liegen ausdrücklich auf `Detail`, damit der Normalbetrieb unverändert bleibt. Geprüft von T308.
 
 **F-M597 [U]:** **Jede Spur wird vermessen — QA, Quellen-Tore, Slot-Warten, Versand.** Operator-Freigabe 18.11.2026 („Ja"), nachdem die Messung zeigte: der Abstand zwischen zwei Uploads lag bei 9,6 s (Median, 500/h), davon 2,0 s Netz — und der Rest in einem Block, der **keine einzige Logzeile** schrieb. Statt zu raten, trägt `UploadSrtContentAsync` jetzt eine Stoppuhr: `qa`, `sources`, `slot wait`, `send`, `total` je Spur als eine Zeile auf `Detail` (also nur im Debug-LogMode sichtbar, damit der Normalbetrieb nicht zugemüllt wird). Zweck ist ausdrücklich die Diagnose: die Zeile sagt, welcher Schritt die Zeit hält, und jede Optimierung danach lässt sich an ihr prüfen statt an einer Vermutung. **Nachtrag 18.11.2026:** Die erste Messung zeigte, dass die Zeit **nicht** in der Spur liegt (`send` 0,7–3,0 s, `qa`/`sources`/`slot` je unter 100 ms bei einem Abstand von 9,5 s zwischen zwei Uploads). Deshalb vermisst dieselbe Zeile jetzt auch die Schleife: `TAKT-SPUR` nennt je Kandidat den **Abstand seit der letzten Spur** (Urteil, Store-Zeilen, Buchführung) und den Anteil der Kette daran. Geprüft von T307.
@@ -2517,6 +2519,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
 
 **T303:** Der Takt ist 50–500 einstellbar, Vorgabe 450, und der Hinweis nennt SubDLs 500/h (F-M593) — ein Feld für Upload und Download: die Beschriftung im Formular, `max="500"` am Feld, die Prüfung beim Speichern samt Rückfall und die Beschreibung OHNE SubDL-Hinweis und die Vorgabe im Konfigurationsmodell — **4 Prüfungen** in `endpoints` (284 → 288).
+
+**T309:** Die Pack-Phase von innen (F-M599): Walk, Folgenzahl-Abfragen, Datei-Sprachscan, Summenzeile und die getrennte Füll-Phase, alles auf `Detail` — **4 Prüfungen** in `endpoints` (310 → 314).
 
 **T308:** Der ganze Lauf wird vermessen (F-M598): Upload nennt Item-Liste, Pack-Phase und Lauf-Ende, dazu jedes Item einzeln; der Download hat dieselben Punkte; alle Lauf-Zeilen liegen auf `Detail` — **4 Prüfungen** in `endpoints` (306 → 310).
 
