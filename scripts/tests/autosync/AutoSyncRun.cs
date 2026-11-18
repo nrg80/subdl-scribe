@@ -81,6 +81,7 @@ public static class AutoSyncRun
         failures += UnsyncArchive();
         failures += StreamingDecoder();
         failures += FitTimeCredit();
+        failures += CancelledExtractionStopsFfmpeg();
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -88,6 +89,176 @@ public static class AutoSyncRun
             : $"{failures} CASE(S) FAILED");
         return failures == 0 ? 0 : 1;
     }
+
+    /// <summary>
+    /// Case 12 — F-M596: ein abgebrochener Lauf beendet ffmpeg WIRKLICH.
+    /// <para>
+    /// Operator-Zusage 18.11.2026 („Lauf starten, STOPP, `ps` muss leer sein"). Vorher brach nur das
+    /// Warten ab (`WaitForExitAsync(ct)`), der Prozess lief weiter und schrieb in ein Verzeichnis, das
+    /// der finally-Block bereits geloescht hatte. Beim regulaeren Lauf unsichtbar; mit dem vorgezogenen
+    /// Lauf (F-M596) waere es ein Waisenprozess, der die naechste Extraktion ueberholt.
+    /// </para>
+    /// <para>
+    /// Geprueft wird am ECHTEN Prozess, nicht am Quelltext: Extraktion starten, warten bis ein
+    /// ffmpeg-Prozess laeuft, Token abbrechen, und danach muss die Prozesszahl wieder auf den
+    /// Ausgangswert fallen. Fehlt ffmpeg oder eine Mediendatei, sagt der Fall das und zaehlt nicht als
+    /// Fehler — ein Umgebungslueck ist kein Regressionsbefund.
+    /// </para>
+    /// </summary>
+    /// <returns>Zahl der fehlgeschlagenen Pruefungen dieses Falls.</returns>
+    private static int CancelledExtractionStopsFfmpeg()
+    {
+        int f = 0;
+        Console.WriteLine("[12] a cancelled extraction stops ffmpeg (F-M596)");
+
+        string? ffmpeg = new[] { "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg" }
+            .FirstOrDefault(System.IO.File.Exists);
+        string? media = null;
+        foreach (string wurzel in new[] { "/data/movies", "/data/movies2" })
+        {
+            if (!System.IO.Directory.Exists(wurzel))
+            {
+                continue;
+            }
+
+            media = System.IO.Directory
+                .EnumerateFiles(wurzel, "*.mkv", System.IO.SearchOption.AllDirectories)
+                .FirstOrDefault(p => new System.IO.FileInfo(p).Length > 50L * 1024 * 1024);
+            if (media != null)
+            {
+                break;
+            }
+        }
+
+        if (ffmpeg == null || media == null)
+        {
+            Console.WriteLine("  [SKIP] ffmpeg or a media file is not reachable from here");
+            return f;
+        }
+
+        // Der erste Untertitel-Index ist nicht in jeder Datei vorhanden; ffmpeg bricht dann sofort ab
+        // (gemessen: exit 234, kein Prozess zu sehen). Deshalb werden Kandidaten durchprobiert, bis
+        // einer wirklich liest — ein Umgebungslueck darf den Fall nicht als Regression erscheinen lassen.
+        var kandidaten = new System.Collections.Generic.List<string>();
+        foreach (string wurzel in new[] { "/data/movies", "/data/movies2" })
+        {
+            if (!System.IO.Directory.Exists(wurzel))
+            {
+                continue;
+            }
+
+            kandidaten.AddRange(System.IO.Directory
+                .EnumerateFiles(wurzel, "*.mkv", System.IO.SearchOption.AllDirectories)
+                .Where(p => new System.IO.FileInfo(p).Length > 50L * 1024 * 1024)
+                .Take(12));
+        }
+
+        if (kandidaten.Count == 0)
+        {
+            Console.WriteLine("  [SKIP] no media file is reachable from here");
+            return f;
+        }
+
+        int vorher = FfmpegProzesse();
+        System.Threading.CancellationTokenSource? cts = null;
+        System.Threading.Tasks.Task<(System.Collections.Generic.Dictionary<int, string?> Texts, int ExitCode)>? lauf = null;
+        bool lief = false;
+        foreach (string datei in kandidaten)
+        {
+            using var versuch = new System.Threading.CancellationTokenSource();
+            var probe = Jellyfin.Plugin.SubScribe.Pipeline.FfmpegTools.ExtractAllAsync(
+                ffmpeg,
+                datei,
+                new[] { 0 },
+                Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                new Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration(),
+                versuch.Token);
+
+            for (int i = 0; i < 15 && !lief; i++)
+            {
+                System.Threading.Thread.Sleep(100);
+                lief = FfmpegProzesse() > vorher;
+            }
+
+            if (lief)
+            {
+                cts = new System.Threading.CancellationTokenSource();
+                lauf = Jellyfin.Plugin.SubScribe.Pipeline.FfmpegTools.ExtractAllAsync(
+                    ffmpeg,
+                    datei,
+                    new[] { 0 },
+                    Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                    new Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration(),
+                    cts.Token);
+
+                // Den Probeprozess beenden, dann neu messen: der Abbruch unten gilt dem zweiten Lauf.
+                versuch.Cancel();
+                try
+                {
+                    probe.GetAwaiter().GetResult();
+                }
+                catch (Exception)
+                {
+                    // Erwartet: der Probe-Lauf wird abgebrochen.
+                }
+
+                for (int i = 0; i < 30 && FfmpegProzesse() > vorher; i++)
+                {
+                    System.Threading.Thread.Sleep(100);
+                }
+
+                for (int i = 0; i < 20 && !lief; i++)
+                {
+                    System.Threading.Thread.Sleep(100);
+                    lief = FfmpegProzesse() > vorher;
+                }
+
+                break;
+            }
+        }
+
+        if (lauf == null || cts == null)
+        {
+            Console.WriteLine("  [SKIP] no candidate file exposed a readable subtitle stream");
+            return f;
+        }
+
+        Check("the extraction really starts an ffmpeg process", lief, $"prozesse {FfmpegProzesse()} (vorher {vorher})");
+        f += lief ? 0 : 1;
+
+        cts.Cancel();
+        try
+        {
+            lauf.GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            // Der Abbruch ist der erwartete Ausgang.
+        }
+        catch (Exception ex)
+        {
+            Check("the cancelled extraction ends as a cancellation", false, ex.GetType().Name);
+            f++;
+        }
+
+        int nachher = FfmpegProzesse();
+        for (int i = 0; i < 30 && nachher > vorher; i++)
+        {
+            System.Threading.Thread.Sleep(100);
+            nachher = FfmpegProzesse();
+        }
+
+        int nachReset = nachher;
+        Check("after the cancellation no ffmpeg process is left behind", nachReset <= vorher, $"prozesse {nachReset} (vorher {vorher})");
+        f += nachReset <= vorher ? 0 : 1;
+
+        return f;
+    }
+
+    /// <summary>F-M596: laufende ffmpeg-Prozesse dieses Rechners.</summary>
+    /// <returns>Die Anzahl.</returns>
+    private static int FfmpegProzesse()
+        => System.Diagnostics.Process.GetProcessesByName("ffmpeg").Length;
 
     /// <summary>
     /// Case 7: the decoder streams frame LEVELS and nothing persists them. Two absences,
