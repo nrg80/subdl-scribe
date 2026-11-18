@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.480",
-        "changelog": "v12.1.12.480: three verdicts — refused closes the pair, no answer keeps it open.",
+        "version": "12.1.12.481",
+        "changelog": "v12.1.12.481: the ladder only closes what it can prove — evidence and disturbances close nothing.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.480-dev/Jellyfin.Plugin.SubdlSync_12.1.12.480.zip",
-        "checksum": "187e47164d34f8d16e545f78d1a4fd0f",
-        "timestamp": "2026-11-18T16:02:17Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.481-dev/Jellyfin.Plugin.SubdlSync_12.1.12.481.zip",
+        "checksum": "8e75513a45ffb551971915413733eb30",
+        "timestamp": "2026-11-18T16:28:56Z"
       }
     ]
   }
