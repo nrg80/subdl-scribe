@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.483",
-        "changelog": "v12.1.12.483: no tvst id read-back — 88 tries, 0 readable ids, ~15 s each; own marker instead.",
+        "version": "12.1.12.484",
+        "changelog": "v12.1.12.484: the extraction pump stays fed on every item (skips included) — one ffmpeg at a time.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.483-dev/Jellyfin.Plugin.SubdlSync_12.1.12.483.zip",
-        "checksum": "d2ae50e191af6b10ad563428593ce3ca",
-        "timestamp": "2026-11-18T18:14:24Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.484-dev/Jellyfin.Plugin.SubdlSync_12.1.12.484.zip",
+        "checksum": "cc70c591b3dc20999c0d8bec10d38768",
+        "timestamp": "2026-11-18T19:03:34Z"
       }
     ]
   }
