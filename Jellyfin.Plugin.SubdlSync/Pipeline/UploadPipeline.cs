@@ -765,8 +765,14 @@ public sealed class UploadPipeline : IPackFiller
 
         bool alleQuellenWeg = false; // F-M590: erst wenn jede Quelle streikt, endet der Lauf
 
-        foreach (var item in items)
+        // F-M596 (Operator-Freigabe 18.11.2026): Index statt foreach und EIN Vorlauf — die Extraktion
+        // der naechsten Datei laeuft, waehrend diese sendet. `using` raeumt ihn am Laufende ab, auch
+        // auf dem Abbruchpfad.
+        using var vorlauf = new ExtractionLookahead();
+
+        for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)
         {
+            var item = items[itemIndex];
             if (alleQuellenWeg)
             {
                 break;
@@ -1404,7 +1410,10 @@ public sealed class UploadPipeline : IPackFiller
                 continue;
             }
 
-            var (extracted, batchExit) = await FfmpegTools.ExtractAllAsync(_ffmpegPath, mediaPath, textPositions, _logger, _config, runCt).ConfigureAwait(false);
+            // F-M596: entweder das vorgezogene Ergebnis dieser Datei oder eine frische Extraktion.
+            var (extracted, batchExit, ausVorlauf) = await vorlauf
+                .TakeOrExtractAsync(mediaPath, textPositions, _ffmpegPath, _logger, _config, runCt)
+                .ConfigureAwait(false);
 
             // When the one-pass call failed as a whole (non-zero exit, spawn error or
             // exception), a null per stream is a SUSPICION, not a verdict — ffmpeg never
@@ -1419,7 +1428,20 @@ public sealed class UploadPipeline : IPackFiller
                 LogUtil.PerItem(_config.LogMode, _logger,
                     "[Sub Scribe] extraction: {Count} text stream(s) in ONE ffmpeg pass for {File} (exit {Exit}){Note}",
                     textPositions.Count, Path.GetFileName(mediaPath), batchExit,
-                    retryPerStream ? " — per-stream retry for empty streams" : string.Empty);
+                    retryPerStream ? " — per-stream retry for empty streams"
+                    : ausVorlauf ? " — from the look-ahead (F-M596)" : string.Empty);
+            }
+
+            // F-M596: jetzt den naechsten Schritt vorziehen. Die Extraktion der naechsten Datei liest
+            // nur eine Datei und schreibt Textdateien in ein temporaeres Verzeichnis — alles, was
+            // zaehlt, sendet oder in den Store schreibt, bleibt hier an seinem Platz. Nur nach einem
+            // sauberen Durchlauf (kein Einzel-Nachlauf) und nur, wenn es eine naechste Datei gibt.
+            if (!retryPerStream
+                && itemIndex + 1 < items.Count
+                && !string.IsNullOrWhiteSpace(items[itemIndex + 1].Path))
+            {
+                var naechste = items[itemIndex + 1];
+                vorlauf.Start(naechste.Path!, TextSubtitlePositions(naechste.Id), _ffmpegPath, _logger, _config, runCt);
             }
 
             // Phase 1 candidates: (kind, stream/loose-data, lang, srtContent)
@@ -2526,6 +2548,27 @@ public sealed class UploadPipeline : IPackFiller
     /// the size floor and the content-hash dedup. Returns the reject reason
     /// (or null when the content passes) plus the computed content hash.
     /// </summary>
+
+    /// <summary>
+    /// F-M596: die Untertitel-Positionen einer Datei fuer den Vorlauf — dieselbe Auswahl wie im Lauf
+    /// (<see cref="SidecarNaming.IsDialogueStream"/> gegen die ungefilterte Untertitel-Liste, weil
+    /// ffmpeg mit <c>0:s:N</c> ALLE Untertitelspuren zaehlt). Nur lesend, keine Store-Frage: der
+    /// Vorlauf soll genau das extrahieren, was der Lauf gleich braucht, aber nichts beurteilen.
+    /// </summary>
+    /// <param name="itemId">Die Datei, die als naechste dran waere.</param>
+    /// <returns>Die Positionen, aufsteigend.</returns>
+    private List<int> TextSubtitlePositions(Guid itemId)
+    {
+        var alle = _mediaSourceManager.GetMediaStreams(itemId)?
+            .Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal)
+            .ToList() ?? new List<MediaStream>();
+
+        return alle
+            .Select((stream, position) => (stream, position))
+            .Where(x => Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream(x.stream))
+            .Select(x => x.position)
+            .ToList();
+    }
 
     private string? ScreenContentQa(string srtContent, string lang, long runtimeMs, out string contentHash, out string? correctedLang, out bool qaFail)
     {

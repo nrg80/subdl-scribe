@@ -580,6 +580,10 @@
     "T305": {
       "suite": "endpoints",
       "checks": 4
+    },
+    "T306": {
+      "suite": "endpoints",
+      "checks": 4
     }
   }
 }

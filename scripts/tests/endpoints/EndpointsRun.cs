@@ -809,6 +809,30 @@ internal static class Program
         Check("F-M593: die Vorgabe im Konfigurationsmodell ist 450",
             configSource593.Contains("UploadsPerHour = 450;", StringComparison.Ordinal));
 
+        // --- F-M596: der Vorlauf (Extraktion der naechsten Datei) ---------------------------------
+        var lookaheadSource596 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/ExtractionLookahead.cs"));
+        var ffmpegSource596 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/FfmpegTools.cs"));
+        var uploadSource596 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        Check("F-M596: der Vorlauf ist eine eigene Klasse mit Start, Nehmen und Abraeumen",
+            lookaheadSource596.Contains("public sealed class ExtractionLookahead : IDisposable", StringComparison.Ordinal)
+            && lookaheadSource596.Contains("public void Start(", StringComparison.Ordinal)
+            && lookaheadSource596.Contains("public async Task<(Dictionary<int, string?> Texts, int ExitCode, bool FromLookahead)> TakeOrExtractAsync(", StringComparison.Ordinal)
+            && lookaheadSource596.Contains("public void Dispose()", StringComparison.Ordinal));
+        Check("F-M596: benutzt wird der Vorlauf nur bei DERSELBEN Datei und ALLEN Positionen",
+            lookaheadSource596.Contains("_key == mediaPath", StringComparison.Ordinal)
+            && lookaheadSource596.Contains("positions.All(p => _positions.Contains(p))", StringComparison.Ordinal)
+            && lookaheadSource596.Contains("AbbrechenUnterSchloss();", StringComparison.Ordinal));
+        Check("F-M596: der Lauf nimmt den Vorlauf und startet ihn fuer die NAECHSTE Datei",
+            uploadSource596.Contains("using var vorlauf = new ExtractionLookahead();", StringComparison.Ordinal)
+            && uploadSource596.Contains("for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)", StringComparison.Ordinal)
+            && uploadSource596.Contains("await vorlauf", StringComparison.Ordinal)
+            && uploadSource596.Contains("vorlauf.Start(naechste.Path!, TextSubtitlePositions(naechste.Id)", StringComparison.Ordinal)
+            && uploadSource596.Contains("itemIndex + 1 < items.Count", StringComparison.Ordinal));
+        Check("F-M596: ein Abbruch beendet ffmpeg wirklich, nicht nur das Warten",
+            ffmpegSource596.Contains("catch (OperationCanceledException)", StringComparison.Ordinal)
+            && ffmpegSource596.Contains("BeendeHart(proc, logger, mediaPath);", StringComparison.Ordinal)
+            && ffmpegSource596.Contains("proc.Kill(entireProcessTree: true);", StringComparison.Ordinal));
+
         // --- F-M595: die Statistik zaehlt nur die QA-Urteile --------------------------------------
         var deltaSource595 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/StatusCounterDelta.cs"));
         var uploadSource595 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
@@ -1493,7 +1517,10 @@ internal static class Program
                 // ---- F-M539: erledigte Eintraege enden VOR dem ffmpeg-Durchgang ---------------
                 // Operator-Anweisung 16.11.2026: „Das kann man doch sofort skippen, ohne weitere Pruefung."
                 int iSettle = uploadSource.IndexOf("summary.SettledItems++", StringComparison.Ordinal);
-                int iExtract = uploadSource.IndexOf("FfmpegTools.ExtractAllAsync", StringComparison.Ordinal);
+                // F-M596: der ffmpeg-Durchlauf steht jetzt hinter dem Vorlauf (`vorlauf.TakeOrExtractAsync`),
+                // die Extraktion selbst liegt in ExtractionLookahead/FfmpegTools. Der Anker im Lauf ist
+                // also der Aufruf, nicht mehr der Methodenname.
+                int iExtract = uploadSource.IndexOf("await vorlauf", StringComparison.Ordinal);
                 Check("F-M539: the settled-item exit stands BEFORE the one ffmpeg pass over all streams",
                     iSettle > 0 && iExtract > 0 && iSettle < iExtract,
                     "SettledItems@" + iSettle + " ExtractAll@" + iExtract);

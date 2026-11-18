@@ -198,6 +198,34 @@ public static class FfmpegTools
     /// wrong, retry it per stream" (non-zero) — the caller needs that to decide
     /// whether a null is a verdict or a suspicion.
     /// </returns>
+    /// <summary>
+    /// F-M596: beendet einen laufenden ffmpeg-Prozess samt Kindern. Best effort — ein bereits
+    /// beendeter Prozess ist kein Fehler, und ein Fehler beim Beenden darf den Abbruch nicht
+    /// verdecken. Der Aufruf steht auf dem Abbruchpfad, damit kein Kind den Lauf ueberlebt.
+    /// </summary>
+    /// <param name="proc">Der laufende Prozess.</param>
+    /// <param name="logger">Protokoll fuer den Fall, dass es nicht klappt.</param>
+    /// <param name="mediaPath">Nur fuer die Meldung.</param>
+    private static void BeendeHart(Process proc, ILogger logger, string mediaPath)
+    {
+        try
+        {
+            if (!proc.HasExited)
+            {
+                proc.Kill(entireProcessTree: true);
+                logger.LogInformation(
+                    "[Sub Scribe] ffmpeg for {File} was stopped — the run was cancelled (F-M596)",
+                    Path.GetFileName(mediaPath));
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                "[Sub Scribe] stopping ffmpeg for {File} failed: {Msg}",
+                Path.GetFileName(mediaPath), ex.Message);
+        }
+    }
+
     public static async Task<(Dictionary<int, string?> Texts, int ExitCode)> ExtractAllAsync(
         string ffmpegPath,
         string mediaPath,
@@ -261,8 +289,22 @@ public static class FfmpegTools
                 return (result, -1);
             }
 
-            string stderr = await proc.StandardError.ReadToEndAsync(ct).ConfigureAwait(false);
-            await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+            // F-M596 (Operator-Freigabe 18.11.2026, „Ja"): ein Abbruch beendet ffmpeg jetzt WIRKLICH.
+            // Vorher brach nur das Warten ab (`WaitForExitAsync(ct)`), der Prozess lief weiter und
+            // schrieb in ein Verzeichnis, das der finally-Block gerade geloescht hatte — beim
+            // regulaeren Lauf unsichtbar, mit dem vorgezogenen Lauf (ExtractionLookahead) waere es ein
+            // Waisenprozess, der die naechste Extraktion ueberholt.
+            string stderr;
+            try
+            {
+                stderr = await proc.StandardError.ReadToEndAsync(ct).ConfigureAwait(false);
+                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                BeendeHart(proc, logger, mediaPath);
+                throw;
+            }
 
             // ffmpeg keeps going after a bad stream with -y where it can, so a non-zero
             // exit does NOT mean every output is unusable. Read whatever landed and let
