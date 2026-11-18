@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.489",
-        "changelog": "v12.1.12.489: every store fetches a missing context itself, like the TMDb store does.",
+        "version": "12.1.12.490",
+        "changelog": "v12.1.12.490: the title store says out loud whether a row is missing, open or closed.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.489-dev/Jellyfin.Plugin.SubdlSync_12.1.12.489.zip",
-        "checksum": "ba7eb351377370a4e05279328a2fb5ec",
-        "timestamp": "2026-11-18T20:19:51Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.490-dev/Jellyfin.Plugin.SubdlSync_12.1.12.490.zip",
+        "checksum": "b9a7aeb5b00e895989ceb2ab1bdd558f",
+        "timestamp": "2026-11-18T20:46:29Z"
       }
     ]
   }
