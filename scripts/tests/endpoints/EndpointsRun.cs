@@ -844,6 +844,12 @@ internal static class Program
             up605.Contains("Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed(\"moviesubtitles\", msubTitelId", StringComparison.Ordinal)
             && up605.Contains("Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed(\"tvsubtitles\", tvstTitelId", StringComparison.Ordinal)
             && !up605.Contains("TitleFailureStore.IsClosed(\"subdl\"", StringComparison.Ordinal));
+        Check("F-M608: ein im Lauf geschlossener Titel laeuft die Leiter nicht fuer jede Spur erneut",
+            up605.Contains("private readonly System.Collections.Generic.HashSet<string> _titelGeschlossen", StringComparison.Ordinal)
+            && up605.Contains("_titelGeschlossen.Contains(\"moviesubtitles|\" + msubTitelId)", StringComparison.Ordinal)
+            && up605.Contains("_titelGeschlossen.Add(\"moviesubtitles|\" + msubTitelId);", StringComparison.Ordinal)
+            && up605.Contains("_titelGeschlossen.Contains(\"tvsubtitles|\" + tvstTitelId)", StringComparison.Ordinal)
+            && up605.Contains("_titelGeschlossen.Add(\"tvsubtitles|\" + tvstTitelId);", StringComparison.Ordinal));
         Check("F-M608: ein geschlossener Titel wird gar nicht mehr gefragt — auf beiden Seiten mit Grund",
             up605.Contains("return UploadResult.Skipped(\"film-source-title-closed\");", StringComparison.Ordinal)
             && up605.Contains("return UploadResult.Skipped(\"second-source-title-closed\");", StringComparison.Ordinal));

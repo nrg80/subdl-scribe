@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.478"
+version: "12.1.12.479"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.479: a title closed in this run is not run through the ladder again for every track.
   v12.1.12.478: title ladder for tvst and mst — create, look again, 2/4/8 s pauses, the fourth failure closes every pair of that title.
   v12.1.12.477: create, look again, and if the title is not there the pair is settled; the film id is probed before any upload; a source's no is remembered per content.
   v12.1.12.476: the pack verdict is stored with a signature of its members; a new signature means a new attempt.

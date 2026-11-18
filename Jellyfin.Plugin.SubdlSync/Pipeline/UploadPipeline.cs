@@ -6365,6 +6365,15 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="framerate">Bildrate-Kennung (nur SubDL).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Das Ergebnis DIESER Quelle.</returns>
+    /// <summary>
+    /// F-M608-Nachtrag (Messung 18.11.2026, 16:07): Titel, die in DIESEM Lauf schon geschlossen wurden.
+    /// Ohne diese Liste lief die Leiter fuer jede Spur desselben Titels erneut — vier Zuege mit 2+4+8 s
+    /// Pause je Datei, also 14 s pro Spur, und der Store sah die Sperre im selben Lauf nicht (die
+    /// Schreibvorgaenge liegen bis zum Ende in der Klammer aus F-M602). Gemessen: „tt14129116" fuhr die
+    /// Leiter fuer jede EN-Datei erneut ab.
+    /// </summary>
+    private readonly System.Collections.Generic.HashSet<string> _titelGeschlossen = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>F-M608: die Pausen der Titel-Leiter — nach Fehlschlag 1 zwei, nach 2 vier, nach 3 acht Sekunden.</summary>
     private static readonly int[] TitelLeiterPausenMs = { 2000, 4000, 8000 };
 
@@ -6529,8 +6538,16 @@ public sealed class UploadPipeline : IPackFiller
         // F-M608: Titel-Leiter (anlegen → nachsuchen, Pausen 2/4/8 s, nach dem vierten Fehlschlag ist der
         // Titel dauerhaft geschlossen — damit sind alle Paare dieses Films entschieden).
         string msubTitelId = !string.IsNullOrWhiteSpace(imdbId) ? imdbId! : (tmdbId ?? mediaHash ?? string.Empty);
-        if (Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed("moviesubtitles", msubTitelId, out string msubGesperrt))
+        string msubGesperrt = string.Empty;
+        bool msubTitelZu = _titelGeschlossen.Contains("moviesubtitles|" + msubTitelId)
+            || Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed("moviesubtitles", msubTitelId, out msubGesperrt);
+        if (msubTitelZu)
         {
+            if (string.IsNullOrEmpty(msubGesperrt))
+            {
+                msubGesperrt = "closed in this run";
+            }
+
             LogUtil.PerItem(_config.LogMode, _logger,
                 "[moviesubtitles] {Name} [{Lang}] — title {Title} is closed after repeated failed creations ({Reason}), nothing asked (F-M608)",
                 neutralName, lang, msubTitelId, msubGesperrt);
@@ -6550,7 +6567,8 @@ public sealed class UploadPipeline : IPackFiller
         {
             LogUtil.PerItem(_config.LogMode, _logger,
                 "[moviesubtitles] {Name} [{Lang}] — title {Title} could not be created and found after the ladder ({Status}), nothing sent (F-M608)",
-                neutralName, lang, msubTitelId, aufloesung?.Status ?? "?");
+                neutralName, lang,                msubTitelId, aufloesung?.Status ?? "?");
+            _titelGeschlossen.Add("moviesubtitles|" + msubTitelId);
             return UploadResult.Skipped("film-source-title-closed");
         }
 
@@ -6822,8 +6840,16 @@ public sealed class UploadPipeline : IPackFiller
         // F-M608: dieselbe Leiter fuer die Serie — anlegen, nachsuchen, 2/4/8 s, nach dem vierten
         // Fehlschlag sind alle Paare dieser Serie geschlossen.
         string tvstTitelId = !string.IsNullOrWhiteSpace(imdbId) ? imdbId! : (tmdbId ?? mediaHash ?? string.Empty);
-        if (Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed("tvsubtitles", tvstTitelId, out string tvstGesperrt))
+        string tvstGesperrt = string.Empty;
+        bool tvstTitelZu = _titelGeschlossen.Contains("tvsubtitles|" + tvstTitelId)
+            || Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed("tvsubtitles", tvstTitelId, out tvstGesperrt);
+        if (tvstTitelZu)
         {
+            if (string.IsNullOrEmpty(tvstGesperrt))
+            {
+                tvstGesperrt = "closed in this run";
+            }
+
             LogUtil.PerItem(_config.LogMode, _logger,
                 "[tvsubtitles] {Name} [{Lang}] — title {Title} is closed after repeated failed creations ({Reason}), nothing asked (F-M608)",
                 neutralName, lang, tvstTitelId, tvstGesperrt);
@@ -6841,6 +6867,7 @@ public sealed class UploadPipeline : IPackFiller
             .ConfigureAwait(false);
         if (!tvstGelungen)
         {
+            _titelGeschlossen.Add("tvsubtitles|" + tvstTitelId);
             LogUtil.PerItem(_config.LogMode, _logger,
                 "[tvsubtitles] {Name} [{Lang}] — title {Title} could not be created and found after the ladder ({Status}), nothing sent (F-M608)",
                 neutralName, lang, tvstTitelId, show?.Status ?? "?");
