@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.473",
-        "changelog": "v12.1.12.473: the pack phase is timed from the inside — library walk, aired lookups, file language scans, fill phase.",
+        "version": "12.1.12.474",
+        "changelog": "v12.1.12.474: a pack that cannot form asks the store first instead of extracting episodes, and the aired episode count lives in the store.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.473-dev/Jellyfin.Plugin.SubdlSync_12.1.12.473.zip",
-        "checksum": "045dbe2b670e84d804e86fa21868f5de",
-        "timestamp": "2026-11-18T13:25:46Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.474-dev/Jellyfin.Plugin.SubdlSync_12.1.12.474.zip",
+        "checksum": "01ec3b60215f02151410c111e04a8c72",
+        "timestamp": "2026-11-18T13:48:49Z"
       }
     ]
   }
