@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.462",
-        "changelog": "v12.1.12.462: the file fetch and the report filing are guarded too; a source that stopped answering stays out for the rest of the run, and the run ends only when none is left.",
+        "version": "12.1.12.463",
+        "changelog": "v12.1.12.463: the transfer rate is adjustable from 60 to 600 per hour, default 450, and the field says that SubDL allows 500 uploads or downloads per hour.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.462-dev/Jellyfin.Plugin.SubdlSync_12.1.12.462.zip",
-        "checksum": "074021235671564c80e573b54ceb0787",
-        "timestamp": "2026-11-17T21:53:30Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.463-dev/Jellyfin.Plugin.SubdlSync_12.1.12.463.zip",
+        "checksum": "2cbf7bae79fb9787159a1626bb1617e2",
+        "timestamp": "2026-11-18T06:23:23Z"
       }
     ]
   }
