@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.490.
+**Status:** Implementation — v12.1.12.491.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -1708,6 +1708,8 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 **F-M479 [P]:** **Die vier Schalter stehen im Tab ihrer Richtung, nicht in einem eigenen Anbieter-Tab.** Download-Schalter im Download-Tab, Upload-Schalter im Upload-Tab, je Anbieter eine Zeile mit dem Anbieternamen im Label (`Download enabled — SubDL`). Ein Anbieter-Tab hätte die Richtung von ihrer Schaltung getrennt und den Weg „erst hier, dann dort" erzwungen; die Richtung ist die Frage, die der Nutzer hat.
 
 **F-M605 [U]:** **Das Nein einer Quelle wird gemerkt.** Operator-Freigabe 18.11.2026 („Ok", nach der Frage „Ja aber legen wir nicht auch bei tvst neu an?"): F-M603 schloss nur den Fall „angelegt, Kennung nicht lesbar". Jeder andere Zustand einer Adresse — bei tvsubtitles `would-create`, `create-already-tried`, `refused`, `unclear`, `no-title`, `no-year`, bei moviesubtitles die entsprechenden Film-Zustände — endete weiterhin als SKIP **ohne** Marke, das Paar blieb offen und die Datei kehrte in jeden Lauf zurück. Jetzt merkt der Store das inhaltliche Nein je **Spur, Quelle und Inhalt** (`source_refusals`, Schlüssel `mediaHash|subPos|langTag|quelle`, Signatur = Inhalts-Hash): dieselbe Spur wird bei demselben Text nicht erneut gefragt, ein anderer Text (oder ein neu geripptes Medium) fragt wieder. **Nicht** gemerkt werden vorübergehende Neins (Rate Limit, Zeitüberschreitung, Abbruch) — die dürfen und müssen beim nächsten Lauf neu gefragt werden; hat eine Quelle den Inhalt genommen, wird ein altes Nein vergessen. Geprüft von T315.
+
+**F-M619 [U]:** Die Aufrufstelle protokolliert die Antwort des Titelspeichers selbst: `title <id>: store says closed=<wahr/falsch> ("<Grund>"), run memo=<wahr/falsch>` — eine Zeile je Titel und Lauf, über das Protokoll der Pipeline (nicht über das des Stores). Grund: in 490 standen alle Schreibzeilen im Log, aber **keine** Lesezeile — also musste die Antwort dort sichtbar gemacht werden, wo die Frage gestellt wird.
 
 **F-M618 [U]:** **Der Titelspeicher sagt laut, was er liest.** Befund 18.11.2026, 21:36: `tt28638842` wurde um 21:14 geschlossen und protokolliert (`closed and written`), begann im nächsten Lauf aber wieder bei `attempt 1 written` — die Zeile war weg oder wurde nicht gefunden, und die Lese-Zeilen standen auf Debug (also unsichtbar). Jetzt steht **jeder** Lesezugriff auf Information: `NOT in the store — the ladder runs again`, `open, attempts N (<Grund>)` oder `is closed (<Grund>, attempts N) — the ladder is skipped`. Drei Zeilen je Titel und Lauf, damit ist eindeutig, ob geschrieben, gelesen oder gelöscht wird. Geprüft von T325 (die Zeilen sind dieselben, nur auf Information).
 

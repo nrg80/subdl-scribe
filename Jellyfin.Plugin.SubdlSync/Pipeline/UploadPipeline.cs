@@ -6673,8 +6673,14 @@ public sealed class UploadPipeline : IPackFiller
         // Titel dauerhaft geschlossen — damit sind alle Paare dieses Films entschieden).
         string msubTitelId = !string.IsNullOrWhiteSpace(imdbId) ? imdbId! : (tmdbId ?? mediaHash ?? string.Empty);
         string msubGesperrt = string.Empty;
-        bool msubTitelZu = _titelGeschlossen.Contains("moviesubtitles|" + msubTitelId)
-            || Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed("moviesubtitles", msubTitelId, out msubGesperrt);
+        bool msubAusStore = Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed("moviesubtitles", msubTitelId, out msubGesperrt);
+        bool msubTitelZu = _titelGeschlossen.Contains("moviesubtitles|" + msubTitelId) || msubAusStore;
+
+        // F-M619: die Frage „haelt die Sperre?" wird an der Aufrufstelle beantwortet, mit dem Protokoll
+        // der Pipeline — eine Zeile je Titel und Lauf, unabhaengig davon, was der Store selbst meldet.
+        LogUtil.PerItem(_config.LogMode, _logger,
+            "[moviesubtitles] title {Title}: store says closed={Closed} (\"{Reason}\"), run memo={Memo} (F-M619)",
+            msubTitelId, msubAusStore, msubGesperrt, _titelGeschlossen.Contains("moviesubtitles|" + msubTitelId));
         if (msubTitelZu)
         {
             if (string.IsNullOrEmpty(msubGesperrt))
@@ -6997,8 +7003,11 @@ public sealed class UploadPipeline : IPackFiller
         // Fehlschlag sind alle Paare dieser Serie geschlossen.
         string tvstTitelId = !string.IsNullOrWhiteSpace(imdbId) ? imdbId! : (tmdbId ?? mediaHash ?? string.Empty);
         string tvstGesperrt = string.Empty;
-        bool tvstTitelZu = _titelGeschlossen.Contains("tvsubtitles|" + tvstTitelId)
-            || Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed("tvsubtitles", tvstTitelId, out tvstGesperrt);
+        bool tvstAusStore = Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed("tvsubtitles", tvstTitelId, out tvstGesperrt);
+        bool tvstTitelZu = _titelGeschlossen.Contains("tvsubtitles|" + tvstTitelId) || tvstAusStore;
+        LogUtil.PerItem(_config.LogMode, _logger,
+            "[tvsubtitles] title {Title}: store says closed={Closed} (\"{Reason}\"), run memo={Memo} (F-M619)",
+            tvstTitelId, tvstAusStore, tvstGesperrt, _titelGeschlossen.Contains("tvsubtitles|" + tvstTitelId));
         if (tvstTitelZu)
         {
             if (string.IsNullOrEmpty(tvstGesperrt))
