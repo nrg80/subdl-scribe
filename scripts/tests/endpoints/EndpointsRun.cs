@@ -830,6 +830,24 @@ internal static class Program
             db605.Contains("CREATE TABLE IF NOT EXISTS source_refusals (", StringComparison.Ordinal)
             && db605.Contains("e.ToTable(\"source_refusals\");", StringComparison.Ordinal));
 
+        // --- F-M608: Titel-Leiter fuer tvst und mst --------------------------------------------------
+        var fail608 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/TitleFailureStore.cs"));
+        Check("F-M608: die Pausen sind 2 s, 4 s, 8 s und der vierte Fehlschlag schliesst den Titel",
+            up605.Contains("private static readonly int[] TitelLeiterPausenMs = { 2000, 4000, 8000 };", StringComparison.Ordinal)
+            && fail608.Contains("public const int ClosingAttempt = 4;", StringComparison.Ordinal)
+            && fail608.Contains("public static void Close(string source, string titleId, string reason)", StringComparison.Ordinal));
+        Check("F-M608: die Leiter leert vor jedem Zug den Speicher des Laufs, sonst wiederholt sie nur das Urteil",
+            up605.Contains("() => _msubMovies.BeginRun(),", StringComparison.Ordinal)
+            && up605.Contains("() => _tvstShows.BeginRun(),", StringComparison.Ordinal)
+            && up605.Contains("int pause = TitelLeiterPausenMs[Math.Min(zug - 2, TitelLeiterPausenMs.Length - 1)];", StringComparison.Ordinal));
+        Check("F-M608: beide Adressen mit Anlage fahren die Leiter, subdl nicht",
+            up605.Contains("Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed(\"moviesubtitles\", msubTitelId", StringComparison.Ordinal)
+            && up605.Contains("Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed(\"tvsubtitles\", tvstTitelId", StringComparison.Ordinal)
+            && !up605.Contains("TitleFailureStore.IsClosed(\"subdl\"", StringComparison.Ordinal));
+        Check("F-M608: ein geschlossener Titel wird gar nicht mehr gefragt — auf beiden Seiten mit Grund",
+            up605.Contains("return UploadResult.Skipped(\"film-source-title-closed\");", StringComparison.Ordinal)
+            && up605.Contains("return UploadResult.Skipped(\"second-source-title-closed\");", StringComparison.Ordinal));
+
         // --- F-M607: anlegen, nachsuchen, bei Nichtfund das Paar schliessen --------------------------
         Check("F-M607: beide Belege der Seite (angelegt / fuehrt den Titel) schliessen das Paar, andere Neins nicht",
             up605.Contains("|| string.Equals(aufloesung.Status, \"exists-id-not-readable\", StringComparison.Ordinal))", StringComparison.Ordinal)

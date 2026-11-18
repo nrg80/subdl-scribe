@@ -420,6 +420,9 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
 
         // F-M605: and the refusals the sources have already given for a track.
         Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.Attach(_sharedDbContext.Context);
+
+        // F-M608: and the ladder that closes a title after four failed creations.
+        Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Attach(_sharedDbContext.Context);
         }
 
     /// <inheritdoc />

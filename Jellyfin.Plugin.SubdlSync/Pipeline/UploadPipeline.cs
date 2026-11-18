@@ -6365,6 +6365,77 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="framerate">Bildrate-Kennung (nur SubDL).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Das Ergebnis DIESER Quelle.</returns>
+    /// <summary>F-M608: die Pausen der Titel-Leiter — nach Fehlschlag 1 zwei, nach 2 vier, nach 3 acht Sekunden.</summary>
+    private static readonly int[] TitelLeiterPausenMs = { 2000, 4000, 8000 };
+
+    /// <summary>
+    /// F-M608 (Operator-Anweisung 18.11.2026: „Anlegen, nachsuchen, fail 1: 2 Sekunden pause, fail 2: 4
+    /// sekunden pause, fail 3: 8 Sekunden pause. Fail4: alles pairs des movies der serie dauerhaft
+    /// schließen" — „Bei tvst und mst natürlich nur"): faehrt die Leiter fuer EINEN Titel ab.
+    /// <para>
+    /// Vier Zuege. Zwischen den Zuegen 2 s, 4 s, 8 s — die Seite braucht nach dem Anlegen manchmal einen
+    /// Moment, bis die Nachsuche den Titel findet, und genau dafuer sind die Pausen da. Vor jedem Zug wird
+    /// der Speicher-des-Laufs geleert (<paramref name="zwischenZug"/>), sonst antwortet der Resolver mit
+    /// dem gemerkten Fehlschlag und der naechste Zug waere sinnlos. Nach dem vierten Fehlschlag wird der
+    /// Titel dauerhaft geschlossen: damit sind ALLE Paare dieses Films bzw. dieser Serie entschieden.
+    /// </para>
+    /// </summary>
+    /// <typeparam name="T">The resolver's answer type.</typeparam>
+    /// <param name="quelle">The address — <c>tvsubtitles</c> or <c>moviesubtitles</c>.</param>
+    /// <param name="titelId">IMDb id, else TMDb id, of the title.</param>
+    /// <param name="versuch">One attempt.</param>
+    /// <param name="gelungen">Whether an attempt succeeded.</param>
+    /// <param name="grund">The status of a failed attempt.</param>
+    /// <param name="zwischenZug">Clears the resolver's per-run memory (never null).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The last answer and whether it succeeded.</returns>
+    private async Task<(T Ergebnis, bool Gelungen)> MitTitelLeiterAsync<T>(
+        string quelle,
+        string titelId,
+        Func<Task<T>> versuch,
+        Func<T, bool> gelungen,
+        Func<T, string?> grund,
+        Action zwischenZug,
+        CancellationToken ct)
+    {
+        T ergebnis = default!;
+        string? letzterGrund = null;
+        int zuege = _config.DryRun ? 1 : Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.ClosingAttempt;
+
+        for (int zug = 1; zug <= zuege; zug++)
+        {
+            if (zug > 1)
+            {
+                int pause = TitelLeiterPausenMs[Math.Min(zug - 2, TitelLeiterPausenMs.Length - 1)];
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[Sub Scribe] {Source} title {Title}: attempt {Zug}/{Zuege} failed ({Reason}) — waiting {Pause} ms (F-M608)",
+                    quelle, titelId, zug - 1, zuege, letzterGrund ?? "?", pause);
+                await Task.Delay(pause, ct).ConfigureAwait(false);
+                zwischenZug();
+            }
+
+            ergebnis = await versuch().ConfigureAwait(false);
+            if (gelungen(ergebnis))
+            {
+                Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Clear(quelle, titelId);
+                return (ergebnis, true);
+            }
+
+            letzterGrund = grund(ergebnis) ?? "?";
+            Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Note(quelle, titelId, letzterGrund);
+        }
+
+        if (!_config.DryRun)
+        {
+            Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Close(quelle, titelId, letzterGrund ?? "?");
+            LogUtil.Normal(_logger,
+                "[Sub Scribe] {Source} title {Title}: {Zuege} attempts failed ({Reason}) — every pair of this title is closed for good (F-M608)",
+                quelle, titelId, zuege, letzterGrund ?? "?");
+        }
+
+        return (ergebnis, false);
+    }
+
     private Task<UploadResult> SendToSourceAsync(
         Configuration.SubtitleProvider quelle, string srtContent, string neutralName, string lang,
         string releaseName, string quality, string? imdbId, string? tmdbId, bool isSeries,
@@ -6455,9 +6526,34 @@ public sealed class UploadPipeline : IPackFiller
             return UploadResult.Skipped("film-source-no-film-record");
         }
 
-        var aufloesung = await _msubMovies
-            .ResolveOrCreateForMediaAsync(Registry, mediaHash, movie, _config.DryRun, ct, mediaPath)
+        // F-M608: Titel-Leiter (anlegen → nachsuchen, Pausen 2/4/8 s, nach dem vierten Fehlschlag ist der
+        // Titel dauerhaft geschlossen — damit sind alle Paare dieses Films entschieden).
+        string msubTitelId = !string.IsNullOrWhiteSpace(imdbId) ? imdbId! : (tmdbId ?? mediaHash ?? string.Empty);
+        if (Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed("moviesubtitles", msubTitelId, out string msubGesperrt))
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[moviesubtitles] {Name} [{Lang}] — title {Title} is closed after repeated failed creations ({Reason}), nothing asked (F-M608)",
+                neutralName, lang, msubTitelId, msubGesperrt);
+            return UploadResult.Skipped("film-source-title-closed");
+        }
+
+        var (aufloesung, msubGelungen) = await MitTitelLeiterAsync(
+                "moviesubtitles",
+                msubTitelId,
+                () => _msubMovies.ResolveOrCreateForMediaAsync(Registry, mediaHash, movie, _config.DryRun, ct, mediaPath),
+                a => a.Resolved,
+                a => a.Status,
+                () => _msubMovies.BeginRun(),
+                ct)
             .ConfigureAwait(false);
+        if (!msubGelungen)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[moviesubtitles] {Name} [{Lang}] — title {Title} could not be created and found after the ladder ({Status}), nothing sent (F-M608)",
+                neutralName, lang, msubTitelId, aufloesung?.Status ?? "?");
+            return UploadResult.Skipped("film-source-title-closed");
+        }
+
         if (!aufloesung.Resolved)
         {
             // F-M508: KEIN Blocker. Die Zeile nennt den Grund (Status), damit im Lauf steht, warum die
@@ -6723,9 +6819,34 @@ public sealed class UploadPipeline : IPackFiller
             return UploadResult.Skipped("second-source-no-series-record");
         }
 
-        var show = await _tvstShows
-            .ResolveForMediaAsync(Registry, mediaHash, series, _config.DryRun, ct, mediaPath)
+        // F-M608: dieselbe Leiter fuer die Serie — anlegen, nachsuchen, 2/4/8 s, nach dem vierten
+        // Fehlschlag sind alle Paare dieser Serie geschlossen.
+        string tvstTitelId = !string.IsNullOrWhiteSpace(imdbId) ? imdbId! : (tmdbId ?? mediaHash ?? string.Empty);
+        if (Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed("tvsubtitles", tvstTitelId, out string tvstGesperrt))
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[tvsubtitles] {Name} [{Lang}] — title {Title} is closed after repeated failed creations ({Reason}), nothing asked (F-M608)",
+                neutralName, lang, tvstTitelId, tvstGesperrt);
+            return UploadResult.Skipped("second-source-title-closed");
+        }
+
+        var (show, tvstGelungen) = await MitTitelLeiterAsync(
+                "tvsubtitles",
+                tvstTitelId,
+                () => _tvstShows.ResolveForMediaAsync(Registry, mediaHash, series, _config.DryRun, ct, mediaPath),
+                s => s.Resolved,
+                s => s.Status,
+                () => _tvstShows.BeginRun(),
+                ct)
             .ConfigureAwait(false);
+        if (!tvstGelungen)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[tvsubtitles] {Name} [{Lang}] — title {Title} could not be created and found after the ladder ({Status}), nothing sent (F-M608)",
+                neutralName, lang, tvstTitelId, show?.Status ?? "?");
+            return UploadResult.Skipped("second-source-title-closed");
+        }
+
         if (!show.Resolved)
         {
             // F-M603 (Operator-Frage 18.11.2026: „Müsste ja derselbe uploader sein?"): JA — dieselbe

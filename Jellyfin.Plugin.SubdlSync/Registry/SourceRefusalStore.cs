@@ -47,6 +47,7 @@ public static class SourceRefusalStore
         "second-source-show-",
         "second-source-no-tmdb-id",
         "second-source-no-series-record",
+        "second-source-title-closed",
     };
 
     /// <summary>

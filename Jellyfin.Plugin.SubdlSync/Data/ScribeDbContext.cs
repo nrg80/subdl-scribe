@@ -142,6 +142,7 @@ public sealed class ScribeDbContext : IDisposable
         EnsureAiredSeasonsTable();
         EnsurePackSeasonsTable();
         EnsureSourceRefusalsTable();
+        EnsureTitleFailuresTable();
         EnsureReportColumns();
         EnsureStatusColumns();
         EnsurePackColumns();
@@ -337,6 +338,27 @@ public sealed class ScribeDbContext : IDisposable
     /// <summary>
     /// F-M605: the remembered source refusals. Same reasoning as <see cref="EnsurePackSeasonsTable"/>.
     /// </summary>
+    /// <summary>
+    /// F-M608: how often creating and finding a title failed, and whether it is closed for good.
+    /// </summary>
+    private void EnsureTitleFailuresTable()
+    {
+        try
+        {
+            _db.Database.ExecuteSqlRaw(
+                "CREATE TABLE IF NOT EXISTS title_failures ("
+                + "Id TEXT NOT NULL PRIMARY KEY, "
+                + "Attempts INTEGER NOT NULL DEFAULT 0, "
+                + "Closed INTEGER NOT NULL DEFAULT 0, "
+                + "Reason TEXT NOT NULL DEFAULT '', "
+                + "Written TEXT NOT NULL DEFAULT '');");
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("[Sub Scribe] could not create the title_failures table (continuing): {Msg}", ex.Message);
+        }
+    }
+
     private void EnsureSourceRefusalsTable()
     {
         try
@@ -1338,6 +1360,9 @@ public sealed class ScribeSqliteContext : DbContext
     /// <summary>F-M605: the remembered refusals of the sources, per track and content hash.</summary>
     public DbSet<SourceRefusalEntity> SourceRefusalRows => Set<SourceRefusalEntity>();
 
+    /// <summary>F-M608: the titles whose creation keeps failing, and the ones closed for good.</summary>
+    public DbSet<TitleFailureEntity> TitleFailureRows => Set<TitleFailureEntity>();
+
     /// <summary>
     /// Sets the pragmas this store runs with. Called once per context, right after the schema exists.
     /// <para>
@@ -1522,6 +1547,13 @@ public sealed class ScribeSqliteContext : DbContext
         modelBuilder.Entity<AiredSeasonEntity>(e =>
         {
             e.ToTable("aired_seasons");
+            e.HasKey(x => x.Id);
+        });
+
+        // F-M608: and for the title ladder.
+        modelBuilder.Entity<TitleFailureEntity>(e =>
+        {
+            e.ToTable("title_failures");
             e.HasKey(x => x.Id);
         });
 
