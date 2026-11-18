@@ -160,9 +160,51 @@ public sealed class ExtractionLookahead : IDisposable
             }
         }
 
+        // F-M613: erst die Pumpe freigeben, dann selbst extrahieren — nie zwei ffmpeg gleichzeitig.
+        Freigeben();
         var frisch = await FfmpegTools.ExtractAllAsync(ffmpegPath, mediaPath, positions, logger, config, ct)
             .ConfigureAwait(false);
         return (frisch.Texts, frisch.ExitCode, false);
+    }
+
+    /// <summary>
+    /// F-M613: gibt die Pumpe frei, bevor der Lauf selbst extrahiert — es soll nie zwei ffmpeg
+    /// gleichzeitig geben. Ein Plan, der danach noch gebraucht wird, meldet sich neu an und startet
+    /// die Pumpe wieder.
+    /// </summary>
+    public void Freigeben()
+    {
+        Task? pumpe;
+        CancellationTokenSource? cts;
+        lock (_lock)
+        {
+            pumpe = _pumpe;
+            cts = _cts;
+            _pumpe = null;
+            _cts = null;
+        }
+
+        try
+        {
+            cts?.Cancel();
+            cts?.Dispose();
+        }
+        catch (Exception)
+        {
+            // Eine bereits entsorgte Quelle ist kein Fehler des Laufs.
+        }
+
+        if (pumpe != null)
+        {
+            try
+            {
+                pumpe.Wait(TimeSpan.FromSeconds(3));
+            }
+            catch (Exception)
+            {
+                // Ein verworfener Vorlauf ist kein Fehler des Laufs.
+            }
+        }
     }
 
     /// <summary>Beendet die Pumpe und den laufenden ffmpeg-Prozess.</summary>

@@ -143,6 +143,49 @@ public class RunSummary
 /// </summary>
 public sealed class UploadPipeline : IPackFiller
 {
+    /// <summary>
+    /// F-M613: meldet der Pumpe die naechsten bis zu drei Dateien, die wirklich Arbeit brauchen
+    /// (in der Warteschlange und mit Textspuren). Wird an JEDEM Gegenstand aufgerufen, auch wenn er
+    /// uebersprungen wird — sonst laeuft die Pumpe leer und jede Extraktion faengt kalt an.
+    /// </summary>
+    /// <param name="vorlauf">Die Pumpe.</param>
+    /// <param name="items">Die Gegenstaende des Laufs.</param>
+    /// <param name="itemIndex">Wo der Lauf steht.</param>
+    /// <param name="runCt">Abbruch des Laufs.</param>
+    private void MeldeVorlauf(
+        ExtractionLookahead vorlauf,
+        IReadOnlyList<MediaBrowser.Controller.Entities.BaseItem> items,
+        int itemIndex,
+        CancellationToken runCt)
+    {
+        var kandidaten = new List<(string Path, List<int> Positions)>();
+        for (int i = itemIndex + 1; i < items.Count && kandidaten.Count < 3; i++)
+        {
+            var naechste = items[i];
+            if (string.IsNullOrWhiteSpace(naechste.Path))
+            {
+                continue;
+            }
+
+            if (QueueFilter != null && !QueueFilter.Contains(naechste.Id.ToString()))
+            {
+                continue;
+            }
+
+            var positionen = TextSubtitlePositions(naechste.Id);
+            if (positionen.Count == 0)
+            {
+                continue;
+            }
+
+            kandidaten.Add((naechste.Path!, positionen));
+        }
+
+        if (kandidaten.Count > 0)
+        {
+            vorlauf.Plan(kandidaten, _ffmpegPath, _logger, _config, runCt);
+        }
+    }
         /// <summary>
         /// Current postprocessing state for monitoring /Plugins/SubdlSync/PostprocessStatus.
         /// </summary>
@@ -1422,6 +1465,13 @@ public sealed class UploadPipeline : IPackFiller
                 .Any(pair => AnyUploadSourceStillWants(mediaHash, pair.Language, pair.HearingImpaired, isSeries));
             if (settledPairs && Registry.ArePositionsTerminal(mediaHash, textPositions))
             {
+                // F-M613 (Operator-Entscheidung 18.11.2026: „Ersteres" — die Pumpe laeuft dauerhaft
+                // eine Datei voraus): auch hier wird der Vorlauf angemeldet. Genau diese Zeile fehlte:
+                // 541 Ueberspringungen am Lauf, und die Pumpe bekam nie Auftrag, weil nur nach einer
+                // echten Extraktion angemeldet wurde. Sie lief leer, und die naechste Datei, die
+                // wirklich extrahieren musste, fing kalt an (gemessen: 2 von 34 Extraktionen aus dem
+                // Vorlauf).
+                MeldeVorlauf(vorlauf, items, itemIndex, runCt);
                 summary.SettledItems++;
                 LogUtil.PerItem(_config.LogMode, _logger,
                     "[Sub Scribe] SKIP {File} — item settled before extraction (every text stream has its end state, no source still wants a pair, F-M539)",
@@ -1500,33 +1550,7 @@ public sealed class UploadPipeline : IPackFiller
             // inzwischen aus dem Plan faellt.
             if (!retryPerStream)
             {
-                var kandidaten = new List<(string Path, List<int> Positions)>();
-                for (int i = itemIndex + 1; i < items.Count && kandidaten.Count < 3; i++)
-                {
-                    var naechste = items[i];
-                    if (string.IsNullOrWhiteSpace(naechste.Path))
-                    {
-                        continue;
-                    }
-
-                    if (QueueFilter != null && !QueueFilter.Contains(naechste.Id.ToString()))
-                    {
-                        continue;
-                    }
-
-                    var positionen = TextSubtitlePositions(naechste.Id);
-                    if (positionen.Count == 0)
-                    {
-                        continue;
-                    }
-
-                    kandidaten.Add((naechste.Path!, positionen));
-                }
-
-                if (kandidaten.Count > 0)
-                {
-                    vorlauf.Plan(kandidaten, _ffmpegPath, _logger, _config, runCt);
-                }
+                MeldeVorlauf(vorlauf, items, itemIndex, runCt);
             }
 
             // Phase 1 candidates: (kind, stream/loose-data, lang, srtContent)

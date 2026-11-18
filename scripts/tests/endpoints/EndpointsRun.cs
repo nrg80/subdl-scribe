@@ -831,6 +831,18 @@ internal static class Program
             db605.Contains("CREATE TABLE IF NOT EXISTS source_refusals (", StringComparison.Ordinal)
             && db605.Contains("e.ToTable(\"source_refusals\");", StringComparison.Ordinal));
 
+        // --- F-M613: die Pumpe bleibt gefuettert ------------------------------------------------------
+        var la613 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/ExtractionLookahead.cs"));
+        Check("F-M613: der Vorlauf wird an jedem Gegenstand angemeldet, auch wenn er uebersprungen wird",
+            up605.Contains("private void MeldeVorlauf(", StringComparison.Ordinal)
+            && up605.Contains("MeldeVorlauf(vorlauf, items, itemIndex, runCt);", StringComparison.Ordinal));
+        Check("F-M613: die Anmeldung steht auch im Pfad 'item settled before extraction'",
+            System.Text.RegularExpressions.Regex.IsMatch(up605, @"MeldeVorlauf\(vorlauf, items, itemIndex, runCt\);\s*summary\.SettledItems\+\+;"));
+        Check("F-M613: es laufen nie zwei ffmpeg — vor einer frischen Extraktion wird die Pumpe freigegeben",
+            la613.Contains("public void Freigeben()", StringComparison.Ordinal)
+            && la613.Contains("F-M613: erst die Pumpe freigeben, dann selbst extrahieren", StringComparison.Ordinal)
+            && la613.IndexOf("Freigeben();", la613.IndexOf("var frisch = await FfmpegTools.ExtractAllAsync", StringComparison.Ordinal) - 200, StringComparison.Ordinal) > 0);
+
         // --- F-M612: die tvst-Kennung wird nicht mehr nachgelesen -------------------------------------
         var tvstEp612 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/Endpoints/TvSubtitlesEndpoints.cs"));
         Check("F-M612: der tvst-Versand wartet nicht mehr auf eine Kennung, die es nicht gibt",
