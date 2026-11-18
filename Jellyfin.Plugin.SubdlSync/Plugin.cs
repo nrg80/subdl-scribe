@@ -409,24 +409,37 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         var logger = _loggerFactory?.CreateLogger<ScribeDbContext>();
         _sharedDbContext = new ScribeDbContext(DataFolderPath, logger);
 
+        AttachStores(_sharedDbContext.Context, logger);
+    }
+
+    /// <summary>
+    /// F-M616: haengt ALLE Stores an einen Datenkontext. Es gibt zwei Stellen, an denen ein Kontext
+    /// entsteht — dieser Weg und der normale Start ueber den Getter — und beide muessen dieselbe Liste
+    /// sehen. Genau das war der Fehler: F-M605 und F-M608 waren nur hier angehaengt, im normalen Start
+    /// fehlten sie, und die Titelsperre schrieb ins Nichts.
+    /// </summary>
+    /// <param name="db">Der Datenkontext.</param>
+    /// <param name="logger">Das Protokoll (F-M615).</param>
+    private static void AttachStores(Data.ScribeSqliteContext? db, Microsoft.Extensions.Logging.ILogger? logger)
+    {
         // F-M542: the TMDb answers live in the store now, so a restart does not re-ask them.
-        Jellyfin.Plugin.SubScribe.Registry.TmdbAnswerStore.Attach(_sharedDbContext.Context);
+        Jellyfin.Plugin.SubScribe.Registry.TmdbAnswerStore.Attach(db);
 
         // F-M601: the aired episode numbers of a season live in the store too.
-        Jellyfin.Plugin.SubScribe.Registry.AiredSeasonStore.Attach(_sharedDbContext.Context);
+        Jellyfin.Plugin.SubScribe.Registry.AiredSeasonStore.Attach(db);
 
         // F-M604: so do the pack verdicts, with the signature of the members they were made for.
-        Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.Attach(_sharedDbContext.Context);
+        Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.Attach(db);
 
         // F-M605: and the refusals the sources have already given for a track.
-        Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.Attach(_sharedDbContext.Context);
+        Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.Attach(db);
 
         // F-M608: and the ladder that closes a title after four failed creations.
-        Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Attach(_sharedDbContext.Context);
+        Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Attach(db);
 
         // F-M615: ohne Protokoll bleibt ein stiller Fehlschlag unsichtbar.
         Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.AttachLogger(logger);
-        }
+    }
 
     /// <inheritdoc />
     public override string Name => "Sub Scribe";
@@ -507,9 +520,12 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
                         // Zeit leer. Die Pruefung im Prueflauf deckte nur den Store selbst ab, nicht
                         // seine Verdrahtung — deshalb steht der Aufruf jetzt an BEIDEN Stellen, an
                         // denen ein Kontext entsteht.
-                        Jellyfin.Plugin.SubScribe.Registry.TmdbAnswerStore.Attach(_sharedDbContext.Context);
-                        Jellyfin.Plugin.SubScribe.Registry.AiredSeasonStore.Attach(_sharedDbContext.Context);
-                        Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.Attach(_sharedDbContext.Context);
+                        // F-M616 (18.11.2026): alle Stores haengen hier, nicht nur drei. F-M605
+                        // (Verweigerungen) und F-M608 (Titelsperre) waren nur in RecreateDbContext
+                        // angehaengt — also nach einem Reset. Im normalen Start hatte die Titelsperre
+                        // deshalb KEINE Datenbank: Close und IsClosed liefen ins Leere, und dieselben
+                        // acht Titel liefen in 482–487 in jedem Lauf erneut durch die Leiter.
+                        AttachStores(_sharedDbContext.Context, logger);
                     }
                 }
             }

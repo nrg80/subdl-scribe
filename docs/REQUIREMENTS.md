@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.487.
+**Status:** Implementation — v12.1.12.488.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -32,7 +32,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [10. Scheduler, Quota and Timing](#10-scheduler-quota-and-timing) — 24 requirements
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 27 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
-- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 42 requirements
+- [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 43 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 19 requirements
 - [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 48 requirements
 - [16. Non-Goals](#16-non-goals)
@@ -1709,6 +1709,8 @@ Libraries is opt-in AND required: nothing is processed until a library is picked
 
 **F-M605 [U]:** **Das Nein einer Quelle wird gemerkt.** Operator-Freigabe 18.11.2026 („Ok", nach der Frage „Ja aber legen wir nicht auch bei tvst neu an?"): F-M603 schloss nur den Fall „angelegt, Kennung nicht lesbar". Jeder andere Zustand einer Adresse — bei tvsubtitles `would-create`, `create-already-tried`, `refused`, `unclear`, `no-title`, `no-year`, bei moviesubtitles die entsprechenden Film-Zustände — endete weiterhin als SKIP **ohne** Marke, das Paar blieb offen und die Datei kehrte in jeden Lauf zurück. Jetzt merkt der Store das inhaltliche Nein je **Spur, Quelle und Inhalt** (`source_refusals`, Schlüssel `mediaHash|subPos|langTag|quelle`, Signatur = Inhalts-Hash): dieselbe Spur wird bei demselben Text nicht erneut gefragt, ein anderer Text (oder ein neu geripptes Medium) fragt wieder. **Nicht** gemerkt werden vorübergehende Neins (Rate Limit, Zeitüberschreitung, Abbruch) — die dürfen und müssen beim nächsten Lauf neu gefragt werden; hat eine Quelle den Inhalt genommen, wird ein altes Nein vergessen. Geprüft von T315.
 
+**F-M616 [U]:** **Die Titelsperre (und die Verweigerungen) hingen an keinem Datenkontext — im normalen Start.** Diagnose vom 18.11.2026 aus dem Protokoll von 487: die Leiter schloss dieselben Titel in jedem Lauf erneut (`closed for good` um 20:52, 20:54, 20:56), aber **keine einzige** Store-Zeile erschien — weder `closed and written` noch `attempt N written`. Ursache: `TitleFailureStore.Attach` und `SourceRefusalStore.Attach` standen nur in `RecreateDbContext` (dem Weg nach einem Reset). Der normale Start geht über den Getter von `SharedDbContext`, und dort hingen nur drei Stores (TMDb, Staffelluft, Pack-Urteile). Folge: `_db` war `null`, `Close` und `IsClosed` liefen stillschweigend ins Leere — deshalb 482, 483, 484, 485, 486, 487 immer dieselben acht Titel. Es ist derselbe Fehler wie F-M545 (dort für den TMDb-Store gefunden) — nur wurden F-M605 und F-M608 später genau so wieder halb verdrahtet. Jetzt gibt es **eine** Methode `AttachStores(db, logger)`, die alle fünf Stores und das Protokoll anhängt, und **beide** Startwege rufen sie; T326 prüft, dass es genau zwei Aufrufe gibt und kein Store am Helfer vorbei angehängt wird.
+
 **F-M615 [U]:** **Der Titelspeicher schweigt nicht mehr.** Operator-Anweisung 18.11.2026: „Do it". `IsClosed`, `Close`, `Note` und `Clear` fingen **jede** Ausnahme ohne ein Wort ab; die Titelsperre hielt in vier Läufen nicht (482–485, immer `tt35538033`, `tt34685692`, `tt34379051` → `exists-other-year`), und im Log war nichts zu sehen. Jetzt hängt das Plugin beim Start ein Protokoll an (`AttachLogger`): Lese-, Schreib- und Schließfehler erscheinen als Warnung mit Typ und Text, ein **nicht angehängter** Store wird einmal je Prozess gemeldet, und jeder Zugriff steht als Debug-Zeile im Log (`not in the store`, `open, attempts N`, `is closed`, `attempt N written`, `closed and written`). Damit ist im nächsten Lauf sichtbar, ob der Eintrag geschrieben wird und beim nächsten Lauf wieder da ist. **Nachtrag 487:** die ersten drei Zeilen (`attempt N written`, `closed and written`, `is closed … the ladder is skipped`) stehen auf **Information** — Jellyfin zeigt Debug im Standardprotokoll nicht, deshalb war der Lauf 486 trotz Protokoll blind (0 Zeilen). Geprüft von T325.
 
 **F-M614 [U]:** **Der Store wird am Ende jedes Gegenstands geschrieben, nicht erst am Laufende.** Operator-Frage 18.11.2026: „Wieso schreiben wir den store nicht pro file am ende?" — es gab keinen guten Grund, nur einen Fehler: `ContentHashRegistry.Flush()` war eine **leere Methode**. Die Aufrufer glaubten an einen Flush, die Zeilen lagen aber bis zum Laufende in der F-M602-Klammer. Folge, live erlebt: nach einem Neustart mitten im Lauf (zweimal am 18.11. durch Deploys von 483 und 484) waren die Titelsperren weg, und dieselben acht Titel (`tt35538033`, `tt34685692`, `tt34379051`, `tt27613895`, `tt34564059`, `tt27419466`, `tt32547691`, `tt28638842`) liefen in 482, 483 **und** 484 erneut durch die Titel-Leiter — je 4 Versuche mit 2/4/8 s Pause. Jetzt ruft die Pipeline zu Beginn jedes Gegenstands `Registry.Flush()` (jetzt `_db.FlushPending()`); offen ist damit höchstens noch die Arbeit des laufenden Gegenstands. `FlushPending` ist ein No-Op ohne offene Zeilen, kostet also nur bei Gegenständen mit Schreibvorgang einen Commit. **Generell** (Operator: „Und das generell. Also nicht pro track, nicht pro lauf, pro file"): dieselbe Zeile steht jetzt auch in der Download-Pipeline. Geprüft von T324.
@@ -2551,6 +2553,8 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
 
 **T303:** Der Takt ist 50–500 einstellbar, Vorgabe 450, und der Hinweis nennt SubDLs 500/h (F-M593) — ein Feld für Upload und Download: die Beschriftung im Formular, `max="500"` am Feld, die Prüfung beim Speichern samt Rückfall und die Beschreibung OHNE SubDL-Hinweis und die Vorgabe im Konfigurationsmodell — **4 Prüfungen** in `endpoints` (284 → 288).
+
+**T326:** Alle Stores an beiden Startwegen (F-M616): ein Helfer, zwei Aufrufe, kein Store vorbei — **3 Prüfungen** in `endpoints`.
 
 **T325:** Kein stiller Fehlschlag im Titelspeicher (F-M615): Protokoll, Meldungen, Anhängen beim Start — **3 Prüfungen** in `endpoints`.
 

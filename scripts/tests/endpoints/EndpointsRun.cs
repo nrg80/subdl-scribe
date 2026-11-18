@@ -831,6 +831,20 @@ internal static class Program
             db605.Contains("CREATE TABLE IF NOT EXISTS source_refusals (", StringComparison.Ordinal)
             && db605.Contains("e.ToTable(\"source_refusals\");", StringComparison.Ordinal));
 
+        // --- F-M616: alle Stores haengen an beiden Startwegen -----------------------------------------
+        var pl616 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Plugin.cs"));
+        Check("F-M616: es gibt genau eine Stelle, die alle Stores anhaengt",
+            System.Text.RegularExpressions.Regex.Matches(pl616, @"\bAttachStores\(_sharedDbContext\.Context, logger\);").Count == 2
+            && pl616.Contains("private static void AttachStores(", StringComparison.Ordinal));
+        Check("F-M616: Verweigerungen und Titelsperre sind dabei, nicht nur die drei alten",
+            pl616.Contains("SourceRefusalStore.Attach(db);", StringComparison.Ordinal)
+            && pl616.Contains("TitleFailureStore.Attach(db);", StringComparison.Ordinal)
+            && pl616.Contains("TitleFailureStore.AttachLogger(logger);", StringComparison.Ordinal)
+            && pl616.Contains("PackSeasonStore.Attach(db);", StringComparison.Ordinal)
+            && pl616.Contains("AiredSeasonStore.Attach(db);", StringComparison.Ordinal)
+            && pl616.Contains("TmdbAnswerStore.Attach(db);", StringComparison.Ordinal));
+        Check("F-M616: kein Store wird mehr am Helfer vorbei angehaengt",
+            !System.Text.RegularExpressions.Regex.IsMatch(pl616, @"(?<!AttachStores[\s\S]{0,1200})Registry\.(TmdbAnswer|AiredSeason|PackSeason|SourceRefusal|TitleFailure)Store\.Attach\(_sharedDbContext\.Context\);"));
         // --- F-M615: kein stiller Fehlschlag mehr ----------------------------------------------------
         var tfs615 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/TitleFailureStore.cs"));
         var pl615 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Plugin.cs"));
@@ -1074,8 +1088,9 @@ internal static class Program
             && upload601.Contains("&& AiredSeasonStore.Covers(gespeichert, entry.Value)", StringComparison.Ordinal)
             && upload601.Contains("aired = await SeasonEpisodeIndex.AiredAsync(", StringComparison.Ordinal)
             && upload601.Contains("AiredSeasonStore.Put(entry.Key.Item1, entry.Key.Item2, aired);", StringComparison.Ordinal));
-        Check("F-M601: der Store haengt an BEIDEN Stellen, an denen ein Kontext entsteht (F-M545)",
-            plugin601.Split("AiredSeasonStore.Attach(_sharedDbContext.Context);").Length - 1 == 2);
+        Check("F-M601: der Store haengt an BEIDEN Stellen, an denen ein Kontext entsteht (F-M545, seit F-M616 ueber den Helfer)",
+            plugin601.Contains("AiredSeasonStore.Attach(db);", StringComparison.Ordinal)
+            && plugin601.Split("AttachStores(_sharedDbContext.Context, logger);").Length - 1 == 2);
         Check("F-M601: die Planungszeile nennt, wie viele Antworten aus dem Store kamen",
             upload601.Contains("({FromStore} from the store)", StringComparison.Ordinal)
             && upload601.Contains("airedAusStore++", StringComparison.Ordinal));
@@ -2002,9 +2017,12 @@ internal static class Program
                 // Prueflauf deckte den Store ab, nicht seine Verdrahtung; das holt dieser Check nach.
                 string pluginQuelle = await File.ReadAllTextAsync(Path.Combine(
                     root, "Jellyfin.Plugin.SubdlSync", "Plugin.cs")).ConfigureAwait(false);
+                // F-M616: die Anhaenge stehen jetzt in einem Helfer, den beide Startwege rufen. Der Check
+                // zaehlt deshalb die Aufrufe des Helfers und prueft, dass der Store darin haengt.
                 Check("F-M545: the TMDb store is attached where the shared context is created",
-                    pluginQuelle.Split("TmdbAnswerStore.Attach(_sharedDbContext.Context)").Length - 1 == 2,
-                    (pluginQuelle.Split("TmdbAnswerStore.Attach(_sharedDbContext.Context)").Length - 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + " Stelle(n)");
+                    pluginQuelle.Split("AttachStores(_sharedDbContext.Context, logger);").Length - 1 == 2
+                    && pluginQuelle.Contains("TmdbAnswerStore.Attach(db);", StringComparison.Ordinal),
+                    (pluginQuelle.Split("AttachStores(_sharedDbContext.Context, logger);").Length - 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + " Stelle(n)");
                 string storeQuelle = await File.ReadAllTextAsync(Path.Combine(
                     root, "Jellyfin.Plugin.SubdlSync", "Registry", "TmdbAnswerStore.cs")).ConfigureAwait(false);
                 Check("F-M545: and the store fetches a missing context itself instead of silently staying in memory",
