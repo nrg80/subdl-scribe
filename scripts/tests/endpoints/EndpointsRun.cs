@@ -831,6 +831,30 @@ internal static class Program
             db605.Contains("CREATE TABLE IF NOT EXISTS source_refusals (", StringComparison.Ordinal)
             && db605.Contains("e.ToTable(\"source_refusals\");", StringComparison.Ordinal));
 
+        // --- F-M610: nicht zu viel schliessen ----------------------------------------------------------
+        var store610 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/TitleFailureStore.cs"));
+        Check("F-M610: ein Beleg schliesst den Titel nicht — er wird beim Lesen sogar verworfen",
+            store610.Contains("private static readonly string[] EvidenceReasons", StringComparison.Ordinal)
+            && store610.Contains("\"created-id-not-readable\",", StringComparison.Ordinal)
+            && store610.Contains("\"exists-id-not-readable\",", StringComparison.Ordinal)
+            && store610.Contains("if (EvidenceReasons.Any(e => string.Equals(e, row.Reason, StringComparison.OrdinalIgnoreCase)))", StringComparison.Ordinal));
+        Check("F-M610: eine Stoerung zaehlt nicht als Fehlschlag und schliesst nichts",
+            up605.Contains("Func<T, bool>? stoerung,", StringComparison.Ordinal)
+            && up605.Contains("if (!letzteStoerung)", StringComparison.Ordinal)
+            && up605.Contains("if (!_config.DryRun && !letzteStoerung)", StringComparison.Ordinal)
+            && up605.Contains("attempts without a verdict ({Reason}) — nothing closed, the next run asks again (F-M610)", StringComparison.Ordinal));
+        Check("F-M610: 'existiert, Kennung nicht lesbar' gilt als Beleg, nicht als Fehlschlag der Leiter",
+            up605.Contains("Func<T, bool>? schonBelegt,", StringComparison.Ordinal)
+            && up605.Contains("if (gelungen(ergebnis) || (schonBelegt?.Invoke(ergebnis) ?? false))", StringComparison.Ordinal)
+            && up605.Contains("Api.Endpoints.MsubMovieStatus.CreatedWithoutId", StringComparison.Ordinal)
+            && up605.Contains("Api.Endpoints.MsubMovieStatus.ExistsWithoutId", StringComparison.Ordinal)
+            && up605.Contains("Api.Endpoints.TvstShowStatus.CreatedIdUnknown", StringComparison.Ordinal));
+        Check("F-M610: ohne Urteil gibt es NoVerdict statt eines geschlossenen Titels",
+            up605.Contains("return UploadResult.NoVerdict(\"film-source-title-no-verdict\");", StringComparison.Ordinal)
+            && up605.Contains("return UploadResult.NoVerdict(\"second-source-title-no-verdict\");", StringComparison.Ordinal)
+            && up605.Contains("Api.Endpoints.MsubMovieStatus.Unclear", StringComparison.Ordinal)
+            && up605.Contains("Api.Endpoints.TvstShowStatus.Unclear", StringComparison.Ordinal));
+
         // --- F-M609: drei Urteile — angenommen, abgelehnt, kein Urteil ---------------------------------
         var ur609 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/UploadResult.cs"));
         var api609 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/ScribeApiClient.cs"));

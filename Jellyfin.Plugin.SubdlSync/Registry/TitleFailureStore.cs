@@ -55,6 +55,21 @@ public static class TitleFailureStore
         => (source ?? string.Empty).Trim().ToLowerInvariant() + "|" + (titleId ?? string.Empty).Trim().ToLowerInvariant();
 
     /// <summary>
+    /// F-M610 (Operator-Frage 18.11.2026: „Anzeichen dafür das wir zuviel schließen/ uberblocken?"): diese
+    /// Gruende sind ein BELEG („die Seite fuehrt den Titel, die Kennung ist nur nicht lesbar") und KEIN
+    /// Nein — sie duerfen einen Titel nicht dauerhaft schliessen. Vor F-M610 tat die Leiter genau das:
+    /// 12 Titel lagen in der Sperre, obwohl die Seite sie fuehrt (gemessen 18.11.2026: 57 Zeilen
+    /// <c>exists-id-not-readable</c>, 29 Zeilen <c>exists-other-year</c>). Eine solche Zeile wird beim
+    /// Lesen verworfen statt befolgt — kein Aufraeumlauf noetig.
+    /// </summary>
+    private static readonly string[] EvidenceReasons =
+    {
+        "created-id-not-readable",
+        "exists-id-not-readable",
+        "created-id-unknown",
+    };
+
+    /// <summary>
     /// Answers whether a title was closed after the ladder ran out.
     /// </summary>
     /// <param name="source">The address.</param>
@@ -78,6 +93,20 @@ public static class TitleFailureStore
                 var row = db.TitleFailureRows.AsNoTracking().FirstOrDefault(r => r.Id == id);
                 if (row == null || !row.Closed)
                 {
+                    return false;
+                }
+
+                // F-M610: eine Sperre, die auf einem Beleg beruht, ist keine Sperre. Sie faellt hier weg
+                // (auch aus dem Store, damit die Zaehlung nicht weiterlaeuft).
+                if (EvidenceReasons.Any(e => string.Equals(e, row.Reason, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var alt = db.TitleFailureRows.FirstOrDefault(r => r.Id == id);
+                    if (alt != null)
+                    {
+                        db.TitleFailureRows.Remove(alt);
+                        db.SaveChanges();
+                    }
+
                     return false;
                 }
 

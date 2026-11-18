@@ -6444,19 +6444,33 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="gelungen">Whether an attempt succeeded.</param>
     /// <param name="grund">The status of a failed attempt.</param>
     /// <param name="zwischenZug">Clears the resolver's per-run memory (never null).</param>
+    /// <param name="schonBelegt">
+    /// F-M610: Zustaende, die ein BELEG sind, aber keine Aufloesung — „der Film existiert, die Kennung ist
+    /// nicht lesbar". Sie zaehlen als Erfolg der Leiter, damit das Paar ueber F-M603 geschlossen wird und
+    /// NICHT der ganze Titel. Vorher schloss die Leiter nach vier solchen Zuegen den Titel fuer immer,
+    /// obwohl die Seite den Film fuehrt — gemessen 18.11.2026 an 12 Titeln.
+    /// </param>
+    /// <param name="stoerung">
+    /// F-M610: Zustaende ohne Urteil („unclear", Serverfehler). Sie zaehlen nicht als Fehlschlag, und der
+    /// Titel wird NICHT geschlossen — sonst waere ein Lauf waehrend einer Serverstoerung ein Dauerurteil,
+    /// genau das, was F-M609 fuer die Paare schon verhindert.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>The last answer and whether it succeeded.</returns>
-    private async Task<(T Ergebnis, bool Gelungen)> MitTitelLeiterAsync<T>(
+    /// <returns>Die letzte Antwort, ob sie gelungen ist, und ob der Titel geschlossen wurde.</returns>
+    private async Task<(T Ergebnis, bool Gelungen, bool Geschlossen)> MitTitelLeiterAsync<T>(
         string quelle,
         string titelId,
         Func<Task<T>> versuch,
         Func<T, bool> gelungen,
         Func<T, string?> grund,
+        Func<T, bool>? schonBelegt,
+        Func<T, bool>? stoerung,
         Action zwischenZug,
         CancellationToken ct)
     {
         T ergebnis = default!;
         string? letzterGrund = null;
+        bool letzteStoerung = false;
         int zuege = _config.DryRun ? 1 : Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.ClosingAttempt;
 
         for (int zug = 1; zug <= zuege; zug++)
@@ -6472,25 +6486,41 @@ public sealed class UploadPipeline : IPackFiller
             }
 
             ergebnis = await versuch().ConfigureAwait(false);
-            if (gelungen(ergebnis))
+
+            // F-M610: ein Beleg ohne Aufloesung („existiert, Kennung nicht lesbar") ist KEIN Fehlschlag
+            // der Leiter — das Paar wird ueber F-M603 geschlossen, der Titel bleibt offen.
+            if (gelungen(ergebnis) || (schonBelegt?.Invoke(ergebnis) ?? false))
             {
                 Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Clear(quelle, titelId);
-                return (ergebnis, true);
+                return (ergebnis, true, false);
             }
 
             letzterGrund = grund(ergebnis) ?? "?";
-            Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Note(quelle, titelId, letzterGrund);
+            letzteStoerung = stoerung?.Invoke(ergebnis) ?? false;
+            if (!letzteStoerung)
+            {
+                // F-M610: eine Stoerung zaehlt nicht als Fehlschlag — sie ist kein Urteil.
+                Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Note(quelle, titelId, letzterGrund);
+            }
         }
 
-        if (!_config.DryRun)
+        if (!_config.DryRun && !letzteStoerung)
         {
             Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Close(quelle, titelId, letzterGrund ?? "?");
             LogUtil.Normal(_logger,
                 "[Sub Scribe] {Source} title {Title}: {Zuege} attempts failed ({Reason}) — every pair of this title is closed for good (F-M608)",
                 quelle, titelId, zuege, letzterGrund ?? "?");
+            return (ergebnis, false, true);
         }
 
-        return (ergebnis, false);
+        if (letzteStoerung)
+        {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[Sub Scribe] {Source} title {Title}: {Zuege} attempts without a verdict ({Reason}) — nothing closed, the next run asks again (F-M610)",
+                quelle, titelId, zuege, letzterGrund ?? "?");
+        }
+
+        return (ergebnis, false, false);
     }
 
     private Task<UploadResult> SendToSourceAsync(
@@ -6602,20 +6632,34 @@ public sealed class UploadPipeline : IPackFiller
             return UploadResult.Skipped("film-source-title-closed");
         }
 
-        var (aufloesung, msubGelungen) = await MitTitelLeiterAsync(
+        var (aufloesung, msubGelungen, msubGeschlossen) = await MitTitelLeiterAsync(
                 "moviesubtitles",
                 msubTitelId,
                 () => _msubMovies.ResolveOrCreateForMediaAsync(Registry, mediaHash, movie, _config.DryRun, ct, mediaPath),
                 a => a.Resolved,
                 a => a.Status,
+                // F-M610: „existiert, Kennung nicht lesbar" ist ein Beleg — Paar zu, Titel offen.
+                a => string.Equals(a.Status, Api.Endpoints.MsubMovieStatus.CreatedWithoutId, StringComparison.Ordinal)
+                    || string.Equals(a.Status, Api.Endpoints.MsubMovieStatus.ExistsWithoutId, StringComparison.Ordinal),
+                // F-M610: „unclear" ist keine Auskunft — nichts zaehlen, nichts schliessen.
+                a => string.Equals(a.Status, Api.Endpoints.MsubMovieStatus.Unclear, StringComparison.Ordinal),
                 () => _msubMovies.BeginRun(),
                 ct)
             .ConfigureAwait(false);
         if (!msubGelungen)
         {
+            // F-M610: nur ein inhaltliches Nein schliesst den Titel. Ohne Urteil bleibt alles offen.
+            if (!msubGeschlossen)
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[moviesubtitles] {Name} [{Lang}] — title {Title} got no verdict after the ladder ({Status}), nothing closed (F-M610)",
+                    neutralName, lang, msubTitelId, aufloesung?.Status ?? "?");
+                return UploadResult.NoVerdict("film-source-title-no-verdict");
+            }
+
             LogUtil.PerItem(_config.LogMode, _logger,
                 "[moviesubtitles] {Name} [{Lang}] — title {Title} could not be created and found after the ladder ({Status}), nothing sent (F-M608)",
-                neutralName, lang,                msubTitelId, aufloesung?.Status ?? "?");
+                neutralName, lang, msubTitelId, aufloesung?.Status ?? "?");
             _titelGeschlossen.Add("moviesubtitles|" + msubTitelId);
             return UploadResult.Skipped("film-source-title-closed");
         }
@@ -6912,17 +6956,28 @@ public sealed class UploadPipeline : IPackFiller
             return UploadResult.Skipped("second-source-title-closed");
         }
 
-        var (show, tvstGelungen) = await MitTitelLeiterAsync(
+        var (show, tvstGelungen, tvstGeschlossen) = await MitTitelLeiterAsync(
                 "tvsubtitles",
                 tvstTitelId,
                 () => _tvstShows.ResolveForMediaAsync(Registry, mediaHash, series, _config.DryRun, ct, mediaPath),
                 s => s.Resolved,
                 s => s.Status,
+                // F-M610: „angelegt, Kennung unbekannt" ist ein Beleg — Paar zu, Titel offen.
+                s => string.Equals(s.Status, Api.Endpoints.TvstShowStatus.CreatedIdUnknown, StringComparison.Ordinal),
+                s => string.Equals(s.Status, Api.Endpoints.TvstShowStatus.Unclear, StringComparison.Ordinal),
                 () => _tvstShows.BeginRun(),
                 ct)
             .ConfigureAwait(false);
         if (!tvstGelungen)
         {
+            if (!tvstGeschlossen)
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[tvsubtitles] {Name} [{Lang}] — title {Title} got no verdict after the ladder ({Status}), nothing closed (F-M610)",
+                    neutralName, lang, tvstTitelId, show?.Status ?? "?");
+                return UploadResult.NoVerdict("second-source-title-no-verdict");
+            }
+
             _titelGeschlossen.Add("tvsubtitles|" + tvstTitelId);
             LogUtil.PerItem(_config.LogMode, _logger,
                 "[tvsubtitles] {Name} [{Lang}] — title {Title} could not be created and found after the ladder ({Status}), nothing sent (F-M608)",
