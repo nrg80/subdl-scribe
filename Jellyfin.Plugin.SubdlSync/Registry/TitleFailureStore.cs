@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Linq;
 using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.SubScribe.Registry;
 
@@ -31,6 +32,29 @@ public static class TitleFailureStore
     private static readonly object Gate = new();
 
     private static ScribeSqliteContext? _db;
+
+    /// <summary>
+    /// F-M615 (Operator-Anweisung 18.11.2026: „Do it"): ein Protokoll, damit ein stiller Fehlschlag
+    /// nicht mehr unsichtbar bleibt. Bis hierher fingen <see cref="IsClosed"/>, <see cref="Close"/>,
+    /// <see cref="Note"/> und <see cref="Clear"/> jede Ausnahme ohne Wort ab — die Titelsperre hielt
+    /// deshalb in vier Laeufen nicht, und niemand konnte sehen, warum.
+    /// </summary>
+    private static ILogger? _log;
+
+    /// <summary>Warnung „Store nicht angehaengt" nur einmal je Prozess.</summary>
+    private static bool _warnedNoStore;
+
+    /// <summary>
+    /// F-M615: haengt das Protokoll an. Ohne Protokoll bleibt das Verhalten wie vorher, nur stumm.
+    /// </summary>
+    /// <param name="log">Das Protokoll des Plugins.</param>
+    public static void AttachLogger(ILogger? log)
+    {
+        lock (Gate)
+        {
+            _log = log;
+        }
+    }
 
     /// <summary>
     /// Attaches the store. Called once when the plugin builds its data context; without it the ladder
@@ -91,8 +115,15 @@ public static class TitleFailureStore
             lock (Gate)
             {
                 var row = db.TitleFailureRows.AsNoTracking().FirstOrDefault(r => r.Id == id);
-                if (row == null || !row.Closed)
+                if (row == null)
                 {
+                    _log?.LogDebug("[Sub Scribe] title store: {Key} not in the store (F-M615)", id);
+                    return false;
+                }
+
+                if (!row.Closed)
+                {
+                    _log?.LogDebug("[Sub Scribe] title store: {Key} open, attempts {Attempts} ({Reason}) (F-M615)", id, row.Attempts, row.Reason);
                     return false;
                 }
 
@@ -110,12 +141,16 @@ public static class TitleFailureStore
                     return false;
                 }
 
+                _log?.LogDebug(
+                    "[Sub Scribe] title store: {Key} is closed ({Reason}, attempts {Attempts}) — the ladder is skipped (F-M615)",
+                    id, row.Reason, row.Attempts);
                 reason = row.Reason ?? string.Empty;
                 return true;
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _log?.LogWarning("[Sub Scribe] title store: reading {Key} failed: {Type}: {Msg} (F-M615)", id, ex.GetType().Name, ex.Message);
             return false;
         }
     }
@@ -151,11 +186,13 @@ public static class TitleFailureStore
                 row.Reason = Trunc(reason, 200);
                 row.Written = DateTime.UtcNow;
                 db.SaveChanges();
+                _log?.LogDebug("[Sub Scribe] title store: {Key} attempt {Attempts} written ({Reason}) (F-M615)", id, row.Attempts, row.Reason);
                 return row.Attempts;
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _log?.LogWarning("[Sub Scribe] title store: writing {Key} failed: {Type}: {Msg} (F-M615)", id, ex.GetType().Name, ex.Message);
             return 1;
         }
     }
@@ -191,11 +228,14 @@ public static class TitleFailureStore
                 row.Reason = Trunc(reason, 200);
                 row.Written = DateTime.UtcNow;
                 db.SaveChanges();
+                _log?.LogDebug("[Sub Scribe] title store: {Key} closed and written ({Reason}) (F-M615)", id, reason);
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Eine Sperre, die nicht gespeichert werden kann, kostet nur einen weiteren Versuch.
+            // Eine Sperre, die nicht gespeichert werden kann, kostet nur einen weiteren Versuch — aber
+            // jetzt steht im Protokoll, dass es passiert ist (F-M615).
+            _log?.LogWarning("[Sub Scribe] title store: closing {Key} failed: {Type}: {Msg} (F-M615)", id, ex.GetType().Name, ex.Message);
         }
     }
 
@@ -238,6 +278,13 @@ public static class TitleFailureStore
     {
         lock (Gate)
         {
+            if (_db == null && !_warnedNoStore)
+            {
+                _warnedNoStore = true;
+                _log?.LogWarning(
+                    "[Sub Scribe] title store: NOT attached — the ladder can only count within the run, nothing is written (F-M615)");
+            }
+
             return _db;
         }
     }

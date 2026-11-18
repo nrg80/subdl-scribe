@@ -423,6 +423,9 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
 
         // F-M608: and the ladder that closes a title after four failed creations.
         Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Attach(_sharedDbContext.Context);
+
+        // F-M615: ohne Protokoll bleibt ein stiller Fehlschlag unsichtbar.
+        Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.AttachLogger(logger);
         }
 
     /// <inheritdoc />

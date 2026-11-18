@@ -831,6 +831,21 @@ internal static class Program
             db605.Contains("CREATE TABLE IF NOT EXISTS source_refusals (", StringComparison.Ordinal)
             && db605.Contains("e.ToTable(\"source_refusals\");", StringComparison.Ordinal));
 
+        // --- F-M615: kein stiller Fehlschlag mehr ----------------------------------------------------
+        var tfs615 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/TitleFailureStore.cs"));
+        var pl615 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Plugin.cs"));
+        Check("F-M615: der Titelspeicher hat ein Protokoll und meldet jeden Fehlschlag",
+            tfs615.Contains("public static void AttachLogger(ILogger? log)", StringComparison.Ordinal)
+            && tfs615.Contains("title store: closing {Key} failed", StringComparison.Ordinal)
+            && tfs615.Contains("title store: writing {Key} failed", StringComparison.Ordinal)
+            && tfs615.Contains("title store: reading {Key} failed", StringComparison.Ordinal));
+        Check("F-M615: auch ein nicht angehaengter Store und ein fehlender Eintrag sind sichtbar",
+            tfs615.Contains("NOT attached — the ladder can only count within the run", StringComparison.Ordinal)
+            && tfs615.Contains("not in the store (F-M615)", StringComparison.Ordinal)
+            && tfs615.Contains("is closed ({Reason}, attempts {Attempts})", StringComparison.Ordinal));
+        Check("F-M615: das Plugin haengt das Protokoll beim Start an",
+            pl615.Contains("TitleFailureStore.AttachLogger(logger);", StringComparison.Ordinal));
+
         // --- F-M614: der Store wird je Gegenstand geschrieben -----------------------------------------
         var reg614 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
         Check("F-M614: Flush schreibt wirklich, statt leer zu bleiben",
