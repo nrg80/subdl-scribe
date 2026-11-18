@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.490",
-        "changelog": "v12.1.12.490: the title store says out loud whether a row is missing, open or closed.",
+        "version": "12.1.12.491",
+        "changelog": "v12.1.12.491: the pipeline logs what the title store answers at the call site.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.490-dev/Jellyfin.Plugin.SubdlSync_12.1.12.490.zip",
-        "checksum": "b9a7aeb5b00e895989ceb2ab1bdd558f",
-        "timestamp": "2026-11-18T20:46:29Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.491-dev/Jellyfin.Plugin.SubdlSync_12.1.12.491.zip",
+        "checksum": "59cbd9abba871a81b98eaccd26a40b30",
+        "timestamp": "2026-11-18T21:01:13Z"
       }
     ]
   }
