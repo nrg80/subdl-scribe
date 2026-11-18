@@ -631,7 +631,7 @@
     },
     "T318": {
       "suite": "endpoints",
-      "checks": 4
+      "checks": 5
     }
   }
 }
