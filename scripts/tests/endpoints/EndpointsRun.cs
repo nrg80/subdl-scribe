@@ -809,6 +809,29 @@ internal static class Program
         Check("F-M593: die Vorgabe im Konfigurationsmodell ist 450",
             configSource593.Contains("UploadsPerHour = 450;", StringComparison.Ordinal));
 
+        // --- F-M598: der ganze Lauf wird vermessen (Upload mit Pack-Phase, Download) ---------------
+        var uploadSource598 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        var downloadSource598 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
+        Check("F-M598: der Upload-Lauf nennt Item-Liste, Pack-Phase und Lauf-Ende mit Dauer",
+            uploadSource598.Contains("var laufTakt = System.Diagnostics.Stopwatch.StartNew();", StringComparison.Ordinal)
+            && uploadSource598.Contains("LAUF upload — {Count} item(s) collected and ordered after {Ms} ms (F-M598)", StringComparison.Ordinal)
+            && uploadSource598.Contains("LAUF upload — pack phase done after {Ms} ms (F-M598)", StringComparison.Ordinal)
+            && uploadSource598.Contains("LAUF upload — done: item loop {Loop} ms, run total {Total} ms, {Items} item(s) (F-M598)", StringComparison.Ordinal));
+        Check("F-M598: der Upload-Lauf vermisst auch jedes Item einzeln",
+            uploadSource598.Contains("var itemTakt = System.Diagnostics.Stopwatch.StartNew();", StringComparison.Ordinal)
+            && uploadSource598.Contains("LAUF upload — item {Index}/{Count}", StringComparison.Ordinal)
+            && uploadSource598.Contains("itemTakt.Restart();", StringComparison.Ordinal));
+        Check("F-M598: der Download-Lauf hat dieselben Punkte",
+            downloadSource598.Contains("var laufTakt = System.Diagnostics.Stopwatch.StartNew();", StringComparison.Ordinal)
+            && downloadSource598.Contains("LAUF download — {Count} item(s) collected after {Ms} ms (F-M598)", StringComparison.Ordinal)
+            && downloadSource598.Contains("LAUF download — item {Index}/{Count}", StringComparison.Ordinal)
+            && downloadSource598.Contains("LAUF download — done after {Ms} ms, {Items} item(s) (F-M598)", StringComparison.Ordinal));
+        Check("F-M598: alle Lauf-Zeilen liegen auf Detail, nicht im Normalbetrieb",
+            uploadSource598.Contains("LogUtil.Detail(_logger, \"[Sub Scribe] LAUF upload", StringComparison.Ordinal)
+            && downloadSource598.Contains("LogUtil.Detail(_logger, \"[Sub Scribe-D] LAUF download", StringComparison.Ordinal)
+            && !uploadSource598.Contains("LogUtil.Normal(_logger, \"[Sub Scribe] LAUF", StringComparison.Ordinal)
+            && !downloadSource598.Contains("LogUtil.Normal(_logger, \"[Sub Scribe-D] LAUF", StringComparison.Ordinal));
+
         // --- F-M597: die Spur wird vermessen -------------------------------------------------------
         var uploadSource597 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         Check("F-M597: die Spur traegt eine Stoppuhr ueber den ganzen Weg",

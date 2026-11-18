@@ -453,6 +453,12 @@ public sealed class UploadPipeline : IPackFiller
     {
         var summary = new RunSummary();
 
+        // F-M598 (Operator-Anweisung 18.11.2026: „Auch gerne Diagnose Punkte (log level detail) für den
+        // ganzen upload vorlauf (pack usw) und den download einführen."): der Lauf selbst wird vermessen,
+        // nicht nur die einzelne Spur. Die Zeilen stehen auf `Detail` (also im Debug-LogMode) und nennen
+        // je Abschnitt die Dauer: Item-Liste, Pack-Phase, Item-Schleife, Lauf gesamt.
+        var laufTakt = System.Diagnostics.Stopwatch.StartNew();
+
         // F-M445 (operator order 02.11.2026, "bestehende Aufträge bereits beim Upload-Start stornieren"):
         // an order left over from an earlier run is dropped the moment THIS run starts. It would fire
         // against state this run is about to change, and the run's own end sets the new moment — so the
@@ -587,6 +593,8 @@ public sealed class UploadPipeline : IPackFiller
             // No count line — partition stays internal.
             items = withIds.Concat(withoutIds).ToList();
         }
+
+        LogUtil.Detail(_logger, "[Sub Scribe] LAUF upload — {Count} item(s) collected and ordered after {Ms} ms (F-M598)", items.Count, laufTakt.ElapsedMilliseconds);
 
         // F-M59 (user decision 09.09.2026): LIFO within BOTH partitions — newest items
         // (DateCreated descending) get the daily quota first, old library stock last.
@@ -763,16 +771,26 @@ public sealed class UploadPipeline : IPackFiller
                 _packAbsorbed.Count);
         }
 
+        long packFertigMs = laufTakt.ElapsedMilliseconds;
+        LogUtil.Detail(_logger, "[Sub Scribe] LAUF upload — pack phase done after {Ms} ms (F-M598)", packFertigMs);
+
         bool alleQuellenWeg = false; // F-M590: erst wenn jede Quelle streikt, endet der Lauf
 
         // F-M596 (Operator-Freigabe 18.11.2026): Index statt foreach und EIN Vorlauf — die Extraktion
         // der naechsten Datei laeuft, waehrend diese sendet. `using` raeumt ihn am Laufende ab, auch
         // auf dem Abbruchpfad.
         using var vorlauf = new ExtractionLookahead();
+        var itemTakt = System.Diagnostics.Stopwatch.StartNew();
 
         for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)
         {
             var item = items[itemIndex];
+
+            // F-M598: das vorige Item ist so lange gelaufen — die Zahl macht sichtbar, ob die Zeit in
+            // einem einzelnen Item steckt (Extraktion, viele Spuren) oder zwischen den Items.
+            LogUtil.Detail(_logger, "[Sub Scribe] LAUF upload — item {Index}/{Count} \"{Name}\" — previous item took {Ms} ms (F-M598)",
+                itemIndex + 1, items.Count, item.Name, itemTakt.ElapsedMilliseconds);
+            itemTakt.Restart();
             if (alleQuellenWeg)
             {
                 break;
@@ -2492,6 +2510,9 @@ public sealed class UploadPipeline : IPackFiller
 
         if (summary.IsDryRun)
         {
+            LogUtil.Detail(_logger, "[Sub Scribe] LAUF upload — done: item loop {Loop} ms, run total {Total} ms, {Items} item(s) (F-M598)",
+                laufTakt.ElapsedMilliseconds - packFertigMs, laufTakt.ElapsedMilliseconds, items.Count);
+
             LogUtil.Normal(_logger, "[Sub Scribe] upload: finished — lock released. DRY-RUN would have uploaded {N} | {Rejected} rejected, {Skipped} stream(s) skipped",
                 summary.Uploaded, summary.RejectedCandidates, summary.SkippedStreams);
         }

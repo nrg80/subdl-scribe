@@ -559,6 +559,10 @@ public sealed class DownloadPipeline : IDisposable
     {
         var summary = new DownloadRunSummary();
 
+        // F-M598 (Operator-Anweisung 18.11.2026): auch der Download wird vermessen — Item-Liste,
+        // Item-Schleife und Lauf gesamt, je eine Zeile auf `Detail` (Debug-LogMode).
+        var laufTakt = System.Diagnostics.Stopwatch.StartNew();
+
         // F-M247: record that this run was a dry run. It searches, ranks and runs the QA gates,
         // so its summary fills up with numbers, but it saves nothing to disk — the statistics
         // must not receive them. Set here, at the source, so a later counter cannot forget it.
@@ -691,6 +695,7 @@ public sealed class DownloadPipeline : IDisposable
         var refetchGap = ScribeDownloadTask.IntervalToGap(_config.RefetchInterval);
 
         var items = CollectItems(_config.SelectedLibraries);
+        LogUtil.Detail(_logger, "[Sub Scribe-D] LAUF download — {Count} item(s) collected after {Ms} ms (F-M598)", items.Count, laufTakt.ElapsedMilliseconds);
         summary.FilesSeen = items.Count;
 
         // (user decision 08.09.2026): id-less items go to the BACK — their
@@ -737,8 +742,13 @@ public sealed class DownloadPipeline : IDisposable
         var packQueued = new HashSet<string>(StringComparer.Ordinal);
         // An index loop, not foreach: the pack hand-over INSERTS items behind the current one, and
         // inserting into a list while it is being enumerated throws.
+        var itemTakt = System.Diagnostics.Stopwatch.StartNew();
         for (int pos = 0; pos < items.Count; pos++)
         {
+            // F-M598: wie lange das vorige Item gedauert hat.
+            LogUtil.Detail(_logger, "[Sub Scribe-D] LAUF download — item {Index}/{Count} \"{Name}\" — previous item took {Ms} ms (F-M598)",
+                pos + 1, items.Count, items[pos].Name, itemTakt.ElapsedMilliseconds);
+            itemTakt.Restart();
             var item = items[pos];
             // User stop marker — check BEFORE doing any work.
             if (PipelineStopSignal.IsStopped(Plugin.Instance?.DataFolderPath ?? string.Empty, upload: false, runCt))
@@ -887,6 +897,8 @@ public sealed class DownloadPipeline : IDisposable
         // its whole daily quota and kept 41 of 50 files read exactly like one that kept everything:
         // "skipped" counts items NOT PROCESSED, so the nine discards sat in no field at all.
         summary.RejectedCandidates += _tvstFormatRejected; // F-M533
+
+        LogUtil.Detail(_logger, "[Sub Scribe-D] LAUF download — done after {Ms} ms, {Items} item(s) (F-M598)", laufTakt.ElapsedMilliseconds, items.Count);
 
         LogUtil.Normal(_logger, 
             "[Sub Scribe-D] download: finished — lock released. {Saved} " + savedLabel + " | {Fitted} fitted to audio ({FitSec}s) | {NotSignificant} downloaded without significance | {Rejected} rejected after fetch | {NoCand} no candidates | {Ai} AI uploader filtered | {Reported} reported ({ReportsDeferred} deferred) | {NotAvail} lang not available | {Skipped} skipped ({NotDue} not due, {Filtered} filtered, {NoId} no id, {NothingMissing} nothing open) | {Open} open file(s) seen | {Failed} failed | processed {Done}/{Queued} queued | {CacheHits} archive hit(s)",

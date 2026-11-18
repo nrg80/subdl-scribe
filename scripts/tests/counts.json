@@ -588,6 +588,10 @@
     "T307": {
       "suite": "endpoints",
       "checks": 4
+    },
+    "T308": {
+      "suite": "endpoints",
+      "checks": 4
     }
   }
 }
