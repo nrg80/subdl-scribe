@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.465",
-        "changelog": "v12.1.12.465: the transfer rhythm is a slot before the transfer, measured from the end of the last real one, and the rate is adjustable from 50 to 500 per hour again.",
+        "version": "12.1.12.466",
+        "changelog": "v12.1.12.466: the upload statistics row counts only quality-gate verdicts and is called \"Uploads qa fails not uploaded\"; the SubDL note leaves the rate-limit description.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.465-dev/Jellyfin.Plugin.SubdlSync_12.1.12.465.zip",
-        "checksum": "5c8c37536f319574b38622f0b834a9ed",
-        "timestamp": "2026-11-18T07:43:29Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.466-dev/Jellyfin.Plugin.SubdlSync_12.1.12.466.zip",
+        "checksum": "f41432fcda90d74b6b539f44c10e396e",
+        "timestamp": "2026-11-18T08:07:20Z"
       }
     ]
   }
