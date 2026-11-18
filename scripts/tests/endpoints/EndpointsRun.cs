@@ -810,6 +810,29 @@ internal static class Program
         Check("F-M593: die Vorgabe im Konfigurationsmodell ist 450",
             configSource593.Contains("UploadsPerHour = 450;", StringComparison.Ordinal));
 
+        // --- F-M604: das Pack-Urteil liegt im Store, mit Signatur der Mitglieder ----------------------
+        var store604 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/PackSeasonStore.cs"));
+        var db604 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"));
+        var up604 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        Check("F-M604: die Signatur besteht aus gelaufenen Folgen und je Datei Nummer, Groesse, Speicherdatum",
+            store604.Contains("public static string SignatureOf(IEnumerable<int> aired, IEnumerable<(int Episode, long Size, DateTime Written)> files)", StringComparison.Ordinal)
+            && store604.Contains("return \"aired=\" + gelaufen + \"|files=\" + mitglieder;", StringComparison.Ordinal)
+            && store604.Contains("f.Written.ToUniversalTime().Ticks", StringComparison.Ordinal));
+        Check("F-M604: ein Urteil gilt nur fuer genau dieselbe Signatur — sonst neuer Versuch",
+            store604.Contains("public static bool StillImpossible(string imdbId, int season, string langTag, string currentSignature, out string reason)", StringComparison.Ordinal)
+            && store604.Contains("if (!string.Equals(signature, currentSignature, StringComparison.Ordinal))", StringComparison.Ordinal));
+        Check("F-M604: die Tabelle pack_seasons entsteht beim Start und wird unter demselben Namen gelesen",
+            db604.Contains("CREATE TABLE IF NOT EXISTS pack_seasons (", StringComparison.Ordinal)
+            && db604.Contains("e.ToTable(\"pack_seasons\");", StringComparison.Ordinal)
+            && db604.Contains("public DbSet<PackSeasonEntity> PackSeasonRows", StringComparison.Ordinal));
+        Check("F-M604: die Planung rechnet die Signatur aus einem stat je Folgendatei, nicht aus einem Lesevorgang",
+            up604.Contains("private string SeasonSignatureOf(IEnumerable<BaseItem> items, IReadOnlyList<int> aired)", StringComparison.Ordinal)
+            && up604.Contains("var datei = new System.IO.FileInfo(item.Path);", StringComparison.Ordinal)
+            && up604.Contains("dateien.Add((folge, datei.Length, datei.LastWriteTimeUtc));", StringComparison.Ordinal));
+        Check("F-M604: Staffel- und Paar-Ebene fragen das gespeicherte Urteil, die Spur-Liste des Stores steckt in der Paar-Signatur",
+            up604.Contains("PackSeasonStore.StillImpossible(\n                    entry.Key.Item1, entry.Key.Item2, Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.SeasonTag, saisonSignatur", StringComparison.Ordinal)
+            && up604.Contains("string paarSignatur = saisonSignatur + \"|store=\" + mitSprache.Count.ToString", StringComparison.Ordinal));
+
         // --- F-M602: die Schreibvorgaenge eines Laufs werden gebuendelt ------------------------------
         var reg602 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
         var up602 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));

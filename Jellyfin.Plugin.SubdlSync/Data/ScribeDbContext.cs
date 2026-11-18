@@ -140,6 +140,7 @@ public sealed class ScribeDbContext : IDisposable
         EnsurePacksTable();
         EnsureTmdbAnswersTable();
         EnsureAiredSeasonsTable();
+        EnsurePackSeasonsTable();
         EnsureReportColumns();
         EnsureStatusColumns();
         EnsurePackColumns();
@@ -328,6 +329,28 @@ public sealed class ScribeDbContext : IDisposable
     /// <c>OnModelCreating</c>) — a table that is created under one name and read under another is
     /// dead weight that looks like a working cache.
     /// </summary>
+    /// <summary>
+    /// F-M604: the stored pack verdicts. Same reasoning as <see cref="EnsureAiredSeasonsTable"/> — the
+    /// table is created here and read under the very same name in <c>OnModelCreating</c>.
+    /// </summary>
+    private void EnsurePackSeasonsTable()
+    {
+        try
+        {
+            _db.Database.ExecuteSqlRaw(
+                "CREATE TABLE IF NOT EXISTS pack_seasons ("
+                + "Id TEXT NOT NULL PRIMARY KEY, "
+                + "Signature TEXT NOT NULL DEFAULT '', "
+                + "Verdict TEXT NOT NULL DEFAULT '', "
+                + "Reason TEXT NOT NULL DEFAULT '', "
+                + "Written TEXT NOT NULL DEFAULT '');");
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("[Sub Scribe] could not create the pack_seasons table (continuing): {Msg}", ex.Message);
+        }
+    }
+
     private void EnsureAiredSeasonsTable()
     {
         try
@@ -1288,6 +1311,9 @@ public sealed class ScribeSqliteContext : DbContext
     /// <summary>F-M601: the aired episode numbers per season, so a restart does not re-ask IMDb/TMDb.</summary>
     public DbSet<AiredSeasonEntity> AiredSeasonRows => Set<AiredSeasonEntity>();
 
+    /// <summary>F-M604: the stored pack verdicts with the signature of the members they were made for.</summary>
+    public DbSet<PackSeasonEntity> PackSeasonRows => Set<PackSeasonEntity>();
+
     /// <summary>
     /// Sets the pragmas this store runs with. Called once per context, right after the schema exists.
     /// <para>
@@ -1472,6 +1498,13 @@ public sealed class ScribeSqliteContext : DbContext
         modelBuilder.Entity<AiredSeasonEntity>(e =>
         {
             e.ToTable("aired_seasons");
+            e.HasKey(x => x.Id);
+        });
+
+        // F-M604: same contract for the pack verdicts.
+        modelBuilder.Entity<PackSeasonEntity>(e =>
+        {
+            e.ToTable("pack_seasons");
             e.HasKey(x => x.Id);
         });
     }

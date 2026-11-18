@@ -4166,6 +4166,45 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="imdbId">Serie.</param>
     /// <param name="season">Staffel.</param>
     /// <returns>Sprache und HI-Variante, leer wenn der Store nichts kennt.</returns>
+    /// <summary>
+    /// F-M604: die Signatur der Packmitglieder. Gelaufene Folgen plus je Folgendatei Nummer, Groesse und
+    /// Speicherdatum — ein <c>stat</c> je Datei, kein Lesevorgang. Andert sich ein Mitglied (neu gerippt,
+    /// ersetzt, dazugekommen), andert sich die Signatur, und das gespeicherte Urteil gilt nicht mehr.
+    /// </summary>
+    /// <param name="items">Die Folgen der Staffel, wie die Bibliothek sie liefert.</param>
+    /// <param name="aired">Die gelaufenen Folgennummern.</param>
+    /// <returns>Die Signatur.</returns>
+    private string SeasonSignatureOf(IEnumerable<BaseItem> items, IReadOnlyList<int> aired)
+    {
+        var dateien = new List<(int Episode, long Size, DateTime Written)>();
+        foreach (var item in items)
+        {
+            var (_, _, _, folge, istSerie) = ResolveIdsRaw(item);
+            if (!istSerie || folge < 1 || string.IsNullOrWhiteSpace(item.Path))
+            {
+                continue;
+            }
+
+            try
+            {
+                var datei = new System.IO.FileInfo(item.Path);
+                if (!datei.Exists)
+                {
+                    continue;
+                }
+
+                dateien.Add((folge, datei.Length, datei.LastWriteTimeUtc));
+            }
+            catch (Exception)
+            {
+                // Eine Datei, die gerade nicht erreichbar ist, kommt in die Signatur nicht hinein — dann
+                // gilt das alte Urteil eben nicht und es wird neu bewertet.
+            }
+        }
+
+        return Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.SignatureOf(aired, dateien);
+    }
+
     private HashSet<(string Language, bool HearingImpaired)> LanguagesOf(string imdbId, int season)
     {
         _alleSprachen ??= Registry.LanguagePairsBySeason();
@@ -4307,6 +4346,20 @@ public sealed class UploadPipeline : IPackFiller
             // release names. Is the season already up as a pack for the languages the store knows, and
             // does any of them cover every aired episode? Only then are release groups worth reading,
             // and only then does anything get extracted.
+            string saisonSignatur = SeasonSignatureOf(itemsOf[entry.Key], aired);
+
+            // F-M604: gilt das gespeicherte Urteil „kein Pack" noch fuer genau diese Mitglieder, ist die
+            // Staffel in einem Schritt erledigt — kein Sprachenscan, keine Gruppenwanderung.
+            if (Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.StillImpossible(
+                    entry.Key.Item1, entry.Key.Item2, Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.SeasonTag, saisonSignatur, out string altGrund))
+            {
+                LogUtil.Detail(
+                    _logger,
+                    "[Sub Scribe] season pack — {Imdb} S{Season} unchanged since the last judgement ({Reason}), nothing examined (F-M604)",
+                    entry.Key.Item1, entry.Key.Item2, altGrund);
+                continue;
+            }
+
             var known = LanguagesOf(entry.Key.Item1, entry.Key.Item2);
 
             // F-M433 (operator order 03.11.2026, "wieso geht Tracker einzeln hoch?"): the store names the
@@ -4345,8 +4398,22 @@ public sealed class UploadPipeline : IPackFiller
                 }
 
                 // F-M433: the store's count decides nothing on its own — the files are the second witness.
-                bool whole = SeasonPack.IsComplete(
-                    aired, Registry.EpisodesWithLanguage(entry.Key.Item1, entry.Key.Item2, language, hi))
+                var mitSprache = Registry.EpisodesWithLanguage(entry.Key.Item1, entry.Key.Item2, language, hi);
+
+                // F-M604: was der STORE an Spuren kennt, gehoert in die Signatur — sonst wuerde eine neu
+                // eingetroffene Spur eines fehlenden Paares nie bemerkt (die Dateien aendern sich dabei nicht).
+                string paarSignatur = saisonSignatur + "|store=" + mitSprache.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                string paarTag = SeasonPack.LangTag(language, hi);
+                if (Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.StillImpossible(entry.Key.Item1, entry.Key.Item2, paarTag, paarSignatur, out string paarGrund))
+                {
+                    LogUtil.Detail(
+                        _logger,
+                        "[Sub Scribe] season pack — {Imdb} S{Season} [{Lang}] unchanged since the last judgement ({Reason}), nothing examined (F-M604)",
+                        entry.Key.Item1, entry.Key.Item2, paarTag, paarGrund);
+                    continue;
+                }
+
+                bool whole = SeasonPack.IsComplete(aired, mitSprache)
                     || SeasonCarriesInFiles(entry.Key.Item1, entry.Key.Item2, aired, language, hi);
                 if (whole)
                 {
@@ -4354,10 +4421,13 @@ public sealed class UploadPipeline : IPackFiller
                 }
                 else
                 {
+                    Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.Put(
+                        entry.Key.Item1, entry.Key.Item2, paarTag, paarSignatur, Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.NoPack,
+                        "neither the store nor the files of every aired episode carry this language");
                     LogUtil.Normal(
                         _logger,
                         "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: neither the store nor the files of every aired episode carry this language — no pack for it, the single uploads of this run are unaffected.",
-                        entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(language, hi));
+                        entry.Key.Item1, entry.Key.Item2, paarTag);
                 }
             }
 
@@ -4423,6 +4493,10 @@ public sealed class UploadPipeline : IPackFiller
             {
                 // F-M469: complete on disk, but not one release — no pack. The single uploads of the run
                 // are unaffected; this is the pack's own refusal.
+                Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.Put(
+                    entry.Key.Item1, entry.Key.Item2, Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.SeasonTag, saisonSignatur,
+                    Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.NoPack,
+                    "all aired episodes are on disk but split over " + groupOf.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) + " release(s)");
                 LogUtil.Normal(
                     _logger,
                     "[Sub Scribe] season pack skipped: {Imdb} S{Season} — all {Aired} episode(s) are on disk but split over {Groups} release(s) ({List}), a pack carries one release, stays single.",
@@ -4444,6 +4518,9 @@ public sealed class UploadPipeline : IPackFiller
             }
             else
             {
+                Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.Put(
+                    entry.Key.Item1, entry.Key.Item2, Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.SeasonTag, saisonSignatur,
+                    Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.NoPack, "no release group covers the season");
                 LogUtil.Normal(
                     _logger,
                     "[Sub Scribe] season pack skipped: {Imdb} S{Season} — {Have} episode(s) on disk against {Aired} aired, no release group covers the season, stays single.",
