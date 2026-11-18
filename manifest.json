@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.477",
-        "changelog": "v12.1.12.477: create, look again, and if the title is not there the pair is settled; the film id is probed before any upload; a source's no is remembered per content.",
+        "version": "12.1.12.478",
+        "changelog": "v12.1.12.478: title ladder for tvst and mst — create, look again, 2/4/8 s pauses, the fourth failure closes every pair of that title.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.477-dev/Jellyfin.Plugin.SubdlSync_12.1.12.477.zip",
-        "checksum": "af4ee931c8e329bc4d02adfe017bcda6",
-        "timestamp": "2026-11-18T14:47:49Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.478-dev/Jellyfin.Plugin.SubdlSync_12.1.12.478.zip",
+        "checksum": "7127b2c9ea6f873104bd7dce87fd01b4",
+        "timestamp": "2026-11-18T15:02:07Z"
       }
     ]
   }
