@@ -169,10 +169,28 @@ public static class AiredSeasonStore
         return onDisk.All(known.Contains);
     }
 
+    /// <summary>
+    /// F-M617: holt sich einen fehlenden Kontext SELBST, statt still im Speicher zu arbeiten — dieselbe
+    /// Selbsthilfe, die der TMDb-Store seit F-M545 hat. Der Anhang über
+    /// <c>Plugin.AttachStores</c> bleibt der regulaere Weg; das hier ist das Netz darunter.
+    /// </summary>
+    /// <returns>Der Datenkontext, oder null, wenn es keinen gibt.</returns>
     private static ScribeSqliteContext? Store()
     {
         lock (Gate)
         {
+            if (_db == null)
+            {
+                try
+                {
+                    _db = Plugin.Instance?.SharedDbContext?.Context;
+                }
+                catch (Exception)
+                {
+                    // Kein Plugin-Kontext erreichbar: dann bleibt es beim Speicher.
+                }
+            }
+
             return _db;
         }
     }

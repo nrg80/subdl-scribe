@@ -831,6 +831,22 @@ internal static class Program
             db605.Contains("CREATE TABLE IF NOT EXISTS source_refusals (", StringComparison.Ordinal)
             && db605.Contains("e.ToTable(\"source_refusals\");", StringComparison.Ordinal));
 
+        // --- F-M617: jeder Store hilft sich selbst -----------------------------------------------
+        var storeDir617 = Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry");
+        var ohneSelbsthilfe = new List<string>();
+        foreach (string datei in new[] { "TmdbAnswerStore.cs", "AiredSeasonStore.cs", "PackSeasonStore.cs", "SourceRefusalStore.cs", "TitleFailureStore.cs" })
+        {
+            string quelle = ReadText(Path.Combine(storeDir617, datei));
+            if (!quelle.Contains("Plugin.Instance?.SharedDbContext?.Context", StringComparison.Ordinal))
+            {
+                ohneSelbsthilfe.Add(datei);
+            }
+        }
+
+        Check("F-M617: JEDER Store holt sich einen fehlenden Kontext selbst",
+            ohneSelbsthilfe.Count == 0,
+            ohneSelbsthilfe.Count == 0 ? "alle fünf" : string.Join(", ", ohneSelbsthilfe));
+
         // --- F-M616: alle Stores haengen an beiden Startwegen -----------------------------------------
         var pl616 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Plugin.cs"));
         Check("F-M616: es gibt genau eine Stelle, die alle Stores anhaengt",

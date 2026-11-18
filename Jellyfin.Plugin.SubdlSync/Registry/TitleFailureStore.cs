@@ -278,6 +278,19 @@ public static class TitleFailureStore
     {
         lock (Gate)
         {
+            // F-M617: erst selbst helfen (wie der TMDb-Store seit F-M545), dann warnen.
+            if (_db == null)
+            {
+                try
+                {
+                    _db = Plugin.Instance?.SharedDbContext?.Context;
+                }
+                catch (Exception)
+                {
+                    // Kein Plugin-Kontext erreichbar.
+                }
+            }
+
             if (_db == null && !_warnedNoStore)
             {
                 _warnedNoStore = true;
