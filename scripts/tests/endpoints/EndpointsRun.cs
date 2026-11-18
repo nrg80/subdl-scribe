@@ -794,6 +794,21 @@ internal static class Program
             && downloadSource.Contains("ResolveImdbAsync", StringComparison.Ordinal)
             && !downloadSource.Contains("DownloadRequireImdb", StringComparison.Ordinal));
 
+        // --- F-M593: Takt 100-650, Vorgabe 450, Hinweis auf SubDLs 500/h ---------------------------
+        var guiSource593 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"));
+        var configSource593 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Configuration/PluginConfiguration.cs"));
+        Check("F-M593: das Feld heisst 60-600 und laesst nicht mehr zu",
+            guiSource593.Contains("Transfer rate per hour (60&ndash;600)", StringComparison.Ordinal)
+            && guiSource593.Contains("id=\"UploadsPerHour\" name=\"UploadsPerHour\" type=\"number\" is=\"emby-input\" min=\"60\" max=\"600\"", StringComparison.Ordinal));
+        Check("F-M593: der Hinweis nennt SubDLs 500 Uebertragungen pro Stunde",
+            guiSource593.Contains("SubDL allows 500 uploads or downloads per hour", StringComparison.Ordinal)
+            && guiSource593.Contains("Default: 450.", StringComparison.Ordinal));
+        Check("F-M593: beim Speichern wird auf 60-600 begrenzt, der Rueckfall ist 450",
+            guiSource593.Contains("Math.min(600, Math.max(60, uph))", StringComparison.Ordinal)
+            && guiSource593.Contains("document.querySelector('#UploadsPerHour').value) || 450", StringComparison.Ordinal));
+        Check("F-M593: die Vorgabe im Konfigurationsmodell ist 450",
+            configSource593.Contains("UploadsPerHour = 450;", StringComparison.Ordinal));
+
         // --- F-M592: Abruf und Meldungen, tote Quellen --------------------------------------------
         var downloadSource592 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
         Check("F-M592: der Datei-Abruf faellt bei Timeout auf den naechsten Kandidaten zurueck",

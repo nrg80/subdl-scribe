@@ -187,7 +187,10 @@ public class PluginConfiguration : BasePluginConfiguration
         // it; SubDL publishes DAILY counters only, so that budget was our own invention and stopped
         // runs the server would have allowed. Removed.
         // (17.09.2026): default raised 100 -> 400, range 100-500 (user decision, Matrix DM)
-        UploadsPerHour = 400;
+        // Operator order 18.11.2026: range 60-600, default 450 — SubDL allows 500 uploads or
+        // downloads per hour, so the ceiling of the range is above the server's own limit and the
+        // default sits just below it (F-M593).
+        UploadsPerHour = 450;
         // F-M22: default DryRun OFF — user explicitly wants uploads to run live when enabled.
         DryRun = false;
         // F-M24a
