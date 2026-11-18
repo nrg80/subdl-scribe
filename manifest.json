@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.486",
-        "changelog": "v12.1.12.486: the title store logs its failures instead of swallowing them.",
+        "version": "12.1.12.487",
+        "changelog": "v12.1.12.487: the title store's decisive lines log at Information (Jellyfin hides Debug by default).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.486-dev/Jellyfin.Plugin.SubdlSync_12.1.12.486.zip",
-        "checksum": "c08e13cd8c9e5f9aac92e8de948ba5c8",
-        "timestamp": "2026-11-18T19:35:34Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.487-dev/Jellyfin.Plugin.SubdlSync_12.1.12.487.zip",
+        "checksum": "f2dd20add0932413d987898c64230d6f",
+        "timestamp": "2026-11-18T19:44:35Z"
       }
     ]
   }
