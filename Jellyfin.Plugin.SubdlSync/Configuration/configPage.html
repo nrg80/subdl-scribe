@@ -249,7 +249,7 @@
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="UploadsPerHour">Transfer rate per hour (60&ndash;600)</label>
                             <input id="UploadsPerHour" name="UploadsPerHour" type="number" is="emby-input" min="60" max="600" />
-                            <div class="fieldDescription">Paces the gap between two real transfers (uploads or downloads). Default: 450. Note: SubDL allows 500 uploads or downloads per hour — pick a value below that.</div>
+                            <div class="fieldDescription">Paces the gap between two real transfers (uploads or downloads). Default: 450. SubDL temporarily blocks any prolonged upload/downloads at a rate above 500 per hour.</div>
                         </div>
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="MinCallPauseSec">Min. pause between API calls, seconds (0.1&#8211;10)</label>

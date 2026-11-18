@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.463.
+**Status:** Implementation — v12.1.12.464.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -1497,7 +1497,7 @@ The marker counts the CLAIM, not the outcome: a run that fails after being queue
 **F-M146:** **Wird eine Richtung vom globalen Lauf-Lock übersprungen, terminiert sie sich selbst neu.** Der neue Termin steht als Warnung im Log.
 
 **F-M149:** **In der ersten Runde geht der Download vor dem Upload.**
-**F-M593 [U]:** **Der Transfer-Rhythmus ist von 100 bis 650 einstellbar, Vorgabe 450 — und die Seite sagt, warum nicht mehr.** Operator-Anweisung 18.11.2026: „Rate limit dann bitte von 100 bis 650 einstellbar, default 450", nachgeschoben „Oder 60 bis 600". Gui hinweis dass subdl ein rate limit von 500 uploads or downloads pro stunde hat." Bis hier galt 100–500 mit Vorgabe 400 (F-M20, 17.09.2026). Neu: die Grenze im Eingabefeld (`min="60"`, `max="600"`), die Beschriftung „Transfer rate per hour (60–600)", die Prüfung beim Speichern (`Math.min(600, Math.max(60, …))`, Rückfall 450) und die Vorgabe im Konfigurationsmodell (`UploadsPerHour = 450`). Dazu ein Hinweis am Feld: „SubDL allows 500 uploads or downloads per hour — pick a value below that." Der Hinweis steht nur dort: die Anweisung „Also upload/download rate limit" ist wörtlich genommen: **ein** Feld, das den Takt beider Richtungen setzt (Upload und Download teilen sich `UploadsPerHour`), also gibt es auch nur eine Stelle, an der die Grenze des Servers erklärt werden muss. Geprüft von T303.
+**F-M593 [U]:** **Der Transfer-Rhythmus ist von 100 bis 650 einstellbar, Vorgabe 450 — und die Seite sagt, warum nicht mehr.** Operator-Anweisung 18.11.2026: „Rate limit dann bitte von 100 bis 650 einstellbar, default 450", nachgeschoben „Oder 60 bis 600". Gui hinweis dass subdl ein rate limit von 500 uploads or downloads pro stunde hat." Bis hier galt 100–500 mit Vorgabe 400 (F-M20, 17.09.2026). Neu: die Grenze im Eingabefeld (`min="60"`, `max="600"`), die Beschriftung „Transfer rate per hour (60–600)", die Prüfung beim Speichern (`Math.min(600, Math.max(60, …))`, Rückfall 450) und die Vorgabe im Konfigurationsmodell (`UploadsPerHour = 450`). Dazu ein Hinweis am Feld, in der Formulierung des Operators (18.11.2026: „Pick a value below ist dumm der Hinweis."): „SubDL temporarily blocks any prolonged upload/downloads at a rate above 500 per hour." Der Hinweis steht nur dort: die Anweisung „Also upload/download rate limit" ist wörtlich genommen: **ein** Feld, das den Takt beider Richtungen setzt (Upload und Download teilen sich `UploadsPerHour`), also gibt es auch nur eine Stelle, an der die Grenze des Servers erklärt werden muss. Geprüft von T303.
 
 ## 11. Content Registry and Identity
 
@@ -2506,7 +2506,7 @@ Kein Grund, keine Vorgeschichte, keine Bitte, kein Vorschlag. Gebaut in `Pipelin
 
 **T276:** Die gemeinsame Seitenwagen-Regel von F-M556 in `endpoints`: sie existiert als `SidecarsNeedWorkFor` und wird von beiden Stellen gerufen (keine zweite Kopie mehr), und der Kopf überspringt nur bei `!seitenwagenOffen`. **2 Prüfungen** in `endpoints` (230 → 232).
 
-**T303:** Der Takt ist 60–600 einstellbar, Vorgabe 450, und der Hinweis nennt SubDLs 500/h (F-M593) — ein Feld für Upload und Download: die Beschriftung im Formular, `max="600"` am Feld, der Hinweis am Feld, die Prüfung beim Speichern samt Rückfall und die Vorgabe im Konfigurationsmodell — **4 Prüfungen** in `endpoints` (284 → 288).
+**T303:** Der Takt ist 60–600 einstellbar, Vorgabe 450, und der Hinweis nennt SubDLs 500/h (F-M593) — ein Feld für Upload und Download: die Beschriftung im Formular, `max="600"` am Feld, der Hinweis am Feld („…temporarily blocks … above 500 per hour"), die Prüfung beim Speichern samt Rückfall und die Vorgabe im Konfigurationsmodell — **4 Prüfungen** in `endpoints` (284 → 288).
 
 **T302:** Datei-Abruf und Meldungen gegen Timeout abgesichert, tote Quellen bleiben draußen (F-M592): der Abruf fällt auf den nächsten Kandidaten zurück, `MerkeQuelleTot` führt die ausgefallenen Quellen für den Rest des Laufs, ohne übrige Quelle endet der Lauf, und offene Meldungen werden zurückgestellt — **3 Prüfungen** in `endpoints` (281 → 284).
 

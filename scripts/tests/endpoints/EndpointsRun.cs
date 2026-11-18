@@ -800,8 +800,8 @@ internal static class Program
         Check("F-M593: das Feld heisst 60-600 und laesst nicht mehr zu",
             guiSource593.Contains("Transfer rate per hour (60&ndash;600)", StringComparison.Ordinal)
             && guiSource593.Contains("id=\"UploadsPerHour\" name=\"UploadsPerHour\" type=\"number\" is=\"emby-input\" min=\"60\" max=\"600\"", StringComparison.Ordinal));
-        Check("F-M593: der Hinweis nennt SubDLs 500 Uebertragungen pro Stunde",
-            guiSource593.Contains("SubDL allows 500 uploads or downloads per hour", StringComparison.Ordinal)
+        Check("F-M593: der Hinweis nennt die Sperre oberhalb von 500 Uebertragungen pro Stunde",
+            guiSource593.Contains("SubDL temporarily blocks any prolonged upload/downloads at a rate above 500 per hour", StringComparison.Ordinal)
             && guiSource593.Contains("Default: 450.", StringComparison.Ordinal));
         Check("F-M593: beim Speichern wird auf 60-600 begrenzt, der Rueckfall ist 450",
             guiSource593.Contains("Math.min(600, Math.max(60, uph))", StringComparison.Ordinal)
