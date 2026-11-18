@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.464",
-        "changelog": "v12.1.12.464: the rate-limit note now states what SubDL actually does -- it temporarily blocks prolonged transfers above 500 per hour.",
+        "version": "12.1.12.465",
+        "changelog": "v12.1.12.465: the transfer rhythm is a slot before the transfer, measured from the end of the last real one, and the rate is adjustable from 50 to 500 per hour again.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.464-dev/Jellyfin.Plugin.SubdlSync_12.1.12.464.zip",
-        "checksum": "dea7d40dfa2c65b77a1cfacd5d1a912a",
-        "timestamp": "2026-11-18T06:29:50Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.465-dev/Jellyfin.Plugin.SubdlSync_12.1.12.465.zip",
+        "checksum": "5c8c37536f319574b38622f0b834a9ed",
+        "timestamp": "2026-11-18T07:43:29Z"
       }
     ]
   }
