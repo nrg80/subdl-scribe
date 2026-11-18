@@ -817,10 +817,11 @@ internal static class Program
         Check("F-M605: ein gemerktes Nein gilt nur fuer genau diesen Inhalt",
             refusal605.Contains("public static bool StillRefused(", StringComparison.Ordinal)
             && refusal605.Contains("if (row == null || !string.Equals(row.Signature, signature, StringComparison.Ordinal))", StringComparison.Ordinal));
-        Check("F-M605: gemerkt wird nur ein inhaltliches Nein, kein Rate-Limit und kein Abbruch",
-            refusal605.Contains("public static bool ShouldRemember(string? reason)", StringComparison.Ordinal)
-            && refusal605.Contains("\"film-source-\",", StringComparison.Ordinal)
-            && refusal605.Contains("\"second-source-show-\",", StringComparison.Ordinal)
+        // F-M609 hat die Wortliste durch das Urteil ersetzt: gemerkt wird jedes Refused, eine Stoerung
+        // (NoVerdict) nie. Die Pruefung haelt jetzt diese Zusage fest, nicht mehr die alte Liste.
+        Check("F-M605/F-M609: gemerkt wird ein inhaltliches Nein, kein Rate-Limit und kein Abbruch",
+            refusal605.Contains("public static bool ShouldRemember(string? reason, Api.UploadVerdict verdict)", StringComparison.Ordinal)
+            && refusal605.Contains("return verdict == Api.UploadVerdict.Refused;", StringComparison.Ordinal)
             && !refusal605.Contains("\"timeout\"", StringComparison.Ordinal));
         Check("F-M605: vor dem Quellen-Lauf wird gefragt, nach dem Lauf gemerkt, bei Erfolg vergessen",
             up605.Contains("SourceRefusalStore.StillRefused(", StringComparison.Ordinal)
@@ -829,6 +830,39 @@ internal static class Program
         Check("F-M605: die Tabelle source_refusals entsteht beim Start und wird unter demselben Namen gelesen",
             db605.Contains("CREATE TABLE IF NOT EXISTS source_refusals (", StringComparison.Ordinal)
             && db605.Contains("e.ToTable(\"source_refusals\");", StringComparison.Ordinal));
+
+        // --- F-M609: drei Urteile — angenommen, abgelehnt, kein Urteil ---------------------------------
+        var ur609 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/UploadResult.cs"));
+        var api609 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/ScribeApiClient.cs"));
+        Check("F-M609: das Urteil hat vier Werte, und ein Versuch ohne Antwort ist ein eigener Fall",
+            ur609.Contains("public enum UploadVerdict", StringComparison.Ordinal)
+            && ur609.Contains("Accepted,", StringComparison.Ordinal)
+            && ur609.Contains("AcceptedWithoutId,", StringComparison.Ordinal)
+            && ur609.Contains("Refused,", StringComparison.Ordinal)
+            && ur609.Contains("NoVerdict,", StringComparison.Ordinal)
+            && ur609.Contains("public static UploadResult NoVerdict(string reason)", StringComparison.Ordinal)
+            && ur609.Contains("Verdict = UploadVerdict.NoVerdict", StringComparison.Ordinal));
+        Check("F-M609: Timeout, Ausnahme und Abbruch vor dem Senden sind KEIN Urteil",
+            up605.Contains("return UploadResult.NoVerdict(\"timeout\");", StringComparison.Ordinal)
+            && up605.Contains("return UploadResult.NoVerdict(ex.Message);", StringComparison.Ordinal)
+            && up605.Contains("return UploadResult.NoVerdict(\"run cancelled before the send\");", StringComparison.Ordinal));
+        Check("F-M609: 429 und 5xx sind eine Stoerung, 4xx eine Ablehnung",
+            up605.Contains("private static bool IstStoerung(int? status)", StringComparison.Ordinal)
+            && up605.Contains("=> status is 429 or (>= 500 and < 600);", StringComparison.Ordinal)
+            && up605.Contains("IstStoerung(answer.Status)", StringComparison.Ordinal));
+        Check("F-M609: bei SubDL sind Stundendeckel, rate-limited und API-Fehler Stoerungen, kein Nein",
+            api609.Contains("return UploadResult.NoVerdict(\"rate-limited\");", StringComparison.Ordinal)
+            && api609.Contains("return UploadResult.NoVerdict(\"upload-hourly-cap\");", StringComparison.Ordinal)
+            && api609.Contains("return UploadResult.NoVerdict($\"getNId failed: {Trim(nBody)}\");", StringComparison.Ordinal)
+            && api609.Contains("return UploadResult.Skipped(\"duplicate-content\");", StringComparison.Ordinal));
+        Check("F-M609: gemerkt wird nach URTEIL, nicht nach einer Liste von Wortanfaengen",
+            refusal605.Contains("public static bool ShouldRemember(string? reason, Api.UploadVerdict verdict)", StringComparison.Ordinal)
+            && refusal605.Contains("return verdict == Api.UploadVerdict.Refused;", StringComparison.Ordinal)
+            && !refusal605.Contains("Remembered.Any(prefix", StringComparison.Ordinal));
+        Check("F-M609: die Kopfzeile trennt abgelehnt von ohne Antwort",
+            up605.Contains("public int Refused { get; set; }", StringComparison.Ordinal)
+            && up605.Contains("public int NoVerdicts { get; set; }", StringComparison.Ordinal)
+            && up605.Contains("{Refused} refused, {NoVerdict} without answer", StringComparison.Ordinal));
 
         // --- F-M608: Titel-Leiter fuer tvst und mst --------------------------------------------------
         var fail608 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/TitleFailureStore.cs"));
@@ -911,7 +945,7 @@ internal static class Program
         Check("F-M603: es gibt ein Ergebnis 'angenommen ohne Kennung' — SKIP, aber mit Beleg",
             result603.Contains("public bool SourceAccepted { get; private init; }", StringComparison.Ordinal)
             && result603.Contains("public static UploadResult AcceptedWithoutId(string reason)", StringComparison.Ordinal)
-            && result603.Contains("new() { Ok = false, SkippedItem = true, SourceAccepted = true, Reason = reason }", StringComparison.Ordinal));
+            && result603.Contains("SourceAccepted = true, Reason = reason, Verdict = UploadVerdict.AcceptedWithoutId", StringComparison.Ordinal));
         Check("F-M603: die Film-Adresse meldet 'angelegt, Id nicht lesbar' als angenommen",
             upload603.Contains("string.Equals(aufloesung.Status, \"created-id-not-readable\", StringComparison.Ordinal)", StringComparison.Ordinal)
             && upload603.Contains("return UploadResult.AcceptedWithoutId(\"film-source-movie-\" + aufloesung.Status);", StringComparison.Ordinal));
@@ -1139,7 +1173,8 @@ internal static class Program
             && uploadSource590.Contains("the other source cannot take the record with it any more (F-M590)", StringComparison.Ordinal));
         Check("F-M590: ein Timeout ohne gesetztes ct ist ein Fehlschlag dieser Quelle, kein Lauf-Abbruch",
             uploadSource590.Contains("catch (OperationCanceledException) when (!ct.IsCancellationRequested)", StringComparison.Ordinal)
-            && uploadSource590.Contains("return UploadResult.Failed(\"timeout\");", StringComparison.Ordinal)
+            // F-M609: ein Timeout ist kein Urteil der Quelle mehr — NoVerdict statt Failed.
+            && uploadSource590.Contains("return UploadResult.NoVerdict(\"timeout\");", StringComparison.Ordinal)
             && uploadSource590.Contains("the other source keeps going.", StringComparison.Ordinal)
             && uploadSource590.Contains("// Ein echter Abbruch (Nutzer-Stop, Watchdog, Neustart) — der gilt fuer den ganzen Lauf.", StringComparison.Ordinal));
         Check("F-M590: erst drei Spuren ohne Antwort irgendeiner Quelle beenden den Lauf",
@@ -1199,7 +1234,8 @@ internal static class Program
             && !uploadSource587.Contains("ListMySubtitlesAsync(ct, maxPages: 2)", StringComparison.Ordinal)
             && packCoordSource587.Contains("ListMySubtitlesAsync(ct, maxPages: 1)", StringComparison.Ordinal)
             && uploadSource587.Contains("the other source is still tried.", StringComparison.Ordinal)
-            && uploadSource587.Contains("return UploadResult.Failed(ex.Message);", StringComparison.Ordinal));
+            // F-M609: die Ausnahme ist keine Antwort — NoVerdict.
+            && uploadSource587.Contains("return UploadResult.NoVerdict(ex.Message);", StringComparison.Ordinal));
 
         // --- F-M586: eine Quelle ohne diese Sprache zaehlt nicht als offen -------------------------
         var uploadSource586 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));

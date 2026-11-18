@@ -38,10 +38,16 @@ public static class SourceRefusalStore
     private static ScribeSqliteContext? _db;
 
     /// <summary>
-    /// Reason prefixes that are worth remembering: the source looked at the title and said no.
-    /// Everything else (rate limit, timeout, cancellation) must be asked again next run.
+    /// F-M609 (Operator-Anweisung 18.11.2026): die Whitelist ist WEG. Gemerkt wird jedes
+    /// <see cref="UploadVerdict.Refused"/> — also jede Entscheidung, egal ob die Seite sie getroffen hat
+    /// oder eine unserer Vorpruefungen. Die frueheren Praefixe (`film-source-*`, `second-source-show-*`,
+    /// „kein TMDb-Eintrag") waren nur eine Naeherung an dieselbe Aussage: damals musste man jeden neuen
+    /// Grund von Hand eintragen, und „season must be 1..22" fiel durch — die Staffel kostete deshalb in
+    /// JEDEM Lauf vier Fehlschlaege samt ffmpeg-Extraktion (gemessen 18.11.2026, Grey's Anatomy S23).
+    /// Ausgenommen bleiben allein die Stoerungen, und die sind jetzt am Urteil erkennbar
+    /// (<see cref="UploadVerdict.NoVerdict"/>), nicht am Wortlaut.
     /// </summary>
-    private static readonly string[] Remembered =
+    private static readonly string[] Unused_prefixes_removed_F_M609 =
     {
         "film-source-",
         "second-source-show-",
@@ -68,14 +74,12 @@ public static class SourceRefusalStore
     /// </summary>
     /// <param name="reason">The reason a source gave.</param>
     /// <returns>True when the refusal should be remembered.</returns>
-    public static bool ShouldRemember(string? reason)
+    public static bool ShouldRemember(string? reason, Api.UploadVerdict verdict)
     {
-        if (string.IsNullOrWhiteSpace(reason))
-        {
-            return false;
-        }
-
-        return Remembered.Any(prefix => reason.StartsWith(prefix, StringComparison.Ordinal));
+        // F-M609: das Urteil entscheidet, nicht der Wortlaut. Ein „Nein" ohne Begruendung ist immer
+        // noch ein Nein; eine Stoerung wird nie gemerkt, auch wenn sie wie eine Ablehnung klingt.
+        _ = reason;
+        return verdict == Api.UploadVerdict.Refused;
     }
 
     /// <summary>
@@ -144,11 +148,12 @@ public static class SourceRefusalStore
     /// <param name="signature">Content hash of the subtitle.</param>
     /// <param name="reason">Why it said no.</param>
     public static void Put(
-        string mediaHash, int subPos, string langTag, string source, string signature, string reason)
+        string mediaHash, int subPos, string langTag, string source, string signature, string reason,
+        Api.UploadVerdict verdict = Api.UploadVerdict.Refused)
     {
         ScribeSqliteContext? db = Store();
         if (db == null || string.IsNullOrWhiteSpace(mediaHash) || string.IsNullOrEmpty(signature)
-            || !ShouldRemember(reason))
+            || !ShouldRemember(reason, verdict))
         {
             return;
         }

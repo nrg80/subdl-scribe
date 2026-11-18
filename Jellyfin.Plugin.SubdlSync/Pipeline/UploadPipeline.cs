@@ -51,6 +51,18 @@ public class RunSummary
     /// <summary>Gets or sets the number of failed uploads.</summary>
     public int Failed { get; set; }
 
+    /// <summary>
+    /// F-M609: Versuche, die die Quelle (oder eine unserer Vorpruefungen) mit NEIN beantwortet hat.
+    /// Das Paar ist damit geschlossen.
+    /// </summary>
+    public int Refused { get; set; }
+
+    /// <summary>
+    /// F-M609: Versuche ohne Urteil — Timeout, Verbindungsfehler, 429, 5xx, Stundendeckel, Abbruch.
+    /// Das Paar bleibt offen und wird beim naechsten Lauf neu gefragt.
+    /// </summary>
+    public int NoVerdicts { get; set; }
+
     /// <summary>F-M81z-2 (user decision 10.09.2026): run ended by hitting the daily
     /// quota (429) — a clean rescheduled stop, NOT an upload failure. Own counter
     /// in the Task finished line, symmetric to the download direction.</summary>
@@ -2429,9 +2441,24 @@ public sealed class UploadPipeline : IPackFiller
 
                         break;
                     default:
-                        summary.Failed++;
+                        // F-M609: „keine Antwort" ist keine Ablehnung. Zwei Zeilen, zwei Zaehler —
+                        // vorher hiess beides „UPLOAD FAILED", und ein Ausfall sah aus wie ein Nein.
                         itemHadFailures = true; // F-M88c: failure blocks file-complete marker
-                        _logger.LogError("[Sub Scribe] UPLOAD FAILED {File} [{Lang}] → {Source}: {Reason}", Path.GetFileName(fileName), cand.Lang, QuellName(result), result.Reason);
+                        if (result.Verdict == Api.UploadVerdict.NoVerdict)
+                        {
+                            summary.NoVerdicts++;
+                            _logger.LogWarning(
+                                "[Sub Scribe] NO ANSWER {File} [{Lang}] → {Source}: {Reason} — no verdict, the pair stays open (F-M609)",
+                                Path.GetFileName(fileName), cand.Lang, QuellName(result), result.Reason);
+                        }
+                        else
+                        {
+                            summary.Refused++;
+                            _logger.LogError(
+                                "[Sub Scribe] REFUSED {File} [{Lang}] → {Source}: {Reason} (F-M609)",
+                                Path.GetFileName(fileName), cand.Lang, QuellName(result), result.Reason);
+                        }
+
                         break;
                 }
 
@@ -2545,13 +2572,13 @@ public sealed class UploadPipeline : IPackFiller
             LogUtil.Detail(_logger, "[Sub Scribe] LAUF upload — done: item loop {Loop} ms, run total {Total} ms, {Items} item(s) (F-M598)",
                 laufTakt.ElapsedMilliseconds - packFertigMs, laufTakt.ElapsedMilliseconds, items.Count);
 
-            LogUtil.Normal(_logger, "[Sub Scribe] upload: finished — lock released. DRY-RUN would have uploaded {N} | {Rejected} rejected, {Skipped} stream(s) skipped",
-                summary.Uploaded, summary.RejectedCandidates, summary.SkippedStreams);
+            LogUtil.Normal(_logger, "[Sub Scribe] upload: finished — lock released. DRY-RUN would have uploaded {N} | {Rejected} rejected, {Refused} refused, {NoVerdict} without answer, {Skipped} stream(s) skipped (F-M609)",
+                summary.Uploaded, summary.RejectedCandidates, summary.Refused, summary.NoVerdicts, summary.SkippedStreams);
         }
         else
         {
-            LogUtil.Normal(_logger, "[Sub Scribe] upload: finished — lock released. {N} uploaded | {Rejected} rejected, {Skipped} stream(s) skipped",
-                summary.Uploaded, summary.RejectedCandidates, summary.SkippedStreams);
+            LogUtil.Normal(_logger, "[Sub Scribe] upload: finished — lock released. {N} uploaded | {Rejected} rejected, {Refused} refused, {NoVerdict} without answer, {Skipped} stream(s) skipped (F-M609)",
+                summary.Uploaded, summary.RejectedCandidates, summary.Refused, summary.NoVerdicts, summary.SkippedStreams);
         }
 
         return summary;
@@ -3394,7 +3421,7 @@ public sealed class UploadPipeline : IPackFiller
                 }
                 catch (OperationCanceledException)
                 {
-                    return UploadResult.Failed("run cancelled before the send");
+                    return UploadResult.NoVerdict("run cancelled before the send");
                 }
             }
 
@@ -3429,7 +3456,7 @@ public sealed class UploadPipeline : IPackFiller
                 _logger.LogWarning(
                     "[Sub Scribe] source {Source} did not answer for {Name} [{Lang}] (client timeout) — the other source keeps going.",
                     Api.Endpoints.Provenance.Name(quelle), neutralName, lang);
-                return UploadResult.Failed("timeout");
+                return UploadResult.NoVerdict("timeout");
             }
             catch (OperationCanceledException)
             {
@@ -3445,7 +3472,8 @@ public sealed class UploadPipeline : IPackFiller
                 _logger.LogWarning(
                     "[Sub Scribe] upload to {Source} failed for {Name} [{Lang}]: {Msg} — the other source is still tried.",
                     Api.Endpoints.Provenance.Name(quelle), neutralName, lang, ex.Message);
-                return UploadResult.Failed(ex.Message);
+                // F-M609: eine Ausnahme ist KEINE Antwort — kein Urteil, Paar bleibt offen.
+                return UploadResult.NoVerdict(ex.Message);
             }
         }
 
@@ -3516,13 +3544,23 @@ public sealed class UploadPipeline : IPackFiller
                     mediaHash ?? string.Empty, subPos, SeasonPack.LangTag(lang, hearingImpaired),
                     gemerkteQuelle.ToString());
             }
-            else if (Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.ShouldRemember(gemerkt.Reason))
+            else if (Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.ShouldRemember(gemerkt.Reason, gemerkt.Verdict))
             {
+                // F-M609: gemerkt wird jedes NEIN — nicht mehr nur eine handgepflegte Liste von
+                // Wortanfaengen. Eine Stoerung (NoVerdict) faellt hier heraus und darf beim naechsten
+                // Lauf neu gefragt werden.
                 Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.Put(
                     mediaHash ?? string.Empty, subPos, SeasonPack.LangTag(lang, hearingImpaired),
-                    gemerkteQuelle.ToString(), contentHashEarly, gemerkt.Reason ?? string.Empty);
+                    gemerkteQuelle.ToString(), contentHashEarly, gemerkt.Reason ?? string.Empty,
+                    gemerkt.Verdict);
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[Sub Scribe] {Name} [{Lang}] — source {Source} said no ({Reason}), remembered for this content (F-M605)",
+                    "[Sub Scribe] {Name} [{Lang}] — source {Source} said no ({Reason}), remembered for this content (F-M605/F-M609)",
+                    neutralName, lang, Api.Endpoints.Provenance.Name(gemerkteQuelle), gemerkt.Reason);
+            }
+            else if (gemerkt.Verdict == Api.UploadVerdict.NoVerdict)
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[Sub Scribe] {Name} [{Lang}] — source {Source} gave no verdict ({Reason}); the pair stays open, the next run asks again (F-M609)",
                     neutralName, lang, Api.Endpoints.Provenance.Name(gemerkteQuelle), gemerkt.Reason);
             }
         }
@@ -6374,6 +6412,16 @@ public sealed class UploadPipeline : IPackFiller
     /// </summary>
     private readonly System.Collections.Generic.HashSet<string> _titelGeschlossen = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// F-M609: ist dieser HTTP-Status eine STOERUNG statt einer Ablehnung? 429 („spaeter nochmal") und
+    /// 5xx (Serverfehler) sind keine Entscheidung ueber den Untertitel — sie duerfen das Paar nicht
+    /// schliessen. Ohne Status (kein Sendevorgang) gibt es nichts zu entschuldigen: das ist ein Nein.
+    /// </summary>
+    /// <param name="status">The HTTP status, or null when nothing was sent.</param>
+    /// <returns>True when the answer was a disturbance, false when it was a decision.</returns>
+    private static bool IstStoerung(int? status)
+        => status is 429 or (>= 500 and < 600);
+
     /// <summary>F-M608: die Pausen der Titel-Leiter — nach Fehlschlag 1 zwei, nach 2 vier, nach 3 acht Sekunden.</summary>
     private static readonly int[] TitelLeiterPausenMs = { 2000, 4000, 8000 };
 
@@ -6670,7 +6718,15 @@ public sealed class UploadPipeline : IPackFiller
             "[moviesubtitles] id of our upload: {Id}",
             answer.Id ?? (answer.Ok ? "not named by the site" : "none"));
 
-        return answer.Ok ? UploadResult.Success(answer.Id) : UploadResult.Failed(answer.Reason ?? "film-source-refused");
+        // F-M609: 2xx angenommen; 429/5xx ohne Urteil (Paar bleibt offen); alles andere ist ein Nein.
+        if (answer.Ok)
+        {
+            return UploadResult.Success(answer.Id);
+        }
+
+        return IstStoerung(answer.Status)
+            ? UploadResult.NoVerdict(answer.Reason ?? "film-source-no-answer")
+            : UploadResult.Failed(answer.Reason ?? "film-source-refused");
     }
 
     /// <summary>
@@ -6941,7 +6997,15 @@ public sealed class UploadPipeline : IPackFiller
             string.IsNullOrEmpty(answer.Reason) ? string.Empty : ": " + answer.Reason);
         LogUtil.PerItem(_config.LogMode, _logger,
             "[tvsubtitles] id of our upload: {Id}", answer.Id ?? "not readable");
-        return answer.Ok ? UploadResult.Success(answer.Id) : UploadResult.Failed(answer.Reason ?? "second-source-refused");
+        // F-M609: dasselbe Urteil fuer die Serien-Adresse.
+        if (answer.Ok)
+        {
+            return UploadResult.Success(answer.Id);
+        }
+
+        return IstStoerung(answer.Status)
+            ? UploadResult.NoVerdict(answer.Reason ?? "second-source-no-answer")
+            : UploadResult.Failed(answer.Reason ?? "second-source-refused");
     }
 
     /// <summary>

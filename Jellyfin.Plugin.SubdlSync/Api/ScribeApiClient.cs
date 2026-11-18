@@ -883,7 +883,7 @@ public sealed class ScribeApiClient
 
         if (string.IsNullOrWhiteSpace(nId))
         {
-            return UploadResult.Failed($"getNId failed: {Trim(nBody)}");
+            return UploadResult.NoVerdict($"getNId failed: {Trim(nBody)}");
         }
 
         // Step 2: uploadSingleSubtitle (multipart)
@@ -936,7 +936,7 @@ public sealed class ScribeApiClient
 
         if (string.IsNullOrWhiteSpace(fileNId))
         {
-            return UploadResult.Failed($"uploadSingleSubtitle failed: {Trim(upBody)}");
+            return UploadResult.NoVerdict($"uploadSingleSubtitle failed: {Trim(upBody)}");
         }
 
         // Step 3: uploadSubtitle (metadata)
@@ -996,7 +996,7 @@ public sealed class ScribeApiClient
         if ((int)metaResp.StatusCode == 429)
         {
             Classify429(metaResp, metaBody);
-            return UploadResult.Failed("rate-limited");
+            return UploadResult.NoVerdict("rate-limited");
         }
 
         bool isHourlyUploadCap = false;
@@ -1034,7 +1034,7 @@ public sealed class ScribeApiClient
         {
             // Not a failure — the item stays due and the run stops cleanly.
             HourlyUploadCapHit = true;
-            return UploadResult.Skipped("upload-hourly-cap");
+            return UploadResult.NoVerdict("upload-hourly-cap");
         }
 
         if (serverDuplicate)
@@ -1046,7 +1046,7 @@ public sealed class ScribeApiClient
 
         if (!ok)
         {
-            return UploadResult.Failed($"uploadSubtitle failed: {Trim(metaBody)}");
+            return UploadResult.NoVerdict($"uploadSubtitle failed: {Trim(metaBody)}");
         }
 
         System.Text.Json.JsonDocument? responseDoc = null;
@@ -1136,7 +1136,7 @@ public sealed class ScribeApiClient
 
         if (string.IsNullOrWhiteSpace(nId))
         {
-            return UploadResult.Failed($"getNId failed: {Trim(nBody)}");
+            return UploadResult.NoVerdict($"getNId failed: {Trim(nBody)}");
         }
 
         // Step 2: one uploadSingleSubtitle per episode. Built MANUALLY for the same reason the
@@ -1203,7 +1203,7 @@ public sealed class ScribeApiClient
         if ((int)metaResp.StatusCode == 429)
         {
             Classify429(metaResp, metaBody);
-            return UploadResult.Failed("rate-limited");
+            return UploadResult.NoVerdict("rate-limited");
         }
 
         bool ok;
@@ -1219,7 +1219,7 @@ public sealed class ScribeApiClient
                 {
                     // Not a failure — the season stays due and the run stops cleanly (F-M72).
                     HourlyUploadCapHit = true;
-                    return UploadResult.Skipped("upload-hourly-cap");
+                    return UploadResult.NoVerdict("upload-hourly-cap");
                 }
 
                 if (msg.Contains("already exist", StringComparison.OrdinalIgnoreCase)
@@ -1236,7 +1236,7 @@ public sealed class ScribeApiClient
 
         if (!ok)
         {
-            return UploadResult.Failed($"pack-metadata failed: {Trim(metaBody)}");
+            return UploadResult.NoVerdict($"pack-metadata failed: {Trim(metaBody)}");
         }
 
         System.Text.Json.JsonDocument? responseDoc = null;

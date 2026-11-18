@@ -162,7 +162,13 @@ public sealed record EndpointAnswer(
     /// tvsubtitles.net. Null when the source does not hand one back or it could not be read back; a
     /// guessed id is worse than none, because the store would then vouch for it.
     /// </summary>
-    string? Id = null);
+    string? Id = null,
+    /// <summary>
+    /// F-M609: der HTTP-Status der Antwort, wenn es eine gab — <c>null</c>, wenn gar nicht gesendet
+    /// wurde (eigene Vorpruefung, Trockenlauf). Die Kette braucht ihn, um „die Seite hat abgelehnt"
+    /// (4xx) von „keine Antwort" (429, 5xx) zu trennen: nur das erste schliesst das Paar.
+    /// </summary>
+    int? Status = null);
 
 /// <summary>
 /// F-M483: ONE download endpoint. Two implementations exist — SubDL and tvsubtitles.net — and the

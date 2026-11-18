@@ -632,6 +632,10 @@
     "T318": {
       "suite": "endpoints",
       "checks": 5
+    },
+    "T319": {
+      "suite": "endpoints",
+      "checks": 6
     }
   }
 }

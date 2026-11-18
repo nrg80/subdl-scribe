@@ -300,6 +300,8 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
             result.BodyBytes,
             result.Response,
             !result.Sent,
-            id);
+            id,
+            // F-M609: der Status reist mit — 429/5xx sind keine Ablehnung, sondern keine Antwort.
+            result.Sent ? result.Status : null);
     }
 }

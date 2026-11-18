@@ -436,7 +436,8 @@ public sealed class MovieSubtitlesUploadEndpoint : IUploadEndpoint
             // liefert, und ihr Text geht unverändert mit. Eine Ablehnung, die wir erfinden, wäre so
             // falsch wie eine Annahme, die wir erfinden.
             return new EndpointAnswer(
-                Provider, false, "HTTP " + result.Status, result.BodyBytes, result.Response, false);
+                Provider, false, "HTTP " + result.Status, result.BodyBytes, result.Response, false,
+                Id: null, Status: result.Status);
         }
 
         // ANGENOMMEN, Id UNBEKANNT: 2xx heißt, die Seite hat den Rumpf angenommen. Ob sie ihn später

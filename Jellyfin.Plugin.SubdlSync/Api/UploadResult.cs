@@ -53,6 +53,21 @@ public class UploadResult
     public bool SourceAccepted { get; private init; }
 
     /// <summary>
+    /// F-M609 (Operator-Anweisung 18.11.2026: „Wieso nehmen wir nicht alles was nicht akzetanz ist, als
+    /// Ablehnung und schließen das paar?" — und „Verbindung zu / keine Antwort ist was anderes als kein
+    /// positives verdict"): das URTEIL des Versuchs, in drei trennbaren Faellen.
+    /// <para>
+    /// <see cref="UploadVerdict.Refused"/> schliesst das Paar: es gibt eine Entscheidung, sei es die der
+    /// Seite oder eine unserer eigenen Vorpruefungen (Staffel ausserhalb des Formulars, kein TMDb-Eintrag,
+    /// Kennung nicht bespielbar). <see cref="UploadVerdict.NoVerdict"/> schliesst NICHTS: hier hat niemand
+    /// entschieden — Timeout, Verbindungsfehler, 429, 5xx, Stundendeckel, Abbruch. Der naechste Lauf fragt
+    /// neu, sonst waere die IP-Sperre vom 17.11.2026 (21:25-22:41) zum Dauerurteil fuer jeden Untertitel
+    /// geworden, der in diesen 76 Minuten angefragt wurde.
+    /// </para>
+    /// </summary>
+    public UploadVerdict Verdict { get; private init; } = UploadVerdict.Refused;
+
+    /// <summary>
     /// F-M550: the source that actually answered. The log used to name no source at all, and the old
     /// <c>[SubDL]</c> prefix in front of an upload line read like "uploaded to SubDL" even when the
     /// upload went to tvsubtitles. Set by the chain where the source is known, not by its caller.
@@ -64,22 +79,33 @@ public class UploadResult
     /// </summary>
     /// <param name="sourceId">The id the source reported, or null.</param>
     /// <returns>The result.</returns>
-    public static UploadResult Success(string? sourceId) => new() { Ok = true, SourceId = sourceId };
+    public static UploadResult Success(string? sourceId)
+        => new() { Ok = true, SourceId = sourceId, Verdict = UploadVerdict.Accepted };
 
     /// <summary>
     /// Creates a success result.
     /// </summary>
-    public static UploadResult Success() => new() { Ok = true };
+    public static UploadResult Success() => new() { Ok = true, Verdict = UploadVerdict.Accepted };
 
     /// <summary>
     /// Creates a success result with the raw SubDL response attached.
     /// </summary>
-    public static UploadResult Success(System.Text.Json.JsonDocument? response) => new() { Ok = true, Response = response };
+    public static UploadResult Success(System.Text.Json.JsonDocument? response)
+        => new() { Ok = true, Response = response, Verdict = UploadVerdict.Accepted };
 
     /// <summary>
     /// Creates a failure result.
     /// </summary>
     public static UploadResult Failed(string reason) => new() { Ok = false, Reason = reason };
+
+    /// <summary>
+    /// F-M609: keine Antwort — Timeout, Verbindungsfehler, 429, 5xx, Stundendeckel, Abbruch durch uns.
+    /// KEIN Urteil der Quelle, deshalb bleibt das Paar offen und der naechste Lauf fragt neu.
+    /// </summary>
+    /// <param name="reason">What went wrong.</param>
+    /// <returns>The result.</returns>
+    public static UploadResult NoVerdict(string reason)
+        => new() { Ok = false, Reason = reason, Verdict = UploadVerdict.NoVerdict };
 
     /// <summary>
     /// Creates a skip result.
@@ -93,5 +119,23 @@ public class UploadResult
     /// <param name="reason">Why the source named no id.</param>
     /// <returns>The result.</returns>
     public static UploadResult AcceptedWithoutId(string reason)
-        => new() { Ok = false, SkippedItem = true, SourceAccepted = true, Reason = reason };
+        => new() { Ok = false, SkippedItem = true, SourceAccepted = true, Reason = reason, Verdict = UploadVerdict.AcceptedWithoutId };
+}
+
+/// <summary>
+/// F-M609: what a single upload attempt ended in. See <see cref="UploadResult.Verdict"/>.
+/// </summary>
+public enum UploadVerdict
+{
+    /// <summary>The source took the upload (2xx, or <c>status:true</c> at SubDL).</summary>
+    Accepted,
+
+    /// <summary>The source took the upload but named no id — evidence enough to close the pair (F-M603).</summary>
+    AcceptedWithoutId,
+
+    /// <summary>There is a decision: the site said no, or one of our own pre-checks did. Closes the pair.</summary>
+    Refused,
+
+    /// <summary>Nobody decided — timeout, connection, 429, 5xx, hourly cap, cancellation. Closes nothing.</summary>
+    NoVerdict,
 }
