@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.474",
-        "changelog": "v12.1.12.474: a pack that cannot form asks the store first instead of extracting episodes, and the aired episode count lives in the store.",
+        "version": "12.1.12.475",
+        "changelog": "v12.1.12.475: accepted-without-id closes the pair (film and series address), and each run writes in one batch.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.474-dev/Jellyfin.Plugin.SubdlSync_12.1.12.474.zip",
-        "checksum": "01ec3b60215f02151410c111e04a8c72",
-        "timestamp": "2026-11-18T13:48:49Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.475-dev/Jellyfin.Plugin.SubdlSync_12.1.12.475.zip",
+        "checksum": "3786c7f223e18c12c970f599db6f7eb9",
+        "timestamp": "2026-11-18T14:14:02Z"
       }
     ]
   }
