@@ -1432,16 +1432,45 @@ public sealed class UploadPipeline : IPackFiller
                     : ausVorlauf ? " — from the look-ahead (F-M596)" : string.Empty);
             }
 
-            // F-M596: jetzt den naechsten Schritt vorziehen. Die Extraktion der naechsten Datei liest
-            // nur eine Datei und schreibt Textdateien in ein temporaeres Verzeichnis — alles, was
-            // zaehlt, sendet oder in den Store schreibt, bleibt hier an seinem Platz. Nur nach einem
-            // sauberen Durchlauf (kein Einzel-Nachlauf) und nur, wenn es eine naechste Datei gibt.
-            if (!retryPerStream
-                && itemIndex + 1 < items.Count
-                && !string.IsNullOrWhiteSpace(items[itemIndex + 1].Path))
+            // F-M596: jetzt die naechsten Schritte vorziehen. Die Extraktion liest nur eine Datei und
+            // schreibt Textdateien in ein temporaeres Verzeichnis — alles, was zaehlt, sendet oder in
+            // den Store schreibt, bleibt hier an seinem Platz.
+            //
+            // NACHTRAG 18.11.2026 („Unbedingt", nach der Messung 2 von 26 Treffern): nicht mehr nur die
+            // naechste Datei anmelden, sondern bis zu drei. Der Kopf-Ausstieg ueberspringt regelmaessig
+            // Dateien, deren Spuren im Store erledigt sind; ein Vorlauf fuer genau so eine Datei war
+            // umsonst, und die naechste, die wirklich lief, fing kalt bei ~8 s an. Die Pumpe arbeitet
+            // die Anmeldungen nacheinander ab (nie zwei ffmpeg gleichzeitig) und wirft weg, was
+            // inzwischen aus dem Plan faellt.
+            if (!retryPerStream)
             {
-                var naechste = items[itemIndex + 1];
-                vorlauf.Start(naechste.Path!, TextSubtitlePositions(naechste.Id), _ffmpegPath, _logger, _config, runCt);
+                var kandidaten = new List<(string Path, List<int> Positions)>();
+                for (int i = itemIndex + 1; i < items.Count && kandidaten.Count < 3; i++)
+                {
+                    var naechste = items[i];
+                    if (string.IsNullOrWhiteSpace(naechste.Path))
+                    {
+                        continue;
+                    }
+
+                    if (QueueFilter != null && !QueueFilter.Contains(naechste.Id.ToString()))
+                    {
+                        continue;
+                    }
+
+                    var positionen = TextSubtitlePositions(naechste.Id);
+                    if (positionen.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    kandidaten.Add((naechste.Path!, positionen));
+                }
+
+                if (kandidaten.Count > 0)
+                {
+                    vorlauf.Plan(kandidaten, _ffmpegPath, _logger, _config, runCt);
+                }
             }
 
             // Phase 1 candidates: (kind, stream/loose-data, lang, srtContent)

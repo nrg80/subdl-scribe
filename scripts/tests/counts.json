@@ -583,7 +583,7 @@
     },
     "T306": {
       "suite": "endpoints",
-      "checks": 4
+      "checks": 6
     }
   }
 }

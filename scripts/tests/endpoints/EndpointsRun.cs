@@ -813,21 +813,28 @@ internal static class Program
         var lookaheadSource596 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/ExtractionLookahead.cs"));
         var ffmpegSource596 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/FfmpegTools.cs"));
         var uploadSource596 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
-        Check("F-M596: der Vorlauf ist eine eigene Klasse mit Start, Nehmen und Abraeumen",
+        Check("F-M596: der Vorlauf ist eine eigene Klasse mit Anmelden, Nehmen und Abraeumen",
             lookaheadSource596.Contains("public sealed class ExtractionLookahead : IDisposable", StringComparison.Ordinal)
-            && lookaheadSource596.Contains("public void Start(", StringComparison.Ordinal)
+            && lookaheadSource596.Contains("public void Plan(", StringComparison.Ordinal)
             && lookaheadSource596.Contains("public async Task<(Dictionary<int, string?> Texts, int ExitCode, bool FromLookahead)> TakeOrExtractAsync(", StringComparison.Ordinal)
             && lookaheadSource596.Contains("public void Dispose()", StringComparison.Ordinal));
         Check("F-M596: benutzt wird der Vorlauf nur bei DERSELBEN Datei und ALLEN Positionen",
-            lookaheadSource596.Contains("_key == mediaPath", StringComparison.Ordinal)
-            && lookaheadSource596.Contains("positions.All(p => _positions.Contains(p))", StringComparison.Ordinal)
-            && lookaheadSource596.Contains("AbbrechenUnterSchloss();", StringComparison.Ordinal));
-        Check("F-M596: der Lauf nimmt den Vorlauf und startet ihn fuer die NAECHSTE Datei",
+            lookaheadSource596.Contains("_laeufe.TryGetValue(mediaPath, out var lauf)", StringComparison.Ordinal)
+            && lookaheadSource596.Contains("positions.All(p => vorbereitetPositionen.Contains(p))", StringComparison.Ordinal));
+        Check("F-M596: bis zu DREI Dateien im Voraus, nicht nur eine",
+            lookaheadSource596.Contains("private const int MaxKandidaten = 3;", StringComparison.Ordinal)
+            && lookaheadSource596.Contains(".Take(MaxKandidaten)", StringComparison.Ordinal));
+        Check("F-M596: die Pumpe extrahiert NACHEINANDER — nie zwei ffmpeg gleichzeitig",
+            lookaheadSource596.Contains("private async Task PumpeAsync(", StringComparison.Ordinal)
+            && lookaheadSource596.Contains("await lauf.ConfigureAwait(false);", StringComparison.Ordinal)
+            && lookaheadSource596.Contains("_plan.FirstOrDefault(p => !_laeufe.ContainsKey(p))", StringComparison.Ordinal));
+        Check("F-M596: der Lauf meldet bis zu drei Kandidaten an und nimmt das Ergebnis am Extraktionsplatz",
             uploadSource596.Contains("using var vorlauf = new ExtractionLookahead();", StringComparison.Ordinal)
             && uploadSource596.Contains("for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)", StringComparison.Ordinal)
             && uploadSource596.Contains("await vorlauf", StringComparison.Ordinal)
-            && uploadSource596.Contains("vorlauf.Start(naechste.Path!, TextSubtitlePositions(naechste.Id)", StringComparison.Ordinal)
-            && uploadSource596.Contains("itemIndex + 1 < items.Count", StringComparison.Ordinal));
+            && uploadSource596.Contains("vorlauf.Plan(kandidaten, _ffmpegPath, _logger, _config, runCt);", StringComparison.Ordinal)
+            && uploadSource596.Contains("kandidaten.Count < 3", StringComparison.Ordinal)
+            && uploadSource596.Contains("QueueFilter != null && !QueueFilter.Contains(naechste.Id.ToString())", StringComparison.Ordinal));
         Check("F-M596: ein Abbruch beendet ffmpeg wirklich, nicht nur das Warten",
             ffmpegSource596.Contains("catch (OperationCanceledException)", StringComparison.Ordinal)
             && ffmpegSource596.Contains("BeendeHart(proc, logger, mediaPath);", StringComparison.Ordinal)

@@ -9,81 +9,108 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
-/// F-M596: bereitet die Extraktion GENAU EINER Datei vor, waehrend die aktuelle noch sendet.
+/// F-M596: haelt bis zu drei Dateien extrahiert bereit, waehrend die aktuelle noch sendet.
 /// <para>
 /// Operator-Anweisung 18.11.2026 („Das wäre aber sophisticated. Kriegen wir das sicher abgewickelt?" —
-/// „Ja"): gemessen am 18.11.2026 zerfiel der Abstand zwischen zwei Uploads in 9,0 s Vorbereitung
-/// (davon der eine ffmpeg-Durchlauf), 2,4 s Uebertragung und 0,0 s Warten am Slot. Der Takt von 7,2 s
-/// bei 500/h wurde damit nie erreicht — die Rate war vorbereitungsgebunden. Der Vorlauf zieht den
-/// EINZIGEN lesenden, seiteneffektfreien Schritt nach vorn: mehr nicht.
+/// „Ja"), nach der ersten Messung nachgezogen („Unbedingt"). Messung 1 (26 Spuren, Einstellung 500/h):
+/// Abstand Median 10,0 s = 7,6 s Vorbereitung, 0,2 s Warten, 2,3 s Uebertragung — und der Vorlauf wurde
+/// nur in **2 von 26** Spuren benutzt. Grund: die Kette bricht bei uebersprungenen Dateien. Der Vorlauf
+/// galt der naechsten Datei, die der Kopf-Ausstieg dann uebersprang, und die naechste, die wirklich
+/// lief, fing kalt bei ~8 s an.
+/// </para>
+/// <para>
+/// Deshalb jetzt eine kleine Pumpe: der Lauf meldet bis zu DREI kommende Kandidaten an
+/// (<see cref="Plan"/>), die Pumpe extrahiert sie nacheinander — immer nur eine Datei gleichzeitig,
+/// nie zwei ffmpeg-Prozesse — und legt das Ergebnis ab. Faellt eine Datei unterwegs weg (uebersprungen),
+/// verschwindet ihr Ergebnis beim naechsten Plan wieder. Der Speicherbedarf ist der Text von hoechstens
+/// drei Dateien (wenige MB je Datei).
 /// </para>
 /// <para>
 /// Was dadurch NICHT passiert: keine zweite Verbindung, keine zweite Quelle, kein vorgezogenes Urteil,
 /// keine vorgezogene Zeile im Store, keine Aenderung der Reihenfolge. Die Extraktion liest eine Datei
 /// und schreibt Textdateien in ein temporaeres Verzeichnis; alles, was zaehlt oder schreibt, bleibt im
-/// Lauf an seinem Platz. Deshalb ist der Vorlauf auch dann harmlos, wenn er verworfen wird: die
-/// Ergebnisse sind reproduzierbar, und ein Treffer wird nur benutzt, wenn Positionen UND Datei
-/// uebereinstimmen.
-/// </para>
-/// <para>
-/// Grenzen: hoechstens EIN Vorlauf gleichzeitig (der jeweils aeltere wird abgebrochen und beendet),
-/// hoechstens EINE Datei im Voraus, und ein Abbruch des Laufs beendet den ffmpeg-Prozess wirklich
-/// (F-M596 in <see cref="FfmpegTools"/>). Der Speicherbedarf ist der Text EINER Datei — gemessen an
-/// einer 43-Spuren-Folge wenige Megabyte.
+/// Lauf an seinem Platz. Ein verworfener Vorlauf ist deshalb folgenlos. Ein Abbruch des Laufs beendet
+/// den ffmpeg-Prozess wirklich (F-M596 in <see cref="FfmpegTools"/>).
 /// </para>
 /// </summary>
 public sealed class ExtractionLookahead : IDisposable
 {
+    /// <summary>Wie viele Dateien hoechstens im Voraus bereitgehalten werden.</summary>
+    private const int MaxKandidaten = 3;
+
     private readonly object _lock = new();
+
+    /// <summary>Fertige oder laufende Extraktionen, je Datei.</summary>
+    private readonly Dictionary<string, Task<(Dictionary<int, string?> Texts, int ExitCode)>> _laeufe =
+        new(StringComparer.Ordinal);
+
+    /// <summary>Die angemeldeten Kandidaten in Reihenfolge.</summary>
+    private readonly List<string> _plan = new();
+
+    /// <summary>Die Positionen, die fuer eine Datei vorbereitet wurden.</summary>
+    private readonly Dictionary<string, List<int>> _positionen = new(StringComparer.Ordinal);
+
+    private Task? _pumpe;
     private CancellationTokenSource? _cts;
-    private Task<(Dictionary<int, string?> Texts, int ExitCode)>? _task;
-    private string? _key;
-    private List<int> _positions = new();
 
     /// <summary>
-    /// Startet die Extraktion fuer <paramref name="mediaPath"/>, sofern nicht schon genau diese Datei
-    /// mit genau diesen Positionen vorbereitet wird. Der Aufruf kehrt sofort zurueck.
+    /// Meldet die kommenden Kandidaten an (hoechstens <see cref="MaxKandidaten"/>, in Reihenfolge) und
+    /// startet die Pumpe, falls sie nicht schon laeuft. Der Aufruf kehrt sofort zurueck.
     /// </summary>
-    /// <param name="mediaPath">Die Datei, die als naechste dran waere.</param>
-    /// <param name="positions">Die zu extrahierenden Untertitel-Positionen (0:s:N).</param>
+    /// <param name="kandidaten">Datei und Positionen, naechste zuerst.</param>
     /// <param name="ffmpegPath">Der ffmpeg-Binary.</param>
     /// <param name="logger">Protokoll.</param>
     /// <param name="config">Konfiguration (nur Lesen).</param>
     /// <param name="ct">Abbruch des Laufs.</param>
-    public void Start(
-        string mediaPath,
-        IReadOnlyList<int> positions,
+    public void Plan(
+        IEnumerable<(string Path, List<int> Positions)> kandidaten,
         string ffmpegPath,
         ILogger logger,
         PluginConfiguration config,
         CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(mediaPath) || positions.Count == 0 || ct.IsCancellationRequested)
-        {
-            return;
-        }
+        var neu = kandidaten
+            .Where(k => !string.IsNullOrWhiteSpace(k.Path) && k.Positions.Count > 0)
+            .Take(MaxKandidaten)
+            .ToList();
 
         lock (_lock)
         {
-            if (_key == mediaPath && _task != null && !_task.IsCompleted)
+            _plan.Clear();
+            foreach (var (pfad, positionen) in neu)
             {
-                return;
+                _plan.Add(pfad);
+                _positionen[pfad] = positionen;
             }
 
-            AbbrechenUnterSchloss();
+            // Was nicht mehr im Plan steht, ist unterwegs weggefallen (uebersprungen): ein fertiges
+            // Ergebnis wegwerfen, damit weder Speicher noch ein toter Lauf liegen bleibt.
+            foreach (string alt in _laeufe.Keys.Where(p => !_plan.Contains(p)).ToList())
+            {
+                if (_laeufe[alt].IsCompleted)
+                {
+                    _laeufe.Remove(alt);
+                    _positionen.Remove(alt);
+                }
+            }
 
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            _cts = cts;
-            _key = mediaPath;
-            _positions = positions.ToList();
-            _task = FfmpegTools.ExtractAllAsync(ffmpegPath, mediaPath, _positions, logger, config, cts.Token);
+            foreach (string alt in _positionen.Keys.Where(p => !_plan.Contains(p) && !_laeufe.ContainsKey(p)).ToList())
+            {
+                _positionen.Remove(alt);
+            }
+
+            if (_pumpe == null && _plan.Count > 0 && !ct.IsCancellationRequested)
+            {
+                _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                _pumpe = Task.Run(() => PumpeAsync(ffmpegPath, logger, config, _cts.Token), CancellationToken.None);
+            }
         }
     }
 
     /// <summary>
-    /// Nimmt das vorgezogene Ergebnis, wenn es zu dieser Datei und zu ALLEN geforderten Positionen
-    /// passt — sonst wird normal extrahiert. Ein Vorlauf, der nur einen Teil der Positionen deckt,
-    /// wird verworfen: eine halbe Antwort waere schlimmer als eine frische Frage.
+    /// Nimmt das vorgezogene Ergebnis, wenn diese Datei vorbereitet wurde und ALLE geforderten
+    /// Positionen gedeckt sind — sonst wird normal extrahiert. Eine halbe Antwort waere schlimmer als
+    /// eine frische Frage.
     /// </summary>
     /// <param name="mediaPath">Die Datei, die jetzt dran ist.</param>
     /// <param name="positions">Die jetzt gebrauchten Positionen.</param>
@@ -100,49 +127,36 @@ public sealed class ExtractionLookahead : IDisposable
         PluginConfiguration config,
         CancellationToken ct)
     {
-        Task<(Dictionary<int, string?> Texts, int ExitCode)>? passend = null;
+        Task<(Dictionary<int, string?> Texts, int ExitCode)>? vorbereitet = null;
 
         lock (_lock)
         {
-            bool deckt = _task != null
-                && _key == mediaPath
-                && positions.All(p => _positions.Contains(p));
-
-            if (deckt)
+            if (_laeufe.TryGetValue(mediaPath, out var lauf)
+                && _positionen.TryGetValue(mediaPath, out var vorbereitetPositionen)
+                && positions.All(p => vorbereitetPositionen.Contains(p)))
             {
-                passend = _task;
-            }
-            else
-            {
-                AbbrechenUnterSchloss();
+                vorbereitet = lauf;
+                _laeufe.Remove(mediaPath);
+                _plan.Remove(mediaPath);
+                _positionen.Remove(mediaPath);
             }
         }
 
-        if (passend != null)
+        if (vorbereitet != null)
         {
             try
             {
-                var (texts, exit) = await passend.ConfigureAwait(false);
+                var (texts, exit) = await vorbereitet.ConfigureAwait(false);
                 return (texts, exit, true);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                // Der Vorlauf wurde aus einem anderen Grund beendet (aelterer Vorlauf ersetzt) —
-                // dann ist jetzt die normale Extraktion dran.
+                // Der Vorlauf wurde beendet (Plan ersetzt) — dann eben frisch.
             }
-            finally
+            catch (Exception ex)
             {
-                lock (_lock)
-                {
-                    if (ReferenceEquals(_task, passend))
-                    {
-                        _task = null;
-                        _key = null;
-                        _positions = new List<int>();
-                        _cts?.Dispose();
-                        _cts = null;
-                    }
-                }
+                // Ein gescheiterter Vorlauf ist kein Urteil: frisch versuchen.
+                logger.LogDebug("[Sub Scribe] look-ahead extraction failed for {File}: {Msg}", mediaPath, ex.Message);
             }
         }
 
@@ -151,49 +165,129 @@ public sealed class ExtractionLookahead : IDisposable
         return (frisch.Texts, frisch.ExitCode, false);
     }
 
-    /// <summary>Verwirft einen noch laufenden Vorlauf und beendet seinen ffmpeg-Prozess.</summary>
+    /// <summary>Beendet die Pumpe und den laufenden ffmpeg-Prozess.</summary>
     public void Dispose()
     {
-        Task<(Dictionary<int, string?> Texts, int ExitCode)>? offen;
+        Task? pumpe;
+        Task<(Dictionary<int, string?> Texts, int ExitCode)>[] offen;
+
         lock (_lock)
         {
-            offen = _task;
-            AbbrechenUnterSchloss();
-            _task = null;
-            _key = null;
-            _positions = new List<int>();
+            pumpe = _pumpe;
+            offen = _laeufe.Values.ToArray();
+            try
+            {
+                _cts?.Cancel();
+                _cts?.Dispose();
+            }
+            catch (Exception)
+            {
+                // Cancel/Dispose auf einer bereits entsorgten Quelle ist kein Fehler des Laufs.
+            }
+
+            _cts = null;
+            _pumpe = null;
+            _plan.Clear();
+            _laeufe.Clear();
+            _positionen.Clear();
         }
 
-        if (offen != null)
+        if (pumpe != null)
         {
             try
             {
                 // Kurz warten, damit der Abbruch greift und ffmpeg beendet ist, bevor der Lauf endet.
-                offen.Wait(TimeSpan.FromSeconds(5));
+                pumpe.Wait(TimeSpan.FromSeconds(5));
             }
             catch (Exception)
             {
-                // Ein verworfener Vorläufer ist kein Fehler des Laufs.
+                // Ein verworfener Vorlauf ist kein Fehler des Laufs.
+            }
+        }
+
+        foreach (var lauf in offen)
+        {
+            try
+            {
+                lauf.Wait(TimeSpan.FromSeconds(2));
+            }
+            catch (Exception)
+            {
+                // Siehe oben.
             }
         }
     }
 
-    /// <summary>Bricht den laufenden Vorlauf ab. Nur unter <see cref="_lock"/> aufrufen.</summary>
-    private void AbbrechenUnterSchloss()
+    /// <summary>
+    /// F-M596: die Pumpe — arbeitet den Plan der Reihe nach ab, immer eine Datei gleichzeitig, und
+    /// hoert auf, sobald nichts mehr offen ist. Sie laeuft nur, solange Kandidaten angemeldet sind.
+    /// </summary>
+    /// <param name="ffmpegPath">Der ffmpeg-Binary.</param>
+    /// <param name="logger">Protokoll.</param>
+    /// <param name="config">Konfiguration (nur Lesen).</param>
+    /// <param name="ct">Abbruch des Laufs.</param>
+    /// <returns>Ein Task, der endet, wenn der Plan abgearbeitet ist.</returns>
+    private async Task PumpeAsync(string ffmpegPath, ILogger logger, PluginConfiguration config, CancellationToken ct)
     {
-        try
+        while (!ct.IsCancellationRequested)
         {
-            _cts?.Cancel();
-            _cts?.Dispose();
-        }
-        catch (Exception)
-        {
-            // Cancel/Dispose auf einer bereits entsorgten Quelle ist kein Fehler des Laufs.
+            string? naechste;
+            List<int>? positionen;
+
+            lock (_lock)
+            {
+                naechste = _plan.FirstOrDefault(p => !_laeufe.ContainsKey(p));
+                if (naechste == null)
+                {
+                    _pumpe = null;
+                    return;
+                }
+
+                positionen = _positionen.TryGetValue(naechste, out var vorhanden)
+                    ? vorhanden
+                    : new List<int>();
+            }
+
+            if (positionen.Count == 0)
+            {
+                lock (_lock)
+                {
+                    _plan.Remove(naechste);
+                }
+
+                continue;
+            }
+
+            var lauf = FfmpegTools.ExtractAllAsync(ffmpegPath, naechste, positionen, logger, config, ct);
+
+            lock (_lock)
+            {
+                _laeufe[naechste] = lauf;
+            }
+
+            try
+            {
+                await lauf.ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Ergebnis oder Fehlschlag steht im Task; der Nehmer entscheidet.
+            }
+
+            lock (_lock)
+            {
+                // Weggefallen, waehrend extrahiert wurde: Ergebnis nicht aufheben.
+                if (!_plan.Contains(naechste))
+                {
+                    _laeufe.Remove(naechste);
+                    _positionen.Remove(naechste);
+                }
+            }
         }
 
-        _cts = null;
-        _task = null;
-        _key = null;
-        _positions = new List<int>();
+        lock (_lock)
+        {
+            _pumpe = null;
+        }
     }
 }
