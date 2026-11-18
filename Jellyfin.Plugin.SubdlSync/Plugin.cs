@@ -417,6 +417,9 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
 
         // F-M604: so do the pack verdicts, with the signature of the members they were made for.
         Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.Attach(_sharedDbContext.Context);
+
+        // F-M605: and the refusals the sources have already given for a track.
+        Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.Attach(_sharedDbContext.Context);
         }
 
     /// <inheritdoc />

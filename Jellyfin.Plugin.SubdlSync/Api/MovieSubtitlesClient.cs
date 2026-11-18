@@ -537,6 +537,46 @@ public sealed class MovieSubtitlesClient
     /// <param name="movieId">The film id (the same number as the <c>tvid</c> of the upload form).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The page as parsed. A film without subtitles answers HTTP 200 with an empty entry list.</returns>
+    /// <summary>
+    /// F-M606 (Operator-Frage 18.11.2026: „Erst fragen ob die id bespielbar ist, vor dem hochladen geht
+    /// nicht?"): fragt VOR dem Hochladen, ob die Filmkennung ueberhaupt bespielbar ist — also ob
+    /// <c>add.php?let=&lt;tvid&gt;</c> das Upload-Formular liefert. Antwortet die Seite mit einer Fehlerseite
+    /// oder ohne Formular, wird nichts gesendet.
+    /// <para>
+    /// Gemessen am 18.11.2026 an „The End Of Oak Street": der Film steht dort nicht, <c>add-movie.php</c>
+    /// antwortet trotzdem <c>200</c> und die Kennung ist nicht lesbar — der Versuch landete in einem SKIP
+    /// ohne Beleg, und die Datei kam in jedem Lauf wieder. Die Frage „ist die Kennung bespielbar" wird
+    /// jetzt gestellt, BEVOR gesendet wird.
+    /// </para>
+    /// </summary>
+    /// <param name="movieId">The film's tvid.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True when the upload view for this id shows the upload form.</returns>
+    public async Task<bool> FilmUsableForUploadAsync(int movieId, CancellationToken cancellationToken = default)
+    {
+        if (movieId <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            string html = await GetTextAsync(
+                string.Format(CultureInfo.InvariantCulture, "{0}/add.php?let={1}", BaseUrl, movieId),
+                null,
+                cancellationToken).ConfigureAwait(false);
+            return html.Contains("name=\"lang\"", StringComparison.OrdinalIgnoreCase)
+                   && html.Contains("tvid", StringComparison.OrdinalIgnoreCase)
+                   && html.Contains("movie-", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            // Eine Seite, die nicht antwortet, ist kein Beleg fuer „nicht bespielbar" — dann wird gesendet
+            // wie bisher, und das Ergebnis der Kette entscheidet.
+            return true;
+        }
+    }
+
     public async Task<MovieSubtitlesMoviePage> MovieAsync(
         int movieId, CancellationToken cancellationToken = default)
     {

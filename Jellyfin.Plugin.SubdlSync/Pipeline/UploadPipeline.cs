@@ -2365,7 +2365,7 @@ public sealed class UploadPipeline : IPackFiller
                         string skipReason = RejectReason.DuplicateRemote == result.Reason
                             ? RejectReason.DuplicateRemote
                             : result.Reason ?? RejectReason.CandidateRejected;
-                        // F-M603 (Operator-Entscheidung 18.11.2026, Weg „A"): ein ANGENOMMENER Versuch ohne
+// F-M603 (Operator-Entscheidung 18.11.2026, Weg „A"): ein ANGENOMMENER Versuch ohne
                         // Kennung bekommt seine Marke, BEVOR das Urteil faellt. Sonst rechnet
                         // SettleDuplicateContent die Quelle wieder als offen (ihr fehlt der Beleg), die Spur
                         // bleibt „still open", und der naechste Lauf entpackt dieselbe Datei erneut —
@@ -3361,6 +3361,21 @@ public sealed class UploadPipeline : IPackFiller
 
             // F-M587: was alle Pruefungen bestanden hat, wird nur noch GEMERKT — gestartet wird
             // gesammelt hinter der Schleife, damit die Quellen gleichzeitig laufen.
+            // F-M605 (Operator-Frage 18.11.2026: „Erst fragen ob die id bespielbar ist, vor dem hochladen
+            // geht nicht?"): die Quelle hat fuer GENAU diesen Inhalt schon ein inhaltliches Nein gegeben —
+            // dann wird sie nicht erneut gefragt, solange der Text derselbe ist. Ein voruebergehendes Nein
+            // (Rate Limit, Timeout, Abbruch) steht hier nicht, das wird jedes Mal neu gefragt.
+            if (Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.StillRefused(
+                    mediaHash ?? string.Empty, subPos, SeasonPack.LangTag(lang, hearingImpaired), quelle.ToString(),
+                    contentHashEarly, out string gemerktesNein))
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[Sub Scribe] {Name} [{Lang}] — source {Source} skipped: remembered refusal ({Reason}) (F-M605)",
+                    neutralName, lang, Api.Endpoints.Provenance.Name(quelle), gemerktesNein);
+                ergebnisse[quelle] = UploadResult.Skipped(gemerktesNein);
+                continue;
+            }
+
             zustaendig.Add(quelle);
         }
 
@@ -3487,6 +3502,30 @@ public sealed class UploadPipeline : IPackFiller
 
         UploadResult? Ergebnis(Configuration.SubtitleProvider provider) =>
             ergebnisse.TryGetValue(provider, out var e) ? e : null;
+
+        // F-M605 (Operator-Frage 18.11.2026: „Erst fragen ob die id bespielbar ist, vor dem hochladen geht
+        // nicht?"): das Nein einer Quelle wird mit dem Inhalts-Hash gemerkt — aber nur ein inhaltliches
+        // („die Quelle kennt den Film nicht", „die Seite hat die Serie abgelehnt"). Ein voruebergehendes
+        // Nein (Rate Limit, Timeout, Abbruch) wird NICHT gemerkt: das muss der naechste Lauf neu fragen
+        // duerfen. Hat eine Quelle den Inhalt genommen, wird ein altes Nein vergessen.
+        foreach (var (gemerkteQuelle, gemerkt) in ergebnisse)
+        {
+            if (gemerkt.Ok || gemerkt.SourceAccepted)
+            {
+                Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.Forget(
+                    mediaHash ?? string.Empty, subPos, SeasonPack.LangTag(lang, hearingImpaired),
+                    gemerkteQuelle.ToString());
+            }
+            else if (Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.ShouldRemember(gemerkt.Reason))
+            {
+                Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.Put(
+                    mediaHash ?? string.Empty, subPos, SeasonPack.LangTag(lang, hearingImpaired),
+                    gemerkteQuelle.ToString(), contentHashEarly, gemerkt.Reason ?? string.Empty);
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[Sub Scribe] {Name} [{Lang}] — source {Source} said no ({Reason}), remembered for this content (F-M605)",
+                    neutralName, lang, Api.Endpoints.Provenance.Name(gemerkteQuelle), gemerkt.Reason);
+            }
+        }
 
         bool Genommen(Configuration.SubtitleProvider provider) => Ergebnis(provider) is { Ok: true };
 
@@ -6439,9 +6478,24 @@ public sealed class UploadPipeline : IPackFiller
             // F-M603 (Operator-Entscheidung 18.11.2026, Weg „A"): „angelegt, aber die Id ist nicht
             // lesbar" ist ein ANGENOMMENER Versuch. Ohne Marke blieb das Paar ewig offen und die Datei
             // kam in jedem Lauf wieder (Oak Street, 18.11.2026).
-            if (string.Equals(aufloesung.Status, "created-id-not-readable", StringComparison.Ordinal))
+            // F-M607 (Operator-Anweisung 18.11.2026: „Erst müssen wir den titel neu angelegt haben, wenn wir
+            // ihn dann suchen und er taucht nicht auf -> skip, pair schließen."): die Reihenfolge ist
+            // Anlegen → Nachsuche. Taucht der Titel in der Nachsuche NICHT auf, ist das Paar entschieden und
+            // wird nicht erneut versucht — der Grund steht daneben.
+            //
+            // Zwei Faelle sind ein Beleg der Seite, dass der Titel dort steht (nur die Kennung fehlt):
+            //   created-id-not-readable  — angelegt, Id nicht lesbar
+            //   exists-id-not-readable   — die Seite meldet „fuehrt den Titel schon", Id nicht lesbar
+            // Beide schliessen das Paar (F-M603), ohne einen Upload zu behaupten. Alles andere
+            // (not-found, exists-other-year, create-failed, unclear, no-title, no-year) bleibt ein SKIP und
+            // wird von F-M605 als inhaltliches Nein gemerkt — damit ist es ebenfalls geschlossen.
+            if (string.Equals(aufloesung.Status, "created-id-not-readable", StringComparison.Ordinal)
+                || string.Equals(aufloesung.Status, "exists-id-not-readable", StringComparison.Ordinal))
             {
-                return UploadResult.AcceptedWithoutId("film-source-movie-created-id-not-readable");
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[moviesubtitles] {Name} [{Lang}] — the title was created and the search names no id ({Status}); the pair is settled (F-M603/F-M607)",
+                    neutralName, lang, aufloesung.Status);
+                return UploadResult.AcceptedWithoutId("film-source-movie-" + aufloesung.Status);
             }
 
             return UploadResult.Skipped("film-source-movie-" + aufloesung.Status);
@@ -6470,7 +6524,21 @@ public sealed class UploadPipeline : IPackFiller
             MsubMovieId: aufloesung.MovieId,
             MovieYear: movie.ReleaseYear ?? 0);
 
-        var answer = await endpoint.SendAsync(ticket, ct).ConfigureAwait(false);
+            // F-M606 (Operator-Frage 18.11.2026: „Erst fragen ob die id bespielbar ist, vor dem hochladen geht
+            // nicht?"): erst die Kennung pruefen, dann senden. Antwortet die Seite nicht mit dem Upload-
+            // Formular, wird nichts hochgeladen — der Grund wird gemerkt (F-M605) und die Spur nicht in jedem
+            // Lauf neu gefragt.
+            if (!_config.DryRun && !await _msubClient
+                .FilmUsableForUploadAsync(aufloesung.MovieId ?? 0, ct)
+                .ConfigureAwait(false))
+            {
+            LogUtil.PerItem(_config.LogMode, _logger,
+                "[moviesubtitles] {Name} [{Lang}] — the film id is not usable for an upload (no form on add.php?let=…), nothing sent (F-M606)",
+                neutralName, lang);
+            return UploadResult.Skipped("film-source-id-not-usable");
+            }
+
+            var answer = await endpoint.SendAsync(ticket, ct).ConfigureAwait(false);
         LogUtil.PerItem(_config.LogMode, _logger,
             "[moviesubtitles] {Name} [{Lang}] — {Result}{Reason}",
             neutralName, lang,

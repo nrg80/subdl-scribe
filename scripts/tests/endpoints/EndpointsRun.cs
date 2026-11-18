@@ -810,6 +810,40 @@ internal static class Program
         Check("F-M593: die Vorgabe im Konfigurationsmodell ist 450",
             configSource593.Contains("UploadsPerHour = 450;", StringComparison.Ordinal));
 
+        // --- F-M605: das Nein einer Quelle wird gemerkt -----------------------------------------------
+        var refusal605 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/SourceRefusalStore.cs"));
+        var up605 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+        var db605 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"));
+        Check("F-M605: ein gemerktes Nein gilt nur fuer genau diesen Inhalt",
+            refusal605.Contains("public static bool StillRefused(", StringComparison.Ordinal)
+            && refusal605.Contains("if (row == null || !string.Equals(row.Signature, signature, StringComparison.Ordinal))", StringComparison.Ordinal));
+        Check("F-M605: gemerkt wird nur ein inhaltliches Nein, kein Rate-Limit und kein Abbruch",
+            refusal605.Contains("public static bool ShouldRemember(string? reason)", StringComparison.Ordinal)
+            && refusal605.Contains("\"film-source-\",", StringComparison.Ordinal)
+            && refusal605.Contains("\"second-source-show-\",", StringComparison.Ordinal)
+            && !refusal605.Contains("\"timeout\"", StringComparison.Ordinal));
+        Check("F-M605: vor dem Quellen-Lauf wird gefragt, nach dem Lauf gemerkt, bei Erfolg vergessen",
+            up605.Contains("SourceRefusalStore.StillRefused(", StringComparison.Ordinal)
+            && up605.Contains("SourceRefusalStore.Put(", StringComparison.Ordinal)
+            && up605.Contains("SourceRefusalStore.Forget(", StringComparison.Ordinal));
+        Check("F-M605: die Tabelle source_refusals entsteht beim Start und wird unter demselben Namen gelesen",
+            db605.Contains("CREATE TABLE IF NOT EXISTS source_refusals (", StringComparison.Ordinal)
+            && db605.Contains("e.ToTable(\"source_refusals\");", StringComparison.Ordinal));
+
+        // --- F-M607: anlegen, nachsuchen, bei Nichtfund das Paar schliessen --------------------------
+        Check("F-M607: beide Belege der Seite (angelegt / fuehrt den Titel) schliessen das Paar, andere Neins nicht",
+            up605.Contains("|| string.Equals(aufloesung.Status, \"exists-id-not-readable\", StringComparison.Ordinal))", StringComparison.Ordinal)
+            && up605.Contains("return UploadResult.AcceptedWithoutId(\"film-source-movie-\" + aufloesung.Status);", StringComparison.Ordinal));
+
+        // --- F-M606: erst fragen, ob die Kennung bespielbar ist, dann senden --------------------------
+        var msub606 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/MovieSubtitlesClient.cs"));
+        Check("F-M606: die Film-Adresse fragt vor dem Senden, ob add.php?let=… das Formular liefert",
+            msub606.Contains("public async Task<bool> FilmUsableForUploadAsync(int movieId, CancellationToken cancellationToken = default)", StringComparison.Ordinal)
+            && msub606.Contains("{0}/add.php?let={1}", StringComparison.Ordinal));
+        Check("F-M606: ohne bespielbare Kennung wird nichts gesendet — mit Grund",
+            up605.Contains("if (!_config.DryRun && !await _msubClient", StringComparison.Ordinal)
+            && up605.Contains("return UploadResult.Skipped(\"film-source-id-not-usable\");", StringComparison.Ordinal));
+
         // --- F-M604: das Pack-Urteil liegt im Store, mit Signatur der Mitglieder ----------------------
         var store604 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/PackSeasonStore.cs"));
         var db604 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"));
@@ -855,8 +889,8 @@ internal static class Program
             && result603.Contains("public static UploadResult AcceptedWithoutId(string reason)", StringComparison.Ordinal)
             && result603.Contains("new() { Ok = false, SkippedItem = true, SourceAccepted = true, Reason = reason }", StringComparison.Ordinal));
         Check("F-M603: die Film-Adresse meldet 'angelegt, Id nicht lesbar' als angenommen",
-            upload603.Contains("if (string.Equals(aufloesung.Status, \"created-id-not-readable\", StringComparison.Ordinal))", StringComparison.Ordinal)
-            && upload603.Contains("return UploadResult.AcceptedWithoutId(\"film-source-movie-created-id-not-readable\");", StringComparison.Ordinal));
+            upload603.Contains("string.Equals(aufloesung.Status, \"created-id-not-readable\", StringComparison.Ordinal)", StringComparison.Ordinal)
+            && upload603.Contains("return UploadResult.AcceptedWithoutId(\"film-source-movie-\" + aufloesung.Status);", StringComparison.Ordinal));
         Check("F-M603: die Serien-Adresse (tvst) genauso — derselbe Uploader, dieselbe Luecke",
             upload603.Contains("if (string.Equals(show.Status, Api.Endpoints.TvstShowStatus.CreatedIdUnknown, StringComparison.Ordinal))", StringComparison.Ordinal)
             && upload603.Contains("return UploadResult.AcceptedWithoutId(\"second-source-show-created-id-unknown\");", StringComparison.Ordinal));

@@ -141,6 +141,7 @@ public sealed class ScribeDbContext : IDisposable
         EnsureTmdbAnswersTable();
         EnsureAiredSeasonsTable();
         EnsurePackSeasonsTable();
+        EnsureSourceRefusalsTable();
         EnsureReportColumns();
         EnsureStatusColumns();
         EnsurePackColumns();
@@ -333,6 +334,26 @@ public sealed class ScribeDbContext : IDisposable
     /// F-M604: the stored pack verdicts. Same reasoning as <see cref="EnsureAiredSeasonsTable"/> — the
     /// table is created here and read under the very same name in <c>OnModelCreating</c>.
     /// </summary>
+    /// <summary>
+    /// F-M605: the remembered source refusals. Same reasoning as <see cref="EnsurePackSeasonsTable"/>.
+    /// </summary>
+    private void EnsureSourceRefusalsTable()
+    {
+        try
+        {
+            _db.Database.ExecuteSqlRaw(
+                "CREATE TABLE IF NOT EXISTS source_refusals ("
+                + "Id TEXT NOT NULL PRIMARY KEY, "
+                + "Signature TEXT NOT NULL DEFAULT '', "
+                + "Reason TEXT NOT NULL DEFAULT '', "
+                + "Written TEXT NOT NULL DEFAULT '');");
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning("[Sub Scribe] could not create the source_refusals table (continuing): {Msg}", ex.Message);
+        }
+    }
+
     private void EnsurePackSeasonsTable()
     {
         try
@@ -1314,6 +1335,9 @@ public sealed class ScribeSqliteContext : DbContext
     /// <summary>F-M604: the stored pack verdicts with the signature of the members they were made for.</summary>
     public DbSet<PackSeasonEntity> PackSeasonRows => Set<PackSeasonEntity>();
 
+    /// <summary>F-M605: the remembered refusals of the sources, per track and content hash.</summary>
+    public DbSet<SourceRefusalEntity> SourceRefusalRows => Set<SourceRefusalEntity>();
+
     /// <summary>
     /// Sets the pragmas this store runs with. Called once per context, right after the schema exists.
     /// <para>
@@ -1498,6 +1522,13 @@ public sealed class ScribeSqliteContext : DbContext
         modelBuilder.Entity<AiredSeasonEntity>(e =>
         {
             e.ToTable("aired_seasons");
+            e.HasKey(x => x.Id);
+        });
+
+        // F-M605: and for the remembered source refusals.
+        modelBuilder.Entity<SourceRefusalEntity>(e =>
+        {
+            e.ToTable("source_refusals");
             e.HasKey(x => x.Id);
         });
 
