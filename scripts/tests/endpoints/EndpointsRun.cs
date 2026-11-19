@@ -3196,12 +3196,20 @@ internal static class Program
             Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "ScribeReset.cs")).ConfigureAwait(false);
         string registryDatei = await File.ReadAllTextAsync(
             Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Registry", "ContentHashRegistry.cs")).ConfigureAwait(false);
+        string guiDatei = await File.ReadAllTextAsync(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Configuration", "configPage.html")).ConfigureAwait(false);
         Check(
             "F-M620: the single-file reset is a POST route taking confirm, path and what",
             resetDatei.Contains("[HttpPost]", StringComparison.Ordinal)
             && resetDatei.Contains("public IActionResult ResetPath(", StringComparison.Ordinal)
             && resetDatei.Contains("[FromQuery] string path = \"\"", StringComparison.Ordinal)
-            && resetDatei.Contains("[FromQuery] string what = \"both\"", StringComparison.Ordinal));
+            && resetDatei.Contains("[FromQuery] string what = \"both\"", StringComparison.Ordinal)
+            // Der Bediener bedient ihn aus der GUI (Expert -> Plugin database), nicht per curl:
+            // Eingabefeld, Auswahl und Knopf muessen die Route auch wirklich aufrufen.
+            && guiDatei.Contains("id=\"ResetPathInput\"", StringComparison.Ordinal)
+            && guiDatei.Contains("id=\"ResetPathWhat\"", StringComparison.Ordinal)
+            && guiDatei.Contains("id=\"ResetPathRun\"", StringComparison.Ordinal)
+            && guiDatei.Contains("Plugins/SubdlReset/ResetPath", StringComparison.Ordinal));
         Check(
             "F-M620: without confirm=true and a rooted path nothing is written",
             resetDatei.Contains("error = \"confirmation-missing\"", StringComparison.Ordinal)

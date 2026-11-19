@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.495.
+**Status:** Implementation — v12.1.12.496.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -1860,7 +1860,7 @@ There is **no "settled"/"done" state.** "Is this position finished?" is answered
 **F-M620 [U]:** **Eine einzelne Datei geht über eine eigene Route zurück in die Queue — der Store bleibt stehen.**
 Route `POST /Plugins/SubdlReset/ResetPath?confirm=true&path=<absoluter Pfad>&what=both|stamps|verdicts`; `confirm` muss exakt `true` sein und der Pfad absolut, sonst antwortet die Route mit `{"ok":false,"error":…}` ohne jeden Schreibzugriff.
 Grund (gemessen 18.11.2026): die Queue entsteht nur aus offenen Stempeln (F-M557/F-M563) — steht ein Stempel, wird die Datei nie wieder angesehen. Elf Folgen (Eyes S01E01–E07, Taylor Swift S01E02/03/05/06) standen als `complete` im Store, während weder SubDL noch tvsubtitles etwas von ihnen hatte und im Log keine einzige Zeile das Urteil erklärte; der einzige vorhandene Ausweg war der Ganz-Store-Reset (F-M90), für elf Dateien unverhältnismäßig.
-`what=stamps` nimmt die drei Zugeh-Stempel (`CompleteSubdl`, `CompleteTvSubtitles`, `CompleteMsub`) samt Spursignatur zurück, `what=verdicts` löscht die Spur-Zeilen mit `Status=rejected`, `both` (Vorgabe) beides. **Unangetastet bleiben** Zeilen mit `Status=uploaded` und die Herkunft eines Funds (`SidecarEntity.Origin`) — beides ist ein Beleg, kein Urteil, und wer einen Beleg löscht, lädt dieselbe Datei ein zweites Mal hoch (F-M489/F-M500). Die Route schreibt eine Zeile je Aufruf (`LogUtil.Normal`, Code F-M620) und ruft `ReloadQueues()`, damit der nächste Scan die Datei erneut einreiht; Rückgabe `{ok, path, media, stamps, verdicts}`. Geprüft in `scripts/tests/endpoints`.
+`what=stamps` nimmt die drei Zugeh-Stempel (`CompleteSubdl`, `CompleteTvSubtitles`, `CompleteMsub`) samt Spursignatur zurück, `what=verdicts` löscht die Spur-Zeilen mit `Status=rejected`, `both` (Vorgabe) beides. **Unangetastet bleiben** Zeilen mit `Status=uploaded` und die Herkunft eines Funds (`SidecarEntity.Origin`) — beides ist ein Beleg, kein Urteil, und wer einen Beleg löscht, lädt dieselbe Datei ein zweites Mal hoch (F-M489/F-M500). Die Route schreibt eine Zeile je Aufruf (`LogUtil.Normal`, Code F-M620) und ruft `ReloadQueues()`, damit der nächste Scan die Datei erneut einreiht; Rückgabe `{ok, path, media, stamps, verdicts}`. **Bedienerweg ist die GUI**, nicht curl: Expert → Plugin database → „Reset one file" (Pfadfeld, Auswahl `both`/`stamps`/`verdicts`, Knopf) ruft genau diese Route auf und nennt in der Antwort, wie viele Stempel und Urteile gefallen sind. Geprüft in `scripts/tests/endpoints`.
 
 ## 15. Logging, Status and Transparency
 

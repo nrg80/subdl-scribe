@@ -395,6 +395,30 @@
                         <div style="margin-top:0.8em;">
                             <button is="emby-button" type="button" class="raised" id="RestoreBackup">Restore from backup…</button>
                         </div>
+
+                        <!-- F-M620 (Operator-Anweisung 19.11.2026): der Ganz-Store-Reset ist fuer eine
+                             Handvoll falsch gestempelter Dateien unverhaeltnismaessig — hier steht der
+                             Weg fuer genau eine Datei. -->
+                        <h3>Reset one file</h3>
+                        <div class="fieldDescription" style="max-width:60em;">
+                            <b>Put one file back into the queue.</b> The source stamps and the rejected
+                            track verdicts fall; real uploads and where a find came from stay, so nothing
+                            is uploaded a second time. Nothing else in the store is touched, and the next
+                            scan queues that file again.
+                        </div>
+                        <div style="display:flex; gap:0.6em; align-items:flex-end; flex-wrap:wrap; margin-top:0.6em;">
+                            <div style="flex:1; min-width:24em;">
+                                <input is="emby-input" id="ResetPathInput" type="text"
+                                       placeholder="/data/movies/…/Episode.mkv" />
+                            </div>
+                            <select is="emby-select" id="ResetPathWhat" class="emby-select-withcolor emby-select" style="width:auto; margin:0;">
+                                <option value="both">stamps and rejected verdicts</option>
+                                <option value="stamps">only the stamps</option>
+                                <option value="verdicts">only the rejected verdicts</option>
+                            </select>
+                            <button is="emby-button" type="button" class="raised button-submit" id="ResetPathRun">Reset this file…</button>
+                        </div>
+                        <div id="ResetPathResult" class="fieldDescription" style="margin-top:0.4em; max-width:60em;"></div>
                     </div>
 
 
@@ -1600,6 +1624,43 @@ workers.forEach(function (w) {
                 });
 
                 // Statistics reset: zero the counters via plugin config update.
+                // F-M620: eine einzelne Datei zurueck in die Queue — der Gegenpart zum Ganz-Store-Reset
+                // darunter. Same-origin gegen die eigene Route des Plugins; die Antwort nennt, wie viele
+                // Stempel und abgelehnte Urteile gefallen sind, damit der Klick nicht blind ist.
+                document.querySelector('#ResetPathRun').addEventListener('click', function (e) {
+                    e.preventDefault();
+                    var feld = document.querySelector('#ResetPathInput');
+                    var ziel = document.querySelector('#ResetPathResult');
+                    var pfad = (feld.value || '').trim();
+                    var was = document.querySelector('#ResetPathWhat').value || 'both';
+                    if (!pfad) {
+                        ziel.textContent = 'Give the full path of the media file first.';
+                        feld.focus();
+                        return;
+                    }
+                    if (!confirm('Reset this one file?\n\n' + pfad + '\n\nThe source stamps and the rejected track verdicts fall (' + was + '). Real uploads stay. The next scan looks at the file again.\n\nProceed?')) {
+                        return;
+                    }
+                    Dashboard.showLoadingMsg();
+                    ApiClient.ajax({
+                        url: ApiClient.getUrl('Plugins/SubdlReset/ResetPath', { confirm: 'true', path: pfad, what: was }),
+                        type: 'POST'
+                    }).then(function (r) {
+                        return r.json();
+                    }).then(function (res) {
+                        Dashboard.hideLoadingMsg();
+                        if (res && res.ok) {
+                            ziel.textContent = 'Reset: ' + res.media + ' file(s), ' + res.stamps
+                                + ' stamp(s) and ' + res.verdicts + ' rejected verdict(s) cleared — the next scan queues it again.';
+                        } else {
+                            ziel.textContent = 'Not reset: ' + ((res && res.error) ? res.error : 'the plugin gave no answer');
+                        }
+                    }).catch(function () {
+                        Dashboard.hideLoadingMsg();
+                        ziel.textContent = 'Request failed — see the log.';
+                    });
+                });
+
                 document.querySelector('#ResetRegistry').addEventListener('click', function (e) {
                     e.preventDefault();
                     // F-M90: two-stage confirmation — the wording is intentionally blunt.
