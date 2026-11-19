@@ -9,20 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.1",
-        "changelog": "v12.2.0.1: every complete season answers in the pack phase — built, skipped or refused, with its reason (F-M640).",
+        "version": "12.2.0.2",
+        "changelog": "v12.2.0.2: a season that is complete in the library but brings no episode into an arrival run now says so in the log (F-M640).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.1/Jellyfin.Plugin.SubdlSync_12.2.0.1.zip",
-        "checksum": "f8219250d90183d4bd36f02923200858",
-        "timestamp": "2026-11-19T19:55:00Z"
-      },
-      {
-        "version": "12.2.0.0",
-        "changelog": "v12.2.0.0: the first stable line since the rename — the deferred pipeline cycle now reports itself under the workers, with its reason and attempt (F-M623).",
-        "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.0-dev/Jellyfin.Plugin.SubdlSync_12.2.0.0.zip",
-        "checksum": "e0ea2cc31fac89135de5555c1f3b25e6",
-        "timestamp": "2026-11-19T07:45:01Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.2-dev/Jellyfin.Plugin.SubdlSync_12.2.0.2.zip",
+        "checksum": "ce3a98efb68debdd65ea55c4233406a1",
+        "timestamp": "2026-11-19T21:42:27Z"
       }
     ]
   }
