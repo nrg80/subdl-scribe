@@ -53,6 +53,33 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             _loggerFactory?.CreateLogger("SubDL-Lock")
                 ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
 
+        // F-M621 (Operator-Anweisung 19.11.2026): derselbe Leichen-Gedanke fuer die Worker-Zeilen. Das
+        // Ende einer Zeile schreiben nur Finish und MarkCancelled, und beide brauchen den laufenden
+        // Prozess: starb Jellyfin mitten im Lauf (19.11.2026, 04:36:40, Download bei Item 1015/1417),
+        // blieb "Ended" leer und "Outcome" auf "run" — die Anzeige meldete "laeuft", und der Stop-Knopf
+        // antwortete "no cycle active", weil es keinen Zyklus mehr gab, den er haette abbrechen koennen.
+        // Ausdruecklich KEIN Nutzer-Stop (F-M293): der Ausgang heisst "failed", das Detail nennt den
+        // Grund, sonst wuerde dem Betreiber ein Knopfdruck untergeschoben, den niemand getan hat.
+        try
+        {
+            int beendet = WorkerRuns.CloseOpenRunsOnStartup(
+                "process ended mid-run (closed at the next start)");
+            if (beendet > 0)
+            {
+                Pipeline.LogUtil.Normal(
+                    _loggerFactory?.CreateLogger("SubDL-Start")
+                        ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                    "[Sub Scribe] closed {Count} worker row(s) a previous process left open — nothing was running any more (F-M621).",
+                    beendet);
+            }
+        }
+        catch (Exception ex)
+        {
+            _loggerFactory?.CreateLogger("SubDL-Start")?.LogWarning(
+                "[Sub Scribe] closing the worker rows left open by a previous process failed: {Msg}",
+                ex.Message);
+        }
+
         // F-M533: die tvst-Befunde melden ueber denselben Weg wie alles andere — eine Meldestelle.
         var tvstLog = _loggerFactory?.CreateLogger("SubDL-Tvst");
         Api.TvstMetadataChecks.OnMessage = msg => tvstLog?.LogInformation("{Msg}", msg);

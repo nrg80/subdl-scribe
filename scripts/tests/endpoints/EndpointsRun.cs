@@ -3191,6 +3191,79 @@ internal static class Program
             && dispatchQuelle.Contains("MarkCycleFailure(ex.Message)", StringComparison.Ordinal)
             && dispatchQuelle.Contains("cycle failed: {Msg} (see the exception below for the site)", StringComparison.Ordinal));
 
+        // ---- F-M620: eine Datei zurueck in die Queue, ohne den Store zu verwerfen ------------------
+        string resetDatei = await File.ReadAllTextAsync(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "ScribeReset.cs")).ConfigureAwait(false);
+        string registryDatei = await File.ReadAllTextAsync(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Registry", "ContentHashRegistry.cs")).ConfigureAwait(false);
+        Check(
+            "F-M620: the single-file reset is a POST route taking confirm, path and what",
+            resetDatei.Contains("[HttpPost]", StringComparison.Ordinal)
+            && resetDatei.Contains("public IActionResult ResetPath(", StringComparison.Ordinal)
+            && resetDatei.Contains("[FromQuery] string path = \"\"", StringComparison.Ordinal)
+            && resetDatei.Contains("[FromQuery] string what = \"both\"", StringComparison.Ordinal));
+        Check(
+            "F-M620: without confirm=true and a rooted path nothing is written",
+            resetDatei.Contains("error = \"confirmation-missing\"", StringComparison.Ordinal)
+            && resetDatei.Contains("error = \"path-missing-or-relative\"", StringComparison.Ordinal)
+            && resetDatei.Contains("System.IO.Path.IsPathRooted(path)", StringComparison.Ordinal));
+        Check(
+            "F-M620: the stamps of all three sources and the track signature fall",
+            registryDatei.Contains("public (int Stamps, int Verdicts) ReopenForRetry(", StringComparison.Ordinal)
+            && registryDatei.Contains("m.CompleteSubdl = null", StringComparison.Ordinal)
+            && registryDatei.Contains("m.CompleteTvSubtitles = null", StringComparison.Ordinal)
+            && registryDatei.Contains("m.CompleteMsub = null", StringComparison.Ordinal)
+            && registryDatei.Contains("m.CompleteSignature = null", StringComparison.Ordinal));
+        int reopenStart = registryDatei.IndexOf(
+            "public (int Stamps, int Verdicts) ReopenForRetry(", StringComparison.Ordinal);
+        int reopenEnd = reopenStart < 0
+            ? -1
+            : registryDatei.IndexOf("/// <summary>", reopenStart, StringComparison.Ordinal);
+        string reopenBody = reopenStart >= 0 && reopenEnd > reopenStart
+            ? registryDatei[reopenStart..reopenEnd]
+            : string.Empty;
+        Check(
+            "F-M620: only rejected rows are deleted — an upload stays proof, not a verdict",
+            reopenBody.Contains(
+                "DeleteMany(x => x.MediaHash == mediaHash && x.Status == SubtitleStatus.Rejected)",
+                StringComparison.Ordinal)
+            && !reopenBody.Contains("SubtitleStatus.Uploaded", StringComparison.Ordinal),
+            reopenBody.Length == 0 ? "ReopenForRetry not found" : null);
+        Check(
+            "F-M620: one line per call and the queues are reloaded right after",
+            resetDatei.Contains("(F-M620)", StringComparison.Ordinal)
+            && resetDatei.Contains("LogUtil.Normal(", StringComparison.Ordinal)
+            && resetDatei.Contains("ReloadQueues()", StringComparison.Ordinal));
+
+        // ---- F-M621: eine Zeile, deren Prozess starb, wird beim Start geschlossen --------------------
+        string workerDatei = await File.ReadAllTextAsync(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Registry", "WorkerRunRegistry.cs")).ConfigureAwait(false);
+        string pluginDatei = await File.ReadAllTextAsync(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Plugin.cs")).ConfigureAwait(false);
+        int closeStart = workerDatei.IndexOf("public int CloseOpenRunsOnStartup(", StringComparison.Ordinal);
+        int closeEnd = closeStart < 0
+            ? -1
+            : workerDatei.IndexOf("/// <summary>", closeStart, StringComparison.Ordinal);
+        string closeBody = closeStart >= 0 && closeEnd > closeStart
+            ? workerDatei[closeStart..closeEnd]
+            : string.Empty;
+        Check(
+            "F-M621: the startup sweep closes every row still marked as running",
+            closeBody.Contains("_db.WorkerRuns.FindAll()", StringComparison.Ordinal)
+            && closeBody.Contains("Outcome.Running", StringComparison.Ordinal)
+            && closeBody.Contains("row.Outcome = Outcome.Failed", StringComparison.Ordinal)
+            && closeBody.Contains("row.Ended = now", StringComparison.Ordinal),
+            closeBody.Length == 0 ? "CloseOpenRunsOnStartup not found" : null);
+        Check(
+            "F-M621: a restart is not a user stop — the sweep never writes cancelled",
+            closeBody.Length > 0 && !closeBody.Contains("Outcome.Cancelled", StringComparison.Ordinal));
+        Check(
+            "F-M621: the plugin runs the sweep at startup and says so in one line",
+            pluginDatei.Contains("CloseOpenRunsOnStartup(", StringComparison.Ordinal)
+            && pluginDatei.Contains("(F-M621)", StringComparison.Ordinal)
+            && pluginDatei.IndexOf("ClearOnStartup", StringComparison.Ordinal)
+                < pluginDatei.IndexOf("CloseOpenRunsOnStartup(", StringComparison.Ordinal));
+
         if (_failures > 0)
         {
             Console.WriteLine($">>> ENDPUNKTE: {_failures} von {_checks} Pruefungen fehlgeschlagen");

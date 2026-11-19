@@ -219,6 +219,60 @@ public sealed class WorkerRunRegistry
     }
 
     /// <summary>
+    /// F-M621 (Operator-Anweisung 19.11.2026): schliesst beim Start jede Zeile, deren Lauf noch offen
+    /// steht.
+    /// <para>
+    /// WARUM: das Ende einer Zeile schreiben nur <see cref="Finish(string, string, string, bool)"/> und
+    /// <see cref="MarkCancelled"/> — beide brauchen den laufenden Prozess. Starb Jellyfin mitten im Lauf
+    /// (Neustart 19.11.2026 um 04:36:40, der Download stand bis dahin bei Item 1015 von 1417), blieb
+    /// <c>Ended</c> leer und <c>Outcome</c> auf <c>run</c>. Die Anzeige liest genau das als "laeuft"
+    /// (<see cref="Api.ScribeStatusController"/>), und der Stop-Knopf antwortet "no cycle active —
+    /// nothing to stop", weil es keinen Zyklus mehr gibt, den er abbrechen koennte. Die Lock-Datei wird
+    /// beim Start laengst als Leiche behandelt (<c>PipelineRunLock.ClearOnStartup</c>: "after a restart no
+    /// previous run can still be alive") — fuer die Zeilen fehlte dieser Gegenpart.
+    /// </para>
+    /// <para>
+    /// NICHT als Nutzer-Stop: F-M293 haelt fest, dass ein Neustart kein Knopfdruck ist. Die Zeile bekommt
+    /// deshalb <see cref="Outcome.Failed"/> und im Detail den Grund; <see cref="Outcome.Cancelled"/> wuerde
+    /// dem Betreiber einen Stop unterschieben, den niemand gedrueckt hat.
+    /// </para>
+    /// </summary>
+    /// <param name="reason">Warum die Zeile geschlossen wurde, in den Worten des Betreibers.</param>
+    /// <returns>Wie viele offene Zeilen geschlossen wurden.</returns>
+    public int CloseOpenRunsOnStartup(string reason)
+    {
+        try
+        {
+            var offen = _db.WorkerRuns.FindAll()
+                .Where(r => string.Equals(r.Outcome, Outcome.Running, StringComparison.Ordinal))
+                .ToList();
+            if (offen.Count == 0)
+            {
+                return 0;
+            }
+
+            // Ended = jetzt: wann der Prozess wirklich starb, weiss beim Start niemand mehr. Der Wert
+            // ist der Moment, in dem die Leiche gefunden wurde, und das Detail sagt genau das.
+            var now = DateTime.UtcNow;
+            foreach (var row in offen)
+            {
+                row.Ended = now;
+                row.Outcome = Outcome.Failed;
+                row.Detail = reason;
+                _db.WorkerRuns.Upsert(row);
+            }
+
+            return offen.Count;
+        }
+        catch (Exception ex)
+        {
+            // Aufraeumen darf den Start nie verhindern.
+            _logger?.LogWarning("[Sub Scribe] closing open worker rows at startup failed: {Msg}", ex.Message);
+            return 0;
+        }
+    }
+
+    /// <summary>
     /// The seeder's worker key.
     /// <para>
     /// The seeder is NOT a Jellyfin scheduled task — it is the dispatcher's own scan step — so it
