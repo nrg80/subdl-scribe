@@ -817,8 +817,14 @@ public sealed class UploadPipeline : IPackFiller
             // Planung nicht. Nur so ist zu sehen, welcher der beiden Teile die Zeit hält.
             var fuellTakt = System.Diagnostics.Stopwatch.StartNew();
             int fuellVersuche = 0;
+            // F-M640 (Operator 19.11.2026, nach „Wurde jetzt ein season pack gebaut?" — nein, und im Log
+            // stand fuer die Staffel nur die Kandidaten-Zeile): hier wird je Staffel mitgezaehlt, ob die
+            // Planung ueberhaupt ein Paar fuer sie hatte. Staffeln ohne Paar bekommen unten ihre eine Zeile.
+            var geplantProStaffel = new Dictionary<(string ImdbId, int Season), int>();
             foreach (var (packImdb, packSeason, packLang, packHi) in PlanPacksFromStore(completeSeasons))
             {
+                geplantProStaffel[(packImdb, packSeason)] =
+                    (geplantProStaffel.TryGetValue((packImdb, packSeason), out int schonGeplant) ? schonGeplant : 0) + 1;
                 fuellVersuche++;
                 await packCoordinator.FillOnlyAsync(packImdb, packSeason, packLang, packHi, runCt).ConfigureAwait(false);
                 if (Registry.HasPack(packImdb, packSeason, packLang, packHi))
@@ -841,6 +847,23 @@ public sealed class UploadPipeline : IPackFiller
                         "[Sub Scribe] pack did not go up for {Imdb} S{Season} [{Lang}] — the singles it was meant to carry go up in the single phase (F-M429).",
                         packImdb, packSeason, packLang);
                 }
+            }
+
+            // F-M640: jede vollstaendige Staffel bekommt GENAU eine Zeile. Vorher fiel eine Staffel, fuer
+            // die die Planung kein offenes Paar hatte, lautlos aus der Phase: der Kandidat stand im Log,
+            // danach nie wieder — „schon alles oben", „kein Paar offen" und „uebersprungen" sahen gleich aus.
+            foreach (var staffel in completeSeasons.Keys)
+            {
+                if (geplantProStaffel.ContainsKey(staffel))
+                {
+                    continue;
+                }
+
+                LogUtil.PerItem(
+                    _config.LogMode,
+                    _logger,
+                    "[Sub Scribe] season pack — {Imdb} S{Season}: nothing to pack from this run — the plan found no open pair for this season, so every pair is either already up or was refused earlier (F-M640).",
+                    staffel.ImdbId, staffel.Season);
             }
 
             LogUtil.Detail(
