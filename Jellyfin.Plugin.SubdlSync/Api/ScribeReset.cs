@@ -291,6 +291,98 @@ public class ScribeReset : ControllerBase
     }
 
     /// <summary>
+    /// F-M620 (Operator-Anweisung 19.11.2026): oeffnet genau EINE Datei wieder fuer die Upload-Schleife,
+    /// statt den ganzen Store zu verwerfen.
+    /// <para>
+    /// Die Queue entsteht aus offenen Stempeln (F-M557/F-M563): steht ein Stempel, wird die Datei nie
+    /// wieder angesehen. Diese Route nimmt den Stempel fuer den angegebenen Pfad zurueck — und, wenn
+    /// gewuenscht, die abgelehnten Spur-Urteile dazu —, damit der naechste Scan die Datei erneut
+    /// einreiht. Echte Uploads und die Herkunft eines Funds bleiben unberuehrt, siehe
+    /// <see cref="Registry.ContentHashRegistry.ReopenForRetry"/>.
+    /// </para>
+    /// Route: POST /Plugins/SubdlReset/ResetPath?confirm=true&amp;path=/data/movies/…/Folge.mkv
+    /// </summary>
+    /// <param name="confirm">Muss genau "true" sein.</param>
+    /// <param name="path">Absoluter Pfad der Mediendatei, wie Jellyfin ihn fuehrt.</param>
+    /// <param name="what">both (Vorgabe) | stamps | verdicts.</param>
+    [HttpPost]
+    public IActionResult ResetPath(
+        [FromQuery] string confirm = "",
+        [FromQuery] string path = "",
+        [FromQuery] string what = "both")
+    {
+        if (!string.Equals(confirm, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return Ok(new { ok = false, error = "confirmation-missing" });
+        }
+
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.Path.IsPathRooted(path))
+        {
+            return Ok(new { ok = false, error = "path-missing-or-relative" });
+        }
+
+        bool stempel = !what.Equals("verdicts", StringComparison.OrdinalIgnoreCase);
+        bool urteile = !what.Equals("stamps", StringComparison.OrdinalIgnoreCase);
+
+        try
+        {
+            var db = Plugin.Instance?.SharedDbContext;
+            if (db == null)
+            {
+                return Ok(new { ok = false, error = "plugin-not-initialized" });
+            }
+
+            var registry = new Registry.ContentHashRegistry(db);
+            var hashes = registry.MediaAtPath(path)
+                .Select(m => m.Id)
+                .Where(h => !string.IsNullOrEmpty(h))
+                .Distinct()
+                .ToList();
+
+            if (hashes.Count == 0 && registry.GetMediaHash(path) is { } frisch)
+            {
+                hashes.Add(frisch);
+            }
+
+            if (hashes.Count == 0)
+            {
+                return Ok(new { ok = false, error = "path-unknown", path });
+            }
+
+            int stempelGesamt = 0;
+            int urteileGesamt = 0;
+            foreach (string hash in hashes)
+            {
+                var (s, v) = registry.ReopenForRetry(hash, stempel, urteile);
+                stempelGesamt += s;
+                urteileGesamt += v;
+            }
+
+            LogUtil.Normal(
+                _logger,
+                "[Sub Scribe] reset path {File} — {Stamps} stamp(s) and {Verdicts} rejected verdict(s) cleared; the next scan queues it again (F-M620).",
+                System.IO.Path.GetFileName(path),
+                stempelGesamt,
+                urteileGesamt);
+
+            ScheduledTasks.ScribeEventDispatcher.Instance?.ReloadQueues();
+            return Ok(new
+            {
+                ok = true,
+                path,
+                media = hashes.Count,
+                stamps = stempelGesamt,
+                verdicts = urteileGesamt,
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Sub Scribe] reset path failed.");
+            return Ok(new { ok = false, error = "reset-path-error" });
+        }
+    }
+
+    /// <summary>
     /// Removes the side files SQLite keeps beside a database. They belong to one file generation and
     /// must never outlive it — see <see cref="Data.ScribeDbContext.Checkpoint"/>.
     /// </summary>

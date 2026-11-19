@@ -2643,6 +2643,75 @@ public sealed class ContentHashRegistry : IDisposable
     }
 
     /// <summary>
+    /// F-M620 (Operator-Anweisung 19.11.2026): oeffnet EINE Datei fuer einen neuen Anlauf — die
+    /// Zugeh-Stempel der Quellen und die abgelehnten Spur-Urteile, sonst nichts.
+    /// <para>
+    /// WARUM ES DAS BRAUCHT: die Queue entsteht nur aus offenen Stempeln (F-M557/F-M563). Steht ein
+    /// Stempel, wird die Datei nie wieder angesehen — auch dann nicht, wenn fuer sie nachweislich
+    /// nichts veroeffentlicht wurde. Gemessen am 18.11.2026: elf Folgen (Eyes, Taylor Swift) standen
+    /// als "complete" im Store, waehrend weder SubDL noch tvsubtitles etwas von ihnen hatte, und im
+    /// Log stand fuer sie keine einzige Zeile, die das Urteil erklaerte. Der einzige vorhandene
+    /// Ausweg war der Ganz-Store-Reset — fuer elf Dateien unverhaeltnismaessig.
+    /// </para>
+    /// <para>
+    /// WAS NICHT ANGEFASST WIRD: echte Uploads (<see cref="SubtitleStatus.Uploaded"/>) und die
+    /// Herkunft eines Funds (<c>SidecarEntity.Origin</c>). Beides ist ein Beleg, kein Urteil — wer
+    /// ihn loescht, laedt dieselbe Datei ein zweites Mal hoch. Entfernt werden nur Zeilen mit
+    /// <see cref="SubtitleStatus.Rejected"/>; die Zeile verschwindet ganz, denn "keine Zeile heisst
+    /// offen" ist die Regel des Stores, und ein geleerter Status waere eine Zeile, die niemand mehr
+    /// erklaeren kann.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaHash">Medien-Hash der Datei.</param>
+    /// <param name="stamps">Wahr, wenn die Zugeh-Stempel der Quellen fallen sollen.</param>
+    /// <param name="verdicts">Wahr, wenn die abgelehnten Spur-Urteile fallen sollen.</param>
+    /// <returns>Wie viele Stempel und wie viele Urteile entfernt wurden.</returns>
+    public (int Stamps, int Verdicts) ReopenForRetry(string? mediaHash, bool stamps, bool verdicts)
+    {
+        if (string.IsNullOrEmpty(mediaHash) || GetMedia(mediaHash) == null)
+        {
+            return (0, 0);
+        }
+
+        int stempel = 0;
+        if (stamps)
+        {
+            EnsureMedia(mediaHash, patch: m =>
+            {
+                if (m.CompleteSubdl != null)
+                {
+                    m.CompleteSubdl = null;
+                    stempel++;
+                }
+
+                if (m.CompleteTvSubtitles != null)
+                {
+                    m.CompleteTvSubtitles = null;
+                    stempel++;
+                }
+
+                if (m.CompleteMsub != null)
+                {
+                    m.CompleteMsub = null;
+                    stempel++;
+                }
+
+                if (!string.IsNullOrEmpty(m.CompleteSignature))
+                {
+                    m.CompleteSignature = null;
+                    stempel++;
+                }
+            });
+        }
+
+        int urteile = verdicts
+            ? _db.Embeds.DeleteMany(x => x.MediaHash == mediaHash && x.Status == SubtitleStatus.Rejected)
+            : 0;
+
+        return (stempel, urteile);
+    }
+
+    /// <summary>
     /// F-M576: der jüngste Zugeh-Stempel dieser Datei, egal welcher Quelle — die Zeit, zu der die
     /// Datei zuletzt als erledigt vermerkt wurde. Der billige Kopf-Ausstieg braucht sie für EINE
     /// Frage: kann seitdem ein loser Seitenwagen dazugekommen sein? Ist das Verzeichnis älter als
