@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.498",
-        "changelog": "v12.1.12.498: the deferred cycle gets its own line under the workers — with reason and attempt (F-M623).",
+        "version": "12.2.0.0",
+        "changelog": "v12.2.0.0: the first stable line since the rename — the deferred pipeline cycle now reports itself under the workers, with its reason and attempt (F-M623).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.498-dev/Jellyfin.Plugin.SubdlSync_12.1.12.498.zip",
-        "checksum": "854a418e29738eeefa0ee5e235cd2745",
-        "timestamp": "2026-11-19T06:47:10Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.0-dev/Jellyfin.Plugin.SubdlSync_12.2.0.0.zip",
+        "checksum": "e0ea2cc31fac89135de5555c1f3b25e6",
+        "timestamp": "2026-11-19T07:45:01Z"
       }
     ]
   }
