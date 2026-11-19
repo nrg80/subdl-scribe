@@ -41,7 +41,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [19. Test Library](#19-test-library)
 - [21. Adding another endpoint — checklist and pitfalls](#21-adding-another-endpoint--checklist-and-pitfalls) — 1 requirement (F-M564) + Checkliste
 
-- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 13 requirements
+- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 16 requirements
 - [20. References](#20-references)
 
 ## 1. Objective and Scope
@@ -2980,3 +2980,9 @@ Dieses Kapitel regelt, wie eine Untertitelquelle angebunden wird. Die Regeln der
 **F-M635 [D]:** **Kein Urteil einer Quelle löscht das einer anderen**, auch nicht bei inhaltsgleichem Material. Fällt ein Inhaltsurteil „liegt bei Quelle A", setzt es ausschließlich den Beleg von A; B bleibt offen (Kapitel 11).
 
 **F-M636 [D]:** **Scheitert eine Quelle, bleibt ihr Beleg offen und mit Grund versehen**, während die übrigen Quellen fortfahren. Der Vorrang (F-M627) entscheidet, wer zuerst gefragt wird, nicht wer den Beleg erhält.
+
+**F-M637 [D]:** **Ein Wechsel des Datenformats wird vor dem Umschalten gegengeprüft.** Die neue Datei entsteht vollständig neben der alten und wird erst zur live Datei, wenn Zeilenzahlen und Quellenbelege übereinstimmen; bei Abweichung oder Abbruch bleibt die alte Datei die live Datei, das Plugin läuft weiter und meldet den Grund in einer Zeile. Ein Startabbruch ist unzulässig (F-M327).
+
+**F-M638 [D]:** **Die Vorgängerdatei bleibt als Sicherung liegen und wird nie selbsttätig gelöscht** — weder beim Umschalten noch später. Sie ist die Rückfallebene: ein Zurück ist ein Dateitausch, keine Schemaumstellung.
+
+**F-M639 [D]:** **Eine Fassung ohne Übernahmepfad legt einen leeren Store an** und liest die Vorgängerdatei weder ganz noch teilweise; sie bleibt unangetastet liegen und wird in einer Zeile benannt. Ab diesem Punkt ist die Rückfallebene der Dateitausch, nicht die Fassung.
