@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 using System;
@@ -14,10 +14,10 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// The one place that talks to ffmpeg (F-M261).
@@ -76,18 +76,18 @@ public static class FfmpegTools
             var configured = config.FfmpegPath.Trim();
             if (File.Exists(configured))
             {
-                LogUtil.Detail(config.LogMode, logger, "[SubDL] ffmpeg path from config override: {Path}", configured);
+                LogUtil.Detail(config.LogMode, logger, "[Sub Scribe] ffmpeg path from config override: {Path}", configured);
                 return configured;
             }
 
-            logger.LogWarning("[SubDL] configured ffmpeg override not found: {Path}, falling back to auto-detection", configured);
+            logger.LogWarning("[Sub Scribe] configured ffmpeg override not found: {Path}, falling back to auto-detection", configured);
         }
 
         // 2) PATH lookup via "which ffmpeg" / "where ffmpeg"
         var pathHit = FindInPath("ffmpeg");
         if (!string.IsNullOrWhiteSpace(pathHit))
         {
-            LogUtil.Detail(config.LogMode, logger, "[SubDL] ffmpeg path from PATH: {Path}", pathHit);
+            LogUtil.Detail(config.LogMode, logger, "[Sub Scribe] ffmpeg path from PATH: {Path}", pathHit);
             return pathHit;
         }
 
@@ -112,13 +112,13 @@ public static class FfmpegTools
         {
             if (File.Exists(candidate))
             {
-                LogUtil.Detail(config.LogMode, logger, "[SubDL] ffmpeg path from static fallback: {Path}", candidate);
+                LogUtil.Detail(config.LogMode, logger, "[Sub Scribe] ffmpeg path from static fallback: {Path}", candidate);
                 return candidate;
             }
         }
 
         // 4) last resort: keep "ffmpeg" and let the OS report the failure in the call log
-        logger.LogWarning("[SubDL] ffmpeg not found anywhere; extraction will fail until ffmpeg is installed or FfmpegPath is configured");
+        logger.LogWarning("[Sub Scribe] ffmpeg not found anywhere; extraction will fail until ffmpeg is installed or FfmpegPath is configured");
         return "ffmpeg";
     }
 
@@ -198,6 +198,37 @@ public static class FfmpegTools
     /// wrong, retry it per stream" (non-zero) — the caller needs that to decide
     /// whether a null is a verdict or a suspicion.
     /// </returns>
+    /// <summary>
+    /// F-M596: beendet einen laufenden ffmpeg-Prozess samt Kindern. Best effort — ein bereits
+    /// beendeter Prozess ist kein Fehler, und ein Fehler beim Beenden darf den Abbruch nicht
+    /// verdecken. Der Aufruf steht auf dem Abbruchpfad, damit kein Kind den Lauf ueberlebt.
+    /// </summary>
+    /// <param name="proc">Der laufende Prozess.</param>
+    /// <param name="logger">Protokoll fuer den Fall, dass es nicht klappt.</param>
+    /// <param name="mediaPath">Nur fuer die Meldung.</param>
+    private static void BeendeHart(Process proc, ILogger logger, string mediaPath)
+    {
+        try
+        {
+            if (!proc.HasExited)
+            {
+                proc.Kill(entireProcessTree: true);
+                // LOGGING.md 1.6: hier endet die Extraktion EINES Items, nicht der Lauf. „the run was
+                // cancelled" war eine Falschaussage im Log (gemessen 18.11.2026: viermal, und der Lauf
+                // lief danach hunderte Positionen weiter).
+                logger.LogInformation(
+                    "[Sub Scribe] EXTRACT CANCELLED {File} — the pass ended before its result was used (F-M596)",
+                    Path.GetFileName(mediaPath));
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                "[Sub Scribe] stopping ffmpeg for {File} failed: {Msg}",
+                Path.GetFileName(mediaPath), ex.Message);
+        }
+    }
+
     public static async Task<(Dictionary<int, string?> Texts, int ExitCode)> ExtractAllAsync(
         string ffmpegPath,
         string mediaPath,
@@ -257,12 +288,26 @@ public static class FfmpegTools
             using var proc = Process.Start(psi);
             if (proc == null)
             {
-                logger.LogError("[SubDL] ffmpeg failed to start for {File}", Path.GetFileName(mediaPath));
+                logger.LogError("[Sub Scribe] ffmpeg failed to start for {File}", Path.GetFileName(mediaPath));
                 return (result, -1);
             }
 
-            string stderr = await proc.StandardError.ReadToEndAsync(ct).ConfigureAwait(false);
-            await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+            // F-M596 (Operator-Freigabe 18.11.2026, „Ja"): ein Abbruch beendet ffmpeg jetzt WIRKLICH.
+            // Vorher brach nur das Warten ab (`WaitForExitAsync(ct)`), der Prozess lief weiter und
+            // schrieb in ein Verzeichnis, das der finally-Block gerade geloescht hatte — beim
+            // regulaeren Lauf unsichtbar, mit dem vorgezogenen Lauf (ExtractionLookahead) waere es ein
+            // Waisenprozess, der die naechste Extraktion ueberholt.
+            string stderr;
+            try
+            {
+                stderr = await proc.StandardError.ReadToEndAsync(ct).ConfigureAwait(false);
+                await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                BeendeHart(proc, logger, mediaPath);
+                throw;
+            }
 
             // ffmpeg keeps going after a bad stream with -y where it can, so a non-zero
             // exit does NOT mean every output is unusable. Read whatever landed and let
@@ -270,7 +315,7 @@ public static class FfmpegTools
             if (proc.ExitCode != 0)
             {
                 LogUtil.PerItem(config.LogMode, logger,
-                    "[SubDL] one-pass extraction of {File} exited {Exit}: {Err}",
+                    "[Sub Scribe] one-pass extraction of {File} exited {Exit}: {Err}",
                     Path.GetFileName(mediaPath), proc.ExitCode,
                     stderr.Length <= 300 ? stderr : stderr[..300]);
             }
@@ -287,7 +332,7 @@ public static class FfmpegTools
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError("[SubDL] reading extracted stream {Idx} failed for {File}: {Msg}",
+                    logger.LogError("[Sub Scribe] reading extracted stream {Idx} failed for {File}: {Msg}",
                         idx, Path.GetFileName(mediaPath), ex.Message);
                 }
             }
@@ -300,7 +345,7 @@ public static class FfmpegTools
         }
         catch (Exception ex)
         {
-            logger.LogError("[SubDL] one-pass extraction error for {File}: {Msg}",
+            logger.LogError("[Sub Scribe] one-pass extraction error for {File}: {Msg}",
                 Path.GetFileName(mediaPath), ex.Message);
             foreach (int idx in subIndices)
             {
@@ -417,7 +462,7 @@ public static class FfmpegTools
             {
                 if (proc == null)
                 {
-                    logger.LogError("[SubDL] ffmpeg failed to start for tag write on {File}", fileName);
+                    logger.LogError("[Sub Scribe] ffmpeg failed to start for tag write on {File}", fileName);
                     return false;
                 }
 
@@ -427,7 +472,7 @@ public static class FfmpegTools
                 if (proc.ExitCode != 0 || !File.Exists(tempPath))
                 {
                     LogUtil.PerItem(config.LogMode, logger,
-                        "[SubDL-D] tag write failed {File}: exit={Exit} {Err}",
+                        "[Sub Scribe-D] tag write failed {File}: exit={Exit} {Err}",
                         fileName, proc.ExitCode, stderr.Length <= 300 ? stderr : stderr[..300]);
                     return false;
                 }
@@ -439,7 +484,7 @@ public static class FfmpegTools
             var verifiedStreams = await ReadSubtitleStreamsAsync(ffmpegPath, tempPath, logger, ct).ConfigureAwait(false);
             if (verifiedStreams == null)
             {
-                LogUtil.PerItem(config.LogMode, logger, "[SubDL-D] tag write not verifiable, keeping original {File}", fileName);
+                LogUtil.PerItem(config.LogMode, logger, "[Sub Scribe-D] tag write not verifiable, keeping original {File}", fileName);
                 DeleteFileBestEffort(tempPath);
                 return false;
             }
@@ -450,7 +495,7 @@ public static class FfmpegTools
                 if (!verified.TryGetValue(kv.Key, out string? got) || !LanguageTagMatches(got, kv.Value))
                 {
                     LogUtil.PerItem(config.LogMode, logger,
-                        "[SubDL-D] tag write did not take on {File} s{Pos} (wanted {Want}, got {Got}) — original kept",
+                        "[Sub Scribe-D] tag write did not take on {File} s{Pos} (wanted {Want}, got {Got}) — original kept",
                         fileName, kv.Key, kv.Value, got ?? "none");
                     DeleteFileBestEffort(tempPath);
                     return false;
@@ -467,7 +512,7 @@ public static class FfmpegTools
                 if (!verifiedForced.Contains(pos))
                 {
                     LogUtil.PerItem(config.LogMode, logger,
-                        "[SubDL-D] forced flag LOST on {File} s{Pos} — original kept",
+                        "[Sub Scribe-D] forced flag LOST on {File} s{Pos} — original kept",
                         fileName, pos);
                     DeleteFileBestEffort(tempPath);
                     return false;
@@ -486,7 +531,7 @@ public static class FfmpegTools
         }
         catch (Exception ex)
         {
-            logger.LogError("[SubDL-D] tag write error for {File}: {Msg}", fileName, ex.Message);
+            logger.LogError("[Sub Scribe-D] tag write error for {File}: {Msg}", fileName, ex.Message);
             DeleteFileBestEffort(tempPath);
             return false;
         }
@@ -632,7 +677,7 @@ public static class FfmpegTools
         }
         catch (Exception ex)
         {
-            logger.LogDebug("[SubDL] reading subtitle tags of {File} failed: {Msg}", Path.GetFileName(mediaPath), ex.Message);
+            logger.LogDebug("[Sub Scribe] reading subtitle tags of {File} failed: {Msg}", Path.GetFileName(mediaPath), ex.Message);
             return null;
         }
     }

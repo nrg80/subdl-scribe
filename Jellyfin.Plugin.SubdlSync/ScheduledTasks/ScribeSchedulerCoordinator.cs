@@ -1,0 +1,1891 @@
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Sub Scribe is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the
+// Free Software Foundation, either version 3 of the License, or (at your
+// option) any later version.
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.IO;
+using System.Security.Cryptography;
+using System.Threading;
+using System.Threading.Tasks;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Model.Tasks;
+using Microsoft.Extensions.Logging;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+
+namespace Jellyfin.Plugin.SubScribe.ScheduledTasks;
+
+/// <summary>
+/// THE scheduler (F-M48 08.09.2026, 12.09.2026, 14.09.2026):
+/// one owner of all due times — refetch anchors (diced once per installation,
+/// persisted in plugin config), recovery fires (F-M65, persisted to
+/// recovery-fires.json since F-M116) and the weekly database refresh job. A 30-s tick
+/// fires due jobs THROUGH the global run lock: busy lock → the job defers by
+/// JobSpacingMinutes (config, default 15) and retries — nothing is dropped,
+/// nothing overlaps. A missed anchor slot IS caught up (F-M156): the slot fires on the
+/// first tick where it is past-due and unconsumed, and the persisted marker keeps it from
+/// stacking or replaying across a restart. Past-due recovery fires fire on the next tick. Jobs are
+/// queued via ITaskManager so they stay visible/manually triggerable in the
+/// dashboard; the event dispatcher executes them (see its header).
+/// </summary>
+public sealed class ScribeSchedulerCoordinator : IDisposable
+{
+    /// <summary>
+    /// F-M65: singleton reference — pipelines (built outside DI by
+    /// PluginServiceRegistrator) reach the coordinator to schedule recovery fires
+    /// without a constructor-injection detour. Set once by the DI singleton, cleared on dispose.
+    /// </summary>
+    public static ScribeSchedulerCoordinator? Instance { get; private set; }
+
+    /// <summary>
+    // F-M25: requirement marker added for traceability.
+    /// F-M152 (rev.10): crypto-RNG uint32 for jitter dicing — every recovery
+    /// fire rolls its own offset, direction-independent.
+    /// </summary>
+    private static uint GetCryptoUInt32()
+    {
+        var buf = RandomNumberGenerator.GetBytes(4);
+        return BitConverter.ToUInt32(buf, 0);
+    }
+
+    private const int TickSeconds = 30;
+
+    private readonly ITaskManager _taskManager;
+    private readonly ILogger<ScribeSchedulerCoordinator> _logger;
+    private readonly string _configDirectory;
+    private readonly CancellationTokenSource _cts = new();
+    private readonly Task _loop;
+
+    // F-M116 (user report 14.09.2026): pending recovery fires used to live in RAM
+    // only — a JF restart (deploy/manual) silently discarded a scheduled quota-reset
+    // fire (verified: 02:30 fire lost to the 23:05 restart; nothing fired at all).
+    // The fire is now mirrored to recovery-fires.json and re-loaded on startup,
+    // including past-due fires (they fire on the next tick immediately).
+    private const string RecoveryFile = "recovery-fires.json";
+
+    // (user decision 29.09.2026): the weekly anchor markers lived in RAM only. The dedup
+    // test is `_lastXMarker != marker` with NO window bound, so on the anchor DAY, from the
+    // anchor time until midnight, every Jellyfin restart re-claimed the slot and re-fired
+    // the job. Measured on prod 28.09.2026 (OSHash anchor Sunday 07:46 local): 23 restarts,
+    // 22 OSHash fires, of which exactly ONE was the real anchor fire (07:46:22, 5.2 h after
+    // the previous restart) — the other 21 landed 0-1 s after a "Loaded assembly" line,
+    // which is the signature of a restart, not of the scheduler. The database refresh
+    // carries the same shape on its own anchor day. The markers are now mirrored to
+    // anchor-fires.json and restored on startup, so a restart stops re-claiming a slot
+    // that already fired today. The marker counts the CLAIM, not the outcome — a run that
+    // fails after being queued stays consumed for the day, exactly as it did before.
+    // (user decision 29.09.2026): ALL scheduler state is persisted, not just the two
+    // weekly anchor markers. Every dedup test in this class was answered against a RAM
+    // field, so a Jellyfin restart re-claimed slots that had already fired: the anchor
+    // markers (22 OSHash fires against 1 real anchor fire on prod 28.09.), the refetch
+    // slot (3 replayed catch-ups on the test instance) and the postprocessing slot
+    // (22 fires, 20 of them 0-1 s after a restart). The whole state — four markers, the
+    // catch-up flag and the three lock-busy deferrals — now lives in one file and is
+    // restored on startup. Written at most once per tick, only when something changed.
+    private const string SchedulerStateFile = "scheduler-state.json";
+    private bool _stateDirty;
+
+    // F-M65 (user decision 09.09.2026): one-shot recovery fires per direction. When a
+    // pipeline hits the daily limit with ContinueAfterLimit OFF, it stops clean AND asks
+    // the coordinator to re-fire JUST that direction after the quota reset
+    // (next reset + 30..300 min jitter, F-M152 rev.11; 's 5..30 window replaced).
+    // One entry per direction; consumed on fire (one-shot, no persistence — a
+    // restart before the reset simply falls back to the regular anchors, acceptable).
+    private DateTime? _recoveryFireDownloadUtc;
+    private DateTime? _recoveryFireUploadUtc;
+
+    // F-M475 (operator finding 15.11.2026, "defer um 15 min taucht nirgendwo auf, stattdessen defer
+    // auf den alten anchor"): every pending fire carries WHY it waits. Until now the moment and the
+    // reason were read from two different places — the moment from the fire, the reason from the
+    // worker row — so a fresh deferral was printed with the PREVIOUS run's cause (live 15.11.2026
+    // 03:49: fire at 04:24 for a quota reset, while the real wait was the library scan that had
+    // just deferred the seed by 15 min).
+    //
+    // A TOKEN, not a sentence: the fire file is a hand-rolled {"download":"…","upload":"…"} pair that
+    // LoadRecoveryFires splits on ',' and ':' — a sentence containing either character would break
+    // the parser. The readable text is built from the token in PendingFireReason.
+    private string? _recoveryFireDownloadWhy;
+    private string? _recoveryFireUploadWhy;
+
+    // F-M156 (20.09.2026): one-time global catch-up. If any anchor window is
+    // missed, queue exactly one catch-up run. It does NOT stack per missed slot.
+    // Reset when a regular anchor fire runs again.
+    private bool _catchUpFired;
+
+    private string? _lastFiredMarker;
+    // F-M368: the spacing the refetch deferral PRINTS, now actually stored. Kept out of
+    // GetPendingFires deliberately: the refetch slot is the pipeline cycle, not one worker, and the
+    // direction lamps are painted from their own recovery fires.
+    private DateTime _refetchDeferredUntil = DateTime.MinValue;
+    private string? _lastPruneMarker; // Dedup for the weekly database refresh job
+    private string? _lastOshashMarker; // F-M119: dedup for the weekly oshash-refresh job
+    // F-M445 (operator decision 02.11.2026): there is no fixed anchor and no marker any more. The
+    // postprocessing is ARMED — one timestamp, overwritten by every finished upload run ("the last
+    // order wins"). MinValue means nothing is armed, i.e. no upload run is waiting to be resolved.
+    private DateTime _postprocessArmUtc = DateTime.MinValue;
+    // (user decision 14.09.2026): when the anchor fire defers on a busy
+    // lock, back off JobSpacingMinutes instead of probing every 30 s — and the
+    // reschedule is NOT bound to the 30-min anchor window anymore.
+    private DateTime _pruneDeferredUntil = DateTime.MinValue;
+    private DateTime _oshashDeferredUntil = DateTime.MinValue;
+    // F-M475 (operator order 15.11.2026, "das sollte längst so sein"): every slot's pending moment
+    // carries its own reason token, not just the two direction fires. Without it the status line paired
+    // a fresh attempt with the PREVIOUS run's cause — the defect the download deferral showed live on
+    // 15.11.2026 ("defer um 15 min taucht nirgendwo auf, stattdessen defer auf den alten anchor").
+    // Tokens only: the state file splits on ',' and ':'.
+    private string? _refreshFireWhy;
+    private string? _oshashFireWhy;
+    private string? _postprocessFireWhy;
+    // F-M623: der Refetch ist der Zyklus, nicht ein Worker — sein Grund stand deshalb nirgends.
+    private string? _refetchFireWhy;
+
+    /// <summary>
+    /// (user decision 25.09.2026: stop rescheduling at the limit): every
+    /// reschedule of a slot (lock-busy defer, rate-limit spacing) is COUNTED. After <see cref="MaxRescheduleAttempts"/> (16) the
+    /// rescheduling stops instead of silently pushing the same work forward
+    /// forever. The slot's next REGULAR anchor picks the work up again — which is
+    /// why giving up is a warning, not an error. Reset on a real fire, and at the
+    /// daily roll-over (see <see cref="ResetDailyRescheduleBudget"/>).
+    /// </summary>
+    // F-M205: every reschedule is counted; after 16 the slot is refused. Log lines render {Limit},
+    // so raising the constant touches no message text.
+    private const int MaxRescheduleAttempts = 16;
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _rescheduleCounts =
+        new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// UTC day the reschedule budget was last reset for. The counters are per-day, so a slot that
+    /// exhausted its budget today gets a fresh one tomorrow instead of staying blocked until a
+    /// restart — the counter lives in RAM, so without this the limit was effectively
+    /// "until the next process start" (measured 25.09.2026: a slot sat at 11 attempts with no path
+    /// back, because the refusal drops its recovery fire and a Manual install has no regular anchor
+    /// that could clear it).
+    /// </summary>
+    private DateTime _rescheduleBudgetDayUtc = DateTime.UtcNow.Date;
+
+    /// <summary>
+    /// Counts one reschedule for a slot. Returns false when the attempt limit is
+    /// exhausted — the caller must then NOT reschedule (the regular anchor owns
+    /// the slot again).
+    /// </summary>
+    /// <param name="slot">Slot label: download, upload, postprocess, refresh, oshash, refetch.</param>
+    /// <param name="reason">Why the reschedule happened (lock-busy, rate-limit, …) — log only.</param>
+    /// <returns>True when another reschedule is still allowed.</returns>
+    /// F-M205: one counter per slot, cleared on a real fire and by the per-day budget reset (F-M208).
+    public bool TryCountReschedule(string slot, string reason)
+    {
+        ResetDailyRescheduleBudget();
+        int attempt = _rescheduleCounts.AddOrUpdate(slot, 1, (_, old) => old + 1);
+        if (attempt > MaxRescheduleAttempts)
+        {
+            // Warn exactly once when the limit is crossed; further attempts stay on
+            // debug so a repeatedly-triggered slot cannot flood the log.
+            if (attempt == MaxRescheduleAttempts + 1)
+            {
+                _logger.LogWarning(
+                    "[Sub Scribe] {Slot} reschedule limit reached ({Limit}x, {Reason}) — NOT rescheduling again today; "
+                    + "the budget resets at the next UTC day roll-over (00:00 UTC).",
+                    slot, MaxRescheduleAttempts, reason);
+            }
+            else
+            {
+                LogUtil.Detail(_logger, 
+                    "[Sub Scribe] {Slot} reschedule refused again ({Attempt}x, limit {Limit}).",
+                    slot, attempt, MaxRescheduleAttempts);
+            }
+
+            return false;
+        }
+
+        LogUtil.Detail(_logger, 
+            "[Sub Scribe] {Slot} reschedule {Attempt}/{Limit} ({Reason}).",
+            slot, attempt, MaxRescheduleAttempts, reason);
+        return true;
+    }
+
+    /// <summary>
+    /// Clears the reschedule counter for a slot — called when the slot actually
+    /// fired, i.e. the blockage cleared (user decision 25.09.2026).
+    /// </summary>
+    /// <param name="slot">Slot label, see <see cref="TryCountReschedule"/>.</param>
+    public void ResetReschedule(string slot)
+    {
+        if (_rescheduleCounts.TryRemove(slot, out int had) && had > 0)
+        {
+            LogUtil.Detail(_logger, "[Sub Scribe] {Slot} reschedule counter reset (was {Count}).", slot, had);
+        }
+    }
+
+    /// <summary>
+    /// Clears the reschedule budget for every slot once the UTC day rolls over — the same boundary
+    /// the SubDL quota reset uses. Called from the scheduler tick (so it also happens while nothing
+    /// else is running) and from <see cref="TryCountReschedule"/> (so a trigger arriving right after
+    /// midnight is never counted against yesterday's budget).
+    /// <para>
+    /// The counters are per-day on purpose: the limit exists to stop one slot from spinning inside a
+    /// single day, not to block it across days. Without this the limit was unbounded in time,
+    /// because a refused slot loses its recovery fire and cannot reach the on-fire reset.
+    /// </para>
+    /// </summary>
+    public void ResetDailyRescheduleBudget()
+    {
+        var today = DateTime.UtcNow.Date;
+        if (today <= _rescheduleBudgetDayUtc)
+        {
+            return;
+        }
+
+        _rescheduleBudgetDayUtc = today;
+        int slots = _rescheduleCounts.Count;
+        _rescheduleCounts.Clear();
+        if (slots > 0)
+        {
+            LogUtil.Detail(_logger, 
+                "[Sub Scribe] reschedule budget reset for the new UTC day ({Slots} slot(s) cleared) (F-M208).",
+                slots);
+        }
+    }
+
+    /// <summary>
+    /// F-M351 (order 18.10.2026): cancels this direction's pending one-shot fire, because pressing Stop
+    /// in the GUI means "stop, and do not come back on your own".
+    /// <para>
+    /// Measured on 18.10.2026: Stop only cancelled the RUNNING cycle (<c>_stopCts</c>) and wrote a marker;
+    /// the armed fire was untouched and nothing in the fire path reads that marker, so a deferred upload
+    /// re-armed itself and started as if the operator had not pressed anything. The marker was not even a
+    /// backstop: both pipelines clear the markers at run start, so the fire wiped its own stop signal.
+    /// </para>
+    /// <para>
+    /// The slot's reschedule counter is reset as well: the fire was removed by the operator, not
+    /// exhausted by the 16x budget, so the next genuine deferral gets its full allowance.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction whose fire is cancelled.</param>
+    /// <param name="reason">Why (log only).</param>
+    /// <returns>True when a fire was pending and is now gone.</returns>
+    /// <summary>
+    /// F-M353 (operator order 19.10.2026): the detail written to the row of a direction whose pending fire
+    /// was cancelled. It names the cause, not a run — a stop is not a run.
+    /// </summary>
+    public const string CancelledDetail = "fire cancelled — stopped by operator";
+
+    /// <summary>
+    /// F-M353: the worker row a cancelled fire belongs to.
+    /// <para>
+    /// Static and free of side effects so a harness can prove the direction mapping without a database.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">True for the upload direction, false for the download.</param>
+    /// <returns>The row key, its display name, and the detail to store.</returns>
+    public static (string Key, string Name, string Detail) CancelledRow(bool upload)
+        => upload
+            ? (Registry.WorkerRunRegistry.UploadWorkerKey, "Upload", CancelledDetail)
+            : (Registry.WorkerRunRegistry.DownloadWorkerKey, "Download", CancelledDetail);
+
+    public bool CancelPendingFire(bool upload, string reason)
+    {
+        bool had;
+        DateTime? was;
+        if (upload)
+        {
+            was = _recoveryFireUploadUtc;
+            had = was.HasValue;
+            _recoveryFireUploadUtc = null;
+            _recoveryFireUploadWhy = null;
+        }
+        else
+        {
+            was = _recoveryFireDownloadUtc;
+            had = was.HasValue;
+            _recoveryFireDownloadUtc = null;
+            _recoveryFireDownloadWhy = null;
+        }
+
+        if (!had)
+        {
+            LogUtil.Detail(_logger,
+                "[Sub Scribe] stop ({Direction}): no fire pending — nothing to cancel (F-M351).",
+                upload ? "upload" : "download");
+            return false;
+        }
+
+        ResetReschedule(upload ? "upload" : "download");
+        PersistRecoveryFires();
+
+        // F-M353 (operator order 19.10.2026, "A. Für upload und download"): the lamp must stop claiming a
+        // deferral it no longer has. Until now a stop only cleared the fire, so the row kept reading
+        // "defer" (live 19.10.2026 01:34: the fire was cancelled and the download row still said defer,
+        // detail "download limit spent (50/50)" from the evening before). The row now carries the
+        // cancellation: word "cancel", the moment it happened, and why. A stop is NOT a run, so it has a
+        // moment and no beginning/end — MarkCancelled stamps BOTH with now. Finish() would keep the old
+        // start (that is its job for real runs), and the display reads Started, so the cancellation would
+        // wear the previous run's date — exactly what happened on the test bench on 19.10.2026.
+        try
+        {
+            var row = CancelledRow(upload);
+            Jellyfin.Plugin.SubScribe.Plugin.Instance?.WorkerRuns?.MarkCancelled(row.Key, row.Name, row.Detail);
+            LogUtil.Detail(_logger, "[Sub Scribe] stop ({Direction}): worker row marked cancelled.", upload ? "upload" : "download");
+        }
+        catch (Exception ex)
+        {
+            // A row that cannot be written must never make the stop fail — the fire is already gone.
+            LogUtil.Detail(_logger, "[Sub Scribe] stop ({Direction}): marking the worker row failed: {Msg}", upload ? "upload" : "download", ex.Message);
+        }
+        // The moment is logged in UTC and NOT converted: DeferFire prints its retry the same way, and a
+        // local time labelled "UTC" is worse than no label — the first live test on the dev instance
+        // reported "02:30 UTC" for a fire that was armed at 00:30Z.
+        LogUtil.Normal(_logger,
+            "[Sub Scribe] stop ({Direction}): pending fire for {Due:yyyy-MM-dd HH:mm} UTC cancelled — {Reason} (F-M351).",
+            upload ? "upload" : "download",
+            was!.Value,
+            reason);
+        return true;
+    }
+
+    /// <summary>
+    /// F-M65: schedules a ONE-SHOT recovery fire for one direction at resetUtc + jitter.
+    /// Called by a pipeline that stopped on the daily limit with ContinueAfterLimit OFF.
+    /// </summary>
+    public void ScheduleRecoveryFire(bool upload, DateTime resetUtc)
+    {
+        // F-M67 (user decision 09.09.2026, "bei sowas evtl den nach 00 uhr retry
+        // triggern"): overload variant — a transient service_busy stop (NOT a quota
+        // problem) gets a SHORT recovery window so the retry happens soon, not
+        // tomorrow night. Same dedup (one pending fire per direction, first-wins);
+        // a pending quota fire is NOT overwritten by an overload fire and vice versa.
+        ScheduleRecoveryFireInternal(upload, resetUtc, overload: false, alreadyJittered: false, why: "quota");
+    }
+
+    /// <summary>
+    /// F-M445 (operator decision 02.11.2026, "mit jedem neuen upload run einen bestehenden
+    /// Postprocessing-Termin stornieren und auf Laufende + 30 Minuten terminieren"): arms the upload
+    /// postprocessing <see cref="PluginConfiguration.UploadPostprocessDelayMinutes"/> minutes after the
+    /// run that just ended. **The last order wins** — an already armed moment is cancelled and replaced,
+    /// never added to, so a cycle that ends at 12:30 pushes the fire to 13:00 and the one armed for
+    /// 12:45 is gone. <see cref="DateTime.MinValue"/> stays the "nothing armed" marker.
+    /// </summary>
+    /// <param name="reason">Where the order came from (run end, rate-limit, lock-busy) — for the log.</param>
+    public void ArmUploadPostprocessing(string reason)
+    {
+        var delay = Plugin.Instance?.Configuration.UploadPostprocessDelayMinutes ?? 30;
+        if (delay > 1440)
+        {
+            delay = 1440;
+        }
+
+        // F-M445 (operator order 02.11.2026, "0 inaktiv"): a zero delay disables the postprocessing —
+        // no order is armed at all, and an order that is still open is cancelled.
+        if (delay <= 0)
+        {
+            CancelUploadPostprocessing($"delay is 0 — the postprocessing is inactive ({reason})");
+            return;
+        }
+
+        ArmUploadPostprocessingAt(DateTime.UtcNow.AddMinutes(delay), reason);
+    }
+
+    /// <summary>
+    /// F-M445: arms the upload postprocessing for an explicit moment. Same "last order wins" rule as
+    /// <see cref="ArmUploadPostprocessing"/> — the previous moment is replaced, not compared.
+    /// </summary>
+    /// <param name="fireAtUtc">The moment (UTC) the postprocessing is due.</param>
+    /// <param name="reason">Where the order came from — for the log.</param>
+    /// <param name="why">F-M475: the reason TOKEN for the status line, or null for a normal arming.</param>
+    public void ArmUploadPostprocessingAt(DateTime fireAtUtc, string reason, string? why = null)
+    {
+        var previous = _postprocessArmUtc;
+        _postprocessArmUtc = fireAtUtc;
+        // A normal arming (an upload run just finished) has nothing to explain — the token is cleared,
+        // so an old lock-busy note cannot stick to a fresh order (F-M475).
+        _postprocessFireWhy = why;
+        _stateDirty = true;
+        ResetReschedule("postprocess");
+        LogUtil.Normal(
+            _logger,
+            previous == DateTime.MinValue
+                ? "[Sub Scribe] Upload postprocessing armed for {FireAt:yyyy-MM-dd HH:mm} UTC — {Reason} (F-M445)."
+                : "[Sub Scribe] Upload postprocessing re-armed for {FireAt:yyyy-MM-dd HH:mm} UTC — {Reason}; the order for {Previous:yyyy-MM-dd HH:mm} UTC is cancelled, the last one wins (F-M445).",
+            fireAtUtc, reason, previous);
+    }
+
+    /// <summary>
+    /// F-M445 (operator order 02.11.2026): cancels an open postprocessing order. The order is cancelled
+    /// when an upload run STARTS — while the run works, its own end will set the new moment, and a
+    /// leftover order from an earlier run must not fire against a half-written state.
+    /// </summary>
+    /// <param name="reason">Why the order is dropped — for the log.</param>
+    public void CancelUploadPostprocessing(string reason)
+    {
+        if (_postprocessArmUtc == DateTime.MinValue)
+        {
+            return;
+        }
+
+        var cancelled = _postprocessArmUtc;
+        _postprocessArmUtc = DateTime.MinValue;
+        _postprocessFireWhy = null;
+        _stateDirty = true;
+        LogUtil.Normal(
+            _logger,
+            "[Sub Scribe] Upload postprocessing cancelled — the order for {Cancelled:yyyy-MM-dd HH:mm} UTC is dropped: {Reason} (F-M445).",
+            cancelled, reason);
+    }
+
+    /// <summary>
+    /// F-M445: the moment the upload postprocessing is due, or null when none is armed. The status page
+    /// prints it on its own line under the workers, and the line disappears as soon as it fires.
+    /// </summary>
+    /// <returns>The armed moment (UTC), or null.</returns>
+    public DateTime? GetUploadPostprocessDue()
+        => _postprocessArmUtc == DateTime.MinValue ? null : _postprocessArmUtc;
+
+    /// <summary>
+    /// F-M176, kept for its callers: a rate-limit or lock-busy re-fire that must respect the spacing.
+    /// </summary>
+    /// <param name="fireAtUtc">The moment (UTC) the next attempt is due.</param>
+    public void SchedulePostprocessFire(DateTime fireAtUtc)
+    {
+        if (!TryCountReschedule("postprocess", "lock-busy/rate-limit"))
+        {
+            return;
+        }
+
+        ArmUploadPostprocessingAt(fireAtUtc, "lock-busy/rate-limit re-fire", why: "lockbusy");
+    }
+
+    public void ScheduleRefreshFire(DateTime fireAtUtc)
+    {
+        // F-M368: the slot is "refresh" — the same one the anchor block counts and the fire resets.
+        // "dbrefresh" was a second, never-reset budget: after 16 task-side deferrals in one UTC day
+        // ScheduleRefreshFire refused silently and armed no deadline at all.
+        if (!TryCountReschedule("refresh", "lock-busy"))
+        {
+            return;
+        }
+
+        if (_pruneDeferredUntil == DateTime.MinValue || fireAtUtc < _pruneDeferredUntil)
+        {
+            _pruneDeferredUntil = fireAtUtc;
+            _refreshFireWhy = "lockbusy";
+            _stateDirty = true;
+            LogUtil.Normal(_logger, "[Sub Scribe] Database refresh re-fire scheduled at {FireAt:yyyy-MM-dd HH:mm} UTC.", fireAtUtc);
+        }
+    }
+
+    public void ScheduleOshashFire(DateTime fireAtUtc)
+    {
+        if (!TryCountReschedule("oshash", "lock-busy"))
+        {
+            return;
+        }
+
+        if (_oshashDeferredUntil == DateTime.MinValue || fireAtUtc < _oshashDeferredUntil)
+        {
+            _oshashDeferredUntil = fireAtUtc;
+            _oshashFireWhy = "lockbusy";
+            _stateDirty = true;
+            LogUtil.Normal(_logger, "[Sub Scribe] OSHash refresh re-fire scheduled at {FireAt:yyyy-MM-dd HH:mm} UTC.", fireAtUtc);
+        }
+    }
+
+    /// <summary>
+    /// Fires at the exact given time — the caller already applied its own
+    /// offset (lock retry and rate-limit deferral: now + JobSpacingMinutes).
+    /// No second jitter on top. Do NOT use this overload for daily-limit quota anchors:
+    /// those need the coordinator's 30..300 min dice — use ScheduleRecoveryFire instead
+    /// (F-M182, 23.09.2026: alreadyJittered:true silently disabled the anti-herd jitter).
+    /// </summary>
+    /// <returns>True when the fire was (re)scheduled; false when the slot's
+    /// reschedule limit (16) is exhausted (user decision 25.09.2026).</returns>
+    public bool ScheduleRecoveryFireAt(bool upload, DateTime fireAtUtc)
+    {
+        // The respacing path (lock-busy / rate limit): every REQUEST is
+        // counted, before the duplicate check, so repeated triggers for the same slot
+        // cannot push the work forward forever (user decision 25.09.2026:
+        // "stop rescheduling at the limit"). The duplicate check below still keeps the
+        // fire from stacking.
+        if (!TryCountReschedule(upload ? "upload" : "download", "lock-busy/rate-limit respacing"))
+        {
+            return false;
+        }
+
+        ScheduleRecoveryFireInternal(upload, fireAtUtc, overload: false, alreadyJittered: true, why: "respaced");
+        return true;
+    }
+
+    /// <summary>
+    /// F-M475: arms the retry a library-scan deferral needs — exactly <c>now + JobSpacingMinutes</c>,
+    /// no jitter, on the direction that was deferred.
+    /// <para>
+    /// Replaces the in-process timer the scan deferral used until now. That timer re-ran the
+    /// ARRIVAL cycle (<c>TimerFiredAsync</c>), so with no arrivals it did nothing at all (measured
+    /// 15.11.2026: deferred 03:38:10, timer fired 03:53:10, cycle start "event", "no arrivals
+    /// collected — no run", download task still on its 03:38 run), it was invisible to the status
+    /// line (which reads pending fires), and it died with the process.
+    /// </para>
+    /// <para>
+    /// The SOONER attempt wins: a pending quota fire may sit hours in the future while the scan it
+    /// waited for is already gone, so an earlier scan retry replaces it. A fire that is already
+    /// earlier than the new one is kept — nothing is pushed back.
+    /// </para>
+    /// </summary>
+    /// <param name="upload">Direction: upload vs download.</param>
+    /// <param name="fireAtUtc">The moment (UTC) the deferred direction may try again.</param>
+    /// <param name="minutes">The spacing that produced the moment — carried into the reason text.</param>
+    /// <returns>True when this call armed the fire; false when an earlier one was already pending.</returns>
+    public bool ScheduleScanDeferFire(bool upload, DateTime fireAtUtc, int minutes)
+    {
+        var existing = upload ? _recoveryFireUploadUtc : _recoveryFireDownloadUtc;
+        if (existing.HasValue && existing.Value <= fireAtUtc)
+        {
+            LogUtil.Detail(
+                _logger,
+                "[Sub Scribe] Scan defer ({Direction}): fire at {Existing:yyyy-MM-dd HH:mm} UTC is already sooner — keeping it (F-M475).",
+                upload ? "upload" : "download",
+                existing.Value);
+            return false;
+        }
+
+        if (upload)
+        {
+            _recoveryFireUploadUtc = fireAtUtc;
+            _recoveryFireUploadWhy = "scan" + minutes.ToString(CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            _recoveryFireDownloadUtc = fireAtUtc;
+            _recoveryFireDownloadWhy = "scan" + minutes.ToString(CultureInfo.InvariantCulture);
+        }
+
+        PersistRecoveryFires();
+        if (existing.HasValue)
+        {
+            LogUtil.Normal(
+                _logger,
+                "[Sub Scribe] Scan defer ({Direction}): fire moved from {Previous:yyyy-MM-dd HH:mm} UTC to {FireAt:yyyy-MM-dd HH:mm} UTC — the sooner attempt wins (F-M475).",
+                upload ? "upload" : "download",
+                existing.Value,
+                fireAtUtc);
+        }
+        else
+        {
+            LogUtil.Normal(
+                _logger,
+                "[Sub Scribe] Scan defer ({Direction}): fire armed for {FireAt:yyyy-MM-dd HH:mm} UTC — retry in {Min} min (F-M475).",
+                upload ? "upload" : "download",
+                fireAtUtc,
+                minutes);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// F-M475: the token that says why a direction's fire waits, or null when none is pending.
+    /// Tokens are <c>quota</c>, <c>respaced</c>, <c>overload</c> and <c>scan&lt;minutes&gt;</c>.
+    /// </summary>
+    /// <param name="upload">Direction: upload vs download.</param>
+    /// <returns>The stored token, or null.</returns>
+    public string? GetPendingFireWhy(bool upload)
+    {
+        var when = upload ? _recoveryFireUploadUtc : _recoveryFireDownloadUtc;
+        if (!when.HasValue || DateTime.UtcNow >= when.Value)
+        {
+            return null; // an elapsed deadline is not a pending fire (F-M368)
+        }
+
+        return upload ? _recoveryFireUploadWhy : _recoveryFireDownloadWhy;
+    }
+
+    /// <summary>
+    /// F-M475: the sentence the status line prints next to a pending attempt. The reason belongs to
+    /// the MOMENT, not to the last run — pairing a fresh deferral with the previous run's cause was
+    /// the defect this requirement fixes.
+    /// </summary>
+    /// <param name="upload">Direction: upload vs download.</param>
+    /// <returns>The reason text, or null when no fire is pending.</returns>
+    public string? PendingFireReason(bool upload)
+    {
+        var why = GetPendingFireWhy(upload);
+        if (string.IsNullOrEmpty(why))
+        {
+            // A fire from an older state file carries no token — say that it is a retry, not why.
+            return (upload ? _recoveryFireUploadUtc : _recoveryFireDownloadUtc).HasValue
+                ? "retry scheduled (reason not recorded)"
+                : null;
+        }
+
+        return ReasonText(upload ? "upload" : "download", why);
+    }
+
+    /// <summary>
+    /// F-M475: the reason of the pending attempt for one of the maintenance slots, or null when nothing
+    /// is pending for it. Same clock rule as <see cref="PendingFireReason"/>: an elapsed deadline is not
+    /// a pending attempt (F-M368), so its reason is not offered either.
+    /// </summary>
+    /// <param name="slot">"refresh" (database), "oshash", or "postprocess".</param>
+    /// <returns>The sentence, or null.</returns>
+    public string? PendingMaintenanceReason(string slot)
+    {
+        var nowUtc = DateTime.UtcNow;
+        switch (slot)
+        {
+            case "refresh":
+                return _pruneDeferredUntil != DateTime.MinValue && nowUtc < _pruneDeferredUntil
+                    ? ReasonText("database", _refreshFireWhy)
+                    : null;
+            case "oshash":
+                return _oshashDeferredUntil != DateTime.MinValue && nowUtc < _oshashDeferredUntil
+                    ? ReasonText("oshash", _oshashFireWhy)
+                    : null;
+            case "postprocess":
+                return _postprocessArmUtc != DateTime.MinValue && nowUtc < _postprocessArmUtc
+                    ? ReasonText("upload", _postprocessFireWhy)
+                    : null;
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// F-M475: renders a stored reason token. Pure and clock-free on purpose: the moment a fire is
+    /// CONSUMED has already passed when the tick reads it, and <see cref="PendingFireReason"/> answers
+    /// "nothing pending" for an elapsed deadline (F-M368). Measured on the bench 15.11.2026: the scan
+    /// deferral armed at 04:02:31 and fired at 04:07:35, and the log said "retry scheduled (reason not
+    /// recorded)" because the reason was fetched through the status accessor.
+    /// </summary>
+    /// <param name="direction">"download" or "upload" — used in the quota wording.</param>
+    /// <param name="why">The stored token, or null.</param>
+    /// <returns>The sentence, or null when there is no token.</returns>
+    private static string? ReasonText(string direction, string? why)
+    {
+        if (string.IsNullOrEmpty(why))
+        {
+            return null;
+        }
+
+        if (why.StartsWith("scan", StringComparison.Ordinal))
+        {
+            return "library scan running — retry in " + why["scan".Length..] + " min";
+        }
+
+        return why switch
+        {
+            "quota" => direction + " quota/rate limit — rescheduled",
+            "respaced" => "rate limit or lock busy — rescheduled",
+            // The maintenance slots (database refresh, OSHash refresh, upload postprocessing) defer for
+            // exactly one cause — a run lock that was busy (F-M475).
+            "lockbusy" => "run lock busy — rescheduled",
+            "overload" => "SubDL was overloaded (service_busy) — rescheduled",
+            _ => "retry scheduled (" + why + ")"
+        };
+    }
+
+    /// <summary>
+    /// F-M81z-2: the pending one-shot fire time for this direction (UTC), or null
+    /// when no recovery fire is scheduled — used for logging the restart date.
+    /// </summary>
+    public DateTime? GetPendingFireUtc(bool upload)
+    {
+        return upload ? _recoveryFireUploadUtc : _recoveryFireDownloadUtc;
+    }
+
+    /// <summary>
+    /// Every pending one-shot fire, keyed by the WORKER it belongs to (F-M294, user decision
+    /// 03.10.2026: "defer whenever a fire was scheduled, whichever worker").
+    /// <para>
+    /// The GUI needs this to paint a worker's lamp yellow and to name the moment. Only DEFERRED
+    /// re-fires appear here — the regular anchors are computed from the interval and carry no
+    /// stored fire, so a worker that is simply waiting for its next window is not "deferred".
+    /// </para>
+    /// <para>
+    /// The seeder has no fire of its own: it runs inside a cycle, driven by whichever direction
+    /// triggered it. The five keys below are exactly the workers that can hold one.
+    /// </para>
+    /// </summary>
+    /// <returns>Worker key → the moment (UTC) that worker's fire is due. Empty when nothing is pending.</returns>
+    public System.Collections.Generic.Dictionary<string, DateTime> GetPendingFires()
+    {
+        var result = new System.Collections.Generic.Dictionary<string, DateTime>(StringComparer.Ordinal);
+
+        // Read in one pass each; the fields are written by the tick and read here by an HTTP thread.
+        // A torn read would at worst name a moment one tick off, never a wrong worker.
+        var down = _recoveryFireDownloadUtc;
+        var up = _recoveryFireUploadUtc;
+        var post = _postprocessArmUtc;
+        var prune = _pruneDeferredUntil;
+        var oshash = _oshashDeferredUntil;
+
+        // F-M368: a deadline that has already passed is NOT a pending fire. The anchor jobs store one,
+        // but the task itself can also run on Jellyfin's own trigger, and nobody tells the coordinator —
+        // measured 28.10.2026: the Database row still read "defer — next attempt Wed 4:40 PM" at half
+        // past ten, six hours after 16:40, while the run had finished green at 22:50. An elapsed
+        // deadline is what AnchorJobGate.DeferralElapsed lets through, so the display must not show it.
+        var nowUtc = DateTime.UtcNow;
+
+        if (down.HasValue && nowUtc < down.Value)
+        {
+            result[Registry.WorkerRunRegistry.DownloadWorkerKey] = down.Value;
+        }
+
+        if (up.HasValue && nowUtc < up.Value)
+        {
+            result[Registry.WorkerRunRegistry.UploadWorkerKey] = up.Value;
+        }
+
+        if (post != DateTime.MinValue && nowUtc < post)
+        {
+            result["SubDLPostprocessTask"] = post;
+        }
+
+        if (prune != DateTime.MinValue && nowUtc < prune)
+        {
+            result["SubdlSyncDatabaseRefreshTask"] = prune;
+        }
+
+        if (oshash != DateTime.MinValue && nowUtc < oshash)
+        {
+            result["SubdlSyncOshashRefreshTask"] = oshash;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// F-M623 (Operator-Anweisung 19.11.2026: „Nur das cycle deferral"): der aufgeschobene
+    /// Refetch-Feuerzeitpunkt als eigene Meldung.
+    /// <para>
+    /// WARUM NICHT IN <see cref="GetPendingFires"/>: der Refetch ist der Zyklus, nicht ein Worker, und
+    /// die Liste unter der Workers-Liste haengt jede Meldung an eine Zeile. Am 19.11.2026 verschob sich
+    /// der Tagesanker „daily 05:43" siebenmal („a run holds the lock"), waehrend die Anzeige nichts
+    /// zeigte — der Grund stand nur im Log. Deshalb eigene Felder, genau wie beim Postprocessing
+    /// (F-M445), und NICHT als gelbe Worker-Zeile: der Zyklus hat keine eigene Zeile, an der er haengen
+    /// koennte, und ein Dauer-Gelb auf einem fremden Worker waere eine Luege.
+    /// </para>
+    /// <para>
+    /// Ein abgelaufener Zeitpunkt ist keine Meldung (F-M368): der Tick laesst ihn durch, die Anzeige
+    /// darf ihn nicht mehr zeigen.
+    /// </para>
+    /// </summary>
+    /// <returns>Faelligkeit, Grund und Versuchszahl; alle null/0, wenn nichts aufgeschoben ist.</returns>
+    public (DateTime? DueUtc, string? Why, int Attempt) GetCycleDeferral()
+    {
+        var when = _refetchDeferredUntil;
+        if (when == DateTime.MinValue || DateTime.UtcNow >= when)
+        {
+            return (null, null, 0);
+        }
+
+        _rescheduleCounts.TryGetValue("refetch", out int versuche);
+        return (when, _refetchFireWhy ?? "retry scheduled", versuche);
+    }
+
+    /// <summary>
+    /// F-M623: die Obergrenze der Verschiebungen, damit die Anzeige „7/16" schreiben kann, ohne die
+    /// Zahl zu duplizieren.
+    /// </summary>
+    public static int RescheduleAttemptLimit => MaxRescheduleAttempts;
+
+    /// <summary>
+    /// F-M67: overload variant — one-shot recovery fire 10–30 min after a
+    /// transient service_busy stop. The quota reset is not involved; the window
+    /// is short because the SubDL server is usually back within minutes.
+    /// </summary>
+    /// <param name="upload">Direction: upload vs download.</param>
+    /// <param name="nowUtc">Stop moment; the fire lands JobSpacingMinutes after this (F-M152 rev.10).</param>
+    public void ScheduleOverloadFire(bool upload, DateTime nowUtc)
+    {
+        // F-M152 (rev.10): the overload/hourly-cap fire uses the configurable
+        // JobSpacingMinutes gap (same spacing as run-lock re-fires) instead of
+        // the old fixed 10..30 min window.
+        // F-M238: clamped like every other reader of this setting (5..120, the range
+        // the settings page enforces). It used Math.Max(1, …), so a hand-edited value
+        // above the GUI range produced a far longer spacing here than at any sibling
+        // deferral site — one setting with two meanings.
+        var spacing = 15; // default; Plugin.Instance config read below when available
+        try
+        {
+            spacing = Math.Clamp(
+                Jellyfin.Plugin.SubScribe.Plugin.Instance?.Configuration.JobSpacingMinutes ?? 15,
+                5,
+                120);
+        }
+        catch
+        {
+            spacing = 15; // plugin not ready (unit tests) - default gap
+        }
+
+        // service_busy overload is a rate-limit respacing → counted like the others.
+        if (!TryCountReschedule(upload ? "upload" : "download", "service_busy overload"))
+        {
+            return;
+        }
+
+        ScheduleRecoveryFire(upload, nowUtc.AddMinutes(spacing), overload: true);
+    }
+
+    private void ScheduleRecoveryFire(bool upload, DateTime fireAtUtc, bool overload)
+    {
+        ScheduleRecoveryFireInternal(upload, fireAtUtc, overload, alreadyJittered: false, why: "overload");
+    }
+
+    private void ScheduleRecoveryFireInternal(bool upload, DateTime fireAtUtc, bool overload, bool alreadyJittered, string why)
+    {
+        // F-M65 (user decision 09.09.2026): one recovery fire per direction, not one
+        // per run — if a direction already has a pending recovery fire, keep the
+        // existing one (first-wins) and skip the duplicate.
+        var existing = upload ? _recoveryFireUploadUtc : _recoveryFireDownloadUtc;
+        if (existing.HasValue)
+        {
+            LogUtil.Normal(_logger, 
+                "[Sub Scribe] Recovery fire already scheduled ({Direction}): {Existing:yyyy-MM-dd HH:mm} local — skipping duplicate (F-M65).",
+                upload ? "upload" : "download",
+                TimeZoneInfo.ConvertTimeFromUtc(existing.Value, TimeZoneInfo.Local));
+            return;
+        }
+
+        var fireAt = fireAtUtc;
+        // NOTE: the overload path (service_busy) and the respacing path
+        // (alreadyJittered) are COUNTED by their public entry points
+        // (ScheduleOverloadFire / ScheduleRecoveryFireAt) — never here, or one
+        // request would consume two reschedule slots.
+        if (!overload && !alreadyJittered)
+        {
+            // F-M65 user correction (09.09.2026): quota fires get 120..360 min of
+            // jitter ON TOP of the reset — NOT 0..30 min. Landing 02:00–06:59 UTC
+            // keeps this installation away from the 00:00 collective-restart herd
+            // (verified live: the 02:05 post-reset run died on a service_busy 429
+            // five minutes after reset while the panel showed only 24/2000 used —
+            // every API consumer restarts at exactly 00:00 UTC). Same anti-sync
+            // Rationale as (which dices 120..240 for the in-run wait).
+            // F-M152 (rev.11, user decision 17.09.2026): quota fires get 30..300 MINUTES
+            // of jitter on top of the reset — diced fresh per fire, crypto RNG,
+            // direction-independent (upload and download fires roll separately).
+            // Replaces the 5..30 window. Keeps away from the 00:00 UTC
+            // Collective-restart herd (rationale).
+            fireAt = fireAt.AddMinutes(30 + (int)(GetCryptoUInt32() % 271)); // +30..300 min
+        }
+
+        if (upload)
+        {
+            _recoveryFireUploadUtc = fireAt;
+            _recoveryFireUploadWhy = why;
+        }
+        else
+        {
+            _recoveryFireDownloadUtc = fireAt;
+            _recoveryFireDownloadWhy = why;
+        }
+
+        PersistRecoveryFires();
+
+        if (overload)
+        {
+            LogUtil.Normal(_logger, 
+                "[Sub Scribe] Overload recovery fire scheduled ({Direction}): {FireAt:yyyy-MM-dd HH:mm} local — SubDL was transiently overloaded (service_busy); retrying this direction once in 10–30 min (F-M67).",
+                upload ? "upload" : "download",
+                TimeZoneInfo.ConvertTimeFromUtc(fireAt, TimeZoneInfo.Local));
+        }
+        else if (alreadyJittered)
+        {
+            // Lock-busy / rate-limit reschedule: the caller already
+            // computed the exact time (now + JobSpacingMinutes) and no
+            // jitter applies to it. The old text claimed a quota reset with a
+            // 30..300 min jitter that never happened here — misleading in the log.
+            LogUtil.Normal(_logger, 
+                // F-M206: a respacing fire carries no jitter and must not claim a quota reset.
+                "[Sub Scribe] Recovery fire scheduled ({Direction}): {FireAt:yyyy-MM-dd HH:mm} local — respaced by JobSpacingMinutes after lock-busy or rate-limit (no jitter).",
+                upload ? "upload" : "download",
+                TimeZoneInfo.ConvertTimeFromUtc(fireAt, TimeZoneInfo.Local));
+        }
+        else
+        {
+            LogUtil.Normal(_logger, 
+                "[Sub Scribe] Recovery fire scheduled ({Direction}): quota reset {Reset:yyyy-MM-dd HH:mm} local + 30..300 min jitter → fire ~{FireAt:yyyy-MM-dd HH:mm} local — re-firing this direction once after the reset (F-M65, F-M152).",
+                upload ? "upload" : "download",
+                TimeZoneInfo.ConvertTimeFromUtc(fireAtUtc, TimeZoneInfo.Local),
+                TimeZoneInfo.ConvertTimeFromUtc(fireAt, TimeZoneInfo.Local));
+        }
+    }
+
+    public ScribeSchedulerCoordinator(ITaskManager taskManager, IApplicationPaths applicationPaths, ILogger<ScribeSchedulerCoordinator> logger)
+    {
+        Instance = this;
+        _taskManager = taskManager;
+        _logger = logger;
+        _configDirectory = applicationPaths.ConfigurationDirectoryPath;
+        LoadRecoveryFires();
+        LoadSchedulerState();
+        _loop = Task.Run(() => LoopAsync(_cts.Token));
+        LogUtil.Normal(_logger, 
+            "[Sub Scribe] Refetch scheduler started.");
+    }
+
+    /// <summary>
+    /// F-M48: fixed-time triggers are forbidden — all scheduled fires come from the
+    /// coordinator's random anchors. JF persists dashboard trigger edits as
+    /// {ConfigurationDirectory}/scheduledtasks/{TaskId}.js; installs that ran an
+    /// older version (or where the user edited triggers) still carry the old
+    /// DailyTrigger there. Remove the file and reload — LoadTriggers then falls
+    /// back to our empty GetDefaultTriggers().
+    /// </summary>
+    private void ClearStaleTriggers()
+    {
+        try
+        {
+            foreach (var worker in _taskManager.ScheduledTasks)
+            {
+                if (worker.ScheduledTask is not (ScribeDownloadTask or ScribeUploadTask or ScribePostprocessTask))
+                {
+                    continue;
+                }
+
+                var file = Path.Combine(_configDirectory, "scheduledtasks", worker.Id + ".js");
+                bool hadFile = File.Exists(file);
+                if (hadFile)
+                {
+                    File.Delete(file);
+                }
+
+                if (hadFile || worker.Triggers.Count > 0)
+                {
+                    LogUtil.Normal(_logger, 
+                        "[Sub Scribe] Scheduler: clearing {Count} stale trigger(s) from '{Task}' (fixed-time fires replaced by random anchors).",
+                        worker.Triggers.Count, worker.Name);
+                    worker.ReloadTriggerEvents(); // reloads from file → now empty defaults
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[Sub Scribe] Scheduler: stale-trigger cleanup failed: {Msg}", ex.Message);
+        }
+    }
+
+    private async Task LoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    ResetDailyRescheduleBudget(); // midnight may have passed while idle
+                    CheckAndFire();
+                    if (_stateDirty)
+                    {
+                        PersistSchedulerState();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError("[Sub Scribe] Scheduler tick failed: {Msg}", ex.Message);
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(TickSeconds), ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// True when the given plugin task type is registered with the TaskManager.
+    /// During early startup Jellyfin has not registered the plugin's tasks yet,
+    /// and QueueScheduledTask at that moment logs "Unable to find scheduled task
+    /// of type ... in QueueScheduledTask" and DROPS the fire silently. Every fire
+    /// path must therefore test this BEFORE it consumes its marker (or resets its
+    /// reschedule counter), so an unregistered task leaves the slot claimable and
+    /// the next 30-s tick retries it. Same guard class as the F-M65 recovery
+    /// fires, which had it for download/upload only (F-M212).
+    /// </summary>
+    /// <summary>
+    /// F-M448: true while Jellyfin is building or validating a library (or refreshing the metadata of
+    /// freshly imported items). A scan creates the item first and attaches its media streams when its
+    /// analysis runs — a seed that looks in between finds an item with no stream list at all.
+    /// </summary>
+    public bool IsLibraryScanRunning()
+    {
+        try
+        {
+            return _taskManager.ScheduledTasks.Any(t =>
+                t.State == MediaBrowser.Model.Tasks.TaskState.Running
+                && (string.Equals(t.ScheduledTask.Key, "RefreshLibrary", System.StringComparison.Ordinal)
+                    || string.Equals(t.ScheduledTask.Key, "RefreshMediaMetadata", System.StringComparison.Ordinal)));
+        }
+        catch
+        {
+            // A throwing probe must never stop a seed — it only costs the deferral.
+            return false;
+        }
+    }
+
+    private bool IsTaskRegistered<T>()
+        where T : IScheduledTask =>
+        _taskManager.ScheduledTasks.Any(t => t.ScheduledTask is T);
+
+    private void CheckAndFire()
+    {
+        var plugin = Plugin.Instance;
+        if (plugin == null)
+        {
+            return;
+        }
+
+        // Self-healing trigger cleanup (F-M48): runs every tick, idempotent, cheap.
+        // Fixed-time triggers are forbidden — scheduling belongs to this coordinator.
+        ClearStaleTriggers();
+
+        // F-M65: one-shot recovery fires (daily-limit stop with ContinueAfterLimit OFF).
+        // Each direction fires INDEPENDENTLY — only the direction that hit the limit
+        // gets re-fired; the other one is untouched. Consumed on fire.
+        var nowUtc = DateTime.UtcNow;
+        if (_recoveryFireDownloadUtc.HasValue && nowUtc >= _recoveryFireDownloadUtc.Value)
+        {
+            // (14.09.2026): during early startup the TaskManager may not
+            // have registered the plugin tasks yet — QueueScheduledTask then just
+            // logs 'Unable to find scheduled task' and drops the fire. Guard:
+            // only fire when the task is registered; otherwise keep the fire
+            // pending and retry on the next tick (30 s).
+            bool registered = IsTaskRegistered<ScribeDownloadTask>();
+            if (!registered)
+            {
+                return; // fire stays pending, file stays as backup
+            }
+
+            // Lock busy → defer by JobSpacingMinutes instead of dropping.
+            if (!Pipeline.PipelineRunLock.IsFree(_logger))
+            {
+                DeferFire(upload: false);
+                return;
+            }
+
+            var downReason = ReasonText("download", _recoveryFireDownloadWhy) ?? "quota window has reset";
+            _recoveryFireDownloadUtc = null;
+            _recoveryFireDownloadWhy = null;
+            ResetReschedule("download"); // really fired — clear the 16x counter
+            PersistRecoveryFires();
+            LogUtil.Normal(_logger, "[Sub Scribe] Recovery fire: download — {Reason}; queueing download run (F-M65, F-M475).", downReason);
+            _taskManager.QueueScheduledTask<ScribeDownloadTask>(new TaskOptions());
+            return;
+        }
+
+        if (_recoveryFireUploadUtc.HasValue && nowUtc >= _recoveryFireUploadUtc.Value)
+        {
+            // Same guard as download.
+            bool registeredUp = IsTaskRegistered<ScribeUploadTask>();
+            if (!registeredUp)
+            {
+                return; // fire stays pending
+            }
+
+            // Lock busy → defer.
+            if (!Pipeline.PipelineRunLock.IsFree(_logger))
+            {
+                DeferFire(upload: true);
+                return;
+            }
+
+            var upReason = ReasonText("upload", _recoveryFireUploadWhy) ?? "quota window has reset";
+            _recoveryFireUploadUtc = null;
+            _recoveryFireUploadWhy = null;
+            ResetReschedule("upload"); // really fired — clear the 16x counter
+            PersistRecoveryFires();
+            LogUtil.Normal(_logger, "[Sub Scribe] Recovery fire: upload — {Reason}; queueing upload run (F-M65, F-M475).", upReason);
+            _taskManager.QueueScheduledTask<ScribeUploadTask>(new TaskOptions());
+            return;
+        }
+
+        var config = plugin.Configuration;
+
+        // Weekly database refresh job — fired by the scheduler on the diced weekly
+        // anchor (same anchor the refetch uses), NOT by a JF trigger anymore.
+        // Runs even when both pipelines are disabled; respects the global lock
+        // (defer like every job) and dedups via marker (one run per anchor day).
+        // F-M111 (user decision 12.09.2026): ONE unified refetch interval for both
+        // directions (GUI General). No per-direction scheduling anymore — one
+        // rhythm drives the cycle tick (the dispatcher sequences seed→down→up).
+        //
+        // The "no scheduled refetch fires" decision for OnArrival/Manual is applied
+        // AFTER the three independent anchor jobs below, NOT here. Those jobs — refresh,
+        // OSHash refresh and upload postprocessing — each have their OWN setting and
+        // their own diced anchor, and are documented as independent of the pipeline.
+        // Gating them on RefetchInterval silenced all three: with RefetchInterval=Manual
+        // the tick returned before reaching them, so not one anchor-driven run ever
+        // happened (measured 26.09.2026 over every log: 0 "Database refresh fire at", 0
+        // "OSHash-refresh fire at", 0 "Postprocessing fire at" — the only runs were
+        // manual API triggers and one lock-recovery start).
+        var now = DateTime.Now;
+        // F-M368: `nowUtc` (declared above) is for deadlines, `now` is for anchors — local wall-clock
+        // time. Keep both and never mix them: the mixed comparison is what made a "re-fire at 15:40 UTC"
+        // look already expired at 16:25 local, and what silently dropped the retry afterwards.
+
+        // The database refresh runs regardless of pipeline switches (rationale).
+        // (14.09.2026): the refresh block no longer aborts the tick —
+        // both the deferred case (lock busy) and the fired case fall through
+        // to the run fires below. QueueScheduledTask only QUEUES; running the
+        // refresh beside a queued run fire is fine (the run lock serializes them;
+        // the refresh task itself re-checks and waits/bails via F-M94h).
+        {
+            // Own diced anchor — no longer the refetch weekly anchor.
+            int refreshWeekMod = config.PruneMode switch
+            {
+                Configuration.PruneMode.Weekly => 1,
+                Configuration.PruneMode.Monthly => 4,
+                Configuration.PruneMode.Yearly => 52,
+                // Manual, and its legacy spelling Never: no scheduled fire at all, the dashboard
+                // button is the only way in (F-M210a).
+                _ => 0
+            };
+            var refreshAnchor = IsWeeklyDaySpec(config.RandomPruneTime, now)
+                ? ParseWeeklySpec(config.RandomPruneTime, now)
+                : (DateTime?)null;
+            var refreshMarker = refreshAnchor?.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+            var refreshCadenceDue = refreshWeekMod > 0 && IsoWeek(now) % refreshWeekMod == 0;
+            // F-M368: the deferral is its own term. It used to sit INSIDE "due" as
+            // `|| now < _pruneDeferredUntil`, which cancelled the gate in the block below.
+            var refreshDeferPending = _pruneDeferredUntil != DateTime.MinValue;
+            var refreshDue = AnchorJobGate.IsDue(
+                now, refreshAnchor, refreshCadenceDue, _lastPruneMarker, refreshMarker, refreshDeferPending);
+            if (refreshDue && AnchorJobGate.DeferralElapsed(nowUtc, _pruneDeferredUntil))
+            {
+                if (!IsTaskRegistered<ScribeDatabaseRefreshTask>())
+                {
+                    return; // F-M212: task not registered yet — marker not consumed, retried next tick
+                }
+
+                if (Pipeline.PipelineRunLock.IsFree(_logger))
+                {
+                    _lastPruneMarker = refreshMarker;
+                    _stateDirty = true;
+                    _pruneDeferredUntil = DateTime.MinValue;
+                    _refreshFireWhy = null; // fired — the reason goes with the moment (F-M475)
+                    _stateDirty = true;
+                    ResetReschedule("refresh"); // fired — clear the 16x counter
+                    LogUtil.Normal(_logger, "[Sub Scribe] Database refresh fire at {Anchor:yyyy-MM-dd HH:mm} local ({Mode}).", (DateTime)refreshAnchor, config.PruneMode);
+                    _taskManager.QueueScheduledTask<ScribeDatabaseRefreshTask>(new TaskOptions());
+                }
+                else
+                {
+                    // Reschedule instead of window-bound retry — next
+                    // attempt JobSpacingMinutes out, regardless of the anchor window.
+                    if (TryCountReschedule("refresh", "lock-busy anchor"))
+                    {
+                        _pruneDeferredUntil = nowUtc.AddMinutes(Math.Max(1, config.JobSpacingMinutes));
+                        _refreshFireWhy = "lockbusy";
+                        _stateDirty = true;
+                        LogUtil.Normal(_logger, "[Sub Scribe] Database refresh deferred to {Until:HH:mm} local (lock busy).", _pruneDeferredUntil.ToLocalTime());
+                    }
+                }
+            }
+        }
+
+        // (user decision 14.09.2026): OSHash cache refresh on the diced
+        // WEEKLY anchor (same anchor as the refresh — the cadence menu already
+        // offers Weekly; a monthly reshash made no sense against it). Same
+        // reschedule mechanic as the refresh: busy lock → back off
+        // JobSpacingMinutes, NOT bound to the 30-min window.
+        {
+            // Own diced anchor.
+            var osAnchor = IsWeeklyDaySpec(config.RandomOshashTime, now)
+                ? ParseWeeklySpec(config.RandomOshashTime, now)
+                : (DateTime?)null;
+            var osMarker = osAnchor?.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+            // F-M368: same split as the refresh block — deferral separate from due, UTC deadline.
+            var osDeferPending = _oshashDeferredUntil != DateTime.MinValue;
+            var osDue = AnchorJobGate.IsDue(
+                now, osAnchor, cadenceDue: true, _lastOshashMarker, osMarker, osDeferPending);
+            if (osDue && AnchorJobGate.DeferralElapsed(nowUtc, _oshashDeferredUntil))
+            {
+                if (!IsTaskRegistered<ScribeOshashRefreshTask>())
+                {
+                    return; // F-M212: task not registered yet — marker not consumed, retried next tick
+                }
+
+                if (Pipeline.PipelineRunLock.IsFree(_logger))
+                {
+                    _lastOshashMarker = osMarker;
+                    _stateDirty = true;
+                    _oshashDeferredUntil = DateTime.MinValue;
+                    _oshashFireWhy = null; // fired — the reason goes with the moment (F-M475)
+                    _stateDirty = true;
+                    ResetReschedule("oshash"); // fired — clear the 16x counter
+                    LogUtil.Normal(_logger, "[Sub Scribe] OSHash-refresh fire at {Anchor:yyyy-MM-dd HH:mm} local.", (DateTime)osAnchor);
+                    _taskManager.QueueScheduledTask<ScribeOshashRefreshTask>(new TaskOptions());
+                }
+                else
+                {
+                    if (TryCountReschedule("oshash", "lock-busy anchor"))
+                    {
+                        _oshashDeferredUntil = nowUtc.AddMinutes(Math.Max(1, config.JobSpacingMinutes));
+                        _oshashFireWhy = "lockbusy";
+                        _stateDirty = true;
+                        LogUtil.Normal(_logger, "[Sub Scribe] OSHash-refresh deferred to {Until:HH:mm} local (lock busy).", _oshashDeferredUntil.ToLocalTime());
+                    }
+                }
+            }
+        }
+
+        // F-M445 (operator decision 02.11.2026): the fixed postprocessing anchor is GONE — no interval,
+        // no diced day+time, no minimum spacing. One armed moment decides, and every finished upload run
+        // re-arms it ("the last order wins"). Upload switched off means nothing is armed at all: the
+        // postprocessing resolves rejected uploads, work that only exists while the direction is on
+        // (F-M291).
+        if (config.IsUploadEnabled(SubtitleProvider.Subdl) && _postprocessArmUtc != DateTime.MinValue)
+        {
+            if (nowUtc >= _postprocessArmUtc)
+            {
+                if (!IsTaskRegistered<ScribePostprocessTask>())
+                {
+                    // F-M212: task not registered yet — keep the order, try again next tick.
+                    return;
+                }
+
+                if (!Pipeline.PipelineRunLock.IsFree(_logger))
+                {
+                    // Busy lock: push the order forward by the job spacing instead of probing every tick.
+                    ArmUploadPostprocessingAt(nowUtc.AddMinutes(config.JobSpacingMinutes), "run lock busy", why: "lockbusy");
+                }
+                else
+                {
+                    _postprocessArmUtc = DateTime.MinValue;
+                    _postprocessFireWhy = null; // fired — the reason goes with the moment (F-M475)
+                    _stateDirty = true;
+                    ResetReschedule("postprocess");
+                    LogUtil.Normal(
+                        _logger,
+                        "[Sub Scribe] Upload postprocessing fires now — armed 30-minute rhythm after the last upload run (F-M445).");
+                    _taskManager.QueueScheduledTask<ScribePostprocessTask>(new TaskOptions());
+                }
+            }
+        }
+
+        // ── Refetch rhythm (the unified pipeline cycle) ──────────────────────
+        // Only here does RefetchInterval decide anything: OnArrival and Manual mean
+        // "no automatic pipeline cycles". This gate deliberately sits AFTER the refresh,
+        // OSHash and postprocessing, which run on their own settings/anchors.
+        var effective = config.RefetchInterval;
+        if (effective is UpdateInterval.OnArrival || effective == UpdateInterval.Manual)
+        {
+            return; // no scheduled refetch fires (arrival-only or manual-only)
+        }
+
+        foreach (var fire in EffectiveFiresToday(effective, config, now))
+        {
+            if (now < fire.Effective)
+            {
+                continue;
+            }
+
+            if (fire.Marker == _lastFiredMarker)
+            {
+                continue;
+            }
+
+            // (user decision 29.09.2026): NO fire window. The 60-s window
+            // (2 * Tick) was a rollback against F-M156: it made a missed anchor wait for
+            // the NEXT regular window instead of being caught up, so the one-shot catch-up
+            // below had to exist as a workaround. A due slot now fires on the first tick
+            // where it is past-due and unconsumed — the same logic the database refresh,
+            // the OSHash refresh and postprocessing already have (they carry no window
+            // either). The marker is what prevents stacking: it is persisted, so a restart
+            // does not replay the slot, and a missed window is picked up on the next tick.
+
+            // A due anchor fire respects the global lock — if a run is
+            // active, defer (retry at now + JobSpacing) instead of dropping the
+            // window. The marker is NOT set on defer, so the slot stays claimable.
+            // F-M368: honour the spacing this block PRINTS. It stored nothing before, so the next tick
+            // (30 s) found the slot due again, deferred again, and burned the 16× budget in about eight
+            // minutes — after which it kept probing every tick without a log line. The deadline is armed
+            // on every deferral; the counter now only decides whether it gets logged.
+            if (!AnchorJobGate.DeferralElapsed(nowUtc, _refetchDeferredUntil))
+            {
+                return;
+            }
+
+            if (!Pipeline.PipelineRunLock.IsFree(_logger))
+            {
+                _refetchDeferredUntil = nowUtc.AddMinutes(JobSpacing(config));
+                _refetchFireWhy = "run holds the lock";
+                _stateDirty = true;
+
+                if (TryCountReschedule("refetch", "lock-busy anchor"))
+                {
+                    LogUtil.Normal(_logger,
+                        "[Sub Scribe] Refetch fire ({Anchor}) deferred — a run holds the lock; retrying at {Retry:yyyy-MM-dd HH:mm} local (F-M117).",
+                        fire.AnchorDesc, _refetchDeferredUntil.ToLocalTime());
+                }
+
+                return; // marker NOT set → slot retries after the spacing window
+            }
+
+            // F-M212: during early startup the tasks may not be registered yet, and
+            // QueueScheduledTask then drops the fire silently. Test this BEFORE the
+            // marker is consumed so the slot stays claimable for the next tick.
+            // Checked for both directions, since either may be missing.
+            if ((config.IsDownloadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<ScribeDownloadTask>())
+                || (config.IsUploadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<ScribeUploadTask>()))
+            {
+                return; // marker NOT set → fires on a later tick
+            }
+
+            _lastFiredMarker = fire.Marker;
+            _refetchDeferredUntil = DateTime.MinValue; // F-M368: fired — the spacing is spent
+            _refetchFireWhy = null;
+            _catchUpFired = false; // regular fire resets global catch-up state
+            _stateDirty = true;
+            ResetReschedule("refetch"); // fired — clear the 16x counter
+            ResetReschedule("download"); // regular anchor owns both directions again
+            ResetReschedule("upload");
+            LogUtil.Normal(_logger, 
+                "[Sub Scribe] Refetch fire: rhythm={Rhythm} anchor {Anchor} — queueing cycle (unified refetch interval, F-M111).",
+                effective, fire.AnchorDesc);
+
+            // F-M111 (user decision 12.09.2026): the unified refetch rhythm fires
+            // the cycle via the dispatcher (seed → down → up). The per-direction
+            // task queueing stays as the delivery mechanism — both tasks forward
+            // to TriggerCycle, which is idempotent (one cycle at a time).
+            bool downloadJoins = config.IsDownloadEnabled(SubtitleProvider.Subdl);
+            bool uploadJoins = config.IsUploadEnabled(SubtitleProvider.Subdl);
+
+            if (downloadJoins)
+            {
+                _taskManager.QueueScheduledTask<ScribeDownloadTask>(new TaskOptions());
+            }
+
+            if (uploadJoins)
+            {
+                _taskManager.QueueScheduledTask<ScribeUploadTask>(new TaskOptions());
+            }
+
+            return; // one fire per tick
+        }
+
+        // F-M156: one-shot global catch-up — REDUNDANT since the fire window was removed
+        // (F-M248, 29.09.2026). The regular fire above already claims every past-due,
+        // unconsumed slot, and its test (`now >= anchor`) is strictly weaker than this
+        // block's (`now > anchor + 60 s`), so the regular fire always wins and this code
+        // cannot be reached. It is kept rather than deleted because F-M156 is still a
+        // standing requirement and the block is the exact shape to restore if a window is
+        // ever reintroduced — but no path leads here today. Do not read a run without a
+        // "Refetch catch-up" line as a defect.
+        // If any of today's fire slots has
+        // already passed and no regular fire has run for the current slot, queue
+        // exactly one catch-up run — regardless of how many slots were missed.
+        var anyMissed = EffectiveFiresToday(effective, config, now)
+            .Any(f => now > f.Effective.AddSeconds(2 * TickSeconds) && _lastFiredMarker != f.Marker);
+        if (anyMissed && !_catchUpFired)
+        {
+            if (!Pipeline.PipelineRunLock.IsFree(_logger))
+            {
+                return; // still within catch-up window; retry on next tick
+            }
+
+            // F-M212: catch-up queueing needs the same registration guard as the
+            // regular fire — an early-startup miss would otherwise set _catchUpFired
+            // and drop the cycle for the whole day.
+            if ((config.IsDownloadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<ScribeDownloadTask>())
+                || (config.IsUploadEnabled(SubtitleProvider.Subdl) && !IsTaskRegistered<ScribeUploadTask>()))
+            {
+                return; // retry on a later tick
+            }
+
+            _catchUpFired = true;
+            _stateDirty = true;
+            LogUtil.Normal(_logger, 
+                "[Sub Scribe] Refetch catch-up: missed anchor window — queueing one cycle (F-M156).");
+
+            bool downloadJoins = config.IsDownloadEnabled(SubtitleProvider.Subdl);
+            bool uploadJoins = config.IsUploadEnabled(SubtitleProvider.Subdl);
+
+            if (downloadJoins)
+            {
+                _taskManager.QueueScheduledTask<ScribeDownloadTask>(new TaskOptions());
+            }
+
+            if (uploadJoins)
+            {
+                _taskManager.QueueScheduledTask<ScribeUploadTask>(new TaskOptions());
+            }
+        }
+    }
+
+    /// <summary>Spacing window for deferred jobs (config, clamped 5..120).</summary>
+    private static int JobSpacing(PluginConfiguration config) =>
+        Math.Clamp(config.JobSpacingMinutes is int m && m > 0 ? m : 15, 5, 120);
+
+    /// <summary>Pushes a pending recovery fire back by JobSpacing minutes
+    /// (lock was busy when it came due) and mirrors that to the fire file.
+    /// Counted against the reschedule limit (user decision 25.09.2026).</summary>
+    private void DeferFire(bool upload)
+    {
+        if (!TryCountReschedule(upload ? "upload" : "download", "lock-busy at due time"))
+        {
+            // Limit reached: stop pushing this fire forward. Drop it so the
+            // direction falls back to its regular anchor instead of spinning.
+            if (upload)
+            {
+                _recoveryFireUploadUtc = null;
+                _recoveryFireUploadWhy = null;
+            }
+            else
+            {
+                _recoveryFireDownloadUtc = null;
+                _recoveryFireDownloadWhy = null;
+            }
+
+            PersistRecoveryFires();
+            return;
+        }
+
+        var spaced = DateTime.UtcNow.AddMinutes(JobSpacing(Plugin.Instance!.Configuration));
+        if (upload)
+        {
+            _recoveryFireUploadUtc = spaced;
+        }
+        else
+        {
+            _recoveryFireDownloadUtc = spaced;
+        }
+
+        PersistRecoveryFires();
+        _logger.LogWarning(
+            "[Sub Scribe] Recovery fire ({Direction}) deferred — a run holds the lock; retrying at {Retry:yyyy-MM-dd HH:mm} UTC (F-M117).",
+            upload ? "upload" : "download",
+            spaced);
+    }
+
+    /// <summary>One fire slot: effective moment (the diced anchor), dedup marker, description.</summary>
+    private sealed record FireSlot(DateTime Effective, string Marker, string AnchorDesc);
+
+    /// <summary>All effective fire moments for today under the current interval.</summary>
+    private List<FireSlot> EffectiveFiresToday(UpdateInterval effective, PluginConfiguration config, DateTime now)
+    {
+        var result = new List<FireSlot>();
+        switch (effective)
+        {
+            case UpdateInterval.Daily:
+                AddSlot(result, ParseHhMm(config.RandomDailyTime, now), "daily " + config.RandomDailyTime);
+                break;
+
+            case UpdateInterval.TwiceDaily:
+                AddSlot(result, ParseHhMm(config.RandomDailyTime, now), "twice-daily " + config.RandomDailyTime);
+                AddSlot(result, ParseHhMm(config.RandomDailyTime, now)?.AddHours(12), "twice-daily+12h " + config.RandomDailyTime);
+                break;
+
+            case UpdateInterval.Weekly:
+                if (IsWeeklyDay(config, now))
+                {
+                    AddSlot(result, ParseWeekly(config, now), "weekly " + config.RandomWeeklyTime);
+                }
+
+                break;
+
+            case UpdateInterval.TwiceWeekly:
+                // anchor day + anchor+3d12h ≈ every 3.5 days (F-M47 mapping)
+                if (IsWeeklyDay(config, now))
+                {
+                    AddSlot(result, ParseWeekly(config, now), "twice-weekly " + config.RandomWeeklyTime);
+                }
+
+                if (IsWeeklyDay(config, now.AddDays(-3)) && ParseWeekly(config, now.AddDays(-3)).HasValue)
+                {
+                    var second = ParseWeekly(config, now.AddDays(-3))!.Value.AddHours(12);
+                    AddSlot(result, second, "twice-weekly+3.5d " + config.RandomWeeklyTime);
+                }
+
+                break;
+
+            case UpdateInterval.Monthly:
+                if (now.Day == config.RandomMonthlyDay)
+                {
+                    AddSlot(result, ParseHhMm(config.RandomMonthlyTime, now), $"monthly day {config.RandomMonthlyDay} {config.RandomMonthlyTime}");
+                }
+
+                break;
+        }
+
+        return result;
+    }
+
+    // (user decision 12.09.2026): no per-fire jitter anymore — runs are
+    // processed sequentially (one queue), so simultaneous anchors across
+    // installations are harmless.
+    private void AddSlot(List<FireSlot> list, DateTime? anchor, string desc)
+    {
+        if (anchor == null)
+        {
+            return;
+        }
+
+        var effective = anchor.Value;
+        if (effective.Date != anchor.Value.Date && anchor.Value.Date == DateTime.Today.AddDays(1))
+        {
+            return; // rolled past midnight into tomorrow — not today's slot
+        }
+
+        list.Add(new FireSlot(effective, effective.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture), desc));
+    }
+
+    /// <summary>Parses "HH:mm" into today's DateTime (local). Null when malformed.</summary>
+    private static DateTime? ParseHhMm(string? value, DateTime now)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var parts = value.Split(':');
+        if (parts.Length != 2 || !int.TryParse(parts[0], out int h) || !int.TryParse(parts[1], out int m))
+        {
+            return null;
+        }
+
+        if (h < 0 || h > 23 || m < 0 || m > 59)
+        {
+            return null;
+        }
+
+        return now.Date.AddHours(h).AddMinutes(m);
+    }
+
+    /// <summary>Parses "D HH:mm" (D=1..7 Mon..Sun) into today's DateTime. Null when malformed.</summary>
+    private static DateTime? ParseWeekly(PluginConfiguration config, DateTime now)
+        => ParseWeeklySpec(config.RandomWeeklyTime, now);
+
+    /// <summary>Same "D HH:mm" parsing for the dedicated refresh/oshash anchors.</summary>
+    private static DateTime? ParseWeeklySpec(string? spec, DateTime now)
+    {
+        if (string.IsNullOrWhiteSpace(spec))
+        {
+            return null;
+        }
+
+        var parts = spec.Split(' ');
+        return parts.Length == 2 ? ParseHhMm(parts[1], now) : null;
+    }
+
+    /// <summary>Parses the "HH:mm" portion of a "D HH:mm" weekly anchor for daily cadences.</summary>
+    private static DateTime? ParseHhMmFromWeeklySpec(string? spec, DateTime now)
+    {
+        if (string.IsNullOrWhiteSpace(spec))
+        {
+            return null;
+        }
+
+        var parts = spec.Split(' ');
+        if (parts.Length != 2)
+        {
+            return null;
+        }
+
+        return ParseHhMm(parts[1], now);
+    }
+
+
+    /// <summary>True when today's weekday matches the diced weekly anchor "D".</summary>
+    private static bool IsWeeklyDay(PluginConfiguration config, DateTime now)
+        => IsWeeklyDaySpec(config.RandomWeeklyTime, now);
+
+    /// <summary>Day-match for the dedicated refresh/oshash anchors.</summary>
+    private static bool IsWeeklyDaySpec(string? spec, DateTime now)
+    {
+        if (string.IsNullOrWhiteSpace(spec))
+        {
+            return false;
+        }
+
+        var parts = spec.Split(' ');
+        if (parts.Length != 2 || !int.TryParse(parts[0], out int d) || d < 1 || d > 7)
+        {
+            return false;
+        }
+
+        int todayD = now.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)now.DayOfWeek;
+        return todayD == d;
+    }
+
+    /// <summary>ISO-8601 week number (1..53) for cadence gating.</summary>
+    private static int IsoWeek(DateTime date)
+    {
+        var cal = System.Globalization.CultureInfo.InvariantCulture.Calendar;
+        return cal.GetWeekOfYear(date.Date, System.Globalization.CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
+    }
+
+    /// <summary>F-M57: rhythm → approximate day distance (for "shorter rhythm wins").</summary>
+    private static int RhythmDays(UpdateInterval interval) => interval switch
+    {
+        UpdateInterval.Daily => 1,
+        UpdateInterval.TwiceDaily => 0, // twice a day — tightest
+        UpdateInterval.TwiceWeekly => 3,
+        UpdateInterval.Weekly => 7,
+        UpdateInterval.Monthly => 30,
+        _ => int.MaxValue // Manual/OnArrival/unknown
+    };
+
+    /// <summary>F-M116: mirror pending recovery fires to recovery-fires.json
+    /// (UTC ISO-8601, round-trip 'O'); consumed keys are written as null.</summary>
+    private void PersistRecoveryFires()
+    {
+        try
+        {
+            // F-M475: the reason token travels with the moment, so a restart keeps both. Tokens carry
+            // no ',' and no ':' — LoadRecoveryFires splits on exactly those.
+            var payload = string.Format(
+                CultureInfo.InvariantCulture,
+                "{{\"download\":\"{0}\",\"upload\":\"{1}\",\"downloadWhy\":\"{2}\",\"uploadWhy\":\"{3}\"}}",
+                _recoveryFireDownloadUtc?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty,
+                _recoveryFireUploadUtc?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty,
+                _recoveryFireDownloadUtc.HasValue ? (_recoveryFireDownloadWhy ?? string.Empty) : string.Empty,
+                _recoveryFireUploadUtc.HasValue ? (_recoveryFireUploadWhy ?? string.Empty) : string.Empty);
+            File.WriteAllText(Path.Combine(_configDirectory, RecoveryFile), payload);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[Sub Scribe] Recovery-fire persist failed: {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>F-M116: reload pending recovery fires on startup. Past-due fires
+    /// stay as-is — CheckAndFire consumes them on the first tick (immediate fire).</summary>
+    private void LoadRecoveryFires()
+    {
+        try
+        {
+            var file = Path.Combine(_configDirectory, RecoveryFile);
+            if (!File.Exists(file))
+            {
+                return;
+            }
+
+            var payload = File.ReadAllText(file);
+            bool any = false;
+            foreach (var part in payload.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var kv = part.Split(':', 2);
+                if (kv.Length != 2)
+                {
+                    continue;
+                }
+
+                var raw = kv[1].Trim().Trim('"', '}');
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    continue;
+                }
+
+                // F-M475: the reason tokens come first — their keys also contain "download"/"upload",
+                // so a date parse on them would be skipped anyway, but the ORDER must be explicit.
+                if (kv[0].Contains("Why", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (kv[0].Contains("download", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _recoveryFireDownloadWhy = string.IsNullOrWhiteSpace(raw) ? null : raw;
+                    }
+                    else if (kv[0].Contains("upload", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _recoveryFireUploadWhy = string.IsNullOrWhiteSpace(raw) ? null : raw;
+                    }
+
+                    continue;
+                }
+
+                if (DateTime.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var when))
+                {
+                    if (kv[0].Contains("download", StringComparison.Ordinal))
+                    {
+                        _recoveryFireDownloadUtc = when.ToUniversalTime();
+                    }
+                    else if (kv[0].Contains("upload", StringComparison.Ordinal))
+                    {
+                        _recoveryFireUploadUtc = when.ToUniversalTime();
+                    }
+                }
+            }
+
+            if (_recoveryFireDownloadUtc.HasValue || _recoveryFireUploadUtc.HasValue)
+            {
+                LogUtil.Normal(_logger, 
+                    "[Sub Scribe] Recovery fires restored from disk: download {D:yyyy-MM-dd HH:mm} UTC, upload {U:yyyy-MM-dd HH:mm} UTC (F-M116).",
+                    _recoveryFireDownloadUtc ?? DateTime.MinValue,
+                    _recoveryFireUploadUtc ?? DateTime.MinValue);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[Sub Scribe] Recovery-fire reload failed: {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>(user decision 29.09.2026): mirror the WHOLE scheduler state to
+    /// scheduler-state.json. Every dedup test in this class is answered against a RAM
+    /// field, so without this a Jellyfin restart re-claims slots that already fired
+    /// today and re-runs work that was done: measured on prod 28.09.2026 (OSHash anchor
+    /// Sunday 07:46) 23 restarts produced 22 OSHash fires against ONE real anchor fire,
+    /// and postprocessing fired 22 times with 20 of them 0-1 s after a restart. The
+    /// marker counts the CLAIM, not the outcome — a run that fails after being queued
+    /// stays consumed for the day, exactly as it did before.
+    /// Written at most once per tick and only when something actually changed.</summary>
+    private void PersistSchedulerState()
+    {
+        try
+        {
+            var payload = string.Format(
+                CultureInfo.InvariantCulture,
+                "{{\"refresh\":\"{0}\",\"oshash\":\"{1}\",\"postprocess\":\"{2}\",\"fired\":\"{3}\","
+                // F-M445: "postprocessDefer" keeps its field name — it now carries the ARMED moment
+                // rather than a lock-busy deferral, so an existing state file keeps working.
+                + "\"catchup\":{4},\"refreshDefer\":\"{5}\",\"oshashDefer\":\"{6}\",\"postprocessDefer\":\"{7}\",\"refetchDefer\":\"{8}\","
+                // F-M475: the reason tokens travel with their moments, so a restart does not turn a
+                // named retry into an anonymous one.
+                + "\"refreshWhy\":\"{9}\",\"oshashWhy\":\"{10}\",\"postprocessWhy\":\"{11}\"}}",
+                _lastPruneMarker ?? string.Empty,
+                _lastOshashMarker ?? string.Empty,
+                string.Empty, // F-M445: no postprocessing marker any more — the armed moment decides
+                _lastFiredMarker ?? string.Empty,
+                _catchUpFired ? "true" : "false",
+                _pruneDeferredUntil.ToString("O", CultureInfo.InvariantCulture),
+                _oshashDeferredUntil.ToString("O", CultureInfo.InvariantCulture),
+                _postprocessArmUtc.ToString("O", CultureInfo.InvariantCulture),
+                _refetchDeferredUntil.ToString("O", CultureInfo.InvariantCulture),
+                _refreshFireWhy ?? string.Empty,
+                _oshashFireWhy ?? string.Empty,
+                _postprocessFireWhy ?? string.Empty);
+            File.WriteAllText(Path.Combine(_configDirectory, SchedulerStateFile), payload);
+            _stateDirty = false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[Sub Scribe] Scheduler-state persist failed: {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>(user decision 29.09.2026): reload the scheduler state on startup. A
+    /// marker restored from disk is already consumed for its day, so the due-test skips
+    /// the slot until the next anchor day — which is what stops a restart from replaying
+    /// it. A missing or unreadable file simply leaves the fields at their defaults (the
+    /// pre-persist behaviour), so a fresh install or a deleted file is never worse.</summary>
+    private void LoadSchedulerState()
+    {
+        try
+        {
+            var file = Path.Combine(_configDirectory, SchedulerStateFile);
+            if (!File.Exists(file))
+            {
+                return;
+            }
+
+            var payload = File.ReadAllText(file);
+            // Split on ',' then ':' — the values carry no comma (markers are digits,
+            // instants use the round-trip 'O' format, which has no separator conflict).
+            var fields = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var part in payload.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var kv = part.Split(':', 2);
+                if (kv.Length != 2)
+                {
+                    continue;
+                }
+
+                fields[kv[0].Trim().TrimStart('{').Trim('"')] =
+                    kv[1].Trim().Trim('"', '}', ' ');
+            }
+
+            if (fields.TryGetValue("refresh", out var r) && !string.IsNullOrWhiteSpace(r))
+            {
+                _lastPruneMarker = r;
+            }
+
+            if (fields.TryGetValue("oshash", out var o) && !string.IsNullOrWhiteSpace(o))
+            {
+                _lastOshashMarker = o;
+            }
+
+            if (fields.TryGetValue("fired", out var f) && !string.IsNullOrWhiteSpace(f))
+            {
+                _lastFiredMarker = f;
+            }
+
+            if (fields.TryGetValue("catchup", out var c)
+                && bool.TryParse(c, out var catchUp))
+            {
+                _catchUpFired = catchUp;
+            }
+
+            _pruneDeferredUntil = ParseInstant(fields, "refreshDefer");
+            _oshashDeferredUntil = ParseInstant(fields, "oshashDefer");
+            // F-M445: the armed moment survives a restart — an upload run that finished before the
+            // restart still gets its postprocessing.
+            var armed = ParseInstant(fields, "postprocessDefer");
+            _postprocessArmUtc = armed == DateTime.MinValue ? DateTime.MinValue : AnchorJobGate.NormalizeDeadline(armed);
+            _refetchDeferredUntil = ParseInstant(fields, "refetchDefer");
+            // F-M475: a token without its moment would be a stray note — take it only when the moment
+            // came back too, and drop it when the file has none (older state file).
+            _refreshFireWhy = _pruneDeferredUntil == DateTime.MinValue ? null : ParseToken(fields, "refreshWhy");
+            _oshashFireWhy = _oshashDeferredUntil == DateTime.MinValue ? null : ParseToken(fields, "oshashWhy");
+            _postprocessFireWhy = _postprocessArmUtc == DateTime.MinValue ? null : ParseToken(fields, "postprocessWhy");
+
+            LogUtil.Normal(_logger,
+                "[Sub Scribe] Scheduler state restored from disk: refresh {Refresh}, oshash {Oshash}, postprocessing armed for {Pp}, refetch slot {Fired}, catch-up {CatchUp}.",
+                _lastPruneMarker ?? "-",
+                _lastOshashMarker ?? "-",
+                _postprocessArmUtc == DateTime.MinValue ? "-" : _postprocessArmUtc.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+                _lastFiredMarker ?? "-",
+                _catchUpFired);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[Sub Scribe] Scheduler-state reload failed: {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// F-M475: reads one reason token. Kept separate from <see cref="ParseInstant"/> because a token is
+    /// text: parsing it as a date would fail and quietly leave the field empty.
+    /// </summary>
+    /// <param name="fields">The parsed state file.</param>
+    /// <param name="key">The field name.</param>
+    /// <returns>The token, or null when absent or blank.</returns>
+    private static string? ParseToken(Dictionary<string, string> fields, string key)
+        => fields.TryGetValue(key, out var raw) && !string.IsNullOrWhiteSpace(raw) ? raw : null;
+
+    /// <summary>Reads one UTC instant written in round-trip format; MinValue when absent
+    /// or unparseable, which is the "no deferral pending" value the due-tests expect.</summary>
+    private static DateTime ParseInstant(Dictionary<string, string> fields, string key)
+    {
+        if (fields.TryGetValue(key, out var raw)
+            && DateTime.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var when))
+        {
+            // F-M368: a state file written before the fix carries LOCAL deadlines next to UTC ones, and
+            // DateTime comparisons ignore Kind — normalise so the mixed clock cannot survive an upgrade.
+            return AnchorJobGate.NormalizeDeadline(when);
+        }
+
+        return DateTime.MinValue;
+    }
+
+    public void Dispose()
+    {
+        Instance = null;
+        _cts.Cancel();
+        _cts.Dispose();
+        try
+        {
+            _loop.Wait(TimeSpan.FromSeconds(5));
+        }
+        catch
+        {
+        }
+    }
+}

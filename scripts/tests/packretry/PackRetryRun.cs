@@ -1,10 +1,10 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
 // Software Foundation, either version 3 of the License, or (at your option) any
-// later version. SubDL Scribe is distributed WITHOUT ANY WARRANTY; without
+// later version. Sub Scribe is distributed WITHOUT ANY WARRANTY; without
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See the GNU General Public License for more details.
 //
@@ -25,9 +25,9 @@
 using System;
 using System.IO;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 namespace PackRetryRun;
 
@@ -109,7 +109,7 @@ internal static class Program
 
         // ── 4. Wiring: the retry exists and is fed from the cache ───────────────
         Console.WriteLine("4. Source contract");
-        var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlApiClient.cs"));
+        var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeApiClient.cs"));
         Check(api.Contains("public List<SubtitleUnpackFile> FindUnpackFiles(int season, int episode, bool? hearingImpaired = null)", StringComparison.Ordinal),
             "the candidate publishes the retry list with the HI filter");
         Check(api.Contains("f.HearingImpaired == hearingImpaired.Value", StringComparison.Ordinal),
@@ -166,6 +166,42 @@ internal static class Program
               && correctedText.Contains("\n2\n00:00:04,000", StringComparison.Ordinal),
             "and what is left is renumbered 1, 2 …", correctedText.Split('\n').FirstOrDefault() ?? "");
 
+        // ── 5b. F-M536: the site serves some languages in a legacy codepage ──────────────
+        // Measured on the site's own files on 16.11.2026: Arabic arrived as cp1256 (Prison Break
+        // 1x22), Greek as cp1253 (Game of Thrones 1x10), Bulgarian as cp1251 (the same episode) —
+        // and every one of them was rendered as U+FFFD before this, because DecodeSrt only knew BOM
+        // and UTF-8. The language of the candidate decides, not a guess over all codepages.
+        Console.WriteLine("5b. Legacy codepages (F-M536)");
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        const string arabisch = "1\n00:00:01,000 --> 00:00:02,000\nفي الحلقات السابقة\n";
+        const string bulgarisch = "1\n00:00:01,000 --> 00:00:02,000\nПогледни ме.\n";
+        const string griechisch = "1\n00:00:01,000 --> 00:00:02,000\nΗ Epoca Team παρουσιάζει\n";
+
+        string AusLegacy(string text, int codepage, string? language)
+            => System.Text.Encoding.UTF8.GetString(
+                DownloadPipeline.CorrectInvisibleCues(
+                    System.Text.Encoding.GetEncoding(codepage).GetBytes(text), language)!);
+
+        var arabischRueck = AusLegacy(arabisch, 1256, "ar");
+        Check(arabischRueck.Contains("في الحلقات السابقة", StringComparison.Ordinal) && !arabischRueck.Contains('\uFFFD'),
+            "cp1256 Arabic is read as Arabic (F-M536)", arabischRueck.Split('\n').Skip(2).FirstOrDefault() ?? "");
+        var bulgarischRueck = AusLegacy(bulgarisch, 1251, "bg");
+        Check(bulgarischRueck.Contains("Погледни ме.", StringComparison.Ordinal) && !bulgarischRueck.Contains('\uFFFD'),
+            "cp1251 Bulgarian is read as Bulgarian (F-M536)", bulgarischRueck.Split('\n').Skip(2).FirstOrDefault() ?? "");
+        var griechischRueck = AusLegacy(griechisch, 1253, "gre");
+        Check(griechischRueck.Contains("Η Epoca Team παρουσιάζει", StringComparison.Ordinal) && !griechischRueck.Contains('\uFFFD'),
+            "cp1253 Greek is read as Greek, addressed by its ISO code (F-M536)",
+            griechischRueck.Split('\n').Skip(2).FirstOrDefault() ?? "");
+        Check(AusLegacy(arabisch, 1256, null).Contains('\uFFFD'),
+            "without a language nothing is guessed — the old behaviour is kept, not papered over (F-M536)");
+
+        // The codepage must never touch a payload that IS UTF-8: strict UTF-8 wins first.
+        string utf8Arabisch = System.Text.Encoding.UTF8.GetString(
+            DownloadPipeline.CorrectInvisibleCues(System.Text.Encoding.UTF8.GetBytes(arabisch), "ar")!);
+        Check(utf8Arabisch.Contains("في الحلقات السابقة", StringComparison.Ordinal),
+            "a UTF-8 payload stays UTF-8 even when the language has a codepage (F-M536)");
+
+
         // The operator's condition, as an assertion: md5 over the CORRECTED bytes is the md5 the
         // registry stores for the state.
         string hashOfCorrected = Convert.ToHexString(
@@ -195,13 +231,13 @@ internal static class Program
         Console.WriteLine("6. Order of operations");
         var wrapper = pipe.IndexOf("DownloadCandidateRawAsync(", StringComparison.Ordinal);
         var gate = pipe.IndexOf("string? gateFail = QaGateFailure(bytes);", StringComparison.Ordinal);
-        Check(wrapper > 0 && pipe.Contains("byte[]? corrected = CorrectInvisibleCues(raw);", StringComparison.Ordinal),
+        Check(wrapper > 0 && pipe.Contains("byte[]? corrected = CorrectInvisibleCues(raw, cand.Language);", StringComparison.Ordinal),
             "the fetched payload is corrected in the download itself");
         Check(gate > 0, "the gates run on the corrected bytes");
         Check(pipe.Contains("byte[] writeBytes = bytes;", StringComparison.Ordinal)
               && pipe.Contains("ComputeHash(content)", StringComparison.Ordinal),
             "the write and the state hash take the same, already corrected bytes");
-        Check(pipe.Contains("siblingBytes = CorrectInvisibleCues(siblingBytes)", StringComparison.Ordinal),
+        Check(pipe.Contains("siblingBytes = CorrectInvisibleCues(siblingBytes, lang)", StringComparison.Ordinal),
             "a retried sibling of the archive is corrected as well");
         Check(pipe.Contains("var hiBytes = CorrectInvisibleCues(", StringComparison.Ordinal),
             "so is the hearing-impaired file");
@@ -218,9 +254,11 @@ internal static class Program
         // The planner lives in the UPLOAD pipeline — reading download source here would assert about
         // a file that never contained the line.
         var upload = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
-        Check(upload.Contains("Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi)", StringComparison.Ordinal),
+        // F-M571: die Staffel-Pack-Frage kommt jetzt aus dem Lauf-Cache (PacksOf), nicht je Paar aus dem
+        // Store — die Aussage bleibt dieselbe: ein schon gepacktes Paar wird nicht erneut geplant.
+        Check(upload.Contains("PacksOf(entry.Key.Item1, entry.Key.Item2).Contains((", StringComparison.Ordinal),
             "and the fill-only plan skips a season that is already packed");
-        Check(upload.IndexOf("Registry.HasPack(", StringComparison.Ordinal) < upload.IndexOf("already inside a pack, nothing is re-sent", StringComparison.Ordinal),
+        Check(upload.IndexOf("PacksOf(entry.Key.Item1, entry.Key.Item2).Contains((", StringComparison.Ordinal) < upload.IndexOf("already inside a pack, nothing is re-sent", StringComparison.Ordinal),
             "the check comes before the decision it guards");
 
         // ── 8. F-M391: the duplicate goes first, the pack second ────────────────
@@ -229,8 +267,8 @@ internal static class Program
             "the client can delete one published entry by id");
         Check(api.Contains("/user/deletePublishedSubtitle?id=", StringComparison.Ordinal),
             "over the published route — deleteSubtitle answers true and deletes nothing");
-        Check(coord.Contains("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
-            "the coordinator deletes the absorbed single");
+        Check(!coord.Contains("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
+            "F-M585: the coordinator no longer deletes the absorbed single — it stays beside the pack");
         Check(coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal)
               < coord.IndexOf("UploadSeasonPackAsync(", StringComparison.Ordinal),
             "BEFORE it uploads the pack, not after");
@@ -258,9 +296,9 @@ internal static class Program
         Check(coord.Contains("season pack already up with these members", StringComparison.Ordinal),
             "the buffer path refuses a pack that is already up with the same members");
         Check(coord.IndexOf("_registry.GetPack(key.ImdbId, key.Season, key.Lang, key.Hi)", StringComparison.Ordinal)
-              < coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
-            "and it decides that BEFORE anything is deleted");
-        var refresh = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlDatabaseRefreshTask.cs"));
+              < coord.IndexOf("await _api.UploadSeasonPackAsync", StringComparison.Ordinal),
+            "and it decides that BEFORE the pack is sent");
+        var refresh = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeDatabaseRefreshTask.cs"));
         Check(refresh.Contains("registry.PruneOrphanedPacks()", StringComparison.Ordinal),
             "the database refresh prunes orphaned pack rows");
         Check(reg.Contains("public int PruneOrphanedPacks()", StringComparison.Ordinal),
@@ -276,8 +314,8 @@ internal static class Program
             "the coordinator refuses the whole pack, not just that member");
         Check(coord.Contains("came from SubDL itself", StringComparison.Ordinal)
               && coord.IndexOf("_registry.IsSubdlOrigin", StringComparison.Ordinal)
-                 < coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal),
-            "and it refuses BEFORE anything is deleted");
+                 < coord.IndexOf("await _api.UploadSeasonPackAsync", StringComparison.Ordinal),
+            "and it refuses BEFORE the pack is sent");
 
         // ── 14. F-M399: nur die packs-Zeile belegt einen Pack, keine SubdlId an den Mitgliedern ──
         Console.WriteLine("14. A single upload's id is not a pack");
@@ -285,7 +323,7 @@ internal static class Program
             "the plan no longer treats 'has a SubdlId' as 'is inside a pack'");
         Check(!upload.Contains("inPack.Add(pair)", StringComparison.Ordinal),
             "and the member-id heuristic is gone with it");
-        Check(upload.Contains("Registry.HasPack(entry.Key.Item1, entry.Key.Item2, pair.Key.Lang, pair.Key.Hi)", StringComparison.Ordinal),
+        Check(upload.Contains("PacksOf(entry.Key.Item1, entry.Key.Item2).Contains((", StringComparison.Ordinal),
             "the packs row is the only proof that a season is packed");
 
         // ── 15. F-M405: eine Extraktion je Datei, nicht je Sprache ───────────────
@@ -317,18 +355,18 @@ internal static class Program
         var coordPackSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
         Check(coordPackSrc.Contains("carry no SubDL id in the store"), "F-M412: a member without a SubDL id is named");
         Check(coordPackSrc.IndexOf("undeletable", StringComparison.Ordinal)
-              < coordPackSrc.IndexOf("DeletePublishedSubtitleAsync"), "F-M412: the note comes before the pack is sent");
+              < coordPackSrc.IndexOf("await _api.UploadSeasonPackAsync"), "F-M412: the note comes before the pack is sent");
 
         // ── 19. F-M413: die Id kommt aus mySubtitles ────────────────────────────
         Console.WriteLine("19. The upload id is taken from mySubtitles");
-        Check(upload.Contains("ResolveOwnUploadIdAsync") && upload.Contains("ListMySubtitlesAsync(ct, maxPages: 2)"),
-            "F-M413: a single upload resolves its id right after the upload");
-        Check(upload.Contains("upload id {Id} taken from mySubtitles"),
-            "F-M413: the resolution is logged");
+        Check(upload.Contains("ResolveDeferredUploadIdsAsync") && upload.Contains("ListMySubtitlesAsync(ct, maxPages: 1)"),
+            "F-M413/F-M588: a single upload resolves its id from mySubtitles — once at the end of the run");
+        Check(upload.Contains("the SubDL id is read back once at the end of the run (F-M588)"),
+            "F-M413/F-M588: the deferral is logged on the upload");
 
         // ── 20. F-M414: dieselbe Methode für Packs ──────────────────────────────
         Console.WriteLine("20. Packs resolve their id the same way");
-        Check(coordPackSrc.Contains("ResolveOwnPackIdAsync") && coordPackSrc.Contains("ListMySubtitlesAsync(ct, maxPages: 2)"),
+        Check(coordPackSrc.Contains("ResolveOwnPackIdAsync") && coordPackSrc.Contains("ListMySubtitlesAsync(ct, maxPages: 1)"),
             "F-M414: a pack resolves its id from mySubtitles");
         Check(upload.Contains("MatchesRelease") && upload.Contains("MapToSubdlName"),
             "F-M414: the match runs over the release name and the written language");
@@ -337,7 +375,7 @@ internal static class Program
         Console.WriteLine("21. The pack check runs before the extraction");
         var m415Start = coordPackSrc.IndexOf("FillOnlyAsync", StringComparison.Ordinal);
         var fillBody = m415Start > 0 ? coordPackSrc.Substring(m415Start) : string.Empty;
-        Check(fillBody.Contains("HasPack(", StringComparison.Ordinal)
+        Check(fillBody.Contains("HasPack(")
               && fillBody.Contains("nothing is extracted", StringComparison.Ordinal),
             "F-M415: a season already up as a pack is skipped before any extraction");
 
@@ -349,7 +387,9 @@ internal static class Program
 
         // ── 23. F-M417: Store vor Dateinamen vor Extraktion ─────────────────────
         Console.WriteLine("23. The store is asked before the release names");
-        var langAt = upload.IndexOf("LanguagesInSeason(", StringComparison.Ordinal);
+        // F-M575: die Staffelfrage heisst jetzt LanguagesOf (Sammel-Karte) — der Punkt der Pruefung
+        // bleibt die Reihenfolge: Store vor Release-Gruppe.
+        var langAt = upload.IndexOf("LanguagesOf(", StringComparison.Ordinal);
         var groupAt = upload.IndexOf("SeasonPack.ReleaseGroup(item.Path)", StringComparison.Ordinal);
         Check(langAt >= 0 && groupAt > langAt,
             "F-M417: languages and packs are looked up before the release group is read");
@@ -360,10 +400,10 @@ internal static class Program
         Console.WriteLine("24. Every upload names its SubDL id");
         Check(upload.Contains("upload id {Id} from the upload answer for", StringComparison.Ordinal),
             "F-M421: an id that came with the answer is named too, not only a fetched one");
-        Check(upload.Contains("upload id {Id} taken from mySubtitles for", StringComparison.Ordinal),
-            "F-M421: an id fetched from mySubtitles keeps its own line");
-        Check(upload.Contains("no upload id for {File}", StringComparison.Ordinal)
-              && upload.Contains("no handle to delete it", StringComparison.Ordinal),
+        Check(upload.Contains("deferred upload ids: {Hit} of {Open} assigned with one list fetch (F-M588)", StringComparison.Ordinal),
+            "F-M421: the fetch that brings the ids names what it assigned");
+        Check(upload.Contains("still have no SubDL id", StringComparison.Ordinal)
+              && upload.Contains("no handle to delete them", StringComparison.Ordinal),
             "F-M421: an upload without an id warns instead of staying silent");
         Check(coordPackSrc.Contains("no pack id for {Imdb} S{Season}", StringComparison.Ordinal),
             "F-M421: a pack without an id names the fallback to its name");
@@ -376,7 +416,7 @@ internal static class Program
 
         // ── 26. F-M423: bereits veröffentlichte Uploads lassen sich in die Registry übernehmen ─
         Console.WriteLine("26. Published uploads can be adopted into the registry");
-        var adopt = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlAdoptController.cs"));
+        var adopt = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeAdoptController.cs"));
         Check(adopt.Contains("AdoptUploads", StringComparison.Ordinal)
               && adopt.Contains("SubtitleStatus.Uploaded", StringComparison.Ordinal)
               && adopt.Contains("subdlId: entry.SubdlId", StringComparison.Ordinal),
@@ -407,8 +447,8 @@ internal static class Program
             "F-M429: the pack phase sits textually before the item loop");
         Check(upload.Contains("_packAbsorbed.Add((packImdb, packSeason, packLang, packHi))", StringComparison.Ordinal),
             "a pack that went up is remembered with its series, season, language and variant");
-        Check(upload.Contains("carried by the pack built in this run, no single beside it", StringComparison.Ordinal),
-            "a position the pack carries is not uploaded single");
+        Check(upload.Contains("carried by the pack built in this run and sent as a single beside it (F-M585", StringComparison.Ordinal),
+            "F-M585: a position the pack carries IS uploaded single, beside the pack");
         Check(upload.Contains("the singles it was meant to carry go up in the single phase", StringComparison.Ordinal),
             "a pack that did not go up leaves its singles to the single phase");
         Check(upload.Contains("first publication: the pack carries this text up", StringComparison.Ordinal)
@@ -547,7 +587,7 @@ internal static class Program
             zipBytes = ms.ToArray();
         }
 
-        var unpack = typeof(SubdlApiClient).GetMethod("UnpackAsync",
+        var unpack = typeof(ScribeApiClient).GetMethod("UnpackAsync",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         // F-M450: the unpack step hands back the entry it ACTUALLY took beside the bytes, so the
         // harness reads the same tuple the client does.
@@ -599,7 +639,7 @@ internal static class Program
         string entitySource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Data", "Entities.cs"));
         Check(entitySource.Contains("public string? Fingerprint { get; set; }", StringComparison.Ordinal),
             "F-M466: the memo row carries the fingerprint");
-        string dbSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Data", "SubdlDbContext.cs"));
+        string dbSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Data", "ScribeDbContext.cs"));
         Check(dbSource.Contains("ALTER TABLE packs ADD COLUMN Fingerprint TEXT NULL;", StringComparison.Ordinal)
               && dbSource.Contains("EnsurePackColumns();", StringComparison.Ordinal),
             "F-M466: an older data file gets the column on start, guarded by the table's own column list");

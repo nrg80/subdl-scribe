@@ -1,4 +1,4 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // One fit, one file: runs the shipped auto-sync on a real media file and writes the
@@ -9,8 +9,8 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
-using Jellyfin.Plugin.SubdlScribe.Qa;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Qa;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace SpeechFitTest
@@ -35,7 +35,7 @@ namespace SpeechFitTest
 
             string text = await File.ReadAllTextAsync(srtIn).ConfigureAwait(false);
             string ffmpeg = FfmpegTools.ResolvePath(
-                new Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration(), NullLogger.Instance) ?? "ffmpeg";
+                new Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration(), NullLogger.Instance) ?? "ffmpeg";
 
             SubtitleSync.Result r = await SubtitleSync.SyncAsync(
                 media, text, "0:a:0", ffmpeg, NullLogger.Instance, default).ConfigureAwait(false);

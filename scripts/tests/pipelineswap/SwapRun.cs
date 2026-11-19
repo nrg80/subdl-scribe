@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
@@ -14,10 +14,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 // T81: findet die Registry die vom Seeder geschriebene Sprache, wo die STREAMLISTE sie nicht sieht?
 internal static class SwapRun
@@ -25,12 +25,24 @@ internal static class SwapRun
     private static int Main(string[] args)
     {
         string media = args[0], root = args[1], ffmpeg = args[2];
+        // T178 (operator finding 15.11.2026, second occurrence): this harness DELETES its working
+        // directory. Handed a repository root by mistake — e.g. by a script that passes the checkout to
+        // every suite — it removes the sources. A directory carrying a repo marker is not a workdir, and
+        // refusing is the only safe direction.
+        if (File.Exists(Path.Combine(root, "build.yaml"))
+            || Directory.Exists(Path.Combine(root, ".git"))
+            || File.Exists(Path.Combine(root, ".gitignore")))
+        {
+            Console.WriteLine($">>> FEHLER: '{root}' ist ein Repository, kein Arbeitsverzeichnis — dieser Lauf loescht dort alle Dateien.");
+            return 3;
+        }
+
         if (Directory.Exists(root)) Directory.Delete(root, true);
         Directory.CreateDirectory(root);
         string work = Path.Combine(root, "item.mkv");
         File.Copy(media, work, true);
 
-        using var db = new SubdlDbContext(Path.Combine(root, "db"), null);
+        using var db = new ScribeDbContext(Path.Combine(root, "db"), null);
         var reg = new ContentHashRegistry(db, null, null);
         var cfg = new PluginConfiguration { LogMode = LogLevelMode.Normal, AllocateMissingLanguageCodes = true };
 
@@ -49,7 +61,7 @@ internal static class SwapRun
         // 2) Die STREAMLISTE, wie Jellyfin sie liefert (gecacht -> alte Tags)
         var stale = Probe(work);   // frisch gelesen, aber wir simulieren Jellyfins Cache mit dem ALTEN Stand
         var staleStreams = streams; // der Stand VOR dem Schreiben
-        var viaStreams = Jellyfin.Plugin.SubdlScribe.Registry.SidecarNaming.EmbeddedPresentLanguages(staleStreams);
+        var viaStreams = Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.EmbeddedPresentLanguages(staleStreams);
         var viaRegistry = reg.EmbeddedLanguages(work);
         Console.WriteLine();
         Console.WriteLine("EmbeddedPresentLanguages (Streamliste, ALTER Stand): [" + string.Join(",", viaStreams.OrderBy(x=>x)) + "]");

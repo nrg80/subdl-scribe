@@ -1,10 +1,10 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
 // Software Foundation, either version 3 of the License, or (at your option) any
-// later version. SubDL Scribe is distributed WITHOUT ANY WARRANTY; without
+// later version. Sub Scribe is distributed WITHOUT ANY WARRANTY; without
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See the GNU General Public License for more details.
 //
@@ -37,7 +37,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
-using Jellyfin.Plugin.SubdlScribe.Qa;
+using Jellyfin.Plugin.SubScribe.Qa;
 
 namespace LangCorrectRun;
 
@@ -137,7 +137,7 @@ internal static class LangCorrectRun
         // F-M400 (operator order 02.11.2026): the log line states the finding — tag, detection,
         // result — and does not call the tag a liar. The neutral wording is asserted, so it cannot
         // drift back.
-        Check(pipeline.Contains("[SubDL] LANGUAGE {File} — tagged {Tag}, detected {Lang}"),
+        Check(pipeline.Contains("[Sub Scribe] LANGUAGE {File} — tagged {Tag}, detected {Lang}"),
             "the line names tag and detection side by side");
         Check(!pipeline.Contains("the tag lies"),
             "and it does not accuse the tag");

@@ -1,4 +1,4 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // F-M438: a plugin-owned field that is NEW to an existing configuration file has to be inserted at its
@@ -10,8 +10,8 @@
 using System.Reflection;
 using System.Xml.Linq;
 using System.Xml.Serialization;
-using Jellyfin.Plugin.SubdlScribe;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe;
+using Jellyfin.Plugin.SubScribe.Configuration;
 
 namespace StateFileRun;
 
@@ -155,14 +155,14 @@ internal static class Program
 
             // 6) F-M445: der Nachlauf hat keinen festen Anker mehr — ein Termin, letzter Auftrag gewinnt.
             string root = FindPluginRoot();
-            string sched = File.ReadAllText(Path.Combine(root, "ScheduledTasks", "SubdlSchedulerCoordinator.cs"));
+            string sched = File.ReadAllText(Path.Combine(root, "ScheduledTasks", "ScribeSchedulerCoordinator.cs"));
             string upload = File.ReadAllText(Path.Combine(root, "Pipeline", "UploadPipeline.cs"));
             string cfg = File.ReadAllText(Path.Combine(root, "Configuration", "PluginConfiguration.cs"));
             Check(sched.Contains("_postprocessArmUtc = fireAtUtc;", StringComparison.Ordinal),
                 "F-M445: arming replaces the moment instead of comparing against it (last order wins)");
             Check(!sched.Contains("_postprocessDeferredUntil", StringComparison.Ordinal),
                 "F-M445: the old lock-busy deferral field is gone — it only delayed a due anchor");
-            Check(sched.Contains("config.UploadEnabled && _postprocessArmUtc != DateTime.MinValue", StringComparison.Ordinal),
+            Check(sched.Contains("config.IsUploadEnabled(SubtitleProvider.Subdl) && _postprocessArmUtc != DateTime.MinValue", StringComparison.Ordinal),
                 "F-M445: the fire needs upload enabled and an armed moment, nothing else");
             Check(!sched.Contains("RandomPostprocessTime", StringComparison.Ordinal)
                   && !sched.Contains("UploadPostprocessInterval", StringComparison.Ordinal)
@@ -185,7 +185,7 @@ internal static class Program
                 "F-M445: a user stop CANCELS the scheduled postprocessing run (operator order 02.11.2026)");
             Check(sched.Contains("public DateTime? GetUploadPostprocessDue()", StringComparison.Ordinal),
                 "F-M445: the armed moment is readable for the status line");
-            string ctrl = File.ReadAllText(Path.Combine(root, "Api", "SubdlStatusController.cs"));
+            string ctrl = File.ReadAllText(Path.Combine(root, "Api", "ScribeStatusController.cs"));
             Check(ctrl.Contains("PostprocessDue = postprocessDue?", StringComparison.Ordinal)
                   && ctrl.Contains("workerFires.Remove(\"SubDLPostprocessTask\")", StringComparison.Ordinal),
                 "F-M445: the moment rides on its own field — the worker row is not painted yellow forever");

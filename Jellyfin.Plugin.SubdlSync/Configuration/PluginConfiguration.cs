@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
@@ -13,7 +13,7 @@ using System;
 using System.Collections.Generic;
 using MediaBrowser.Model.Plugins;
 
-namespace Jellyfin.Plugin.SubdlScribe.Configuration;
+namespace Jellyfin.Plugin.SubScribe.Configuration;
 
 /// <summary>
 /// Update interval for the scheduled upload task (F-M21).
@@ -139,7 +139,37 @@ public enum LogLevelMode
 }
 
 /// <summary>
-/// Plugin configuration for SubDL Scribe (F-M18 – F-M22, F-M24a-c, F-M28-F-M30, F-M34/M35).
+/// F-M477 (operator order 15.11.2026): the subtitle source a switch talks about. The plugin serves
+/// exactly one source today (SubDL); tvsubtitles.net is named here because its switches exist and
+/// must state that no provider is wired in — a switch that silently does nothing is worse than none
+/// (same reasoning as F-M366).
+/// </summary>
+public enum SubtitleProvider
+{
+    /// <summary>SubDL.com — the source with an id index, the one its own search asks.</summary>
+    Subdl,
+
+    /// <summary>tvsubtitles.net — series only, no id index (resolved by name).</summary>
+    TvSubtitles,
+
+    /// <summary>
+    /// F-M507 (Nutzerauftrag 15.11.2026: „Dritte quelle. Nur das series halt nach tv show und movies nach
+    /// moviesubtitels gehen."): moviesubtitles.org — films only, no id index, HTML pages.
+    /// <para>
+    /// Der Wert steht am ENDE, damit kein bestehender Member seine Zahl ändert (Subdl bleibt 0,
+    /// TvSubtitles 1) — dieselbe Regel wie bei <see cref="UpdateInterval"/> und <see cref="PruneMode"/>.
+    /// </para>
+    /// <para>
+    /// Die Medienart entscheidet, welche der beiden Seiten überhaupt gefragt wird: eine Serie geht an
+    /// tvsubtitles.net, ein Film an moviesubtitles.org, einander ausschließend
+    /// (<c>Api.Endpoints.SourceOrder.AppliesTo</c>). SubDL unterscheidet nicht und bleibt für beides.
+    /// </para>
+    /// </summary>
+    MovieSubtitles,
+}
+
+/// <summary>
+/// Plugin configuration for Sub Scribe (F-M18 – F-M22, F-M24a-c, F-M28-F-M30, F-M34/M35).
 /// </summary>
     
 public class PluginConfiguration : BasePluginConfiguration
@@ -157,7 +187,10 @@ public class PluginConfiguration : BasePluginConfiguration
         // it; SubDL publishes DAILY counters only, so that budget was our own invention and stopped
         // runs the server would have allowed. Removed.
         // (17.09.2026): default raised 100 -> 400, range 100-500 (user decision, Matrix DM)
-        UploadsPerHour = 400;
+        // Operator order 18.11.2026: range 50-500, default 450 — SubDL allows 500 uploads or
+        // downloads per hour, so the ceiling of the range IS the server's own limit and the
+        // default sits just below it (F-M593).
+        UploadsPerHour = 450;
         // F-M22: default DryRun OFF — user explicitly wants uploads to run live when enabled.
         DryRun = false;
         // F-M24a
@@ -320,8 +353,28 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>
     /// Gets or sets a value indicating whether the upload pipeline is enabled.
     /// Master switch for ALL upload runs (scheduled, manual trigger, on-arrival). Default: off (opt-in).
+    /// <para>
+    /// F-M477 (operator order 15.11.2026): this is the LEGACY value. The switches are split per provider
+    /// (<see cref="SubdlUploadEnabled"/>, <see cref="TvSubtitlesUploadEnabled"/>); the two are nullable so
+    /// "the operator never touched the split" stays distinguishable from "the operator said off". While a
+    /// per-provider value is null, this one answers — a configuration file written before the split keeps
+    /// meaning exactly what it meant. <see cref="IsUploadEnabled"/> is the only reader.
+    /// </para>
     /// </summary>
     public bool UploadEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the SubDL upload switch. Null = not decided yet, the legacy
+    /// <see cref="UploadEnabled"/> answers instead (F-M477).
+    /// </summary>
+    public bool? SubdlUploadEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the tvsubtitles.net upload switch. Null = not decided yet, and an undecided tvst
+    /// UPLOAD is OFF (F-M503: download defaults on, upload defaults off — an explicitly stored true
+    /// still uploads). The legacy <see cref="UploadEnabled"/> does NOT answer here (F-M477).
+    /// </summary>
+    public bool? TvSubtitlesUploadEnabled { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether F-M372 is on: a season that is complete (every aired
@@ -339,8 +392,58 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>
     /// Gets or sets a value indicating whether the download pipeline is enabled (F-M41).
     /// Default true so the plugin works out of the box; users may disable it.
+    /// <para>
+    /// F-M477: the LEGACY value, exactly like <see cref="UploadEnabled"/> — the per-provider switches
+    /// (<see cref="SubdlDownloadEnabled"/>, <see cref="TvSubtitlesDownloadEnabled"/>) answer first, and
+    /// this one answers while they are null. <see cref="IsDownloadEnabled"/> is the only reader.
+    /// </para>
     /// </summary>
     public bool DownloadEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the SubDL download switch. Null = not decided yet, the legacy
+    /// <see cref="DownloadEnabled"/> answers instead (F-M477).
+    /// </summary>
+    public bool? SubdlDownloadEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the tvsubtitles.net download switch. Null = not decided yet, and an undecided
+    /// tvst DOWNLOAD is ON (F-M503, operator decision 15.11.2026: "tvst download als download default
+    /// aktivieren sie, upload default deaktiviert"). The two tvst directions therefore default in
+    /// opposite directions: download on, upload off (<see cref="TvSubtitlesUploadEnabled"/> stays
+    /// <c>?? false</c>). An explicitly stored false still means OFF — the default only answers while
+    /// the value was never written. The legacy <see cref="DownloadEnabled"/> does NOT answer here: it
+    /// belongs to SubDL (F-M477).
+    /// </summary>
+    public bool? TvSubtitlesDownloadEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the moviesubtitles.org download switch (F-M507). Null = not decided yet, and an
+    /// undecided msub DOWNLOAD is ON — the same defaulting the second source got (F-M503: download on,
+    /// upload off). An explicitly stored false still means OFF; the default only answers while the
+    /// value was never written.
+    /// </summary>
+    public bool? MovieSubtitlesDownloadEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the moviesubtitles.org upload switch (F-M507). Null = not decided yet, and an
+    /// undecided msub UPLOAD is OFF — an upload leaves the process, so it is opt-in like every other
+    /// upload path in this plugin.
+    /// <para>
+    /// F-M508 (Etappe 2b): der Upload-Endpunkt steht, die Kette fragt ihn, wenn dieser Schalter an ist
+    /// und die Medienart ein Film ist. ER BLEIBT TROTZDEM AUS: die Sprachabbildung der Seite ist gegen
+    /// die echte Seite nicht belegt, und der Operator hat gesagt, was dann gilt („Bevor wir falsche
+    /// Sprachen hochladen, laden wir nix hoch."). Freigeben erst nach belegter Sprachabbildung.
+    /// </para>
+    /// </summary>
+    public bool? MovieSubtitlesUploadEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets which download source is asked first (F-M491). Operator decision 15.11.2026:
+    /// "Tvst ist zuerst" — tvsubtitles.net is asked first, SubDL is the fallback for a language the site
+    /// does not have.
+    /// </summary>
+    public DownloadSourceOrder DownloadOrder { get; set; } = DownloadSourceOrder.TvSubtitlesFirst;
 
     /// <summary>Gets or sets the target languages, e.g. "EN, FR, ES" (F-M42). Empty = download disabled. (user decision 08.09.2026, Arabic added 30.09.2026): default AR, EN, ES, FR, HI, ZH (alphabetical) — DE/RU/PT were removed deliberately (DE is uploaded by hand, RU/PT have thin coverage).</summary>
     public string DownloadLanguages { get; set; } = "AR, EN, ES, FR, HI, ZH";
@@ -696,36 +799,44 @@ public class PluginConfiguration : BasePluginConfiguration
     }
 
     /// <summary>
-    /// F-M19/F-M203: the four credentials the plugin cannot run without, in ONE place
-    /// so both pipelines and the settings page answer the same question.
+    /// F-M497 (operator order 15.11.2026: „Pflichtkonfiguration ist tmdb key. Wenn subdl nich
+    /// konfiguriert -> skip subdl upload/download. Kennzeichnung als required for subdl"): the ONE
+    /// credential the plugin cannot run without, in ONE place so both pipelines and the settings page
+    /// answer the same question.
     /// <para>
-    /// They are not alternatives: the SubDL login pair authenticates the UPLOAD (its
-    /// three steps carry a Bearer token from /login), the SubDL API key authenticates
-    /// search, file download and the quota read, and the TMDb key is what resolves and
-    /// corrects the ids in both directions. A missing one is not a degraded mode, it is
-    /// a run that cannot do its job — so the run is refused up front with the field
-    /// named, instead of failing later at the first call that needs it.
+    /// Only the TMDb key is mandatory. It is what resolves and corrects the ids the store, the ranking
+    /// and tvsubtitles.net's upload comment are all keyed on, in both directions and for both sources —
+    /// without it neither direction can do its job, so the run is refused up front with the field named
+    /// instead of failing later at the first call that needs it.
     /// </para>
     /// </summary>
-    /// <returns>The human-readable labels of every missing credential; empty when complete.</returns>
+    /// <remarks>
+    /// F-M492 (operator order 15.11.2026, found by the testbench run): the question was already asked
+    /// <b>per source and direction</b>, because credentials do not belong to the plugin, they belong to
+    /// what the run is going to do. A run that only asks tvsubtitles.net never logs in to SubDL, so
+    /// demanding the SubDL login pair refused a run that could have worked — measured on jf-test: two
+    /// cycles died on credentials that the configured sources never needed.
+    /// <para>
+    /// F-M497 narrows that to its end: SubDL's own credentials are a SOURCE question, not a run
+    /// question. A missing API key or login pair no longer refuses anything — the source simply does
+    /// not take part (<see cref="IsConfiguredForUpload"/>, <see cref="IsConfiguredForDownload"/>) and
+    /// the run says so in one line. The refusal that remains is the TMDb key alone.
+    /// </para>
+    /// <para>
+    /// F-M496 and this rule do not contradict each other. The dry run makes no API call at all, so it
+    /// NEEDS no credentials and is never refused for missing ones — that is what it means for a dry run
+    /// to walk the same decision path: it is not asked to log in. Live, a source that is not configured
+    /// does not take part. One rule about needing (dry run: nothing) and one about taking part (both
+    /// modes, live binding), and the second one is the general one.
+    /// </para>
+    /// </remarks>
+    /// <returns>The human-readable labels of every missing MANDATORY credential; empty when complete.</returns>
     public List<string> MissingCredentials()
     {
         var missing = new List<string>();
-        if (string.IsNullOrWhiteSpace(Username))
-        {
-            missing.Add("SubDL email");
-        }
 
-        if (string.IsNullOrWhiteSpace(Password))
-        {
-            missing.Add("SubDL password");
-        }
-
-        if (string.IsNullOrWhiteSpace(ApiKey))
-        {
-            missing.Add("SubDL API key");
-        }
-
+        // F-M497: the only mandatory key. See the remarks above for why nothing else is demanded here,
+        // and for how that stands beside the dry-run rule (F-M496).
         if (string.IsNullOrWhiteSpace(TmdbApiKey))
         {
             missing.Add("TMDb API key (v3)");
@@ -733,6 +844,48 @@ public class PluginConfiguration : BasePluginConfiguration
 
         return missing;
     }
+
+    /// <summary>
+    /// F-M497: is this source configured for the UPLOAD direction?
+    /// <para>
+    /// The SubDL login pair authenticates the upload (its three steps carry a Bearer token from
+    /// /login); tvsubtitles.net takes no credentials at all, so there is nothing to configure. This is
+    /// the second half of "may this source take part" — <see cref="IsUploadEnabled"/> is the first —
+    /// and the pipelines ask both, right before a source starts.
+    /// </para>
+    /// </summary>
+    /// <param name="provider">The subtitle source asked about.</param>
+    /// <returns>True when this source has what its upload path needs.</returns>
+    public bool IsConfiguredForUpload(SubtitleProvider provider) => provider switch
+    {
+        SubtitleProvider.Subdl => !string.IsNullOrWhiteSpace(Username) && !string.IsNullOrWhiteSpace(Password),
+        SubtitleProvider.TvSubtitles => true,
+
+        // F-M507: moviesubtitles.org nimmt keinen Zugang — wie tvsubtitles.net hat die Quelle nichts
+        // zu konfigurieren, also fehlt ihr auch nichts.
+        SubtitleProvider.MovieSubtitles => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// F-M497: is this source configured for the DOWNLOAD direction?
+    /// <para>
+    /// The SubDL API key authenticates the search, the file fetch and the quota read — the download
+    /// direction and nothing else. Without it SubDL cannot search, so the source steps aside instead of
+    /// taking the run down with a 403 on its first call.
+    /// </para>
+    /// </summary>
+    /// <param name="provider">The subtitle source asked about.</param>
+    /// <returns>True when this source has what its download path needs.</returns>
+    public bool IsConfiguredForDownload(SubtitleProvider provider) => provider switch
+    {
+        SubtitleProvider.Subdl => !string.IsNullOrWhiteSpace(ApiKey),
+        SubtitleProvider.TvSubtitles => true,
+
+        // F-M507: kein Schlüssel, kein Login — eine HTML-Seite, die jeder lesen darf.
+        SubtitleProvider.MovieSubtitles => true,
+        _ => false,
+    };
 
     /// <summary>
     /// Gets or sets the REQUIRED TMDB API key (v3), the TMDb-authoritative source for
@@ -760,6 +913,115 @@ public class PluginConfiguration : BasePluginConfiguration
     /// 'und' stream is removed from the upload set (skip, logged). Default: on.
     /// </summary>
     public bool UploadResolveUnd { get; set; } = true;
+
+    #endregion
+
+    #region Provider switches (F-M477/F-M478)
+
+    /// <summary>
+    /// F-M477 (operator order 15.11.2026): is the DOWNLOAD direction on for this source?
+    /// SubDL: the per-provider switch answers; while it is null the legacy <see cref="DownloadEnabled"/>
+    /// answers, so a configuration written before the split keeps its meaning.
+    /// F-M503: tvsubtitles.net has no legacy value — an undecided tvst download is ON (the operator's
+    /// default), an explicitly stored false is OFF.
+    /// A source with no provider wired in is always off (F-M478) — see <see cref="HasProvider"/>.
+    /// </summary>
+    /// <param name="provider">The subtitle source asked about.</param>
+    /// <returns>True when the download direction runs for this source.</returns>
+    public bool IsDownloadEnabled(SubtitleProvider provider) => provider switch
+    {
+        SubtitleProvider.Subdl => HasProvider(provider) && (SubdlDownloadEnabled ?? DownloadEnabled),
+        SubtitleProvider.TvSubtitles => HasProvider(provider) && (TvSubtitlesDownloadEnabled ?? true),
+
+        // F-M507: moviesubtitles.org hat keinen Alt-Wert — wie tvst ist ein ungesetzter Download AN
+        // und ein gespeichertes false AUS.
+        SubtitleProvider.MovieSubtitles => HasProvider(provider) && (MovieSubtitlesDownloadEnabled ?? true),
+        _ => false,
+    };
+
+    /// <summary>
+    /// Gets a value indicating whether the DOWNLOAD direction runs at all — for ANY source.
+    /// F-M492 (operator order 15.11.2026): the tasks and the cycle gates used to ask this question of
+    /// SubDL alone, so switching SubDL off and tvsubtitles on made the whole direction look disabled and
+    /// the run was skipped with "Download pipeline disabled" although a source wanted to work.
+    /// </summary>
+    public bool AnyDownloadEnabled =>
+        Array.Exists(Enum.GetValues<SubtitleProvider>(), IsDownloadEnabled);
+
+    /// <summary>
+    /// Gets a value indicating whether the UPLOAD direction runs at all — for ANY source (F-M492).
+    /// </summary>
+    public bool AnyUploadEnabled =>
+        Array.Exists(Enum.GetValues<SubtitleProvider>(), IsUploadEnabled);
+
+    /// <summary>
+    /// F-M477: is the UPLOAD direction on for this source? Same answering order as
+    /// <see cref="IsDownloadEnabled"/>: provider switch first, legacy <see cref="UploadEnabled"/> as fallback.
+    /// </summary>
+    /// <param name="provider">The subtitle source asked about.</param>
+    /// <returns>True when the upload direction runs for this source.</returns>
+    public bool IsUploadEnabled(SubtitleProvider provider) => provider switch
+    {
+        SubtitleProvider.Subdl => HasProvider(provider) && (SubdlUploadEnabled ?? UploadEnabled),
+        SubtitleProvider.TvSubtitles => HasProvider(provider) && (TvSubtitlesUploadEnabled ?? false),
+
+        // F-M507: der Upload dieser Quelle ist default AUS (F-M503-Regel: Download an, Upload aus).
+        SubtitleProvider.MovieSubtitles => HasProvider(provider) && (MovieSubtitlesUploadEnabled ?? false),
+        _ => false,
+    };
+
+    /// <summary>
+    /// F-M478 (weitergeführt von F-M485/F-M503/F-M507): does a provider exist for this source? Every
+    /// address of the tvst family has a client, a pipeline branch, a route and an endpoint pair; the
+    /// question now only answers the "is this source served at all" switch-off case and stays the one
+    /// place a caller asks it (<see cref="IsDownloadEnabled"/>, <see cref="IsUploadEnabled"/>).
+    /// </summary>
+    public static bool HasProvider(SubtitleProvider provider) =>
+        provider is SubtitleProvider.Subdl or SubtitleProvider.TvSubtitles or SubtitleProvider.MovieSubtitles;
+
+    /// <summary>
+    /// F-M478: the operator-facing reason a switch is inert, or null when it works. The page prints it
+    /// under the switch; the worker-off note uses the same sentence so there is one wording, not two.
+    /// <para>
+    /// F-M509: die Familie steht als EINE Quelle da, mit ihren beiden Adressen und der Medienart, die
+    /// zwischen ihnen entscheidet — nicht als zwei Quellen neben SubDL. Der Upload der Film-Adresse ist
+    /// bis zur belegten Sprachabbildung gesperrt (F-M508); der Satz sagt das, statt den Schalter für
+    /// wirkungslos zu erklären.
+    /// </para>
+    /// </summary>
+    /// <param name="provider">The subtitle source asked about.</param>
+    /// <returns>The reason, or null when the source is wired in.</returns>
+    public static string? MissingProviderReason(SubtitleProvider provider) => provider switch
+    {
+        SubtitleProvider.TvSubtitles => "tvst — eine Quelle mit zwei Adressen: tvsubtitles.net für Serien, "
+            + "moviesubtitles.org für Filme. Welche fragt, entscheidet die Medienart. Staffelpacks und "
+            + "der HI-Pool bleiben bei SubDL.",
+        SubtitleProvider.MovieSubtitles => "tvst (Film-Adresse) — moviesubtitles.org für Filme. "
+            + "Download: Standard an. Upload: gesperrt, bis die Sprachabbildung belegt ist (F-M508).",
+        _ => null,
+    };
+    /// F-M509 (Operator-Klarstellung 15.11.2026: „Seperate into subdl and tvst. Tvst is splitted into
+    /// tvst and moviesub itself"): the configured order on FAMILY level.
+    /// <para>
+    /// TWO values, not three: SubDL and the tvst family. The family is split into two addresses —
+    /// tvsubtitles.net (series) and moviesubtitles.org (films) — and the media type from TMDb decides
+    /// which of the two is asked (<c>Api.Endpoints.SourceOrder.FamilyPage</c>). "tvst first" therefore
+    /// means tvsubtitles.net first for a series and moviesubtitles.org first for a film, SubDL after it
+    /// in both cases. A third value would be a position for an address, and the addresses are not
+    /// sources.
+    /// </para>
+    /// </summary>
+    public enum DownloadSourceOrder
+    {
+        /// <summary>SubDL first, the tvst family (its page for this media type) when SubDL has nothing.</summary>
+        SubdlFirst = 0,
+
+        /// <summary>
+        /// The tvst family first — tvsubtitles.net for a series, moviesubtitles.org for a film — and
+        /// SubDL when that page has nothing (the default, F-M491).
+        /// </summary>
+        TvSubtitlesFirst = 1,
+    }
 
     #endregion
 

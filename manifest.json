@@ -1,20 +1,20 @@
 [
   {
     "guid": "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b",
-    "name": "SubDL Scribe",
-    "description": "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key. Created by AI under the directions of the maintainer.",
-    "overview": "Sync subtitles with SubDL — download missing and upload new subtitles.",
+    "name": "Sub Scribe",
+    "description": "Sub Scribe brings subtitles to Jellyfin from SubDL.com and tvsubtitles.net: it downloads what is missing and uploads your own. Each source has its own switches, nothing goes back to the other source, the order is yours. A TMDb API Key is required, SubDL is optional. Created by AI under the directions of the maintainer.",
+    "overview": "Sync subtitles with SubDL and tvsubtitles.net — download missing and upload new subtitles.",
     "owner": "nrg80",
     "category": "Subtitles",
-    "imageUrl": "https://raw.githubusercontent.com/nrg80/subdl-scribe/main/logo.png",
+    "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.378",
-        "changelog": "v12.1.12.378: candidates are ranked by price and reach — free before paid, season pack before single; the cache is asked by entry id (F-M474).",
+        "version": "12.2.0.0",
+        "changelog": "v12.2.0.0: the first stable line since the rename — the deferred pipeline cycle now reports itself under the workers, with its reason and attempt (F-M623).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/subdl-scribe/releases/download/v12.1.12.378/Jellyfin.Plugin.SubdlSync_12.1.12.378.zip",
-        "checksum": "60ffdeab359faf1afe148ed5b9cf4482",
-        "timestamp": "2026-11-14T10:22:30Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.0-dev/Jellyfin.Plugin.SubdlSync_12.2.0.0.zip",
+        "checksum": "e0ea2cc31fac89135de5555c1f3b25e6",
+        "timestamp": "2026-11-19T07:45:01Z"
       }
     ]
   }

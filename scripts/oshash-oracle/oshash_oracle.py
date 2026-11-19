@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent OSHash oracle for SubDL Scribe.
+"""Independent OSHash oracle for Sub Scribe.
 
 Written from the PUBLISHED OpenSubtitles hash definition, deliberately NOT from
 ContentHashRegistry.ComputeMediaHash — a reference that mirrors the code under

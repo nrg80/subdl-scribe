@@ -1,4 +1,4 @@
-# Releasing SubDL Scribe
+# Releasing Sub Scribe
 
 ## The release
 
@@ -65,8 +65,8 @@ The order is: manifest commit and push, then tag, then release. The release ther
 ## Catalog manifest
 
 `manifest.json` is committed on **the branch the release runs on** and read by Jellyfin from
-`https://raw.githubusercontent.com/nrg80/subdl-scribe/main/manifest.json` (released line) or
-`https://raw.githubusercontent.com/nrg80/subdl-scribe/develop/manifest.json` (prerelease line).
+`https://raw.githubusercontent.com/nrg80/sub-scribe/main/manifest.json` (released line) or
+`https://raw.githubusercontent.com/nrg80/sub-scribe/develop/manifest.json` (prerelease line).
 
 The script writes the new version, the release URL and the md5 of the uploaded ZIP, then commits and
 pushes the manifest before creating the release. The manifest carries exactly one version entry.
@@ -111,13 +111,13 @@ catches this class of mistake — the reference to an "assertion below" that use
 a block that had been dropped, so the check is written out in full:
 
 ```bash
-curl -sS https://raw.githubusercontent.com/nrg80/subdl-scribe/main/manifest.json \
+curl -sS https://raw.githubusercontent.com/nrg80/sub-scribe/main/manifest.json \
   | python3 -c "import json,sys; m=json.load(sys.stdin); v=m[0]['versions'][0]; print(v['version'], v['sourceUrl'])"
 # must print a released version and a tag WITHOUT -dev
 ```
 
 **Never rehearse the release flow against a cloned copy without cutting the API off.** `REPO_SLUG` is
-hardcoded to `nrg80/subdl-scribe` and the token is read from `/opt/data/.secrets.json`, so a
+hardcoded to `nrg80/sub-scribe` and the token is read from `/opt/data/.secrets.json`, so a
 `release.sh` run in a throwaway clone does not stay local: it looks up and creates real releases on
 GitHub. In a sandbox run it found the existing release and tried to re-upload its asset — GitHub
 rejected the duplicate name and the asset stayed intact, but that was luck, not containment. For any
@@ -130,14 +130,14 @@ API calls to still reach GitHub; a real test release must go to a different `REP
 
 ## Installing
 
-Dashboard → plugins → all → SubDL Scribe → install → restart Jellyfin.
+Dashboard → plugins → all → Sub Scribe → install → restart Jellyfin.
 
 Versions older than the current one are installable from their release page only.
 
 ## Deploying to the test bench
 
 `scripts/deploy-jf-test.sh <version> <zip>` stops the test Jellyfin, removes every other
-`SubDL Scribe_*` folder (one GUID — two copies would both load), unpacks the ZIP, writes `meta.json`
+`Sub Scribe_*` folder (one GUID — two copies would both load), unpacks the ZIP, writes `meta.json`
 and starts the instance again. The order is mandatory: replacing the DLL while Jellyfin runs leaves the
 process holding a file that no longer matches the loaded assembly, and .NET compiles methods lazily, so
 a method first reached during SHUTDOWN is read off disk then and the runtime dies with

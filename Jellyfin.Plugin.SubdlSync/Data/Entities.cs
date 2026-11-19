@@ -1,18 +1,18 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
 using System;
 using System.Collections.Generic;
 
-namespace Jellyfin.Plugin.SubdlScribe.Data;
+namespace Jellyfin.Plugin.SubScribe.Data;
 
 /// <summary>
 /// The four states a subtitle can be in. Everything else is derived.
@@ -98,6 +98,25 @@ public static class RejectReason
     /// <summary>Untagged stream, too little text to detect a language.</summary>
     public const string UndTooSmall = "und-too-small";
 
+    /// <summary>
+    /// F-M577 (Operator-Entscheidung 17.11.2026: Variante B): die Extraktion dieser Spur ist
+    /// gescheitert — kein Urteil über den Untertitel, sondern über den Zugriff auf ihn. Die Ablehnung
+    /// steht im vorhandenen Store (kein eigenes Feld, kein Schema-Schritt) und gilt nach
+    /// sieben Tagen als veraltet: dann bekommt die Spur ihren nächsten Versuch.
+    /// </summary>
+    public const string ExtractionFailed = "extraction-failed";
+
+    /// <summary>
+    /// F-M586 (Operator-Anweisung 17.11.2026: „Die spur sollte dann für tvsubtitles oder mst geschlossen
+    /// werden, das paar. Unsupported language oder so"): keine der eingeschalteten Quellen führt diese
+    /// Sprache. tvsubtitles.net bietet 24 Sprachen (en, es, fr, de, br, ru, ua, it, gr, ar, hu, pl, tr,
+    /// nl, pt, sv, da, fi, ko, cn, jp, bg, cz, ro) — Norwegisch, Slowakisch oder Estnisch sind nicht
+    /// dabei, weder im Sprachfilter noch als Flagge (gemessen 17.11.2026: <c>sk.gif</c>/<c>no.gif</c>
+    /// antworten 404, <c>de.gif</c> 200). Ohne dieses Urteil nannte das Log das Paar in jedem Lauf
+    /// weiter „still open for tvsubtitles" (1.316 DUE-Zeilen, davon 104 für Norwegisch).
+    /// </summary>
+    public const string UnsupportedLanguage = "unsupported-language";
+
     /// <summary>Untagged stream, language could not be detected.</summary>
     public const string UndDetectionFailed = "und-detection-failed";
 
@@ -175,6 +194,33 @@ public class MediaEntity
     /// <summary>TMDb ID. For series this is the SHOW id, never an episode or season id.</summary>
     public string? TmdbId { get; set; }
 
+    /// <summary>
+    /// F-M501 (Operator-Anweisung 15.11.2026: „Tvst Seriennummer in den Store, gleiche Ebene wie tvshow
+    /// id von tmdb und tmdb“): die Nummer, unter der die Serie bei tvsubtitles.net geführt wird —
+    /// dieselbe Ebene wie <see cref="TmdbId"/> und <see cref="ImdbId"/>, weil sie dieselbe Frage
+    /// beantwortet: welche Serie IST diese Datei.
+    /// <para>
+    /// Sie wird EINMAL ermittelt (exakter TMDb-Titel in der Serienliste der Seite oder, wenn die Serie
+    /// dort fehlt, nach dem Anlegen) und danach gelesen statt neu gesucht. Null heißt „noch nicht
+    /// ermittelt“ — nie „keine Nummer vorhanden“: die Auflösung schreibt nur, was sie wirklich gesehen
+    /// hat, und ein Fehlschlag lässt das Feld leer.
+    /// </para>
+    /// </summary>
+    public string? TvstShowId { get; set; }
+
+    /// <summary>
+    /// F-M507 (Schema 14, Nutzerauftrag 15.11.2026 „Was was ist, Auflösung per tmdb"): die Nummer, unter
+    /// der der FILM bei moviesubtitles.org geführt wird — dieselbe Ebene wie <see cref="TmdbId"/>,
+    /// <see cref="ImdbId"/> und <see cref="TvstShowId"/>, weil sie dieselbe Frage beantwortet: welcher
+    /// Film IST diese Datei.
+    /// <para>
+    /// Sie wird EINMAL ermittelt (TMDb-Titel plus TMDb-Jahr in der Suche der Seite, eng verglichen) und
+    /// danach gelesen statt neu gesucht. Null heißt „noch nicht ermittelt" — nie „keine Nummer
+    /// vorhanden": geschrieben wird nur, was die Seite wirklich genannt hat.
+    /// </para>
+    /// </summary>
+    public string? MsubMovieId { get; set; }
+
     /// <summary>SubDL release ID (sd_id) when known.</summary>
     public string? SdId { get; set; }
 
@@ -199,6 +245,29 @@ public class MediaEntity
     /// </summary>
     // F-M88c: the upload-side completion mark; a file whose embedded side is complete is skipped.
     public DateTime? SubtitlesUploadedAt { get; set; }
+
+    /// <summary>
+    /// F-M557 (Operator-Entscheidung 16.11.2026: „Alle spuren bearbeitet im durchlauf oder übersprungen
+    /// ist zu für die Quelle?"): der Zugeh-Stempel JE QUELLE. Er sagt: für diese Quelle wurde jede
+    /// vorhandene Dialogspur der Datei in einem Durchlauf entschieden — hochgeladen oder bewusst
+    /// übersprungen. Ein Upload bei tvst schliesst die Datei NICHT für SubDL; genau das war der Fehler,
+    /// den <see cref="SubtitlesUploadedAt"/> als eine globale Marke gemacht hat.
+    /// </summary>
+    public DateTime? CompleteSubdl { get; set; }
+
+    /// <summary>F-M557: Zugeh-Stempel für tvsubtitles.net (Serien).</summary>
+    public DateTime? CompleteTvSubtitles { get; set; }
+
+    /// <summary>F-M557: Zugeh-Stempel für moviesubtitles.org (Filme).</summary>
+    public DateTime? CompleteMsub { get; set; }
+
+    /// <summary>
+    /// F-M562: die Spursignatur, die zu den Stempeln gehört — die verschiedenen (Sprache, HI)-Paare der
+    /// Datei, sortiert und verkettet. Weicht sie beim nächsten Nachsehen ab (Spur dazu, Remux, andere
+    /// Sprache), gilt die Datei wieder als offen; ohne diese Zeile wäre der Stempel eine Behauptung über
+    /// einen Zustand, der sich ändern kann.
+    /// </summary>
+    public string? CompleteSignature { get; set; }
 
     // F-M283 (user decision 02.10.2026): the download-side completion mark is GONE.
     //
@@ -274,11 +343,84 @@ public abstract class SubtitleState
     /// <summary>Rejection reason (one of <see cref="RejectReason"/>, suffixes allowed), else null.</summary>
     public string? Reason { get; set; }
 
+
     /// <summary>When <see cref="Status"/> was last set.</summary>
     public DateTime StatusAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>SubDL upload or download id this verdict refers to, when known.</summary>
     public string? SubdlId { get; set; }
+
+    /// <summary>
+    /// F-M486 (operator order 15.11.2026): where this subtitle CAME FROM — <c>subdl</c> or
+    /// <c>tvsubtitles</c>. Null means "this row does not say" (an older row, or a file nobody fetched),
+    /// which is why it is never guessed. This value is what keeps the two sources apart: a subtitle
+    /// fetched from one source is never uploaded to the other (F-M487).
+    /// </summary>
+    public string? Origin { get; set; }
+
+    /// <summary>
+    /// F-M486: the source's OWN id for this subtitle — the tvsubtitles.net subtitle id (for example
+    /// <c>170678</c>) or the SubDL entry id. Together with <see cref="Origin"/> it names the original
+    /// exactly, so a later check can quote it instead of describing it.
+    /// </summary>
+    public string? OriginId { get; set; }
+
+    /// <summary>
+    /// F-M488 (operator order 15.11.2026): the four marks are separate fields, one per source AND
+    /// direction, so a row says by itself what happened where — no reading of <see cref="Status"/> and
+    /// no guessing. <c>SubdlDownloadId</c> is the SubDL entry the subtitle was fetched from.
+    /// </summary>
+    public string? SubdlDownloadId { get; set; }
+
+    /// <summary>F-M488: the SubDL id the uploaded subtitle got.</summary>
+    public string? SubdlUploadId { get; set; }
+
+    /// <summary>F-M488: the tvsubtitles.net subtitle id the subtitle was fetched from (e.g. <c>170678</c>).</summary>
+    public string? TvSubtitlesDownloadId { get; set; }
+
+    /// <summary>
+    /// F-M488: the tvsubtitles.net subtitle id our own upload got, read back from the episode page after
+    /// the send. Null means the id could not be read back — it is never filled with a guess.
+    /// </summary>
+    public string? TvSubtitlesUploadId { get; set; }
+
+    /// <summary>
+    /// F-M490 (operator order 15.11.2026): when OUR upload to SubDL happened (UTC). A timestamp rather
+    /// than a flag, because "uploaded" without "when" answers half the question — and because a row can
+    /// carry both sources: uploaded to SubDL in March, to tvsubtitles.net in November.
+    /// </summary>
+    public DateTime? SubdlUploadedAt { get; set; }
+
+    /// <summary>
+    /// F-M490: when OUR upload to tvsubtitles.net happened (UTC). Independent of
+    /// <see cref="SubdlUploadedAt"/> — that is the whole point of two fields.
+    /// </summary>
+    public DateTime? TvSubtitlesUploadedAt { get; set; }
+
+    /// <summary>
+    /// F-M507 (Schema 14): die Id, unter der moviesubtitles.org diesen Untertitel führt — die
+    /// Gegenseite der Eintragsseite <c>subtitle-&lt;id&gt;.html</c>. Eigenes Feld je Quelle und
+    /// Richtung, wie die vier Kennzeichen aus F-M488: eine Zeile soll von sich aus sagen, was wo
+    /// passiert ist, ohne <see cref="Status"/> zu deuten.
+    /// </summary>
+    public string? MoviesubtitlesDownloadId { get; set; }
+
+    /// <summary>
+    /// F-M507 (Schema 14): die Id, die unser eigener Upload bei moviesubtitles.org bekommen hat.
+    /// <para>
+    /// Das Feld steht hier mit der Spalte, weil die Migration beide Richtungen auf einmal anlegt;
+    /// GESCHRIEBEN wird es erst in Etappe 2b, wenn der Upload dieser Quelle verdrahtet ist. Null heißt
+    /// deshalb heute „noch nicht ermittelt" und nicht „kein Upload".
+    /// </para>
+    /// </summary>
+    public string? MoviesubtitlesUploadId { get; set; }
+
+    /// <summary>
+    /// F-M507 (Schema 14): wann UNSER Upload zu moviesubtitles.org lief (UTC) — ein Zeitpunkt, kein
+    /// Schalter, aus demselben Grund wie <see cref="SubdlUploadedAt"/>. Geschrieben wird er in
+    /// Etappe 2b.
+    /// </summary>
+    public DateTime? MoviesubtitlesUploadedAt { get; set; }
 }
 
 /// <summary>
@@ -326,6 +468,7 @@ public class EmbedTrackEntity : SubtitleState
 
     /// <summary>How the last detection attempt ended — one of <see cref="DetectionOutcome"/>, else null.</summary>
     public string? DetectionOutcome { get; set; }
+
 }
 
 /// <summary>

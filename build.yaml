@@ -1,31 +1,153 @@
-# This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+# This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# SubDL Scribe is free software: you can redistribute it and/or modify it
+# Sub Scribe is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
 # Free Software Foundation, either version 3 of the License, or (at your
 # option) any later version.
-# SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+# Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 # warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 # See the GNU General Public License for more details.
-name: "SubDL Scribe"
+name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.378"
+version: "12.2.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
-overview: "Sync subtitles with SubDL — download missing and upload new subtitles."
+overview: "Sync subtitles with SubDL and tvsubtitles.net — download missing and upload new subtitles."
 description: >
-  SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing
-  subtitles for the languages and libraries you pick and uploads your own.
-  Download is on by default; upload is off — enable at your choice.
-  Requires a SubDL login and API Key plus a TMDb API Key. Created by AI
-  under the directions of the maintainer.
+  Sub Scribe brings subtitles to Jellyfin from SubDL.com and tvsubtitles.net: it
+  downloads what is missing and uploads your own. Each source has its own
+  switches, nothing goes back to the other source, the order is yours. A TMDb API
+  Key is required, SubDL is optional. Created by AI under the directions of the
+  maintainer.
 category: "Subtitles"
 artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.2.0.0: the first stable line since the rename — the deferred pipeline cycle now reports itself under the workers, with its reason and attempt (F-M623).
+  v12.1.12.498: the deferred cycle gets its own line under the workers — with reason and attempt (F-M623).
+  v12.1.12.497: the database refresh counts the verdicts it discards into its own worker line (F-M622).
+  v12.1.12.496: Expert -> Plugin database offers "Reset one file" — the single-file reset from the GUI.
+  v12.1.12.495: a worker row whose process died mid-run is closed at the next start — the row no longer claims to be running (F-M621).
+  v12.1.12.494: the single-file reset is documented (F-M620) and covered by five checks in the endpoints suite.
+  v12.1.12.493: one file back into the queue — POST /Plugins/SubdlReset/ResetPath drops its source stamps and rejected track verdicts.
+  v12.1.12.492: log lines follow docs/LOGGING.md — run report, one event per line, no broken quotes.
+  v12.1.12.491: the pipeline logs what the title store answers at the call site.
+  v12.1.12.490: the title store says out loud whether a row is missing, open or closed.
+  v12.1.12.489: every store fetches a missing context itself, like the TMDb store does.
+  v12.1.12.488: every store is attached on both start paths — the title ladder wrote into nothing.
+  v12.1.12.487: the title store's decisive lines log at Information (Jellyfin hides Debug by default).
+  v12.1.12.486: the title store logs its failures instead of swallowing them.
+  v12.1.12.485: the store is written per file (upload and download), not per run — Flush was empty.
+  v12.1.12.484: the extraction pump stays fed on every item (skips included) — one ffmpeg at a time.
+  v12.1.12.483: no tvst id read-back — 88 tries, 0 readable ids, ~15 s each; own marker instead.
+  v12.1.12.482: the pack's fill verdict is stored with the season signature — no re-extraction while nothing changed.
+  v12.1.12.481: the ladder only closes what it can prove — evidence and disturbances close nothing.
+  v12.1.12.480: three verdicts — refused closes the pair, no answer keeps it open.
+  v12.1.12.479: a title closed in this run is not run through the ladder again for every track.
+  v12.1.12.478: title ladder for tvst and mst — create, look again, 2/4/8 s pauses, the fourth failure closes every pair of that title.
+  v12.1.12.477: create, look again, and if the title is not there the pair is settled; the film id is probed before any upload; a source's no is remembered per content.
+  v12.1.12.476: the pack verdict is stored with a signature of its members; a new signature means a new attempt.
+  v12.1.12.475: accepted-without-id closes the pair (film and series address), and each run writes in one batch.
+  v12.1.12.474: a pack that cannot form asks the store first instead of extracting episodes, and the aired episode count lives in the store.
+  v12.1.12.473: the pack phase is timed from the inside — library walk, aired lookups, file language scans, fill phase.
+  v12.1.12.472: the whole run is timed on detail — item list, pack phase, every item and the run total, for upload and download alike.
+  v12.1.12.471: the loop between two tracks is timed too — the gap since the last track and the chain's share of it.
+  v12.1.12.470: every track carries a stopwatch — qa, sources, slot wait and send are timed and logged on detail.
+  v12.1.12.469: the look-ahead holds three files instead of one, worked off by a single pump, so skipped files no longer waste it.
+  v12.1.12.468: the next file is extracted while the current one uploads, so the rate setting becomes the actual rate; a cancelled run now really stops ffmpeg.
+  v12.1.12.467: the statistics row is worded "Uploads: QA fails not sent".
+  v12.1.12.466: the upload statistics row counts only quality-gate verdicts and is called "Uploads qa fails not uploaded"; the SubDL note leaves the rate-limit description.
+  v12.1.12.465: the transfer rhythm is a slot before the transfer, measured from the end of the last real one, and the rate is adjustable from 50 to 500 per hour again.
+  v12.1.12.464: the rate-limit note now states what SubDL actually does -- it temporarily blocks prolonged transfers above 500 per hour.
+  v12.1.12.463: the transfer rate is adjustable from 60 to 600 per hour, default 450, and the field says that SubDL allows 500 uploads or downloads per hour.
+  v12.1.12.462: the file fetch and the report filing are guarded too; a source that stopped answering stays out for the rest of the run, and the run ends only when none is left.
+  v12.1.12.461: the download side gets the same rule as the upload side -- a source that times out is a failure of that source, the run goes on and ends only when no source answers.
+  v12.1.12.460: each source records its own acceptance right after it answers, and a source that times out no longer aborts the run -- the run ends only when every source is gone.
+  v12.1.12.459: the transfer pause follows a real transfer of the track itself; a skipped track no longer pays it.
+  v12.1.12.458: the SubDL upload id is read back once at the end of a run instead of after every upload -- one list fetch for all of them.
+  v12.1.12.457: the two sources of a track are sent in parallel (second one with a 0-5 % offset), and the upload id is read from page 1 of mySubtitles only.
+  v12.1.12.456: a source whose site does not carry the language no longer counts as still wanting the pair -- it closes as unsupported-language.
+  v12.1.12.455: the "Upload season packs" switch carries no description text any more -- the tick switches pack building on and off.
+  v12.1.12.454: a season pack and its single episodes no longer exclude each other -- SubDL allows both, so nothing is deleted before the pack.
+  v12.1.12.453: a stored verdict closes the pair, and a pair question asks for evidence instead of the run's own queue and language lists.
+  v12.1.12.453: a duplicate counts only at the same source -- what SubDL already has still goes to tvsubtitles.
+  v12.1.12.452: a settled file costs one look at the store instead of a stream read plus a walk over every track.
+  v12.1.12.452: a track whose extraction failed is parked for seven days, and a missing file is never parked.
+  v12.1.12.450: both season questions read their table once per run instead of once per season.
+  v12.1.12.449: the comment joins its three parts with a dash -- the site turns line breaks into spaces.
+  v12.1.12.448: the comment carries IMDb/TMDb, SxxEyy with show and episode title, and the year.
+  v12.1.12.447: a season that is fully packed costs one line, not a TMDb question and a file walk.
+  v12.1.12.446: the episode title rides in the tvst comment field, placeholders stay out.
+  v12.1.12.445: the pack question is asked once per season, not once per pair.
+  v12.1.12.444: completion is counted per track, the same rule the head already proves (schema 17).
+  v12.1.12.443: the store speaks ISO 639-2; each source gets its own code at the edge (schema 16).
+  v12.1.12.442: the completion check maps the language tag before it asks the store (ENG vs EN).
+  v12.1.12.441: upload completion per source -- a per-source stamp decides "done", derived from the pairs of the file.
+  v12.1.12.440: the head knows loose sidecars too — 292 files were dropped every cycle while a sidecar waited for a source.
+  v12.1.12.439: every TMDb answer is cached in one place — 916 repeated requests a day were made because 4 of 13 call sites forgot the store.
+  v12.1.12.438: the run head judges by the tracks the file really has — 285 files were skipped as "complete" while never being looked at.
+  v12.1.12.437: store column names are back to their stored names — the rename broke the EF mapping and aborted the cycle.
+  v12.1.12.436: the plugin is called Sub Scribe in the log too — namespace and type names renamed, stored keys and API routes untouched.
+  v12.1.12.435: a queued item is refreshed on merge, so its source list is no longer frozen from an older version.
+  v12.1.12.434: a saved download names the source it came from, the HI copy too.
+  v12.1.12.433: log lines name the source that answered, and every log prefix says Sub Scribe instead of SubDL.
+  v12.1.12.432: the per-source queue now survives a restart — every queued item carries its own sources.
+  v12.1.12.431: the download rhythm also hangs behind the saved file — no pause in front of a fetch, none for a dry run.
+  v12.1.12.430: limits only where they belong — the 400/h rhythm follows a real transfer, the 0.5 s pause follows every external API call, nothing else waits.
+  v12.1.12.429: one upload queue per source — a source that did not queue an item no longer keeps it open, and the scan line names the counts per source.
+  v12.1.12.428: the TMDb store is really attached on the normal start path (it was not) and heals itself if a context appears without it.
+  v12.1.12.427: a series is no longer measured against moviesubtitles.org at the head of the run — the item names the media kind, so a finished series can actually become "complete".
+  v12.1.12.426: the episode page is looked up once per run instead of once per request — a season no longer costs a request per candidate page.
+  v12.1.12.425: TMDb answers are kept in the store instead of only in memory — a restart no longer re-asks the same titles and ids.
+  v12.1.12.424: a file whose text streams were all rejected ends before the ffmpeg pass instead of being re-extracted and skipped stream by stream on every run.
+  v12.1.12.423: the queue asks each site for its own language set before it looks at the marks; the mark check stays per source, so the queue does not fill up again.
+  v12.1.12.422: an item whose text streams are all settled and whose pairs no source still wants ends before the ffmpeg pass instead of after it.
+  v12.1.12.421: documentation, licence-file name and licence headers say "Sub Scribe" everywhere instead of the retired "SubDL Scribe".
+  v12.1.12.420: A language the site does not carry no longer re-enters the chain every run and is no longer booked as a failure — each site keeps its own language set, SubDL keeps its own.
+  v12.1.12.419: The client now names itself on every request to tvsubtitles.net (client=sub-scribe-<version>) and carries the current product name in its user-agent instead of the retired one.
+  v12.1.12.418: Subtitles that the site serves in a legacy codepage (Arabic cp1256, Greek cp1253, Bulgarian cp1251) are now read through the language of the candidate instead of being destroyed — strict UTF-8 first, the codepage only when that fails.
+  v12.1.12.417: Reports are filed before the API trace is detached — every accepted report now leaves both its POST line and its per-item line, so the counter in the statistics can be recounted from the log.
+  v12.1.12.416: The leftover "tvst" heading is gone from the upload tab as well — the family is one source, one switch per direction.
+  v12.1.12.415: tvsubtitles.net gets the same treatment: an entry whose language, rip or episode label the site's own form would refuse is reported through its "Report bad" form, dropped and counted. The report switch no longer carries a SubDL-only marker.
+  v12.1.12.414: The field-shape check now covers every SubDL answer — film block, quota, own subtitle list and upload answer — with the same rule: name the attribute, drop the value, keep the run going.
+  v12.1.12.413: A metadata format mismatch is reported as exactly that — attribute, affected subtitle, attribution — logged and filed with SubDL when the report switch is on. The hit is dropped and counted.
+  v12.1.12.412: Every metadata field of a SubDL hit — and of each file inside a pack — is checked against the documented shape; a wrong entry is named with its subtitle and attribute, the hit is dropped and counted, the run continues.
+  v12.1.12.411: A hit whose field shape contradicts SubDL's own documentation is now rejected and counted instead of being rescued; the count appears in the run's closing line.
+  v12.1.12.410: A foreign number in a SubDL hit (1.7, "3", 1e3, out of int range) no longer kills the whole download cycle — it is read tolerantly, the hit is kept, and the odd value is logged once per search.
+  v12.1.12.409: The "SubDL only" marker no longer sits between the label text and Jellyfin's checkbox outline — that broke the CSS sibling chain, so the boxes could not be ticked.
+  v12.1.12.408: Settings that only affect one source now say so at the switch — "SubDL only" for the SubDL limit, season packs, the hearing-impaired variant, the AI account, the broken-subtitle report and the archive cache.
+  v12.1.12.407: The download tab no longer carries a bare "tvst" heading, and the GUI check suite counts its failures at the end — it had been reporting 326/326 OK while ten checks were red.
+  v12.1.12.406: A failed cycle now logs the exception with its stack — the message alone ("One of the identified items was in an invalid format.") named no site.
+  v12.1.12.405: The download run now stores the tvsubtitles show number too — before, only the upload path wrote it, so every run fetched the show list again.
+  v12.1.12.404: The tvsubtitles show list is now fetched once per run instead of once per search — a single download run asked /add.html 53 times; the list is dropped when a show is actually added.
+  v12.1.12.403: Both addresses of the tvst family now write their requests and answers to the log (Debug, both directions), and the run summary names the status each source answered with — before, tvsubtitles and moviesubtitles were silent, so "asked" could not be proven.
+  v12.1.12.402: The tvst family is one source with one switch per direction — the two addresses stay data fields and TMDb decides which one is asked; the page says that in one line instead of two switch pairs.
+  v12.1.12.401: sidecars from the reserved original block (slot 50-99) are no longer uploaded - they are the unsynchronized copies a correction keeps beside its result - and the upload comment carries the TMDb and IMDb ids only.
+  v12.1.12.400: the status page shows a light for each address of the tvst family, and the SubDL quota bars now say they are SubDL's; a number found for a film or show is stored even when no file hash is known, by finding its own row through the path.
+  v12.1.12.399: creating a missing show or film is now judged by the answer the site actually gives (a redirect with done=yes for shows, the "Movie has been added" line for films) instead of by "any 2xx"; a show that already exists is looked up again instead of being created twice.
+  v12.1.12.398: a rejected store row no longer poisons the whole run — the row is refused with a warning and the tracker rebuilds itself, so the upload cycle starts again; films missing on the site can now be created there, guarded against duplicates; the plugin page speaks one language again.
+  v12.1.12.397: movie uploads now translate the quality into the site's own rip values instead of sending it raw, and the upload queuer takes the media kind from TMDb rather than from Jellyfin's item type.
+  v12.1.12.396: the log now names the address that was actually asked, a trailing year in brackets no longer breaks the TMDb title match, and a dry run says which source won the pick.
+  v12.1.12.395: a third address joins the two existing sources — movies are searched and uploaded at moviesubtitles.org, series keep tvsubtitles.net, and TMDb decides which is which; uploading there stays switched off until its language mapping is proven.
+  v12.1.12.394: the configured order now decides which search engine is asked first, not only which hit leads — the SubDL search runs inside the ordered source loop instead of always up front — F-M504.
+  v12.1.12.393: a subtitle hunt no longer ends when the first source finds nothing — every enabled source is asked, in the configured order, once per language, and the source list is a loop over all providers instead of two hard-coded ones — F-M504.
+  v12.1.12.392: the tvsubtitles download is on by default when its switch is unset; the tvsubtitles upload stays off by default — F-M503.
+  v12.1.12.391: the tvsubtitles client maps ISO language codes onto the site's own codes (el/gre becomes gr, cze cs, zho cn, jpn jp, and so on), so uploads in those languages are no longer refused — F-M502.
+  v12.1.12.390: the plugin keeps the tvsubtitles show number next to the TMDb and IMDb ids (store schema 13) and creates a missing show from the TMDb title, year and season count after a narrow name comparison (case, "&"/"and", whitespace) — F-M501.
+  v12.1.12.389: the upload path asks which source holds a subtitle before it settles it, so one endpoint no longer blocks the other (F-M499, F-M500); subtitles downloaded from a source are never uploaded anywhere (no reup, no cross-contamination); the tvsubtitles upload sends the hearing-impaired flag and maps the release name onto the site's rip values.
+  v12.1.12.388: the upload pipeline only skips a media file once every enabled upload source has its mark, so the second endpoint is no longer dropped after the first has taken the subtitle (F-M499).
+  v12.1.12.387: the upload queue asks per source, so the second endpoint still gets its own attempt after the first one has taken the subtitle (F-M499); the tvsubtitles upload sends the hearing-impaired flag.
+  v12.1.12.386: the tvsubtitles upload maps the release name onto the site's seven rip values (WEB-DL becomes WEB); before, every episode was refused with "rip must be one of …" (F-M498).
+  v12.1.12.385: both download endpoints are asked in the configured order and the second one gets its own attempt — the candidate lists are merged instead of replaced, the ranking leads with the source, and a refused correction no longer ends the hunt for the other source; the upload walks the same chain, asking each source's switch before its start and keeping the provenance gate per source (F-M494/F-M495).
+  v12.1.12.384: the queue fills for the direction instead of for SubDL — with SubDL switched off (or its allowance spent) a tvsubtitles run still queues its episodes (F-M492).
+  v12.1.12.383: the direction gates ask the direction, not SubDL — with SubDL switched off and tvsubtitles on the download runs instead of being skipped as disabled (F-M492).
+  v12.1.12.382: the pre-checks ask per source — the SubDL API key is only required when SubDL downloads, the login pair only when SubDL uploads, and a spent SubDL quota no longer holds a cycle that still has tvsubtitles; every download write now carries its origin (F-M492/F-M493).
+  v12.1.12.381: tvsubtitles.net is a real second source — its own download and upload switches, four endpoints behind one seam, the download order is a setting (tv subtitles first by default), provenance and per-source ids live in the store, no re-upload and no cross-source upload, and only a subtitle that passed the alignment significance counts as a successful download (F-M477–F-M491).
+  v12.1.12.380: the hearing-impaired pool is walked instead of grabbed, and it carries the main track when the regular pool runs dry — an episode whose pack produced nothing usable is no longer marked "language not available" while its HI uploads sit unused (F-M476).
+  v12.1.12.379: a library-scan deferral is a scheduled fire of its direction, not an in-process timer; every pending attempt — both directions and the three maintenance slots — names its own reason instead of the last run's (F-M475).
   v12.1.12.378: candidates are ranked by price and reach — free before paid, season pack before single; the cache is asked by entry id (F-M474).
   v12.1.12.377: the hand-over line names the episode stretch low-to-high.
   v12.1.12.376: a follow-up single-file save no longer wipes the pack cover (F-M472).

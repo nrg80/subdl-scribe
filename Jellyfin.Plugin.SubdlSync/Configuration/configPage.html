@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-  This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+  This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
   SPDX-License-Identifier: GPL-3.0-or-later
 
-  SubDL Scribe is free software: you can redistribute it and/or modify it
+  Sub Scribe is free software: you can redistribute it and/or modify it
   under the terms of the GNU General Public License as published by the
   Free Software Foundation, either version 3 of the License, or (at your
   option) any later version.
-  SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+  Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
   warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   See the GNU General Public License for more details.
 -->
@@ -16,13 +16,13 @@
 <head>
     <meta charset="utf-8">
 
-    <title>SubDL Scribe</title>
+    <title>Sub Scribe</title>
 </head>
 <body>
     <div id="SubdlSyncConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
         <div data-role="content">
             <div class="content-primary">
-                <div id="SubdlTabs" class="subdl-tabs">
+                <div id="ScribeTabs" class="subdl-tabs">
                     <button type="button" is="emby-button" class="subdl-tab-btn raised" data-tab="general">General</button>
                     <button type="button" is="emby-button" class="subdl-tab-btn raised" data-tab="download">Download</button>
                     <button type="button" is="emby-button" class="subdl-tab-btn raised" data-tab="upload">Upload</button>
@@ -65,14 +65,14 @@
                         <div id="RandomScheduleInfo" style="margin-top:-0.4em; font-size:0.85em; opacity:0.8;"></div>
 
                         <h3>Status</h3>
-                        <div id="SubdlQuotaBox" style="margin-bottom:1em;"></div>
-                        <div id="SubdlStatusBox" style="display:flex;flex-direction:column;margin-bottom:1em;">
+                        <div id="ScribeQuotaBox" style="margin-bottom:1em;"></div>
+                        <div id="ScribeStatusBox" style="display:flex;flex-direction:column;margin-bottom:1em;">
                             <div class="subdl-status-row" id="SubdlLoginStatus">
                                 <span class="subdl-light"></span>
                                 <span class="subdl-label">SubDL Login</span>
                                 <span class="subdl-msg">—</span>
                             </div>
-                            <div class="subdl-status-row" id="SubdlApiStatus">
+                            <div class="subdl-status-row" id="ScribeApiStatus">
                                 <span class="subdl-light"></span>
                                 <span class="subdl-label">SubDL API</span>
                                 <span class="subdl-msg">—</span>
@@ -82,35 +82,53 @@
                                 <span class="subdl-label">TMDb API</span>
                                 <span class="subdl-msg">—</span>
                             </div>
+                            <div class="subdl-status-row" id="TvstStatus">
+                                <span class="subdl-light"></span>
+                                <span class="subdl-label">tvsubtitles.net</span>
+                                <span class="subdl-msg">—</span>
+                            </div>
+                            <div class="subdl-status-row" id="MstStatus">
+                                <span class="subdl-light"></span>
+                                <span class="subdl-label">moviesubtitles.org</span>
+                                <span class="subdl-msg">—</span>
+                            </div>
                             <h4 style="margin-top:0.8em;margin-bottom:0.3em;">Library directories</h4>
-                            <div id="SubdlDirStatusList">
+                            <div id="ScribeDirStatusList">
                                 <div class="fieldDescription">Loading…</div>
                             </div>
                         </div>
 
-                        <h3>SubDL Account (<span class="subdl-required">Required</span>)</h3>
+                        <!-- F-M497: der TMDb-Schluessel ist die EINZIGE Pflicht — ohne ihn startet keine
+                             Richtung, und die Seite sagt das ausdruecklich. -->
+                        <h3>TMDb (<span class="subdl-required">Required</span>)</h3>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="TmdbApiKey">TMDb API key (v3)</label>
+                            <input id="TmdbApiKey" name="TmdbApiKey" type="password" is="emby-input" autocomplete="new-password" required />
+                            <div class="fieldDescription">Required — the one mandatory key: without it neither download nor upload starts. Resolves IMDb / TMDb ids for upload and download. Register at <a href="https://www.themoviedb.org" target="_blank" rel="noopener">themoviedb.org</a>, then request a free key at <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org/settings/api</a>.</div>
+                        </div>
+
+                        <!-- F-M497 (Operator-Anweisung 15.11.2026: "Pflichtkonfiguration ist tmdb key …
+                             Kennzeichnung als required for subdl"): die SubDL-Felder sind NICHT mehr
+                             Pflicht — sie gehoeren zu EINER Quelle. Fehlt eines, faellt SubDL aus der
+                             Kette und tvsubtitles.net laeuft weiter; der Hinweis unter jedem Feld sagt
+                             das. Die IDs der Felder bleiben unveraendert. -->
+                        <h3>SubDL Account (<span class="subdl-required">Required for SubDL only</span>)</h3>
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="Username">SubDL email</label>
                             <input id="Username" name="Username" type="text" is="emby-input" required />
-                            <div class="fieldDescription">Login email of your SubDL account. Register free at <a href="https://subdl.com" target="_blank" rel="noopener">subdl.com</a>, then get your API key from the account panel.</div>
+                            <div class="fieldDescription">Required for SubDL only. Login email of your SubDL account. Register free at <a href="https://subdl.com" target="_blank" rel="noopener">subdl.com</a>, then get your API key from the account panel. Leave the SubDL fields empty to run on tvsubtitles.net alone.</div>
                         </div>
 
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="Password">SubDL password</label>
                             <input id="Password" name="Password" type="password" is="emby-input" autocomplete="new-password" required />
+                            <div class="fieldDescription">Required for SubDL only — the upload logs in with this pair. Without it SubDL is skipped, for upload as for download.</div>
                         </div>
 
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="ApiKey">SubDL API key</label>
                             <input id="ApiKey" name="ApiKey" type="password" is="emby-input" autocomplete="new-password" required />
-                            <div class="fieldDescription">Free key, created in your account panel &mdash; documented at <a href="https://subdl.com/api-doc" target="_blank" rel="noopener">subdl.com/api-doc</a>.</div>
-                        </div>
-
-                        <h3>TMDb (<span class="subdl-required">Required</span>)</h3>
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="TmdbApiKey">TMDb API key (v3)</label>
-                            <input id="TmdbApiKey" name="TmdbApiKey" type="password" is="emby-input" autocomplete="new-password" required />
-                            <div class="fieldDescription">Resolves IMDb / TMDb ids for upload and download. Register at <a href="https://www.themoviedb.org" target="_blank" rel="noopener">themoviedb.org</a>, then request a free key at <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org/settings/api</a>.</div>
+                            <div class="fieldDescription">Required for SubDL only. Free key, created in your account panel &mdash; documented at <a href="https://subdl.com/api-doc" target="_blank" rel="noopener">subdl.com/api-doc</a>. Without it SubDL is skipped, for download as for upload.</div>
                         </div>
 
                         
@@ -152,12 +170,16 @@
                              postprocessing ansteht. Zeile entfällt wenn gestartet"): one line, filled from
                              PostprocessDue; empty and invisible while no order is armed. -->
                         <div class="fieldDescription" id="PostprocessDueLine" style="margin-top:0.25em; display:none;"></div>
+                        <!-- F-M623 (Operator-Anweisung 19.11.2026 "Nur das cycle deferral"): der Zyklus
+                             selbst hat keine Worker-Zeile — sein aufgeschobener Anker bekommt deshalb
+                             seine eigene Zeile. Leer und unsichtbar, solange nichts aufgeschoben ist. -->
+                        <div class="fieldDescription" id="CycleDueLine" style="margin-top:0.25em; display:none;"></div>
                         <!-- The LOCAL deferral line (F-M288): sits under the last worker light, in the
                              page's normal text colour. Empty while nothing is deferred, so it costs no
                              space. It is NOT part of the quota box — those bars describe the server's
                              allowance, this line describes our own wait, and mixing the two made a
                              partly-used allowance read as a problem (user decision 03.10.2026). -->
-                        <div class="fieldDescription" id="SubdlLocalDeferLine" style="margin-top:0.5em;"></div>
+                        <div class="fieldDescription" id="ScribeLocalDeferLine" style="margin-top:0.5em;"></div>
 
                         <!-- One refresh for EVERY live readout (user order 30.09.2026: "es reicht wenn er
                              unter General tab sitzt woanders laufen keine live daten rein"). It sits at
@@ -172,7 +194,7 @@
                              cached 5 min, so its fetchedAt could be minutes old) and the status
                              probe. Two writers meant the line could report a time that had nothing
                              to do with the click, and the 10 s poll could move it on its own. -->
-                        <div id="SubdlStatusTimestamp" style="margin-top:1.2em;font-size:0.85em;opacity:0.8;">Not refreshed yet.</div>
+                        <div id="ScribeStatusTimestamp" style="margin-top:1.2em;font-size:0.85em;opacity:0.8;">Not refreshed yet.</div>
 
                         <!-- Same width and height as Save, flush left AND right with it, grey so the
                              two are never confused: Save is the blue action, this only re-reads
@@ -229,9 +251,9 @@
 <!-- F-M329: der Download-Tab liest in der Reihenfolge des Zyklus: Weiter-nach-Tageslimit, Nachlauf-Runden, Automatische Synchronisierung — alle drei über den Quality Gates. F-M385: jede Gate-Beschriftung nennt ihre eigene Aktion, Upload und Download teilen keine Formulierung. -->
 <h3>Rate Limit</h3>
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="UploadsPerHour">Transfer rate per hour (100&ndash;500)</label>
-                            <input id="UploadsPerHour" name="UploadsPerHour" type="number" is="emby-input" min="100" max="500" />
-                            <div class="fieldDescription">Paces the gap between two real transfers (uploads or downloads). Default: 400.</div>
+                            <label class="inputLabel inputLabelUnfocused" for="UploadsPerHour">Transfer rate per hour (50&ndash;500)</label>
+                            <input id="UploadsPerHour" name="UploadsPerHour" type="number" is="emby-input" min="50" max="500" />
+                            <div class="fieldDescription">Paces the gap between two real transfers (uploads or downloads). Default: 450.</div>
                         </div>
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="MinCallPauseSec">Min. pause between API calls, seconds (0.1&#8211;10)</label>
@@ -294,12 +316,12 @@
 
                         <h3>Download</h3>
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="DownloadArchiveCacheDays">Archive cache — days on disk</label>
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadArchiveCacheDays">Archive cache — days on disk <span class="src-badge src-subdl" title="Only this source is affected — tvst does not have this">SubDL only</span></label>
                             <input id="DownloadArchiveCacheDays" name="DownloadArchiveCacheDays" type="number" is="emby-input" min="0" max="365" />
                             <div class="fieldDescription">Keeps a downloaded subtitle pack on disk for this many days and reuses it. <strong>0 = off.</strong> Default: 14.</div>
                         </div>
                         <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="DownloadArchiveCacheMaxMb">Archive cache — ceiling (MB)</label>
+                            <label class="inputLabel inputLabelUnfocused" for="DownloadArchiveCacheMaxMb">Archive cache — ceiling (MB) <span class="src-badge src-subdl" title="Only this source is affected — tvst does not have this">SubDL only</span></label>
                             <input id="DownloadArchiveCacheMaxMb" name="DownloadArchiveCacheMaxMb" type="number" is="emby-input" min="0" max="10240" />
                             <div class="fieldDescription">Size ceiling for the archive cache; the oldest archives are dropped first. <strong>0 = off.</strong> Default: 512.</div>
                         </div>
@@ -355,7 +377,7 @@
                                  It starts the TASK, like the two refresh buttons above — NOT the job's own
                                  endpoint. Measured 08.10.2026: the endpoint ran the work correctly (prod log
                                  23:20:22→25, two rejected uploads cleaned) but the status list stayed EMPTY,
-                                 because the "Upl. Postproc." row is written by SubdlPostprocessTask alone and
+                                 because the "Upl. Postproc." row is written by ScribePostprocessTask alone and
                                  the endpoint never wrote one. The operator pressed the button, saw no entry,
                                  and concluded nothing had run. The task route also runs in the background
                                  instead of holding the click open. The endpoint stays as an API-level trigger;
@@ -377,16 +399,48 @@
                         <div style="margin-top:0.8em;">
                             <button is="emby-button" type="button" class="raised" id="RestoreBackup">Restore from backup…</button>
                         </div>
+
+                        <!-- F-M620 (Operator-Anweisung 19.11.2026): der Ganz-Store-Reset ist fuer eine
+                             Handvoll falsch gestempelter Dateien unverhaeltnismaessig — hier steht der
+                             Weg fuer genau eine Datei. -->
+                        <h3>Reset one file</h3>
+                        <div class="fieldDescription" style="max-width:60em;">
+                            <b>Put one file back into the queue.</b> The source stamps and the rejected
+                            track verdicts fall; real uploads and where a find came from stay, so nothing
+                            is uploaded a second time. Nothing else in the store is touched, and the next
+                            scan queues that file again.
+                        </div>
+                        <div style="display:flex; gap:0.6em; align-items:flex-end; flex-wrap:wrap; margin-top:0.6em;">
+                            <div style="flex:1; min-width:24em;">
+                                <input is="emby-input" id="ResetPathInput" type="text"
+                                       placeholder="/data/movies/…/Episode.mkv" />
+                            </div>
+                            <select is="emby-select" id="ResetPathWhat" class="emby-select-withcolor emby-select" style="width:auto; margin:0;">
+                                <option value="both">stamps and rejected verdicts</option>
+                                <option value="stamps">only the stamps</option>
+                                <option value="verdicts">only the rejected verdicts</option>
+                            </select>
+                            <button is="emby-button" type="button" class="raised button-submit" id="ResetPathRun">Reset this file…</button>
+                        </div>
+                        <div id="ResetPathResult" class="fieldDescription" style="margin-top:0.4em; max-width:60em;"></div>
                     </div>
 
 
 <div class="subdl-tab" data-tab-content="upload" style="display:none">
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
-                                <input id="UploadEnabled" name="UploadEnabled" type="checkbox" is="emby-checkbox" />
-                                <span>Upload enabled</span>
+                                <input id="SubdlUploadEnabled" name="SubdlUploadEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Upload enabled — SubDL</span>
                             </label>
-                            <div class="fieldDescription">Enable all upload functions. Default: off.</div>
+                            <div class="fieldDescription">Enable all upload functions against SubDL. Default: off.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="TvstUploadEnabled" name="TvstUploadEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Upload enabled — tvst</span>
+                            </label>
+                            <div class="fieldDescription" id="TvstUploadReason">Series go to tvsubtitles.net, films to moviesubtitles.org. TMDb decides. Default: off.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -400,7 +454,7 @@
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="UploadContinueAfterLimit" name="UploadContinueAfterLimit" type="checkbox" is="emby-checkbox" />
-                                <span>Continue after daily limit</span>
+                                <span>Continue after daily limit <span class="src-badge src-subdl" title="Only this source is affected — tvst does not have this">SubDL only</span></span>
                             </label>
                             <div class="fieldDescription">On 429/overload, schedule one automatic retry. Default: on.</div>
                         </div>
@@ -412,12 +466,11 @@
                         </label>
                         <div class="fieldDescription">Further runs while new files keep arriving. Default: on.</div>
                         </div>
-                        <div class="checkboxContainer checkboxContainer-withDescription">
+                        <div class="checkboxContainer">
                             <label class="emby-checkbox-label">
                                 <input id="UploadSeasonPacks" name="UploadSeasonPacks" type="checkbox" is="emby-checkbox" />
-                                <span>Upload season packs</span>
+                                <span>Upload season packs <span class="src-badge src-subdl" title="Only this source is affected — tvst does not have this">SubDL only</span></span>
                             </label>
-                            <div class="fieldDescription">A complete season goes up as one pack instead of one upload per episode. Default: on. An episode that already went up on its own is folded into a later pack, and its single upload is deleted from SubDL first so it is not there twice.</div>
                         </div>
                     <h3>Quality gates (before upload)</h3>
                         <div class="fieldDescription">Quality gates for uploads. All on by default.</div>
@@ -462,10 +515,27 @@
                     <div class="subdl-tab" data-tab-content="download" style="display:none">
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
-                                <input id="DownloadEnabled" name="DownloadEnabled" type="checkbox" is="emby-checkbox" />
-                                <span>Download enabled</span>
+                                <input id="SubdlDownloadEnabled" name="SubdlDownloadEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Download enabled — SubDL</span>
                             </label>
-                            <div class="fieldDescription">Enable all download functions. Default: on.</div>
+                            <div class="fieldDescription">Enable all download functions against SubDL. Default: on.</div>
+                        </div>
+
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="TvstDownloadEnabled" name="TvstDownloadEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Download enabled — tvst</span>
+                            </label>
+                            <div class="fieldDescription" id="TvstDownloadReason">Series come from tvsubtitles.net, films from moviesubtitles.org. TMDb decides. Default: on.</div>
+                        </div>
+
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="DownloadOrder">Download order</label>
+                            <select id="DownloadOrder" name="DownloadOrder" is="emby-select-withcolor" class="emby-select-withcolor emby-select">
+                                <option value="TvSubtitlesFirst">tvst first</option>
+                                <option value="SubdlFirst">SubDL first</option>
+                            </select>
+                            <div class="fieldDescription">Which source is asked first.</div>
                         </div>
 
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -480,7 +550,7 @@
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="DownloadContinueAfterLimit" name="DownloadContinueAfterLimit" type="checkbox" is="emby-checkbox" />
-                                <span>Continue after daily limit</span>
+                                <span>Continue after daily limit <span class="src-badge src-subdl" title="Only this source is affected — tvst does not have this">SubDL only</span></span>
                             </label>
                             <div class="fieldDescription">On 429/overload, schedule one automatic retry. Default: on.</div>
                         </div>
@@ -516,7 +586,7 @@
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="DownloadHearingImpaired" name="DownloadHearingImpaired" type="checkbox" is="emby-checkbox" />
-                                <span>Also download hearing impaired version (if available)</span>
+                                <span>Also download hearing impaired version (if available) <span class="src-badge src-subdl" title="Only this source is affected — tvst does not have this">SubDL only</span></span>
                             </label>
                             <div class="fieldDescription">Also save the SDH variant as separate file. Default: off.</div>
                         </div>
@@ -550,7 +620,7 @@
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="AllowAiTranslatedSubs" name="AllowAiTranslatedSubs" type="checkbox" is="emby-checkbox" />
-                                <span>Allow AI translated subs (SUBDL AI)</span>
+                                <span>Allow AI translated subs (SUBDL AI) <span class="src-badge src-subdl" title="Only this source is affected — tvst does not have this">SubDL only</span></span>
                             </label>
                             <div class="fieldDescription">Candidates from the machine-translation account are dropped at the search result while this is off. Default: off.</div>
                         </div>
@@ -558,7 +628,7 @@
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="ReportBrokenSubtitles" name="ReportBrokenSubtitles" type="checkbox" is="emby-checkbox" />
-                                <span>Report broken subtitles to SubDL</span>
+                                <span>Report broken subtitles</span>
                             </label>
                             <div class="fieldDescription">Default: on.</div>
                         </div>
@@ -625,7 +695,7 @@
             state rows sit on the same rhythm as the worker lines. The h4 between the two groups
             keeps its own margin -- that separation is wanted.
             NO backticks in this comment: the block is a JS template literal. */
-         #SubdlStatusBox .subdl-status-row { margin: 0; }
+         #ScribeStatusBox .subdl-status-row { margin: 0; }
          .subdl-msg { opacity: 0.85; margin-left: auto; text-align: right; }
         /* Innenluft in der Zeitspalte: the cell is max-content, so padding is what separates the
            date from the column edges. Keep it small and re-check the line's minimum width. */
@@ -633,6 +703,10 @@
         .subdl-outcome { font-weight: 600; }
         /* Dry-run note: plain grey text beside the result word, NOT a badge and NOT its own
            column. It must not inherit the result colour (that stays the outcome's own colour). */
+        .src-badge { display: inline-block; margin-left: .4em; padding: 0 .45em; border-radius: .6em;
+            font-size: 78%; font-weight: 600; letter-spacing: .02em; vertical-align: middle; }
+        .src-subdl { background: #e8eef7; color: #2f4d7a; }
+        .src-tvst  { background: #eef2e6; color: #4a5c28; }
         .subdl-dryrun { color: #767676; margin-left: 0.25em; }
         /* Workers section only: ONE worker = ONE line, never wrapped.
            Four columns, in this order: light, name, time, result -- ALL left-aligned, so every
@@ -985,10 +1059,10 @@
             }
 
             function subdlInitConfigPage() {
-                console.log('[SubDL Scribe] pageinit called');
+                console.log('[Sub Scribe] pageinit called');
                 if (typeof Dashboard !== 'undefined' && Dashboard.showLoadingMsg) { try { Dashboard.showLoadingMsg(); } catch (err) { /* non-fatal */ } }
                 ApiClient.getPluginConfiguration(SubdlSyncConfig.pluginUniqueId).then(function (config) {
-                    console.log('[SubDL Scribe] config loaded');
+                    console.log('[Sub Scribe] config loaded');
                     document.querySelector('#Username').value = config.Username || '';
                         document.querySelector('#Password').value = config.Password || '';
                         document.querySelector('#ApiKey').value = config.ApiKey || '';
@@ -1024,7 +1098,15 @@
                         }
                         document.querySelector('#UploadOnArrival').checked = config.UploadOnArrival;
                         document.querySelector('#UploadSeasonPacks').checked = config.UploadSeasonPacks;
-                        document.querySelector('#UploadEnabled').checked = config.UploadEnabled;
+                        // F-M477: provider switch first, the pre-split value answers while it is unset.
+                        document.querySelector('#SubdlUploadEnabled').checked =
+                            config.SubdlUploadEnabled === null || config.SubdlUploadEnabled === undefined
+                                ? !!config.UploadEnabled : !!config.SubdlUploadEnabled;
+                        // F-M520: ONE switch for the family. The box shows the EFFECTIVE state of both
+                        // addresses: on as soon as either one is on, because uploads follow the switch and
+                        // the address is decided by TMDb, not by the operator.
+                        document.querySelector('#TvstUploadEnabled').checked =
+                            config.TvSubtitlesUploadEnabled === true || config.MovieSubtitlesUploadEnabled === true;
                         document.querySelector('#DryRun').checked = config.DryRun;
                         document.querySelector('#LogMode').value = config.LogMode;
                         document.querySelector('#OshashRefresh').value = config.OshashRefresh || 'Monthly';
@@ -1046,7 +1128,20 @@
                                '.!qb', '.!ut', '.bc!', '.!bt', '.az!', '.bt!', '.part', '.partial', '.downloading',
                                '.crdownload', '.opdownload',
                                '.ob!', '.fb!', '.jc!', '.td', '.dtapart', '.tmp'].join('\n');
-                        document.querySelector('#DownloadEnabled').checked = config.DownloadEnabled;
+                        document.querySelector('#SubdlDownloadEnabled').checked =
+                            config.SubdlDownloadEnabled === null || config.SubdlDownloadEnabled === undefined
+                                ? !!config.DownloadEnabled : !!config.SubdlDownloadEnabled;
+                        // F-M503: an undecided tvst download is ON — the box shows the EFFECTIVE state, not the raw null.
+                        document.querySelector('#TvstDownloadEnabled').checked =
+                            (config.TvSubtitlesDownloadEnabled === null || config.TvSubtitlesDownloadEnabled === undefined
+                                ? true : !!config.TvSubtitlesDownloadEnabled)
+                            || (config.MovieSubtitlesDownloadEnabled === null || config.MovieSubtitlesDownloadEnabled === undefined
+                                ? true : !!config.MovieSubtitlesDownloadEnabled);
+                        // F-M507: undecided (null) is ON for the film address — same default as the series address.
+
+                        document.querySelector('#DownloadOrder').value = config.DownloadOrder === 'SubdlFirst'
+                            ? 'SubdlFirst'
+                            : 'TvSubtitlesFirst';
                         subdlPopulateLangList(config);
                         document.querySelector('#DownloadLanguagesDisplay').value = (config.DownloadLanguages || '');
                         document.querySelector('#DownloadOnlyMissing').checked = config.DownloadOnlyMissing;
@@ -1113,7 +1208,7 @@
                                 // F-M458b (operator order 10.11.2026): plural, like every other row —
                                 // at 36 characters it still stays under the longest label the table carries.
                                 ['Downloads: Broken subtitles reported', s.BrokenReported || 0],
-                                ['Uploads: stopped before sending', s.RejectedUpload || 0],
+                                ['Uploads: QA fails not sent', s.RejectedUpload || 0],
                                 ['Media files: language codes added', s.LanguageCodesAllocated || 0],
                                 ['Loose subtitles: language codes added', s.LooseSubtitlesRenamed || 0]
                             ];
@@ -1196,6 +1291,21 @@
                             if (line) {
                                 line.textContent = 'The last run of each worker.';
                             }
+                            // F-M623: der aufgeschobene Zyklus, in einer Zeile. Grund und Versuch stehen
+                            // dabei, weil "wartet" allein am 19.11.2026 nicht zu deuten war.
+                            var cyLine = document.querySelector('#CycleDueLine');
+                            if (cyLine) {
+                                var cyWhen = d && d.CycleDue ? subdlFmtDayTime(d.CycleDue) : '';
+                                if (cyWhen) {
+                                    var cyText = 'Next cycle ' + cyWhen;
+                                    if (d.CycleWhy) { cyText += ' — ' + d.CycleWhy; }
+                                    if (d.CycleAttemptLimit) { cyText += ' (attempt ' + d.CycleAttempt + '/' + d.CycleAttemptLimit + ')'; }
+                                    cyLine.textContent = cyText + '.';
+                                } else {
+                                    cyLine.textContent = '';
+                                }
+                                cyLine.style.display = cyWhen ? '' : 'none';
+                            }
                             var ppLine = document.querySelector('#PostprocessDueLine');
                             if (ppLine) {
                                 // F-M445: the armed postprocessing order, in the same words as the rest of
@@ -1247,7 +1357,7 @@ workers.forEach(function (w) {
                         window.subdlLoadWorkers = subdlLoadWorkers;
                         subdlLoadWorkers();
                         // One call that reloads EVERY live readout on the page: the API/search quota,
-                        // the download quota (both live in #SubdlQuotaBox), the SubDL/TMDb status rows,
+                        // the download quota (both live in #ScribeQuotaBox), the SubDL/TMDb status rows,
                         // the statistics counters and the Workers list. Wired to the "Refresh status"
                         // button AND used by the poll tick, so a manual run shows up without an F5
                         // (measured 30.09.2026: subdlLoadWorkers was called ONCE at init, so a worker
@@ -1268,10 +1378,10 @@ workers.forEach(function (w) {
                             jobs.forEach(function (job) {
                                 var fn = job[1];
                                 if (typeof fn !== 'function') {
-                                    console.log('[SubDL Scribe] refresh: ' + job[0] + ' loader not available');
+                                    console.log('[Sub Scribe] refresh: ' + job[0] + ' loader not available');
                                     return;
                                 }
-                                try { fn(); } catch (e) { console.error('[SubDL Scribe] refresh failed: ' + job[0], e); }
+                                try { fn(); } catch (e) { console.error('[Sub Scribe] refresh failed: ' + job[0], e); }
                             });
                         };
                         window.subdlReloadEverything = subdlReloadEverything;
@@ -1288,11 +1398,11 @@ workers.forEach(function (w) {
                         subdlPopulateLibraries(config);
                         subdlLoadQuota();
                         subdlLoadStatus();
-                        console.log('[SubDL Scribe] init complete');
+                        console.log('[Sub Scribe] init complete');
                     }).catch(function (err) {
-                        console.error('[SubDL Scribe] init failed', err);
+                        console.error('[Sub Scribe] init failed', err);
                         if (typeof Dashboard !== 'undefined' && Dashboard.hideLoadingMsg) { try { Dashboard.hideLoadingMsg(); } catch (e) { /* non-fatal */ } }
-                        var box = document.querySelector('#SubdlStatusBox');
+                        var box = document.querySelector('#ScribeStatusBox');
                         if (box) {
                             box.innerHTML = '<div class="fieldDescription" style="color:#a4262c;">Failed to load configuration: ' + (err && err.message ? err.message : String(err)) + '</div>';
                         }
@@ -1348,7 +1458,7 @@ workers.forEach(function (w) {
                     subdlQuotaTimer = setInterval(subdlLoadQuota, 60000);
                 }
                 function subdlLoadQuota() {
-                    var box = document.querySelector('#SubdlQuotaBox');
+                    var box = document.querySelector('#ScribeQuotaBox');
                     if (!box) { return; }
                     var subdlQ = ApiClient.getUrl('Plugins/SubdlQuota/Get');
                     subdlQ += (subdlQ.indexOf('?') === -1 ? '?' : '&') + '_t=' + Date.now();
@@ -1367,7 +1477,7 @@ workers.forEach(function (w) {
                             box.style.display = 'block';
                             // The deferral line is fed by this same answer — a stale line would outlive
                             // the data it came from, so it is cleared with every failed read.
-                            var dlErr = document.querySelector('#SubdlLocalDeferLine');
+                            var dlErr = document.querySelector('#ScribeLocalDeferLine');
                             if (dlErr) { dlErr.textContent = ''; }
                             return;
                         }
@@ -1378,7 +1488,7 @@ workers.forEach(function (w) {
                         if (!res || !res.search) {
                             box.textContent = 'Unavailable (bad response)';
                             box.style.display = 'block';
-                            var dlBad = document.querySelector('#SubdlLocalDeferLine');
+                            var dlBad = document.querySelector('#ScribeLocalDeferLine');
                             if (dlBad) { dlBad.textContent = ''; }
                             return;
                         }
@@ -1436,7 +1546,7 @@ workers.forEach(function (w) {
                         // the deferral notes, same separator, no second line anywhere on the page.
                         var offNotes = (loc && loc.notes) || [];
                         offNotes.forEach(function (t) { localLines.push(t); });
-                        var deferLine = document.querySelector('#SubdlLocalDeferLine');
+                        var deferLine = document.querySelector('#ScribeLocalDeferLine');
                         if (deferLine) {
                             // Plain text, page default colour. Empty when nothing is deferred and nothing
                             // is off — then the line carries no text and takes no visual space.
@@ -1444,9 +1554,9 @@ workers.forEach(function (w) {
                         }
                         var lines = [];
                         lines.push('<div style="font-weight:600;">Plan: ' + (res.plan || 'Free') + '</div>');
-                        lines.push(renderBar('API calls', res.search.used, res.search.limit, resetLocal(res.search.reset_at)));
+                        lines.push(renderBar('SubDL API calls', res.search.used, res.search.limit, resetLocal(res.search.reset_at)));
                         if (res.downloads) {
-                            lines.push(renderBar('Downloads', res.downloads.used, res.downloads.limit, resetLocal(res.downloads.reset_at)));
+                            lines.push(renderBar('SubDL downloads', res.downloads.used, res.downloads.limit, resetLocal(res.downloads.reset_at)));
                         }
                         box.innerHTML = lines.join('');
                         // The footer stamp is NOT written here any more (30.09.2026): this loader runs
@@ -1467,7 +1577,7 @@ workers.forEach(function (w) {
                         try { Dashboard.alert(msg); return; } catch (e) {}
                     }
                     if (typeof alert === 'function') { alert(msg); }
-                    else { console.log('[SubDL Scribe] notify:', msg); }
+                    else { console.log('[Sub Scribe] notify:', msg); }
                 }
 
                 function subdlStopTask(name) {
@@ -1482,7 +1592,7 @@ workers.forEach(function (w) {
                             subdlNotify('Stop failed: ' + name + ' (' + (r && r.error ? r.error : 'unknown') + ')');
                         }
                     }).catch(function (err) {
-                        console.error('[SubDL Scribe] stop failed', name, err);
+                        console.error('[Sub Scribe] stop failed', name, err);
                         subdlNotify('Stop failed — plugin not reachable: ' + name);
                     });
                 }
@@ -1509,7 +1619,7 @@ workers.forEach(function (w) {
                         // is cached server-side for 5 minutes, so its fetchedAt would show a time the
                         // click did not cause.
                         try {
-                            var stamp = document.querySelector('#SubdlStatusTimestamp');
+                            var stamp = document.querySelector('#ScribeStatusTimestamp');
                             // F-M271: the stamp has ONE writer - this click handler - and names the manual act.
                             if (stamp) { stamp.textContent = 'Manually refreshed ' + subdlFmtTime(new Date()); }
                         } catch (e) { /* the readouts matter more than the stamp */ }
@@ -1520,11 +1630,11 @@ workers.forEach(function (w) {
                 document.querySelector('#RunDownloadNow').addEventListener('click', function () { subdlStartTask('SubDL/TMDB — Subtitle Download'); });
                 // Operator order 08.10.2026: the two refresh tasks get a manual button under their
                 // own description. Same helper the run buttons use, so the task NAME is the only
-                // difference — these two are "SubDL Scribe — …", not "SubDL/TMDB — …".
-                document.querySelector('#RunDatabaseRefreshNow').addEventListener('click', function () { subdlStartTask('SubDL Scribe — Database Refresh'); });
-                document.querySelector('#RunOshashRefreshNow').addEventListener('click', function () { subdlStartTask('SubDL Scribe — OSHash Cache Refresh'); });
+                // difference — these two are "Sub Scribe — …", not "SubDL/TMDB — …".
+                document.querySelector('#RunDatabaseRefreshNow').addEventListener('click', function () { subdlStartTask('Sub Scribe — Database Refresh'); });
+                document.querySelector('#RunOshashRefreshNow').addEventListener('click', function () { subdlStartTask('Sub Scribe — OSHash Cache Refresh'); });
                 // F-M295 (08.10.2026): the TASK, not the endpoint — only the task writes the status row.
-                // Name must match SubdlPostprocessTask.Name exactly; a mismatch answers "Task not found".
+                // Name must match ScribePostprocessTask.Name exactly; a mismatch answers "Task not found".
                 document.querySelector('#RunPostprocessNow').addEventListener('click', function () { subdlStartTask('SubDL Postprocessing'); });
                 document.querySelector('#StopAllNow').addEventListener('click', function () {
                     // NF-8: stop BOTH directions — one click, two marker files.
@@ -1533,6 +1643,43 @@ workers.forEach(function (w) {
                 });
 
                 // Statistics reset: zero the counters via plugin config update.
+                // F-M620: eine einzelne Datei zurueck in die Queue — der Gegenpart zum Ganz-Store-Reset
+                // darunter. Same-origin gegen die eigene Route des Plugins; die Antwort nennt, wie viele
+                // Stempel und abgelehnte Urteile gefallen sind, damit der Klick nicht blind ist.
+                document.querySelector('#ResetPathRun').addEventListener('click', function (e) {
+                    e.preventDefault();
+                    var feld = document.querySelector('#ResetPathInput');
+                    var ziel = document.querySelector('#ResetPathResult');
+                    var pfad = (feld.value || '').trim();
+                    var was = document.querySelector('#ResetPathWhat').value || 'both';
+                    if (!pfad) {
+                        ziel.textContent = 'Give the full path of the media file first.';
+                        feld.focus();
+                        return;
+                    }
+                    if (!confirm('Reset this one file?\n\n' + pfad + '\n\nThe source stamps and the rejected track verdicts fall (' + was + '). Real uploads stay. The next scan looks at the file again.\n\nProceed?')) {
+                        return;
+                    }
+                    Dashboard.showLoadingMsg();
+                    ApiClient.ajax({
+                        url: ApiClient.getUrl('Plugins/SubdlReset/ResetPath', { confirm: 'true', path: pfad, what: was }),
+                        type: 'POST'
+                    }).then(function (r) {
+                        return r.json();
+                    }).then(function (res) {
+                        Dashboard.hideLoadingMsg();
+                        if (res && res.ok) {
+                            ziel.textContent = 'Reset: ' + res.media + ' file(s), ' + res.stamps
+                                + ' stamp(s) and ' + res.verdicts + ' rejected verdict(s) cleared — the next scan queues it again.';
+                        } else {
+                            ziel.textContent = 'Not reset: ' + ((res && res.error) ? res.error : 'the plugin gave no answer');
+                        }
+                    }).catch(function () {
+                        Dashboard.hideLoadingMsg();
+                        ziel.textContent = 'Request failed — see the log.';
+                    });
+                });
+
                 document.querySelector('#ResetRegistry').addEventListener('click', function (e) {
                     e.preventDefault();
                     // F-M90: two-stage confirmation — the wording is intentionally blunt.
@@ -1649,12 +1796,12 @@ workers.forEach(function (w) {
                         config.Password = document.querySelector('#Password').value;
                         config.ApiKey = document.querySelector('#ApiKey').value;
                         config.TmdbApiKey = tmdbKey;
-                        var uph = parseInt(document.querySelector('#UploadsPerHour').value) || 400;
+                        var uph = parseInt(document.querySelector('#UploadsPerHour').value) || 450;
                         config.DownloadQaRetryLimit = (function () { var v = parseInt(document.querySelector('#DownloadQaRetryLimit').value, 10); return isNaN(v) ? 3 : Math.min(20, Math.max(0, v)); })();
                         config.ArrivalDebounceMinutes = (function () { var v = parseInt(document.querySelector('#ArrivalDebounceMinutes').value, 10); return isNaN(v) ? 2 : Math.min(120, Math.max(1, v)); })();                                                config.RefetchInterval = document.querySelector('#RefetchInterval').value;
                         config.JobSpacingMinutes = (function () { var v = parseInt(document.querySelector('#JobSpacingMinutes').value, 10); return isNaN(v) ? 15 : Math.min(120, Math.max(5, v)); })();
 
-                        config.UploadsPerHour = Math.min(500, Math.max(100, uph)); // Rate 100..500 (F-M20)
+                        config.UploadsPerHour = Math.min(500, Math.max(50, uph)); // Rate 50..500 (F-M20/F-M593)
                         var mcp = parseFloat(String(document.querySelector('#MinCallPauseSec').value).replace(',', '.'));
                         if (isNaN(mcp)) { mcp = 0.5; }
                         config.MinCallPauseSec = Math.min(10, Math.max(0.1, mcp)); // 0.1..10
@@ -1662,7 +1809,12 @@ workers.forEach(function (w) {
                         config.FollowUpRoundsUpload = document.querySelector('#FollowUpRoundsUpload').checked;
                         config.UploadOnArrival = document.querySelector('#UploadOnArrival').checked;
                         config.UploadSeasonPacks = document.querySelector('#UploadSeasonPacks').checked;
-                                                config.UploadEnabled = document.querySelector('#UploadEnabled').checked;
+                        config.SubdlUploadEnabled = document.querySelector('#SubdlUploadEnabled').checked;
+                        // F-M520: the family has ONE switch; both addresses are stored with it, so the
+                        // stored shape stays what the pipeline reads and nothing is left half-decided.
+                        var tvstUp = document.querySelector('#TvstUploadEnabled').checked;
+                        config.TvSubtitlesUploadEnabled = tvstUp;
+                        config.MovieSubtitlesUploadEnabled = tvstUp;
                         config.DryRun = document.querySelector('#DryRun').checked;
                         config.LogMode = document.querySelector('#LogMode').value;
                         config.OshashRefresh = document.querySelector('#OshashRefresh').value;
@@ -1678,7 +1830,15 @@ workers.forEach(function (w) {
                         config.UploadContinueAfterLimit = document.querySelector('#UploadContinueAfterLimit').checked;
                         config.SkipDirPatterns = document.querySelector('#SkipDirs').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
                         config.SkipFilePatterns = document.querySelector('#SkipFiles').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
-                        config.DownloadEnabled = document.querySelector('#DownloadEnabled').checked;
+                        config.SubdlDownloadEnabled = document.querySelector('#SubdlDownloadEnabled').checked;
+                        // F-M520: one switch for the family, stored on both addresses (TMDb decides which
+                        // of the two is asked for a given item).
+                        var tvstDown = document.querySelector('#TvstDownloadEnabled').checked;
+                        config.TvSubtitlesDownloadEnabled = tvstDown;
+                        config.MovieSubtitlesDownloadEnabled = tvstDown;
+                        config.DownloadOrder = document.querySelector('#DownloadOrder').value === 'TvSubtitlesFirst'
+                            ? 'TvSubtitlesFirst'
+                            : 'SubdlFirst';
                         config.DownloadLanguages = document.querySelector('#DownloadLanguagesDisplay').value;
                         config.DownloadOnlyMissing = document.querySelector('#DownloadOnlyMissing').checked;
                         config.DownloadHearingImpaired = document.querySelector('#DownloadHearingImpaired').checked;
@@ -1730,12 +1890,14 @@ workers.forEach(function (w) {
             }
 
             function subdlLoadStatus() {
-                var box = document.querySelector('#SubdlStatusBox');
+                var box = document.querySelector('#ScribeStatusBox');
                 if (!box) { return; }
                 subdlSetLight('#SubdlLoginStatus', 'grey', 'Checking…');
-                subdlSetLight('#SubdlApiStatus', 'grey', 'Checking…');
+                subdlSetLight('#ScribeApiStatus', 'grey', 'Checking…');
                 subdlSetLight('#TmdbApiStatus', 'grey', 'Checking…');
-                var dirList = document.querySelector('#SubdlDirStatusList');
+                subdlSetLight('#TvstStatus', 'grey', 'Checking…');
+                subdlSetLight('#MstStatus', 'grey', 'Checking…');
+                var dirList = document.querySelector('#ScribeDirStatusList');
                 if (dirList) { dirList.innerHTML = '<div class="fieldDescription">Loading…</div>'; }
 
                 var statusUrl = ApiClient.getUrl('Plugins/SubdlSync/Status');
@@ -1745,8 +1907,14 @@ workers.forEach(function (w) {
                     var api = data.Subdl || {};
                     var tmdb = data.Tmdb || {};
                     subdlSetLight('#SubdlLoginStatus', (login.Light || 'grey').toLowerCase(), login.Message);
-                    subdlSetLight('#SubdlApiStatus', (api.Light || 'grey').toLowerCase(), api.Message);
+                    subdlSetLight('#ScribeApiStatus', (api.Light || 'grey').toLowerCase(), api.Message);
                     subdlSetLight('#TmdbApiStatus', (tmdb.Light || 'grey').toLowerCase(), tmdb.Message);
+                    // The tvst family has two addresses; each gets its own light, because one can be
+                    // reachable while the other is not.
+                    var tvst = data.Tvst || {};
+                    var mst = data.Mst || {};
+                    subdlSetLight('#TvstStatus', (tvst.Light || 'grey').toLowerCase(), tvst.Message);
+                    subdlSetLight('#MstStatus', (mst.Light || 'grey').toLowerCase(), mst.Message);
 
                     if (dirList) {
                         var dirs = data.Directories || [];
@@ -1776,8 +1944,10 @@ workers.forEach(function (w) {
                     // Refresh. Only that button stamps it now.
                 }).catch(function (err) {
                     subdlSetLight('#SubdlLoginStatus', 'red', 'Status probe failed');
-                    subdlSetLight('#SubdlApiStatus', 'red', 'Status probe failed');
+                    subdlSetLight('#ScribeApiStatus', 'red', 'Status probe failed');
                     subdlSetLight('#TmdbApiStatus', 'red', 'Status probe failed');
+                    subdlSetLight('#TvstStatus', 'red', 'Status probe failed');
+                    subdlSetLight('#MstStatus', 'red', 'Status probe failed');
                     if (dirList) { dirList.innerHTML = '<div class="fieldDescription" style="color:#a4262c;">Unable to load status.</div>'; }
                 });
             }

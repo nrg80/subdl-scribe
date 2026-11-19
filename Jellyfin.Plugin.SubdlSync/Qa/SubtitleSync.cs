@@ -1,12 +1,12 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
 //
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the
 // implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 //
@@ -86,7 +86,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Qa;
+namespace Jellyfin.Plugin.SubScribe.Qa;
 
 /// <summary>
 /// F-M307: corrects a downloaded subtitle by the piecewise-constant offset fitted
@@ -289,7 +289,7 @@ public static class SubtitleSync
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "[SubDL] auto-sync: decode failed for {File}", System.IO.Path.GetFileName(mediaPath));
+            logger.LogDebug(ex, "[Sub Scribe] auto-sync: decode failed for {File}", System.IO.Path.GetFileName(mediaPath));
             return new Result(false, 0, srtText, null, "audio decode failed");
         }
 
@@ -310,7 +310,7 @@ public static class SubtitleSync
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "[SubDL] auto-sync: fit threw for {File}", System.IO.Path.GetFileName(mediaPath));
+            logger.LogDebug(ex, "[Sub Scribe] auto-sync: fit threw for {File}", System.IO.Path.GetFileName(mediaPath));
             return new Result(false, 0, srtText, null, "fit error");
         }
 

@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
@@ -14,10 +14,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 // F-M262: welche Zeile erscheint bei welchem LogLevelMode?
 internal static class LogRun
@@ -55,7 +55,7 @@ internal static class LogRun
             if (Directory.Exists(dbDir)) Directory.Delete(dbDir, true);
             Directory.CreateDirectory(dbDir);
 
-            using var db = new SubdlDbContext(dbDir, null);
+            using var db = new ScribeDbContext(dbDir, null);
             var reg = new ContentHashRegistry(db, null, null);
             var cfg = new PluginConfiguration
             {
@@ -104,7 +104,7 @@ internal static class LogRun
             if (Directory.Exists(dbDir)) Directory.Delete(dbDir, true);
             Directory.CreateDirectory(dbDir);
 
-            using var db = new SubdlDbContext(dbDir, null);
+            using var db = new ScribeDbContext(dbDir, null);
             var reg = new ContentHashRegistry(db, null, null);
             var cfg = new PluginConfiguration { LogMode = mode, AllocateMissingLanguageCodes = true };
             reg.EnsureMedia(reg.GetMediaHash(work)!, "aabbccdd11223344aabbccdd11223344", work);

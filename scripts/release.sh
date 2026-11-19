@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+# This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# SubDL Scribe is free software: you can redistribute it and/or modify it
+# Sub Scribe is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
 # Free Software Foundation, either version 3 of the License, or (at your
 # option) any later version.
-# SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+# Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 # warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 # See the GNU General Public License for more details.
 
-# Release SubDL Scribe — the ONE supported release path.
+# Release Sub Scribe — the ONE supported release path.
 #
 # We build locally, verify the artifact, and upload exactly one ZIP. The CI
 # workflows only build and test; they never touch a release. See
@@ -29,7 +29,7 @@
 
 set -euo pipefail
 
-REPO_SLUG="nrg80/subdl-scribe"
+REPO_SLUG="nrg80/sub-scribe"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
@@ -211,6 +211,14 @@ say "Specification"
 python3 scripts/tests/spec-doc/check.py | tail -3 \
     || die "spec-doc check failed — the Lastenheft does not describe this build"
 
+# The check COUNTS the Lastenheft states ("**29 Prüfungen.**") are claims like any other: they were
+# never recomputed, so a suite could shrink under its stated number and nobody noticed. This gate binds
+# every stated count to the suite that carries it (scripts/tests/counts.json) and holds the suite's own
+# total against the sum of its claims.
+say "Metriken"
+python3 scripts/tests/counts/check.py | tail -3 \
+    || die "counts check failed — a stated check count is not carried by its suite"
+
 # --- 2. build ----------------------------------------------------------------
 say "Build"
 ./build.sh "$VER" | tail -3
@@ -253,7 +261,7 @@ for req in ('Jellyfin.Plugin.SubdlSync.dll', 'LanguageDetection.dll', 'build.yam
 # Apache-2.0, which requires the licence and notice alongside a redistribution.
 for req in ('licenses/THIRD-PARTY.txt',
             'licenses/LanguageDetection-Apache-2.0.txt',
-            'licenses/SubDL-Scribe-GPL-3.0.txt'):
+            'licenses/Sub-Scribe-GPL-3.0.txt'):
     if req not in names:
         sys.exit(f"  FAIL: {req} missing from the ZIP — a required licence is not shipped")
 if any(n.endswith('meta.json') for n in names):
@@ -314,7 +322,7 @@ fi
 
 git add manifest.json
 # NO identity override (fixed 03.10.2026). This line used to force
-# "SubDL Scribe <noreply@localhost>" on the release commit, so every release produced
+# "Sub Scribe <noreply@localhost>" on the release commit, so every release produced
 # one commit that belongs to nobody: GitHub counted it for no account, the contributor
 # list showed a name next to the maintainer's, and 13 commits carried an author the
 # user never wrote. The commit now inherits the repository's own identity, which is the
@@ -325,7 +333,7 @@ git push --quiet origin "$BRANCH"
 
 # --- 5. tag, and check what the TAG carries ---------------------------------
 say "Tag $TAG"
-git tag -a "$TAG" -m "SubDL Scribe $VER"
+git tag -a "$TAG" -m "Sub Scribe $VER"
 # Tag first, release second: the release can then never point at a tag the
 # server does not know. And check the TAGGED build.yaml, not the working tree —
 # a tag left behind on an older commit is exactly how v12.1.12.80 shipped

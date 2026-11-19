@@ -1,4 +1,4 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Concurrency harness: proves the shared context survives the load the plugin actually produces.
@@ -8,7 +8,7 @@
 //   Entity Framework's DbContext is single-threaded by contract. The plugin hands ONE context to
 //   every registry, every scheduled task and every API endpoint, and the configuration page polls
 //   /Plugins/SubdlSync/Stats every 10 seconds while a worker writes. Without the gate in
-//   SubdlSet, that combination throws "A second operation was started on this context instance
+//   ScribeSet, that combination throws "A second operation was started on this context instance
 //   before a previous operation completed" — and it throws it under load, on a user's server, not
 //   in a quiet test.
 //
@@ -19,11 +19,22 @@
 // Usage: concrun <workdir> [seconds]
 
 using System.Diagnostics;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 var workdir = args[0];
 int seconds = args.Length > 1 ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 6;
+
+// T178 wie in storex: dieser Lauf LOESCHT jede Datei in seinem Arbeitsverzeichnis. Ein
+// Repository-Root, versehentlich als Arbeitsverzeichnis uebergeben, kostet die Wurzeldateien
+// — am 18.11.2026 passiert, als ein Alle-Suiten-Skript jeder Suite denselben Pfad gab.
+if (File.Exists(Path.Combine(workdir, "build.yaml"))
+    || Directory.Exists(Path.Combine(workdir, ".git"))
+    || File.Exists(Path.Combine(workdir, ".gitignore")))
+{
+    Console.WriteLine($">>> FEHLER: '{workdir}' ist ein Repository, kein Arbeitsverzeichnis — dieser Lauf loescht dort alle Dateien.");
+    return 3;
+}
 
 Directory.CreateDirectory(workdir);
 foreach (var f in Directory.GetFiles(workdir))
@@ -31,7 +42,7 @@ foreach (var f in Directory.GetFiles(workdir))
     File.Delete(f);
 }
 
-using var db = new SubdlDbContext(workdir, null);
+using var db = new ScribeDbContext(workdir, null);
 var registry = new ContentHashRegistry(db, null, null);
 var oshash = new OshashCache(db, null);
 

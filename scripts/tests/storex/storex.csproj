@@ -1,12 +1,12 @@
 <!--
-  This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+  This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
   SPDX-License-Identifier: GPL-3.0-or-later
 
-  SubDL Scribe is free software: you can redistribute it and/or modify it
+  Sub Scribe is free software: you can redistribute it and/or modify it
   under the terms of the GNU General Public License as published by the
   Free Software Foundation, either version 3 of the License, or (at your
   option) any later version.
-  SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+  Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
   warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   See the GNU General Public License for more details.
 
@@ -43,5 +43,10 @@
     <Reference Include="SQLitePCLRaw.provider.e_sqlite3"><HintPath>$(JellyfinDir)/SQLitePCLRaw.provider.e_sqlite3.dll</HintPath></Reference>
     <Reference Include="SQLitePCLRaw.batteries_v2"><HintPath>$(JellyfinDir)/SQLitePCLRaw.batteries_v2.dll</HintPath></Reference>
     <Reference Include="Microsoft.Extensions.Logging.Abstractions"><HintPath>$(JellyfinDir)/Microsoft.Extensions.Logging.Abstractions.dll</HintPath></Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Der Harness oeffnet den echten Store: SQLite-Provider und native Bibliothek muessen mit.
+         Ohne diesen Verweis stirbt der Lauf im DbContext-Konstruktor (EnsureCreated). -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
   </ItemGroup>
 </Project>

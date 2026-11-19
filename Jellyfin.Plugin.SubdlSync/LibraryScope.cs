@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 using System;
@@ -16,7 +16,7 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe;
+namespace Jellyfin.Plugin.SubScribe;
 
 /// <summary>
 /// Resolves the configured library selection to the concrete media PATHS it
@@ -119,7 +119,7 @@ internal sealed class LibraryScope
                 // Fail-soft: the locations are an ADDITION to the name check, never a
                 // replacement — losing them degrades nested libraries to the old
                 // name-only behaviour instead of losing the scope entirely.
-                logger?.LogWarning("[SubDL] Library locations unresolvable ({Msg}) — falling back to library names.", ex.Message);
+                logger?.LogWarning("[Sub Scribe] Library locations unresolvable ({Msg}) — falling back to library names.", ex.Message);
             }
         }
 

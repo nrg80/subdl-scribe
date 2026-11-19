@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
@@ -14,11 +14,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// Central OSHash cache backed by the plugin's data store (F-M88c, F-M119).
@@ -27,7 +27,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// so a replaced file is re-hashed automatically.
 public sealed class OshashCache
 {
-    private readonly SubdlDbContext _db;
+    private readonly ScribeDbContext _db;
     private readonly Microsoft.Extensions.Logging.ILogger? _logger;
 
     private static StringComparer PathComparer { get; } =
@@ -40,7 +40,7 @@ public sealed class OshashCache
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
-    public OshashCache(SubdlDbContext db, Microsoft.Extensions.Logging.ILogger? logger = null)
+    public OshashCache(ScribeDbContext db, Microsoft.Extensions.Logging.ILogger? logger = null)
     {
         _db = db;
         _logger = logger;
@@ -55,14 +55,14 @@ public sealed class OshashCache
         var e = _db.Oshashes.FindById(mediaPath);
         if (e == null || e.Size != size || e.MtimeUnix != mtimeUnix)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] oshash lookup miss {Path}", mediaPath);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] oshash lookup miss {Path}", mediaPath);
             return null;
         }
 
         validatedUtc = e.Updated;
         if (revalidateEvery != TimeSpan.Zero && e.Updated < DateTime.UtcNow - revalidateEvery)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] oshash lookup expired {Path}", mediaPath);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] oshash lookup expired {Path}", mediaPath);
             return null;
         }
 
@@ -77,7 +77,7 @@ public sealed class OshashCache
 
         if (firstHit)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] oshash lookup hit {Path}", mediaPath);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] oshash lookup hit {Path}", mediaPath);
         }
 
         return e.Hash;
@@ -100,7 +100,7 @@ public sealed class OshashCache
             MtimeUnix = mtimeUnix,
             Updated = DateTime.UtcNow
         });
-        LogUtil.Detail(_logger, "[SubDL-DB] oshash store {Path} {Hash}", mediaPath, hash);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] oshash store {Path} {Hash}", mediaPath, hash);
     }
 
 
@@ -110,7 +110,7 @@ public sealed class OshashCache
     public void Remove(string mediaPath)
     {
         _db.Oshashes.Delete(mediaPath);
-        LogUtil.Detail(_logger, "[SubDL-DB] oshash remove {Path}", mediaPath);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] oshash remove {Path}", mediaPath);
     }
 
     public int PruneStalePaths(IReadOnlyList<string> libraryRoots)

@@ -1,0 +1,673 @@
+{
+  "_note": "Bindung Test -> Suite fuer die Pruefungszahlen im Lastenheft. Der Pruefer vergleicht jede im Dokument genannte Zahl mit der Bindung hier und stellt sicher, dass die Suite diese Zahl noch traegt (Suite-Summe >= Summe der Testzahlen). Exakte Pruefung je Test braucht Gruppenmarken in der Suite; solange die fehlen, ist die Suite-Summe die harte Grenze.",
+  "suites": {
+    "reporting": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "coverage": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "storex": {
+      "args": [
+        "<temp>/storexwork"
+      ],
+      "invariant": false,
+      "skip_run": "Suite braucht echte Globalisierung (de-Collation im Store); dotnet bricht auf diesem Host in TimeZoneInfo ab"
+    },
+    "packretry": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "gui-structure": {
+      "python": "scripts/tests/gui-structure/check.py",
+      "file": "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"
+    },
+    "seasonpack": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "offstate": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "archivecache": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "stopfire": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "hipool": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "tvsubtitles": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "moviesubtitles": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "endpoints": {
+      "args": [
+        "<root>"
+      ]
+    },
+    "followup": {
+      "python": "scripts/tests/followup/check.py",
+      "file": "Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeEventDispatcher.cs"
+    }
+  },
+  "tests": {
+    "T154": {
+      "suite": "followup",
+      "checks": 25
+    },
+    "T176": {
+      "suite": "reporting",
+      "checks": 4
+    },
+    "T177": {
+      "suite": "coverage",
+      "checks": 12
+    },
+    "T178": {
+      "suite": "storex",
+      "checks": 3
+    },
+    "T179": {
+      "suite": "packretry",
+      "checks": 6
+    },
+    "T180": {
+      "suite": "reporting",
+      "checks": 6
+    },
+    "T181": {
+      "suite": "packretry",
+      "checks": 7
+    },
+    "T182": {
+      "suite": "gui-structure",
+      "checks": 1
+    },
+    "T183": {
+      "suite": "gui-structure",
+      "checks": 1
+    },
+    "T184": {
+      "suite": "reporting",
+      "checks": 6
+    },
+    "T185": {
+      "suite": "reporting",
+      "checks": 1
+    },
+    "T186": {
+      "suite": "reporting",
+      "checks": 1
+    },
+    "T187": {
+      "suite": "packretry",
+      "checks": 7
+    },
+    "T188": {
+      "suite": "archivecache",
+      "checks": 9
+    },
+    "T189": {
+      "suite": "packretry",
+      "checks": 7
+    },
+    "T190": {
+      "suite": "seasonpack",
+      "checks": 4
+    },
+    "T191": {
+      "suite": "seasonpack",
+      "checks": 2
+    },
+    "T192": {
+      "suite": "seasonpack",
+      "checks": 5
+    },
+    "T193": {
+      "suite": "offstate",
+      "checks": 3
+    },
+    "T194": {
+      "suite": "archivecache",
+      "checks": 8
+    },
+    "T195": {
+      "suite": "seasonpack",
+      "checks": 7
+    },
+    "T196": {
+      "suite": "gui-structure",
+      "checks": 8
+    },
+    "T197": {
+      "suite": "seasonpack",
+      "checks": 6
+    },
+    "T198": {
+      "suite": "stopfire",
+      "checks": 29
+    },
+    "T201": {
+      "suite": "hipool",
+      "checks": 20
+    },
+    "T202": {
+      "suite": "offstate",
+      "checks": 10
+    },
+    "T203": {
+      "suite": "tvsubtitles",
+      "checks": 41
+    },
+    "T205": {
+      "suite": "endpoints",
+      "checks": 37
+    },
+    "T206": {
+      "suite": "endpoints",
+      "checks": 8
+    },
+    "T207": {
+      "suite": "endpoints",
+      "checks": 9
+    },
+    "T208": {
+      "suite": "endpoints",
+      "checks": 8
+    },
+    "T209": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T210": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T211": {
+      "suite": "endpoints",
+      "checks": 6
+    },
+    "T212": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T213": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T214": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T215": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T216": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T217": {
+      "suite": "gui-structure",
+      "checks": 1
+    },
+    "T218": {
+      "suite": "gui-structure",
+      "checks": 1
+    },
+    "T219": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T220": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T221": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T222": {
+      "suite": "endpoints",
+      "checks": 10
+    },
+    "T223": {
+      "suite": "endpoints",
+      "checks": 16
+    },
+    "T224": {
+      "suite": "tvsubtitles",
+      "checks": 9
+    },
+    "T225": {
+      "suite": "offstate",
+      "checks": 3
+    },
+    "T226": {
+      "suite": "endpoints",
+      "checks": 10
+    },
+    "T227": {
+      "suite": "seasonpack",
+      "checks": 2
+    },
+    "T228": {
+      "suite": "moviesubtitles",
+      "checks": 84
+    },
+    "T229": {
+      "suite": "endpoints",
+      "checks": 14
+    },
+    "T230": {
+      "suite": "endpoints",
+      "checks": 8
+    },
+    "T231": {
+      "suite": "endpoints",
+      "checks": 8
+    },
+    "T232": {
+      "suite": "moviesubtitles",
+      "checks": 9
+    },
+    "T233": {
+      "suite": "moviesubtitles",
+      "checks": 5
+    },
+    "T234": {
+      "suite": "endpoints",
+      "checks": 7
+    },
+    "T235": {
+      "suite": "moviesubtitles",
+      "checks": 15
+    },
+    "T236": {
+      "suite": "endpoints",
+      "checks": 10
+    },
+    "T237": {
+      "suite": "moviesubtitles",
+      "checks": 6
+    },
+    "T238": {
+      "suite": "tvsubtitles",
+      "checks": 15
+    },
+    "T239": {
+      "suite": "moviesubtitles",
+      "checks": 4
+    },
+    "T240": {
+      "suite": "tvsubtitles",
+      "checks": 3
+    },
+    "T241": {
+      "suite": "tvsubtitles",
+      "checks": 8
+    },
+    "T242": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T243": {
+      "suite": "gui-structure",
+      "checks": 8
+    },
+    "T244": {
+      "suite": "endpoints",
+      "checks": 5
+    },
+    "T245": {
+      "suite": "tvsubtitles",
+      "checks": 3
+    },
+    "T246": {
+      "suite": "tvsubtitles",
+      "checks": 3
+    },
+    "T247": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T248": {
+      "suite": "gui-structure",
+      "checks": 7
+    },
+    "T249": {
+      "suite": "gui-structure",
+      "checks": 10
+    },
+    "T250": {
+      "suite": "gui-structure",
+      "checks": 7
+    },
+    "T251": {
+      "suite": "seasonpack",
+      "checks": 12
+    },
+    "T252": {
+      "suite": "seasonpack",
+      "checks": 9
+    },
+    "T253": {
+      "suite": "seasonpack",
+      "checks": 5
+    },
+    "T254": {
+      "suite": "seasonpack",
+      "checks": 5
+    },
+    "T255": {
+      "suite": "tvsubtitles",
+      "checks": 7
+    },
+    "T256": {
+      "suite": "reporting",
+      "checks": 1
+    },
+    "T257": {
+      "suite": "packretry",
+      "checks": 5
+    },
+    "T258": {
+      "suite": "tvsubtitles",
+      "checks": 5
+    },
+    "T259": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T260": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T261": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T262": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T263": {
+      "suite": "storex",
+      "checks": 8
+    },
+    "T264": {
+      "suite": "tvsubtitles",
+      "checks": 4
+    },
+    "T265": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T266": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T267": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T268": {
+      "suite": "endpoints",
+      "checks": 5
+    },
+    "T269": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T270": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T271": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T272": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T273": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T274": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T275": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T276": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T277": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T278": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T279": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T280": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T281": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T282": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T283": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T285": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T286": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T287": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T288": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T289": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T290": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T291": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T292": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T293": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T294": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T295": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T296": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T297": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T298": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T299": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T300": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T301": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T302": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T303": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T304": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T305": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T306": {
+      "suite": "endpoints",
+      "checks": 6
+    },
+    "T307": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T308": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T309": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T310": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T311": {
+      "suite": "endpoints",
+      "checks": 5
+    },
+    "T312": {
+      "suite": "endpoints",
+      "checks": 5
+    },
+    "T313": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T314": {
+      "suite": "endpoints",
+      "checks": 5
+    },
+    "T315": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T316": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T317": {
+      "suite": "endpoints",
+      "checks": 1
+    },
+    "T318": {
+      "suite": "endpoints",
+      "checks": 5
+    },
+    "T319": {
+      "suite": "endpoints",
+      "checks": 6
+    },
+    "T320": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T321": {
+      "suite": "endpoints",
+      "checks": 4
+    },
+    "T322": {
+      "suite": "endpoints",
+      "checks": 2
+    },
+    "T323": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T324": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T325": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T326": {
+      "suite": "endpoints",
+      "checks": 3
+    },
+    "T327": {
+      "suite": "endpoints",
+      "checks": 1
+    }
+  }
+}

@@ -1,15 +1,15 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// F-M247 (user decision 28.09.2026: "Dryrun geht nie in die Statistik"): the cumulative counters a
@@ -22,7 +22,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
 /// dry runs.
 /// </para>
 /// <para>
-/// The rule lives HERE and only here, because <see cref="ScheduledTasks.SubdlEventDispatcher"/>
+/// The rule lives HERE and only here, because <see cref="ScheduledTasks.ScribeEventDispatcher"/>
 /// is the single writer of the statistics row. Gating the counters at each increment site would
 /// mean six places that can each drift; gating them once, at the boundary, means a new counter
 /// added later is either routed through this type or is visibly outside it.
@@ -106,7 +106,8 @@ public readonly struct StatusCounterDelta
             uploaded: uploadDry ? 0 : upload?.Uploaded ?? 0,
             downloaded: downloadDry ? 0 : download?.Downloaded ?? 0,
             rejectedDownload: downloadDry ? 0 : download?.RejectedCandidates ?? 0,
-            rejectedUpload: uploadDry ? 0 : upload?.RejectedCandidates ?? 0,
+            // F-M595: die Statistik zaehlt nur die QA-Urteile, nicht jede verworfene Spur.
+            rejectedUpload: uploadDry ? 0 : upload?.RejectedQaFail ?? 0,
             fittedToAudio: downloadDry ? 0 : download?.FittedToAudio ?? 0,
             languageCodesAllocated: languageCodesAllocated,
             looseSubtitlesRenamed: looseSubtitlesRenamed,

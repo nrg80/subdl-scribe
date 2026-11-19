@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+# This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# SubDL Scribe is free software: you can redistribute it and/or modify it
+# Sub Scribe is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
 # Free Software Foundation, either version 3 of the License, or (at your
 # option) any later version.
-# SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+# Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 # warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 # See the GNU General Public License for more details.
 
@@ -24,7 +24,7 @@ requirement, so it lived in the tree for weeks. These checks assert the rule as 
 NEGATIVE: the two flags derive from the two switches and from nothing else, both legs are
 reachable in the body, download runs before upload, and neither switch off means no reseed.
 
-Run: python3 scripts/tests/followup/check.py [path/to/SubdlEventDispatcher.cs]
+Run: python3 scripts/tests/followup/check.py [path/to/ScribeEventDispatcher.cs]
 Exit code 0 = all checks pass.
 """
 
@@ -35,7 +35,7 @@ import sys
 DEFAULT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "..", "..", "..",
-    "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "SubdlEventDispatcher.cs",
+    "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "ScribeEventDispatcher.cs",
 )
 
 results = []
@@ -105,10 +105,16 @@ def main():
           "the running cycle's direction is an argument, not a gate (F-M177)")
 
     # Both legs reachable, and download runs before upload (the F-M177 order).
-    dl = body.find("if (followUpDown && config.DownloadEnabled)")
-    ul = body.find("if (followUpUp && config.UploadEnabled)")
-    check("the download leg is guarded by followUpDown", dl >= 0, "if (followUpDown && config.DownloadEnabled)")
-    check("the upload leg is guarded by followUpUp", ul >= 0, "if (followUpUp && config.UploadEnabled)")
+    #
+    # The direction switch is asked through the ANY-question since F-M492 (operator order 15.11.2026):
+    # a per-source toggle means "is the DIRECTION on" can no longer be read from SubDL's switch alone —
+    # switching SubDL off and tvsubtitles on would make the whole direction look disabled. The check
+    # follows the code here (AnyDownloadEnabled/AnyUploadEnabled), not the other way round: the rule it
+    # guards is unchanged, only the question that carries it.
+    dl = body.find("if (followUpDown && config.AnyDownloadEnabled)")
+    ul = body.find("if (followUpUp && config.AnyUploadEnabled)")
+    check("the download leg is guarded by followUpDown", dl >= 0, "if (followUpDown && config.AnyDownloadEnabled)")
+    check("the upload leg is guarded by followUpUp", ul >= 0, "if (followUpUp && config.AnyUploadEnabled)")
     check("download runs before upload", dl >= 0 and ul >= 0 and dl < ul,
           "download at %d, upload at %d" % (dl, ul))
 
@@ -140,7 +146,7 @@ def main():
           "IsArrivalRun = false" not in src,
           "the literal was the defect: it looked deliberate and was never true")
     check("the scope decides, not the trigger name",
-          re.search(r"ExecutePipelineAsync\(upload, config, filter, progress, trigger, scopeIds != null\)", src) is not None,
+          re.search(r"ExecutePipelineAsync\(\s*upload, config, filter, progress, trigger, scopeIds != null", src) is not None,
           "the queue scope IS the arrival statement (F-M233) — a trigger string can drift")
 
     # --- F-M448 (operator order 05.11.2026): "defer 15 min (aus gui) wenn der seeder auf einen
@@ -152,7 +158,7 @@ def main():
     plugin = os.path.join(root, "Jellyfin.Plugin.SubdlSync")
     config = _read(os.path.join(plugin, "Configuration", "PluginConfiguration.cs"))
     page = _read(os.path.join(plugin, "Configuration", "configPage.html"))
-    coord = _read(os.path.join(plugin, "ScheduledTasks", "SubdlSchedulerCoordinator.cs"))
+    coord = _read(os.path.join(plugin, "ScheduledTasks", "ScribeSchedulerCoordinator.cs"))
 
     check("the seed waits for a running library scan (F-M448)",
           "TryDeferForLibraryScan(config, reason, dir)" in src,
@@ -170,9 +176,15 @@ def main():
     check("a nonsensical spacing never waits",
           "if (minutes <= 0)" in src,
           "guard only — the GUI floor is 5 minutes")
+    # F-M475 (operator finding 15.11.2026): the retry is a SCHEDULED FIRE, not an in-process timer.
+    # The timer re-ran the arrival cycle (deferred 03:38 → fired 03:53 → "no arrivals collected — no
+    # run"), so it is gone; the fire keeps the direction, shows on the status line and survives a
+    # restart. The check names the arming call that replaced the timer.
     check("the retry is re-armed, so the arrival is not lost",
-          "_scanDeferTimer.Change(TimeSpan.FromMinutes(minutes)" in src,
-          "one-shot timer — a later trigger moves the retry further out")
+          "ScheduleScanDeferFire(upload: false, fireAt, minutes)" in src
+          and "ScheduleScanDeferFire(upload: true, fireAt, minutes)" in src
+          and "_scanDeferTimer" not in src,
+          "the retry is the direction's scheduled fire (F-M475), not a timer")
     check("a deferred seed neither scanned nor failed",
           'library scan running — retry in {0} min' in src,
           "grey row: the work is pending, not switched off")

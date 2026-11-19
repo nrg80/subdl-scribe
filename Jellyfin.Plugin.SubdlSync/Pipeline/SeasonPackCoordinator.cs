@@ -4,16 +4,16 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Language;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Language;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Registry;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// F-M372: holds back the episodes of a complete season until the season is whole, then sends ONE
@@ -77,7 +77,7 @@ public sealed class SeasonPackCoordinator
         string? VideoCodec = null,
         string? AbsorbedSingleId = null);
 
-    private readonly SubdlApiClient _api;
+    private readonly ScribeApiClient _api;
     private readonly ContentHashRegistry _registry;
     private readonly ILogger _logger;
     private readonly PluginConfiguration _config;
@@ -119,7 +119,7 @@ public sealed class SeasonPackCoordinator
     /// up the single way.
     /// </param>
     public SeasonPackCoordinator(
-        SubdlApiClient api,
+        ScribeApiClient api,
         ContentHashRegistry registry,
         ILogger logger,
         PluginConfiguration config,
@@ -216,7 +216,7 @@ public sealed class SeasonPackCoordinator
 
             LogUtil.Normal(
                 _logger,
-                "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Want} episode(s), the rest stays single.",
+                "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Want} episode(s), the rest stays single.",
                 entry.Key.ImdbId, entry.Key.Season, SeasonPack.LangTag(entry.Key.Lang, entry.Key.Hi), entry.Value.Count, aired.Count);
             await UploadSinglesAsync(entry.Value, ct).ConfigureAwait(false);
         }
@@ -296,9 +296,62 @@ public sealed class SeasonPackCoordinator
     /// <param name="hi">HI/SDH variant.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Task.</returns>
+    /// <summary>
+    /// F-M611 (Operator-Anweisung 18.11.2026: „1x ist ok. Dann verdict und status speichern, wenn der
+    /// status sich ändert, neu versuchen ein pack zu bilden"): die Signatur der Staffel — Luftzahl plus
+    /// Groesse und Speicherdatum jeder Folgedatei. Solange sie gleich bleibt, wird ein gefälltes
+    /// „kein Pack"-Urteil befolgt; aendert sie sich, wird neu geprueft.
+    /// </summary>
+    public Func<string, int, string>? SeasonSignature { get; set; }
+
+    /// <summary>
+    /// F-M611: der Grund, aus dem dieser Füllversuch keinen Pack ergab — null, wenn er aufging oder
+    /// nichts zu tun war. Der Aufrufer schreibt ihn als Urteil in den Store.
+    /// </summary>
+    public string? LastRefusal { get; private set; }
+
+    /// <summary>F-M611: das Urteil „kein Pack" wird mit Signatur gespeichert, damit der naechste Lauf nicht wieder entpackt.</summary>
+    private const string FillTagSuffix = "|fill";
+
+    /// <summary>
+    /// F-M611: merkt einen Fehlschlag und schreibt ihn als Urteil in den Store. Ohne das wurde dieselbe
+    /// Staffel am 18.11.2026 <b>17 Mal an einem Tag</b> entpackt und jedes Mal an derselben Folge
+    /// abgebrochen — der Befund war bekannt, nur nicht gespeichert.
+    /// </summary>
+    /// <param name="imdbId">Serie.</param>
+    /// <param name="season">Staffel.</param>
+    /// <param name="lang">Sprache.</param>
+    /// <param name="hi">HI-Variante.</param>
+    /// <param name="reason">Warum kein Pack entsteht.</param>
+    private void Refuse(string imdbId, int season, string lang, bool hi, string reason)
+    {
+        LastRefusal = reason;
+        string? signatur = SeasonSignature?.Invoke(imdbId, season);
+        if (string.IsNullOrEmpty(signatur))
+        {
+            return;
+        }
+
+        try
+        {
+            Registry.PackSeasonStore.Put(
+                imdbId, season, SeasonPack.LangTag(lang, hi) + FillTagSuffix, signatur!,
+                Registry.PackSeasonStore.NoPack, reason);
+            LogUtil.Normal(
+                _logger,
+                "[Sub Scribe] season pack — {Imdb} S{Season} [{Lang}]: no pack ({Reason}); the verdict is stored with the files' signature (F-M611).",
+                imdbId, season, SeasonPack.LangTag(lang, hi), reason);
+        }
+        catch (Exception ex)
+        {
+            LogUtil.Detail(_logger, "[Sub Scribe] pack verdict not stored: {Msg}", ex.Message);
+        }
+    }
+
     public async Task FillOnlyAsync(string imdbId, int season, string lang, bool hi, CancellationToken ct)
     {
         var key = (imdbId, season, lang, hi);
+        LastRefusal = null;
         if (_filler == null || !_complete.TryGetValue((imdbId, season), out var aired))
         {
             return;
@@ -311,8 +364,22 @@ public sealed class SeasonPackCoordinator
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: already up as a pack, nothing is extracted.",
+                "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: already up as a pack, nothing is extracted.",
                 imdbId, season, SeasonPack.LangTag(lang, hi));
+            return;
+        }
+
+        // F-M611: steht das Urteil „kein Pack" schon, und hat sich an den Dateien nichts geaendert, wird
+        // gar nicht erst entpackt. Genau dafuer gibt es die Signatur.
+        string? fillSignatur = SeasonSignature?.Invoke(imdbId, season);
+        if (!string.IsNullOrEmpty(fillSignatur)
+            && Registry.PackSeasonStore.StillImpossible(
+                imdbId, season, SeasonPack.LangTag(lang, hi) + FillTagSuffix, fillSignatur!, out string altGrund))
+        {
+            LogUtil.Detail(
+                _logger,
+                "[Sub Scribe] season pack — {Imdb} S{Season} [{Lang}] unchanged since the last judgement ({Reason}), nothing extracted (F-M611)",
+                imdbId, season, SeasonPack.LangTag(lang, hi), altGrund);
             return;
         }
 
@@ -355,14 +422,15 @@ public sealed class SeasonPackCoordinator
                 {
                     LogUtil.Normal(
                         _logger,
-                        "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Aired} episode(s) carry this language in the store and {Carried} of {Aired} in their own file — no pack for it, this pass sends nothing.",
+                        "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Aired} episode(s) carry this language in the store and {Carried} of {Aired} in their own file — no pack for it, this pass sends nothing.",
                         imdbId, season, SeasonPack.LangTag(lang, hi), withLanguage.Count, aired.Count, carried.Count);
+                    Refuse(imdbId, season, lang, hi, "the files do not carry this language in every aired episode");
                     return;
                 }
 
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack planned from the files — {Imdb} S{Season} [{Lang}]: the store knows {Have} of {Aired}, but all {Carried} file(s) carry the language themselves (F-M433).",
+                    "[Sub Scribe] season pack planned from the files — {Imdb} S{Season} [{Lang}]: the store knows {Have} of {Aired}, but all {Carried} file(s) carry the language themselves (F-M433).",
                     imdbId, season, SeasonPack.LangTag(lang, hi), withLanguage.Count, aired.Count, carried.Count);
             }
         }
@@ -397,9 +465,28 @@ public sealed class SeasonPackCoordinator
                     .ToList();
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack skipped before any extraction — {Imdb} S{Season} [{Lang}]: {QualityCount} quality level(s) and {FramerateCount} frame rate(s) across {Aired} episode(s); {Deviating} carries another source, and {State} (F-M442).",
+                    "[Sub Scribe] season pack skipped before any extraction — {Imdb} S{Season} [{Lang}]: {QualityCount} quality level(s) and {FramerateCount} frame rate(s) across {Aired} episode(s); {Deviating} carries another source, and {State} (F-M442).",
                     key.imdbId, key.season, key.lang, qualities.Count, framerates.Count, aired.Count,
                     string.Join(", ", deviating.Take(6)), stateSentence);
+                return;
+            }
+        }
+
+        // F-M600 (Operator-Freigabe 18.11.2026: „Ja", nach der Messung „8 Versuche, 45,7 s, 0 Packs"):
+        // bevor die erste Folge entpackt wird, fragt der Pack den Store, ob eine Folge ohnehin nicht
+        // beitreten kann — keine Spur dieser Sprache, oder alle Spuren schon gesperrt. Ein Pack, der an
+        // Episode 3 scheitert, hat vorher Episode 1 und 2 umsonst entpackt (tt9737326: 20 s). Der Grund
+        // wird genannt, damit die Zeile nicht wie ein stiller Ausfall aussieht.
+        foreach (int episode in SeasonPack.AiredNumbers(aired))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (_filler.EpisodeCannotJoin(imdbId, season, episode, lang, hi, out string vorabGrund))
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[Sub Scribe] season pack skipped before any extraction — {Imdb} S{Season} [{Lang}]: episode {Episode} cannot join ({Reason}), and {State} (F-M600).",
+                    imdbId, season, SeasonPack.LangTag(lang, hi), episode, vorabGrund, stateSentence);
+                Refuse(imdbId, season, lang, hi, $"episode {episode} cannot join ({vorabGrund})");
                 return;
             }
         }
@@ -416,8 +503,9 @@ public sealed class SeasonPackCoordinator
                 // episode's subtitle is up already or it never was — either way this run is done.
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: episode {Episode} cannot join, and {State} (F-M442).",
+                    "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: episode {Episode} cannot join, and {State} (F-M442).",
                     imdbId, season, SeasonPack.LangTag(lang, hi), episode, stateSentence);
+                Refuse(imdbId, season, lang, hi, $"episode {episode} cannot join");
                 return;
             }
 
@@ -433,7 +521,7 @@ public sealed class SeasonPackCoordinator
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: the episodes do not share one source, and {State} (F-M442).",
+                "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: the episodes do not share one source, and {State} (F-M442).",
                 imdbId, season, SeasonPack.LangTag(lang, hi), stateSentence);
             return;
         }
@@ -452,7 +540,7 @@ public sealed class SeasonPackCoordinator
     private void LogFilled((string ImdbId, int Season, string Lang, bool Hi) key, int filled, int fresh)
         => LogUtil.Normal(
             _logger,
-            "[SubDL] season pack filled — {Imdb} S{Season} [{Lang}]: {Filled} episode(s) from subtitles already uploaded, {New} from this run.",
+            "[Sub Scribe] season pack filled — {Imdb} S{Season} [{Lang}]: {Filled} episode(s) from subtitles already uploaded, {New} from this run.",
             key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), filled, fresh);
 
     private async Task UploadAsync(
@@ -475,7 +563,7 @@ public sealed class SeasonPackCoordinator
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL] season pack skipped — {Imdb} S{Season} [{Lang}]: the episodes do not share one source, they stay single.",
+                "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: the episodes do not share one source, they stay single.",
                 key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi));
             if (uploadSinglesOnRefusal)
             {
@@ -511,7 +599,7 @@ public sealed class SeasonPackCoordinator
             // without writing anything to SubDL.
             LogUtil.Normal(
                 _logger,
-                "[SubDL] DRY-RUN would upload season pack {Name} — {Count} episode(s), {Imdb} S{Season} [{Lang}], Ef/Ee {From}-{To}",
+                "[Sub Scribe] DRY-RUN would upload season pack {Name} — {Count} episode(s), {Imdb} S{Season} [{Lang}], Ef/Ee {From}-{To}",
                 name, ordered.Count, key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), ordered.Min(c => c.Episode), ordered.Max(c => c.Episode));
             return;
         }
@@ -533,7 +621,7 @@ public sealed class SeasonPackCoordinator
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season memo hit — {Imdb} S{Season} [{Lang}]: fingerprint {Fingerprint} unchanged, nothing is re-sent.",
+                    "[Sub Scribe] season memo hit — {Imdb} S{Season} [{Lang}]: fingerprint {Fingerprint} unchanged, nothing is re-sent.",
                     key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), packFingerprint);
                 return;
             }
@@ -546,7 +634,7 @@ public sealed class SeasonPackCoordinator
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack already up with these members — {Imdb} S{Season} [{Lang}]: {Members}, nothing is re-sent.",
+                    "[Sub Scribe] season pack already up with these members — {Imdb} S{Season} [{Lang}]: {Members}, nothing is re-sent.",
                     key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), want);
                 return;
             }
@@ -564,14 +652,17 @@ public sealed class SeasonPackCoordinator
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL] season pack refused — {Imdb} S{Season} [{Lang}]: {Count} member(s) came from SubDL itself ({Episodes}); a pack is never built around those.",
+                "[Sub Scribe] season pack refused — {Imdb} S{Season} [{Lang}]: {Count} member(s) came from SubDL itself ({Episodes}); a pack is never built around those.",
                 key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), fromSubdl.Count, string.Join(", ", fromSubdl.Take(5)));
             return;
         }
 
-        // F-M391 (operator order 02.11.2026): the single uploads this pack absorbs are deleted FIRST.
-        // A pack that competes with entries carrying the same content is the case we do not want to
-        // find out about on SubDL's side; deleting first makes the pack the only carrier.
+        // F-M585 (Operator-Anweisung 17.11.2026: „Subdl erlaubt Einzeluploads die gleichzeitig
+        // bestandteil eines staffelpacks sind"): die Einzel-Uploads werden NICHT mehr geloescht. Bis
+        // hierher galt F-M391 — „der Pack ist der einzige Traeger", die Einzel wurden vor dem Pack per
+        // /user/deletePublishedSubtitle entfernt. SubDL erlaubt beides; der Pack tritt jetzt NEBEN die
+        // Einzel. Die Ids wandern als „stehen daneben" in die packs-Zeile (F-M390), damit sichtbar
+        // bleibt, was ausser dem Container noch von uns oben ist.
         var absorbed = ordered
             .Where(x => !string.IsNullOrWhiteSpace(x.AbsorbedSingleId))
             .Select(x => (Episode: x.Episode, Id: x.AbsorbedSingleId!))
@@ -588,31 +679,20 @@ public sealed class SeasonPackCoordinator
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL] season pack {Imdb} S{Season} [{Lang}]: {Count} member(s) carry no SubDL id in the store ({Episodes}) — uploaded by us, but not deletable, they stay beside the pack.",
+                "[Sub Scribe] season pack {Imdb} S{Season} [{Lang}]: {Count} member(s) carry no SubDL id in the store ({Episodes}) — uploaded by us, but not deletable, they stay beside the pack.",
                 key.ImdbId, key.Season, key.Lang, undeletable.Count, string.Join(", ", undeletable.Take(6)));
         }
 
+        // F-M585: kein Loeschaufruf mehr. Was als Einzel oben ist, bleibt oben — genannt wird es
+        // trotzdem, damit das Log die Wahrheit ueber die Staffel erzaehlt.
         var deletedIds = new List<string>();
-        foreach (var single in absorbed)
+        if (absorbed.Count > 0)
         {
-            bool gone = await _api.DeletePublishedSubtitleAsync(single.Id, ct).ConfigureAwait(false);
-            if (gone)
-            {
-                deletedIds.Add(single.Id);
-                LogUtil.Normal(
-                    _logger,
-                    "[SubDL] season pack absorbs the single upload of {Imdb} S{Season}E{Episode} [{Lang}] — id {Id} deleted before the pack.",
-                    key.ImdbId, key.Season, single.Episode, SeasonPack.LangTag(key.Lang, key.Hi), single.Id);
-            }
-            else
-            {
-                // Not fatal: the pack is still the better artefact, and the entry that refused to go
-                // stays visible as a duplicate rather than silently blocking the season.
-                LogUtil.Normal(
-                    _logger,
-                    "[SubDL] season pack could NOT delete the single upload of {Imdb} S{Season}E{Episode} [{Lang}] — id {Id} stays beside the pack.",
-                    key.ImdbId, key.Season, single.Episode, SeasonPack.LangTag(key.Lang, key.Hi), single.Id);
-            }
+            LogUtil.Normal(
+                _logger,
+                "[Sub Scribe] season pack {Imdb} S{Season} [{Lang}]: {Count} member(s) stay up as singles beside the pack (ids {Ids}, F-M585).",
+                key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), absorbed.Count,
+                string.Join(",", absorbed.Take(8).Select(x => x.Id)));
         }
 
         UploadResult result = await _api.UploadSeasonPackAsync(
@@ -640,7 +720,7 @@ public sealed class SeasonPackCoordinator
             {
                 LogUtil.Normal(
                     _logger,
-                    "[SubDL] season pack refused ({Reason}) — {Imdb} S{Season} [{Lang}] stays single.",
+                    "[Sub Scribe] season pack refused ({Reason}) — {Imdb} S{Season} [{Lang}] stays single.",
                     result.Reason ?? "skipped", key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi));
                 if (uploadSinglesOnRefusal)
                 {
@@ -651,16 +731,10 @@ public sealed class SeasonPackCoordinator
             }
 
             _countFailed(ordered.Count);
-            _logger.LogError("[SubDL] SEASON PACK FAILED {Imdb} S{Season} [{Lang}]: {Reason}", key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), result.Reason);
-            if (deletedIds.Count > 0)
-            {
-                // The singles are gone and the pack did not land. Say it out loud: the next fill-only
-                // pass rebuilds the same pack from the library (the content is still known), and nobody
-                // should have to guess why the episodes vanished from the panel.
-                _logger.LogWarning(
-                    "[SubDL] {Count} single upload(s) of {Imdb} S{Season} [{Lang}] were deleted for a pack that then failed — ids {Ids}. The next run rebuilds the pack from the library.",
-                    deletedIds.Count, key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), string.Join(",", deletedIds));
-            }
+            _logger.LogError("[Sub Scribe] SEASON PACK FAILED {Imdb} S{Season} [{Lang}]: {Reason}", key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), result.Reason);
+            // F-M585: hier stand die Warnung ueber geloeschte Einzel, die ein gescheiterter Pack
+            // hinterlaesst. Sie ist hinfaellig — nichts wird mehr geloescht; die Einzel dieser Staffel
+            // stehen unveraendert oben, und der naechste Lauf baut den Container erneut.
             return;
         }
 
@@ -682,19 +756,20 @@ public sealed class SeasonPackCoordinator
                 // F-M421: the pack row then carries the NAME instead of an id — say so, because a pack
                 // without an id cannot be deleted or matched against the account's own list later.
                 _logger.LogWarning(
-                    "[SubDL] no pack id for {Imdb} S{Season} [{Lang}] — the pack row carries its name \"{Name}\" instead of an id.",
+                    "[Sub Scribe] no pack id for {Imdb} S{Season} [{Lang}] — the pack row carries its name \"{Name}\" instead of an id.",
                     key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), name);
             }
         }
 
+        // F-M585: der Pack-Beleg gehoert NICHT auf die Folgezeile. Bis hierher schrieb diese Schleife
+        // `Uploaded` plus die Pack-Id in jede Mitgliedszeile — danach war „hochgeladen" ein einziger
+        // Wahrheitswert fuer drei Sachverhalte (Einzel, nur im Pack, beides), und die Folgezeile
+        // verlor ihre eigene Einzel-Id an die Pack-Id. Der Pack steht jetzt allein in der packs-Zeile
+        // (PackId + Episodes = die abgehakten Folgen); die Folgezeile bleibt ausschliesslich der
+        // Einzel-Upload. Nur der Fortschritt wird weiter gemeldet.
         foreach (var candidate in ordered)
         {
-            var c = candidate;
-            _registry.MarkAndFlush(() => _registry.MarkEmbed(
-                c.MediaHash, c.SubPos, c.Lang, c.HearingImpaired,
-                SubtitleStatus.Uploaded, contentHash: ContentHashRegistry.ComputeHash(c.Srt),
-                subdlId: packId, forced: c.Forced));
-            _reportDone(c.ItemId);
+            _reportDone(candidate.ItemId);
         }
 
         // F-M390: the pack is now a fact in the store, not an inference from the subtitle rows. One row
@@ -714,7 +789,7 @@ public sealed class SeasonPackCoordinator
         _countUploaded($"{key.ImdbId} S{key.Season} [{key.Lang}]", ordered.Count);
         LogUtil.Normal(
             _logger,
-            "[SubDL] SEASON PACK {Name} — {Count} episode(s), {Imdb} S{Season} [{Lang}], Ef/Ee {From}-{To}, id {Id}",
+            "[Sub Scribe] SEASON PACK {Name} — {Count} episode(s), {Imdb} S{Season} [{Lang}], Ef/Ee {From}-{To}, id {Id}",
             name, ordered.Count, key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi),
             ordered.Min(c => c.Episode), ordered.Max(c => c.Episode), packId ?? "-");
     }
@@ -731,7 +806,8 @@ public sealed class SeasonPackCoordinator
         List<OwnSubtitleEntry>? entries;
         try
         {
-            entries = await _api.ListMySubtitlesAsync(ct, maxPages: 2).ConfigureAwait(false);
+            // F-M587: nur Seite 1 — die API ignoriert page/per_page, Seite 2 wiederholt Seite 1.
+            entries = await _api.ListMySubtitlesAsync(ct, maxPages: 1).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -739,7 +815,7 @@ public sealed class SeasonPackCoordinator
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "[SubDL] could not read mySubtitles for the pack id.");
+            _logger.LogDebug(ex, "[Sub Scribe] could not read mySubtitles for the pack id.");
             return null;
         }
 
@@ -754,7 +830,7 @@ public sealed class SeasonPackCoordinator
         {
             LogUtil.Normal(
                 _logger,
-                "[SubDL] pack id {Id} taken from mySubtitles for {Imdb} S{Season} [{Lang}] — without it the pack could never be matched against the account's own list.",
+                "[Sub Scribe] pack id {Id} taken from mySubtitles for {Imdb} S{Season} [{Lang}] — without it the pack could never be matched against the account's own list.",
                 byRelease.HandleId, key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi));
             return byRelease.HandleId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
@@ -772,7 +848,7 @@ public sealed class SeasonPackCoordinator
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "[SubDL] could not read myPublishedSubtitles for the pack id.");
+            _logger.LogDebug(ex, "[Sub Scribe] could not read myPublishedSubtitles for the pack id.");
             return null;
         }
 
@@ -786,7 +862,7 @@ public sealed class SeasonPackCoordinator
         // one /user/deletePublishedSubtitle takes, so that is what the pack row is written with.
         LogUtil.Normal(
             _logger,
-            "[SubDL] pack entry id {Id} taken from myPublishedSubtitles for {Imdb} S{Season} [{Lang}] (upload id {UploadId}) — the submission list knows nothing, the published list names it (F-M432/F-M435).",
+            "[Sub Scribe] pack entry id {Id} taken from myPublishedSubtitles for {Imdb} S{Season} [{Lang}] (upload id {UploadId}) — the submission list knows nothing, the published list names it (F-M432/F-M435).",
             publishedMatch.HandleId, key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), publishedMatch.UploadId);
         return publishedMatch.HandleId.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
@@ -886,18 +962,18 @@ public sealed class SeasonPackCoordinator
                     forced: candidate.Forced));
                 _countUploaded($"{c.ImdbId} S{c.Season} [{c.Lang}]", 1);
                 _reportDone(c.ItemId);
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] UPLOADED {File} [{Lang}]", neutral, c.Lang);
+                LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] UPLOADED {File} [{Lang}]", neutral, c.Lang);
                 continue;
             }
 
             if (result.SkippedItem)
             {
-                LogUtil.PerItem(_config.LogMode, _logger, "[SubDL] SKIP {File} [{Lang}] — {Reason}", neutral, c.Lang, result.Reason ?? "skipped");
+                LogUtil.PerItem(_config.LogMode, _logger, "[Sub Scribe] SKIP {File} [{Lang}] — {Reason}", neutral, c.Lang, result.Reason ?? "skipped");
                 continue;
             }
 
             _countFailed(1);
-            _logger.LogError("[SubDL] UPLOAD FAILED {File} [{Lang}]: {Reason}", neutral, c.Lang, result.Reason);
+            _logger.LogError("[Sub Scribe] UPLOAD FAILED {File} [{Lang}]: {Reason}", neutral, c.Lang, result.Reason);
         }
     }
 

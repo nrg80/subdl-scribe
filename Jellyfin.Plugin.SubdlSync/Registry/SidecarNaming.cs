@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 using System;
@@ -13,10 +13,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Jellyfin.Plugin.SubdlScribe.Language;
+using Jellyfin.Plugin.SubScribe.Language;
 using MediaBrowser.Model.Entities;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// F-M239: the ONE reader of a sidecar file name.
@@ -115,6 +115,32 @@ public static class SidecarNaming
     /// <returns>True when the slot is reserved for an unsynchronized original.</returns>
     public static bool IsOriginalSlot(int slot)
         => slot >= OriginalSlotMin && slot <= OriginalSlotMax;
+
+    /// <summary>
+    /// Operator order 17.11.2026 ("5xer sidecars bitte generell nicht hochladen"): a sidecar in the
+    /// reserved ORIGINAL block is the unsynchronized copy a correction keeps beside its result — it is
+    /// a working file, not a deliverable.
+    /// <para>
+    /// The test is the slot on the name and nothing else, which is why it lives here next to
+    /// <see cref="IsOriginalSlot"/>: no file has to be opened to answer it, and a run of 24 episodes
+    /// pays nothing for the question. Slot 50 counts as well, although no writer hands it out any
+    /// more — older trees still carry such names, and they are originals just the same.
+    /// </para>
+    /// </summary>
+    /// <param name="filePath">Path of the sidecar.</param>
+    /// <param name="mediaPath">Path of the media file the sidecar belongs to.</param>
+    /// <returns>True when the name carries a slot of the original block.</returns>
+    public static bool IsOriginalSidecar(string filePath, string mediaPath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(mediaPath))
+        {
+            return false;
+        }
+
+        string baseName = Path.GetFileNameWithoutExtension(mediaPath);
+        int slot = SlotOf(Path.GetFileNameWithoutExtension(filePath), baseName);
+        return slot >= 50 && slot <= OriginalSlotMax;
+    }
 
     /// <summary>
     /// Builds the file name a sidecar gets next to the media file.

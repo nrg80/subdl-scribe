@@ -1,8 +1,10 @@
-# SubDL Scribe
+# Sub Scribe
 
-SubDL Scribe keeps your Jellyfin library subtitled and gives back to [SubDL](https://subdl.com). It
-**downloads** missing subtitles for the languages and libraries you select, **synchronizes them to the
-audio track**, and **uploads** the subtitle tracks already embedded in your own media files.
+Sub Scribe keeps your Jellyfin library subtitled. It draws on two sources — [SubDL](https://subdl.com)
+and [tvsubtitles.net](https://www.tvsubtitles.net) — and **downloads** missing subtitles for the
+languages and libraries you select, **synchronizes them to the audio track**, and **uploads** the
+subtitle tracks already embedded in your own media files. Each source has its own download and upload
+switch, and the order in which the sources are asked is yours to choose.
 
 Written by an **AI agent** under the maintainer's direction.
 
@@ -13,7 +15,7 @@ Licensed under **GPL-3.0-or-later** — see [LICENSE](LICENSE).
 The plugin page in one piece — libraries you opt in, target languages, quota and connection
 status, statistics, and when each worker last ran (credentials masked):
 
-![The SubDL Scribe settings page](docs/images/config-general.png)
+![The Sub Scribe settings page](docs/images/config-general.png)
 
 **Download** — what gets fetched, when a run happens, and the quality gates a subtitle has to pass
 before it is saved:
@@ -27,8 +29,9 @@ before it is saved:
 ## Requirements
 
 - Jellyfin **12.1.x** (targetAbi `12.1.0.0`)
-- A [SubDL](https://subdl.com) account with its **API key**
-- A **TMDb API key**
+- A **TMDb API key** — the only mandatory credential
+- Optional, per source: a [SubDL](https://subdl.com) account (API key for downloads, username and
+  password for uploads). Without it, SubDL is skipped and the remaining source keeps running.
 
 ## Installation
 
@@ -38,10 +41,10 @@ before it is saved:
 2. Add this repository URL:
 
    ```
-   https://raw.githubusercontent.com/nrg80/subdl-scribe/main/manifest.json
+   https://raw.githubusercontent.com/nrg80/sub-scribe/main/manifest.json
    ```
 
-3. Open **Dashboard → Plugins → All**, find **SubDL Scribe** and install it.
+3. Open **Dashboard → Plugins → All**, find **Sub Scribe** and install it.
 4. Restart Jellyfin.
 
 ### Manual
@@ -50,35 +53,39 @@ before it is saved:
 2. Create a folder for the plugin under your Jellyfin `plugins/` directory and extract the ZIP into it:
 
    ```
-   /var/lib/jellyfin/plugins/SubDL Scribe/
+   /var/lib/jellyfin/plugins/Sub Scribe/
    ├── Jellyfin.Plugin.SubdlSync.dll
    ├── LanguageDetection.dll
    ├── build.yaml
    └── licenses/
        ├── THIRD-PARTY.txt
        ├── LanguageDetection-Apache-2.0.txt
-       └── SubDL-Scribe-GPL-3.0.txt
+       └── Sub-Scribe-GPL-3.0.txt
    ```
 
 3. Restart Jellyfin.
 
 ## Quick start
 
-Open **Dashboard → Plugins → SubDL Scribe** and fill in:
+Open **Dashboard → Plugins → Sub Scribe** and fill in:
 
-1. **SubDL API key.**
-2. **SubDL username and password.**
-3. **TMDb API key.**
-4. **Libraries** to scan.
-5. **Target languages** for the download side.
+1. **TMDb API key** — required, everything else is optional.
+2. **Libraries** to scan.
+3. **Target languages** for the download side.
+4. **Source switches** — one download and one upload switch per source.
+5. **Download order** — which source is asked first; the second one gets its own attempt.
+6. **SubDL API key** and **SubDL username/password** — *required for SubDL only*. Without them that
+   source simply drops out of the chain.
 
 Save.
 
 ## Upload (off by default)
 
-Uploads the subtitle tracks embedded in your media files to SubDL, through **your own** SubDL
-account — enable it under **Dashboard → Plugins → SubDL Scribe → Upload → Upload enabled**. Quality
-gates and duplicate protection apply here exactly as on the download side.
+Uploads the subtitle tracks embedded in your media files — enable it under **Dashboard → Plugins →
+Sub Scribe → Upload → Upload enabled**. Both endpoints are tried in turn, in the configured source
+order: a source that is switched off, not configured, already holds the subtitle, or is not allowed to
+take it (a downloaded subtitle never travels to the other source) is skipped, and the next one still
+runs. Quality gates and duplicate protection apply here exactly as on the download side.
 
 ## Build
 

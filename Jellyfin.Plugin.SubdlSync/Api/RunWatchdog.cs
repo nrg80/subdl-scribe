@@ -1,18 +1,18 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api
+namespace Jellyfin.Plugin.SubScribe.Api
 {
     /// <summary>
     /// In-run watchdog (NF-4): aborts a pipeline run when no heartbeat has been
@@ -57,7 +57,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Api
 
         /// <summary>
         /// Gets the fixed idle grace: 6 minutes. It covers the 5-minute file-transfer
-        /// timeout (SubdlApiClient.FileTransferTimeout) with room to spare, so a slow but
+        /// timeout (ScribeApiClient.FileTransferTimeout) with room to spare, so a slow but
         /// working transfer is never mistaken for a frozen run.
         /// </summary>
         public static TimeSpan Grace => TimeSpan.FromMinutes(6);

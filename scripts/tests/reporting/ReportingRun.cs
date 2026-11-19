@@ -1,10 +1,10 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
 // Software Foundation, either version 3 of the License, or (at your option) any
-// later version. SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even
+// later version. Sub Scribe is distributed WITHOUT ANY WARRANTY; without even
 // the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 //
@@ -31,10 +31,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Registry;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
 namespace ReportingRun;
 
@@ -73,7 +73,7 @@ internal static class ReportingRun
         Check(empty.StartsWith("Package 3767750-8689923 ('Breaking.Bad.S04E01.Box.Cutter.WEB-DL', EN) downloads with 0 bytes.",
                 StringComparison.Ordinal),
             "an empty answer is named with the byte count, not described");
-        Check(empty.Contains("Automated report by SubDL Scribe (Jellyfin plugin) v12.1.12.343, account midevildynasty.", StringComparison.Ordinal),
+        Check(empty.Contains("Automated report by Sub Scribe (Jellyfin plugin) v12.1.12.343, account midevildynasty.", StringComparison.Ordinal),
             "the attribution carries plugin version and account");
         Check(!empty.Contains("attempt", StringComparison.OrdinalIgnoreCase)
               && !empty.Contains("please", StringComparison.OrdinalIgnoreCase)
@@ -151,9 +151,9 @@ internal static class ReportingRun
             "the pipeline puts the resolved pack member into the finding");
         Check(pipeline.Contains("hiFinding += \" ('\" + hiDl.Member + \"')\"", StringComparison.Ordinal),
             "F-M450: the SDH path names its member too — the file the gate measured, not the pack");
-        Check(Read(plugin, "Api/SubdlApiClient.cs").Contains("Member = memberEntry ?? memberName", StringComparison.Ordinal),
+        Check(Read(plugin, "Api/ScribeApiClient.cs").Contains("Member = memberEntry ?? memberName", StringComparison.Ordinal),
             "F-M450: the outcome reports the entry that was actually resolved, not the guessed name");
-        Check(Read(plugin, "Api/SubdlApiClient.cs").Contains("return (ms.ToArray(), entry.Name);", StringComparison.Ordinal),
+        Check(Read(plugin, "Api/ScribeApiClient.cs").Contains("return (ms.ToArray(), entry.Name);", StringComparison.Ordinal),
             "F-M450: only the unpack step knows which entry it handed back — it says so");
         // F-M455 replaced the "no members" test with "at most one member": with unpack=1 an ordinary
         // single release carries exactly one member — the file itself — so the old guard silenced
@@ -174,19 +174,25 @@ internal static class ReportingRun
         Check(tracker.Contains("!string.Equals(x.Kind, \"empty\", StringComparison.Ordinal)", StringComparison.Ordinal),
             "an empty-payload memo does not turn into a skip memo");
 
-        string db = Read(plugin, "Data/SubdlDbContext.cs");
+        string db = Read(plugin, "Data/ScribeDbContext.cs");
         Check(db.Contains("ALTER TABLE rejected_candidates ADD COLUMN NId", StringComparison.Ordinal)
               && db.Contains("EnsureReportColumns();", StringComparison.Ordinal),
             "an upgraded data file gets the report columns (EnsureCreated never alters a table)");
-        Check(db.Contains("CurrentSchemaVersion = 9", StringComparison.Ordinal),
-            "the schema version is bumped with the columns (9 carries the pack fingerprint)");
+        // F-M486/F-M488/F-M490: 10 provenance, 11 the four own marks, 12 the per-source upload times.
+        // F-M501: 13 carries media.TvstShowId — der Marker wird mit jeder Spalte gehoben, die ein
+        // aelterer Build beim Schreiben verlieren wuerde.
+        // F-M507: der Marker steht auf 14 — die Spalten der dritten Quelle (Filme) kamen dazu.
+        Check(db.Contains("CurrentSchemaVersion = 17", StringComparison.Ordinal)
+              && db.Contains("ALTER TABLE sidecars ADD COLUMN Origin", StringComparison.Ordinal)
+              && db.Contains("ALTER TABLE sidecars ADD COLUMN TvSubtitlesUploadId", StringComparison.Ordinal),
+            "the schema version is bumped with the columns (11 carries source and direction marks)");
 
-        string api = Read(plugin, "Api/SubdlApiClient.cs");
+        string api = Read(plugin, "Api/ScribeApiClient.cs");
         Check(api.Contains("\"subtitlePage\"", StringComparison.Ordinal) && api.Contains("c.NId = page[(slash + 1)..]", StringComparison.Ordinal),
             "the report id is taken from the search answer");
         Check(api.Contains("$\"{ApiBase}/report\"", StringComparison.Ordinal),
             "the report goes to the site's report endpoint");
-        Check(api.Contains("== 429", StringComparison.Ordinal) && api.Contains("SubdlReportOutcome.Deferred", StringComparison.Ordinal),
+        Check(api.Contains("== 429", StringComparison.Ordinal) && api.Contains("ScribeReportOutcome.Deferred", StringComparison.Ordinal),
             "a rate-limited report is reported back as deferred");
         Check(api.Contains("ud.TryGetProperty(\"name\"", StringComparison.Ordinal),
             "the attribution uses the account name, not the login mail");
@@ -209,7 +215,7 @@ internal static class ReportingRun
         string dir = Path.Combine(Path.GetTempPath(), "subdl-report-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var store = new SubdlDbContext(dir);
+            var store = new ScribeDbContext(dir);
             var spent = new QaFailTracker(store);
             spent.RecordSkippedCandidates("item", "EN", new[] { "9100001-111111", "9100002-222222" },
                 kind: "empty");
@@ -257,8 +263,12 @@ internal static class ReportingRun
         string between = runtimeAt > switchAt ? page[switchAt..runtimeAt] : string.Empty;
         Check(Regex.Matches(between, "id=\"").Count == 1,
             "the switch is the second-to-last control — only the runtime tolerance field follows");
-        Check(page.Contains("Report broken subtitles to SubDL", StringComparison.Ordinal),
+        // F-M533: der Schalter meldet an BEIDE Quellen (SubDL und tvst), deshalb nennt das Etikett
+        // keine Quelle mehr — ein "to SubDL" waere nach der Ausweitung schlicht falsch.
+        Check(page.Contains("Report broken subtitles", StringComparison.Ordinal),
             "the label names what it does");
+        Check(!page.Contains("Report broken subtitles to SubDL", StringComparison.Ordinal),
+            "the label names no single source any more");
         Check(page.Contains("config.ReportBrokenSubtitles = document.querySelector('#ReportBrokenSubtitles').checked", StringComparison.Ordinal)
               && page.Contains("document.querySelector('#ReportBrokenSubtitles').checked = config.ReportBrokenSubtitles !== false", StringComparison.Ordinal),
             "the switch is loaded and saved with the page");
@@ -328,7 +338,7 @@ internal static class ReportingRun
               && pipeline[gateFile..runEndFlush].Contains("QueueReport(row);", StringComparison.Ordinal),
             "F-M462: the main-path verdict is queued where it is measured, not behind 'nothing was saved'");
 
-        string apiSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "SubdlApiClient.cs"));
+        string apiSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "ScribeApiClient.cs"));
         // F-M461 (measured 10.11.2026): the v1 download route recorded no verdict at all, so its
         // rejects quoted the previous v2 call — the source of both misleading labels we chased
         // ("HTTP 200" on a healthy upload, "no request made" on a request that happened).
@@ -352,6 +362,16 @@ internal static class ReportingRun
             "F-M455: a run that only filed reports is not an empty run — the row gets written");
 
         Console.WriteLine();
+        // ---- F-M535: der Melde-Versand laeuft, solange die Spuren noch haengen ------------------
+        // Vorher wurde die API-Spur VOR dem Flush abgehaengt; dadurch fehlte im Log bei jeder Meldung
+        // die Zeile "API call POST …/report" — am 16.11. zaehlte die Statistik 2 Meldungen, sichtbar
+        // war eine. Der Quelltext muss den Flush VOR dem Abhaengen fuehren.
+        string berichtQuelle = Read(plugin, "Pipeline/DownloadPipeline.cs");
+        int flusch = berichtQuelle.IndexOf("FlushReportsAsync(summary, ct)", StringComparison.Ordinal);
+        int abhaengen = berichtQuelle.IndexOf("_api.DebugTrace -= OnApiTrace", StringComparison.Ordinal);
+        Check(flusch > 0 && abhaengen > 0 && flusch < abhaengen,
+            "F-M535: reports are filed while the API trace is still attached");
+
         Console.WriteLine(Failures.Count == 0
             ? $"reporting: {_checks} checks, all green."
             : $"reporting: {Failures.Count} of {_checks} checks FAILED:");

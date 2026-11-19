@@ -1,10 +1,10 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
 // Software Foundation, either version 3 of the License, or (at your option) any
-// later version. SubDL Scribe is distributed WITHOUT ANY WARRANTY; without
+// later version. Sub Scribe is distributed WITHOUT ANY WARRANTY; without
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See the GNU General Public License for more details.
 //
@@ -32,7 +32,7 @@
 
 using System;
 using System.IO;
-using Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+using Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 namespace AnchorGateRun;
 
@@ -116,7 +116,7 @@ internal static class Program
         // ── 4. Wiring on the source ────────────────────────────────────────────
         Console.WriteLine("4. Source contract");
         var src = File.ReadAllText(Path.Combine(
-            root, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlSchedulerCoordinator.cs"));
+            root, "Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeSchedulerCoordinator.cs"));
         Check(src.Contains("AnchorJobGate.IsDue(", StringComparison.Ordinal), "the gate is used");
         Check(src.Contains("AnchorJobGate.DeferralElapsed(", StringComparison.Ordinal), "the deadline gate is used");
         Check(!src.Contains("|| now < _pruneDeferredUntil)", StringComparison.Ordinal),

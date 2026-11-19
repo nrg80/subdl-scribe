@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 using System;
@@ -13,13 +13,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Language;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Language;
+using Jellyfin.Plugin.SubScribe.Registry;
 using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// Result of one language-resolution pass over a container.
@@ -286,7 +286,7 @@ public sealed class LanguageTagGate
                 // record, and the sibling F-M264 line is at Normal for the same reason. At PerItem
                 // the operator could never tell a skipped file from an untouched one.
                 LogUtil.Normal(_logger,
-                    "[SubDL-D] {File} — {Count} track(s) already ran through language detection; container not re-opened (F-M266).",
+                    "[Sub Scribe-D] {File} — {Count} track(s) already ran through language detection; container not re-opened (F-M266).",
                     System.IO.Path.GetFileName(mediaPath), skipped);
             }
         }
@@ -331,7 +331,7 @@ public sealed class LanguageTagGate
             if (alreadyTagged > 0)
             {
                 LogUtil.Normal(_logger,
-                    "[SubDL-D] {File} — {Count} track(s) already carry a language tag in the container; nothing to write (F-M264).",
+                    "[Sub Scribe-D] {File} — {Count} track(s) already carry a language tag in the container; nothing to write (F-M264).",
                     System.IO.Path.GetFileName(mediaPath), alreadyTagged);
             }
         }
@@ -356,7 +356,7 @@ public sealed class LanguageTagGate
         if (exit != 0 && texts.Values.All(v => v == null))
         {
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL-D] language resolution of {File} skipped: extraction exited {Exit}",
+                "[Sub Scribe-D] language resolution of {File} skipped: extraction exited {Exit}",
                 System.IO.Path.GetFileName(mediaPath), exit);
             return new LanguageResolution(tracks, wanted, untagged, written);
         }
@@ -371,7 +371,7 @@ public sealed class LanguageTagGate
                 // scan does not open the container for this position again.
                 _registry?.MarkDetectionAttempt(gateHash, pos, Data.DetectionOutcome.NoText);
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL-D] {File} s{Pos} — untagged track carries no text, left unresolved",
+                    "[Sub Scribe-D] {File} s{Pos} — untagged track carries no text, left unresolved",
                     System.IO.Path.GetFileName(mediaPath), pos);
                 continue;
             }
@@ -383,7 +383,7 @@ public sealed class LanguageTagGate
             {
                 _registry?.MarkDetectionAttempt(gateHash, pos, Data.DetectionOutcome.TooSmall);
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL-D] {File} s{Pos} — untagged track too small to detect a language ({Bytes} bytes), left unresolved",
+                    "[Sub Scribe-D] {File} s{Pos} — untagged track too small to detect a language ({Bytes} bytes), left unresolved",
                     System.IO.Path.GetFileName(mediaPath), pos, text.Length);
                 continue;
             }
@@ -393,7 +393,7 @@ public sealed class LanguageTagGate
             {
                 _registry?.MarkDetectionAttempt(gateHash, pos, Data.DetectionOutcome.Failed);
                 LogUtil.PerItem(_config.LogMode, _logger,
-                    "[SubDL-D] {File} s{Pos} — language could not be detected ({Bytes} bytes), left unresolved",
+                    "[Sub Scribe-D] {File} s{Pos} — language could not be detected ({Bytes} bytes), left unresolved",
                     System.IO.Path.GetFileName(mediaPath), pos, text.Length);
                 continue;
             }
@@ -403,7 +403,7 @@ public sealed class LanguageTagGate
             wanted[pos] = detected;
             _registry?.MarkDetectionAttempt(gateHash, pos, Data.DetectionOutcome.Resolved, detected, hi);
             LogUtil.PerItem(_config.LogMode, _logger,
-                "[SubDL-D] {File} s{Pos} — untagged track resolved to {Lang} ({Bytes} bytes)",
+                "[Sub Scribe-D] {File} s{Pos} — untagged track resolved to {Lang} ({Bytes} bytes)",
                 System.IO.Path.GetFileName(mediaPath), pos, detected, text.Length);
         }
 
@@ -463,7 +463,7 @@ public sealed class LanguageTagGate
 
             string identity = oldHash != null && newHash != null ? $"  {oldHash} -> {newHash}" : string.Empty;
             LogUtil.Normal(_logger,
-                "[SubDL-D] {File} — {Count} language code(s) written into the container: {Langs}{Identity}",
+                "[Sub Scribe-D] {File} — {Count} language code(s) written into the container: {Langs}{Identity}",
                 System.IO.Path.GetFileName(mediaPath), iso639.Count, string.Join(", ", writtenLangs), identity);
         }
 

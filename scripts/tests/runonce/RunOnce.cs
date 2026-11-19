@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 // T82 (F-M264): laeuft das Sprachcode-Gate pro Datei nur EINMAL?
@@ -22,23 +22,35 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
-using Jellyfin.Plugin.SubdlScribe.Registry;
-using Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Registry;
+using Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
 internal static class RunOnce
 {
     private static int Main(string[] args)
     {
         string media = args[0], root = args[1], ffmpeg = args[2];
+        // T178 (operator finding 15.11.2026, second occurrence): this harness DELETES its working
+        // directory. Handed a repository root by mistake — e.g. by a script that passes the checkout to
+        // every suite — it removes the sources. A directory carrying a repo marker is not a workdir, and
+        // refusing is the only safe direction.
+        if (File.Exists(Path.Combine(root, "build.yaml"))
+            || Directory.Exists(Path.Combine(root, ".git"))
+            || File.Exists(Path.Combine(root, ".gitignore")))
+        {
+            Console.WriteLine($">>> FEHLER: '{root}' ist ein Repository, kein Arbeitsverzeichnis — dieser Lauf loescht dort alle Dateien.");
+            return 3;
+        }
+
         if (Directory.Exists(root)) Directory.Delete(root, true);
         Directory.CreateDirectory(root);
         string work = Path.Combine(root, "item.mkv");
         BuildProbe(work, ffmpeg);   // eigene Probe: 2 grosse Spuren + 1 zu kleine
 
-        using var db = new SubdlDbContext(Path.Combine(root, "db"), null);
+        using var db = new ScribeDbContext(Path.Combine(root, "db"), null);
         var reg = new ContentHashRegistry(db, null, null);
         var cfg = new PluginConfiguration { LogMode = LogLevelMode.Verbose, AllocateMissingLanguageCodes = true };
         var log = new RecLogger();
@@ -113,7 +125,7 @@ internal static class RunOnce
         Console.WriteLine("Lauf 1: " + ur1.Written + " geschrieben, " + uAttempts1 + " Spur(en) nicht aufloesbar");
 
         // Der Seeder zieht die Zeilen auf den neuen Hash — die Vermerke muessen mitwandern.
-        // Reihenfolge wie in SubdlSeeder.AllocateMissingLanguageCodes: erst der Umzug, DANN den
+        // Reihenfolge wie in ScribeSeeder.AllocateMissingLanguageCodes: erst der Umzug, DANN den
         // aktuellen Hash lesen. Andersherum haelt uCur den ALTEN Hash, die Marker suchen am neuen
         // und der Test scheitert an seinem eigenen Aufbau statt am Code.
         if (ur1.OldHash != null && ur1.NewHash != null) reg.ReplaceMediaIdentity(ur1.OldHash, ur1.NewHash);
@@ -249,13 +261,13 @@ internal static class RunOnce
         Console.WriteLine();
         Console.WriteLine("=== F-M269: Refresh-Detailzeile ===");
 
-        string dClean = SubdlDatabaseRefreshTask.BuildRefreshDetail(
+        string dClean = ScribeDatabaseRefreshTask.BuildRefreshDetail(
             null, 33, 10, 0, 0, 450, null);
-        string dRebuilt = SubdlDatabaseRefreshTask.BuildRefreshDetail(
+        string dRebuilt = ScribeDatabaseRefreshTask.BuildRefreshDetail(
             null, 33, 10, 0, 0, 450, "compaction failed — rebuilt from own rows (12419072 -> 8249344 bytes)");
-        string dNothing = SubdlDatabaseRefreshTask.BuildRefreshDetail(
+        string dNothing = ScribeDatabaseRefreshTask.BuildRefreshDetail(
             null, 0, 0, 0, 0, 0, null);
-        string dFailed = SubdlDatabaseRefreshTask.BuildRefreshDetail(
+        string dFailed = ScribeDatabaseRefreshTask.BuildRefreshDetail(
             new InvalidOperationException("boom"), 0, 0, 0, 0, 0, null);
 
         Console.WriteLine("  sauber       : \"" + dClean + "\"");

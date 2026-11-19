@@ -1,0 +1,26 @@
+<center><br /><br /><br /><div id="linkPlace"><b>Wait: <span id="timeNumer">0</span> sec ...</b></div></center>
+
+<script type="text/javascript"
+               language="JavaScript">
+
+var timerFIG = 1; //        ...
+       document.all.timeNumer.innerHTML = timerFIG; //     ...
+
+var timer = setInterval("startTimer()",1000);
+
+        function startTimer()
+{
+        if(timerFIG !== 1) {
+           timerFIG--;
+           document.all.timeNumer.innerHTML = timerFIG;
+        } else {
+        	  var s1= 'fil';
+        	  document.all.timeNumer.innerHTML = 'download starting';
+           clearInterval(timer);
+           var s2= 'es/T';
+           var s3= 'he';
+           var s4= ' Middle_2x24_HDTV.FEVER.en.zip';
+           document.location = s1+s2+s3+s4;
+        }
+}
+</script>

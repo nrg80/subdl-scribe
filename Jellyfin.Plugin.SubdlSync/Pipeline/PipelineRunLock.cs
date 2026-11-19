@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 using System;
@@ -16,7 +16,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Pipeline;
+namespace Jellyfin.Plugin.SubScribe.Pipeline;
 
 /// <summary>
 /// (user decision 25.09.2026): ONE lock for every state-mutating component —
@@ -72,7 +72,7 @@ public static class PipelineRunLock
     private static string? _holder;
 
     private static string BlockPath() =>
-        Path.Combine(Jellyfin.Plugin.SubdlScribe.Plugin.Instance!.DataFolderPath, BlockFileName);
+        Path.Combine(Jellyfin.Plugin.SubScribe.Plugin.Instance!.DataFolderPath, BlockFileName);
 
     /// <summary>
     /// Removes a leftover block file once at plugin startup. After a restart no
@@ -89,14 +89,14 @@ public static class PipelineRunLock
                 if (File.Exists(path))
                 {
                     File.Delete(path);
-                    LogUtil.Normal(logger, "[SubDL-Lock] Removed leftover block file at startup (no previous run can still be alive).");
+                    LogUtil.Normal(logger, "[Sub Scribe-Lock] Removed leftover block file at startup (no previous run can still be alive).");
                 }
 
                 _holder = null;
             }
             catch (Exception ex)
             {
-                logger?.LogWarning("[SubDL-Lock] Startup cleanup failed ({Msg}) — continuing.", ex.Message);
+                logger?.LogWarning("[Sub Scribe-Lock] Startup cleanup failed ({Msg}) — continuing.", ex.Message);
             }
         }
     }
@@ -177,7 +177,7 @@ public static class PipelineRunLock
         }
         catch (Exception ex)
         {
-            logger?.LogWarning("[SubDL-Lock] probe failed ({Msg}) — assuming free.", ex.Message);
+            logger?.LogWarning("[Sub Scribe-Lock] probe failed ({Msg}) — assuming free.", ex.Message);
             return true; // fail-open
         }
     }
@@ -206,11 +206,11 @@ public static class PipelineRunLock
                 }
 
                 _holder = null;
-                LogUtil.Detail(logger, "[SubDL] {Who}: finished — lock released.", who);
+                LogUtil.Detail(logger, "[Sub Scribe] {Who}: finished — lock released.", who);
             }
             catch (Exception ex)
             {
-                logger?.LogWarning("[SubDL] {Who}: block file release failed: {Msg}", who, ex.Message);
+                logger?.LogWarning("[Sub Scribe] {Who}: block file release failed: {Msg}", who, ex.Message);
             }
         }
     }
@@ -231,14 +231,14 @@ public static class PipelineRunLock
                 if (ownerPid.HasValue && !IsProcessAlive(ownerPid.Value))
                 {
                     logger?.LogWarning(
-                        "[SubDL-Lock] {Who}: previous holder (PID {Pid}) is gone — taking over.",
+                        "[Sub Scribe-Lock] {Who}: previous holder (PID {Pid}) is gone — taking over.",
                         who,
                         ownerPid.Value);
                 }
                 else if (age > StaleAfter || age > RunCeiling)
                 {
                     logger?.LogWarning(
-                        "[SubDL-Lock] {Who}: holder PID {Pid} exceeded the run ceiling ({AgeMinutes} min) — taking over.",
+                        "[Sub Scribe-Lock] {Who}: holder PID {Pid} exceeded the run ceiling ({AgeMinutes} min) — taking over.",
                         who,
                         ownerPid?.ToString(CultureInfo.InvariantCulture) ?? "?",
                         (int)age.TotalMinutes);
@@ -246,7 +246,7 @@ public static class PipelineRunLock
                 else
                 {
                     LogUtil.Detail(logger, 
-                        "[SubDL-Lock] Busy: {Who} cannot start, held by {Holder} (PID {Pid}, {AgeMinutes} min) — reschedule by JobSpacingMinutes.",
+                        "[Sub Scribe-Lock] Busy: {Who} cannot start, held by {Holder} (PID {Pid}, {AgeMinutes} min) — reschedule by JobSpacingMinutes.",
                         who,
                         _holder ?? "?",
                         ownerPid?.ToString(CultureInfo.InvariantCulture) ?? "?",
@@ -259,12 +259,12 @@ public static class PipelineRunLock
                 path,
                 string.Format(CultureInfo.InvariantCulture, "{0}|{1:O}", Environment.ProcessId, DateTime.UtcNow));
             _holder = who;
-            LogUtil.Detail(logger, "[SubDL] {Who}: start (lock acquired).", who);
+            LogUtil.Detail(logger, "[Sub Scribe] {Who}: start (lock acquired).", who);
             return true;
         }
         catch (Exception ex)
         {
-            logger?.LogWarning("[SubDL] {Who}: block file check failed ({Msg}) — proceeding.", who, ex.Message);
+            logger?.LogWarning("[Sub Scribe] {Who}: block file check failed ({Msg}) — proceeding.", who, ex.Message);
             return true; // fail-open
         }
     }

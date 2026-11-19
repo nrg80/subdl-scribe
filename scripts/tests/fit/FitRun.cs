@@ -1,4 +1,4 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // T119/T120/T121: the offset fit, driven on real files and on planted truths.
@@ -26,7 +26,7 @@ using System.Text;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
-using Jellyfin.Plugin.SubdlScribe.Qa;
+using Jellyfin.Plugin.SubScribe.Qa;
 
 internal static class FitRun
 {

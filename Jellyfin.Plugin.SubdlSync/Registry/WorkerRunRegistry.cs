@@ -1,19 +1,20 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
 using System;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using System.Linq;
+using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// Records the LAST run of each worker (scheduled task) in the data file, so the configuration page
@@ -38,7 +39,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// </summary>
 public sealed class WorkerRunRegistry
 {
-    private readonly SubdlDbContext _db;
+    private readonly ScribeDbContext _db;
     private readonly ILogger? _logger;
 
     /// <summary>
@@ -46,7 +47,7 @@ public sealed class WorkerRunRegistry
     /// </summary>
     /// <param name="db">Database context.</param>
     /// <param name="logger">Optional logger.</param>
-    public WorkerRunRegistry(SubdlDbContext db, ILogger? logger = null)
+    public WorkerRunRegistry(ScribeDbContext db, ILogger? logger = null)
     {
         _db = db;
         _logger = logger;
@@ -128,7 +129,7 @@ public sealed class WorkerRunRegistry
         catch (Exception ex)
         {
             // Recording a run must never break the run itself.
-            _logger?.LogWarning("[SubDL] recording the start of worker {Key} failed: {Msg}", key, ex.Message);
+            _logger?.LogWarning("[Sub Scribe] recording the start of worker {Key} failed: {Msg}", key, ex.Message);
         }
     }
 
@@ -176,7 +177,7 @@ public sealed class WorkerRunRegistry
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning("[SubDL] recording the result of worker {Key} failed: {Msg}", key, ex.Message);
+            _logger?.LogWarning("[Sub Scribe] recording the result of worker {Key} failed: {Msg}", key, ex.Message);
         }
     }
 
@@ -214,7 +215,61 @@ public sealed class WorkerRunRegistry
         catch (Exception ex)
         {
             // Recording a cancellation must never break the stop itself.
-            _logger?.LogWarning("[SubDL] recording the cancellation of worker {Key} failed: {Msg}", key, ex.Message);
+            _logger?.LogWarning("[Sub Scribe] recording the cancellation of worker {Key} failed: {Msg}", key, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// F-M621 (Operator-Anweisung 19.11.2026): schliesst beim Start jede Zeile, deren Lauf noch offen
+    /// steht.
+    /// <para>
+    /// WARUM: das Ende einer Zeile schreiben nur <see cref="Finish(string, string, string, bool)"/> und
+    /// <see cref="MarkCancelled"/> — beide brauchen den laufenden Prozess. Starb Jellyfin mitten im Lauf
+    /// (Neustart 19.11.2026 um 04:36:40, der Download stand bis dahin bei Item 1015 von 1417), blieb
+    /// <c>Ended</c> leer und <c>Outcome</c> auf <c>run</c>. Die Anzeige liest genau das als "laeuft"
+    /// (<see cref="Api.ScribeStatusController"/>), und der Stop-Knopf antwortet "no cycle active —
+    /// nothing to stop", weil es keinen Zyklus mehr gibt, den er abbrechen koennte. Die Lock-Datei wird
+    /// beim Start laengst als Leiche behandelt (<c>PipelineRunLock.ClearOnStartup</c>: "after a restart no
+    /// previous run can still be alive") — fuer die Zeilen fehlte dieser Gegenpart.
+    /// </para>
+    /// <para>
+    /// NICHT als Nutzer-Stop: F-M293 haelt fest, dass ein Neustart kein Knopfdruck ist. Die Zeile bekommt
+    /// deshalb <see cref="Outcome.Failed"/> und im Detail den Grund; <see cref="Outcome.Cancelled"/> wuerde
+    /// dem Betreiber einen Stop unterschieben, den niemand gedrueckt hat.
+    /// </para>
+    /// </summary>
+    /// <param name="reason">Warum die Zeile geschlossen wurde, in den Worten des Betreibers.</param>
+    /// <returns>Wie viele offene Zeilen geschlossen wurden.</returns>
+    public int CloseOpenRunsOnStartup(string reason)
+    {
+        try
+        {
+            var offen = _db.WorkerRuns.FindAll()
+                .Where(r => string.Equals(r.Outcome, Outcome.Running, StringComparison.Ordinal))
+                .ToList();
+            if (offen.Count == 0)
+            {
+                return 0;
+            }
+
+            // Ended = jetzt: wann der Prozess wirklich starb, weiss beim Start niemand mehr. Der Wert
+            // ist der Moment, in dem die Leiche gefunden wurde, und das Detail sagt genau das.
+            var now = DateTime.UtcNow;
+            foreach (var row in offen)
+            {
+                row.Ended = now;
+                row.Outcome = Outcome.Failed;
+                row.Detail = reason;
+                _db.WorkerRuns.Upsert(row);
+            }
+
+            return offen.Count;
+        }
+        catch (Exception ex)
+        {
+            // Aufraeumen darf den Start nie verhindern.
+            _logger?.LogWarning("[Sub Scribe] closing open worker rows at startup failed: {Msg}", ex.Message);
+            return 0;
         }
     }
 
@@ -246,7 +301,7 @@ public sealed class WorkerRunRegistry
     /// the operator watches: a run can fetch 40 files and align none, and the Download row's single
     /// word cannot tell those two appart.
     /// </summary>
-    public const string AutoSyncWorkerKey = "SubdlAutoSyncTask";
+    public const string AutoSyncWorkerKey = "ScribeAutoSyncTask";
 
     /// <summary>
     /// F-M323 (operator order 08.10.2026): the auto-sync's display name, in one place. The worker
@@ -394,7 +449,7 @@ public sealed class WorkerRunRegistry
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning("[SubDL] reading worker rows failed for {Key}: {Msg}", key, ex.Message);
+                _logger?.LogWarning("[Sub Scribe] reading worker rows failed for {Key}: {Msg}", key, ex.Message);
                 row = new WorkerRunEntity { Id = key, Name = name, Started = null, Outcome = Outcome.Never };
             }
 
@@ -422,7 +477,7 @@ public sealed class WorkerRunRegistry
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning("[SubDL] reading worker {Key} failed: {Msg}", key, ex.Message);
+            _logger?.LogWarning("[Sub Scribe] reading worker {Key} failed: {Msg}", key, ex.Message);
             return null;
         }
     }

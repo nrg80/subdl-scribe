@@ -1,18 +1,18 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
 using System;
 using System.Collections.Generic;
 
-namespace Jellyfin.Plugin.SubdlScribe.Language;
+namespace Jellyfin.Plugin.SubScribe.Language;
 
 /// <summary>
 /// Maps ISO 639-2 (ffprobe/MediaBrowser) three-letter codes to SubDL two-letter codes (F-M10).
@@ -83,6 +83,31 @@ public static class LanguageMapper
         ["KY"] = "kir", ["UZ"] = "uzb", ["HY"] = "arm", ["BE"] = "bel", ["BS"] = "bos",
         ["MY"] = "bur", ["KM"] = "khm", ["LA"] = "lat", ["CY"] = "wel", ["GA"] = "gle"
     };
+
+    /// <summary>
+    /// F-M557 (Operator-Anweisung 17.11.2026: „Ich würde iso nehmen und immer auf die jeweiligen Quellen
+    /// umsetzen. Per Software-Routine"): die EINE Schreibweise, in der der Store eine Sprache fuehrt —
+    /// ISO 639-2 in Grossbuchstaben (<c>ENG</c>, <c>DEU</c>). Jede Quelle bekommt ihre eigene Schreibweise
+    /// erst an der Kante (tvst/mst ueber ihre SiteLanguage-Tabelle, SubDL ueber
+    /// <see cref="MapToSubdl"/>); im Store steht nie ein quellenspezifischer Code. Vorher lagen beide
+    /// Schreibweisen nebeneinander, und die Vollstaendigkeitsfrage stellte sich mit <c>ENG</c>, waehrend
+    /// die Zeile <c>EN</c> hiess — 839 offene Paare und 0 Stempel.
+    /// </summary>
+    /// <param name="code">Ein Sprachkennzeichen, gleich in welcher Schreibweise.</param>
+    /// <returns>Das ISO-639-2-Kennzeichen in Grossbuchstaben, oder null bei leerer Eingabe.</returns>
+    public static string? Canonical(string? code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return null;
+        }
+
+        string trimmed = code.Trim();
+        string iso = trimmed.Length == 2
+            ? ToIso6392(trimmed) ?? trimmed
+            : trimmed;
+        return iso.ToUpperInvariant();
+    }
 
     /// <summary>
     /// F-M261: maps a SubDL two-letter code to the ISO 639-2 tag to write into a container.

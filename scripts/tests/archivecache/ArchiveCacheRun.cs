@@ -1,10 +1,10 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
 // Software Foundation, either version 3 of the License, or (at your option) any
-// later version. SubDL Scribe is distributed WITHOUT ANY WARRANTY; without
+// later version. Sub Scribe is distributed WITHOUT ANY WARRANTY; without
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See the GNU General Public License for more details.
 //
@@ -24,7 +24,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using Jellyfin.Plugin.SubdlScribe.Api;
+using Jellyfin.Plugin.SubScribe.Api;
 
 namespace ArchiveCacheRun;
 
@@ -193,7 +193,7 @@ internal static class Program
 
         // ── 8. Wiring on the source: ONE layer ───────────────────────────────────
         Console.WriteLine("8. Source contract");
-        var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlApiClient.cs"));
+        var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeApiClient.cs"));
         Check(api.Contains("private readonly ArchiveDiskCache _archiveDiskCache = new();", StringComparison.Ordinal),
             "the client owns the disk cache");
         Check(!api.Contains("RunArchiveCache", StringComparison.Ordinal)
@@ -267,7 +267,7 @@ internal static class Program
         // re-derived from its name — and the code refetched the archive that was already on disk,
         // once per episode. The order is the rule: pick by name, then the episode match on the same
         // body, and only then a real refetch.
-        string apiSource = File.ReadAllText(System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "SubdlApiClient.cs"));
+        string apiSource = File.ReadAllText(System.IO.Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "ScribeApiClient.cs"));
         int v1 = apiSource.IndexOf("public async Task<DownloadOutcome> DownloadSubtitleFileAsync", StringComparison.Ordinal);
         int v1Refetch = v1 < 0 ? -1 : apiSource.IndexOf("archive cache does not hold this entry", v1, StringComparison.Ordinal);
         bool v1Ordered = v1 >= 0 && v1Refetch > v1

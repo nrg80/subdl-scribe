@@ -1,22 +1,22 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// F-M320 (operator order 08.10.2026): the FAIL COUNTER is GONE. It counted saveless runs of a
@@ -32,7 +32,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// </summary>
 public sealed class QaFailTracker
 {
-    private readonly SubdlDbContext _db;
+    private readonly ScribeDbContext _db;
     private readonly ILogger? _logger;
 
     /// <summary>
@@ -40,7 +40,7 @@ public sealed class QaFailTracker
     /// </summary>
     /// <param name="db">Database context.</param>
     /// <param name="logger">Optional logger.</param>
-    public QaFailTracker(SubdlDbContext db, ILogger? logger = null)
+    public QaFailTracker(ScribeDbContext db, ILogger? logger = null)
     {
         _db = db;
         _logger = logger;
@@ -127,7 +127,7 @@ public sealed class QaFailTracker
             // F-M450: the row may already carry a report timestamp. Upsert replaces the whole row,
             // so it is read first — otherwise every further failure would erase "already reported"
             // and the same broken package would be reported again and again.
-            string key = SubdlDbContext.CandidateKey(itemId, language, id);
+            string key = ScribeDbContext.CandidateKey(itemId, language, id);
             var previous = _db.RejectedCandidates.Find(x => x.Id == key).FirstOrDefault();
             DateTime? reportedUtc = previous?.ReportedUtc;
             if (string.IsNullOrEmpty(nId))
@@ -166,7 +166,7 @@ public sealed class QaFailTracker
         if (recorded > 0)
         {
             PruneOldest(itemId, language);
-            LogUtil.Detail(_logger, "[SubDL-DB] burned candidates {Item}|{Lang} +{Count}", itemId, language, recorded);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] burned candidates {Item}|{Lang} +{Count}", itemId, language, recorded);
         }
     }
 
@@ -183,7 +183,7 @@ public sealed class QaFailTracker
         // match a row stored in another case, which the previous engine's exact EQ never did.
         var upper = language.ToUpperInvariant();
         _db.RejectedCandidates.DeleteMany(c => c.ItemId == itemId && c.Language == upper);
-        LogUtil.Detail(_logger, "[SubDL-DB] burned candidates reset {Item}|{Lang}", itemId, language);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] burned candidates reset {Item}|{Lang}", itemId, language);
     }
 
     /// <summary>Removes the burned candidates of items that no longer exist.</summary>
@@ -205,7 +205,7 @@ public sealed class QaFailTracker
 
         if (removed > 0)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] burned candidate prune {Removed}", removed);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] burned candidate prune {Removed}", removed);
         }
 
         return removed;

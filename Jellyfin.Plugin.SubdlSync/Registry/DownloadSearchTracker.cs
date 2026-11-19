@@ -1,22 +1,22 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.Extensions.Logging;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe.Registry;
+namespace Jellyfin.Plugin.SubScribe.Registry;
 
 /// <summary>
 /// Per-file download search tracker.
@@ -35,7 +35,7 @@ namespace Jellyfin.Plugin.SubdlScribe.Registry;
 /// </summary>
 public sealed class DownloadSearchTracker
 {
-    private readonly SubdlDbContext _db;
+    private readonly ScribeDbContext _db;
     private readonly ILogger? _logger;
 
     /// <summary>
@@ -43,7 +43,7 @@ public sealed class DownloadSearchTracker
     /// </summary>
     /// <param name="db">Database context.</param>
     /// <param name="logger">Optional logger.</param>
-    public DownloadSearchTracker(SubdlDbContext db, ILogger? logger = null)
+    public DownloadSearchTracker(ScribeDbContext db, ILogger? logger = null)
     {
         _db = db;
         _logger = logger;
@@ -105,7 +105,7 @@ public sealed class DownloadSearchTracker
         media.LastSearchUtc = null;
         media.LastSearchLanguages = null;
         _db.Media.Update(media);
-        LogUtil.Detail(_logger, "[SubDL-DB] search stamp cleared for {Item} — rework due now", itemId);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] search stamp cleared for {Item} — rework due now", itemId);
         return true;
     }
 
@@ -117,14 +117,14 @@ public sealed class DownloadSearchTracker
         var media = FindByItemId(itemId);
         if (media == null)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] search stamp skipped — no media record for item {Item}", itemId);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] search stamp skipped — no media record for item {Item}", itemId);
             return;
         }
 
         media.LastSearchUtc = DateTime.UtcNow;
         media.LastSearchLanguages = Normalize(currentLanguages);
         _db.Media.Update(media);
-        LogUtil.Detail(_logger, "[SubDL-DB] search stamp {Item} langs={Langs}", itemId, media.LastSearchLanguages);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] search stamp {Item} langs={Langs}", itemId, media.LastSearchLanguages);
     }
 
     /// <summary>Records a search with no language list.</summary>
@@ -149,7 +149,7 @@ public sealed class DownloadSearchTracker
             _db.Media.Update(media);
         }
 
-        LogUtil.Detail(_logger, "[SubDL-DB] search stamps cleared: {Count}", stamped.Count);
+        LogUtil.Detail(_logger, "[Sub Scribe-DB] search stamps cleared: {Count}", stamped.Count);
         return stamped.Count;
     }
 
@@ -171,7 +171,7 @@ public sealed class DownloadSearchTracker
 
         if (dead.Count > 0)
         {
-            LogUtil.Detail(_logger, "[SubDL-DB] search stamp prune {Removed}", dead.Count);
+            LogUtil.Detail(_logger, "[Sub Scribe-DB] search stamp prune {Removed}", dead.Count);
         }
 
         return dead.Count;

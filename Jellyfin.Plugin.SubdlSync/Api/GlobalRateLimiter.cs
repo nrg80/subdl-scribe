@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
@@ -13,7 +13,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// The pacing rhythm shared by the upload AND the download pipeline (F-M20/F-M26).
@@ -131,6 +131,75 @@ public sealed class GlobalRateLimiter
         long credit = System.Threading.Interlocked.Exchange(ref _fitMsPending, 0);
 
         return (int)Math.Max(0, pause - credit);
+    }
+
+    // ---- F-M594: der Takt als Slot vor dem Transfer ------------------------------------------
+    //
+    // Operator-Anweisung 18.11.2026: „Lässt sich die zeitliche Differenz seit letztem
+    // download/upload ende messen und die pause exakt anpassen? Dann müsste die
+    // download/upload rate limit pause exakt vor dem tatsächlich stattfindenden
+    // upload/download stattfinden." Bis hier wurde nach einem Transfer BLIND die Pause
+    // abgewartet (TransferPauseMs/TransferPauseMsLessFit); Extraktion, Gate-Pruefungen und
+    // Vorbereitung der naechsten Spur kamen obendrauf. Gemessen am 18.11.2026 bei 600/h:
+    // eingestellt 6 s, tatsaechlich 8,2 s je Spur nach Wanduhr (rund 440/h). Jetzt haelt die
+    // Klasse einen Zeitanker: Ende des letzten ECHTEN Transfers. Vor dem naechsten Transfer
+    // wird nur die DIFFERENZ zum Ziel (Anker + Intervall) gewartet — Vorbereitungszeit ist
+    // damit Teil der Pause statt ein Zuschlag, und die eingestellte Rate ist die tatsaechliche
+    // Rate, solange die Vorbereitung kuerzer dauert als das Intervall.
+    //
+    // Der Anker ist STATISCH: Upload und Download teilen sich `UploadsPerHour` (ein Feld, eine
+    // Rate), also teilen sie sich auch den Anker — sonst zahlte jede Richtung ihren eigenen
+    // Takt und die Summe laege ueber der Einstellung. Er zaehlt nur ECHTE Transfers
+    // (F-M547/F-M589): eine Spur ohne Uebertragung setzt ihn nicht, die naechste startet
+    // deshalb ohne Wartezeit.
+
+    /// <summary>F-M594: Ende des letzten echten Transfers, prozessweit geteilt (Upload + Download).</summary>
+    private static DateTime _lastTransferDoneUtc = DateTime.MinValue;
+
+    /// <summary>F-M594: Schloss um den Anker — die Quellen einer Spur laufen parallel.</summary>
+    private static readonly object _slotLock = new();
+
+    /// <summary>
+    /// F-M594: wartet, bis der naechste Transferslot erreicht ist. Ziel ist
+    /// „Ende des letzten Transfers + Intervall (3600/Rate, ±30 %)"; gewartet wird nur die
+    /// Differenz. Ohne Anker (erster Transfer, oder der letzte liegt lange zurueck) wartet
+    /// nichts — die Rate ist ein Deckel, kein Metronom, das Leerlauf nachholt.
+    /// </summary>
+    /// <param name="ct">Abbruch des Laufs.</param>
+    public async Task WaitForTransferSlotAsync(CancellationToken ct)
+    {
+        int interval = TransferPauseMs();
+        DateTime anchor;
+        lock (_slotLock)
+        {
+            anchor = _lastTransferDoneUtc;
+        }
+
+        if (anchor == DateTime.MinValue)
+        {
+            return;
+        }
+
+        TimeSpan warten = anchor.AddMilliseconds(interval) - DateTime.UtcNow;
+        if (warten <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        await Task.Delay(warten, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// F-M594: setzt den Anker auf JETZT — nach einem Transfer, der wirklich Bytes bewegt hat.
+    /// Eine Spur, die nichts uebertraegt (Skip, Tor, Fehlschlag ohne Antwort), ruft das NICHT;
+    /// sie soll den Rhythmus nicht bestrafen (F-M547/F-M589).
+    /// </summary>
+    public void MarkTransferDone()
+    {
+        lock (_slotLock)
+        {
+            _lastTransferDoneUtc = DateTime.UtcNow;
+        }
     }
 
     /// <summary>

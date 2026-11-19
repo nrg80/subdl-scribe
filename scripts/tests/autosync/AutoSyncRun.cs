@@ -1,4 +1,4 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // F-M296 test driver: the two halves of the auto-sync that do NOT need a media
@@ -46,9 +46,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Qa;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Qa;
+using Jellyfin.Plugin.SubScribe.Registry;
 using MediaBrowser.Model.Entities;
 
 namespace AutoSyncTest;
@@ -81,6 +81,7 @@ public static class AutoSyncRun
         failures += UnsyncArchive();
         failures += StreamingDecoder();
         failures += FitTimeCredit();
+        failures += CancelledExtractionStopsFfmpeg();
 
         Console.WriteLine();
         Console.WriteLine(failures == 0
@@ -88,6 +89,176 @@ public static class AutoSyncRun
             : $"{failures} CASE(S) FAILED");
         return failures == 0 ? 0 : 1;
     }
+
+    /// <summary>
+    /// Case 12 — F-M596: ein abgebrochener Lauf beendet ffmpeg WIRKLICH.
+    /// <para>
+    /// Operator-Zusage 18.11.2026 („Lauf starten, STOPP, `ps` muss leer sein"). Vorher brach nur das
+    /// Warten ab (`WaitForExitAsync(ct)`), der Prozess lief weiter und schrieb in ein Verzeichnis, das
+    /// der finally-Block bereits geloescht hatte. Beim regulaeren Lauf unsichtbar; mit dem vorgezogenen
+    /// Lauf (F-M596) waere es ein Waisenprozess, der die naechste Extraktion ueberholt.
+    /// </para>
+    /// <para>
+    /// Geprueft wird am ECHTEN Prozess, nicht am Quelltext: Extraktion starten, warten bis ein
+    /// ffmpeg-Prozess laeuft, Token abbrechen, und danach muss die Prozesszahl wieder auf den
+    /// Ausgangswert fallen. Fehlt ffmpeg oder eine Mediendatei, sagt der Fall das und zaehlt nicht als
+    /// Fehler — ein Umgebungslueck ist kein Regressionsbefund.
+    /// </para>
+    /// </summary>
+    /// <returns>Zahl der fehlgeschlagenen Pruefungen dieses Falls.</returns>
+    private static int CancelledExtractionStopsFfmpeg()
+    {
+        int f = 0;
+        Console.WriteLine("[12] a cancelled extraction stops ffmpeg (F-M596)");
+
+        string? ffmpeg = new[] { "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg" }
+            .FirstOrDefault(System.IO.File.Exists);
+        string? media = null;
+        foreach (string wurzel in new[] { "/data/movies", "/data/movies2" })
+        {
+            if (!System.IO.Directory.Exists(wurzel))
+            {
+                continue;
+            }
+
+            media = System.IO.Directory
+                .EnumerateFiles(wurzel, "*.mkv", System.IO.SearchOption.AllDirectories)
+                .FirstOrDefault(p => new System.IO.FileInfo(p).Length > 50L * 1024 * 1024);
+            if (media != null)
+            {
+                break;
+            }
+        }
+
+        if (ffmpeg == null || media == null)
+        {
+            Console.WriteLine("  [SKIP] ffmpeg or a media file is not reachable from here");
+            return f;
+        }
+
+        // Der erste Untertitel-Index ist nicht in jeder Datei vorhanden; ffmpeg bricht dann sofort ab
+        // (gemessen: exit 234, kein Prozess zu sehen). Deshalb werden Kandidaten durchprobiert, bis
+        // einer wirklich liest — ein Umgebungslueck darf den Fall nicht als Regression erscheinen lassen.
+        var kandidaten = new System.Collections.Generic.List<string>();
+        foreach (string wurzel in new[] { "/data/movies", "/data/movies2" })
+        {
+            if (!System.IO.Directory.Exists(wurzel))
+            {
+                continue;
+            }
+
+            kandidaten.AddRange(System.IO.Directory
+                .EnumerateFiles(wurzel, "*.mkv", System.IO.SearchOption.AllDirectories)
+                .Where(p => new System.IO.FileInfo(p).Length > 50L * 1024 * 1024)
+                .Take(12));
+        }
+
+        if (kandidaten.Count == 0)
+        {
+            Console.WriteLine("  [SKIP] no media file is reachable from here");
+            return f;
+        }
+
+        int vorher = FfmpegProzesse();
+        System.Threading.CancellationTokenSource? cts = null;
+        System.Threading.Tasks.Task<(System.Collections.Generic.Dictionary<int, string?> Texts, int ExitCode)>? lauf = null;
+        bool lief = false;
+        foreach (string datei in kandidaten)
+        {
+            using var versuch = new System.Threading.CancellationTokenSource();
+            var probe = Jellyfin.Plugin.SubScribe.Pipeline.FfmpegTools.ExtractAllAsync(
+                ffmpeg,
+                datei,
+                new[] { 0 },
+                Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                new Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration(),
+                versuch.Token);
+
+            for (int i = 0; i < 15 && !lief; i++)
+            {
+                System.Threading.Thread.Sleep(100);
+                lief = FfmpegProzesse() > vorher;
+            }
+
+            if (lief)
+            {
+                cts = new System.Threading.CancellationTokenSource();
+                lauf = Jellyfin.Plugin.SubScribe.Pipeline.FfmpegTools.ExtractAllAsync(
+                    ffmpeg,
+                    datei,
+                    new[] { 0 },
+                    Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                    new Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration(),
+                    cts.Token);
+
+                // Den Probeprozess beenden, dann neu messen: der Abbruch unten gilt dem zweiten Lauf.
+                versuch.Cancel();
+                try
+                {
+                    probe.GetAwaiter().GetResult();
+                }
+                catch (Exception)
+                {
+                    // Erwartet: der Probe-Lauf wird abgebrochen.
+                }
+
+                for (int i = 0; i < 30 && FfmpegProzesse() > vorher; i++)
+                {
+                    System.Threading.Thread.Sleep(100);
+                }
+
+                for (int i = 0; i < 20 && !lief; i++)
+                {
+                    System.Threading.Thread.Sleep(100);
+                    lief = FfmpegProzesse() > vorher;
+                }
+
+                break;
+            }
+        }
+
+        if (lauf == null || cts == null)
+        {
+            Console.WriteLine("  [SKIP] no candidate file exposed a readable subtitle stream");
+            return f;
+        }
+
+        Check("the extraction really starts an ffmpeg process", lief, $"prozesse {FfmpegProzesse()} (vorher {vorher})");
+        f += lief ? 0 : 1;
+
+        cts.Cancel();
+        try
+        {
+            lauf.GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            // Der Abbruch ist der erwartete Ausgang.
+        }
+        catch (Exception ex)
+        {
+            Check("the cancelled extraction ends as a cancellation", false, ex.GetType().Name);
+            f++;
+        }
+
+        int nachher = FfmpegProzesse();
+        for (int i = 0; i < 30 && nachher > vorher; i++)
+        {
+            System.Threading.Thread.Sleep(100);
+            nachher = FfmpegProzesse();
+        }
+
+        int nachReset = nachher;
+        Check("after the cancellation no ffmpeg process is left behind", nachReset <= vorher, $"prozesse {nachReset} (vorher {vorher})");
+        f += nachReset <= vorher ? 0 : 1;
+
+        return f;
+    }
+
+    /// <summary>F-M596: laufende ffmpeg-Prozesse dieses Rechners.</summary>
+    /// <returns>Die Anzahl.</returns>
+    private static int FfmpegProzesse()
+        => System.Diagnostics.Process.GetProcessesByName("ffmpeg").Length;
 
     /// <summary>
     /// Case 7: the decoder streams frame LEVELS and nothing persists them. Two absences,
@@ -261,10 +432,15 @@ public static class AutoSyncRun
         if (System.IO.File.Exists(pipe))
         {
             string src = System.IO.File.ReadAllText(pipe);
+            // F-M594 (18.11.2026): the crediting pause is GONE from the pipeline — the rhythm is a
+            // slot BEFORE the fetch, measured from the end of the last real transfer, so the
+            // alignment time sits inside the pause by construction and needs no credit. The
+            // assertion follows: no crediting pause in the pipeline, and the slot instead.
             int creditSites = src.Split("_limiter.TransferPauseMsLessFit()").Length - 1;
-            bool bothGaps = creditSites == 2;
-            Check("both transfer gaps use the crediting pause",
-                bothGaps, $"{creditSites} site(s), expected 2 (main and HI)");
+            int slotSites = src.Split("await _limiter.WaitForTransferSlotAsync(ct)").Length - 1;
+            bool bothGaps = creditSites == 0 && slotSites == 1;
+            Check("the crediting pause is replaced by the transfer slot before the fetch",
+                bothGaps, $"{creditSites} crediting site(s), expected 0; {slotSites} slot(s), expected 1");
             f += bothGaps ? 0 : 1;
 
             bool measured = src.Split("SyncMeasuredAsync(").Length - 1 == 3;
@@ -402,8 +578,8 @@ public static class AutoSyncRun
     {
         int f = 0;
 
-        Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.FitResult Make(
-            Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause cause,
+        Jellyfin.Plugin.SubScribe.Qa.OffsetFit.FitResult Make(
+            Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause cause,
             int cueCount,
             int moved,
             double t,
@@ -411,10 +587,10 @@ public static class AutoSyncRun
             double scoreBefore,
             double scoreAfter,
             System.Collections.Generic.List<double> offsets)
-            => new Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.FitResult
+            => new Jellyfin.Plugin.SubScribe.Qa.OffsetFit.FitResult
             {
                 Ran = true,
-                Reverted = cause != Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.None,
+                Reverted = cause != Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.None,
                 Cause = cause,
                 CueCount = cueCount,
                 MeasuredMovedCues = moved,
@@ -429,8 +605,8 @@ public static class AutoSyncRun
 
         // The case the operator asked about: a better score, 887 moved cues, 2.50 s — refused because
         // t = 1.71 misses DeployZ = 2.0. The reason must SAY that, with the numbers.
-        string notSignificant = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildRefusalReason(
-            Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NotSignificant, 887, 887, 1.71, 2.50, 0.5591, 0.5667, five));
+        string notSignificant = Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.BuildRefusalReason(
+            Make(Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.NotSignificant, 887, 887, 1.71, 2.50, 0.5591, 0.5667, five));
         bool nsOk = notSignificant.StartsWith("gain not statistically proven", StringComparison.Ordinal)
                     && notSignificant.Contains("t = +1.71 < 2.0", StringComparison.Ordinal)
                     && notSignificant.Contains("t = +1.71 < 2.0", StringComparison.Ordinal)
@@ -444,23 +620,23 @@ public static class AutoSyncRun
         f += nsOk ? 0 : 1;
 
         // The other three causes must be distinguishable from it, not merely shorter.
-        string nothing = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildRefusalReason(
-            Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NothingMoved, 412, 0, 0, 0, 0.5100, 0.5100, []));
+        string nothing = Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.BuildRefusalReason(
+            Make(Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.NothingMoved, 412, 0, 0, 0, 0.5100, 0.5100, []));
         bool nothingOk = nothing.Contains("nothing to move", StringComparison.Ordinal)
                          && nothing.Contains("0/412 cues", StringComparison.Ordinal);
         Check("\"nothing to move\" is its own cause, with the cue count", nothingOk, nothing);
         f += nothingOk ? 0 : 1;
 
-        string worse = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildRefusalReason(
-            Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.ScoreWorse, 500, 500, -3.4, 1.5, 0.6000, 0.5800, [1.50]));
+        string worse = Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.BuildRefusalReason(
+            Make(Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.ScoreWorse, 500, 500, -3.4, 1.5, 0.6000, 0.5800, [1.50]));
         bool worseOk = worse.Contains("significantly worse, untreated is better", StringComparison.Ordinal)
                        && worse.Contains("0.6000 -> 0.5800 (-0.0200)", StringComparison.Ordinal)
                        && !worse.Contains("< 2.0", StringComparison.Ordinal);
         Check("\"the correction would make it worse (untreated better)\" is its own cause, with both scores", worseOk, worse);
         f += worseOk ? 0 : 1;
 
-        string floor = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.BuildRefusalReason(
-            Make(Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.BelowFloor, 300, 300, 5.0, 0.50, 0.5200, 0.5300, [0.50]));
+        string floor = Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.BuildRefusalReason(
+            Make(Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.BelowFloor, 300, 300, 5.0, 0.50, 0.5200, 0.5300, [0.50]));
         bool floorOk = floor.Contains("below floor", StringComparison.Ordinal)
                        && floor.Contains("largest 0.50 s < MinShiftSec 0.70 s", StringComparison.Ordinal);
         Check("\"below floor\" names the floor it missed (0.7 s, not 1.0)", floorOk, floor);
@@ -470,21 +646,21 @@ public static class AutoSyncRun
         // The decision table itself, as a pure function — the dry run over the real library found the
         // first version of it classifying a clearly-worse correction (t = -3.74, score dropping) as
         // "statistically not proven", which would have pulled a fresh download for a file that is fine.
-        (string label, int moved, double before, double after, double t, double largest, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause want)[] table =
+        (string label, int moved, double before, double after, double t, double largest, Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause want)[] table =
         {
-            ("nothing moved", 0, 0.50, 0.50, 0.00, 0.00, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NothingMoved),
-            ("significantly worse (real: t = -3.74)", 577, 0.5654, 0.5599, -3.74, 2.50, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.ScoreWorse),
-            ("negative t with a rising score is still significantly worse", 400, 0.5000, 0.5100, -2.50, 3.00, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.ScoreWorse),
-            ("score drop at t > 2 is vetoed", 400, 0.5000, 0.4900, 3.20, 3.00, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.ScoreWorse),
-            ("shift below the 0.7 s floor, however significant", 462, 0.5600, 0.5700, 3.36, 0.50, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.BelowFloor),
-            ("worse but NOT significant is still not sufficiently evidenced (real: t = -1.59)", 317, 0.5032, 0.4914, -1.59, 14.25, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NotSignificant),
-            ("insignificant score gain (real: t = +1.71, +0.0076)", 887, 0.5591, 0.5667, 1.71, 2.50, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NotSignificant),
-            ("smallest insignificant gain (real: t = +0.57, +0.0036)", 358, 0.4955, 0.4991, 0.57, 13.75, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.NotSignificant),
-            ("proven gain is applied (t > 2 mandatory)", 887, 0.5591, 0.5667, 3.20, 2.50, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause.None),
+            ("nothing moved", 0, 0.50, 0.50, 0.00, 0.00, Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.NothingMoved),
+            ("significantly worse (real: t = -3.74)", 577, 0.5654, 0.5599, -3.74, 2.50, Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.ScoreWorse),
+            ("negative t with a rising score is still significantly worse", 400, 0.5000, 0.5100, -2.50, 3.00, Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.ScoreWorse),
+            ("score drop at t > 2 is vetoed", 400, 0.5000, 0.4900, 3.20, 3.00, Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.ScoreWorse),
+            ("shift below the 0.7 s floor, however significant", 462, 0.5600, 0.5700, 3.36, 0.50, Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.BelowFloor),
+            ("worse but NOT significant is still not sufficiently evidenced (real: t = -1.59)", 317, 0.5032, 0.4914, -1.59, 14.25, Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.NotSignificant),
+            ("insignificant score gain (real: t = +1.71, +0.0076)", 887, 0.5591, 0.5667, 1.71, 2.50, Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.NotSignificant),
+            ("smallest insignificant gain (real: t = +0.57, +0.0036)", 358, 0.4955, 0.4991, 0.57, 13.75, Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.NotSignificant),
+            ("proven gain is applied (t > 2 mandatory)", 887, 0.5591, 0.5667, 3.20, 2.50, Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause.None),
         };
-        foreach ((string label, int moved, double before, double after, double t, double largest, Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.RevertCause want) in table)
+        foreach ((string label, int moved, double before, double after, double t, double largest, Jellyfin.Plugin.SubScribe.Qa.OffsetFit.RevertCause want) in table)
         {
-            var got = Jellyfin.Plugin.SubdlScribe.Qa.OffsetFit.ClassifyCause(moved, before, after, t, largest);
+            var got = Jellyfin.Plugin.SubScribe.Qa.OffsetFit.ClassifyCause(moved, before, after, t, largest);
             Check($"decision table: {label} -> {want}", got == want, got == want ? got.ToString() : $"got {got}, want {want}");
             f += got == want ? 0 : 1;
         }
@@ -497,8 +673,8 @@ public static class AutoSyncRun
             (floor, true),
         })
         {
-            bool good = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(reason);
-            bool candidateSpecific = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalIsCandidateSpecific(reason);
+            bool good = Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(reason);
+            bool candidateSpecific = Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.RefusalIsCandidateSpecific(reason);
             // Operator order 18.10.2026: the two classes must be answered DIFFERENTLY, or the rule is not
             // implemented. A thin gain keeps the 9x original and pulls the next candidate; the three
             // genuine "no proven gain" shapes end the walk.
@@ -957,8 +1133,8 @@ public static class AutoSyncRun
 
         const string pipeline = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs";
         const string tracker = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Registry/QaFailTracker.cs";
-        const string seeder = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlSeeder.cs";
-        const string refresh = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/ScheduledTasks/SubdlDatabaseRefreshTask.cs";
+        const string seeder = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeSeeder.cs";
+        const string refresh = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/ScheduledTasks/ScribeDatabaseRefreshTask.cs";
         foreach (string p in new[] { pipeline, tracker, seeder, refresh })
         {
             if (!System.IO.File.Exists(p))
@@ -1106,7 +1282,7 @@ public static class AutoSyncRun
 
         foreach ((string reason, bool expected, string fragment) in cases)
         {
-            bool actual = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalIsCandidateSpecific(reason);
+            bool actual = Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.RefusalIsCandidateSpecific(reason);
             bool present = syncSrc.Contains(fragment, StringComparison.Ordinal);
             Check($"refusal \"{reason.Substring(0, Math.Min(34, reason.Length))}…\" → hunt continues: {expected}",
                 actual == expected && present,
@@ -1116,7 +1292,7 @@ public static class AutoSyncRun
 
         // The cap is the QA retry limit, read from the config type — not a second number invented
         // beside it. Asserted on the default, because that is what an untouched install uses.
-        var cfg = new Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration();
+        var cfg = new Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration();
         Check("the candidate cap IS DownloadQaRetryLimit (default 3, not a second knob)",
             cfg.DownloadQaRetryLimit == 3, $"default = {cfg.DownloadQaRetryLimit}");
         f += cfg.DownloadQaRetryLimit == 3 ? 0 : 1;
@@ -1151,7 +1327,7 @@ public static class AutoSyncRun
         // The setting must be GONE from every layer, not just unused: a field still on the config type
         // is a knob the next reader will wire back up. Asserted on the config TYPE and the GUI page.
         bool settingGone = !src.Contains("DownloadKeepBestPerLanguage", StringComparison.Ordinal);
-        var cfgProbe = new Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration();
+        var cfgProbe = new Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration();
         bool fieldGone = cfgProbe.GetType().GetProperty("DownloadKeepBestPerLanguage") == null;
         const string guiPage = "/opt/data/subdl-scribe/Jellyfin.Plugin.SubdlSync/Configuration/configPage.html";
         bool guiGone = !System.IO.File.Exists(guiPage)
@@ -1389,7 +1565,7 @@ public static class AutoSyncRun
         int f = 0;
 
         // ---- The predicate itself, driven with the REAL refusal strings.
-        bool goodOnNoGain = Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(
+        bool goodOnNoGain = Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(
             "no proven gain (0 cue(s) moved, t = +0.00) — left as downloaded");
         Check("a \"no proven gain\" refusal means the file is already good", goodOnNoGain,
             goodOnNoGain ? "predicate answers true" : "predicate does not recognise the refusal");
@@ -1397,16 +1573,16 @@ public static class AutoSyncRun
 
         // Every refusal that says the file is WRONG must NOT count as already good — otherwise the
         // walk would stop on a file that another candidate could have fixed.
-        bool wrongStaysWrong = !Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(
+        bool wrongStaysWrong = !Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(
                 "shift 25.0s beyond the 20s limit — not applied")
-            && !Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood("not measured: only 12 cues")
-            && !Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood("not applied: first cue 5,07s would go negative under -8,50s");
+            && !Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood("not measured: only 12 cues")
+            && !Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood("not applied: first cue 5,07s would go negative under -8,50s");
         Check("a refusal that says the file is WRONG is not treated as already good", wrongStaysWrong,
             wrongStaysWrong ? "wrong-file refusals keep the reserved range" : "a wrong file would take 01");
         f += wrongStaysWrong ? 0 : 1;
 
-        bool toolingStaysOut = !Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood("ffmpeg not available")
-                               && !Jellyfin.Plugin.SubdlScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(null);
+        bool toolingStaysOut = !Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood("ffmpeg not available")
+                               && !Jellyfin.Plugin.SubScribe.Qa.SubtitleSync.RefusalMeansAlreadyGood(null);
         Check("a tooling verdict, and no verdict at all, are not \"already good\"", toolingStaysOut,
             toolingStaysOut ? "only the deploy rule's own refusal counts" : "too broad");
         f += toolingStaysOut ? 0 : 1;

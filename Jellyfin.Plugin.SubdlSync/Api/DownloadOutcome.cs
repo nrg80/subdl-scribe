@@ -1,4 +1,4 @@
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// The verdict of ONE download attempt: the status, the byte count and the error name of that

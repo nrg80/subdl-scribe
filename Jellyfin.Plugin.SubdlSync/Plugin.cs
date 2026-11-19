@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
@@ -14,23 +14,23 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Xml.Linq;
-using Jellyfin.Plugin.SubdlScribe.Data;
+using Jellyfin.Plugin.SubScribe.Data;
 // The cadence enums live in the Configuration namespace. Imported as a namespace, NOT reached
 // through the `Configuration` property of this class, which would resolve to the config object and
 // not to the type (the migration in DiceSchedulerConfig needs the TYPES).
-using Jellyfin.Plugin.SubdlScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 using Microsoft.Extensions.Logging;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 
-namespace Jellyfin.Plugin.SubdlScribe;
+namespace Jellyfin.Plugin.SubScribe;
 
 /// <summary>
-/// Main plugin entry point for SubDL Scribe (upload + download pipelines).
+/// Main plugin entry point for Sub Scribe (upload + download pipelines).
 /// </summary>
 public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPages
 {
@@ -51,7 +51,38 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         // without this, the stale-detection path has to discover that the hard way.
         Pipeline.PipelineRunLock.ClearOnStartup(
             _loggerFactory?.CreateLogger("SubDL-Lock")
-            ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+                ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+
+        // F-M621 (Operator-Anweisung 19.11.2026): derselbe Leichen-Gedanke fuer die Worker-Zeilen. Das
+        // Ende einer Zeile schreiben nur Finish und MarkCancelled, und beide brauchen den laufenden
+        // Prozess: starb Jellyfin mitten im Lauf (19.11.2026, 04:36:40, Download bei Item 1015/1417),
+        // blieb "Ended" leer und "Outcome" auf "run" — die Anzeige meldete "laeuft", und der Stop-Knopf
+        // antwortete "no cycle active", weil es keinen Zyklus mehr gab, den er haette abbrechen koennen.
+        // Ausdruecklich KEIN Nutzer-Stop (F-M293): der Ausgang heisst "failed", das Detail nennt den
+        // Grund, sonst wuerde dem Betreiber ein Knopfdruck untergeschoben, den niemand getan hat.
+        try
+        {
+            int beendet = WorkerRuns.CloseOpenRunsOnStartup(
+                "process ended mid-run (closed at the next start)");
+            if (beendet > 0)
+            {
+                Pipeline.LogUtil.Normal(
+                    _loggerFactory?.CreateLogger("SubDL-Start")
+                        ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                    "[Sub Scribe] closed {Count} worker row(s) a previous process left open — nothing was running any more (F-M621).",
+                    beendet);
+            }
+        }
+        catch (Exception ex)
+        {
+            _loggerFactory?.CreateLogger("SubDL-Start")?.LogWarning(
+                "[Sub Scribe] closing the worker rows left open by a previous process failed: {Msg}",
+                ex.Message);
+        }
+
+        // F-M533: die tvst-Befunde melden ueber denselben Weg wie alles andere — eine Meldestelle.
+        var tvstLog = _loggerFactory?.CreateLogger("SubDL-Tvst");
+        Api.TvstMetadataChecks.OnMessage = msg => tvstLog?.LogInformation("{Msg}", msg);
         // Stats period start defaults to plugin install/first start —
         // the GUI "since" always shows a real date until "Reset statistics" re-sets it.
     }
@@ -270,7 +301,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         catch (Exception ex)
         {
             _loggerFactory?.CreateLogger<Plugin>().LogError(ex,
-                "[SubDL] failed to persist plugin state (user settings left untouched).");
+                "[Sub Scribe] failed to persist plugin state (user settings left untouched).");
         }
     }
 
@@ -402,12 +433,43 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         _sharedOshashCache = null;
         _sharedRegistry = null;
         _sharedWorkerRuns = null;
-        var logger = _loggerFactory?.CreateLogger<SubdlDbContext>();
-        _sharedDbContext = new SubdlDbContext(DataFolderPath, logger);
+        var logger = _loggerFactory?.CreateLogger<ScribeDbContext>();
+        _sharedDbContext = new ScribeDbContext(DataFolderPath, logger);
+
+        AttachStores(_sharedDbContext.Context, logger);
+    }
+
+    /// <summary>
+    /// F-M616: haengt ALLE Stores an einen Datenkontext. Es gibt zwei Stellen, an denen ein Kontext
+    /// entsteht — dieser Weg und der normale Start ueber den Getter — und beide muessen dieselbe Liste
+    /// sehen. Genau das war der Fehler: F-M605 und F-M608 waren nur hier angehaengt, im normalen Start
+    /// fehlten sie, und die Titelsperre schrieb ins Nichts.
+    /// </summary>
+    /// <param name="db">Der Datenkontext.</param>
+    /// <param name="logger">Das Protokoll (F-M615).</param>
+    private static void AttachStores(Data.ScribeSqliteContext? db, Microsoft.Extensions.Logging.ILogger? logger)
+    {
+        // F-M542: the TMDb answers live in the store now, so a restart does not re-ask them.
+        Jellyfin.Plugin.SubScribe.Registry.TmdbAnswerStore.Attach(db);
+
+        // F-M601: the aired episode numbers of a season live in the store too.
+        Jellyfin.Plugin.SubScribe.Registry.AiredSeasonStore.Attach(db);
+
+        // F-M604: so do the pack verdicts, with the signature of the members they were made for.
+        Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.Attach(db);
+
+        // F-M605: and the refusals the sources have already given for a track.
+        Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.Attach(db);
+
+        // F-M608: and the ladder that closes a title after four failed creations.
+        Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Attach(db);
+
+        // F-M615: ohne Protokoll bleibt ein stiller Fehlschlag unsichtbar.
+        Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.AttachLogger(logger);
     }
 
     /// <inheritdoc />
-    public override string Name => "SubDL Scribe";
+    public override string Name => "Sub Scribe";
 
     /// <inheritdoc />
     public override Guid Id => Guid.Parse("7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"); // matches build.yaml — stable plugin identity
@@ -425,20 +487,21 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// and the catalogue therefore say the same thing; the catalogue reads it from build.yaml, and a
     /// Jellyfin with the plugin installed copies this text into its own meta.json at install time —
     /// so a card without the sentence would hide it exactly where the plugin is in use.
-    public override string Description => "SubDL Scribe brings SubDL.com to Jellyfin: it downloads missing subtitles for the languages and libraries you pick and uploads your own. Download is on by default; upload is off — enable at your choice. Requires a SubDL login and API Key plus a TMDb API Key. Created by AI under the directions of the maintainer.";
+    public override string Description =>
+        "Sub Scribe brings subtitles to Jellyfin from SubDL.com and tvsubtitles.net: it downloads what is missing and uploads your own. Each source has its own switches, nothing goes back to the other source, the order is yours. A TMDb API Key is required, SubDL is optional. Created by AI under the directions of the maintainer.";
 
     /// <summary>
     /// Gets the current plugin instance.
     /// </summary>
     public static Plugin? Instance { get; private set; }
 
-    private static SubdlDbContext? _sharedDbContext;
+    private static ScribeDbContext? _sharedDbContext;
     private static ILoggerFactory? _loggerFactory;
 
     /// <summary>Guards the lazy creation of the shared context.</summary>
     /// <para>
     /// Without this, two scheduled tasks starting in the same tick both see
-    /// <c>_sharedDbContext == null</c> and each construct a SubdlDbContext over the same data
+    /// <c>_sharedDbContext == null</c> and each construct a ScribeDbContext over the same data
     /// file. The engine then in use had a non-thread-safe object mapper, so the concurrent
     /// schema setup raced and one task died with
     /// <c>System.NotSupportedException: Member Id not found on BsonMapper for type
@@ -459,7 +522,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     /// Shared data context. Lazy-created on first use; all registries
     /// and scheduled tasks share this one instance.
     /// </summary>
-    public SubdlDbContext SharedDbContext
+    public ScribeDbContext SharedDbContext
     {
         get
         {
@@ -469,13 +532,27 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
                 {
                     if (_sharedDbContext == null)
                     {
-                        var logger = _loggerFactory?.CreateLogger<SubdlDbContext>();
-                        _sharedDbContext = new SubdlDbContext(DataFolderPath, logger);
+                        var logger = _loggerFactory?.CreateLogger<ScribeDbContext>();
+                        _sharedDbContext = new ScribeDbContext(DataFolderPath, logger);
 
                         // Area 0: record which plugin and Jellyfin version last wrote this data file.
                         // Done once per context creation, not per run — an audit record that rewrites
                         // itself every cycle is a write amplifier and tells nobody anything.
                         _sharedDbContext.RecordVersions(Version?.ToString(), JellyfinVersionProbe());
+
+                        // F-M542/F-M545 (gemessen 16.11.2026, 16:01): der Store wurde nur in
+                        // RecreateDbContext angehaengt, also nach einem Reset — der NORMALE Start geht
+                        // ueber diesen Getter, und dort fehlte der Aufruf. Folge: 42 von 42 TMDb-Fragen
+                        // des Zyklus 15:48 waren schon einmal gestellt worden, der Store war die ganze
+                        // Zeit leer. Die Pruefung im Prueflauf deckte nur den Store selbst ab, nicht
+                        // seine Verdrahtung — deshalb steht der Aufruf jetzt an BEIDEN Stellen, an
+                        // denen ein Kontext entsteht.
+                        // F-M616 (18.11.2026): alle Stores haengen hier, nicht nur drei. F-M605
+                        // (Verweigerungen) und F-M608 (Titelsperre) waren nur in RecreateDbContext
+                        // angehaengt — also nach einem Reset. Im normalen Start hatte die Titelsperre
+                        // deshalb KEINE Datenbank: Close und IsClosed liefen ins Leere, und dieselben
+                        // acht Titel liefen in 482–487 in jedem Lauf erneut durch die Leiter.
+                        AttachStores(_sharedDbContext.Context, logger);
                     }
                 }
             }
@@ -570,7 +647,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
             new PluginPageInfo
             {
                 Name = Name,
-                EmbeddedResourcePath = "Jellyfin.Plugin.SubdlScribe.Configuration.configPage.html"
+                EmbeddedResourcePath = "Jellyfin.Plugin.SubScribe.Configuration.configPage.html"
             }
         ];
     }

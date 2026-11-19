@@ -1,11 +1,11 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // F-M441: the pack fill writes its texts into the run's working directory instead of holding every
 // subtitle track of every touched file in memory for the whole run (prod 04.11.2026: 689 files,
 // ~21.000 texts, ~900 MB).
 
-using Jellyfin.Plugin.SubdlScribe.Api;
+using Jellyfin.Plugin.SubScribe.Api;
 
 namespace WorkFilesRun;
 

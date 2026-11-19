@@ -1,10 +1,10 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
 // Software Foundation, either version 3 of the License, or (at your option) any
-// later version. SubDL Scribe is distributed WITHOUT ANY WARRANTY; without
+// later version. Sub Scribe is distributed WITHOUT ANY WARRANTY; without
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See the GNU General Public License for more details.
 //
@@ -34,7 +34,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 using Microsoft.Extensions.Logging;
 
 namespace SeasonPackRun;
@@ -115,6 +115,15 @@ internal static class Program
         public IReadOnlyCollection<(string Language, bool HearingImpaired)> FileLanguages(string imdbId, int season)
             => InFiles;
 
+        /// <summary>F-M600: Folgen, von denen der Store schon weiss, dass sie nicht beitreten koennen.</summary>
+        public HashSet<int> CannotJoin { get; } = new();
+
+        public bool EpisodeCannotJoin(string imdbId, int season, int episode, string lang, bool hearingImpaired, out string reason)
+        {
+            reason = CannotJoin.Contains(episode) ? "every track of this language is already refused in the store (1)" : string.Empty;
+            return CannotJoin.Contains(episode);
+        }
+
         public Task<SeasonPackCoordinator.Candidate?> FillAsync(
             string imdbId, int season, int episode, string lang, bool hearingImpaired, CancellationToken ct)
         {
@@ -154,9 +163,9 @@ internal static class Program
         IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
         ISet<(string ImdbId, int Season)> packable,
         IPackFiller filler,
-        Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration config)
+        Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration config)
         => new(
-            new Jellyfin.Plugin.SubdlScribe.Api.SubdlApiClient(new System.Net.Http.HttpClient()),
+            new Jellyfin.Plugin.SubScribe.Api.ScribeApiClient(new System.Net.Http.HttpClient()),
             null!,
             new ListLogger(log),
             config,
@@ -197,13 +206,13 @@ internal static class Program
         // ── 3. The name carries the pack's identity ─────────────────────────────
         Console.WriteLine("3. Pack name");
         var hashes8 = Enumerable.Range(1, 8)
-            .Select(e => Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e))).ToList();
+            .Select(e => Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e))).ToList();
         string packHash = SeasonPack.PackHash(hashes8);
         Check(packHash.Length == 32, "the pack hash is an MD5");
         Check(SeasonPack.PackHash(hashes8) == packHash, "the same season hashes the same");
         Check(SeasonPack.PackHash(hashes8.AsEnumerable().Reverse()) != packHash, "the episode order is part of the identity");
         var corrected = hashes8.ToList();
-        corrected[2] = Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(Srt(3) + "\n99\n00:01:00,000 --> 00:01:01,000\nchanged\n");
+        corrected[2] = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(Srt(3) + "\n99\n00:01:00,000 --> 00:01:01,000\nchanged\n");
         Check(SeasonPack.PackHash(corrected) != packHash, "a corrected episode is a different pack");
 
         string name = SeasonPack.Name("tt0944947", 1, packHash, "DE");
@@ -213,7 +222,7 @@ internal static class Program
 
         // ── 4. What SubDL documents about a packed upload ───────────────────────
         Console.WriteLine("4. Documented upload shape");
-        var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSsync/Api/SubdlApiClient.cs".Replace("Ssync", "Sync")));
+        var api = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeApiClient.cs"));
         Check(api.Contains("JsonSerializer.Serialize(fileNIds)", StringComparison.Ordinal), "step 3 sends the ARRAY of file ids");
         Check(api.Contains("[\"is_full_season\"] = \"true\"", StringComparison.Ordinal), "the pack claims a full season");
         Check(api.Contains("[\"is_full_season\"] = \"false\"", StringComparison.Ordinal), "a single upload still claims nothing");
@@ -269,7 +278,8 @@ internal static class Program
         Check(coordinator.Contains("season pack skipped — {Imdb} S{Season} [{Lang}]: {Have} of {Want} episode(s)", StringComparison.Ordinal),
             "an incomplete buffer says so and falls back to singles");
         Check(coordinator.Contains("pack-file-refused", StringComparison.Ordinal), "a refused container falls back to singles, not to loss");
-        Check(coordinator.Contains("subdlId: packId", StringComparison.Ordinal), "every episode of a pack carries the pack's id");
+        Check(!coordinator.Contains("subdlId: packId", StringComparison.Ordinal),
+            "F-M585: a pack no longer writes its id onto the episode rows — the pack row is the pack's only home");
         Check(!coordinator.Contains("c.ReleaseName).Distinct().Count() == 1", StringComparison.Ordinal),
             "differing release names do not block a pack — only quality and frame rate do");
         Check(coordinator.Contains("PackReleases(ordered, key)", StringComparison.Ordinal),
@@ -348,6 +358,8 @@ internal static class Program
             "F-M430: a bracketed group is read");
         Check(SeasonPack.ReleaseGroup("Unicorn.Academy.S03E01.1080p.WEB.h264-DOLORES[EZTVx.to]") == "DOLORES",
             "F-M430: a site tag behind the group does not hide it");
+        Check(SeasonPack.ReleaseGroup("The Middle.S01E05.MULTI.1080p.WEB-DL.H265-FTMVHD") == "FTMVHD",
+            "F-M505: the group is sent to tvst, not the file name — the name is what the site truncated");
         Check(SeasonPack.ReleaseGroup("A.Bona.Fide.Killer.S01E12.(THENKIRI.COM)") == null,
             "F-M430: a long site watermark is not a group");
         Check(SeasonPack.ReleaseGroup("Toy.Story.4.2019.1080p.BluRay.x264-[YTS.LT]") == "YTS"
@@ -364,6 +376,14 @@ internal static class Program
             "F-M430: an episode title behind an episode tag stays null — nothing is invented");
         Check(SeasonPack.ReleaseGroup(null) == null && SeasonPack.ReleaseGroup("") == null,
             "no name, no group");
+
+        // F-M505 (measured 15.11.2026 on tvsubtitles.net, first Middle season, 193 entries read): the
+        // Release column of the page carries the GROUP — 2HD (28x), REWARD (24x), FQM (14x), FEVER,
+        // POW4, CTU, LOL, DIMENSION, 91 empty, not one entry with a dot. Our uploads carried the media
+        // file name instead, and the page cut it at the dash: "The Middle.S01E21.MULTI.1080p.WEB-DL"
+        // stood there and the group (FTMVHD) was gone. This is the real library name of that episode.
+        Check(SeasonPack.ReleaseGroup("The Middle.S01E01.MULTI.1080p.WEB-DL.H265-FTMVHD") == "FTMVHD",
+            "F-M505: the group is read off the real library name (…WEB-DL.H265-FTMVHD → FTMVHD) — the page's release column carries the group, not the file name");
 
         Check(SeasonPack.PackRelease(new[] { "Reacher.3x04.1080p.WEB" }, "Reacher", "tt9288030", 3, "EN", false)
               == "Reacher.S03.1080p.WEB", "1x05 style markers reduce to the season too");
@@ -419,6 +439,27 @@ internal static class Program
             "the pack takes its id from mySubtitles and keeps the name only as the last resort");
 
         var pipeline = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+
+        // F-M505 (operator 15.11.2026: "Release on tvst is not perfect"): the tvst ticket carries the
+        // GROUP, never the media file name. The page cuts the release at the dash, so a file name
+        // arrives there as "The Middle.S01E21.MULTI.1080p.WEB-DL" and the group is lost; an empty
+        // field is allowed and is the majority on the page, hence the `?? string.Empty`. Bound as
+        // source text, so a later edit cannot quietly put the file name back.
+        {
+            int ticketAt = pipeline.IndexOf("var ticket = new Api.Endpoints.UploadTicket(", StringComparison.Ordinal);
+            int ticketEnd = ticketAt < 0
+                ? -1
+                : pipeline.IndexOf("TvstShowId: show.ShowId", ticketAt, StringComparison.Ordinal);
+            // F-M572: das Ticket endet nicht mehr an "TvstShowId: show.ShowId);" — der Folgentitel steht
+            // jetzt als letztes Feld dahinter. Der Anker ist deshalb der Feldname ohne Klammer.
+            string ticket = ticketAt < 0 || ticketEnd < 0
+                ? string.Empty
+                : pipeline[ticketAt..(ticketEnd + "TvstShowId: show.ShowId".Length)];
+            Check(ticket.Length > 0
+                  && ticket.Contains("SeasonPack.ReleaseGroup(releaseName) ?? string.Empty", StringComparison.Ordinal)
+                  && !ticket.Contains("GetFileNameWithoutExtension", StringComparison.Ordinal),
+                "F-M505: the tvst ticket's release field is the GROUP (`SeasonPack.ReleaseGroup(releaseName) ?? string.Empty`) and never the media file name — the page cuts a name at the dash (\"The Middle.S01E21.MULTI.1080p.WEB-DL\") and the group would be lost, an empty field being allowed and the majority on the page");
+        }
         Check(pipeline.Contains("&& !cand.IsLoose && !cand.Forced", StringComparison.Ordinal), "no pack for a loose sidecar or a forced track");
         Check(pipeline.Contains("await packCoordinator.FlushAsync(runCt)", StringComparison.Ordinal), "the run closes its buffers before the summary");
         Check(pipeline.Contains("SeasonPack.IsComplete(aired, entry.Value)", StringComparison.Ordinal), "the pipeline asks the completeness rule");
@@ -491,8 +532,8 @@ internal static class Program
         var filledSeason = sevenOfEight.Concat(SeasonPack.Uncovered(airedEight, sevenOfEight)).ToList();
         Check(SeasonPack.IsComplete(airedEight, filledSeason), "seven plus the filled eighth is the season");
         Check(!SeasonPack.IsComplete(airedEight, sevenOfEight), "without the fill the season stays single");
-        Check(SeasonPack.PackHash(filledSeason.Select(e => Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e))))
-              == SeasonPack.PackHash(Enumerable.Range(1, 8).Select(e => Jellyfin.Plugin.SubdlScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e)))),
+        Check(SeasonPack.PackHash(filledSeason.Select(e => Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e))))
+              == SeasonPack.PackHash(Enumerable.Range(1, 8).Select(e => Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(Srt(e)))),
             "a filled pack is the same container as a fully collected one — same members, same hash");
 
         // The rules in the code: a member may only come from a subtitle that passed the gates AND is
@@ -525,14 +566,14 @@ internal static class Program
             "F-M429: the packs go up first, before the item loop and before the buffers are flushed");
         Check(pipeline.Contains("_packAbsorbed.Add((packImdb, packSeason, packLang, packHi))", StringComparison.Ordinal),
             "the pairs a pack carried are remembered for the single phase");
-        Check(pipeline.Contains("carried by the pack built in this run, no single beside it", StringComparison.Ordinal),
-            "and a covered position is skipped instead of uploaded single");
+        Check(pipeline.Contains("carried by the pack built in this run and sent as a single beside it (F-M585, the pack row lists this episode", StringComparison.Ordinal),
+            "F-M585: a covered position is NOT skipped — it goes up as a single beside the pack");
 
         // ── 8. The coordinator itself, on fakes ─────────────────────────────────
         // No network, no Jellyfin, no database: the dry run of a pack stops before the upload, and the
         // registry is never touched on that path.
         Console.WriteLine("8. Coordinator on fakes");
-        var dryConfig = new Jellyfin.Plugin.SubdlScribe.Configuration.PluginConfiguration { DryRun = true };
+        var dryConfig = new Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration { DryRun = true };
         var complete = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>> { [("tt1", 1)] = airedEight };
         var packable = new HashSet<(string ImdbId, int Season)> { ("tt1", 1) };
 
@@ -624,7 +665,7 @@ internal static class Program
         """;
         using (var doc = System.Text.Json.JsonDocument.Parse(published))
         {
-            var entry = Jellyfin.Plugin.SubdlScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
+            var entry = Jellyfin.Plugin.SubScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
             Check(entry != null && entry!.UploadId == 3755405,
                 "F-M432: the published list yields the upload id a delete needs");
             Check(entry!.Name.Contains("ELiTE", StringComparison.Ordinal) && entry.Language == "English",
@@ -648,7 +689,7 @@ internal static class Program
         """;
         using (var doc = System.Text.Json.JsonDocument.Parse(publishedWithBoth))
         {
-            var entry = Jellyfin.Plugin.SubdlScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
+            var entry = Jellyfin.Plugin.SubScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
             Check(entry != null && entry!.EntryId == 3758706,
                 "F-M435: the published entry carries its own entry id");
             Check(entry!.UploadId == 380828,
@@ -663,7 +704,7 @@ internal static class Program
         """;
         using (var doc = System.Text.Json.JsonDocument.Parse(pending))
         {
-            var entry = Jellyfin.Plugin.SubdlScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
+            var entry = Jellyfin.Plugin.SubScribe.Api.OwnSubtitleEntry.FromJson(doc.RootElement);
             Check(entry != null && entry!.EntryId == 380865 && entry.UploadId == 380865,
                 "F-M435: a submission reports its upload id as id — both fields agree");
             Check(entry!.HandleId == 380865,
@@ -686,8 +727,8 @@ internal static class Program
         // ── F-M442/F-M443/F-M444: die drei Vorabprüfungen und die zweite Fassung ──
         Check(uploadSrc.Contains("public (string? Quality, string? Framerate) SourceFacts("),
             "F-M442: quality and frame rate are readable without extracting anything");
-        Check(uploadSrc.Contains("Registry.EmbedRejectedReason(fillMediaHash, position)"),
-            "F-M443: the fill asks the reject store before it extracts");
+        Check(uploadSrc.Contains("SpurIstGesperrt(fillMediaHash, position, lang, hearingImpaired, isSeries: true)"),
+            "F-M443/F-M584: the fill asks the reject store before it extracts — and only for the source that owns the verdict");
         Check(uploadSrc.Contains("every track of this language is already refused in the store, nothing is extracted"),
             "F-M443: a language whose tracks are all refused costs no extraction at all");
         Check(uploadSrc.Contains("FindSeasonEpisodeItems(") && uploadSrc.Contains("trying the next file of this episode"),
@@ -713,9 +754,11 @@ internal static class Program
         var coordinatorSrc2 = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
         Check(!coordinatorSrc2.Contains("_ownTexts"),
             "F-M441: the pack coordinator carries no store either");
-        Check(coordinatorSrc2.Contains("DeletePublishedSubtitleAsync(single.Id")
-                && coordinatorSrc2.IndexOf("DeletePublishedSubtitleAsync(single.Id") < coordinatorSrc2.IndexOf("await _api.UploadSeasonPackAsync"),
-            "F-M391 stays as ordered: the absorbed singles are deleted BEFORE the pack goes up");
+        Check(!coordinatorSrc2.Contains("DeletePublishedSubtitleAsync(single.Id"),
+            "F-M585 replaces F-M391: no single is deleted before the pack any more — SubDL allows both");
+        Check(coordinatorSrc2.Contains("stay up as singles beside the pack", StringComparison.Ordinal)
+                && coordinatorSrc2.Contains("CoveredByPack", StringComparison.Ordinal) == false,
+            "F-M585: the pack names the singles that stay beside it instead of deleting them");
 
         // F-M467 (measured 11.11.2026 on VisionQuest tt23112594): the pack phase reads a season as
         // children of the folder it did not work this run — there Episode.Series is NULL, and every
@@ -839,6 +882,174 @@ internal static class Program
             "F-M472: the run loop is an index loop, because the hand-over inserts while it walks");
         Check(dlPipeline.Contains("covers {Season}x{First}-{Last}", StringComparison.Ordinal),
             "F-M472: the run says which stretch of the season it moved forward");
+
+        // ---- F-M528: eine fremde Zahl kostet einen Treffer, nie den Lauf ------------------------
+        // Befund 16.11.2026: `FormatException` aus SubtitleCandidate.FromJson beendete zwei
+        // Download-Zyklen. GetInt32 wirft bei einem Zahlwert mit Nachkomma oder ausserhalb des
+        // Int32-Bereichs. Geprueft wird jetzt, dass solche Werte GELESEN werden.
+        string looseJson = """
+        { "url": "/subtitle/1-2.zip", "release_name": "X", "language": "de",
+          "season": 1.7, "episode": "3", "episode_from": 99999999999, "framerate": 1e3,
+          "download_count": { "n": 5 } }
+        """;
+        using (var doc = System.Text.Json.JsonDocument.Parse(looseJson))
+        {
+            Jellyfin.Plugin.SubScribe.Api.SubtitleCandidate? cand = null;
+            bool threw = false;
+            try
+            {
+                cand = Jellyfin.Plugin.SubScribe.Api.SubtitleCandidate.FromJson(doc.RootElement);
+            }
+            catch (FormatException)
+            {
+                threw = true;
+            }
+
+            Check(!threw, "F-M528: a hit with foreign number shapes no longer throws");
+            Check(cand != null && cand!.Season == 1,
+                "F-M528: a number with a fraction (1.7) is truncated, not thrown away");
+            Check(cand != null && cand!.Episode == 3,
+                "F-M528: a number sent as a string (\"3\") is understood");
+            Check(cand != null && cand!.EpisodeFrom == int.MaxValue,
+                "F-M528: a number beyond the Int32 range is clamped instead of throwing");
+            Check(cand != null && cand!.Framerate == 1000,
+                "F-M528: exponent notation (1e3) is read");
+            Check(cand != null && cand!.DownloadCount == 0,
+                "F-M528: an object where a number belongs reads as 0, and the hit survives");
+        }
+
+        string subdlClient = File.ReadAllText(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "ScribeApiClient.cs"));
+        Check(subdlClient.Contains("JsonAnomalies.GetInt(el, name)", StringComparison.Ordinal),
+            "F-M528: the shared int reader goes through the tolerant one");
+        Check(subdlClient.Contains("catch (FormatException)", StringComparison.Ordinal)
+              && subdlClient.Contains("JsonAnomalies.Take()", StringComparison.Ordinal),
+            "F-M528: one bad hit is skipped AND the foreign value is written to the log");
+        Check(!subdlClient.Contains("v.GetInt32();\n        }", StringComparison.Ordinal),
+            "F-M528: no int-only read of an API payload is left in the search path");
+        // F-M529: der Befund wird nicht gemeldet, sondern der Treffer faellt — und wird gezaehlt.
+        Check(subdlClient.Contains("LastRejectedByFormat++", StringComparison.Ordinal),
+            "F-M529: a hit whose field shape is not as documented is rejected");
+        Check(subdlClient.Contains("LastJsonMismatches = befund", StringComparison.Ordinal),
+            "F-M529: the rejected hits keep their sub and attribute for the log");
+        string dlSource = File.ReadAllText(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "DownloadPipeline.cs"));
+        Check(dlSource.Contains("summary.RejectedCandidates += _api.LastRejectedByFormat", StringComparison.Ordinal),
+            "F-M529: the count reaches the run's closing line");
+
+        // ---- F-M530: jedes Metadatenfeld robust, Meldung + droppen, kein Run-Fail ----------------
+        // Operator-Anweisung 17.11.2026: „in jedem Metadatenfeld Robustheit gegen Falscheintrag.
+        // Meldung und droppen, kein run fail." Geprueft wird die Tabelle, die das entscheidet.
+        string sauber = """
+        { "url": "/subtitle/1-2.zip", "release_name": "X", "language": "de", "season": 1, "episode": 2,
+          "framerate": 2, "fps": "23.976", "hi": true, "full_season": false, "download_count": 12,
+          "unpack_files": [ { "file_n_id": "abc", "season": 1, "episode": 2, "hi": false, "size": 100 } ] }
+        """;
+        using (var doc = System.Text.Json.JsonDocument.Parse(sauber))
+        {
+            var findings = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.Check(doc.RootElement);
+            Check(findings.Count == 0,
+                "F-M530: a documented entry — including numeric fps as TEXT — is not a finding");
+            var ident = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.Identity(doc.RootElement);
+            Check(ident.SubId == "1-2" && ident.Name == "X" && ident.Language == "DE",
+                "F-M530: the finding can name its subtitle (id, release name, language)");
+        }
+
+        string falsch = """
+        { "url": "/subtitle/9-9.zip", "release_name": "Y", "language": "de",
+          "season": "3", "framerate": 23.98, "hi": "true", "author": ["a"],
+          "unpack_files": [ { "file_n_id": "abc", "season": 1.5 } ] }
+        """;
+        using (var doc = System.Text.Json.JsonDocument.Parse(falsch))
+        {
+            var findings = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.Check(doc.RootElement);
+            Check(findings.Count == 5,
+                "F-M530: five wrong shapes are named (got " + findings.Count + ")");
+            Check(findings.Any(f => f.Path == "season"),
+                "F-M530: a number sent as text is a finding");
+            Check(findings.Any(f => f.Path == "framerate"),
+                "F-M530: a fractional framerate is a finding");
+            Check(findings.Any(f => f.Path == "hi"),
+                "F-M530: a flag sent as text is a finding");
+            Check(findings.Any(f => f.Path == "author"),
+                "F-M530: an array where a string belongs is a finding");
+            Check(findings.Any(f => f.Path == "unpack_files[0].season"),
+                "F-M530: the pack's own files are checked too, with their position named");
+
+        }
+
+        using (var doc = System.Text.Json.JsonDocument.Parse("{ \"unpack_files\": \"kaputt\" }"))
+        {
+            var findings = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.Check(doc.RootElement);
+            Check(findings.Count == 1 && findings[0].Path == "unpack_files",
+                "F-M530: a string where the pack array belongs is a finding, not a crash");
+        }
+
+        // ---- F-M531: die Meldung sagt nur, was verkehrt ist ------------------------------------
+        var probe = new Jellyfin.Plugin.SubScribe.Api.FieldShapeFinding(
+            "framerate", "framerate", "23.98", "Number", "a whole number");
+        var text = Jellyfin.Plugin.SubScribe.Pipeline.MetadataMismatchReports.Build(
+            probe, "3676577-8593549", "The.Odyssey.2026.720p.WEBRip", "en", "12.1.12.413", "konto");
+        Check(text != null && text!.Category == Jellyfin.Plugin.SubScribe.Pipeline.BrokenSubtitleReports.CategoryMetadata,
+            "F-M531: a format mismatch is filed as wrong release info");
+        var zeilen = (text?.Comment ?? string.Empty).Split('\n');
+        Check(zeilen.Length == 5 && zeilen[0] == "Metadata format mismatch.",
+            "F-M531: the report opens with the finding and carries nothing else");
+        Check(zeilen[1] == "Attribute: framerate (documented: a whole number, received: 23.98)",
+            "F-M531: the attribute line names documented and received value");
+        Check(zeilen[2] == "Subtitle: 3676577-8593549 ('The.Odyssey.2026.720p.WEBRip', EN)",
+            "F-M531: the subtitle line names the affected sub");
+        Check((text?.Comment ?? string.Empty).Contains("Automated report by Sub Scribe", StringComparison.Ordinal)
+              && !(text?.Comment ?? string.Empty).Contains("because", StringComparison.OrdinalIgnoreCase)
+              && !(text?.Comment ?? string.Empty).Contains("please", StringComparison.OrdinalIgnoreCase),
+            "F-M531: attribution, and no story around it");
+
+        // ---- F-M532: auch die anderen SubDL-Antworten werden geprueft ---------------------------
+        using (var doc = System.Text.Json.JsonDocument.Parse(
+            "{ \"imdb_id\": 123, \"tmdb_id\": 1368337 }"))
+        {
+            var f = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.CheckFilm(doc.RootElement);
+            Check(f.Count == 1 && f[0].Path == "imdb_id",
+                "F-M532: the film block is checked (a numeric imdb_id is a finding)");
+        }
+
+        using (var doc = System.Text.Json.JsonDocument.Parse(
+            "{ \"usage\": { \"search\": { \"used\": 5, \"limit\": \"100\" }, \"downloads\": { \"used\": 1.5 } } }"))
+        {
+            var f = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.CheckQuota(doc.RootElement);
+            Check(f.Count == 2
+                  && f.Any(x => x.Path == "search.limit")
+                  && f.Any(x => x.Path == "downloads.used"),
+                "F-M532: the quota answer is checked, nested blocks named (got " + f.Count + ")");
+        }
+
+        using (var doc = System.Text.Json.JsonDocument.Parse(
+            "{ \"subtitle\": { \"id\": \"3755405\", \"n_id\": \"abc\" } }"))
+        {
+            var f = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.CheckOwnEntry(doc.RootElement);
+            Check(f.Count == 1 && f[0].Path == "subtitle.id",
+                "F-M532: an own-list entry is checked (an id sent as text is a finding)");
+        }
+
+        using (var doc = System.Text.Json.JsonDocument.Parse(
+            "{ \"subtitle\": { \"sd_id\": \"x\", \"subtitle_id\": \"9\" } }"))
+        {
+            var f = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.CheckUploadAnswer(doc.RootElement);
+            Check(f.Count == 1 && f[0].Path == "subtitle.subtitle_id",
+                "F-M532: the upload answer is checked too");
+        }
+
+        var gesammelt = new List<string>();
+        Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.OnMismatch = (f, ctx) => gesammelt.Add(ctx + ":" + f.Path);
+        using (var doc = System.Text.Json.JsonDocument.Parse("{ \"imdb_id\": 7 }"))
+        {
+            bool gemeldet = Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.Emit(
+                Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.CheckFilm(doc.RootElement), "search answer, film block");
+            Check(gemeldet && gesammelt.Count == 1 && gesammelt[0] == "search answer, film block:imdb_id",
+                "F-M532: a finding from another answer reaches the same reporter");
+        }
+
+        Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.OnMismatch = null;
 
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."

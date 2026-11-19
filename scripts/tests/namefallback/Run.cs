@@ -1,5 +1,5 @@
 #nullable enable
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Test harness for F-M346 to F-M349. Run from the repo root:
@@ -27,7 +27,7 @@ while (!File.Exists(Path.Combine(repo, PluginDll)) && Path.GetDirectoryName(repo
 }
 
 var asm = Assembly.LoadFrom(Path.Combine(repo, PluginDll));
-var parser = asm.GetType("Jellyfin.Plugin.SubdlScribe.Pipeline.MediaNameParser");
+var parser = asm.GetType("Jellyfin.Plugin.SubScribe.Pipeline.MediaNameParser");
 Check("the parser is reachable", parser != null);
 var parse = parser!.GetMethod("Parse", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
 var extract = parser.GetMethod("ExtractImdbId", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);

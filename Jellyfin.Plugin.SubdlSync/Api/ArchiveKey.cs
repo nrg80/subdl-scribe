@@ -1,6 +1,6 @@
 using System;
 
-namespace Jellyfin.Plugin.SubdlScribe.Api;
+namespace Jellyfin.Plugin.SubScribe.Api;
 
 /// <summary>
 /// F-M370: the part of a download URL that names the ARCHIVE, not the entry inside it.

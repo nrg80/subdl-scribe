@@ -2,8 +2,9 @@
 using System;
 using System.IO;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Api.Endpoints;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 // T158 / F-M352 (operator order 19.10.2026): a worker that cannot start reads "off".
 // The conditions are the code's own hard refusals, so they are driven through the REAL gate.
@@ -32,10 +33,17 @@ Check("ready upload is NOT off", !WorkerOffState.Applies(UL, ok));
 Check("ready postprocessing is NOT off", !WorkerOffState.Applies(PP, ok));
 
 // --- download: four independent hard stops ----------------------------------
-Check("download off when the toggle is off", Off(DL, c => c.DownloadEnabled = false));
+// F-M507: „alles aus" verlangt auch den Schalter der dritten Quelle — sie ist im ungesetzten Fall an.
+Check("download off when the toggle is off", Off(DL, c =>
+{
+    c.DownloadEnabled = false;
+    c.TvSubtitlesDownloadEnabled = false;
+    c.MovieSubtitlesDownloadEnabled = false;
+}));
 Check("download off when no library is selected", Off(DL, c => c.SelectedLibraries.Clear()));
 Check("download off when the language list is empty", Off(DL, c => c.DownloadLanguages = "  , ,"));
-Check("download off when a credential is missing", Off(DL, c => c.ApiKey = " "));
+Check("download off when the MANDATORY credential is missing — and NOT for a missing SubDL key, because tvsubtitles still runs (F-M497)",
+    Off(DL, c => c.TmdbApiKey = "") && !Off(DL, c => c.ApiKey = " "));
 
 // --- upload: three hard stops, and NO language condition --------------------
 Check("upload off when the toggle is off", Off(UL, c => c.UploadEnabled = false));
@@ -49,6 +57,97 @@ Check("postprocessing off when upload is off", Off(PP, c => c.UploadEnabled = fa
 Check("postprocessing is never off while upload runs", !Off(PP, _ => { }));
 Check("postprocessing stays ON when no library is selected — it reads /user/mySubtitles",
     !WorkerOffState.Applies(PP, Mutate(c => c.SelectedLibraries.Clear())));
+
+// --- F-M477: die Schalter sind je Anbieter und Richtung getrennt -----------------
+// Der Alt-Wert antwortet nur, solange der Anbieterschalter ungesetzt (null) ist. Genau diese
+// Reihenfolge macht die Umstellung ohne Migration richtig: eine Datei von vor der Trennung
+// bedeutet weiter, was sie bedeutete.
+Check("SubDL-Download folgt dem Anbieterschalter, wenn er gesetzt ist",
+    !Mutate(c => { c.DownloadEnabled = true; c.SubdlDownloadEnabled = false; }).IsDownloadEnabled(SubtitleProvider.Subdl));
+Check("SubDL-Download bleibt an, auch wenn der Alt-Wert aus ist — der neue Schalter gewinnt",
+    Mutate(c => { c.DownloadEnabled = false; c.SubdlDownloadEnabled = true; }).IsDownloadEnabled(SubtitleProvider.Subdl));
+Check("der Alt-Wert antwortet, solange der Anbieterschalter ungesetzt ist",
+    !Mutate(c => { c.DownloadEnabled = false; c.SubdlDownloadEnabled = null; }).IsDownloadEnabled(SubtitleProvider.Subdl)
+    && Mutate(c => { c.DownloadEnabled = true; c.SubdlDownloadEnabled = null; }).IsDownloadEnabled(SubtitleProvider.Subdl));
+Check("SubDL-Upload folgt dem Anbieterschalter, wenn er gesetzt ist",
+    !Mutate(c => { c.UploadEnabled = true; c.SubdlUploadEnabled = false; }).IsUploadEnabled(SubtitleProvider.Subdl));
+Check("der Alt-Wert des Uploads antwortet, solange der Anbieterschalter ungesetzt ist",
+    !Mutate(c => { c.UploadEnabled = false; c.SubdlUploadEnabled = null; }).IsUploadEnabled(SubtitleProvider.Subdl));
+// F-M478: tvsubtitles.net hat Schalter, aber keinen Anbieter — beide Richtungen sind aus,
+// egal was in der Konfiguration steht, und der Grund ist benannt statt still.
+// F-M485: die zweite Quelle ist eingebunden — ihr Schalter wirkt jetzt, und zwar je Richtung.
+Check("der tvsubtitles-Schalter schaltet beide Richtungen einzeln",
+    Mutate(c => { c.TvSubtitlesDownloadEnabled = true; c.TvSubtitlesUploadEnabled = false; }).IsDownloadEnabled(SubtitleProvider.TvSubtitles)
+    && !Mutate(c => { c.TvSubtitlesDownloadEnabled = true; c.TvSubtitlesUploadEnabled = false; }).IsUploadEnabled(SubtitleProvider.TvSubtitles)
+    && Mutate(c => { c.TvSubtitlesDownloadEnabled = false; c.TvSubtitlesUploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.TvSubtitles)
+    && !Mutate(c => { c.TvSubtitlesDownloadEnabled = false; c.TvSubtitlesUploadEnabled = true; }).IsDownloadEnabled(SubtitleProvider.TvSubtitles));
+Check("tvsubtitles nennt seine Grenzen, SubDL hat keine zu nennen",
+    PluginConfiguration.MissingProviderReason(SubtitleProvider.TvSubtitles) is { Length: > 20 }
+    && PluginConfiguration.MissingProviderReason(SubtitleProvider.Subdl) is null);
+Check("beide Quellen sind Anbieter (F-M485: tvsubtitles ist eingebunden)",
+    PluginConfiguration.HasProvider(SubtitleProvider.TvSubtitles)
+    && PluginConfiguration.HasProvider(SubtitleProvider.Subdl));
+// F-M503 (Nutzerentscheid 15.11.2026: "tvst download als download default aktivieren sie, upload
+// default deaktiviert"): die beiden tvst-Richtungen fallen im null-Fall GEGENLAEUFIG aus. Der
+// Download ist default AN, der Upload bleibt default AUS, und ein explizit gesetztes false muss
+// weiterhin AUS heissen — der Default antwortet nur, solange nichts geschrieben wurde.
+Check("ohne gesetzten Schalter ist der tvst-DOWNLOAD an, auch wenn der Alt-Wert aus ist",
+    Mutate(c => { c.DownloadEnabled = false; c.UploadEnabled = false; }).IsDownloadEnabled(SubtitleProvider.TvSubtitles),
+    "F-M503: null → Download AN");
+Check("ein explizit ausgeschalteter tvst-Download bleibt aus",
+    !Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; c.TvSubtitlesDownloadEnabled = false; }).IsDownloadEnabled(SubtitleProvider.TvSubtitles),
+    "F-M503: false → Download AUS, der Default ueberschreibt keine Entscheidung");
+Check("ohne gesetzten Schalter bleibt der tvst-UPLOAD aus, auch wenn der Alt-Wert an ist",
+    !Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.TvSubtitles),
+    "F-M503: null → Upload AUS (unveraendert)");
+
+// F-M507 (Nutzerauftrag 15.11.2026: „Dritte quelle. Nur das series halt nach tv show und movies nach
+// moviesubtitels gehen."): die dritte Quelle hat eigene Schalter, und sie fallen wie tvst aus —
+// Download im ungesetzten Fall AN, Upload AUS. Ein gespeichertes false bleibt AUS; der Alt-Schalter
+// (DownloadEnabled/UploadEnabled) gehoert SubDL und antwortet hier NICHT.
+Check("ohne gesetzten Schalter ist der moviesubtitles-DOWNLOAD an, der Upload aus",
+    Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; }).IsDownloadEnabled(SubtitleProvider.MovieSubtitles)
+    && !Mutate(c => { c.DownloadEnabled = true; c.UploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.MovieSubtitles),
+    "F-M507: null → Download AN, Upload AUS");
+Check("ein explizit ausgeschalteter moviesubtitles-Download bleibt aus",
+    !Mutate(c => { c.DownloadEnabled = true; c.MovieSubtitlesDownloadEnabled = false; }).IsDownloadEnabled(SubtitleProvider.MovieSubtitles)
+    && Mutate(c => { c.DownloadEnabled = false; c.MovieSubtitlesDownloadEnabled = true; }).IsDownloadEnabled(SubtitleProvider.MovieSubtitles),
+    "F-M507: false → AUS, true schlaegt den Alt-Schalter");
+Check("der Alt-Schalter allein schaltet moviesubtitles NICHT ab",
+    Mutate(c => { c.DownloadEnabled = false; c.UploadEnabled = false; }).IsDownloadEnabled(SubtitleProvider.MovieSubtitles)
+    && Mutate(c => { c.UploadEnabled = true; c.MovieSubtitlesUploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.MovieSubtitles),
+    "F-M507: der Alt-Wert gehoert SubDL");
+// F-M508 (Etappe 2b): der Upload-Weg der dritten Quelle EXISTIERT jetzt (Endpunkt verdrahtet), aber er
+// ist gesperrt: der Schalter faellt im ungesetzten Fall aus, und ein gespeichertes true ist die einzige
+// Art, ihn scharf zu machen — bis die Sprachabbildung der Seite belegt ist, bleibt er aus.
+Check("die dritte Quelle hat einen Upload-Weg, aber ihr Schalter ist ohne Entscheidung aus",
+    PluginConfiguration.HasProvider(SubtitleProvider.MovieSubtitles)
+    && SubtitleEndpointCatalog.HasUploadPath(SubtitleProvider.MovieSubtitles)
+    && !Mutate(c => { c.UploadEnabled = true; c.DownloadEnabled = true; }).IsUploadEnabled(SubtitleProvider.MovieSubtitles)
+    && Mutate(c => { c.MovieSubtitlesUploadEnabled = true; }).IsUploadEnabled(SubtitleProvider.MovieSubtitles),
+    "F-M508: der Weg ist gebaut, der Schalter bleibt aus, bis die Sprachabbildung belegt ist");
+
+// F-M509 (Operator-Klarstellung 15.11.2026: „Seperate into subdl and tvst. Tvst is splitted into tvst
+// and moviesub itself"): die Reihenfolge ordnet ZWEI Quellen — SubDL und die tvst-Familie —, und die
+// Familie loest nach Medienart auf ihre Adresse auf. Deshalb hat die Einstellung zwei Werte, und in
+// JEDER Medienart stehen genau zwei Quellen in der Frage-Reihenfolge.
+Check("die Reihenfolge hat zwei Werte und ordnet die Familie, nicht ihre Adressen",
+    Enum.GetValues<PluginConfiguration.DownloadSourceOrder>().Length == 2
+    && SourceOrder.ForMedia(PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst, isSeries: true)
+        .SequenceEqual(new[] { SubtitleProvider.TvSubtitles, SubtitleProvider.Subdl })
+    && SourceOrder.ForMedia(PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst, isSeries: false)
+        .SequenceEqual(new[] { SubtitleProvider.MovieSubtitles, SubtitleProvider.Subdl }),
+    "F-M509: tvst zuerst = die Adresse der Medienart zuerst, danach SubDL");
+
+Check("die Familie ist EINE Quelle mit zwei Adressen, und die Medienart waehlt die Adresse",
+    SourceOrder.FamilyPage(isSeries: true) == SubtitleProvider.TvSubtitles
+    && SourceOrder.FamilyPage(isSeries: false) == SubtitleProvider.MovieSubtitles
+    && SourceOrder.InFamily(SubtitleProvider.TvSubtitles)
+    && SourceOrder.InFamily(SubtitleProvider.MovieSubtitles)
+    && !SourceOrder.InFamily(SubtitleProvider.Subdl)
+    && SourceOrder.FamilyFirst(PluginConfiguration.DownloadSourceOrder.TvSubtitlesFirst)
+    && !SourceOrder.FamilyFirst(PluginConfiguration.DownloadSourceOrder.SubdlFirst),
+    "F-M509: zwei Adressen, eine Quelle");
 
 // --- the lamps are NOT repainted (operator: note it, do not grey the row) ---
 var gate = Mutate(c => c.UploadEnabled = false);
@@ -71,8 +170,13 @@ Check("a scheduled rhythm is NOT manual",
 Check("manual needs a runnable direction - upload off is off, not manual",
     WorkerOffState.Applies(UL, Mutate(c => { c.UploadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; })));
 Check("download manual and off are mutually exclusive by construction",
-    WorkerOffState.Applies(DL, Mutate(c => { c.DownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; }))
-    && WorkerOffState.IsManualOnly(DL, Mutate(c => { c.DownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; })));
+    WorkerOffState.Applies(DL, Mutate(c => { c.DownloadEnabled = false; c.TvSubtitlesDownloadEnabled = false; c.MovieSubtitlesDownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; }))
+    && WorkerOffState.IsManualOnly(DL, Mutate(c => { c.DownloadEnabled = false; c.TvSubtitlesDownloadEnabled = false; c.MovieSubtitlesDownloadEnabled = false; c.RefetchInterval = UpdateInterval.Manual; })));
+// F-M503: der Alt-Schalter allein schaltet die Richtung NICHT mehr ab — der tvst-Download ist im
+// null-Fall an. Genau diese Folge wird hier festgehalten, damit sie nicht als Regression auftaucht.
+Check("Download alt aus + tvst ungesetzt = Richtung bleibt an (F-M503)",
+    !WorkerOffState.Applies(DL, Mutate(c => c.DownloadEnabled = false)),
+    "der tvst-Download default traegt die Richtung");
 
 // --- the maintenance workers say MANUAL, not off -----------------------------
 const string DB = WorkerOffState.DatabaseWorkerKey;
@@ -108,13 +212,13 @@ Check("a null language value yields no languages", WorkerOffState.ParseTargetLan
 Check("no configuration: no statement, no off", !WorkerOffState.Applies(DL, null) && !WorkerOffState.Applies(PP, null));
 
 // --- the other workers keep their palette ----------------------------------
-foreach (var other in new[] { "SubDLSeeder", "SubdlAutoSyncTask", "SubdlDatabaseRefreshTask", "SubdlOshashRefreshTask" })
+foreach (var other in new[] { "SubDLSeeder", "ScribeAutoSyncTask", "ScribeDatabaseRefreshTask", "ScribeOshashRefreshTask" })
 {
     Check($"'{other}' is not covered by the off rule", !WorkerOffState.Applies(other, Mutate(c => { c.DownloadEnabled = false; c.UploadEnabled = false; c.SelectedLibraries.Clear(); })));
 }
 
 // --- wiring on the source ---------------------------------------------------
-string ctl = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlStatusController.cs"));
+string ctl = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeStatusController.cs"));
 Check("the worker endpoint no longer carries an off block of its own", !ctl.Contains("Off = new"));
 Check("the endpoint does NOT repaint an outcome", !ctl.Contains("Outcome = off ?"));
 Check("the endpoint does NOT hide a pending fire", !ctl.Contains("Deferred = !off"));
@@ -122,17 +226,17 @@ Check("the endpoint keeps the stored detail", !ctl.Contains("Detail = off ?"));
 
 string page = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"));
 Check("the off note rides on the DEFERRAL line, not on a line of its own",
-    page.Contains("var deferLine = document.querySelector('#SubdlLocalDeferLine')")
+    page.Contains("var deferLine = document.querySelector('#ScribeLocalDeferLine')")
     && page.Contains("offNotes.forEach(function (t) { localLines.push(t); })")
-    && !page.Contains("SubdlOffLine"));
+    && !page.Contains("ScribeOffLine"));
 Check("the page reads the off facts from the same payload as the deferral", page.Contains("(loc && loc.notes)"));
 
-string quota = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/SubdlQuotaService.cs"));
+string quota = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/ScribeQuotaService.cs"));
 Check("the quota answer carries the notes in its local block",
     quota.Contains("var offEntries = StatusNotes();") && quota.Contains("notes = offEntries"));
 Check("the notes list is built from the shared gates",
     quota.Contains("WorkerOffState.Applies") && quota.Contains("WorkerOffState.IsManualOnly") && quota.Contains("StatusNotes()"));
-Check("postprocessing has ONE wording - manual, never off", quota.Contains("!config.UploadEnabled || manual(postKey, config)"));
+Check("postprocessing has ONE wording - manual, never off", quota.Contains("!config.IsUploadEnabled(SubtitleProvider.Subdl) || manual(postKey, config)"));
 Check("the wording is the operator's seven phrases", quota.Contains("\"download off\"") && quota.Contains("\"upload off\"") && quota.Contains("\"download manual\"") && quota.Contains("\"upload manual\"")
     && !quota.Contains("\"upload postprocessing off\"")
     && quota.Contains("\"upload postprocessing manual\"") && quota.Contains("\"database refresh manual\"") && quota.Contains("\"oshash refresh manual\""));
@@ -149,8 +253,14 @@ Check("the deferral note carries a BROKEN worker's outcome, not just 'deferred'"
     quota.Contains("Outcome.Failed") && quota.Contains("\"last run failed\""));
 Check("the broken worker's own cause travels with it",
     quota.Contains("string.IsNullOrWhiteSpace(row!.Detail) ? string.Empty : \": \" + row.Detail.Trim()"));
-Check("a deferred row still passes its detail through unchanged",
-    quota.Contains("reason = row!.Detail ?? string.Empty;"));
+// F-M475 (operator finding 15.11.2026): the reason belongs to the PENDING attempt, not to the row.
+// A fresh deferral must not wear the previous run's cause — live 15.11.2026: the scan deferral was
+// printed as "download quota/rate limit — rescheduled — next attempt 4:24 AM". The row's detail stays
+// the fallback for a fire that carries no token (an older state file, or a foreign failure).
+Check("a deferred row names the reason of the PENDING attempt and falls back to the row's detail",
+    quota.Contains("reason = fireReason ?? row!.Detail ?? string.Empty;"));
+Check("a pending attempt without a row still says why it waits",
+    quota.Contains("else if (hasFire)") && quota.Contains("reason = fireReason ?? string.Empty;"));
 Check("a failure keeps its note WITHOUT a pending fire (no early return)",
     !quota.Contains("if (fires.Count == 0)")
     && quota.Contains("if (!hasFire && !isFailed)"));
@@ -185,7 +295,7 @@ Check("the postprocessing no longer rides on the deferral line",
     quota.Contains("&& !isFailed)") && quota.Contains("continue;"),
     "the armed order is shown once — by its own line (F-M445)");
 Check("the skip is gated on the postprocessing worker and on a healthy run",
-    quota.Contains("Jellyfin.Plugin.SubdlScribe.Registry.WorkerOffState.PostprocessWorkerKey, StringComparison.Ordinal)\n                    && !isFailed"),
+    quota.Contains("Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.PostprocessWorkerKey, StringComparison.Ordinal)\n                    && !isFailed"),
     "a FAILED postprocessing run still speaks here (F-M436)");
 Check("the duplicate word is gone",
     !quota.Contains("reason = \"schedule\";"),

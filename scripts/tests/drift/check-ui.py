@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+# This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # F-M304 UI wiring check. ONE toggle, and it must be wired in the file that is actually

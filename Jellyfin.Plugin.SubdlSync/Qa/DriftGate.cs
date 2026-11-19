@@ -1,12 +1,12 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
 //
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 //
@@ -40,10 +40,10 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Pipeline;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe.Qa;
+namespace Jellyfin.Plugin.SubScribe.Qa;
 
 /// <summary>
 /// F-M295: runs the drift gate against a media file and an SRT. Owns the ffmpeg
@@ -117,7 +117,7 @@ public static class DriftGate
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "[SubDL] drift gate: audio decode failed for {File}", Path.GetFileName(mediaPath));
+            logger.LogDebug(ex, "[Sub Scribe] drift gate: audio decode failed for {File}", Path.GetFileName(mediaPath));
             return Skip("audio decode failed");
         }
 
@@ -142,7 +142,7 @@ public static class DriftGate
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "[SubDL] drift gate: detector failed for {File}", Path.GetFileName(mediaPath));
+            logger.LogDebug(ex, "[Sub Scribe] drift gate: detector failed for {File}", Path.GetFileName(mediaPath));
             return Skip("detector error");
         }
     }

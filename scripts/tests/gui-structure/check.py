@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+# This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# SubDL Scribe is free software: you can redistribute it and/or modify it
+# Sub Scribe is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
 # Free Software Foundation, either version 3 of the License, or (at your
 # option) any later version.
-# SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+# Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 # warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 # See the GNU General Public License for more details.
 
@@ -158,10 +158,10 @@ def main():
     # and "Dann nur noch vom refresh bitte". It used to sit up in the SubDL/TMDb block and had TWO
     # automatic writers — the quota fetch (server-cached 5 min) and the status probe — so the line
     # could show a time unrelated to any click, and the poll moved it by itself.
-    ts = html.find('id="SubdlStatusTimestamp"')
+    ts = html.find('id="ScribeStatusTimestamp"')
     check("timestamp element exists exactly once",
-          html.count('id="SubdlStatusTimestamp"') == 1,
-          "count=%d" % html.count('id="SubdlStatusTimestamp"'))
+          html.count('id="ScribeStatusTimestamp"') == 1,
+          "count=%d" % html.count('id="ScribeStatusTimestamp"'))
     check("timestamp sits directly ABOVE the refresh button", ts != -1 and btn != -1 and ts < btn)
     if idx.get("general", -1) != -1:
         check("timestamp sits inside the general tab", idx["general"] < ts)
@@ -172,7 +172,7 @@ def main():
           "ts.textContent = 'Updated '" not in html)
     # Exactly one writer, and it is the button handler.
     check("exactly one writer of the stamp",
-          html.count("#SubdlStatusTimestamp") == 1)
+          html.count("#ScribeStatusTimestamp") == 1)
     check("the writer is the refresh button",
           "stamp.textContent = 'Manually refreshed ' + subdlFmtTime(new Date())" in html)
     # The stamp must show the click moment, NOT a server timestamp that may be server-cached.
@@ -193,11 +193,13 @@ def main():
                    "subdlLoadWorkers]"):
         check("refresh covers %s" % loader.rstrip("]"), loader in html)
     # quota covers BOTH the API/search allowance and the download allowance
-    check("quota loader renders the API calls bar", "renderBar('API calls'" in html)
-    check("quota loader renders the downloads bar", "renderBar('Downloads'" in html)
+    # Operator order 16.11.2026: both bars belong to SubDL and say so — the tvst family has its
+    # own lights now, so an unlabelled "Downloads" bar would be read as the whole plugin's.
+    check("quota loader renders the SubDL API calls bar", "renderBar('SubDL API calls'" in html)
+    check("quota loader renders the SubDL downloads bar", "renderBar('SubDL downloads'" in html)
     # status covers the lights AND the library read/write rows
     check("status loader renders the library read/write rows",
-          "#SubdlDirStatusList" in html)
+          "#ScribeDirStatusList" in html)
 
     # ---- 4. Scope trap: window.* only where it IS on window ----
     check("no window.subdlLoadQuota reference (it is a plain declaration)",
@@ -259,7 +261,7 @@ def main():
     root = os.path.dirname(os.path.dirname(path))
     js_path = os.path.join(os.path.dirname(path), "configPage.js")
     check("no second page script sits next to the page", not os.path.isfile(js_path), js_path)
-    ctrl = os.path.join(root, "Api", "SubdlConfigController.cs")
+    ctrl = os.path.join(root, "Api", "ScribeConfigController.cs")
     check("the ConfigJs route controller is gone", not os.path.isfile(ctrl), ctrl)
     plugin_cs = os.path.join(root, "Plugin.cs")
     check("the .js page is no longer registered as a plugin page",
@@ -378,8 +380,8 @@ def main():
     check("the volume rows lead, download first",
           order[:2] == expected_prefix,
           "got: %s" % " | ".join(order[:2]))
-    dl = [i for i, o in enumerate(order) if o.startswith("Downloads:")]
-    up = [i for i, o in enumerate(order) if o.startswith("Uploads:")]
+    dl = [i for i, o in enumerate(order) if o.startswith("Downloads")]
+    up = [i for i, o in enumerate(order) if o.startswith("Uploads")]
     check("the remaining rows are grouped by direction, downloads before uploads",
           bool(dl) and bool(up) and max(dl) < min(up),
           "downloads at %s, uploads at %s" % (dl, up))
@@ -424,7 +426,7 @@ def main():
     }
     src_ent = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Data", "Entities.cs"))
     src_plg = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Plugin.cs"))
-    src_api = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Api", "SubdlStatusController.cs"))
+    src_api = os.path.abspath(os.path.join(os.path.dirname(path), "..", "Api", "ScribeStatusController.cs"))
     carriers = {"page": html}
     if os.path.exists(src_ent):
         carriers["entity"] = open(src_ent, encoding="utf-8").read()
@@ -455,11 +457,14 @@ def main():
     # breaks, the number is right, only the sentence is false. Also asserted positively, so a rename
     # to something else has to be a deliberate act rather than a silent drift.
     # 02.11.2026 (operator): the word "discarded" read as "SubDL threw an upload away" — the row
-    # counts attempts that never left, so it now says "stopped before sending". The point of the
-    # assertion stays the same: no upload row may claim a fetch, and a rename has to be deliberate.
-    check("the upload row says stopped before sending, not fetched",
-          "Uploads: stopped before sending" in order,
-          "row missing or reverted: %s" % [o for o in order if o.startswith("Uploads:")])
+    # counted attempts that never left, so it said "stopped before sending".
+    # 18.11.2026 (operator, F-M595): „Stopped before sending bitte nur noch für qa fails in die
+    # Statistik. Wording: Uploads qa fails not uploaded" — the row counts ONLY the quality-gate
+    # verdicts now, and it says so. The point of the assertion stays: no upload row may claim a
+    # fetch, and a rename has to be deliberate.
+    check("the upload row says QA fails not sent, not fetched",
+          "Uploads: QA fails not sent" in order,
+          "row missing or reverted: %s" % [o for o in order if o.startswith("Uploads")])
     check("and no upload row claims a fetch",
           not any(o.startswith("Uploads:") and "fetch" in o for o in order),
           "an upload row still speaks of fetching: %s" % [o for o in order if o.startswith("Uploads:")])
@@ -489,7 +494,7 @@ def main():
           "a row reads a field name the API does not publish")
 
     # Every row must name a field the plugin API actually returns.
-    api_src = os.path.join(os.path.dirname(path), "..", "Api", "SubdlStatusController.cs")
+    api_src = os.path.join(os.path.dirname(path), "..", "Api", "ScribeStatusController.cs")
     api_src = os.path.abspath(api_src)
     if os.path.exists(api_src):
         api = open(api_src, encoding="utf-8").read()
@@ -633,11 +638,11 @@ def main():
     # exactly the kind of thing that gets helpfully re-added and the page still renders either way:
     # no mirrored markup (id/class), and no second reader for it in the script.
     check("the auto-sync's light is NOT duplicated under the download switch",
-          "SubdlAutosyncLight" not in html and "SubdlAutosyncOutcome" not in html
-          and "SubdlAutosyncStatus" not in html,
+          "ScribeAutosyncLight" not in html and "ScribeAutosyncOutcome" not in html
+          and "ScribeAutosyncStatus" not in html,
           "a second auto-sync readout is still wired into the page")
     check("no second reader for the auto-sync light remains in the script",
-          "SubdlAutosyncWhen" not in html,
+          "ScribeAutosyncWhen" not in html,
           "the mirrored light's script survived the markup")
 
     # The statistics row says what it counts, and it counts the FILES THE RUN MOVED — the operator's
@@ -668,7 +673,7 @@ def main():
     # 18:21, prod .201 and test .202 alike). Asserted on the SOURCE because the throw is invisible in
     # the page: both lamps render either way, the wrong one just says "Object reference not set".
     # A guard that is only documented is exactly what a later refactor removes again.
-    disp = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "SubdlEventDispatcher.cs"))
+    disp = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "ScribeEventDispatcher.cs"))
     if os.path.exists(disp):
         dsrc = open(disp, encoding="utf-8").read()
         check("the auto-sync row takes a nullable download summary",
@@ -703,7 +708,8 @@ def main():
     if os.path.exists(dl):
         src = open(dl, encoding="utf-8").read()
         check("the run START line names the fit switch at Normal",
-              "audio fit={Fit}" in src)
+              # LOGGING.md 1.11: `:l` druckt das Wort ohne Anführungszeichen
+              "audio fit={Fit:l}" in src)
         check("the run DONE line carries the fit counter at Normal",
               "fitted to audio" in src)
         # The track line must be per-item (Verbose) AND gated on the switch: with the fit off
@@ -730,7 +736,7 @@ def main():
     # writer. An assignment here loses every number produced by a scan whose direction ended without
     # a run: the work would be on disk and absent from the statistics forever. Asserted on the
     # source because the visible symptom is only ever "the counter reads 0".
-    disp = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "SubdlEventDispatcher.cs"))
+    disp = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "ScribeEventDispatcher.cs"))
     if os.path.exists(disp):
         dsrc = open(disp, encoding="utf-8").read()
         check("the seeder's language-code count accumulates across scans",
@@ -739,7 +745,7 @@ def main():
               dsrc.count("_pendingLanguageCodesAllocated = 0;") == 1
               and dsrc.count("_pendingLanguageCodesAllocated += ") == 1)
     else:
-        check("SubdlEventDispatcher.cs reachable for the counter check", False, disp)
+        check("ScribeEventDispatcher.cs reachable for the counter check", False, disp)
 
     # ---- 6e. F-M312/F-M313: a dry run must not RENAME a loose subtitle either ----
     # The container rewrite was already suppressed (F-M263), but this rename had NO dry-run guard:
@@ -747,7 +753,7 @@ def main():
     # a dry run moved the user's files while reporting that it writes nothing (F-M22). Asserted on the
     # source because the symptom is silent and rare: it only shows on an install that has unlabelled
     # sidecars AND a dry run armed, and nothing in the log contradicts the report.
-    sd = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "SubdlSeeder.cs"))
+    sd = os.path.abspath(os.path.join(os.path.dirname(path), "..", "ScheduledTasks", "ScribeSeeder.cs"))
     if os.path.exists(sd):
         sdsrc = open(sd, encoding="utf-8").read()
         # The predicate must exist AND cover BOTH directions: the seeder serves no single direction,
@@ -773,7 +779,7 @@ def main():
               ".Renamed;" in sdsrc and "snapshot.LooseSubtitlesRenamed += ObserveSidecarFacts(mediaPath).Renamed;" in sdsrc,
               "the statistics row must read Renamed, not Rows")
     else:
-        check("SubdlSeeder.cs reachable for the dry-run check", False, sd)
+        check("ScribeSeeder.cs reachable for the dry-run check", False, sd)
 
     # ---- 6g. F-M314: the rename hangs off the SAME switch as the container write ----
     # Two switches for one act — allocating a missing language code — let the operator ask for
@@ -902,8 +908,19 @@ def main():
     # than redundant.
     up_pos = html.find('id="UploadContinueAfterLimit"')
     dl_pos = html.find('id="DownloadContinueAfterLimit"')
-    up_label = html[html.find("<span>", up_pos):html.find("</span>", up_pos) + 7] if up_pos != -1 else ""
-    dl_label = html[html.find("<span>", dl_pos):html.find("</span>", dl_pos) + 7] if dl_pos != -1 else ""
+
+    def _visible_label(pos):
+        """Nur der SICHTBARE Satz. Seit F-M526 haengt ein Quellenmerker IM Text-Span
+        („… <span class=src-badge>SubDL only</span>"); ein Vergleich der rohen Spans wuerde
+        den Merker mitzaehlen und die Paritaet der beiden Richtungen falsch bewerten."""
+        if pos == -1:
+            return ""
+        start = html.find("<span>", pos) + len("<span>")
+        end = html.find("<", start)
+        return html[start:end].strip()
+
+    up_label = _visible_label(up_pos)
+    dl_label = _visible_label(dl_pos)
     check("F-M338: the upload label carries no 'API'",
           up_label != "" and "API" not in up_label,
           "the operator asked for it without the word; measured label=%r" % up_label)
@@ -911,7 +928,7 @@ def main():
           up_label != "" and up_label == dl_label,
           "upload=%r download=%r - a wording difference reads as a behaviour difference" % (up_label, dl_label))
     check("F-M338: the download label is unchanged",
-          dl_label == "<span>Continue after daily limit</span>",
+          dl_label == "Continue after daily limit",
           "the fix is on the upload side only; measured download=%r" % dl_label)
 
     # ---- F-M337 (operator order 09.10.2026): the General tab carries everything that matters ----
@@ -979,7 +996,7 @@ def main():
         check("and no longer hands the seeder's detail to the direction row",
               "IsNullOrWhiteSpace(seederDetail) ? \"cycle finished\" : seederDetail!"
               not in worker_src)
-    disp_src = read_source("ScheduledTasks", "SubdlEventDispatcher.cs")
+    disp_src = read_source("ScheduledTasks", "ScribeEventDispatcher.cs")
     if disp_src:
         check("each direction's row gets its OWN run summary",
               "DescribeDirectionRun(upload" in disp_src)
@@ -1026,8 +1043,8 @@ def main():
         check("and closes it in a finally, so a failure leaves no lamp hanging",
               disp_src.find("FinishDirectionRow(upload)") > disp_src.find("finally"))
 
-    task_src = read_source("ScheduledTasks", "SubdlUploadTask.cs")
-    task_dl = read_source("ScheduledTasks", "SubdlDownloadTask.cs")
+    task_src = read_source("ScheduledTasks", "ScribeUploadTask.cs")
+    task_dl = read_source("ScheduledTasks", "ScribeDownloadTask.cs")
     if task_src and task_dl:
         # The wait-only tasks start a cycle and WAIT for it: marking their direction running there
         # lit a lamp for the seeder's work. They still own the rows of directions that never ran.
@@ -1051,15 +1068,15 @@ def main():
     #
     # Asserted as a PAIR because either half alone is the defect: a probe nobody consults changes
     # nothing, and a flag nobody lowers never fires.
-    seed_src = read_source("ScheduledTasks", "SubdlSeeder.cs")
+    seed_src = read_source("ScheduledTasks", "ScribeSeeder.cs")
     if seed_src:
         check("the seeder does NOT query the API itself (it only reads a flag)",
-              "ReadQuotaAsync" not in seed_src and "SubdlApiClient" not in seed_src,
+              "ReadQuotaAsync" not in seed_src and "ScribeApiClient" not in seed_src,
               "the seeder fills queues; asking the API is the dispatcher's job")
         check("the download queue is gated by that flag, like the download switch",
-              "&& downloadAllowed" in seed_src
+              "downloadAllowed ||" in seed_src
               and "bool downloadAllowed = true" in seed_src,
-              "a spent limit must keep items out of the queue the way switching off does")
+              "a spent limit must keep items out of the queue the way switching off does — unless another source can run (F-M492)")
     if disp_src:
         # Assert the EXACT call site, not the method name: `if (false) …ReadDownloadAllowanceAsync(…)`
         # contains every one of those words and disables the probe completely. Measured: the
@@ -1091,7 +1108,7 @@ def main():
         # into the same wall, and prod had 1144 items already queued.
         check("the RUN is refused at the same place as the download switch",
               "heldByAllowance" in disp_src
-              and "!config.DownloadEnabled || heldByAllowance" in disp_src,
+              and "!config.AnyDownloadEnabled || heldByAllowance" in disp_src,
               "gating only the fill still walks what earlier cycles queued")
         # F-M365 superseded the deferred row: a held-back download writes NO row (a row would have
         # to invent a time for work that did not happen) and says why in the log instead.
@@ -1099,9 +1116,12 @@ def main():
               "_downHeldByAllowance = true" in disp_src
               and "Outcome.Deferred, _downloadAllowanceHeld" not in disp_src,
               "F-M365: no direction outcome, so no row")
+        # LOGGING.md 1.10: genau EIN Ereignis-Code pro Zeile — der Code der Zeile ist F-M331
+        # („queued items stay due"), F-M365 steht als Kommentar an der Fundstelle.
         check("and the log line carries the reason the direction was held back",
               "download held back \u2014 {Reason}" in disp_src
-              and "no worker row (F-M365)" in disp_src)
+              and "(F-M331)" in disp_src
+              and "(F-M331); no worker row" not in disp_src)
         check("the flag is handed to the seeder, so the queue stays empty too",
               "downloadAllowed: _downloadAllowanceHeld == null" in disp_src)
 
@@ -1220,7 +1240,7 @@ def main():
               _open_body != '' and
               disp_src.find("MarkAutoSyncRunning(upload, config)") >= 0 and
               disp_src.find("MarkAutoSyncRunning(upload, config)")
-              < disp_src.find("await ExecutePipelineAsync(upload, config, filter, progress"),
+              < disp_src.find("await ExecutePipelineAsync("),
               "opening it after the await is exactly the old defect: start and finish in one instant")
         check("F-M340: the closing method no longer opens the row",
               "runs.Start(Registry.WorkerRunRegistry.AutoSyncWorkerKey" not in _row_body,
@@ -1308,8 +1328,8 @@ def main():
     # that schedules a job, so a button that also touched `PruneMode`/`OshashRefresh` would be a
     # second, hidden scheduler.
     for btn_id, task_name, cfg_id in [
-        ("RunDatabaseRefreshNow", "SubDL Scribe — Database Refresh", "PruneMode"),
-        ("RunOshashRefreshNow", "SubDL Scribe — OSHash Cache Refresh", "OshashRefresh"),
+        ("RunDatabaseRefreshNow", "Sub Scribe — Database Refresh", "PruneMode"),
+        ("RunOshashRefreshNow", "Sub Scribe — OSHash Cache Refresh", "OshashRefresh"),
     ]:
         check(f"the {cfg_id} section carries a manual run button",
               f'id="{btn_id}"' in html,
@@ -1376,7 +1396,7 @@ def main():
 
     # The disabling member must be named EXPLICITLY in the OSHash switch: its fallback is Monthly, so
     # a value that fell through would start rehashing a library whose owner had switched it off.
-    _oshtask = read_source("ScheduledTasks", "SubdlOshashRefreshTask.cs")
+    _oshtask = read_source("ScheduledTasks", "ScribeOshashRefreshTask.cs")
     check("the OSHash task treats Manual as 'no revalidation'",
           "OshashRefreshMode.Manual => TimeSpan.Zero" in _oshtask,
           "the switch falls back to Monthly — an unnamed disabling value would start rehashing")
@@ -1399,7 +1419,7 @@ def main():
     _up = read_source("Pipeline", "UploadPipeline.cs")
     _dl = read_source("Pipeline", "DownloadPipeline.cs")
     _cfg = read_source("Configuration", "PluginConfiguration.cs")
-    _ref = read_source("ScheduledTasks", "SubdlDatabaseRefreshTask.cs")
+    _ref = read_source("ScheduledTasks", "ScribeDatabaseRefreshTask.cs")
     check("the F-M60 removal checks can reach their sources",
           None not in (_up, _dl, _cfg, _ref),
           "an unreadable source would silently skip every assertion below it")
@@ -1462,8 +1482,8 @@ def main():
               if _mode_at >= 0 and _file_evidence_at >= 0
               else "the mode block or the file-evidence reader was not found at all")
     _pipe = read_source("Pipeline", "DownloadPipeline.cs")
-    _seed = read_source("ScheduledTasks", "SubdlSeeder.cs")
-    _ref2 = read_source("ScheduledTasks", "SubdlDatabaseRefreshTask.cs")
+    _seed = read_source("ScheduledTasks", "ScribeSeeder.cs")
+    _ref2 = read_source("ScheduledTasks", "ScribeDatabaseRefreshTask.cs")
     if _pipe and _seed and _ref2:
         check("the pipeline passes the switch's mode to the shared reader",
               _pipe.count("onlyOwnDownloads: !_config.DownloadOnlyMissing") == 2,
@@ -1484,7 +1504,7 @@ def main():
           'id="RunPostprocessNow"' in html)
     # F-M295 (08.10.2026): the button starts the TASK, not the endpoint. The endpoint ran the work but
     # wrote no status row, so the operator saw an empty list and reported the run as not having happened
-    # (prod log 23:20:22→25: the work WAS done). Only SubdlPostprocessTask writes the "Upl. Postproc."
+    # (prod log 23:20:22→25: the work WAS done). Only ScribePostprocessTask writes the "Upl. Postproc."
     # row, so the task route is the one that leaves evidence.
     check("RunPostprocessNow starts the task, not the endpoint",
           "subdlStartTask('SubDL Postprocessing')" in html
@@ -1493,9 +1513,9 @@ def main():
     # The string above is matched against the task's Name at RUNTIME (subdlStartTask looks the task up by
     # name). A rename on either side would answer "Task not found" in the browser while every build and
     # every other check stayed green — so the literals are tied together here.
-    post_task_src = read_source("ScheduledTasks", "SubdlPostprocessTask.cs")
+    post_task_src = read_source("ScheduledTasks", "ScribePostprocessTask.cs")
     if post_task_src:
-        check("the button's task name matches SubdlPostprocessTask.Name",
+        check("the button's task name matches ScribePostprocessTask.Name",
               'Name => "SubDL Postprocessing"' in post_task_src,
               "a name mismatch fails only in the browser, as 'Task not found'")
 
@@ -1503,14 +1523,16 @@ def main():
     # binden, manuell darf immer"): the upload binding belongs to the AUTOMATIC path ONLY. This is a
     # half-removal by nature — the failure mode is not a crash but a manual run that silently declines —
     # so it is asserted from BOTH sides, and each side alone would pass on a broken file.
-    ctrl = read_source("Api", "SubdlPostprocessController.cs")
-    task = read_source("ScheduledTasks", "SubdlPostprocessTask.cs")
-    sched = read_source("ScheduledTasks", "SubdlSchedulerCoordinator.cs")
+    ctrl = read_source("Api", "ScribePostprocessController.cs")
+    task = read_source("ScheduledTasks", "ScribePostprocessTask.cs")
+    sched = read_source("ScheduledTasks", "ScribeSchedulerCoordinator.cs")
     if ctrl and task and sched:
         # Assert the GATE CONSTRUCT, not the word: both files legitimately NAME UploadEnabled in the
         # comment that explains why the gate was removed, and a word-level ban went RED on a correct
         # file (measured). Match an `if` that tests the flag — that is the shape a re-added gate takes.
-        gate = re.compile(r"if\s*\(\s*!?\s*[\w.]*UploadEnabled\s*\)")
+        # F-M477: the flag is now read through IsUploadEnabled(…); the shape a re-added gate takes
+        # covers both spellings.
+        gate = re.compile(r"if\s*\(\s*!?\s*(?:[\w.]*UploadEnabled|[\w.]*IsUploadEnabled\s*\([^)]*\))\s*\)")
         check("the manual endpoint no longer refuses when upload is off",
               gate.search(ctrl) is None,
               "a manual trigger must run regardless of the upload switch")
@@ -1521,7 +1543,7 @@ def main():
         # F-M445: the automatic path is bound to the upload switch AND to the armed moment — there is
         # no cadence left to test against.
         check("the automatic path is still bound to the upload switch",
-              "config.UploadEnabled && _postprocessArmUtc != DateTime.MinValue" in sched,
+              "config.IsUploadEnabled(SubtitleProvider.Subdl) && _postprocessArmUtc != DateTime.MinValue" in sched,
               "removing the rule entirely would let the schedule run with upload off")
     # The description names the BOUND half and only that. Operator order 08.10.2026: the trailing
     # "the button below always runs" had to go — the button sits directly beneath this line, so
@@ -1578,7 +1600,7 @@ def main():
     # the mode can be read at the call site and never reach the label (the old two-argument call).
     # Comments are stripped before the positive assertions - the fix's own comment quotes both labels,
     # so a raw substring test would pass on a file whose code still prints the old claim.
-    disp_src = read_source("ScheduledTasks", "SubdlEventDispatcher.cs")
+    disp_src = read_source("ScheduledTasks", "ScribeEventDispatcher.cs")
     if disp_src:
         code = re.sub(r"//[^\n]*", "", disp_src)
         # The PAIRING is the claim: each count carries the hypothetical label in its dry-run arm and
@@ -1614,13 +1636,15 @@ def main():
               code.find("bool directionWasDryRun =") < code.find("DescribeDirectionRun(upload, upSummary, downSummary, directionWasDryRun)"),
               "after the write a corrected value cannot reach the row")
     # --- F-M354: a status line names the STATE, not the row's own name again -------------------
-    status_path = os.path.join(DEFAULT, "..", "..", "Api", "SubdlStatusController.cs")
+    status_path = os.path.join(DEFAULT, "..", "..", "Api", "ScribeStatusController.cs")
     status = open(os.path.normpath(status_path), encoding="utf-8").read()
     check("F-M354: the SubDL-API success line says 'reachable', not 'API reachable' (the label says SubDL API)",
           'dto.Message = "reachable";' in status and 'dto.Message = "API reachable";' not in status,
           "'API reachable' next to the label 'SubDL API'")
-    check("F-M354: the same line feeds TMDb — one wording, not two",
-          status.count('dto.Message = "reachable";') == 2, "expected exactly 2 occurrences")
+    # 16.11.2026: both tvst addresses joined as reachability lights and share ONE probe, so the
+    # same one-word line stands in three places: SubDL API, TMDb, and the tvst/mst probe.
+    check("F-M354: the same line feeds TMDb and the tvst/mst probe — one wording, not three",
+          status.count('dto.Message = "reachable";') == 3, "expected exactly 3 occurrences")
     check("F-M354: the login success line says 'OK', not 'Login OK' (the label says SubDL Login)",
           'dto.Message = "OK";' in status and 'dto.Message = "Login OK";' not in status,
           "'Login OK' next to the label 'SubDL Login'")
@@ -1646,15 +1670,17 @@ def main():
     check("F-M356: the JS-injected CSS block still parses (no stray backtick inside it)",
           html.count("var css = `") == 1 and html.count("`;") >= 1, "template literal broken")
     # --- F-M357: the refetch field says what it is, in the words of the field name -----------------
+    # Die Beschreibungen sind englisch (Operator-Entscheid 16.11.2026: "Alles Englisch"); geprueft
+    # wird weiter die Sache: das Feld sagt, was es ist, in den Worten des Feldnamens.
     check("F-M357: the refetch description reads 'Refetch interval for download and upload'",
           "Refetch interval for download and upload." in html, "expected the plain wording")
     check("F-M357: the older wording 'Unified refetch for both ...' is gone",
           "Unified refetch" not in html, "'Unified refetch' still present")
     # --- F-M358: the status rows sit on the same rhythm as the worker lines ----------------------
     check("F-M358: the status box no longer adds a flex gap of its own",
-          "gap:0.8em" not in html, "the inline gap is still on #SubdlStatusBox")
+          "gap:0.8em" not in html, "the inline gap is still on #ScribeStatusBox")
     check("F-M358: its rows carry no margin (same rhythm as the workers block)",
-          "#SubdlStatusBox .subdl-status-row { margin: 0; }" in html, "margin:0 rule missing")
+          "#ScribeStatusBox .subdl-status-row { margin: 0; }" in html, "margin:0 rule missing")
     # --- F-M359: the deferral note names the DAY of the next attempt, not just the time --------
     check("F-M359: a day+time formatter exists",
           "var subdlFmtDayTime = function (iso)" in html, "subdlFmtDayTime missing")
@@ -1664,12 +1690,63 @@ def main():
           "var when = d.due ? subdlFmtDayTime(d.due) : '';" in html, "deferral note still time-only")
     check("F-M359: the bare-time helper is no longer wired into the deferral note",
           "var when = d.due ? resetLocal(d.due) : '';" not in html, "resetLocal still used for the note")
-    # F-M391: a pack absorbs singles — the toggle has to say that they are deleted from SubDL.
-    check("F-M391: the season pack toggle notes that absorbed singles are deleted from SubDL",
-          "its single upload is deleted from SubDL first" in html)
-    check("F-M391: the note sits in the season pack description, not somewhere else",
-          "one pack instead of one upload per episode. Default: on. An episode that already went up on its own"
-          in html)
+    # F-M585 (Operator-Anweisung 17.11.2026: "Der text zu upload season packs in der gui muss weg.
+    # Nur noch tick upload season packs."): der Schalter traegt nur das Haekchen — kein Beschreibungstext,
+    # und der alte F-M391-Hinweis ("deleted from SubDL first") ist mit dem Loeschstopp hinfaellig.
+    check("F-M585: the season pack toggle has no description text any more",
+          "its single upload is deleted from SubDL first" not in html
+          and "instead of one upload per episode" not in html,
+          "the old season pack description is still there")
+    _season_pack_block = ""
+    _idx = html.find('id="UploadSeasonPacks"')
+    if _idx >= 0:
+        _end = html.find("</div>", html.find("</label>", _idx))
+        _season_pack_block = html[_idx:_end] if _end > _idx else html[_idx:_idx + 400]
+    check("F-M585: only the tick and its label remain around the switch",
+          'id="UploadSeasonPacks"' in html
+          and "fieldDescription" not in _season_pack_block
+          and "Upload season packs" in _season_pack_block)
+
+    # ---- F-M497 (Operator-Anweisung 15.11.2026: „Pflichtkonfiguration ist tmdb key … Kennzeichnung
+    # als required for subdl"): Pflicht ist ALLEIN der TMDb-Schlüssel. Die drei SubDL-Felder sagen
+    # „Required for SubDL only", damit ein Bediener nicht glaubt, er müsse ein Konto haben; der
+    # TMDb-Schlüssel steht als Required da. Die Feld-IDs bleiben, was sie waren — eine Umbenennung
+    # würde gespeicherte Konfigurationen und jedes Skript brechen.
+    # Die Seite wird hier eigens gelesen: `page_src` entsteht weiter unten, der Block steht aber
+    # vor der Ausgabe der Ergebnisse (sonst erscheinen seine Pruefungen nicht im Bericht).
+    page_src_f497 = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))), "Jellyfin.Plugin.SubdlSync/Configuration/configPage.html"),
+        encoding="utf-8").read()
+
+    def _section(heading):
+        """Der Block einer Überschrift: von ihr bis zur nächsten <h3> — unabhängig von der Reihenfolge."""
+        start = page_src_f497.index(heading)
+        nxt = page_src_f497.find('<h3>', start + len(heading))
+        return page_src_f497[start:nxt if nxt != -1 else len(page_src_f497)]
+
+    subdl_block = _section('<h3>SubDL Account')
+    tmdb_block = _section('<h3>TMDb (')
+    check("F-M497: the SubDL fields are marked 'Required for SubDL only', the TMDb key as Required",
+          "Required for SubDL only" in subdl_block
+          and subdl_block.count("Required for SubDL only") >= 3
+          and 'id="Username"' in subdl_block and 'id="Password"' in subdl_block and 'id="ApiKey"' in subdl_block
+          and 'subdl-required">Required</span>' in tmdb_block
+          and "the one mandatory key" in tmdb_block
+          and 'id="TmdbApiKey"' in tmdb_block,
+          "F-M497: SubDL ist optional (required for SubDL only), TMDb ist Pflicht")
+
+    # ---- F-M497 (Nachtrag des Nutzers: „Tmdb confi dann auch vor subdl konfi in der gui"): die
+    # Pflicht steht VOR der optionalen Quelle — wer die Seite liest, sieht zuerst, was er haben MUSS.
+    # Nur die beiden Blöcke sind getauscht; geladen und gespeichert wird über die Feld-IDs
+    # (querySelector('#…')), die von ihrer Position nichts wissen — der Tausch darf dort nichts ändern.
+    check("F-M497: the TMDb block stands BEFORE the SubDL account block",
+          page_src_f497.index('<h3>TMDb (') < page_src_f497.index('<h3>SubDL Account')
+          and page_src_f497.index('id="TmdbApiKey"') < page_src_f497.index('id="Username"')
+          and "document.querySelector('#TmdbApiKey').value = config.TmdbApiKey || '';" in page_src_f497
+          and "config.TmdbApiKey = tmdbKey;" in page_src_f497
+          and "document.querySelector('#Username').value = config.Username || '';" in page_src_f497
+          and "config.Username = document.querySelector('#Username').value;" in page_src_f497,
+          "F-M497: TMDb zuerst, SubDL danach — die ID-Bindungen bleiben")
 
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
@@ -1690,8 +1767,8 @@ def main():
         os.path.abspath(__file__))))), "Jellyfin.Plugin.SubdlSync")
     try:
         reg_src = open(os.path.join(root_cs, "Registry/WorkerRunRegistry.cs"), encoding="utf-8").read()
-        up_src = open(os.path.join(root_cs, "ScheduledTasks/SubdlUploadTask.cs"), encoding="utf-8").read()
-        down_src = open(os.path.join(root_cs, "ScheduledTasks/SubdlDownloadTask.cs"), encoding="utf-8").read()
+        up_src = open(os.path.join(root_cs, "ScheduledTasks/ScribeUploadTask.cs"), encoding="utf-8").read()
+        down_src = open(os.path.join(root_cs, "ScheduledTasks/ScribeDownloadTask.cs"), encoding="utf-8").read()
     except OSError as exc:
         check(False, "F-M401: worker sources readable (%s)" % exc)
         reg_src = up_src = down_src = ""
@@ -1704,7 +1781,7 @@ def main():
 
     # ---- F-M402 (operator order 02.11.2026): the cycle line in the log carries the same marker.
     try:
-        disp_src = open(os.path.join(root_cs, "ScheduledTasks/SubdlEventDispatcher.cs"), encoding="utf-8").read()
+        disp_src = open(os.path.join(root_cs, "ScheduledTasks/ScribeEventDispatcher.cs"), encoding="utf-8").read()
     except OSError as exc:
         check(False, "F-M402: dispatcher source readable (%s)" % exc)
         disp_src = ""
@@ -1723,10 +1800,15 @@ def main():
     except OSError as exc:
         check(False, "F-M403: pipeline sources readable (%s)" % exc)
         up_src2 = down_src2 = ""
-    check('"[SubDL] upload: started{Dry}"' in up_src2,
-          "F-M403: the upload start line says ', dry' inline instead of dry-run=True")
-    check('"[SubDL] download: started{Dry}, refetch={Refetch}' in down_src2,
-          "F-M403: the download start line does the same")
+    # LOGGING.md 1.11: kein leeres Suffix mehr — das ", dry" hängt an einer eigenen Vorlage, damit
+    # die Zeile ohne Trockenlauf kein `""` mehr druckt. Die Prüfung stand hier über lange Zeit mit
+    # vertauschten Argumenten (`check(name, ok, detail)`) und war deshalb immer grün.
+    check("F-M403: die Upload-Startzeile sagt ', dry' inline statt dry-run=True",
+          '"[Sub Scribe] upload: started, dry"' in up_src2
+          and '"[Sub Scribe] upload: started"' in up_src2)
+    check("F-M403: die Download-Startzeile tut dasselbe",
+          '"[Sub Scribe] download: started, dry, refetch={Refetch}, audio fit={Fit:l}"' in down_src2
+          and '"[Sub Scribe] download: started, refetch={Refetch}, audio fit={Fit:l}"' in down_src2)
     check("dry-run={" not in up_src2 and "dry-run={" not in down_src2,
           "F-M403: no dry-run=Key=Value form is left in either pipeline")
     check("DRY-RUN would have uploaded" in up_src2,
@@ -1736,7 +1818,7 @@ def main():
 
     # ---- F-M401 (Nachtrag): während ein Worker läuft, gilt das LIVE-Flag, nicht die gespeicherte Zeile.
     try:
-        ctrl_src = open(os.path.join(root_cs, "Api/SubdlStatusController.cs"), encoding="utf-8").read()
+        ctrl_src = open(os.path.join(root_cs, "Api/ScribeStatusController.cs"), encoding="utf-8").read()
     except OSError as exc:
         check(False, "F-M401: status controller readable (%s)" % exc)
         ctrl_src = ""
@@ -1760,6 +1842,129 @@ def main():
     check("document.querySelector('#RefreshLibraryAfterDownload').checked = config.RefreshLibraryAfterDownload !== false;" in page_src
           and "config.RefreshLibraryAfterDownload = document.querySelector('#RefreshLibraryAfterDownload').checked;" in page_src,
           "F-M473: the switch is loaded and saved")
+
+    # ---- F-M525: die Familie steht als EINE Quelle da ---------------------------------------------
+    # Historie: F-M508/F-M509 prueften die ZWEI Adress-Schalter samt deutscher Familien-Ueberschrift —
+    # also genau das, was die Operator-Anweisung vom 17.11.2026 („Weniger in der gui rumlabwern. Tmdb
+    # decided.") entfernt hat, und die Ueberschrift im Download-Tab, die am selben Tag fallen sollte
+    # („Das tvst als Ueberschriftenstummel in der download gui kann auch weg"). Diese Pruefungen
+    # standen ausserdem HINTER der Stelle, an der `failed` berechnet wurde, weshalb ihre zehn
+    # Fehlschlaege nie in der Zusammenfassung auftauchten (326/326 „OK" bei zehn roten Pruefungen).
+    up_tab = page_src.index('data-tab-content="upload"')
+    down_tab = page_src.index('data-tab-content="download"')
+    up_part = page_src[up_tab:down_tab]
+    rest = page_src[down_tab:]
+    nxt = [rest.find('data-tab-content="%s"' % t) for t in ("general", "expert", "upload", "download")]
+    nxt = [n for n in nxt if n > 0]
+    down_part = rest[:min(nxt)] if nxt else rest
+
+    for tab_name, part, box, reason in (("upload", up_part, "TvstUploadEnabled", "TvstUploadReason"),
+                                        ("download", down_part, "TvstDownloadEnabled", "TvstDownloadReason")):
+        check("F-M520: the %s tab shows ONE tvst switch, not one per address" % tab_name,
+              ('id="%s"' % box) in part
+              and 'id="TvSubtitlesUploadEnabled"' not in part
+              and 'id="MovieSubtitlesUploadEnabled"' not in part
+              and 'id="TvSubtitlesDownloadEnabled"' not in part
+              and 'id="MovieSubtitlesDownloadEnabled"' not in part)
+        check("F-M520: the %s switch carries a short default line" % tab_name,
+              ('id="%s"' % reason) in part)
+        # Der Download-Tab nennt den Satz zweimal (einmal am Schalter, einmal in der Statuszeile der
+        # Familie) — geprueft wird, dass er DA ist und beide Adressen nennt, nicht wie oft.
+        check("F-M520: the %s tab names both addresses and says who decides" % tab_name,
+              part.count("tvsubtitles.net") >= 1
+              and part.count("moviesubtitles.org") >= 1
+              and part.count("TMDb decides") >= 1)
+
+    check("F-M525: the tvst heading is gone from the DOWNLOAD tab (operator order 17.11.2026)",
+          down_part.count("<h3>tvst</h3>") == 0,
+          "%d gefunden" % down_part.count("<h3>tvst</h3>"))
+    check("F-M534: the tvst heading is gone from the UPLOAD tab too (operator order 17.11.2026)",
+          up_part.count("<h3>tvst</h3>") == 0,
+          "%d gefunden" % up_part.count("<h3>tvst</h3>"))
+
+    check("F-M520: saving the family switch writes BOTH address flags",
+          "config.TvSubtitlesUploadEnabled = tvstUp;" in page_src
+          and "config.MovieSubtitlesUploadEnabled = tvstUp;" in page_src
+          and "config.TvSubtitlesDownloadEnabled = tvstDown;" in page_src
+          and "config.MovieSubtitlesDownloadEnabled = tvstDown;" in page_src)
+
+    check("F-M520: loading the family switch reads the EFFECTIVE state of both addresses",
+          "config.TvSubtitlesUploadEnabled === true || config.MovieSubtitlesUploadEnabled === true" in page_src
+          and "? true : !!config.TvSubtitlesDownloadEnabled)" in page_src
+          and "? true : !!config.MovieSubtitlesDownloadEnabled);" in page_src)
+
+    check("F-M509: the order field keeps exactly TWO values — the family is ordered, not its addresses",
+          'id="DownloadOrder"' in down_part
+          and down_part.count('<option value="TvSubtitlesFirst">tvst first</option>') == 1
+          and down_part.count('<option value="SubdlFirst">SubDL first</option>') == 1
+          and down_part.count("<option value=") == 2)
+
+    check("F-M525: the order field names the sources in the same words as the switches",
+          '>tvst first<' in down_part and '>SubDL first<' in down_part)
+
+    check("F-M508: the addresses are data, not controls — no address switch survives in the page",
+          page_src.count('id="MovieSubtitlesUploadEnabled"') == 0
+          and page_src.count('id="MovieSubtitlesDownloadEnabled"') == 0
+          and page_src.count('id="TvSubtitlesUploadEnabled"') == 0
+          and page_src.count('id="TvSubtitlesDownloadEnabled"') == 0)
+
+    check("F-M508: the film-address fields are still saved and loaded as configuration",
+          "config.MovieSubtitlesUploadEnabled" in page_src
+          and "config.MovieSubtitlesDownloadEnabled" in page_src
+          and "config.TvSubtitlesUploadEnabled" in page_src
+          and "config.TvSubtitlesDownloadEnabled" in page_src)
+
+    # ---- F-M526: jede Einstellung sagt, WELCHE Quelle sie betrifft -------------------------------
+    # Operator-Anweisung 17.11.2026: „Dann sollten wir in der gui vermerken welches feature nur auf
+    # subdl oder tvst wirkt und nicht auf das andere. SubDL only/TVST only". Der Merker steht am
+    # Schalter selbst — nicht in einer Liste weiter unten, wo man ihn beim Suchen nicht liest.
+    # Nur die eindeutigen Faelle sind markiert; alles andere wirkt auf beide Quellen (TMDb, Sprachen,
+    # Qualitaetspruefungen, Auto-Abgleich, Bibliotheks-Refresh) und bleibt ohne Merker.
+    # F-M533: ReportBrokenSubtitles ist NICHT mehr SubDL-only — derselbe Schalter meldet jetzt auch
+    # an tvsubtitles.net (eigene Meldeform "Report bad"), deshalb traegt er keinen Merker mehr.
+    subdl_only = ("UploadContinueAfterLimit", "UploadSeasonPacks", "DownloadContinueAfterLimit",
+                  "DownloadHearingImpaired", "AllowAiTranslatedSubs",
+                  "DownloadArchiveCacheDays", "DownloadArchiveCacheMaxMb")
+    for cid in subdl_only:
+        # Der Merker steht mal hinter dem Kaestchen (Checkbox), mal im Label DAVOR (Zahlenfeld) —
+        # gesucht wird deshalb in einem Fenster um das Control, nicht nur dahinter.
+        pos = page_src.find('id="%s"' % cid)
+        check("F-M526: %s carries the SubDL-only marker" % cid,
+              pos > 0 and 'src-subdl' in page_src[max(0, pos - 400):pos + 400],
+              "kein Merker" if pos > 0 else "Control fehlt")
+
+    # F-M527: Jellyfin zeichnet das Haekchen ueber die Nachbar-Kette
+    # `.emby-checkbox:checked + span + .checkboxOutline` — das Outline-<span> haengt der Baustein
+    # selbst ans ENDE des Labels. Steht zwischen Text-Span und Outline ein weiteres <span>, ist die
+    # Kette unterbrochen: der Klick zaehlt, aber es erscheint kein Haken (Operator-Befund 17.11.2026:
+    # „Die boxen mit dem subdl only badge lassen sich nicht mehr ticken"). Der Merker gehoert deshalb
+    # IN den Text-Span, nie daneben.
+    check("F-M527: no badge sits between the label text and Jellyfin's checkbox outline",
+          '</span> <span class="src-badge' not in page_src,
+          "%d kaputte Ketten" % page_src.count('</span> <span class="src-badge'))
+    for cid in ("UploadContinueAfterLimit", "UploadSeasonPacks", "DownloadContinueAfterLimit",
+                "DownloadHearingImpaired", "AllowAiTranslatedSubs"):
+        pos = page_src.find('id="%s"' % cid)
+        check("F-M527: %s keeps the marker nested inside its label text" % cid,
+              pos > 0 and 'SubDL only</span></span>' in page_src[pos:pos + 700])
+
+    check("F-M526: the marker has its own two styles and spells the source out",
+          ".src-badge {" in page_src and ".src-subdl {" in page_src and ".src-tvst" in page_src
+          and ">SubDL only</span>" in page_src)
+
+    check("F-M526: no marker claims a tvst-only setting that does not exist",
+          page_src.count("src-tvst") == 1)  # nur die CSS-Klasse, kein gesetztes Abzeichen
+
+    # F-M533: der Melde-Schalter wirkt auf BEIDE Quellen und darf keinen Quellenmerker tragen.
+    check("F-M533: the report switch carries no source marker any more",
+          page_src.count('>SubDL only</span>') == 7,
+          "%d Abzeichen (erwartet 7 nach dem Melde-Schalter)" % page_src.count('>SubDL only</span>'))
+    check("F-M533: the report switch is named without a source",
+          "<span>Report broken subtitles</span>" in page_src)
+
+    # Die Zaehlung gehoert ans ENDE: stand sie mitten in der Datei, waren alle spaeteren Pruefungen
+    # fuer die Zusammenfassung unsichtbar (F-M525 — zehn rote Pruefungen bei "326/326 OK").
+    failed = [r for r in results if not r[1]]
 
     print(">>> GUI-STRUKTUR %s: %d/%d Pruefungen bestanden"
           % ("OK" if not failed else "FEHLER", len(results) - len(failed), len(results)))

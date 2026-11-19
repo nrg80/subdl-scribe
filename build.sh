@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+# This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# SubDL Scribe is free software: you can redistribute it and/or modify it
+# Sub Scribe is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
 # Free Software Foundation, either version 3 of the License, or (at your
 # option) any later version.
-# SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+# Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 # warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 # See the GNU General Public License for more details.
 
-# Build + package SubDL Scribe Jellyfin plugin
+# Build + package Sub Scribe Jellyfin plugin
 # Usage: ./build.sh [version]
 # Without version, reads version from build.yaml
 
@@ -24,7 +24,7 @@ if [[ -z "$VERSION" ]]; then
     VERSION="$(grep '^version:' build.yaml | sed 's/.*"\(.*\)".*/\1/')"
 fi
 
-echo "Building SubDL Scribe v$VERSION ..."
+echo "Building Sub Scribe v$VERSION ..."
 
 # Build
 DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
@@ -64,7 +64,7 @@ files = [
 licences = [
     'licenses/THIRD-PARTY.txt',
     'licenses/LanguageDetection-Apache-2.0.txt',
-    'licenses/SubDL-Scribe-GPL-3.0.txt',
+    'licenses/Sub-Scribe-GPL-3.0.txt',
 ]
 with zipfile.ZipFile('$ZIP', 'w', zipfile.ZIP_DEFLATED) as z:
     for f in files:

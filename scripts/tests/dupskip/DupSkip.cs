@@ -1,12 +1,12 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
 //
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 //
@@ -32,18 +32,31 @@
 using System;
 using System.IO;
 using System.Linq;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Registry;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Registry;
 
 internal static class DupSkip
 {
     private static int Main(string[] args)
     {
         string root = args.Length > 0 ? args[0] : Path.Combine(Path.GetTempPath(), "dupskip");
+        // T178 (operator finding 15.11.2026, second occurrence): this harness DELETES its working
+        // directory. Handed a repository root by mistake — e.g. by a script that passes the checkout to
+        // every suite — it removes the sources. A directory carrying a repo marker is not a workdir, and
+        // refusing is the only safe direction.
+        if (File.Exists(Path.Combine(root, "build.yaml"))
+            || Directory.Exists(Path.Combine(root, ".git"))
+            || File.Exists(Path.Combine(root, ".gitignore")))
+        {
+            Console.WriteLine($">>> FEHLER: '{root}' ist ein Repository, kein Arbeitsverzeichnis — dieser Lauf loescht dort alle Dateien.");
+            return 3;
+        }
+
         if (Directory.Exists(root)) Directory.Delete(root, true);
         Directory.CreateDirectory(root);
 
-        using var db = new SubdlDbContext(Path.Combine(root, "db"), null);
+        using var db = new ScribeDbContext(Path.Combine(root, "db"), null);
         var reg = new ContentHashRegistry(db, null, null);
 
         const string oldHash = "e621029b4734e366";
@@ -67,7 +80,8 @@ internal static class DupSkip
         Console.WriteLine();
         Console.WriteLine("Schritt 3  Inhalt bekannt (IsContentKnown) = " + reg.IsContentKnown(contentHash));
         bool settled = reg.RecordSkippedContent(
-            newHash, false, 0, lang, false, false, contentHash, RejectReason.DuplicateContent);
+            newHash, false, 0, lang, false, false, contentHash, RejectReason.DuplicateContent,
+            new[] { SubtitleProvider.Subdl });
 
         string statusAfter = reg.GetEmbed(newHash, 0)?.Status ?? "<keine Zeile>";
         Console.WriteLine("           RecordSkippedContent -> settled=" + settled + ", Status danach=" + statusAfter);
@@ -86,7 +100,8 @@ internal static class DupSkip
             contentHash: otherHash, reason: RejectReason.DuplicateRemote);
 
         bool otherSettled = reg.RecordSkippedContent(
-            newHash, false, 4, "DE", false, false, otherHash, RejectReason.DuplicateContent);
+            newHash, false, 4, "DE", false, false, otherHash, RejectReason.DuplicateContent,
+            new[] { SubtitleProvider.Subdl });
 
         string otherStatus = reg.GetEmbed(newHash, 4)?.Status ?? "<keine Zeile>";
         string otherReason = reg.GetEmbed(newHash, 4)?.Reason ?? "<kein Grund>";
@@ -106,7 +121,7 @@ internal static class DupSkip
     }
 
     /// <summary>Zaehlt die uploaded-Zeilen zu diesem Inhalt im ganzen Bestand.</summary>
-    private static int UploadedRows(SubdlDbContext db, string contentHash)
+    private static int UploadedRows(ScribeDbContext db, string contentHash)
     {
         int n = db.Embeds.FindAll().Count(x => x.ContentHash == contentHash && x.Status == SubtitleStatus.Uploaded);
         return n + db.Sidecars.FindAll().Count(x => x.ContentHash == contentHash && x.Status == SubtitleStatus.Uploaded);

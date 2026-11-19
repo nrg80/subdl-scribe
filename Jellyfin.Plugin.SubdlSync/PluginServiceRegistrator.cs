@@ -1,22 +1,22 @@
-// This file is part of SubDL Scribe (https://github.com/nrg80/subdl-scribe)
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SubDL Scribe is free software: you can redistribute it and/or modify it
+// Sub Scribe is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
 // Free Software Foundation, either version 3 of the License, or (at your
 // option) any later version.
-// SubDL Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 // See the GNU General Public License for more details.
 
 using System;
 using System.Net.Http;
-using Jellyfin.Plugin.SubdlScribe.Api;
-using Jellyfin.Plugin.SubdlScribe.Configuration;
-using Jellyfin.Plugin.SubdlScribe.Data;
-using Jellyfin.Plugin.SubdlScribe.Pipeline;
-using Jellyfin.Plugin.SubdlScribe.Registry;
-using Jellyfin.Plugin.SubdlScribe.ScheduledTasks;
+using Jellyfin.Plugin.SubScribe.Api;
+using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Pipeline;
+using Jellyfin.Plugin.SubScribe.Registry;
+using Jellyfin.Plugin.SubScribe.ScheduledTasks;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
@@ -26,7 +26,7 @@ using MediaBrowser.Model.Plugins;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.SubdlScribe;
+namespace Jellyfin.Plugin.SubScribe;
 
 /// <summary>
 /// DI registration of shared services (F-M40): API client, registry, resolver.
@@ -45,25 +45,28 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// </summary>
     /// <param name="config">Plugin configuration (carries the credentials).</param>
     /// <returns>The client and the HttpClient it owns; the caller disposes the client.</returns>
-    public static (SubdlApiClient Api, HttpClient Http) BuildApiClient(PluginConfiguration config)
+    public static (ScribeApiClient Api, HttpClient Http) BuildApiClient(PluginConfiguration config)
     {
         // F-M235: the timeout lives in the handler now, per attempt, so a slow server is retried
         // (3 attempts) instead of surfacing as a cancellation. HttpClient.Timeout is disabled
         // (InfiniteTimeSpan) because it would otherwise cap the WHOLE request including retries
         // and cancel them mid-sequence.
-        var retry = new TransientRetryHandler(new SocketsHttpHandler());
-        var http = new HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+        // F-M547: die API-Pause sitzt INNEN (jeder Versuch zaehlt), der Retry aussen.
+        var retry = new TransientRetryHandler(new Api.PacingHandler(new SocketsHttpHandler()));
+        var chain = new Api.TmdbCacheHandler(retry);
+        var http = new HttpClient(chain) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+        Api.ExternalApiPacer.Configure(config.MinCallPauseSec);
 
         // F-M343: the client identity travels with EVERY call this client makes — and it is not
         // only a SubDL caller: the registrator hands this very HttpClient to TmdbImdbResolver, so
         // the TMDb id lookups carry the same agent. Intended, per the operator decision recorded on
-        // DefaultUserAgent. The per-request header inside SubdlApiClient covers search, download
+        // DefaultUserAgent. The per-request header inside ScribeApiClient covers search, download
         // and upload; the login call builds its own request and carried no agent at all (verified
         // 10.10.2026: the call succeeds with the plugin agent, with the old one and with none), so
         // the identity is set once here as the client's own default rather than at a fourth site.
-        http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", SubdlApiClient.DefaultUserAgent);
+        http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", ScribeApiClient.DefaultUserAgent);
 
-        var api = new SubdlApiClient(http)
+        var api = new ScribeApiClient(http)
         {
             Username = config.Username,
             Password = config.Password,
@@ -162,26 +165,29 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // scheduler coordinator stays for recovery fires and refetch ticks; both
         // forward to the dispatcher. Eager construction happens via the task
         // constructors (JF resolves task ctors at startup).
-        serviceCollection.AddSingleton<SubdlDbContext>(_ =>
+        serviceCollection.AddSingleton<ScribeDbContext>(_ =>
         {
             string dataDir = Plugin.Instance!.DataFolderPath;
-            return new SubdlDbContext(dataDir);
+            return new ScribeDbContext(dataDir);
         });
-        serviceCollection.AddSingleton<ContentHashRegistry>(sp => new ContentHashRegistry(sp.GetRequiredService<SubdlDbContext>()));
+        serviceCollection.AddSingleton<ContentHashRegistry>(sp => new ContentHashRegistry(sp.GetRequiredService<ScribeDbContext>()));
         serviceCollection.AddSingleton<TmdbImdbResolver>(sp =>
         {
             // F-M235: same retry discipline for the DI-resolved resolver.
-            var retry = new TransientRetryHandler(new System.Net.Http.SocketsHttpHandler());
-            var http = new System.Net.Http.HttpClient(retry) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+            // F-M547: dieselbe Kette wie in BuildApiClient — eine Regel, zwei Baustellen.
+            var retry = new TransientRetryHandler(new Api.PacingHandler(new System.Net.Http.SocketsHttpHandler()));
+            var chain = new Api.TmdbCacheHandler(retry);
+            Api.ExternalApiPacer.Configure(Plugin.Instance!.Configuration.MinCallPauseSec);
+            var http = new System.Net.Http.HttpClient(chain) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
             var log = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
                       .CreateLogger<TmdbImdbResolver>();
-            retry.Log = msg => Microsoft.Extensions.Logging.LoggerExtensions.LogDebug(log, "[SubDL-Retry] {Msg}", msg);
+            retry.Log = msg => Microsoft.Extensions.Logging.LoggerExtensions.LogDebug(log, "[Sub Scribe-Retry] {Msg}", msg);
             return new TmdbImdbResolver(http, Plugin.Instance!.Configuration.TmdbApiKey);
         });
-        serviceCollection.AddSingleton<SubdlEventDispatcher>();
-        serviceCollection.AddSingleton<SubdlSchedulerCoordinator>();
-        serviceCollection.AddSingleton<SubdlApiClient>();
-        serviceCollection.AddScoped<SubdlPostprocessTask>();
+        serviceCollection.AddSingleton<ScribeEventDispatcher>();
+        serviceCollection.AddSingleton<ScribeSchedulerCoordinator>();
+        serviceCollection.AddSingleton<ScribeApiClient>();
+        serviceCollection.AddScoped<ScribePostprocessTask>();
     }
 
     /// <summary>

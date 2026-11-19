@@ -1,0 +1,401 @@
+// This file is part of Sub Scribe (https://github.com/nrg80/sub-scribe)
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Sub Scribe is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the
+// Free Software Foundation, either version 3 of the License, or (at your
+// option) any later version.
+// Sub Scribe is distributed WITHOUT ANY WARRANTY; without even the implied
+// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU General Public License for more details.
+
+using System;
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using Jellyfin.Plugin.SubScribe.Configuration;
+
+namespace Jellyfin.Plugin.SubScribe.Api;
+
+/// <summary>
+/// F-M70 (user decision 09.09.2026 "show API-key usage in the general menu"):
+/// plugin API endpoint that reports the live SubDL account quota
+/// (requestUsage / downloadUsage) to the config page. The endpoint proxies
+/// the SubDL /api/v1/me call SERVER-SIDE so the API key never travels to the
+/// browser. Verified live 09.09.2026: /api/v1/me does NOT consume request
+/// quota (two consecutive calls, counter unchanged at 2125/2000) — the config
+/// page can query freely. Answers are cached for 5 minutes per process
+/// (anti-hammering; the panel view does not need second-freshness).
+/// Route: GET /Plugins/{pluginId}/Quota  (plugin controller route prefix).
+/// </summary>
+[ApiController]
+[Route("Plugins/SubdlQuota/[action]")]
+public class ScribeQuota : ControllerBase
+{
+    private readonly ILogger<ScribeQuota> _logger;
+
+    // F-M343: /me is a SubDL call like any other, so it identifies the plugin too.
+    private static readonly Lazy<HttpClient> SharedHttp = new(() => ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(20)));
+
+    // F-M70: 5-minute cache — repeated page loads/reloads don't hit SubDL at all.
+    // Key + fetch time travel WITH the cache so (a) a changed API key never shows
+    // the old key's numbers (cache bypass on key change, user decision 09.09.2026)
+    // and (b) the UI can display when the data was last fetched.
+    private static (DateTime ExpiresUtc, DateTime FetchedUtc, string Key, JsonElement Body)? _cached;
+    private static readonly object CacheLock = new();
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ScribeQuota"/> class.
+    /// </summary>
+    public ScribeQuota(ILogger<ScribeQuota> logger)
+    {
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// GET /Plugins/ScribeQuota/Get — live quota for the configured API key.
+    /// </summary>
+    /// <returns>JSON: { requestUsage:{today,total,limit}, downloadUsage:{…}, cached:bool } or { error }.</returns>
+    [HttpGet]
+    public async Task<IActionResult> Get(CancellationToken cancellationToken)
+    {
+        string? key = Plugin.Instance?.Configuration.ApiKey;
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return Ok(new { error = "no-api-key" });
+        }
+
+        lock (CacheLock)
+        {
+            if (_cached.HasValue && _cached.Value.ExpiresUtc > DateTime.UtcNow
+                && string.Equals(_cached.Value.Key, key, StringComparison.Ordinal))
+            {
+                return Ok(Wrap(_cached.Value.Body, _cached.Value.FetchedUtc, cached: true));
+            }
+        }
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            using var resp = await SharedHttp.Value
+                .GetAsync($"https://api.subdl.com/api/v2/me?api_key={Uri.EscapeDataString(key)}", cts.Token)
+                .ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[Sub Scribe] Quota endpoint: /me answered HTTP {Code}", (int)resp.StatusCode);
+                return Ok(new { error = "subdl-http-" + (int)resp.StatusCode });
+            }
+
+            var json = await resp.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement.Clone(); // clone out of the disposing doc
+
+            lock (CacheLock)
+            {
+                _cached = (DateTime.UtcNow.AddMinutes(5), DateTime.UtcNow, key, root);
+            }
+
+            return Ok(Wrap(root, DateTime.UtcNow, cached: false));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[Sub Scribe] Quota endpoint failed: {Msg}", ex.Message);
+            return Ok(new { error = "unreachable" });
+        }
+    }
+
+    // (15.09.2026): v2/me shape — plan + separated counters.
+    // The UI renders exactly the docs structure: plan, search, downloads,
+    // errors. All strings resolved server-side; UI only formats numbers.
+    /// <summary>
+    /// The LOCAL deferral state for the answer: every worker that has a deferred fire pending, with
+    /// the moment it is due (F-M288/F-M294, reworked 03.10.2026).
+    /// <para>
+    /// The server counters cannot express this. They can read 3/1000 while a worker is already
+    /// deferred, so a box built from them alone shows blue bars and no hint that nothing will run
+    /// for the next quarter of an hour. The values come from the scheduler's pending fires — the
+    /// same source the Workers list and the server log read, so all three agree.
+    /// </para>
+    /// <para>
+    /// The user's rule (03.10.2026): "defer whenever a fire was scheduled, whichever worker". So
+    /// this is not limited to the two directions — the database refresh, the OSHash refresh and
+    /// postprocessing carry fires of their own and are named by their own worker name.
+    /// </para>
+    /// <para>
+    /// The reason comes from the worker's own stored row, passed through verbatim rather than
+    /// summarised: a deferral is a run-lock push just as often as it is a rate limit, and a label
+    /// saying "rate limit" on a lock deferral would send the reader looking for a quota problem
+    /// that does not exist.
+    /// </para>
+    /// </summary>
+    /// <returns>The deferred workers, each with its short name, cause and due moment; empty when nothing is deferred.</returns>
+    /// <summary>
+    /// F-M475: the reason of the PENDING attempt that belongs to this worker, or null when the worker
+    /// has no pending fire (or is not one of the two directions). Kept out of the note loop so the loop
+    /// itself stays direction-blind — every worker runs through the same pass (F-M436).
+    /// </summary>
+    /// <param name="coord">The scheduler, or null while the plugin is still starting.</param>
+    /// <param name="workerKey">The worker's key.</param>
+    /// <returns>The reason text, or null.</returns>
+    private static string? PendingReasonForWorker(ScheduledTasks.ScribeSchedulerCoordinator? coord, string workerKey)
+    {
+        if (coord == null)
+        {
+            return null;
+        }
+
+        if (string.Equals(workerKey, Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.DownloadWorkerKey, StringComparison.Ordinal))
+        {
+            return coord.PendingFireReason(upload: false);
+        }
+
+        if (string.Equals(workerKey, Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.UploadWorkerKey, StringComparison.Ordinal))
+        {
+            return coord.PendingFireReason(upload: true);
+        }
+
+        // F-M475 (operator order 15.11.2026, "das sollte laengst so sein"): the maintenance slots carry
+        // their reason the same way. They deferred for one cause only — a busy run lock — but they used
+        // to print the previous run's text beside a fresh moment, exactly like the direction rows did.
+        if (string.Equals(workerKey, "SubdlSyncDatabaseRefreshTask", StringComparison.Ordinal))
+        {
+            return coord.PendingMaintenanceReason("refresh");
+        }
+
+        if (string.Equals(workerKey, "SubdlSyncOshashRefreshTask", StringComparison.Ordinal))
+        {
+            return coord.PendingMaintenanceReason("oshash");
+        }
+
+        if (string.Equals(workerKey, "SubDLPostprocessTask", StringComparison.Ordinal))
+        {
+            return coord.PendingMaintenanceReason("postprocess");
+        }
+
+        return null;
+    }
+
+    private static object LocalRateLimitState()
+    {
+        var entries = new System.Collections.Generic.List<object>();
+
+        // F-M352 (operator order 19.10.2026): the switched-off directions belong on the SAME line as the
+        // deferral ("als statustext da wo auch das deferred fire at x pm steht"), so they travel in the
+        // same payload. Read before any early return — a page with nothing deferred still has to state
+        // that a direction is off.
+        var offEntries = StatusNotes();
+        try
+        {
+            var coord = Jellyfin.Plugin.SubScribe.ScheduledTasks.ScribeSchedulerCoordinator.Instance;
+            if (coord == null)
+            {
+                return new { deferred = entries, notes = offEntries };
+            }
+
+            var fires = coord.GetPendingFires();
+
+            // F-M436: an empty fire list no longer ends the pass — a worker whose last run failed keeps
+            // its note until it runs ok again, fire or no fire. The loop below simply finds nothing to
+            // say for a healthy worker, so the old early return is gone on purpose.
+
+            var registry = Jellyfin.Plugin.SubScribe.Plugin.Instance?.WorkerRuns;
+
+            // Display order follows the Workers list, so the line reads in the same sequence as the
+            // lamps above it. A worker with a fire but no known name still appears — under its key.
+            foreach (var worker in Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.KnownWorkers)
+            {
+                var hasFire = fires.TryGetValue(worker.Key, out var due);
+                var row = registry?.Get(worker.Key);
+                var outcome = row?.Outcome ?? string.Empty;
+                var isFailed = string.Equals(
+                    outcome,
+                    Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.Outcome.Failed,
+                    StringComparison.Ordinal);
+
+                // F-M436 (operator decision 04.11.2026): a failure keeps its voice until the worker's
+                // NEXT run succeeds — not only while a retry happens to be pending. The row's own red
+                // lamp says "failed" (or yellow "defer" while a fire waits) but it never carries the
+                // cause, so without this the reason vanishes the moment the fire is consumed.
+                // A worker with nothing to report stays silent: no fire and no failure, no entry.
+                if (!hasFire && !isFailed)
+                {
+                    continue;
+                }
+
+                // F-M475 (operator finding 15.11.2026, "defer um 15 min taucht nirgendwo auf,
+                // stattdessen defer auf den alten anchor"): the reason is taken from the PENDING FIRE,
+                // not from the worker row. The row is the last run's verdict and — by design, F-M436 —
+                // keeps its text until the next successful run; pairing it with a fresh moment printed
+                // "download quota/rate limit — rescheduled — next attempt 4:24 AM" while the real wait
+                // was the library scan that had just deferred the seed by 15 minutes. The direction
+                // mapping lives in the helper, so this loop stays direction-blind (F-M436).
+                var fireReason = PendingReasonForWorker(coord, worker.Key);
+
+                var reason = string.Empty;
+                if (isFailed)
+                {
+                    // The failure outranks the deferral: the cause is what the reader needs, and the
+                    // next attempt is appended after it.
+                    reason = "last run failed"
+                        + (string.IsNullOrWhiteSpace(row!.Detail) ? string.Empty : ": " + row.Detail.Trim());
+                }
+                else if (string.Equals(
+                             outcome,
+                             Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.Outcome.Deferred,
+                             StringComparison.Ordinal))
+                {
+                    // The pending attempt's own reason wins over the row's stored text (F-M475).
+                    reason = fireReason ?? row!.Detail ?? string.Empty;
+                }
+                else if (hasFire)
+                {
+                    // No direction row was written (F-M365: nothing ran, so nothing to record), but an
+                    // attempt is pending — it still has to say why (F-M475).
+                    reason = fireReason ?? string.Empty;
+                }
+
+                // F-M470 (operator 11.11.2026, "wieso wird postprocessing jetzt 2x gemeldet?"): the armed
+                // postprocessing order has its OWN line on the page ("Postprocessing due <when>", F-M445),
+                // so it must not be repeated here — the same moment stood twice, once as "Postprocessing
+                // due 9:04 PM" and once as "Upl. Postproc.: schedule — next attempt Wed 9:04 PM".
+                // F-M447 had given it the word "schedule" on this line; that turned a duplicate into a
+                // duplicate with a nicer word. The schedule is the other line's job. What stays is the one
+                // thing this line alone can say: a FAILED postprocessing run, whose cause would otherwise
+                // vanish (F-M436).
+                if (string.Equals(worker.Key, Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.PostprocessWorkerKey, StringComparison.Ordinal)
+                    && !isFailed)
+                {
+                    continue;
+                }
+
+                entries.Add(new
+                {
+                    name = worker.Name,
+                    key = worker.Key,
+                    reason,
+                    due = hasFire
+                        ? due.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+                        : string.Empty
+                });
+            }
+        }
+        catch
+        {
+            // The plugin may not be fully started (page requested during a restart) — the line then
+            // simply carries no note; it must never fail the quota call itself.
+        }
+
+        return new { deferred = entries, notes = offEntries };
+    }
+
+    /// <summary>
+    /// F-M352: what the status line says about directions and maintenance workers that do not run on
+    /// their own — "off" for a direction that cannot start at all, "manual" for a worker whose cadence
+    /// is Manual (its dashboard button still runs it).
+    /// </summary>
+    /// <returns>One string per switched-off or manual-only worker, in the order the operator named them.</returns>
+    private static System.Collections.Generic.List<string> StatusNotes()
+    {
+        var notes = new System.Collections.Generic.List<string>();
+        try
+        {
+            var config = Jellyfin.Plugin.SubScribe.Plugin.Instance?.Configuration;
+            if (config == null)
+            {
+                return notes;
+            }
+
+            var off = Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.Applies;
+            var manual = Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.IsManualOnly;
+            var keys = Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.DownloadWorkerKey;
+            var uploadKey = Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry.UploadWorkerKey;
+            var postKey = Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.PostprocessWorkerKey;
+
+            // "off" says the direction cannot start; "manual" says it can, but nothing starts it by itself
+            // (the unified refetch rhythm stands on Manual). "off" outranks "manual" — both at once would be
+            // two words for one fact.
+            if (off(keys, config))
+            {
+                notes.Add("download off");
+            }
+            else if (manual(keys, config))
+            {
+                notes.Add("download manual");
+            }
+
+            if (off(uploadKey, config))
+            {
+                notes.Add("upload off");
+            }
+            else if (manual(uploadKey, config))
+            {
+                notes.Add("upload manual");
+            }
+
+            // F-M352 (operator order 19.10.2026, "Upload Postprocessing off bitte komplett durch manual
+            // ersetzen"): the postprocessing has exactly ONE wording — "manual". Whether the upload switch
+            // is off or the cadence sits on Manual, the fact is the same: it does not run by itself, and
+            // its button does. No "off" for this worker.
+            if (!config.IsUploadEnabled(SubtitleProvider.Subdl) || manual(postKey, config))
+            {
+                notes.Add("upload postprocessing manual");
+            }
+
+            if (manual(Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.DatabaseWorkerKey, config))
+            {
+                notes.Add("database refresh manual");
+            }
+
+            if (manual(Jellyfin.Plugin.SubScribe.Registry.WorkerOffState.OshashWorkerKey, config))
+            {
+                notes.Add("oshash refresh manual");
+            }
+        }
+        catch
+        {
+            // The plugin may not be fully started — then the line simply carries no note.
+        }
+
+        return notes;
+    }
+
+    /// <summary>
+    /// The stored outcome and detail of one worker row, or empty strings when it has none.
+    /// </summary>
+    private static (string? Outcome, string? Detail) ReadWorker(Jellyfin.Plugin.SubScribe.Registry.WorkerRunRegistry registry, string key)
+    {
+        var row = registry.Get(key);
+        return (row?.Outcome, row?.Detail);
+    }
+
+    private static object Wrap(JsonElement me, DateTime fetchedUtc, bool cached)
+    {
+        string plan = "Free";
+        if (me.ValueKind == JsonValueKind.Object && me.TryGetProperty("plan", out var pl)
+            && pl.ValueKind == JsonValueKind.Object && pl.TryGetProperty("name", out var pn)
+            && pn.ValueKind == JsonValueKind.String)
+        {
+            plan = pn.GetString() ?? "Free";
+        }
+
+        JsonElement search = default, downloads = default;
+        if (me.ValueKind == JsonValueKind.Object && me.TryGetProperty("usage", out var us)
+            && us.ValueKind == JsonValueKind.Object)
+        {
+            if (us.TryGetProperty("search", out var s) && s.ValueKind == JsonValueKind.Object) search = s.Clone();
+            if (us.TryGetProperty("downloads", out var d) && d.ValueKind == JsonValueKind.Object) downloads = d.Clone();
+        }
+
+        // FetchedAt: ISO-8601 UTC; the UI renders it in the viewer's timezone (user decision 09.09.2026)
+        return new { plan, search, downloads, cached, local = LocalRateLimitState(), fetchedAt = fetchedUtc.ToString("O") };
+    }
+}
