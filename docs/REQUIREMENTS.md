@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.496.
+**Status:** Implementation — v12.1.12.497.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -1099,7 +1099,7 @@ The counter is cleared by the reschedule reset on a real fire and by the per-day
 
 ## 6. Database Refresh
 
-**F-M583 [U]:** **Urteile ohne Beleg werden verworfen — der Refresh setzt sie zurück und der nächste Lauf normalisiert.** Operator-Anweisung 17.11.2026: „Einmal im Store duplicate self und duplicate content zurücksetzen, danach wieder normalisieren." Ein `duplicate-self-echo` oder `duplicate-content` hat nur Bestand, wenn irgendeine Quelle den Text nachweislich hält (Upload-Kennzeichen oder Upload-Zeitpunkt) **oder** die Herkunft bekannt ist (heruntergeladen, darf nirgends hoch — F-M487). Fehlt beides, war der Spruch eine Behauptung; er entstand aus Queue- und Sprachprüfungen (F-M581) oder aus einem Beleg, der sich nicht wiederfindet. `ClearVerdictsWithoutEvidence` löscht solche Zeilen (eingebettet und Sidecar) — gelöscht heißt „unbekannt", und der nächste Lauf urteilt neu. Idempotent: ein Lauf ohne solche Zeilen meldet 0. Der Refresh meldet die Zahl in seiner Zusammenfassung. Geprüft von T293.
+**F-M583 [U]:** **Urteile ohne Beleg werden verworfen — der Refresh setzt sie zurück und der nächste Lauf normalisiert.** Operator-Anweisung 17.11.2026: „Einmal im Store duplicate self und duplicate content zurücksetzen, danach wieder normalisieren." Ein `duplicate-self-echo` oder `duplicate-content` hat nur Bestand, wenn irgendeine Quelle den Text nachweislich hält (Upload-Kennzeichen oder Upload-Zeitpunkt) **oder** die Herkunft bekannt ist (heruntergeladen, darf nirgends hoch — F-M487). Fehlt beides, war der Spruch eine Behauptung; er entstand aus Queue- und Sprachprüfungen (F-M581) oder aus einem Beleg, der sich nicht wiederfindet. `ClearVerdictsWithoutEvidence` löscht solche Zeilen (eingebettet und Sidecar) — gelöscht heißt „unbekannt", und der nächste Lauf urteilt neu. Idempotent: ein Lauf ohne solche Zeilen meldet 0. Der Refresh meldet die Zahl in seiner Zusammenfassung **und in der Summe der Worker-Zeile** (F-M622: sie fehlte dort, sodass am 19.11.2026 „removed 532 dead state" neben 968 Urteilen im Log stand). Geprüft von T293.
 
 **F-M94:** **Database refresh as scheduler task:** a dedicated task reconciles the stored state with reality — it removes tracker state for Jellyfin items that are gone and verifies the file side of stored verdicts (F-M234). The task, its dashboard name and its log prefix read "database refresh" (`[SubDL-Refresh]`). It uses the global run lock and operates on the shared database.
 

@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.1.12.496"
+version: "12.1.12.497"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.1.12.497: the database refresh counts the verdicts it discards into its own worker line (F-M622).
   v12.1.12.496: Expert -> Plugin database offers "Reset one file" — the single-file reset from the GUI.
   v12.1.12.495: a worker row whose process died mid-run is closed at the next start — the row no longer claims to be running (F-M621).
   v12.1.12.494: the single-file reset is documented (F-M620) and covered by five checks in the endpoints suite.

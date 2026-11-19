@@ -356,9 +356,14 @@ public class ScribeDatabaseRefreshTask : IScheduledTask
                 _logger.LogError(ex, "[Sub Scribe-Refresh] Refresh aborted mid-run — already-flushed parts stay, remainder untouched.");
             }
 
+            // F-M622 (gemessen 19.11.2026): die verworfenen Urteile ohne Beleg gehoeren in dieselbe
+            // Summe. Sie fehlten hier, also meldete die Worker-Zeile "removed 532 dead state",
+            // waehrend die Logzeile darunter 968 Urteile nannte — zwei Zahlen fuer einen Lauf, und
+            // die sichtbare war die falsche.
             int removedTotal = removedSearch + removedQa + removedOshash + removedPacks
                                + removedPrunedSubtitles + removedPrunedMedia
-                               + removedGonePathSubtitles + removedGonePathMedia;
+                               + removedGonePathSubtitles + removedGonePathMedia
+                               + removedUnbackedVerdicts;
             int changedTotal = removedTotal + forgottenSidecars + openFiles + forgottenEmbeds + backfilledForced;
 
             if (changedTotal > 0)

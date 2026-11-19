@@ -1426,7 +1426,10 @@ internal static class Program
         Check("F-M583: der Database Refresh setzt zurueck und meldet die Zahl",
             refreshSource.Contains("removedUnbackedVerdicts = registry.ClearVerdictsWithoutEvidence();", StringComparison.Ordinal)
             && refreshSource.Contains("{Unbacked} verdict(s) without evidence (F-M583)", StringComparison.Ordinal)
-            && refreshSource.Contains("removedUnbackedVerdicts,", StringComparison.Ordinal));
+            && refreshSource.Contains("removedUnbackedVerdicts,", StringComparison.Ordinal)
+            // F-M622: die Zahl muss auch in der Summe der Worker-Zeile landen, sonst stehen zwei
+            // Zahlen fuer einen Lauf nebeneinander (19.11.2026: 532 in der Zeile, 968 im Log).
+            && refreshSource.Contains("+ removedUnbackedVerdicts;", StringComparison.Ordinal));
 
         // --- F-M582: "duplicate" gilt je Quelle -----------------------------------------------
         Check("F-M582: ohne Quellenbeleg faellt der Kandidat nicht weg — die Kette bekommt ihn",
