@@ -697,6 +697,14 @@ public sealed class UploadPipeline : IPackFiller
             {
                 if (!queued.TryGetValue(entry.Key, out var arrived) || arrived.Count == 0)
                 {
+                    // F-M640 (Nachtrag 12.2.0.2, Debug-Stufe): eine Staffel, die in der Bibliothek vollstaendig
+                    // ist, von diesem Lauf aber keine einzige Folge mitbringt, fiel hier lautlos heraus — im
+                    // Log stand nur die Kandidaten-Zeile, danach nichts mehr (MobLand S2 am 19.11.2026).
+                    LogUtil.PerItem(
+                        _config.LogMode,
+                        _logger,
+                        "[Sub Scribe] season pack — {Imdb} S{Season}: complete in the library ({Aired} episode(s)), but this run brings none of them — an arrival run builds no pack, that stays with a full run (F-M424, F-M640).",
+                        entry.Key.Item1, entry.Key.Item2, entry.Value.Count);
                     continue;
                 }
 
