@@ -41,7 +41,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [19. Test Library](#19-test-library)
 - [21. Adding another endpoint — checklist and pitfalls](#21-adding-another-endpoint--checklist-and-pitfalls) — 1 requirement (F-M564) + Checkliste
 
-- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 7 requirements
+- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 13 requirements
 - [20. References](#20-references)
 
 ## 1. Objective and Scope
@@ -2968,3 +2968,15 @@ Dieses Kapitel regelt, wie eine Untertitelquelle angebunden wird. Die Regeln der
 **F-M629 [D]:** **Eine scheiternde Quelle hält die anderen nicht auf.** Meldet eine Quelle einen Fehler, führen die übrigen ihren Teil fort; für die gescheiterte Quelle wird ein Urteil mit Grund geschrieben, und die Datei bleibt für sie offen (Kapitel 3, Kapitel 4).
 
 **F-M630 [D]:** **Mindestumfang einer angebundenen Quelle** sind Suche, Abruf und Doppelprüfung. Upload und das Anlegen von Filmen sind optionale Fähigkeiten; fehlt eine davon, übernimmt die Quelle nur die verbleibenden Aufgaben und sagt das im Lauf.
+
+**F-M631 [D]:** **Ein Beleg gilt für genau eine Quelle.** Schlüssel ist das Paar aus Spur und Quelle; fehlt der Eintrag, ist die Spur für diese Quelle offen. Ein Feld „gehalten von" gibt es nicht — eine Spur darf für eine Quelle belegt und für eine andere offen sein.
+
+**F-M632 [D]:** **N Quellen erzeugen N Einträge je Spur, nicht N Spalten.** Eine Quelle anbinden heißt: einen Quellenschlüssel und einen Registrierungseintrag hinzufügen, ohne den gespeicherten Bestand zu ändern. Die Einträge einer nicht mehr angebundenen Quelle bleiben lesbar, werden nicht selbsttätig gelöscht und erzeugen keine Arbeit mehr.
+
+**F-M633 [D]:** **Die Warteschlange ist eine Matrix, kein Ja/Nein:** je Datei und je angebundener Quelle wird gefragt, ob die Quelle die Aufgabe meldet und ob ihr Beleg fehlt. Arbeit entsteht nur aus dieser Paarung, sodass eine Quelle nachziehen kann, während eine andere abgeschlossen ist.
+
+**F-M634 [D]:** **Jeder Beleg wird als Ganzes je Paar aus Spur und Quelle geschrieben** — ein Schreibvorgang ersetzt genau einen Beleg und lässt die Belege anderer Quellen unberührt.
+
+**F-M635 [D]:** **Kein Urteil einer Quelle löscht das einer anderen**, auch nicht bei inhaltsgleichem Material. Fällt ein Inhaltsurteil „liegt bei Quelle A", setzt es ausschließlich den Beleg von A; B bleibt offen (Kapitel 11).
+
+**F-M636 [D]:** **Scheitert eine Quelle, bleibt ihr Beleg offen und mit Grund versehen**, während die übrigen Quellen fortfahren. Der Vorrang (F-M627) entscheidet, wer zuerst gefragt wird, nicht wer den Beleg erhält.
