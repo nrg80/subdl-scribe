@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.492",
-        "changelog": "v12.1.12.492: log lines follow docs/LOGGING.md — run report, one event per line, no broken quotes.",
+        "version": "12.1.12.493",
+        "changelog": "v12.1.12.493: one file back into the queue — POST /Plugins/SubdlReset/ResetPath drops its source stamps and rejected track verdicts.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.492-dev/Jellyfin.Plugin.SubdlSync_12.1.12.492.zip",
-        "checksum": "aed680ca089f1d093e8aa08cf12ae935",
-        "timestamp": "2026-11-18T21:51:50Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.493-dev/Jellyfin.Plugin.SubdlSync_12.1.12.493.zip",
+        "checksum": "cfc2c33aad56df34e749783bebc6bec2",
+        "timestamp": "2026-11-19T03:42:57Z"
       }
     ]
   }
