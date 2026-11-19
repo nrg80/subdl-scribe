@@ -3275,6 +3275,30 @@ internal static class Program
             && pluginDatei.IndexOf("ClearOnStartup", StringComparison.Ordinal)
                 < pluginDatei.IndexOf("CloseOpenRunsOnStartup(", StringComparison.Ordinal));
 
+        // ---- F-M623: der aufgeschobene Zyklus bekommt eine eigene Zeile ------------------------------
+        string coordDatei = await File.ReadAllTextAsync(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "ScheduledTasks", "ScribeSchedulerCoordinator.cs")).ConfigureAwait(false);
+        string statusDatei = await File.ReadAllTextAsync(
+            Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Api", "ScribeStatusController.cs")).ConfigureAwait(false);
+        Check(
+            "F-M623: the coordinator reports the deferred cycle with its reason and attempt",
+            coordDatei.Contains("public (DateTime? DueUtc, string? Why, int Attempt) GetCycleDeferral()", StringComparison.Ordinal)
+            && coordDatei.Contains("_refetchFireWhy = \"run holds the lock\"", StringComparison.Ordinal)
+            && coordDatei.Contains("public static int RescheduleAttemptLimit => MaxRescheduleAttempts;", StringComparison.Ordinal));
+        Check(
+            "F-M623: the cycle deferral is NOT smuggled into the worker fire map",
+            coordDatei.Contains("Kept out of", StringComparison.Ordinal)
+            && coordDatei.Contains("GetPendingFires deliberately", StringComparison.Ordinal)
+            && !coordDatei.Contains("result[\"PipelineCycle\"]", StringComparison.Ordinal));
+        Check(
+            "F-M623: the answer carries CycleDue, CycleWhy, attempt and limit, and the page prints one line",
+            statusDatei.Contains("CycleDue = cycleDue?.ToString(\"O\"", StringComparison.Ordinal)
+            && statusDatei.Contains("CycleWhy = cycleWhy", StringComparison.Ordinal)
+            && statusDatei.Contains("CycleAttemptLimit = cycleAttemptLimit", StringComparison.Ordinal)
+            && guiDatei.Contains("id=\"CycleDueLine\"", StringComparison.Ordinal)
+            && guiDatei.Contains("'Next cycle '", StringComparison.Ordinal)
+            && guiDatei.Contains("d.CycleAttemptLimit", StringComparison.Ordinal));
+
         if (_failures > 0)
         {
             Console.WriteLine($">>> ENDPUNKTE: {_failures} von {_checks} Pruefungen fehlgeschlagen");

@@ -170,6 +170,10 @@
                              postprocessing ansteht. Zeile entfällt wenn gestartet"): one line, filled from
                              PostprocessDue; empty and invisible while no order is armed. -->
                         <div class="fieldDescription" id="PostprocessDueLine" style="margin-top:0.25em; display:none;"></div>
+                        <!-- F-M623 (Operator-Anweisung 19.11.2026 "Nur das cycle deferral"): der Zyklus
+                             selbst hat keine Worker-Zeile — sein aufgeschobener Anker bekommt deshalb
+                             seine eigene Zeile. Leer und unsichtbar, solange nichts aufgeschoben ist. -->
+                        <div class="fieldDescription" id="CycleDueLine" style="margin-top:0.25em; display:none;"></div>
                         <!-- The LOCAL deferral line (F-M288): sits under the last worker light, in the
                              page's normal text colour. Empty while nothing is deferred, so it costs no
                              space. It is NOT part of the quota box — those bars describe the server's
@@ -1286,6 +1290,21 @@
                             var line = document.querySelector('#WorkersLine');
                             if (line) {
                                 line.textContent = 'The last run of each worker.';
+                            }
+                            // F-M623: der aufgeschobene Zyklus, in einer Zeile. Grund und Versuch stehen
+                            // dabei, weil "wartet" allein am 19.11.2026 nicht zu deuten war.
+                            var cyLine = document.querySelector('#CycleDueLine');
+                            if (cyLine) {
+                                var cyWhen = d && d.CycleDue ? subdlFmtDayTime(d.CycleDue) : '';
+                                if (cyWhen) {
+                                    var cyText = 'Next cycle ' + cyWhen;
+                                    if (d.CycleWhy) { cyText += ' — ' + d.CycleWhy; }
+                                    if (d.CycleAttemptLimit) { cyText += ' (attempt ' + d.CycleAttempt + '/' + d.CycleAttemptLimit + ')'; }
+                                    cyLine.textContent = cyText + '.';
+                                } else {
+                                    cyLine.textContent = '';
+                                }
+                                cyLine.style.display = cyWhen ? '' : 'none';
                             }
                             var ppLine = document.querySelector('#PostprocessDueLine');
                             if (ppLine) {

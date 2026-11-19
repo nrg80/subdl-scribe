@@ -145,6 +145,8 @@ public sealed class ScribeSchedulerCoordinator : IDisposable
     private string? _refreshFireWhy;
     private string? _oshashFireWhy;
     private string? _postprocessFireWhy;
+    // F-M623: der Refetch ist der Zyklus, nicht ein Worker — sein Grund stand deshalb nirgends.
+    private string? _refetchFireWhy;
 
     /// <summary>
     /// (user decision 25.09.2026: stop rescheduling at the limit): every
@@ -760,6 +762,41 @@ public sealed class ScribeSchedulerCoordinator : IDisposable
     }
 
     /// <summary>
+    /// F-M623 (Operator-Anweisung 19.11.2026: „Nur das cycle deferral"): der aufgeschobene
+    /// Refetch-Feuerzeitpunkt als eigene Meldung.
+    /// <para>
+    /// WARUM NICHT IN <see cref="GetPendingFires"/>: der Refetch ist der Zyklus, nicht ein Worker, und
+    /// die Liste unter der Workers-Liste haengt jede Meldung an eine Zeile. Am 19.11.2026 verschob sich
+    /// der Tagesanker „daily 05:43" siebenmal („a run holds the lock"), waehrend die Anzeige nichts
+    /// zeigte — der Grund stand nur im Log. Deshalb eigene Felder, genau wie beim Postprocessing
+    /// (F-M445), und NICHT als gelbe Worker-Zeile: der Zyklus hat keine eigene Zeile, an der er haengen
+    /// koennte, und ein Dauer-Gelb auf einem fremden Worker waere eine Luege.
+    /// </para>
+    /// <para>
+    /// Ein abgelaufener Zeitpunkt ist keine Meldung (F-M368): der Tick laesst ihn durch, die Anzeige
+    /// darf ihn nicht mehr zeigen.
+    /// </para>
+    /// </summary>
+    /// <returns>Faelligkeit, Grund und Versuchszahl; alle null/0, wenn nichts aufgeschoben ist.</returns>
+    public (DateTime? DueUtc, string? Why, int Attempt) GetCycleDeferral()
+    {
+        var when = _refetchDeferredUntil;
+        if (when == DateTime.MinValue || DateTime.UtcNow >= when)
+        {
+            return (null, null, 0);
+        }
+
+        _rescheduleCounts.TryGetValue("refetch", out int versuche);
+        return (when, _refetchFireWhy ?? "retry scheduled", versuche);
+    }
+
+    /// <summary>
+    /// F-M623: die Obergrenze der Verschiebungen, damit die Anzeige „7/16" schreiben kann, ohne die
+    /// Zahl zu duplizieren.
+    /// </summary>
+    public static int RescheduleAttemptLimit => MaxRescheduleAttempts;
+
+    /// <summary>
     /// F-M67: overload variant — one-shot recovery fire 10–30 min after a
     /// transient service_busy stop. The quota reset is not involved; the window
     /// is short because the SubDL server is usually back within minutes.
@@ -1280,6 +1317,7 @@ public sealed class ScribeSchedulerCoordinator : IDisposable
             if (!Pipeline.PipelineRunLock.IsFree(_logger))
             {
                 _refetchDeferredUntil = nowUtc.AddMinutes(JobSpacing(config));
+                _refetchFireWhy = "run holds the lock";
                 _stateDirty = true;
 
                 if (TryCountReschedule("refetch", "lock-busy anchor"))
@@ -1304,6 +1342,7 @@ public sealed class ScribeSchedulerCoordinator : IDisposable
 
             _lastFiredMarker = fire.Marker;
             _refetchDeferredUntil = DateTime.MinValue; // F-M368: fired — the spacing is spent
+            _refetchFireWhy = null;
             _catchUpFired = false; // regular fire resets global catch-up state
             _stateDirty = true;
             ResetReschedule("refetch"); // fired — clear the 16x counter

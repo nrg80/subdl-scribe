@@ -190,6 +190,29 @@ public class ScribeStatusController : ControllerBase
         // postprocessing ansteht. Zeile entfällt wenn gestartet"): the armed moment is reported on its
         // OWN field. It deliberately does NOT ride on the worker row: every finished upload run arms it,
         // so the row would sit on yellow "defer" permanently and the light would stop meaning anything.
+        // F-M623 (Operator-Anweisung 19.11.2026): der aufgeschobene Zyklus hat keine Worker-Zeile, an
+        // der seine Meldung haengen koennte — deshalb eigene Felder, wie beim Postprocessing (F-M445).
+        DateTime? cycleDue = null;
+        string? cycleWhy = null;
+        int cycleAttempt = 0;
+        int cycleAttemptLimit = 0;
+        try
+        {
+            var coordCycle = Jellyfin.Plugin.SubScribe.ScheduledTasks.ScribeSchedulerCoordinator.Instance;
+            if (coordCycle != null)
+            {
+                var (dueCycle, whyCycle, attemptsCycle) = coordCycle.GetCycleDeferral();
+                cycleDue = dueCycle;
+                cycleWhy = whyCycle;
+                cycleAttempt = attemptsCycle;
+                cycleAttemptLimit = Jellyfin.Plugin.SubScribe.ScheduledTasks.ScribeSchedulerCoordinator.RescheduleAttemptLimit;
+            }
+        }
+        catch
+        {
+            // Plugin not fully started — no line then.
+        }
+
         DateTime? postprocessDue = null;
         try
         {
@@ -209,6 +232,11 @@ public class ScribeStatusController : ControllerBase
         return Ok(new
         {
             PostprocessDue = postprocessDue?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+            // F-M623: der Zyklus selbst — Faelligkeit, Grund, Versuch. Leer, wenn nichts aufgeschoben ist.
+            CycleDue = cycleDue?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+            CycleWhy = cycleWhy,
+            CycleAttempt = cycleAttempt,
+            CycleAttemptLimit = cycleAttemptLimit,
             Workers = rows.Select(r => new
             {
                 r.Id,

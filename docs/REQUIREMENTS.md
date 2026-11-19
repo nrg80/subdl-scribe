@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.1.12.497.
+**Status:** Implementation — v12.1.12.498.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -34,7 +34,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 46 requirements
 - [14. Data Model and Persistence](#14-data-model-and-persistence) — 20 requirements
-- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 49 requirements
+- [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 50 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
 - [18. Acceptance Criteria](#18-acceptance-criteria)
@@ -2083,6 +2083,8 @@ The line under the Workers list names, per worker and in list order, its stored 
 
 **F-M341:** **Jede Zahl in der Korrekturzeile trägt einen Dezimalpunkt, unabhängig von der Sprache des Hosts.** Werkzeuge lesen diese Zeile; ein Komma bricht den Leser.
 **F-M621 [D]:** **Eine Worker-Zeile, deren Prozess mitten im Lauf starb, wird beim nächsten Start geschlossen — als `failed`, nicht als `cancelled`.** Das Ende einer Zeile schreiben nur `Finish` und `MarkCancelled`, und beide brauchen den laufenden Prozess: nach einem Neustart mitten im Lauf blieb `Ended` leer und `Outcome` auf `run` (19.11.2026, Neustart 04:36:40, der Download zuletzt bei Item 1015 von 1417), die Anzeige meldete „läuft" und der Stop-Knopf antwortete `no cycle active — nothing to stop`, weil es keinen Zyklus mehr gab, den er hätte abbrechen können. Die Lock-Datei wird beim Start längst als Leiche behandelt (`PipelineRunLock.ClearOnStartup`: „after a restart no previous run can still be alive") — die Worker-Zeilen bekommen denselben Gegenpart: `WorkerRunRegistry.CloseOpenRunsOnStartup` schließt jede Zeile mit `Outcome=run` auf `failed` mit dem Detail „process ended mid-run (closed at the next start)" und schreibt dafür eine Logzeile mit dem Code F-M621. **Kein Nutzer-Stop:** F-M293 hält fest, dass ein Neustart kein Knopfdruck ist, und `cancelled` würde dem Betreiber einen Stop unterschieben, den niemand gedrückt hat. `Ended` trägt den Moment, in dem die Leiche gefunden wurde, weil beim Start niemand mehr weiß, wann der Prozess wirklich starb.
+
+**F-M623 [D]:** **Der aufgeschobene Zyklus bekommt seine eigene Zeile unter den Workern — mit Grund und Versuchszahl.** Der Refetch ist der Pipeline-Zyklus, nicht ein Worker; deshalb war er aus `GetPendingFires` bewusst ausgenommen (F-M368) und tauchte in der Anzeige nirgends auf. Am 19.11.2026 verschob sich der Tagesanker „daily 05:43" siebenmal in Folge („Refetch fire … deferred — a run holds the lock"), während unter der Workers-Liste nichts stand — der Grund existierte nur im Log. `ScribeSchedulerCoordinator.GetCycleDeferral` liefert Fälligkeit, Grund und Versuchszahl, der `WorkerRuns`-Antwort werden `CycleDue`/`CycleWhy`/`CycleAttempt`/`CycleAttemptLimit` beigelegt, und die Seite schreibt daraus **eine** Zeile („Next cycle Fri 7:28 AM — run holds the lock (attempt 7/16)"), die verschwindet, sobald nichts aufgeschoben ist. Bewusst **keine** gelbe Worker-Zeile: der Zyklus hat keine eigene Zeile, an der er hängen könnte, und ein Dauer-Gelb auf einem fremden Worker wäre eine Lüge. Ein abgelaufener Zeitpunkt ist keine Meldung (F-M368).
 
 ## 16. Non-Goals
 
