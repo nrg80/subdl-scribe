@@ -461,6 +461,10 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
         // F-M605: and the refusals the sources have already given for a track.
         Jellyfin.Plugin.SubScribe.Registry.SourceRefusalStore.Attach(db);
 
+        // F-M628: die Quellenbelege liegen jetzt in einer eigenen Tabelle — eine Quelle ist ein Wert,
+        // kein Spaltenpaar. Angehängt wird sie neben den übrigen Stores.
+        Jellyfin.Plugin.SubScribe.Data.SourceMarkStore.Attach(db);
+
         // F-M608: and the ladder that closes a title after four failed creations.
         Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.Attach(db);
 

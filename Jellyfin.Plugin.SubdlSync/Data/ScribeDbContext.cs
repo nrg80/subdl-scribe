@@ -111,6 +111,10 @@ public sealed class ScribeDbContext : IDisposable
     // Gegenseite (`MsubMovieId`, dieselbe Ebene wie TvstShowId). Nachgezogen beim Start
     // (EnsureReportColumns/EnsureMediaColumns), Bestandszeilen bleiben unangetastet und lesen die neuen
     // Felder als null.
+    // F-M637 (Entwurf): der Marker bleibt auf 17. Der Store wechselt zwar die Datei (sub-scribe.sqlite) und
+    // bekommt die Tabelle der Quellenbelege (source_marks), aber das ist additiv — der alte Bestand bleibt
+    // vollständig lesbar, und ein Marker-Sprung würde die Bestandsprüfungen der Testharnisse auf einen
+    // Stand ziehen, der noch nicht gebaut ist.
     public const int CurrentSchemaVersion = 17;
 
     private readonly string _dbPath;
@@ -123,13 +127,36 @@ public sealed class ScribeDbContext : IDisposable
     /// <param name="dataDir">Plugin data directory.</param>
     /// <param name="logger">Optional logger.</param>
     public ScribeDbContext(string dataDir, ILogger? logger = null)
+        : this(dataDir, null, logger)
+    {
+    }
+
+    /// <summary>
+    /// F-M637: derselbe Aufbau, aber auf einer ausdrücklich genannten Datei und OHNE den Formatwechsel.
+    /// Diesen Weg nimmt nur der Wechsel selbst — er öffnet die Datei, die er gerade prüft.
+    /// </summary>
+    /// <param name="dataDir">Plugin data directory.</param>
+    /// <param name="explicitPath">Explicit store file, or null for the normal path.</param>
+    /// <param name="logger">Optional logger.</param>
+    internal ScribeDbContext(string dataDir, string? explicitPath, ILogger? logger)
     {
         _logger = logger;
         Directory.CreateDirectory(dataDir);
         _dbPath = DbFiles.PathIn(dataDir);
 
-        // F-M327: the one-time import runs BEFORE the store is opened. It is the only path that ever
-        // reads the old format, it is skipped when there is nothing to import, and it never deletes
+        if (explicitPath != null)
+        {
+            _dbPath = explicitPath;
+        }
+        else
+        {
+            // F-M327/F-M637: der Formatwechsel läuft VOR dem Öffnen des Stores. Er ist der einzige Pfad,
+            // der die Vorgängerdatei liest. Fehlt sie, startet der Store leer (F-M639); stimmt die
+            // Prüfsumme nicht oder bricht das Schreiben ab, bleibt die Vorgängerdatei die live Datei und
+            // es wurde nichts angefasst (F-M637). Die Vorgängerdatei wird nie gelöscht (F-M638).
+            var wechsel = StoreFileSwitch.Run(dataDir, logger);
+            _dbPath = wechsel.LivePath;
+        }
 
         _db = new ScribeSqliteContext(_dbPath);
 
@@ -143,6 +170,7 @@ public sealed class ScribeDbContext : IDisposable
         EnsurePackSeasonsTable();
         EnsureSourceRefusalsTable();
         EnsureTitleFailuresTable();
+        SourceMarkStore.EnsureTable(_db, logger);
         EnsureReportColumns();
         EnsureStatusColumns();
         EnsurePackColumns();
@@ -1363,6 +1391,9 @@ public sealed class ScribeSqliteContext : DbContext
     /// <summary>F-M608: the titles whose creation keeps failing, and the ones closed for good.</summary>
     public DbSet<TitleFailureEntity> TitleFailureRows => Set<TitleFailureEntity>();
 
+    /// <summary>F-M628/F-M631: one mark per pair of record and source — a source is a value, not a column.</summary>
+    public DbSet<SourceMarkEntity> SourceMarkRows => Set<SourceMarkEntity>();
+
     /// <summary>
     /// Sets the pragmas this store runs with. Called once per context, right after the schema exists.
     /// <para>
@@ -1562,6 +1593,13 @@ public sealed class ScribeSqliteContext : DbContext
         {
             e.ToTable("source_refusals");
             e.HasKey(x => x.Id);
+        });
+
+        modelBuilder.Entity<SourceMarkEntity>(e =>
+        {
+            e.ToTable("source_marks");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.OwnerKey, x.Source }).IsUnique();
         });
 
         // F-M604: same contract for the pack verdicts.

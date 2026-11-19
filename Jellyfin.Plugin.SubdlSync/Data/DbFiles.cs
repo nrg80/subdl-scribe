@@ -30,7 +30,13 @@ namespace Jellyfin.Plugin.SubScribe.Data;
 public static class DbFiles
 {
     /// <summary>The data file's name.</summary>
-    public const string Name = "subdl-scribe.sqlite";
+    public const string Name = "sub-scribe.sqlite";
+
+    /// <summary>
+    /// F-M637: the name the live store carried before the source marks became a table of their own. It is
+    /// the IMPORT source — read once, verified, and then left where it is as the fallback (F-M638).
+    /// </summary>
+    public const string PreviousName = "subdl-scribe.sqlite";
 
     /// <summary>Prefix of a timestamped backup, as the reset and restore routes expect it.</summary>
     public const string BackupPrefix = Name + ".bak-";
@@ -60,6 +66,14 @@ public static class DbFiles
     /// <param name="dataDir">Plugin data directory.</param>
     /// <returns>Absolute path of the old document store.</returns>
     public static string LegacyPathIn(string dataDir) => Path.Combine(dataDir, LegacyName);
+
+    /// <summary>
+    /// Full path of the PREVIOUS SQLite store — the one-time import source of the format change
+    /// (F-M637). Never the live store once the change has been verified.
+    /// </summary>
+    /// <param name="dataDir">Plugin data directory.</param>
+    /// <returns>Absolute path of the previous store file.</returns>
+    public static string PreviousPathIn(string dataDir) => Path.Combine(dataDir, PreviousName);
 
     /// <summary>
     /// Path of a side file belonging to a data file. SQLite appends the suffix to the FULL name:

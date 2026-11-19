@@ -2159,7 +2159,7 @@ internal static class Program
             // Oeffnen um die Spalte erweitert, der Bestand bleibt lesbar.
             string legacyDir = Path.Combine(tvstRoot, "legacy");
             Directory.CreateDirectory(legacyDir);
-            string legacyFile = Path.Combine(legacyDir, "subdl-scribe.sqlite");
+            string legacyFile = Path.Combine(legacyDir, Jellyfin.Plugin.SubScribe.Data.DbFiles.Name);
             using (var conn = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + legacyFile))
             {
                 await conn.OpenAsync().ConfigureAwait(false);
@@ -2578,7 +2578,7 @@ internal static class Program
         var msubLegacyDir = new TempDir("msub-legacy");
         try
         {
-            string legacyFile = Path.Combine(msubLegacyDir.Path, "subdl-scribe.sqlite");
+            string legacyFile = Path.Combine(msubLegacyDir.Path, Jellyfin.Plugin.SubScribe.Data.DbFiles.Name);
             using (var conn = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + legacyFile))
             {
                 await conn.OpenAsync().ConfigureAwait(false);
@@ -3053,7 +3053,7 @@ internal static class Program
 
             bool warfNachGift = false;
             using (var gift = new Jellyfin.Plugin.SubScribe.Data.ScribeSqliteContext(
-                Path.Combine(heilDir, "subdl-scribe.sqlite")))
+                Path.Combine(heilDir, Jellyfin.Plugin.SubScribe.Data.DbFiles.Name)))
             {
                 // Der einzige Weg, den Geist heute noch zu erzeugen: am Set vorbei anhaengen.
                 try
