@@ -41,6 +41,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [19. Test Library](#19-test-library)
 - [21. Adding another endpoint — checklist and pitfalls](#21-adding-another-endpoint--checklist-and-pitfalls) — 1 requirement (F-M564) + Checkliste
 
+- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 7 requirements
 - [20. References](#20-references)
 
 ## 1. Objective and Scope
@@ -2950,3 +2951,20 @@ ergibt eine Quelle, die stumm nicht läuft.
   den Zyklus mit `SQLite Error 1: 'no such column: e.ScribeId'` (F-M553).
 - **Der Produktname im Log und in der GUI** — der ist „Sub Scribe"; der Projektname ist Geschichte.
 
+## 22. Subtitle Sources — one contract
+
+Dieses Kapitel regelt, wie eine Untertitelquelle angebunden wird. Die Regeln der beiden Richtungen stehen in Kapitel 3 und 4, der gespeicherte Bestand in Kapitel 14.
+
+**F-M624 [D]:** **Jede Quelle wird über genau einen gemeinsamen Vertrag angebunden** — Suche, Abruf, Upload und Doppelprüfung. Der Ablauf beider Richtungen kennt nur diesen Vertrag, nicht die Quelle dahinter.
+
+**F-M625 [D]:** **Jede Quelle meldet ihre Fähigkeiten selbst**: Suche, Abruf, Upload, Film anlegen, Kontingent. Der Ablauf fragt die Fähigkeit ab; ein Vergleich auf den Quellennamen ist im Ablauf unzulässig. Eine nicht gemeldete Fähigkeit wird für diese Quelle nie aufgerufen — insbesondere entsteht für eine Quelle ohne die Fähigkeit „Film anlegen" nie ein Anlageversuch (Kapitel 9).
+
+**F-M626 [D]:** **Quellen werden registriert, nicht verzweigt.** Genau eine Registrierungsstelle führt die aktiven Quellen; beide Durchläufe arbeiten diese Liste ab. Ein Quellenname darf außerhalb der Registrierung und der Quellenkonfiguration in keiner Bedingung des Ablaufs auftauchen.
+
+**F-M627 [D]:** **Die Vorrangstellung ist eine Einstellung**, keine Eigenschaft des Vertrags: sie gilt je Richtung und für alle Dateien gleich (Kapitel 10, Kapitel 13).
+
+**F-M628 [D]:** **Belege werden quellenunabhängig gelesen und geschrieben** — Download-Kennung, Upload-Kennung und Abschlusszeitpunkt je Quelle über einen Zugriff, der die Quelle auf ihr Belegfeld abbildet. Der Ablauf nennt weder eine quellenspezifische Spalte noch einen quellenspezifischen Stempel (Kapitel 14).
+
+**F-M629 [D]:** **Eine scheiternde Quelle hält die anderen nicht auf.** Meldet eine Quelle einen Fehler, führen die übrigen ihren Teil fort; für die gescheiterte Quelle wird ein Urteil mit Grund geschrieben, und die Datei bleibt für sie offen (Kapitel 3, Kapitel 4).
+
+**F-M630 [D]:** **Mindestumfang einer angebundenen Quelle** sind Suche, Abruf und Doppelprüfung. Upload und das Anlegen von Filmen sind optionale Fähigkeiten; fehlt eine davon, übernimmt die Quelle nur die verbleibenden Aufgaben und sagt das im Lauf.
