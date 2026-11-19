@@ -10,6 +10,7 @@
 // See the GNU General Public License for more details.
 
 using System;
+using System.Linq;
 using Jellyfin.Plugin.SubScribe.Data;
 using Microsoft.Extensions.Logging;
 
