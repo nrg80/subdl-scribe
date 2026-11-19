@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.497",
-        "changelog": "v12.1.12.497: the database refresh counts the verdicts it discards into its own worker line (F-M622).",
+        "version": "12.1.12.498",
+        "changelog": "v12.1.12.498: the deferred cycle gets its own line under the workers — with reason and attempt (F-M623).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.497-dev/Jellyfin.Plugin.SubdlSync_12.1.12.497.zip",
-        "checksum": "46954811376b7b89f022e00f1eb5de85",
-        "timestamp": "2026-11-19T04:24:05Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.498-dev/Jellyfin.Plugin.SubdlSync_12.1.12.498.zip",
+        "checksum": "854a418e29738eeefa0ee5e235cd2745",
+        "timestamp": "2026-11-19T06:47:10Z"
       }
     ]
   }
