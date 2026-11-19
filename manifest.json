@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.493",
-        "changelog": "v12.1.12.493: one file back into the queue — POST /Plugins/SubdlReset/ResetPath drops its source stamps and rejected track verdicts.",
+        "version": "12.1.12.495",
+        "changelog": "v12.1.12.495: a worker row whose process died mid-run is closed at the next start — the row no longer claims to be running (F-M621).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.493-dev/Jellyfin.Plugin.SubdlSync_12.1.12.493.zip",
-        "checksum": "cfc2c33aad56df34e749783bebc6bec2",
-        "timestamp": "2026-11-19T03:42:57Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.495-dev/Jellyfin.Plugin.SubdlSync_12.1.12.495.zip",
+        "checksum": "05c3ba2413f526d1e8c24fd7307b1168",
+        "timestamp": "2026-11-19T04:00:26Z"
       }
     ]
   }
