@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.1.12.496",
-        "changelog": "v12.1.12.496: Expert -> Plugin database offers \"Reset one file\" — the single-file reset from the GUI.",
+        "version": "12.1.12.497",
+        "changelog": "v12.1.12.497: the database refresh counts the verdicts it discards into its own worker line (F-M622).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.496-dev/Jellyfin.Plugin.SubdlSync_12.1.12.496.zip",
-        "checksum": "c5f1413d084ec8ac7b6994015a7dc73f",
-        "timestamp": "2026-11-19T04:09:19Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.1.12.497-dev/Jellyfin.Plugin.SubdlSync_12.1.12.497.zip",
+        "checksum": "46954811376b7b89f022e00f1eb5de85",
+        "timestamp": "2026-11-19T04:24:05Z"
       }
     ]
   }
