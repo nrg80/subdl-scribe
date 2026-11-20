@@ -4511,6 +4511,50 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="imdbId">Serie.</param>
     /// <param name="season">Staffel.</param>
     /// <returns>Die Paare, leer wenn nichts gepackt ist.</returns>
+    /// <summary>
+    /// F-M654 (Operator-Anweisung 20.11.2026: „Uploads bei subdl gelten bei subdl erledigt, updates bei
+    /// tvst gelten bei tvst erledigt"): die Quellen des Pack-Slots — SubDL immer, tvsubtitles nur im
+    /// vollen Lauf und nur bei eingeschaltetem Upload-Schalter (F-M495, F-M641).
+    /// </summary>
+    /// <returns>Die Quellen, fuer die in diesem Lauf ein Pack entstehen kann.</returns>
+    private List<string> PackSlotSources()
+    {
+        var quellen = new List<string> { PackEntity.SubdlSource };
+        if (!IsArrivalRun && SourceAllowed(Configuration.SubtitleProvider.TvSubtitles))
+        {
+            quellen.Add(PackEntity.TvSubtitlesSource);
+        }
+
+        return quellen;
+    }
+
+    /// <summary>
+    /// F-M654: „schon gepackt" gilt nur, wenn JEDE Quelle des Slots ihren EIGENEN Pack fuer das Paar
+    /// hat — die Schnittmenge, nicht die Vereinigung. Bis 12.2.0.13 las der Plan die quellenblinde
+    /// Summe: ein SubDL-Pack beendete die Staffel auch fuer tvsubtitles. Gemessen 20.11.2026: 36
+    /// Staffeln mit 177 Paaren endeten frueh mit „already up as a pack", tvst-Packs dafuer 0.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <returns>Die Paare, die bei ALLEN Quellen des Slots gepackt sind.</returns>
+    private HashSet<(string Language, bool HearingImpaired)> PacksOfAllSlotSources(string imdbId, int season)
+    {
+        HashSet<(string Language, bool HearingImpaired)>? schnitt = null;
+        foreach (var quelle in PackSlotSources())
+        {
+            var proQuelle = PacksOfSource(imdbId, season, quelle);
+            if (schnitt == null)
+            {
+                schnitt = new HashSet<(string Language, bool HearingImpaired)>(proQuelle);
+                continue;
+            }
+
+            schnitt.IntersectWith(proQuelle);
+        }
+
+        return schnitt ?? new HashSet<(string Language, bool HearingImpaired)>();
+    }
+
     private HashSet<(string Language, bool HearingImpaired)> PacksOf(string imdbId, int season)
     {
         var key = (imdbId, season);
@@ -4666,14 +4710,16 @@ public sealed class UploadPipeline : IPackFiller
             // Vorher lief die teure Kette (TMDb-Fragen + Release-Gruppen + Dateien) fuer JEDE vollstaendige
             // Staffel, nur um am Ende „already up as a pack" zu melden.
             var staffelBekannt = LanguagesOf(entry.Key.Item1, entry.Key.Item2);
-            var staffelGepackt = PacksOf(entry.Key.Item1, entry.Key.Item2);
+            // F-M654: die Schnittmenge ueber die Quellen des Slots — ein Pack der einen Quelle sagt
+            // ueber die andere nichts.
+            var staffelGepackt = PacksOfAllSlotSources(entry.Key.Item1, entry.Key.Item2);
             if (staffelBekannt.Count > 0
                 && staffelBekannt.All(p => staffelGepackt.Contains(p)))
             {
                 LogUtil.PerItem(_config.LogMode,
                     _logger,
-                    "[Sub Scribe] season pack: {Imdb} S{Season} — all {Count} known pair(s) already up as a pack, no TMDb call, no file read.",
-                    entry.Key.Item1, entry.Key.Item2, staffelBekannt.Count);
+                    "[Sub Scribe] season pack: {Imdb} S{Season} — all {Count} known pair(s) already up as a pack for {Sources}, no TMDb call, no file read (F-M654).",
+                    entry.Key.Item1, entry.Key.Item2, staffelBekannt.Count, string.Join(", ", PackSlotSources()));
                 continue;
             }
 
@@ -4754,7 +4800,9 @@ public sealed class UploadPipeline : IPackFiller
             // prüfen und den rest dann überspringen"): EIN Blick auf die Staffel statt einer Abfrage je
             // Paar, und EINE Zeile statt einer je Paar — gemessen an „The Thundermans" 67 Abfragen und
             // 67 Zeilen in einer Minute, alle mit derselben Antwort.
-            var gepackt = PacksOf(entry.Key.Item1, entry.Key.Item2);
+            // F-M654: auch hier die Schnittmenge — ein Paar ist erst erledigt, wenn jede Quelle des
+            // Slots ihren eigenen Pack hat.
+            var gepackt = PacksOfAllSlotSources(entry.Key.Item1, entry.Key.Item2);
             var open = new List<(string Language, bool HearingImpaired)>();
             int schonGepackt = 0;
             foreach (var (language, hi) in pairs)

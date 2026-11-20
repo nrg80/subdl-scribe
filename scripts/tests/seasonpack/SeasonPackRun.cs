@@ -1253,6 +1253,31 @@ internal static class Program
                 "F-M647: the slot answers from the OUTCOMES of both sends, not from a store row afterwards");
         }
 
+        // ── 10b. F-M654: ein Pack erledigt ein Paar nur bei SEINER Quelle ────────────────────────────
+        // Befund 20.11.2026 (Operator: „Uploads bei subdl gelten bei subdl erledigt, updates bei tvst
+        // gelten bei tvst erledigt"): der Plan las die quellenblinde Summe, ein SubDL-Pack beendete die
+        // Staffel auch fuer tvsubtitles. Gemessen: 36 Staffeln / 177 Paare frueh beendet, tvst-Packs 0.
+        Console.WriteLine("10b. F-M654: a pack completes a pair only for ITS source");
+        {
+            Check(uploadSrc.Contains("private HashSet<(string Language, bool HearingImpaired)> PacksOfAllSlotSources(string imdbId, int season)", StringComparison.Ordinal)
+                  && uploadSrc.Contains("schnitt.IntersectWith(proQuelle)", StringComparison.Ordinal)
+                  && !uploadSrc.Contains("schnitt.UnionWith(", StringComparison.Ordinal),
+                "F-M654: the season question is the INTERSECTION over the slot's sources, not the union");
+
+            Check(uploadSrc.Contains("var staffelGepackt = PacksOfAllSlotSources(entry.Key.Item1, entry.Key.Item2);", StringComparison.Ordinal)
+                  && uploadSrc.Contains("var gepackt = PacksOfAllSlotSources(entry.Key.Item1, entry.Key.Item2);", StringComparison.Ordinal),
+                "F-M654: BOTH places use it — the early season end and the pair filter");
+
+            Check(uploadSrc.Contains("private List<string> PackSlotSources()", StringComparison.Ordinal)
+                  && uploadSrc.Contains("quellen.Add(PackEntity.TvSubtitlesSource)", StringComparison.Ordinal)
+                  && uploadSrc.IndexOf("if (!IsArrivalRun && SourceAllowed(Configuration.SubtitleProvider.TvSubtitles))", StringComparison.Ordinal)
+                     < uploadSrc.IndexOf("quellen.Add(PackEntity.TvSubtitlesSource)", StringComparison.Ordinal),
+                "F-M654: the slot names its sources — tvst only in a full run and only with its switch on (F-M495)");
+
+            Check(uploadSrc.Contains("already up as a pack for {Sources}", StringComparison.Ordinal),
+                "F-M654: the one line names the sources the pairs are packed for");
+        }
+
         // ── 11. F-M650: eine stehende Ablehnung schliesst das Paar VOR dem Sammeln ──────────────────
         // Bis 12.2.0.9 wurde fuer ein abgelehntes Paar trotzdem jede Folge entpackt, nur um am Ende
         // „fingerprint unchanged, nothing is re-sent" zu melden: der Fingerabdruck einer Absage laesst

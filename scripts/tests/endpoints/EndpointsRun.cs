@@ -1521,7 +1521,7 @@ internal static class Program
         // --- F-M573: die billigste Staffelfrage zuerst -------------------------------------------
         Check("F-M573: eine vollstaendig gepackte Staffel kostet keine TMDb-Frage und keine Datei",
             uploadSource.Contains("var staffelBekannt = LanguagesOf(entry.Key.Item1, entry.Key.Item2);", StringComparison.Ordinal)
-            && uploadSource.Contains("all {Count} known pair(s) already up as a pack, no TMDb call, no file read", StringComparison.Ordinal)
+            && uploadSource.Contains("all {Count} known pair(s) already up as a pack for {Sources}, no TMDb call, no file read (F-M654)", StringComparison.Ordinal)
             && uploadSource.IndexOf("staffelBekannt.All(", StringComparison.Ordinal)
                 < uploadSource.IndexOf("SeasonEpisodeIndex.AiredAsync", StringComparison.Ordinal));
 
@@ -1529,8 +1529,9 @@ internal static class Program
         Check("F-M571: der Pack-Planer fragt die Staffel einmal, nicht je Paar",
             reg557.Contains("public HashSet<(string Language, bool HearingImpaired)> PacksInSeason(", StringComparison.Ordinal)
             && reg557.Contains("_db.Packs.FindAll()", StringComparison.Ordinal)
-            && uploadSource.Contains("var gepackt = PacksOf(entry.Key.Item1, entry.Key.Item2);", StringComparison.Ordinal)
-            && uploadSource.Contains("private HashSet<(string Language, bool HearingImpaired)> PacksOf(string imdbId, int season)", StringComparison.Ordinal));
+            && uploadSource.Contains("var gepackt = PacksOfAllSlotSources(entry.Key.Item1, entry.Key.Item2);", StringComparison.Ordinal)
+            && uploadSource.Contains("private HashSet<(string Language, bool HearingImpaired)> PacksOf(string imdbId, int season)", StringComparison.Ordinal)
+            && uploadSource.Contains("private HashSet<(string Language, bool HearingImpaired)> PacksOfAllSlotSources(string imdbId, int season)", StringComparison.Ordinal));
 
         // --- F-M556: der Kopf kennt auch die losen Seitenwagen ---------------------------------------
         // Befund 16.11.2026: 292 Wegwuerfe bei 0 Uploads im 21:28-Zyklus. Der Einreiher reihte Items ein,
