@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.14",
-        "changelog": "v12.2.0.14: a pack completes a pair only for its own source — the season question is the intersection over the slot's sources, not the union (F-M654).",
+        "version": "12.2.0.16",
+        "changelog": "v12.2.0.16: the pack key, the buffered pack upload and the upload gate name their source instead of defaulting to SubDL — the early gate had silently skipped the film source (F-M656).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.14-dev/Jellyfin.Plugin.SubdlSync_12.2.0.14.zip",
-        "checksum": "c0db0c47620e7e974deb7b9809c6e581",
-        "timestamp": "2026-11-20T12:46:06Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.16-dev/Jellyfin.Plugin.SubdlSync_12.2.0.16.zip",
+        "checksum": "11235bb00f8e19868684017d168c322e",
+        "timestamp": "2026-11-20T13:11:46Z"
       }
     ]
   }
