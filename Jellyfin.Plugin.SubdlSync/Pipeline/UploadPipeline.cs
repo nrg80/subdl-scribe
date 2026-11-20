@@ -691,6 +691,19 @@ public sealed class UploadPipeline : IPackFiller
         if (_config.UploadSeasonPacks)
         {
             completeSeasons = await CompleteSeasonsAsync(runCt).ConfigureAwait(false);
+            if (!IsArrivalRun)
+            {
+                // F-M420 (Operator-Freigabe 20.11.2026: „Ja. Aber nur für den vollen lauf, refetch oder
+                // manuell") — ein voller Lauf packt aus der BIBLIOTHEK und dem Store, nicht aus seiner
+                // Warteschlange. Vorher galt hier dieselbe Verengung wie beim Ankunftslauf: der Lauf um
+                // 05:05 hatte 71 vollstaendige Staffeln vor sich und 0 Pakete im Ergebnis.
+                LogUtil.Normal(
+                    _logger,
+                    "[Sub Scribe] full run — the pack scope is the library: {N} complete season(s); the packs are assembled from the store at the end of this run (F-M420).",
+                    completeSeasons.Count);
+            }
+            else
+            {
             var queued = QueuedEpisodes(items);
             var arrivalSeasons = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>();
             foreach (var entry in completeSeasons)
@@ -742,6 +755,7 @@ public sealed class UploadPipeline : IPackFiller
                 LogUtil.Normal(
                     _logger,
                     "[Sub Scribe] no season pack this run — no queue of this run was a whole season (F-M424/F-M425).");
+            }
             }
 
             if (completeSeasons.Count > 0)
