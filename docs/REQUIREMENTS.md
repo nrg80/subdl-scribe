@@ -493,6 +493,44 @@ Die Seite macht aus jedem Zeilenumbruch ein Leerzeichen (in Produktion gesehen),
 
 **F-M572 [U]:** **Der Folgentitel geht als Kommentar mit — der Dateiname bleibt der der Seite.** tvsubtitles.net baut den Dateinamen aus **seinem** Folgeneintrag; an „Mo" S01E05 gemessen: die Bibliothek führt „Tombstone" (Jellyfin `ProviderIds` = TMDb 3701256), die Seite zeigt „Episode 5", und ein Titel ist kein Feld, das der Upload sendet. Also trägt der Kommentar den Titel (`TMDB 3701256 / IMDb tt16274608 / Tombstone`), und zwar nur, wenn er kein Platzhalter ist (`Episode 5`, `Folge 5`, leer). Der Author-Bleibt-leer-Beschluss und „nur ids" gelten weiter für alles andere.
 
+### 3.5 Der ffmpeg-Griff — ein Durchlauf, eine Zählweise, ein Exit-Code
+
+Diese drei Regeln sind zusammen der Grund, warum eine Extraktion entweder stimmt oder laut
+scheitert. Sie stehen hier als *eine* Leseansicht, weil sie nur zusammen zu gebrauchen sind;
+die Anforderungen selbst sind F-M405, F-M441, F-M658 und F-M659.
+
+**1. Ein Durchlauf je Datei, nicht je Sprache.** ffmpeg liest den Container einmal und schreibt
+je gefragter Spur eine Datei. Für drei Sprachen einer Folge ist das *ein* Prozess, nicht drei:
+
+```
+ffmpeg -y -loglevel error -i <datei.mkv>        -map 0:s:0 -c:s srt -f srt out/pos0.srt        -map 0:s:3 -c:s srt -f srt out/pos3.srt
+```
+
+Das Ergebnis liegt sprachunabhängig im Arbeitsordner (Schlüssel: IMDb, Staffel, Folge, Hash des
+Medienpfads, Spurposition — F-M441). Die zweite Sprache kostet deshalb keinen zweiten Lauf; sie
+liest die Datei, die die erste schon geschrieben hat.
+
+**2. `0:s:N` zählt nur die UnterTITELspuren IM Container.** N ist die Position in
+Container-Reihenfolge, **Bildformate (PGS/VobSub) zählen mit**, die `.srt`-Beidateien neben dem
+Film **nicht**. Zwei andere Zählungen sind naheliegend und beide falsch:
+
+- `0:N` (absoluter Index im Container) landet auf Video oder Ton — exit 8, „no stream".
+- Der Index in Jellyfins Spurenliste, die **externe Beidateien mitführt**, ist um deren Anzahl zu
+  groß. ffmpeg antwortet `Stream map '' matches no streams.` und endet mit **234** (F-M658,
+  gefunden an MobLand S02E02, das zwei `.de.01/.de.51.srt` neben dem MKV trägt).
+
+Deshalb gibt es genau **eine** Stelle, die die Spurenliste holt — `ContainerSubtitleStreams` — und
+alle Aufrufer zählen darüber. Wer eine zweite Fassung anlegt, legt den Fehler wieder an.
+
+**3. Kein `?` in der Zuordnung, und der Exit-Code ist ein Befund, kein Rauschen.** Fehlt die Spur,
+muss ffmpeg laut scheitern; ein stiller Ersatz würde eine *andere* Spur als die gemeinte liefern —
+und Untertitel, die zur falschen Folge passen, fallen in keiner Prüfung auf. Umgekehrt gilt: **exit 0
+heißt „über den Inhalt ist etwas gesagt"**, **exit ≠ 0 heißt „der Durchlauf ist schiefgegangen"**.
+Im zweiten Fall wird jede leer gebliebene Position **einzeln** nachgefasst; bleibt sie leer, ist das
+kein Urteil und wird nicht als Speichermerker abgelegt (F-M659). Andernfalls sperrt ein einmaliger
+Extraktionsfehler das Paar für alle künftigen Läufe.
+
+
 ## 4. Download Pipeline
 
 **F-M151a [B3]:** **Download-side short-circuit — replaced by the derived open-pair question.**
