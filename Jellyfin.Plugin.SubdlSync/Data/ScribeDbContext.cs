@@ -322,6 +322,8 @@ public sealed class ScribeDbContext : IDisposable
                 // F-M644: Grund und Datum einer Ablehnung stehen in der Zeile, die der Pack ohnehin hat.
                 + "RefusalReason TEXT NULL, "
                 + "RefusedAt TEXT NULL, "
+                // F-M650: die Staffel-Signatur, auf der die Ablehnung beruht.
+                + "RefusedSignature TEXT NULL, "
                 + "UploadedAt TEXT NULL, "
                 + "Created TEXT NOT NULL DEFAULT '', "
                 + "Updated TEXT NOT NULL DEFAULT '');");
@@ -619,7 +621,9 @@ public sealed class ScribeDbContext : IDisposable
 
             // F-M644: Grund und Datum einer Ablehnung. Additiv — eine Zeile ohne diese Spalten ist eine
             // Zeile ohne Ablehnung, es wird also nichts nachgetragen und nichts umgeschrieben.
-            foreach (var spalte in new[] { "RefusalReason", "RefusedAt", "UploadedAt" })
+            // F-M650: die Signatur der Staffel gehoert dazu (nullable, also ebenfalls rein additiv) —
+            // eine bestehende Zeile ohne sie gilt als Signatur unbekannt und wird neu versucht.
+            foreach (var spalte in new[] { "RefusalReason", "RefusedAt", "RefusedSignature", "UploadedAt" })
             {
                 if (!existing.Contains(spalte))
                 {

@@ -44,13 +44,13 @@ internal static class Program
     private static int _checks;
     private static readonly List<string> Failures = new();
 
-    private static void Check(bool ok, string what)
+    private static void Check(bool ok, string what, string? detail = null)
     {
         _checks++;
         if (!ok)
         {
             Failures.Add(what);
-            Console.WriteLine("  FAIL  " + what);
+            Console.WriteLine("  FAIL  " + what + (string.IsNullOrEmpty(detail) ? string.Empty : "  [" + detail + "]"));
         }
     }
 
@@ -163,10 +163,11 @@ internal static class Program
         IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
         ISet<(string ImdbId, int Season)> packable,
         IPackFiller filler,
-        Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration config)
+        Jellyfin.Plugin.SubScribe.Configuration.PluginConfiguration config,
+        Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry? registry = null)
         => new(
             new Jellyfin.Plugin.SubScribe.Api.ScribeApiClient(new System.Net.Http.HttpClient()),
-            null!,
+            registry!,
             new ListLogger(log),
             config,
             complete,
@@ -175,6 +176,22 @@ internal static class Program
             _ => { },
             _ => { },
             filler);
+
+    /// <summary>
+    /// F-M647: sammeln und senden sind zwei Schritte — der Test geht denselben Weg wie die Pipeline,
+    /// damit die Zeilen (Füllen, DRY-RUN, Absage) dort entstehen, wo der Lauf sie schreibt.
+    /// </summary>
+    private static void FillAndSend(SeasonPackCoordinator coordinator, IReadOnlyList<string>? sources = null)
+    {
+        var plan = coordinator
+            .FillAsync("tt1", 1, "EN", false, sources, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        if (plan != null)
+        {
+            coordinator.SendAsync(plan, Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource, CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
+    }
 
     private static int Main(string[] args)
     {
@@ -435,7 +452,7 @@ internal static class Program
         // F-M414: the id comes from mySubtitles right after the upload; the pack name is only the
         // last resort when the account's own list has nothing matching.
         Check(coordinator.Contains("ResolveOwnPackIdAsync", StringComparison.Ordinal)
-              && coordinator.Contains("?? name", StringComparison.Ordinal),
+              && coordinator.Contains("?? plan.Name", StringComparison.Ordinal),
             "the pack takes its id from mySubtitles and keeps the name only as the last resort");
 
         var pipeline = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
@@ -504,8 +521,8 @@ internal static class Program
             "the run no longer re-orders the queue around a pack");
         Check(pipeline.Contains("Erst packbildung dann Einzeluploads", StringComparison.Ordinal),
             "F-M429: the pack phase runs before the single uploads, stated where it is enforced");
-        Check(pipeline.Contains("PlanPacksFromStore(completeSeasons)", StringComparison.Ordinal),
-            "and the plan is made from the queue, before any single went up");
+        Check(pipeline.Contains("PlanPacksFromStore(completeSeasons, sources: slotQuellen)", StringComparison.Ordinal),
+            "and the plan is made from the queue, before any single went up — for every source of the slot (F-M647)");
         Check(pipeline.Contains("brought all {Aired} episode(s)", StringComparison.Ordinal)
               && pipeline.Contains("no queue of this run was a whole season (F-M424/F-M425)", StringComparison.Ordinal),
             "every run packs only when its own queued episodes are the whole season (F-M425)");
@@ -564,12 +581,21 @@ internal static class Program
             "the filler is optional — without it the old behaviour is untouched");
         Check(coordinator.Contains("SeasonPack.Uncovered(aired, buffer.Select(c => c.Episode))", StringComparison.Ordinal),
             "an incomplete buffer asks which episode it lacks");
-        Check(coordinator.Contains("public async Task FillOnlyAsync(", StringComparison.Ordinal),
-            "a season with nothing new in the queue is packed too");
-        Check(coordinator.Contains("uploadSinglesOnRefusal: false", StringComparison.Ordinal),
+        Check(coordinator.Contains("public async Task<PackPlan?> FillAsync(", StringComparison.Ordinal)
+              && coordinator.Contains("public async Task<PackSend> SendAsync(PackPlan plan, string source, CancellationToken ct)", StringComparison.Ordinal),
+            "F-M647: the collector hands back one plan, and every source sends from it — collect and send are two steps");
+        // F-M647: der Füll-Pfad hat nichts nachzureichen — was er tragen würde, steht schon oben.
+        // Deshalb sammelt FillAsync nur und sendet nicht selbst; die Einzel (UploadSinglesAsync) ruft
+        // allein der Puffer-Pfad, und SendAsync meldet den Fall nur als SinglesFallback.
+        int fillNurStart = coordinator.IndexOf("public async Task<PackPlan?> FillAsync(", StringComparison.Ordinal);
+        int fillNurEnde = coordinator.IndexOf("public async Task<PackSend> SendAsync(", StringComparison.Ordinal);
+        string fillNur = fillNurStart > 0 && fillNurEnde > fillNurStart ? coordinator[fillNurStart..fillNurEnde] : string.Empty;
+        Check(fillNur.Length > 0
+              && !fillNur.Contains("UploadSinglesAsync(", StringComparison.Ordinal)
+              && !fillNur.Contains("UploadAsync(", StringComparison.Ordinal),
             "a fill-only season re-sends nothing when the container is refused");
-        Check(pipeline.Contains("await packCoordinator.FillOnlyAsync(packImdb, packSeason, packLang, packHi, runCt)", StringComparison.Ordinal),
-            "F-M429: the packs go up first, before the item loop and before the buffers are flushed");
+        Check(pipeline.Contains("FillAsync(packImdb, packSeason, packLang, packHi, slotQuellen, runCt)", StringComparison.Ordinal),
+            "F-M429/F-M647: the packs go up first, before the item loop and before the buffers are flushed — and ONE collection feeds every source");
         Check(pipeline.Contains("_packAbsorbed.Add((packImdb, packSeason, packLang, packHi))", StringComparison.Ordinal),
             "the pairs a pack carried are remembered for the single phase");
         Check(pipeline.Contains("carried by the pack built in this run and sent as a single beside it (F-M585, the pack row lists this episode", StringComparison.Ordinal),
@@ -606,7 +632,7 @@ internal static class Program
         var fillerAll = new FakeFiller(refuse: Array.Empty<int>(), answer: -1);
         var logAll = new List<string>();
         var coordinatorAll = NewCoordinator(logAll, complete, packable, fillerAll, dryConfig);
-        coordinatorAll.FillOnlyAsync("tt1", 1, "EN", false, CancellationToken.None).GetAwaiter().GetResult();
+        FillAndSend(coordinatorAll);
         Check(fillerAll.Calls.Count == 8, "a season with nothing new asks the filler for every aired episode");
         Check(logAll.Any(l => l.Contains("season pack filled", StringComparison.Ordinal)
                               && l.Contains("8 episode(s) from subtitles already uploaded, 0 from this run", StringComparison.Ordinal)),
@@ -618,7 +644,7 @@ internal static class Program
         var fillerHole = new FakeFiller(refuse: new[] { 5 }, answer: -1);
         var logHole = new List<string>();
         var coordinatorHole = NewCoordinator(logHole, complete, packable, fillerHole, dryConfig);
-        coordinatorHole.FillOnlyAsync("tt1", 1, "EN", false, CancellationToken.None).GetAwaiter().GetResult();
+        FillAndSend(coordinatorHole);
         Check(logHole.Any(l => l.Contains("episode 5 cannot join, and ", StringComparison.Ordinal)),
             "one episode that cannot join stops the pack and names itself");
         Check(!logHole.Any(l => l.Contains("DRY-RUN would upload season pack", StringComparison.Ordinal)),
@@ -631,7 +657,7 @@ internal static class Program
         };
         var logMixed = new List<string>();
         var coordinatorMixed = NewCoordinator(logMixed, complete, packable, fillerMixed, dryConfig);
-        coordinatorMixed.FillOnlyAsync("tt1", 1, "EN", false, CancellationToken.None).GetAwaiter().GetResult();
+        FillAndSend(coordinatorMixed);
         Check(fillerMixed.Calls.Count == 0,
             "F-M442: a mixed-source season is refused before the first extraction");
         Check(logMixed.Any(l => l.Contains("skipped before any extraction", StringComparison.Ordinal)
@@ -645,7 +671,7 @@ internal static class Program
         var fillerEven = new FakeFiller(refuse: Array.Empty<int>(), answer: -1);
         var logEven = new List<string>();
         var coordinatorEven = NewCoordinator(logEven, complete, packable, fillerEven, dryConfig);
-        coordinatorEven.FillOnlyAsync("tt1", 1, "EN", false, CancellationToken.None).GetAwaiter().GetResult();
+        FillAndSend(coordinatorEven);
         Check(fillerEven.Calls.Count == 8, "F-M442: one quality and one frame rate across the season still packs");
 
         // ── F-M407: TMDb zuerst ─────────────────────────────────────────────────
@@ -1102,10 +1128,11 @@ internal static class Program
 
             // Die Folgen-Dateinamen kommen aus derselben Funktion wie beim Einzel-Upload — mit Staffel,
             // weil die SEITE den Namen liest (SubDL-Mitglieder tragen ausdruecklich keine Staffel).
-            Check(tvstCoord.Contains("SeasonPack.NeutralFileName(", StringComparison.Ordinal)
-                  && tvstCoord.IndexOf("SeasonPack.NeutralFileName(", StringComparison.Ordinal)
-                     < tvstCoord.IndexOf("SeasonPack.MemberFileName(", StringComparison.Ordinal),
-                "F-M643: the tvst entries carry the episode's own file name (season included) — the SubDL member naming stays untouched");
+            Check(tvstCoord.Contains("var subdlFiles = ordered", StringComparison.Ordinal)
+                  && tvstCoord.Contains("SeasonPack.MemberFileName(", StringComparison.Ordinal)
+                  && tvstCoord.Contains("var tvstFiles = ordered", StringComparison.Ordinal)
+                  && tvstCoord.Contains("SeasonPack.NeutralFileName(", StringComparison.Ordinal),
+                "F-M643/F-M647: the plan carries BOTH namings — the tvst entries with the season, the SubDL members without it");
 
             // Der Versand: Ticket mit SeasonPack=true in den Staffel-Slot, Schalter der GUI, Quelle tvst.
             int packVersand = tvstPipe.IndexOf("private async Task<UploadResult> SendPackToTvSubtitlesAsync(", StringComparison.Ordinal);
@@ -1120,16 +1147,244 @@ internal static class Program
                   && sender.Contains("DoubleEpisode: false", StringComparison.Ordinal),
                 "F-M643: hi describes the WHOLE container — the collector builds one container per (language, variant), never a mixture");
 
-            // Nur der volle Lauf packt die Bibliothek (F-M420), und nur wenn die Quelle hochladen darf.
-            int tvstPhase = tvstPipe.IndexOf("if (!IsArrivalRun && SourceAllowed(Configuration.SubtitleProvider.TvSubtitles))", StringComparison.Ordinal);
-            Check(tvstPhase > 0
-                  && tvstPipe.IndexOf("PlanPacksFromStore(completeSeasons, source: PackEntity.TvSubtitlesSource)", tvstPhase, StringComparison.Ordinal) > tvstPhase
-                  && tvstPipe.IndexOf("FillOnlyAsync(packImdb, packSeason, packLang, packHi, runCt, PackEntity.TvSubtitlesSource)", tvstPhase, StringComparison.Ordinal) > tvstPhase,
-                "F-M643: the tvst packs are built in the FULL run only, from the library plan, with the same collector");
+            // F-M647: EIN Slot je Paar. Bis 12.2.0.8 standen hier zwei Phasen — erst
+            // `PlanPacksFromStore(completeSeasons)`, danach ein zweiter Block mit
+            // `PlanPacksFromStore(completeSeasons, source: TvSubtitlesSource)` und einer zweiten
+            // `FillOnlyAsync`-Schleife. Jetzt gibt es EINE Paar-Schleife, EINEN Sammler und EINEN Slot.
+            int tvstSlot = tvstPipe.IndexOf("var slotQuellen = new List<string> { PackEntity.SubdlSource };", StringComparison.Ordinal);
+            Check(tvstSlot > 0
+                  && tvstPipe.IndexOf("else if (!SourceAllowed(Configuration.SubtitleProvider.TvSubtitles))", tvstSlot, StringComparison.Ordinal) > tvstSlot
+                  && tvstPipe.IndexOf("slotQuellen.Add(PackEntity.TvSubtitlesSource);", tvstSlot, StringComparison.Ordinal) > tvstSlot,
+                "F-M643/F-M647: the second source joins the SAME slot, only when the run is a full run and the source may upload");
+
+            int paarSchleife = tvstPipe.IndexOf("foreach (var (packImdb, packSeason, packLang, packHi) in packPaare)", StringComparison.Ordinal);
+            int sammler = paarSchleife < 0 ? -1 : tvstPipe.IndexOf("FillAsync(packImdb, packSeason, packLang, packHi, slotQuellen, runCt)", paarSchleife, StringComparison.Ordinal);
+            Check(paarSchleife > 0 && sammler > paarSchleife
+                  && tvstPipe.IndexOf("PlanPacksFromStore(completeSeasons, sources: slotQuellen)", tvstSlot, StringComparison.Ordinal) > tvstSlot,
+                "F-M647: ONE loop over the pairs, ONE collection per pair, and the plan asks every source of the slot");
+
+            int whenAll = sammler < 0 ? -1 : tvstPipe.IndexOf("await Task.WhenAll(packLaeufe).ConfigureAwait(false);", sammler, StringComparison.Ordinal);
+            Check(whenAll > sammler
+                  && tvstPipe.IndexOf("return await packCoordinator.SendAsync(plan, quelle, runCt).ConfigureAwait(false);", sammler, StringComparison.Ordinal) > sammler
+                  && tvstPipe.IndexOf("Random.Shared.Next(1, packVersatzMs + 1)", sammler, StringComparison.Ordinal) > sammler,
+                "F-M647: both containers leave in the SAME slot, simultaneously (Task.WhenAll) and with the 0-5 % offset of F-M587");
+
+            Check(!tvstPipe.Contains("FillOnlyAsync", StringComparison.Ordinal)
+                  && tvstPipe.Split("PlanPacksFromStore(completeSeasons").Length - 1 == 1,
+                "F-M647: the second pack phase is gone — no second plan, no second collector loop, no two sources in sequence");
 
             Check(tvstPipe.Contains("packCoordinator.TvSubtitlesSender = SendPackToTvSubtitlesAsync;", StringComparison.Ordinal)
                   && tvstPipe.Contains("geplantProStaffel[(packImdb, packSeason)]", StringComparison.Ordinal),
                 "F-M643: the run wires the sender, and a tvst pair counts as the season's one line (F-M640)");
+        }
+
+        // ── 10. F-M647/F-M648/F-M649: EIN Slot je Paar, beide Quellen ------------------------------
+        Console.WriteLine("10. F-M647: one slot per pair, both sources");
+        {
+            var quellen = new[] { "subdl", "tvsubtitles" };
+
+            // Der Sammler laeuft EINMAL, auch wenn zwei Quellen im Slot stehen: acht Folgen, nicht
+            // sechzehn — das ist der Unterschied zu den zwei Phasen von 12.2.0.8.
+            var einmalFiller = new FakeFiller(refuse: Array.Empty<int>(), answer: -1);
+            var einmalLog = new List<string>();
+            var einmal = NewCoordinator(einmalLog, complete, packable, einmalFiller, dryConfig);
+            var plan = einmal.FillAsync("tt1", 1, "EN", false, quellen, CancellationToken.None).GetAwaiter().GetResult();
+            Check(plan != null && einmalFiller.Calls.Count == 8,
+                "F-M647: the members are collected ONCE for both sources (8 episodes, not 16)");
+            var zipNamen = new List<string>();
+            if (plan?.TvstZip != null)
+            {
+                using var gelesen = new ZipArchive(new System.IO.MemoryStream(plan.TvstZip));
+                zipNamen.AddRange(gelesen.Entries.Select(e => e.FullName));
+            }
+
+            Check(plan != null && plan!.SubdlFiles.Count == 8 && plan.TvstFiles.Count == 8
+                  && plan.SubdlFiles[0].FileName != plan.TvstFiles[0].FileName
+                  && zipNamen.SequenceEqual(plan.TvstFiles.Select(f => f.FileName)),
+                "F-M648: ONE plan carries both namings AND the finished zip — both containers are built from the same members, before the slot");
+
+            var fuerSubdl = einmal.SendAsync(plan!, Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource, CancellationToken.None).GetAwaiter().GetResult();
+            var fuerTvst = einmal.SendAsync(plan!, Jellyfin.Plugin.SubScribe.Data.PackEntity.TvSubtitlesSource, CancellationToken.None).GetAwaiter().GetResult();
+            Check(fuerSubdl.Outcome == SeasonPackCoordinator.PackSendOutcome.WouldSend
+                  && fuerTvst.Outcome == SeasonPackCoordinator.PackSendOutcome.WouldSend
+                  && einmalFiller.Calls.Count == 8,
+                "F-M647: each source gets its own verdict from the SAME plan — sending does not collect again");
+
+            // Ein Inhaltsurteil faellt EINMAL je Paar: gemischte Quellen, zwei Quellen im Slot, eine
+            // Zeile — nicht zwei.
+            var gemischtFiller = new FakeFiller(refuse: Array.Empty<int>(), answer: -1)
+            {
+                Source = episode => episode == 4 ? ("ATVP.WEB-DL", "23,809") : ("1080p.WEB-DL", "23,976"),
+            };
+            var gemischtLog = new List<string>();
+            var gemischt = NewCoordinator(gemischtLog, complete, packable, gemischtFiller, dryConfig);
+            var gemischtPlan = gemischt.FillAsync("tt1", 1, "EN", false, quellen, CancellationToken.None).GetAwaiter().GetResult();
+            Check(gemischtPlan == null
+                  && gemischtLog.Count(l => l.Contains("skipped before any extraction", StringComparison.Ordinal)) == 1,
+                "F-M648: a content verdict is made ONCE per pair for both sources — one line, not one per source");
+
+            // F-M649: das Stundenkontingent ist kein Urteil.
+            var koord = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+            int kontingent = koord.IndexOf("if (result.Verdict == UploadVerdict.NoVerdict)", StringComparison.Ordinal);
+            int kontingentEnde = koord.IndexOf("if (!result.Ok && result.SourceAccepted)", StringComparison.Ordinal);
+            string kontingentZweig = kontingent >= 0 && kontingentEnde > kontingent ? koord[kontingent..kontingentEnde] : string.Empty;
+            int dublettenZweig = koord.IndexOf("\"duplicate-content\", StringComparison.Ordinal)", StringComparison.Ordinal);
+            Check(kontingentZweig.Length > 0 && dublettenZweig > kontingent
+                  && kontingentZweig.Contains("upload-hourly-cap", StringComparison.Ordinal)
+                  && kontingentZweig.Contains("hourly budget spent", StringComparison.Ordinal)
+                  && kontingentZweig.Contains("PackSendOutcome.LeftOpen", StringComparison.Ordinal)
+                  && !kontingentZweig.Contains("Refuse(", StringComparison.Ordinal)
+                  && !kontingentZweig.Contains("RecordPackRefusal", StringComparison.Ordinal)
+                  && !kontingentZweig.Contains("_countFailed", StringComparison.Ordinal),
+                "F-M649: the hourly cap writes NO verdict and no refusal — the pair stays open and is not counted as failed");
+
+            // Die eine Zeile je Paar: beide Gruende in EINER Zeile, auf der Normal-Stufe.
+            var pipeQuelle = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+            int teileAt = pipeQuelle.IndexOf("string.Join(\"; \", teile)", StringComparison.Ordinal);
+            Check(teileAt > 0
+                  && pipeQuelle.Contains("nothing to build — {Parts}", StringComparison.Ordinal)
+                  && pipeQuelle.Contains("no container, no verdict — {Parts}", StringComparison.Ordinal)
+                  && pipeQuelle.Contains("the next run takes it again (F-M649)", StringComparison.Ordinal),
+                "F-M648/F-M649: BOTH reasons of a pair share ONE Normal line — and the quota case says the pair stays open");
+
+            Check(pipeQuelle.Split("LogUtil.Normal(", StringSplitOptions.None).Length > 0
+                  && pipeQuelle.IndexOf("packErgebnisse.Any(e => e.Delivered)", StringComparison.Ordinal)
+                     < pipeQuelle.IndexOf("string.Join(\"; \", teile)", StringComparison.Ordinal),
+                "F-M647: the slot answers from the OUTCOMES of both sends, not from a store row afterwards");
+        }
+
+        // ── 11. F-M650: eine stehende Ablehnung schliesst das Paar VOR dem Sammeln ──────────────────
+        // Bis 12.2.0.9 wurde fuer ein abgelehntes Paar trotzdem jede Folge entpackt, nur um am Ende
+        // „fingerprint unchanged, nothing is re-sent" zu melden: der Fingerabdruck einer Absage laesst
+        // sich erst nach dem Sammeln vergleichen. Die Signatur der Staffel steht vorher fest — hier wird
+        // mit einem ECHTEN Store geprueft, dass sie das Sammeln wirklich verhindert.
+        Console.WriteLine("11. F-M650: a standing refusal closes the pair before the collection");
+        {
+            string store = Path.Combine(
+                Path.GetTempPath(), "seasonpack-f650-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(store);
+            try
+            {
+                const string Grund = "the source already holds this container (duplicate)";
+                var f650Complete = new Dictionary<(string ImdbId, int Season), IReadOnlyList<int>>
+                {
+                    [("tt650", 2)] = Enumerable.Range(1, 8).ToList(),
+                };
+                var f650Packable = new HashSet<(string ImdbId, int Season)> { ("tt650", 2) };
+
+                using (var db = new Jellyfin.Plugin.SubScribe.Data.ScribeDbContext(store, null))
+                {
+                    var reg = new Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry(db);
+
+                    // (a) Die Absage traegt die Signatur, auf der sie beruht.
+                    reg.RecordPackRefusal(
+                        "tt650", 2, "EN", false, Grund, "fingerprint-of-the-pack",
+                        Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource, signature: "sig-A");
+                    var zeile = reg.GetPack("tt650", 2, "EN", false, Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource);
+                    Check(zeile?.RefusedSignature == "sig-A",
+                        "F-M650: a refusal carries the season signature it is based on",
+                        zeile?.RefusedSignature ?? "(keine Zeile)");
+
+                    // Die Frage selbst: gleiche Signatur = ja, andere oder unbekannte = nein.
+                    Check(reg.PackRefusalStands("tt650", 2, "EN", false, Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource, "sig-A")
+                          && !reg.PackRefusalStands("tt650", 2, "EN", false, Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource, "sig-B")
+                          && !reg.PackRefusalStands("tt650", 2, "EN", false, Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource, null),
+                        "F-M650: the refusal stands on the SAME signature only — a changed or unknown one does not");
+
+                    // (b) Gleiche Signatur: KEIN Sammelaufruf, genau EINE Zeile mit beiden Angaben.
+                    var frageFiller = new FakeFiller(refuse: Array.Empty<int>(), answer: -1);
+                    var frageLog = new List<string>();
+                    var frage = NewCoordinator(frageLog, f650Complete, f650Packable, frageFiller, dryConfig, reg);
+                    frage.SeasonSignature = (_, _) => "sig-A";
+                    var fragePlan = frage
+                        .FillAsync("tt650", 2, "EN", false, new[] { Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource }, CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                    Check(fragePlan == null && frageFiller.Calls.Count == 0,
+                        "F-M650: a refusal with an unchanged signature extracts NOTHING — the filler is never asked (0 calls)",
+                        frageFiller.Calls.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+                    var f650Zeilen = frageLog.Where(l => l.Contains("F-M650", StringComparison.Ordinal)).ToList();
+                    Check(f650Zeilen.Count == 1
+                          && f650Zeilen[0].Contains("no source left open", StringComparison.Ordinal)
+                          && f650Zeilen[0].Contains("subdl refused", StringComparison.Ordinal)
+                          && f650Zeilen[0].Contains("duplicate upload", StringComparison.Ordinal)
+                          && f650Zeilen[0].Contains("signature unchanged", StringComparison.Ordinal)
+                          && f650Zeilen[0].Contains("nothing is extracted", StringComparison.Ordinal),
+                        "F-M650: ONE line names the pair and the source with its reason, date and the unchanged signature",
+                        f650Zeilen.Count == 1 ? f650Zeilen[0] : f650Zeilen.Count + " lines");
+                    Check(frageLog.Count(l => l.Contains("season pack", StringComparison.Ordinal)) == 1
+                          && string.IsNullOrEmpty(frage.LastSkipReason),
+                        "F-M650: the pair reports itself ONCE — the line is already written, the pipeline adds none (F-M648)");
+
+                    // (c) Andere Signatur (neue Folge / neue Datei): es wird wieder gesammelt.
+                    var neuFiller = new FakeFiller(refuse: Array.Empty<int>(), answer: -1);
+                    var neuLog = new List<string>();
+                    var neu = NewCoordinator(neuLog, f650Complete, f650Packable, neuFiller, dryConfig, reg);
+                    neu.SeasonSignature = (_, _) => "sig-B";
+                    var neuPlan = neu
+                        .FillAsync("tt650", 2, "EN", false, new[] { Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource }, CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                    Check(neuPlan != null && neuFiller.Calls.Count == 8,
+                        "F-M650: a CHANGED signature is collected again — all 8 episodes are asked for",
+                        neuFiller.Calls.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+                    // (d) Der GUI-Reset (F-M620) raeumt die Signatur mit weg — sonst bliebe der Pack fuer
+                    // immer geschlossen.
+                    reg.EnsureMedia("ffffffffffffffffffffffffffffffff", patch: m =>
+                    {
+                        m.ImdbId = "tt650";
+                        m.Season = 2;
+                        m.IsSeries = true;
+                    });
+                    int geoeffnet = reg.ReopenPackRefusals("ffffffffffffffffffffffffffffffff");
+                    Check(geoeffnet >= 1
+                          && reg.GetPack("tt650", 2, "EN", false, Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource)?.RefusedSignature == null
+                          && !reg.PackRefusalStands("tt650", 2, "EN", false, Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource, "sig-A"),
+                        "F-M650: the GUI reset clears the signature with the refusal — the pack is open again",
+                        geoeffnet.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+                    // (e) Inhalt gleich, aber die Quelle hat den Behälter inzwischen: HasPack gewinnt.
+                    reg.RecordPackRefusal(
+                        "tt650", 2, "EN", false, Grund, "fingerprint-of-the-pack",
+                        Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource, signature: "sig-A");
+                    reg.RecordPack(
+                        "tt650", 2, "EN", false, "Show.S02.1080p", "tt650.S02.x.EN",
+                        new[] { 1, 2, 3, 4, 5, 6, 7, 8 }, null, "fingerprint-of-the-pack");
+                    var hatFiller = new FakeFiller(refuse: Array.Empty<int>(), answer: -1);
+                    var hatLog = new List<string>();
+                    var hat = NewCoordinator(hatLog, f650Complete, f650Packable, hatFiller, dryConfig, reg);
+                    hat.SeasonSignature = (_, _) => "sig-A";
+                    var hatPlan = hat
+                        .FillAsync("tt650", 2, "EN", false, new[] { Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource }, CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                    Check(hatPlan == null
+                          && hatFiller.Calls.Count == 0
+                          && hatLog.Count(l => l.Contains("F-M647", StringComparison.Ordinal)) == 1
+                          && hatLog.All(l => !l.Contains("F-M650", StringComparison.Ordinal)),
+                        "F-M650: a container that is up wins over the refusal — the HasPack gate answers, once (F-M647)");
+
+                // Die Verdrahtung: ohne die Signatur am Aufruf bliebe `RefusedSignature` leer und das Tor
+                // koennte ein Paar nie schliessen — der Test oben ruft den Store direkt, dieser hier
+                // prueft den Weg, den der Koordinator wirklich geht.
+                var koord650 = File.ReadAllText(
+                    Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+                int ruf = koord650.IndexOf("_registry.RecordPackRefusal(", StringComparison.Ordinal);
+                string rufStelle = ruf < 0 ? string.Empty : koord650[ruf..Math.Min(koord650.Length, ruf + 400)];
+                Check(ruf > 0 && rufStelle.Contains("signature: SeasonSignature?.Invoke", StringComparison.Ordinal),
+                    "F-M650: the refusal call hands the season signature over — without it the gate could never close a pair");
+                }
+            }
+            finally
+            {
+                try
+                {
+                    Directory.Delete(store, true);
+                }
+                catch (IOException)
+                {
+                    // Ein liegengebliebener Probe-Store ist kein Pruefergebnis.
+                }
+            }
         }
 
         Console.WriteLine(Failures.Count == 0

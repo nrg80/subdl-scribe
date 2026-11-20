@@ -258,11 +258,14 @@ internal static class Program
         // Store — die Aussage bleibt dieselbe: ein schon gepacktes Paar wird nicht erneut geplant.
         // F-M643: der Cache wird JE QUELLE befragt — der tvst-Plan darf das SubDL-Paar nicht als
         // „gepackt" lesen.
+        // F-M647: die Frage laeuft ueber JEDE Quelle des Slots — ein Paar faellt erst aus der Planung,
+        // wenn ALLE Quellen es fuehren.
         Check(upload.Contains("? PacksOf(entry.Key.Item1, entry.Key.Item2)", StringComparison.Ordinal)
-              && upload.Contains(": PacksOfSource(entry.Key.Item1, entry.Key.Item2, source)", StringComparison.Ordinal)
-              && upload.Contains("gepacktHier.Contains((", StringComparison.Ordinal),
+              && upload.Contains(": PacksOfSource(entry.Key.Item1, entry.Key.Item2, quelle)", StringComparison.Ordinal)
+              && upload.Contains("gepacktHier.Contains((", StringComparison.Ordinal)
+              && upload.Contains("if (schonGepackt.Count == quellen.Count)", StringComparison.Ordinal),
             "and the fill-only plan skips a season that is already packed");
-        Check(upload.IndexOf("gepacktHier.Contains((", StringComparison.Ordinal) < upload.IndexOf("already inside a pack, nothing is re-sent", StringComparison.Ordinal),
+        Check(upload.IndexOf("gepacktHier.Contains((", StringComparison.Ordinal) < upload.IndexOf("already inside a pack at {Sources}, nothing is re-sent", StringComparison.Ordinal),
             "the check comes before the decision it guards");
 
         // ── 8. F-M391: the duplicate goes first, the pack second ────────────────
@@ -276,8 +279,11 @@ internal static class Program
         Check(coord.IndexOf("DeletePublishedSubtitleAsync(single.Id, ct)", StringComparison.Ordinal)
               < coord.IndexOf("UploadSeasonPackAsync(", StringComparison.Ordinal),
             "BEFORE it uploads the pack, not after");
-        Check(coord.Contains("deletedIds.Count > 0 ? deletedIds : null", StringComparison.Ordinal),
-            "the deleted ids are recorded on the pack row");
+        // F-M585: es wird nichts mehr geloescht — die packs-Zeile traegt deshalb auch keine geloeschten
+        // Ids mehr, sondern nur die Folgen des Containers.
+        Check(!coord.Contains("deletedIds", StringComparison.Ordinal)
+              && coord.Contains("ordered.Select(x => x.Episode),", StringComparison.Ordinal),
+            "the pack row carries the episodes it covers and no deleted ids");
         Check(upload.Contains("absorbedSingleId: absorbed", StringComparison.Ordinal),
             "and the filler hands its single's id to the candidate");
 
@@ -297,7 +303,7 @@ internal static class Program
 
         // ── 12. F-M396: kein zweiter Pack mit denselben Mitgliedern; tote Pack-Zeilen fallen raus ──
         Console.WriteLine("12. Pack rows stay honest");
-        Check(coord.Contains("season pack already up with these members", StringComparison.Ordinal),
+        Check(coord.Contains("\"already up with these members\"", StringComparison.Ordinal),
             "the buffer path refuses a pack that is already up with the same members");
         Check(coord.IndexOf("_registry.GetPack(key.ImdbId, key.Season, key.Lang, key.Hi)", StringComparison.Ordinal)
               < coord.IndexOf("await _api.UploadSeasonPackAsync", StringComparison.Ordinal),
@@ -316,9 +322,14 @@ internal static class Program
             "and it answers from the downloaded sidecar row, not from a guess");
         Check(coord.Contains("season pack refused", StringComparison.Ordinal),
             "the coordinator refuses the whole pack, not just that member");
-        Check(coord.Contains("came from SubDL itself", StringComparison.Ordinal)
-              && coord.IndexOf("_registry.IsSubdlOrigin", StringComparison.Ordinal)
-                 < coord.IndexOf("await _api.UploadSeasonPackAsync", StringComparison.Ordinal),
+        // F-M648: das Herkunftsurteil faellt EINMAL je Paar, im Sammler — nicht mehr je Quelle im
+        // Versand. Es steht damit vor jedem Versand.
+        int sammlerAt = coord.IndexOf("public async Task<PackPlan?> FillAsync(", StringComparison.Ordinal);
+        int senderAt = coord.IndexOf("public async Task<PackSend> SendAsync(", StringComparison.Ordinal);
+        string sammlerTeil = sammlerAt > 0 && senderAt > sammlerAt ? coord[sammlerAt..senderAt] : string.Empty;
+        Check(coord.Contains("came from a download of one of our sources", StringComparison.Ordinal)
+              && sammlerTeil.Contains("MembersFromOurSources(", StringComparison.Ordinal)
+              && !sammlerTeil.Contains("UploadSeasonPackAsync", StringComparison.Ordinal),
             "and it refuses BEFORE the pack is sent");
 
         // ── 14. F-M399: nur die packs-Zeile belegt einen Pack, keine SubdlId an den Mitgliedern ──
@@ -328,7 +339,7 @@ internal static class Program
         Check(!upload.Contains("inPack.Add(pair)", StringComparison.Ordinal),
             "and the member-id heuristic is gone with it");
         Check(upload.Contains("PacksOf(entry.Key.Item1, entry.Key.Item2)", StringComparison.Ordinal)
-              && upload.Contains("PacksOfSource(entry.Key.Item1, entry.Key.Item2, source)", StringComparison.Ordinal),
+              && upload.Contains("PacksOfSource(entry.Key.Item1, entry.Key.Item2, quelle)", StringComparison.Ordinal),
             "the packs row is the only proof that a season is packed");
 
         // ── 15. F-M405: eine Extraktion je Datei, nicht je Sprache ───────────────
@@ -378,7 +389,8 @@ internal static class Program
 
         // ── 21. F-M415: Prüfung vor der Extraktion ──────────────────────────────
         Console.WriteLine("21. The pack check runs before the extraction");
-        var m415Start = coordPackSrc.IndexOf("FillOnlyAsync", StringComparison.Ordinal);
+        // F-M647: der Sammler heisst jetzt FillAsync — Sammeln und Senden sind zwei Schritte.
+        var m415Start = coordPackSrc.IndexOf("public async Task<PackPlan?> FillAsync(", StringComparison.Ordinal);
         var fillBody = m415Start > 0 ? coordPackSrc.Substring(m415Start) : string.Empty;
         Check(fillBody.Contains("HasPack(")
               && fillBody.Contains("nothing is extracted", StringComparison.Ordinal),
@@ -634,8 +646,8 @@ internal static class Program
             "F-M466: one changed member or one member less is a different fingerprint, so the pack is new");
 
         string packSource = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync", "Pipeline", "SeasonPackCoordinator.cs"));
-        Check(packSource.Contains("string packFingerprint = SeasonPack.PackHash(", StringComparison.Ordinal)
-              && packSource.Contains("packFingerprint));", StringComparison.Ordinal),
+        Check(packSource.Contains("string fingerprint = SeasonPack.PackHash(", StringComparison.Ordinal)
+              && packSource.Contains("plan.Fingerprint)", StringComparison.Ordinal),
             "F-M466: the fingerprint is computed once and written into the memo row");
         Check(packSource.Contains("recorded.Fingerprint", StringComparison.Ordinal)
               && packSource.IndexOf("recorded.Fingerprint", StringComparison.Ordinal)
@@ -654,7 +666,7 @@ internal static class Program
         // Bestand. Hier steht, was der KOORDINATOR damit tut: die Ablehnung der Quelle lesen, sie mit
         // dem Fingerabdruck vergleichen, und im Zweifel nichts senden.
         Console.WriteLine("33. A refused pack is remembered, not repeated");
-        Check(packSource.Contains("string.Equals(recorded.Fingerprint, packFingerprint, StringComparison.Ordinal)", StringComparison.Ordinal)
+        Check(packSource.Contains("string.Equals(recorded.Fingerprint, plan.Fingerprint, StringComparison.Ordinal)", StringComparison.Ordinal)
               && packSource.Contains("recorded.RefusalReason", StringComparison.Ordinal)
               && packSource.IndexOf("recorded.RefusalReason", StringComparison.Ordinal)
                  < packSource.IndexOf("F-M466 (memo per season + language with a fingerprint)", StringComparison.Ordinal),
@@ -662,7 +674,7 @@ internal static class Program
 
         Check(packSource.Contains("string.Equals(result.Reason, \"duplicate-content\", StringComparison.Ordinal)", StringComparison.Ordinal)
               && packSource.Contains("_registry.RecordPackRefusal(", StringComparison.Ordinal)
-              && packSource.Contains("Grund, packFingerprint, source", StringComparison.Ordinal),
+              && packSource.Contains("Grund, plan.Fingerprint, source", StringComparison.Ordinal),
             "F-M644: the source's duplicate verdict is written into the row with its reason and the content's fingerprint");
 
         Check(reg.Contains("GetPack(imdbId, season, language, hearingImpaired, source) is { } row", StringComparison.Ordinal)

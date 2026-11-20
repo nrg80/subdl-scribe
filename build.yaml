@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.2.0.8"
+version: "12.2.0.10"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,8 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.2.0.10: a pair that no source is left open for is not collected at all — a refusal now remembers the season signature it is based on, so an unchanged season skips the extraction instead of being unpacked only to be refused again, while a new episode or a changed file collects and tries again (F-M650).
+  v12.2.0.9: one slot per pair, both sources at once — the episodes are collected once and sent to subdl and tvsubtitles.net together (offset 0-5 %, one line per pair naming both reasons when both skip), the content verdicts fall once instead of once per source, and a source's hourly cap is no verdict at all: the pair stays open for the next run (F-M647, F-M648, F-M649).
   v12.2.0.8: every tvst season pack reports itself twice — built (episodes, zip name, target) and sent — and a pair without a container says why (F-M646).
   v12.2.0.7: the tvst pack phase always reports itself — pairs and seasons when it runs, the reason (arrival run or switched-off source) when it does not (F-M645).
   v12.2.0.6: tvsubtitles.net season packs are now built in the run by the same collector as the SubDL packs — one zip of episode files into the site's season slot, only in a full run, on the existing pack switch (F-M643); a pack the source refused as a duplicate is remembered in its row with reason, date and content fingerprint and is not offered again until the content changes, while a pack that goes through carries UploadedAt (F-M644).

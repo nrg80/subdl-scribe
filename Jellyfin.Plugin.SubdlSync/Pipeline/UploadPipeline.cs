@@ -851,7 +851,7 @@ public sealed class UploadPipeline : IPackFiller
         // single phase: nothing is lost, the plan is remembered instead of assumed.
         if (packCoordinator != null && completeSeasons.Count > 0)
         {
-            // F-M599: die Füll-Phase (FillOnly) getrennt vermessen — sie spricht mit dem Netz, die
+            // F-M599: die Füll-Phase (FillAsync) getrennt vermessen — sie spricht mit dem Netz, die
             // Planung nicht. Nur so ist zu sehen, welcher der beiden Teile die Zeit hält.
             var fuellTakt = System.Diagnostics.Stopwatch.StartNew();
             int fuellVersuche = 0;
@@ -859,93 +859,190 @@ public sealed class UploadPipeline : IPackFiller
             // stand fuer die Staffel nur die Kandidaten-Zeile): hier wird je Staffel mitgezaehlt, ob die
             // Planung ueberhaupt ein Paar fuer sie hatte. Staffeln ohne Paar bekommen unten ihre eine Zeile.
             var geplantProStaffel = new Dictionary<(string ImdbId, int Season), int>();
-            foreach (var (packImdb, packSeason, packLang, packHi) in PlanPacksFromStore(completeSeasons))
-            {
-                geplantProStaffel[(packImdb, packSeason)] =
-                    (geplantProStaffel.TryGetValue((packImdb, packSeason), out int schonGeplant) ? schonGeplant : 0) + 1;
-                fuellVersuche++;
-                await packCoordinator.FillOnlyAsync(packImdb, packSeason, packLang, packHi, runCt).ConfigureAwait(false);
-                if (Registry.HasPack(packImdb, packSeason, packLang, packHi))
-                {
-                    _packAbsorbed.Add((packImdb, packSeason, packLang, packHi));
-                }
-                else if (!string.IsNullOrEmpty(packCoordinator.LastRefusal))
-                {
-                    // F-M611: der Grund steht schon als Urteil im Store (Refuse im Koordinator). Hier
-                    // steht nur noch, dass dieser Lauf nichts mehr dafuer tut.
-                    LogUtil.Detail(
-                        _logger,
-                        "[Sub Scribe] PACK — {Imdb} S{Season} [{Lang}] no pack this run ({Reason}); the verdict with the files' signature is stored (F-M611)",
-                        packImdb, packSeason, SeasonPack.LangTag(packLang, packHi), packCoordinator.LastRefusal);
-                }
-                else
-                {
-                    LogUtil.PerItem(_config.LogMode,
-                        _logger,
-                        "[Sub Scribe] pack did not go up for {Imdb} S{Season} [{Lang}] — the singles it was meant to carry go up in the single phase (F-M429).",
-                        packImdb, packSeason, packLang);
-                }
-            }
 
-            // F-M643 (Betreiber-Vorgabe 20.11.2026: „Ja. Aber nur für den vollen lauf, refetch oder
-            // manuell"): seit heute baut auch tvsubtitles.net Staffel-Packs, und der Sammler der
-            // Mitglieder ist derselbe (F-M641/F-M642). Zwei Dinge gelten dabei woertlich:
+            // F-M647 (Betreiber-Vorgabe 20.11.2026: „ein Slot je Paar"): EIN Slot je Paar, darin BEIDE
+            // Quellen. Bis 12.2.0.8 liefen zwei getrennte Phasen — erst die SubDL-Packs, danach die
+            // tvst-Packs —, und die Mitglieder wurden zweimal eingesammelt und zweimal beurteilt.
+            // Jetzt sammelt der Koordinator EINMAL (FillAsync), und die Pipeline versendet daraus an
+            // JEDE Quelle des Slots GLEICHZEITIG (SendAsync je Quelle, Task.WhenAll).
+            //
+            // Welche Quellen im Slot stehen, entscheidet der Lauf und die Schalter, nicht das Paar:
             //   • nur der VOLLE Lauf packt die Bibliothek — ein Ankunftslauf bringt seine eigenen Folgen
-            //     und laesst die Staffel dem naechsten vollen Lauf (F-M420),
-            //   • der Schalter ist der vorhandene `UploadSeasonPacks` (kein zweiter), und die Quelle
-            //     muss hochladen duerfen (ihr eigener Upload-Schalter, F-M495).
-            // Ein Paar ist immer EINE Sprache und EINE Variante — HI und plain werden nie gemischt, `hi`
-            // steht im Behälter also nur, wenn der ganze Pack HI ist.
-            if (!IsArrivalRun && SourceAllowed(Configuration.SubtitleProvider.TvSubtitles))
+            //     und laesst die Staffel dem naechsten vollen Lauf (F-M424),
+            //   • die zweite Quelle haengt an IHREM Upload-Schalter (F-M495),
+            //   • der Pack-Schalter (UploadSeasonPacks) gilt fuer beide — einen zweiten gibt es nicht (F-M641).
+            var slotQuellen = new List<string> { PackEntity.SubdlSource };
+            string tvstDraussen;
+            if (IsArrivalRun)
             {
-                var tvstPaare = PlanPacksFromStore(completeSeasons, source: PackEntity.TvSubtitlesSource);
-                // F-M645 (Operator-Anweisung 20.11.2026: „Unbedingt tvst packbildung und Uebermittlung
-                // loggen"): die Phase nennt sich auf der Normal-Stufe, nicht nur auf Detail. Vorher war
-                // sie im Betrieb unsichtbar — am 20.11. stand im ganzen Tageslog keine einzige
-                // tvst-Zeile, und ob gebaut, uebersprungen oder nichts zu bauen war, liess sich nicht
-                // unterscheiden.
-                LogUtil.Normal(
-                    _logger,
-                    "[Sub Scribe] PACK — tvst phase: {Count} pair(s) to build, {Seasons} complete season(s) in scope (F-M643)",
-                    tvstPaare.Count,
-                    completeSeasons.Count);
-
-                foreach (var (packImdb, packSeason, packLang, packHi) in tvstPaare)
-                {
-                    // F-M640: dieselbe Zaehlung wie fuer SubDL — eine Staffel mit einem tvst-Paar hat
-                    // ihre Zeile, sie darf unten nicht zusaetzlich „nichts zu packen" melden.
-                    geplantProStaffel[(packImdb, packSeason)] =
-                        (geplantProStaffel.TryGetValue((packImdb, packSeason), out int schonTvst) ? schonTvst : 0) + 1;
-                    await packCoordinator
-                        .FillOnlyAsync(packImdb, packSeason, packLang, packHi, runCt, PackEntity.TvSubtitlesSource)
-                        .ConfigureAwait(false);
-
-                    if (!Registry.HasPack(packImdb, packSeason, packLang, packHi, PackEntity.TvSubtitlesSource)
-                        && !string.IsNullOrEmpty(packCoordinator.LastRefusal))
-                    {
-                        // F-M646: auch die Absage eines einzelnen tvst-Behälters steht auf der
-                        // Normal-Stufe — der Betreiber will sehen, ob gebaut und hochgeladen wurde,
-                        // und ebenso, warum nicht.
-                        LogUtil.Normal(
-                            _logger,
-                            "[Sub Scribe] PACK — {Imdb} S{Season} [{Lang}] tvst: no container this run ({Reason}) (F-M643)",
-                            packImdb, packSeason, SeasonPack.LangTag(packLang, packHi), packCoordinator.LastRefusal);
-                    }
-                }
+                tvstDraussen = "this is an arrival run — a season pack of the library stays with a full run (F-M424)";
+            }
+            else if (!SourceAllowed(Configuration.SubtitleProvider.TvSubtitles))
+            {
+                tvstDraussen = "the upload switch of tvsubtitles.net is off — nothing is built or sent for this source (F-M495)";
             }
             else
             {
-                // F-M645 (Operator-Anweisung 20.11.2026: „Unbedingt tvst packbildung und Uebermittlung
-                // loggen"): auch das Nichteintreten ist ein Befund und bekommt eine Zeile. Vorher gab es
-                // hier kein else — war der Upload-Schalter von tvsubtitles.net aus, schwieg die Phase
-                // vollstaendig, und aus dem Log war nicht zu entscheiden, ob nichts zu packen war oder
-                // die Quelle gar nicht darf.
+                tvstDraussen = string.Empty;
+                slotQuellen.Add(PackEntity.TvSubtitlesSource);
+            }
+
+            var packPaare = PlanPacksFromStore(completeSeasons, sources: slotQuellen);
+
+            // F-M645 (Operator-Anweisung 20.11.2026: „Unbedingt tvst packbildung und Uebermittlung
+            // loggen"): die Phase nennt sich auf der Normal-Stufe — mit der Zahl der Paare, dem Umfang
+            // und den Quellen des Slots, und wenn eine Quelle nicht dabei ist, mit ihrem Grund. Vorher
+            // schwieg sie vollstaendig, war der Upload-Schalter von tvsubtitles.net aus.
+            LogUtil.Normal(
+                _logger,
+                "[Sub Scribe] PACK — one slot per pair (F-M647): {Count} pair(s) to build, {Seasons} complete season(s) in scope, sources {Sources}{Out}",
+                packPaare.Count,
+                completeSeasons.Count,
+                string.Join(", ", slotQuellen),
+                string.IsNullOrEmpty(tvstDraussen)
+                    ? string.Empty
+                    : $"; tvsubtitles.net is not in the slot: {tvstDraussen} (F-M645)");
+
+            foreach (var (packImdb, packSeason, packLang, packHi) in packPaare)
+            {
+                // F-M640: dieselbe Zaehlung fuer beide Quellen — eine Staffel mit einem Paar hat ihre
+                // Zeile, sie darf unten nicht zusaetzlich „nichts zu packen" melden.
+                geplantProStaffel[(packImdb, packSeason)] =
+                    (geplantProStaffel.TryGetValue((packImdb, packSeason), out int schonGeplant) ? schonGeplant : 0) + 1;
+                fuellVersuche++;
+
+                // F-M647/F-M648: SAMMELN und URTEILEN — EINMAL je Paar, fuer alle Quellen des Slots.
+                // Vollstaendigkeit, Sprache, Folge N, Qualitaet/Bildrate und die Herkunft des Textes
+                // (F-M487) sind Inhaltsurteile und gelten beiden Quellen gemeinsam; HI und plain bleiben
+                // getrennt, weil das Paar eine Variante ist.
+                var plan = await packCoordinator
+                    .FillAsync(packImdb, packSeason, packLang, packHi, slotQuellen, runCt)
+                    .ConfigureAwait(false);
+
+                if (plan == null)
+                {
+                    if (!string.IsNullOrEmpty(packCoordinator.LastSkipReason))
+                    {
+                        // F-M648: der Grund stand bisher nur auf Detail (gespeichertes Urteil). Er gehoert
+                        // auf die Normal-Stufe — ein Paar ohne Behaelter nennt seinen Grund.
+                        LogUtil.Normal(
+                            _logger,
+                            "[Sub Scribe] season pack — {Imdb} S{Season} [{Lang}]: nothing to build — {Reason}",
+                            packImdb, packSeason, SeasonPack.LangTag(packLang, packHi), packCoordinator.LastSkipReason);
+                    }
+                    else if (!string.IsNullOrEmpty(packCoordinator.LastRefusal))
+                    {
+                        // F-M611: der Grund steht schon als Urteil im Store (Refuse im Koordinator). Hier
+                        // steht nur noch, dass dieser Lauf nichts mehr dafuer tut.
+                        LogUtil.Detail(
+                            _logger,
+                            "[Sub Scribe] PACK — {Imdb} S{Season} [{Lang}] no pack this run ({Reason}); the verdict with the files' signature is stored (F-M611)",
+                            packImdb, packSeason, SeasonPack.LangTag(packLang, packHi), packCoordinator.LastRefusal);
+                    }
+
+                    continue;
+                }
+
+                // F-M647: EIN Slot je Paar. Der Takt wird EINMAL bezahlt — die Rate zaehlt Paare, nicht
+                // Quellen, sonst halbierte sie sich bei jeder zweiten Quelle (dieselbe Regel wie F-M587
+                // je Spur). Die Behaelter stehen vorher fest (FillAsync), gesendet wird gleichzeitig.
+                await _limiter.WaitForTransferSlotAsync(runCt).ConfigureAwait(false);
+                int packVersatzMs = Math.Max(1, (int)(_limiter.TransferPauseMs() * 0.05));
+
+                async Task<SeasonPackCoordinator.PackSend> PackVersand(string quelle, int index)
+                {
+                    // F-M587-Muster: kleiner Versatz statt Gleichstart — die erste Quelle geht sofort
+                    // raus, jede weitere nach 0-5 % des Transfertakts (bei 400/h also bis 0,45 s).
+                    if (index > 0)
+                    {
+                        try
+                        {
+                            await Task.Delay(Random.Shared.Next(1, packVersatzMs + 1), runCt).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            return new SeasonPackCoordinator.PackSend(quelle, SeasonPackCoordinator.PackSendOutcome.LeftOpen, "run cancelled before the send");
+                        }
+                    }
+
+                    try
+                    {
+                        return await packCoordinator.SendAsync(plan, quelle, runCt).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Ein echter Abbruch (Nutzer-Stop, Watchdog, Neustart) gilt dem ganzen Lauf.
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // F-M629/F-M647: ein Fehler bei DIESER Quelle beendet den Versand an die ANDERE
+                        // nicht. Er kommt als Ergebnis zurueck, damit Task.WhenAll nicht mitten in den
+                        // Versand der anderen Quelle reisst.
+                        _logger.LogWarning(
+                            "[Sub Scribe] season pack {Imdb} S{Season} [{Lang}] — {Source} failed: {Msg}; the other source keeps going.",
+                            packImdb, packSeason, SeasonPack.LangTag(packLang, packHi), quelle, ex.Message);
+                        return new SeasonPackCoordinator.PackSend(quelle, SeasonPackCoordinator.PackSendOutcome.Failed, ex.Message);
+                    }
+                }
+
+                var packLaeufe = new Task<SeasonPackCoordinator.PackSend>[slotQuellen.Count];
+                for (int i = 0; i < slotQuellen.Count; i++)
+                {
+                    packLaeufe[i] = PackVersand(slotQuellen[i], i);
+                }
+
+                var packErgebnisse = await Task.WhenAll(packLaeufe).ConfigureAwait(false);
+
+                LogUtil.Detail(
+                    _logger,
+                    "[Sub Scribe] PACK — {Imdb} S{Season} [{Lang}]: one slot, {Count} source(s) sent together with up to {Offset} ms offset (F-M647)",
+                    packImdb, packSeason, SeasonPack.LangTag(packLang, packHi), slotQuellen.Count, packVersatzMs);
+
+                bool geliefert = packErgebnisse.Any(e => e.Delivered);
+                if (geliefert)
+                {
+                    _packAbsorbed.Add((packImdb, packSeason, packLang, packHi));
+
+                    // F-M647/F-M594: der Takt-Anker wird gesetzt, wenn ein Behälter wirklich rausging —
+                    // ein Paar zahlt EINEN Slot, und der nächste Slot misst ab dem Ende dieses Transfers,
+                    // nicht ab dem des vorigen Einzeluploads.
+                    _limiter.MarkTransferDone();
+                }
+
+                // F-M648/F-M649: EINE Zeile je Paar fuer alles, was nicht durchging — nie eine je
+                // Quelle. Ausgenommen sind nur die Ergebnisse, die ihre Zeile schon selbst geschrieben
+                // haben: der gescheiterte Versand steht als SEASON PACK FAILED auf der Fehlerstufe.
+                var offen = packErgebnisse
+                    .Where(e => !e.Delivered && e.Outcome != SeasonPackCoordinator.PackSendOutcome.Failed)
+                    .ToList();
+                if (offen.Count == 0)
+                {
+                    continue;
+                }
+
+                var teile = packErgebnisse
+                    .Where(e => e.Outcome != SeasonPackCoordinator.PackSendOutcome.Failed)
+                    .Select(e => e.Delivered
+                        ? $"{PackSourceName(e.Source)} sent"
+                        : $"{PackSourceName(e.Source)}: {e.Detail}")
+                    .ToList();
+                // F-M648: EINE Zeile je Paar, beide Quellen mit ihrem Grund. Keine eigenen
+                // Anführungszeichen um Platzhalter — der Log-Schreiber setzt sie selbst (LOGGING.md 1.11).
+                bool gescheitert = packErgebnisse.Any(e => e.Outcome == SeasonPackCoordinator.PackSendOutcome.Failed);
+                string packZeile = geliefert
+                    ? "[Sub Scribe] season pack — {Imdb} S{Season} [{Lang}]: {Parts} (F-M648)"
+                    : offen.Any(e => e.Outcome == SeasonPackCoordinator.PackSendOutcome.LeftOpen)
+                        ? "[Sub Scribe] season pack — {Imdb} S{Season} [{Lang}]: no container, no verdict — {Parts}; the pair stays open and the next run takes it again (F-M649)"
+                        : gescheitert
+                            ? "[Sub Scribe] season pack — {Imdb} S{Season} [{Lang}]: no container — {Parts} (F-M647)"
+                            : "[Sub Scribe] season pack — {Imdb} S{Season} [{Lang}]: nothing to build — {Parts}; the singles it was meant to carry go up in the single phase (F-M429, F-M648)";
+
                 LogUtil.Normal(
                     _logger,
-                    "[Sub Scribe] PACK — tvst phase not entered: {Reason} (F-M645).",
-                    IsArrivalRun
-                        ? "this is an arrival run — a season pack of the library stays with a full run (F-M424)"
-                        : "the upload switch of tvsubtitles.net is off — nothing is built or sent for this source (F-M495)");
+                    packZeile,
+                    packImdb, packSeason, SeasonPack.LangTag(packLang, packHi),
+                    string.Join("; ", teile));
             }
 
             // F-M640: jede vollstaendige Staffel bekommt GENAU eine Zeile. Vorher fiel eine Staffel, fuer
@@ -5904,12 +6001,26 @@ public sealed class UploadPipeline : IPackFiller
         return gepackt;
     }
 
+    /// <summary>
+    /// F-M648: der kurze Name einer Quelle fuer die eine Zeile je Paar („subdl" / „tvst") — der
+    /// Schluessel im Store bleibt der volle Name.
+    /// </summary>
+    /// <param name="source">Der Quellenschluessel.</param>
+    /// <returns>Kurzform.</returns>
+    private static string PackSourceName(string source)
+        => source == PackEntity.TvSubtitlesSource ? "tvst" : source;
+
     private List<(string ImdbId, int Season, string Lang, bool Hi)> PlanPacksFromStore(
         IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
         IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlySet<int>>? onlyEpisodes = null,
-        string source = PackEntity.SubdlSource)
+        IReadOnlyList<string>? sources = null)
     {
         var planned = new List<(string ImdbId, int Season, string Lang, bool Hi)>();
+
+        // F-M647: die Planung fragt fuer ALLE Quellen des Slots. Ein Paar ist erst dann nichts mehr zu
+        // tun, wenn JEDE von ihnen den Behaelter hat — sonst faellt der Behälter der zweiten Quelle aus
+        // der Planung, nur weil SubDL ihn schon fuehrt (und umgekehrt).
+        IReadOnlyList<string> quellen = sources is { Count: > 0 } ? sources : new[] { PackEntity.SubdlSource };
 
         foreach (var entry in complete)
         {
@@ -5990,19 +6101,31 @@ public sealed class UploadPipeline : IPackFiller
                 // F-M571: dieselbe Staffelfrage wie im Sammler, keine zweite Abfrage je Paar.
                 // F-M643: die Frage gilt EINER Quelle — ein tvst-Pack macht den SubDL-Pack nicht
                 // ueberfluessig und umgekehrt.
-                var gepacktHier = source == PackEntity.SubdlSource
-                    ? PacksOf(entry.Key.Item1, entry.Key.Item2)
-                    : PacksOfSource(entry.Key.Item1, entry.Key.Item2, source);
-                if (gepacktHier.Contains((
-                        Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(pair.Key.Lang)
-                            ?? (pair.Key.Lang ?? string.Empty).ToUpperInvariant(),
-                        pair.Key.Hi)))
+                // F-M647: deshalb wird fuer JEDE Quelle des Slots gefragt, und erst wenn alle sie
+                // fuehren, faellt das Paar aus der Planung.
+                var schonGepackt = new List<string>();
+                foreach (string quelle in quellen)
+                {
+                    var gepacktHier = quelle == PackEntity.SubdlSource
+                        ? PacksOf(entry.Key.Item1, entry.Key.Item2)
+                        : PacksOfSource(entry.Key.Item1, entry.Key.Item2, quelle);
+                    if (gepacktHier.Contains((
+                            Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(pair.Key.Lang)
+                                ?? (pair.Key.Lang ?? string.Empty).ToUpperInvariant(),
+                            pair.Key.Hi)))
+                    {
+                        schonGepackt.Add(PackSourceName(quelle));
+                    }
+                }
+
+                if (schonGepackt.Count == quellen.Count)
                 {
                     LogUtil.PerItem(
                         _config.LogMode,
                         _logger,
-                        "[Sub Scribe] season pack plan: {Imdb} S{Season} [{Lang}] — already inside a pack, nothing is re-sent.",
-                        entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(pair.Key.Lang, pair.Key.Hi));
+                        "[Sub Scribe] season pack plan: {Imdb} S{Season} [{Lang}] — already inside a pack at {Sources}, nothing is re-sent (F-M647).",
+                        entry.Key.Item1, entry.Key.Item2, SeasonPack.LangTag(pair.Key.Lang, pair.Key.Hi),
+                        string.Join(" and ", schonGepackt));
                     continue;
                 }
 

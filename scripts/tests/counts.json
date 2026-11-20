@@ -679,11 +679,19 @@
     },
     "T330": {
       "suite": "seasonpack",
-      "checks": 9
+      "checks": 12
     },
     "T331": {
       "suite": "storex",
       "checks": 13
+    },
+    "T332": {
+      "suite": "seasonpack",
+      "checks": 7
+    },
+    "T333": {
+      "suite": "seasonpack",
+      "checks": 9
     }
   }
 }

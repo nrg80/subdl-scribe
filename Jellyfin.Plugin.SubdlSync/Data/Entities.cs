@@ -915,6 +915,20 @@ public class PackEntity
     public DateTime? RefusedAt { get; set; }
 
     /// <summary>
+    /// F-M650: die STAFFEL-SIGNATUR, auf der die Ablehnung beruht — die Signatur der Dateien im
+    /// Augenblick der Absage (<see cref="Pipeline.SeasonPackCoordinator.SeasonSignature"/>).
+    /// <para>
+    /// Warum sie gebraucht wird: der Fingerabdruck (<see cref="Fingerprint"/>) beschreibt die
+    /// MITGLIEDER eines Behälters und lässt sich erst vergleichen, wenn gesammelt und entpackt wurde.
+    /// Die Signatur ist vor der Extraktion bekannt — sie sagt „diese Staffel ist dieselbe wie bei der
+    /// Absage". Steht sie unverändert und hat die Quelle den Behälter nicht, ist das Paar für diese
+    /// Quelle geschlossen: es wird weder gesammelt noch entpackt. Erst eine neue Folge oder eine
+    /// geänderte Datei ergibt eine andere Signatur und damit einen neuen Versuch.
+    /// </para>
+    /// </summary>
+    public string? RefusedSignature { get; set; }
+
+    /// <summary>
     /// F-M644: wann dieser Behälter tatsächlich durchgegangen ist (UTC) — der Beleg der Zeile.
     /// <para>
     /// Je Zeile und damit je Quelle, genau wie <c>SubdlUploadedAt</c>/<c>TvSubtitlesUploadedAt</c> auf

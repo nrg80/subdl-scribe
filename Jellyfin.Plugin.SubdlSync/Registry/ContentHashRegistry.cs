@@ -1976,6 +1976,8 @@ public sealed class ContentHashRegistry : IDisposable
             // „abgelehnt am ...", und „Pack ist durch" waere nirgends abzulesen.
             RefusalReason = null,
             RefusedAt = null,
+            // F-M650: mit der Absage faellt auch die Signatur, auf der sie beruhte.
+            RefusedSignature = null,
             UploadedAt = DateTime.UtcNow,
             Created = existing?.Created ?? DateTime.UtcNow,
             Updated = DateTime.UtcNow,
@@ -2006,6 +2008,13 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="reason">Der Grund, den die Quelle genannt hat.</param>
     /// <param name="fingerprint">Fingerabdruck der Mitglieder (<see cref="Pipeline.SeasonPack.PackHash"/>).</param>
     /// <param name="source">F-M642: die Quelle, deren Zeile hier spricht.</param>
+    /// <param name="signature">
+    /// F-M650: die Staffel-Signatur, auf der die Absage beruht
+    /// (<see cref="Pipeline.SeasonPackCoordinator.SeasonSignature"/>). Sie ist der Grund, warum ein
+    /// abgelehntes Paar nicht mehr gesammelt werden muss: ist sie beim nächsten Lauf dieselbe, steht
+    /// das Urteil schon fest, ohne dass ein einziger Mitgliedstext entpackt wurde. Leer bleibt möglich
+    /// (ein Aufrufer ohne Signatur) — dann gilt die Absage wie bisher über den Fingerabdruck.
+    /// </param>
     public void RecordPackRefusal(
         string imdbId,
         int season,
@@ -2013,7 +2022,8 @@ public sealed class ContentHashRegistry : IDisposable
         bool hearingImpaired,
         string reason,
         string? fingerprint,
-        string source = PackEntity.SubdlSource)
+        string source = PackEntity.SubdlSource,
+        string? signature = null)
     {
         if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || string.IsNullOrWhiteSpace(language))
         {
@@ -2038,6 +2048,9 @@ public sealed class ContentHashRegistry : IDisposable
             Fingerprint = string.IsNullOrWhiteSpace(fingerprint) ? existing?.Fingerprint : fingerprint,
             RefusalReason = reason,
             RefusedAt = DateTime.UtcNow,
+            // F-M650: die Signatur, auf der die Absage beruht. Ohne sie waere die Absage erst nach
+            // dem Sammeln pruefbar (Fingerabdruck) — mit ihr steht sie vor der Extraktion fest.
+            RefusedSignature = string.IsNullOrWhiteSpace(signature) ? existing?.RefusedSignature : signature,
             // F-M644: die Absage ist das Gegenteil eines Belegs — ein abgelehnter Behälter ist nie
             // „durch". Was hier steht, raeumt den Beleg der Zeile weg.
             UploadedAt = null,
@@ -2085,6 +2098,9 @@ public sealed class ContentHashRegistry : IDisposable
         {
             row.RefusalReason = null;
             row.RefusedAt = null;
+            // F-M650: die Signatur der Absage faellt mit — sonst stuende nach dem Reset eine Signatur
+            // ohne Grund in der Zeile und ein neuer Lauf haette keinen Grund, sie zu pruefen.
+            row.RefusedSignature = null;
             row.Updated = DateTime.UtcNow;
             _db.Packs.Upsert(row);
             geloescht++;
@@ -2326,6 +2342,46 @@ public sealed class ContentHashRegistry : IDisposable
         // deshalb ein Nein; wer den Grund braucht, nimmt `GetPack` und liest `RefusalReason`.
         => GetPack(imdbId, season, language, hearingImpaired, source) is { } row
            && string.IsNullOrWhiteSpace(row.RefusalReason);
+
+    /// <summary>
+    /// F-M650: steht die Ablehnung dieser Quelle noch — auf DERSELBEN Staffel-Signatur?
+    /// <para>
+    /// Die Frage, die vor dem Sammeln beantwortet werden kann. Der Fingerabdruck einer Absage
+    /// beschreibt die Mitglieder und ist erst nach dem Entpacken vergleichbar; die Signatur der Staffel
+    /// (Luftzahl plus Größe und Speicherdatum jeder Folgedatei, F-M611) steht vorher fest. Ist sie
+    /// dieselbe wie bei der Absage und hat die Quelle den Behälter nicht, gilt das Paar für diese
+    /// Quelle als geschlossen: kein Sammeln, kein Entpacken, ein Versuch weniger.
+    /// </para>
+    /// <para>
+    /// Drei Aussagen gehören zusammen, deshalb wird die Zeile als Ganzes geprüft: eine Ablehnung steht
+    /// (Grund), ihr Beleg fehlt (<see cref="PackEntity.UploadedAt"/> ist leer — Beleg und Absage
+    /// schließen sich aus), und die Signatur ist bekannt und gleich. Eine leere oder unbekannte Signatur
+    /// ist ein <c>false</c>: im Zweifel wird lieber einmal zu viel gesammelt als eine Staffel
+    /// stillgelegt, deren Signatur niemand kennt (Zeilen aus der Zeit vor der Spalte).
+    /// </para>
+    /// </summary>
+    /// <param name="imdbId">Serie.</param>
+    /// <param name="season">Staffel.</param>
+    /// <param name="language">Sprache des Behälters.</param>
+    /// <param name="hearingImpaired">HI-Variante des Behälters.</param>
+    /// <param name="source">F-M642: die Quelle, deren Zeile hier spricht.</param>
+    /// <param name="signature">F-M611/F-M650: die Signatur der Staffel in diesem Lauf.</param>
+    /// <returns>True, wenn die Ablehnung mit genau dieser Signatur steht.</returns>
+    public bool PackRefusalStands(
+        string? imdbId, int season, string? language, bool hearingImpaired,
+        string source, string? signature)
+    {
+        if (string.IsNullOrWhiteSpace(signature))
+        {
+            return false;
+        }
+
+        return GetPack(imdbId, season, language, hearingImpaired, source) is { } row
+               && !string.IsNullOrWhiteSpace(row.RefusalReason)
+               && row.UploadedAt == null
+               && !string.IsNullOrWhiteSpace(row.RefusedSignature)
+               && string.Equals(row.RefusedSignature, signature, StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// F-M571 (Operator-Anweisung 17.11.2026: „Already up as a pack ist doch etwas das kann man mit dem
