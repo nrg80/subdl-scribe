@@ -530,7 +530,7 @@ using (var db = new ScribeDbContext(workdir, null))
     var reg = new ContentHashRegistry(db);
     string abdruck = Jellyfin.Plugin.SubScribe.Pipeline.SeasonPack.PackHash(new[] { "aaaa", "bbbb", "cccc" });
 
-    reg.RecordPackRefusal("tt644", 3, "EN", false, "the source already holds this container (duplicate)", abdruck);
+    reg.RecordPackRefusal("tt644", 3, "EN", false, "the source already holds this container (duplicate)", abdruck, PackEntity.SubdlSource);
     var abgelehnt = db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false));
     Check(abgelehnt != null
           && abgelehnt!.RefusalReason == "the source already holds this container (duplicate)"
@@ -544,8 +544,8 @@ using (var db = new ScribeDbContext(workdir, null))
 
     // Die Zeile existiert (mit Grund), gilt aber NICHT als Pack: sonst haette die Absage die Staffel
     // fuer immer stillgelegt und ein geaenderter Inhalt waere nie wieder geplant worden.
-    Check(!reg.HasPack("tt644", 3, "EN", false)
-          && reg.GetPack("tt644", 3, "EN", false)?.RefusalReason != null,
+    Check(!reg.HasPack("tt644", 3, "EN", false, PackEntity.SubdlSource)
+          && reg.GetPack("tt644", 3, "EN", false, PackEntity.SubdlSource)?.RefusalReason != null,
         "F-M644: a refused row is readable but is not a pack — the next plan asks the same season again");
 
     // Dieselbe Staffel, andere Quelle: die Absage gilt NUR ihrer Zeile (F-M642).
@@ -557,12 +557,12 @@ using (var db = new ScribeDbContext(workdir, null))
     // ueberschreibt den alten Stand, weil sie denselben Inhalt beschreibt (die Zeile ist der Zustand,
     // keine Historie).
     string neuerAbdruck = Jellyfin.Plugin.SubScribe.Pipeline.SeasonPack.PackHash(new[] { "aaaa", "bbbb", "cccc", "dddd" });
-    reg.RecordPackRefusal("tt644", 3, "EN", false, "the source already holds this container (duplicate)", neuerAbdruck);
+    reg.RecordPackRefusal("tt644", 3, "EN", false, "the source already holds this container (duplicate)", neuerAbdruck, PackEntity.SubdlSource);
     Check(db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false))?.Fingerprint == neuerAbdruck,
         "F-M644: a changed content gets its own fingerprint — the verdict follows the content, not the season");
 
     // Der Erfolg: Absage weg, Beleg da.
-    reg.RecordPack("tt644", 3, "EN", false, "Show.S03.1080p", "tt644.S03.x.EN", new[] { 1, 2, 3 }, null, neuerAbdruck);
+    reg.RecordPack("tt644", 3, "EN", false, "Show.S03.1080p", "tt644.S03.x.EN", new[] { 1, 2, 3 }, PackEntity.SubdlSource, absorbedIds: null, neuerAbdruck);
     var durch = db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false));
     Check(durch != null
           && string.IsNullOrEmpty(durch!.RefusalReason)
@@ -578,7 +578,7 @@ using (var db = new ScribeDbContext(workdir, null))
         m.Season = 3;
         m.IsSeries = true;
     });
-    reg.RecordPackRefusal("tt644", 3, "DE", false, "the source already holds this container (duplicate)", abdruck);
+    reg.RecordPackRefusal("tt644", 3, "DE", false, "the source already holds this container (duplicate)", abdruck, PackEntity.SubdlSource);
     Check(db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "DE", false))?.RefusalReason != null,
         "F-M644: a second language of the same season is refused on its own row");
 

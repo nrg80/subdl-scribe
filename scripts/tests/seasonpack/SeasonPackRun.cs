@@ -1276,6 +1276,17 @@ internal static class Program
 
             Check(uploadSrc.Contains("already up as a pack for {Sources}", StringComparison.Ordinal),
                 "F-M654: the one line names the sources the pairs are packed for");
+
+            // F-M655: kein Vorgabewert fuer die Quelle. Ein vergessenes Argument schrieb sonst
+            // stillschweigend "subdl" — genau der Verdacht, der am 20.11.2026 zur Pruefung fuehrte.
+            var storeQuelle = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"));
+            Check(!storeQuelle.Contains("string source = PackEntity.SubdlSource", StringComparison.Ordinal),
+                "F-M655: the source of a pack question never falls back to a default");
+
+            var coordSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+            Check(coordSrc.Contains("source," + Environment.NewLine + "            absorbedIds: null,", StringComparison.Ordinal)
+                  || coordSrc.Contains("            source,", StringComparison.Ordinal),
+                "F-M655: the pack writer names the source it just sent to, it does not inherit one");
         }
 
         // ── 11. F-M650: eine stehende Ablehnung schliesst das Paar VOR dem Sammeln ──────────────────
@@ -1374,7 +1385,10 @@ internal static class Program
                         Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource, signature: "sig-A");
                     reg.RecordPack(
                         "tt650", 2, "EN", false, "Show.S02.1080p", "tt650.S02.x.EN",
-                        new[] { 1, 2, 3, 4, 5, 6, 7, 8 }, null, "fingerprint-of-the-pack");
+                        new[] { 1, 2, 3, 4, 5, 6, 7, 8 },
+                        Jellyfin.Plugin.SubScribe.Data.PackEntity.SubdlSource,
+                        absorbedIds: null,
+                        fingerprint: "fingerprint-of-the-pack");
                     var hatFiller = new FakeFiller(refuse: Array.Empty<int>(), answer: -1);
                     var hatLog = new List<string>();
                     var hat = NewCoordinator(hatLog, f650Complete, f650Packable, hatFiller, dryConfig, reg);

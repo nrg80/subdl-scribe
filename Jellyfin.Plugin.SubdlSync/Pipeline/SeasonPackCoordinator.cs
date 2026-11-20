@@ -1127,7 +1127,11 @@ public sealed class SeasonPackCoordinator
             first.ReleaseName,
             packId,
             ordered.Select(x => x.Episode),
-            null,
+            // F-M655: die Quelle wird AUSDRUECKLICH genannt. Bis 12.2.0.14 hatte der Parameter den
+            // Vorgabewert `subdl` — ein vergessenes Argument haette einen tvst-Pack als SubDL-Pack
+            // gespeichert, ohne dass irgendwo etwas rot wird.
+            source,
+            absorbedIds: null,
             plan.Fingerprint));
 
         _countUploaded($"{key.ImdbId} S{key.Season} [{key.Lang}]", ordered.Count);

@@ -5949,7 +5949,10 @@ public sealed class UploadPipeline : IPackFiller
                 }
 
                 sawRow = true;
-                if (!Registry.HasPack(key.ImdbId, key.Season, row.Language, row.HearingImpaired ?? false))
+                // F-M654: offen ist die Sprache schon dann, wenn EINE Quelle des Slots sie nicht gepackt
+                // hat — nicht erst, wenn keine sie hat.
+                if (!PackSlotSources().All(quelle => Registry.HasPack(
+                        key.ImdbId, key.Season, row.Language, row.HearingImpaired ?? false, quelle)))
                 {
                     return true;
                 }
@@ -7951,7 +7954,10 @@ public sealed class UploadPipeline : IPackFiller
             return false;
         }
 
-        var pack = Registry.GetPack(imdbId, season, language, hearingImpaired);
+        // F-M655: die Quelle wird genannt; der Beleg zaehlt, wenn irgendeine Quelle des Slots ihn fuehrt.
+        var pack = PackSlotSources()
+            .Select(quelle => Registry.GetPack(imdbId, season, language, hearingImpaired, quelle))
+            .FirstOrDefault(gefunden => gefunden is not null && !string.IsNullOrWhiteSpace(gefunden.Episodes));
         if (pack is null || string.IsNullOrWhiteSpace(pack.Episodes))
         {
             return false;

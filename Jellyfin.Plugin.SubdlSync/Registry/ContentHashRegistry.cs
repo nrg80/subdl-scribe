@@ -1945,9 +1945,9 @@ public sealed class ContentHashRegistry : IDisposable
         string? releaseName,
         string? packId,
         IEnumerable<int> episodes,
+        string source,
         IEnumerable<string>? absorbedIds = null,
-        string? fingerprint = null,
-        string source = PackEntity.SubdlSource)
+        string? fingerprint = null)
     {
         if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || string.IsNullOrWhiteSpace(language))
         {
@@ -2022,7 +2022,7 @@ public sealed class ContentHashRegistry : IDisposable
         bool hearingImpaired,
         string reason,
         string? fingerprint,
-        string source = PackEntity.SubdlSource,
+        string source,
         string? signature = null)
     {
         if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || string.IsNullOrWhiteSpace(language))
@@ -2309,11 +2309,11 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="season">Season number.</param>
     /// <param name="language">Language code of the pack at its source.</param>
     /// <param name="hearingImpaired">HI/SDH variant.</param>
-    /// <param name="source">F-M642: the source the pack belongs to — SubDL by default.</param>
+    /// <param name="source">F-M642: the source the pack belongs to; must be named explicitly (F-M655).</param>
     /// <returns>The stored row, or null.</returns>
     public PackEntity? GetPack(
         string? imdbId, int season, string? language, bool hearingImpaired,
-        string source = PackEntity.SubdlSource)
+        string source)
     {
         if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || string.IsNullOrWhiteSpace(language))
         {
@@ -2332,11 +2332,11 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="season">Season number.</param>
     /// <param name="language">Language code of the pack at its source.</param>
     /// <param name="hearingImpaired">HI/SDH variant.</param>
-    /// <param name="source">F-M642: the source the pack belongs to — SubDL by default.</param>
+    /// <param name="source">F-M642: the source the pack belongs to; must be named explicitly (F-M655).</param>
     /// <returns>True when a pack row exists.</returns>
     public bool HasPack(
         string? imdbId, int season, string? language, bool hearingImpaired,
-        string source = PackEntity.SubdlSource)
+        string source)
         // F-M644: eine Zeile mit Ablehnung ist KEIN Pack. Sie belegt, dass die Quelle diesen Behälter
         // abgelehnt hat — nicht, dass er oben ist. Wer „ist die Staffel gepackt?" fragt, bekommt hier
         // deshalb ein Nein; wer den Grund braucht, nimmt `GetPack` und liest `RefusalReason`.
@@ -2395,10 +2395,10 @@ public sealed class ContentHashRegistry : IDisposable
     /// </summary>
     /// <param name="imdbId">Series IMDb id.</param>
     /// <param name="season">Season number.</param>
-    /// <param name="source">F-M642: die Quelle, deren Packs gefragt sind — SubDL per Vorgabe.</param>
+    /// <param name="source">F-M642: die Quelle, deren Packs gefragt sind; muss ausdruecklich genannt werden (F-M655).</param>
     /// <returns>Die bereits gepackten (Sprache, HI)-Paare dieser Staffel.</returns>
     public HashSet<(string Language, bool HearingImpaired)> PacksInSeason(
-        string? imdbId, int season, string source = PackEntity.SubdlSource)
+        string? imdbId, int season, string source)
     {
         var gepackt = new HashSet<(string Language, bool HearingImpaired)>();
         if (string.IsNullOrWhiteSpace(imdbId) || season < 1)
