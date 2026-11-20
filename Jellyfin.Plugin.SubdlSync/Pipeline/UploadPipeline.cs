@@ -4287,9 +4287,32 @@ public sealed class UploadPipeline : IPackFiller
         }
 
         // F-M3/F-M6: text subs only (SRT/ASS/SSA); bitmap (PGS/VobSub) excluded via IsTextSubtitleStream
-        return streams
+        var textTracks = streams
             .Where(s => s.Type == MediaStreamType.Subtitle && s.IsTextSubtitleStream)
             .ToList();
+
+        // F-M640 (Operator-Frage 20.11.2026: „Pierre was not uploaded either single nor pack, why?"):
+        // die Datei trug ausschliesslich PGSSUB — ein Bildformat, aus dem sich keine SRT machen laesst.
+        // Der Lauf schwieg dazu, weil die Filterung oben einfach eine leere Liste ergab. Jetzt sagt er es.
+        if (textTracks.Count == 0)
+        {
+            var bitmap = streams
+                .Where(s => s.Type == MediaStreamType.Subtitle && !s.IsTextSubtitleStream)
+                .Select(s => s.Codec?.ToUpperInvariant())
+                .Where(c => !string.IsNullOrEmpty(c))
+                .Distinct()
+                .ToList();
+            if (bitmap.Count > 0)
+            {
+                LogUtil.PerItem(
+                    _config.LogMode,
+                    _logger,
+                    "[Sub Scribe] bitmap only ({Codecs}) — no text subtitle in this file, nothing to upload from it (F-M3/F-M6).",
+                    string.Join(", ", bitmap!));
+            }
+        }
+
+        return textTracks;
     }
 
     /// <summary>

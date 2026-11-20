@@ -406,6 +406,33 @@ public static partial class SeasonPack
         return ReleaseGroup(releaseName, 0);
     }
 
+    /// <summary>
+    /// F-M640: the video extensions a release name can carry. Only these are stripped, so a name like
+    /// <c>…x265.YIFY</c> keeps its last token.
+    /// </summary>
+    private static bool IsVideoExtension(string tail)
+    {
+        switch (tail.ToLowerInvariant())
+        {
+            case "mkv":
+            case "mp4":
+            case "m4v":
+            case "avi":
+            case "mov":
+            case "wmv":
+            case "mpg":
+            case "mpeg":
+            case "ts":
+            case "m2ts":
+            case "flv":
+            case "webm":
+            case "ogv":
+                return true;
+            default:
+                return false;
+        }
+    }
+
     /// <summary>The recursive worker behind <see cref="ReleaseGroup(string?)"/>.</summary>
     private static string? ReleaseGroup(string? releaseName, int depth)
     {
@@ -415,6 +442,16 @@ public static partial class SeasonPack
         }
 
         string name = releaseName.Trim();
+
+        // F-M640 (Operator-Befund 20.11.2026: Pierre S1 meldete release group "?"): here comes a PATH,
+        // extension included. "…5.1 BONE.mkv" ends on ".mkv", so the last dot token is the extension and
+        // the group token in front of it ("BONE") is never examined. The extension is dropped first; for
+        // dot-separated names ("…x264.YIFY.mkv") nothing changes — it was no candidate there anyway.
+        int extensionAt = name.LastIndexOf('.');
+        if (extensionAt > 0 && IsVideoExtension(name[(extensionAt + 1)..]))
+        {
+            name = name[..extensionAt];
+        }
 
         // A trailing bracket or parenthesis hides two things at once: the site tag the uploader added
         // ("[EZTVx.to]") and, in the bracket itself, the group ("[MPup]"). Strip it, ask the rest, and
