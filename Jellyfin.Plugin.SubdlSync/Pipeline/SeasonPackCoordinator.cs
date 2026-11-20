@@ -521,13 +521,12 @@ public sealed class SeasonPackCoordinator
             && Registry.PackSeasonStore.StillImpossible(
                 imdbId, season, SeasonPack.LangTag(lang, hi) + FillTagSuffix, fillSignatur!, out string altGrund))
         {
-            LogUtil.Detail(
-                _logger,
-                "[Sub Scribe] season pack — {Imdb} S{Season} [{Lang}] unchanged since the last judgement ({Reason}), nothing extracted (F-M611)",
-                imdbId, season, SeasonPack.LangTag(lang, hi), altGrund);
-
-            // F-M648: der Grund stand bisher nur auf Detail. Die eine Zeile je Paar nennt ihn jetzt auf
-            // der Normal-Stufe — sonst liest sich „kein Behälter" wieder wie ein stiller Ausfall.
+            // F-M651 (Operator-Befund 20.11.2026: „Ist schon unstrukturiert"): hier stand zusaetzlich
+            // eine eigene Zeile „unchanged since the last judgement — nothing extracted". Sie sagte
+            // dasselbe wie die eine Zeile je Paar, nur in einer zweiten Formulierung — im Lauf vom
+            // 20.11. hatten 379 von 382 stillgelegten Paaren BEIDE Zeilen. Der Grund reist jetzt
+            // ausschliesslich ueber LastSkipReason in die eine Zeile je Paar (F-M648); nichts wird
+            // doppelt geschrieben.
             LastSkipReason = $"no pack ({altGrund}), the verdict is stored with the files' signature (F-M611)";
             return null;
         }

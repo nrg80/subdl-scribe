@@ -972,7 +972,7 @@ internal static class Program
             && coord611.Contains("Registry.PackSeasonStore.NoPack, reason);", StringComparison.Ordinal));
         Check("F-M611: ein gespeichertes Urteil verhindert die naechste Extraktion, solange die Signatur gleich bleibt",
             coord611.Contains("Registry.PackSeasonStore.StillImpossible(", StringComparison.Ordinal)
-            && coord611.Contains("unchanged since the last judgement ({Reason}), nothing extracted (F-M611)", StringComparison.Ordinal)
+            && coord611.Contains("LastSkipReason = $\"no pack ({altGrund}), the verdict is stored with the files' signature (F-M611)\"", StringComparison.Ordinal)
             && coord611.Contains("LastRefusal = null;", StringComparison.Ordinal));
         Check("F-M611: beide Abbruchwege (vor und nach der Extraktion) hinterlassen ein Urteil",
             coord611.Contains("Refuse(imdbId, season, lang, hi, $\"episode {episode} cannot join ({vorabGrund})\");", StringComparison.Ordinal)
