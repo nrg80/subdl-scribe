@@ -369,7 +369,7 @@ internal static class Program
         // ── 18. F-M412: der State sagt, ob löschbar ────────────────────────────
         Console.WriteLine("18. The store says whether a single can be deleted");
         var coordPackSrc = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
-        Check(coordPackSrc.Contains("carry no SubDL id in the store"), "F-M412: a member without a SubDL id is named");
+        Check(coordPackSrc.Contains("have no single id yet"), "F-M412: a member without a SubDL id is named");
         Check(coordPackSrc.IndexOf("undeletable", StringComparison.Ordinal)
               < coordPackSrc.IndexOf("await _api.UploadSeasonPackAsync"), "F-M412: the note comes before the pack is sent");
 

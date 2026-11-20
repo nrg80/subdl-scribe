@@ -5579,7 +5579,15 @@ public sealed class UploadPipeline : IPackFiller
         // F-M391: the id of the single upload this member replaces travels with the candidate, so the
         // coordinator can delete it BEFORE the pack goes up. Empty means "no single to remove" — the
         // row may be a download, or an upload whose answer carried no id.
+        // F-M391/F-M653: der Einzelupload schreibt seine Kennung in ZWEI Felder — `SubdlId` und
+        // `SubdlUploadId` (ContentHashRegistry 698/704 und 1622/1646). Gelesen wurde bisher nur das
+        // erste. Unter F-M429 (Pack zuerst, Einzeluploads danach) ist zum Zeitpunkt des Packbaus
+        // ohnehin keine Zeile da — die Kennung ist dann ehrlich leer, und die Zeile sagt das jetzt auch.
         string? absorbed = uploadedRow?.SubdlId;
+        if (string.IsNullOrWhiteSpace(absorbed))
+        {
+            absorbed = uploadedRow?.SubdlUploadId;
+        }
         return PackCandidate(
             item, mediaHash, imdbId, TmdbOfEpisode(item), season, episode, lang, hearingImpaired,
             forced: false, subPos, srt, mediaPath, GetFramerateCode(item), width, height, codec,

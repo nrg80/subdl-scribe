@@ -949,7 +949,12 @@ public sealed class SeasonPackCoordinator
             {
                 LogUtil.Normal(
                     _logger,
-                    "[Sub Scribe] season pack {Imdb} S{Season} [{Lang}]: {Count} member(s) carry no SubDL id in the store ({Episodes}) — uploaded by us, but not deletable, they stay beside the pack.",
+                    // F-M653 (Operator-Frage 20.11.2026: „ich wunder mich ob wir das nicht schon alles hatten"):
+                    // die alte Formulierung behauptete „uploaded by us, but not deletable". Unter F-M429 geht
+                    // der Pack ZUERST raus, die Einzeluploads folgen — zum Packbau gibt es also noch keine
+                    // Einzelzeile und damit keine Kennung. Am 19.11.2026 traf das auf 274 von 274 Packs zu,
+                    // nie auf einen mit Kennung. Die Zeile nennt jetzt den Grund statt einer Schuld.
+                    "[Sub Scribe] season pack {Imdb} S{Season} [{Lang}]: {Count} member(s) have no single id yet ({Episodes}) — the pack goes up first, its singles follow and only then can their ids be recorded (F-M429, F-M391).",
                     key.ImdbId, key.Season, key.Lang, undeletable.Count, string.Join(", ", undeletable.Take(6)));
             }
 

@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.2.0.12.
+**Status:** Implementation — v12.2.0.13.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -41,7 +41,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [19. Test Library](#19-test-library)
 - [21. Adding another endpoint — checklist and pitfalls](#21-adding-another-endpoint--checklist-and-pitfalls) — 1 requirement (F-M564) + Checkliste
 
-- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 25 requirements
+- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 26 requirements
 - [20. References](#20-references)
 
 ## 1. Objective and Scope
@@ -3033,6 +3033,8 @@ Geprüft von T332.
 
 **F-M650 [D]:** **Eine abgelehnte Quelle ist geschlossen, solange die Staffel-Signatur dieselbe ist — es wird nicht gesammelt und nicht entpackt.** Betreiber-Anforderung 20.11.2026: ein Paar, für das **keine** Quelle mehr offen ist (Behälter vorhanden **oder** Ablehnung mit unveränderter Signatur **oder** Quelle aus), darf gar nicht erst gesammelt werden. Bis 12.2.0.9 stand die Absage einer Quelle (F-M644) nur mit dem **Fingerabdruck** der Mitglieder in der `packs`-Zeile — und der lässt sich erst vergleichen, nachdem jede Folge entpackt wurde. Für ein abgelehntes Paar wurde deshalb bei jedem Lauf die ganze Staffel gesammelt, nur um am Ende „fingerprint … unchanged, nothing is re-sent" zu melden. Drei Teile schließen die Lücke:
 **F-M651 [D]:** **Ein gespeichertes Pack-Urteil bekommt keine zweite Zeile — je Paar steht genau eine Zeile im Log.** Betreiber-Befund 20.11.2026: „Ist schon unstrukturiert. Mal wieder am umdeuten." Bis 12.2.0.10 schrieb der Sammler beim gespeicherten Urteil zusaetzlich eine eigene Zeile (`unchanged since the last judgement (<Grund>), nothing extracted`), waehrend die Pipeline fuer dasselbe Paar ihre eine Zeile (`nothing to build — "no pack (<Grund>), the verdict is stored with the files' signature"`) schrieb. Im Lauf vom 20.11.2026 hatten **379 von 382** stillgelegten Paaren beide Zeilen, in zwei verschiedenen Formulierungen fuer denselben Befund. Jetzt reist der Grund ausschliesslich ueber `LastSkipReason` in die eine Zeile je Paar (F-M648); der Sammler schreibt dazu nichts. Die Staffel-Zeile aus F-M604 (`nothing examined`, eine je Staffel) bleibt unberuehrt, weil sie eine andere Menge beschreibt. Geprueft in `endpoints` (F-M611-Pruefung: der Grund steht in `LastSkipReason`, nicht als eigene Logzeile).
+**F-M653 [D]:** **Die Mitglieder-Zeile nennt den Grund, nicht eine Schuld — unter F-M429 gibt es zum Packbau noch keine Einzelkennung.** Operator-Frage 20.11.2026: „ich wunder mich ob wir das nicht schon alles hatten". Geprueft in den Laeufen: 19.11.2026 **274 Packs, 274 mal „carry no SubDL id“, 0 mal mit Kennung**; 20.11.2026 65 mal ohne, 0 mit. Die Zuweisung im Code liest nur `embeds.SubdlId`, waehrend der Upload seine Kennung auch in `SubdlUploadId` schreibt (beide werden jetzt gelesen), und vor allem: der Pack geht unter F-M429 **zuerst** raus, die Einzeluploads folgen — zum Packbau existiert also gar keine Einzelzeile. Die Zeile behauptete dennoch „uploaded by us, but not deletable". Sie sagt jetzt „{Count} member(s) have no single id yet … the pack goes up first, its singles follow and only then can their ids be recorded". Geprueft in `packretry` (F-M412-Pruefung pinnt die neue Formulierung).
+
 
 
 1. **Die Absage merkt sich ihre Signatur.** `RecordPackRefusal(…, signature:)` schreibt zusätzlich `RefusedSignature` — die Signatur der Staffel im Augenblick der Absage (F-M611: Luftzahl plus Größe und Speicherdatum jeder Folgedatei). Die Spalte ist **additiv**: `ALTER TABLE packs ADD COLUMN RefusedSignature TEXT NULL` beim Öffnen der Datei (dieselbe Liste wie `RefusalReason`/`RefusedAt`/`UploadedAt`), Bestandszeilen lesen `null`, und der Schema-Marker bleibt auf **17** — eine nullable Spalte macht keinen Bestand unlesbar.
