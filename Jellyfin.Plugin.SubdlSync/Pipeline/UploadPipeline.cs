@@ -5375,7 +5375,7 @@ public sealed class UploadPipeline : IPackFiller
         // dictionary is what made a run grow into the hundreds of megabytes (prod 04.11.2026: 689
         // files, ~21.000 texts, ~900 MB); a second pack that asks for the same file reads its text
         // back off the disk instead of calling ffmpeg again.
-        // F-M652 (Operator-Konzept 20.11.2026: „Der eine Durchlauf für alles ist als Konzept gesetzt"):
+        // F-M441 (Nachtrag 20.11.2026 — Fehler gegen die bestehende Anforderung: der Schluessel des Zwischenspeichers trug Sprache und Variante, also entpackte jede Sprache dieselbe Folge erneut):
         // EIN Durchlauf je Datei, nicht einer je Sprache. Bis 12.2.0.11 lagen die entpackten Texte unter
         // einem Namen mit Sprache und Variante, also entpackte jede Sprache dieselbe Folge erneut —
         // gemessen am 20.11.2026: 15 s je Folge und Sprache, zehn Folgen = 2:45 je Sprache, bei rund 20
@@ -5442,7 +5442,7 @@ public sealed class UploadPipeline : IPackFiller
 
             LogUtil.Normal(
                 _logger,
-                "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} — one pass over the file: {Count} text track(s) extracted, kept for every language of this run (F-M652).",
+                "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} — one pass over the file: {Count} text track(s) extracted, kept for every language of this run (F-M441).",
                 imdbId, season, episode, extracted.Count(k => !string.IsNullOrWhiteSpace(k.Value)));
         }
 

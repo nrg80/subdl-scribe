@@ -103,7 +103,7 @@ public sealed class RunWorkFiles
     }
 
     /// <summary>
-    /// F-M652 (Operator-Konzept 20.11.2026: „Der eine Durchlauf für alles ist als Konzept gesetzt"):
+    /// F-M441 (Nachtrag 20.11.2026 — Fehler gegen die bestehende Anforderung: der Schluessel des Zwischenspeichers trug Sprache und Variante, also entpackte jede Sprache dieselbe Folge erneut):
     /// schreibt den Text EINER SPUR, ohne Sprache und Variante im Namen. Für den Text zählt nur, welche
     /// Datei und welche Spur — nicht, unter welcher Sprache ihn ein Pack gerade braucht. Bis 12.2.0.11
     /// hing der Name an Sprache und Variante, also entpackte jede Sprache dieselbe Folge erneut
@@ -138,7 +138,7 @@ public sealed class RunWorkFiles
     }
 
     /// <summary>
-    /// F-M652: liest den Text einer Spur, sprachunabhängig — der Gegenpart zu <see cref="WriteTrack"/>.
+    /// F-M441: liest den Text einer Spur, sprachunabhängig — der Gegenpart zu <see cref="WriteTrack"/>.
     /// </summary>
     /// <param name="imdbId">Series IMDb id.</param>
     /// <param name="season">Season number.</param>
@@ -173,7 +173,7 @@ public sealed class RunWorkFiles
     }
 
     /// <summary>
-    /// F-M652: der sprachunabhängige Dateiname einer Spur — Serie, Staffel, Folge, kurzer Hash des
+    /// F-M441: der sprachunabhängige Dateiname einer Spur — Serie, Staffel, Folge, kurzer Hash des
     /// Dateipfads (zwei Fassungen derselben Folge tragen andere Spuren) und die Spurposition.
     /// </summary>
     private static string FileNameForTrack(string imdbId, int season, int episode, string mediaPath, int subPos)
