@@ -5442,10 +5442,9 @@ public sealed class UploadPipeline : IPackFiller
         var alleSpuren = new List<int>();
         try
         {
-            var spurenDesItems = (_mediaSourceManager.GetMediaStreams(item.Id)
-                                  ?? item.GetMediaStreams())?
-                .Where(s => s.Type == MediaStreamType.Subtitle)
-                .ToList() ?? new List<MediaStream>();
+            // F-M658: dieselbe Liste wie im Einzelpfad — ohne die Beidateien, sonst verschiebt sich
+            // jede Position um die Zahl der .srt-Dateien neben dem Film.
+            var spurenDesItems = ContainerSubtitleStreams(item);
             for (int i = 0; i < spurenDesItems.Count; i++)
             {
                 if (!spurenDesItems[i].IsExternal
@@ -5844,6 +5843,26 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="lang">SubDL language code.</param>
     /// <param name="hearingImpaired">HI/SDH variant.</param>
     /// <returns>The stream position, or -1 when the file carries no such track.</returns>
+    /// <summary>
+    /// F-M658 (Befund 20.11.2026): die Unterspuren, die ffmpeg im Container sieht — ohne die
+    /// seitlichen .srt-Dateien. ffmpegs `0:s:N` zaehlt AUSSCHLIESSLICH Spuren im Container; Jellyfins
+    /// Spurenliste fuehrt daneben auch externe Untertitel (`IsExternal`). Wer die Position ueber die
+    /// ungefilterte Liste bildet, liegt um die Zahl der Beidateien daneben: ffmpeg bekommt dann
+    /// `-map 0:s:2` auf einer Datei mit zwei Untertitelspuren, antwortet
+    /// „Stream map '' matches no streams." und endet mit 234 — die Extraktion gilt als gescheitert,
+    /// obwohl die Spur im Container liegt (MobLand S02E02 mit zwei .de-SRT daneben).
+    /// Der Einzelpfad filtert seit jeher (UploadPipeline, `allSubs`), der Sammler nicht.
+    /// </summary>
+    /// <param name="item">Episode item.</param>
+    /// <returns>The subtitle streams inside the container, in container order.</returns>
+    private List<MediaStream> ContainerSubtitleStreams(BaseItem item)
+    {
+        var streams = _mediaSourceManager.GetMediaStreams(item.Id) ?? item.GetMediaStreams();
+        return streams?
+            .Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal)
+            .ToList() ?? new List<MediaStream>();
+    }
+
     private List<int> FindFillStreams(BaseItem item, string lang, bool hearingImpaired)
     {
         var positions = new List<int>();
@@ -5857,10 +5876,8 @@ public sealed class UploadPipeline : IPackFiller
             // its own stream list is empty, so every language answered "the file does not carry it"
             // although the files carry 25. Every other place in this pipeline asks the media source
             // manager by id; the object is only the fallback for a source manager that has nothing.
-            allSubs = (_mediaSourceManager.GetMediaStreams(item.Id)
-                       ?? item.GetMediaStreams())?
-                .Where(s => s.Type == MediaStreamType.Subtitle)
-                .ToList() ?? new List<MediaStream>();
+            // F-M658: NUR die Spuren im Container — die Beidateien daneben zaehlt ffmpeg nicht mit.
+            allSubs = ContainerSubtitleStreams(item);
         }
         catch (Exception ex)
         {

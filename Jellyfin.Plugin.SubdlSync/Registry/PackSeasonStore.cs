@@ -51,6 +51,14 @@ public static class PackSeasonStore
     /// </summary>
     public const string FillTagSuffix = "|fill";
 
+    /// <summary>
+    /// F-M658: Fassung der Fuell-Urteile. Ein Urteil, das auf einer falsch gebildeten Spurenposition
+    /// beruht („extraction failed", weil ffmpeg 234 lieferte), darf nicht stehen bleiben, wenn der
+    /// Fehler behoben ist — die Dateien haben sich nicht geaendert, also waere die Signatur dieselbe.
+    /// Mit dieser Fassung im Schluessel werden alte Urteile einmal neu geprueft.
+    /// </summary>
+    public const string FillSignatureVersion = "|fill=2";
+
     private static readonly object Gate = new();
 
     private static ScribeSqliteContext? _db;
@@ -212,7 +220,7 @@ public static class PackSeasonStore
             return true;
         }
 
-        if (StillImpossible(imdbId, season, langTag + FillTagSuffix, seasonSignature, out reason))
+        if (StillImpossible(imdbId, season, langTag + FillTagSuffix, seasonSignature + FillSignatureVersion, out reason))
         {
             fromFill = true;
             return true;

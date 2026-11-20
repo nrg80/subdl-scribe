@@ -993,6 +993,23 @@ internal static class Program
             && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"))
                 .Contains("private const string FillTagSuffix = Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.FillTagSuffix;", StringComparison.Ordinal));
 
+        // --- F-M658: Positionen zaehlen nur die Spuren IM Container ---------------------------------
+        // Befund 20.11.2026: MobLand S02E02 hat zwei .de-SRT neben dem MKV; der Sammler bildete die
+        // Position ueber Jellyfins Liste MIT den Beidateien, ffmpeg bekam `-map 0:s:2` auf einer Datei
+        // mit zwei Untertitelspuren, antwortete „Stream map '' matches no streams." (exit 234) — und
+        // die Spur galt als „extraction failed", obwohl sie im Container liegt.
+        Check("F-M658: der Sammler zaehlt wie der Einzelpfad nur die Spuren im Container",
+            uploadSource.Contains("private List<MediaStream> ContainerSubtitleStreams(BaseItem item)", StringComparison.Ordinal)
+            && uploadSource.Contains(".Where(s => s.Type == MediaStreamType.Subtitle && !s.IsExternal)", StringComparison.Ordinal)
+            && uploadSource.Contains("allSubs = ContainerSubtitleStreams(item);", StringComparison.Ordinal)
+            && uploadSource.Contains("var spurenDesItems = ContainerSubtitleStreams(item);", StringComparison.Ordinal));
+
+        Check("F-M658: die Fassung des Fuell-Urteils steht im Schluessel — alte Fehlurteile werden neu geprueft",
+            store657.Contains("public const string FillSignatureVersion = \"|fill=2\";", StringComparison.Ordinal)
+            && store657.Contains("seasonSignature + FillSignatureVersion", StringComparison.Ordinal)
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"))
+                .Contains("PackSeasonStore.FillSignatureVersion", StringComparison.Ordinal));
+
         Check("F-M657: Plan UND Sammler fragen beide Namensraeume",
             uploadSource.Contains("PackSeasonStore.StillImpossibleAny(", StringComparison.Ordinal)
             && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"))

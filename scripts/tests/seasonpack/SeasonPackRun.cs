@@ -828,8 +828,11 @@ internal static class Program
         // carry it" although the files carried 25.
         Check(uploadSrc2.Contains("_mediaSourceManager.GetMediaStreams(item.Id)", StringComparison.Ordinal),
             "F-M468: the per-file language check asks the media source manager by id, not the item object");
-        Check(uploadSrc2.IndexOf("_mediaSourceManager.GetMediaStreams(item.Id)", StringComparison.Ordinal)
-                 < uploadSrc2.IndexOf("?? item.GetMediaStreams())", StringComparison.Ordinal),
+        // F-M658: die Liste wird jetzt an EINER Stelle geholt (ContainerSubtitleStreams) — der Fallback
+        // auf das Item steht dort, damit beide Aufrufer dieselbe Liste sehen.
+        Check(uploadSrc2.Contains("_mediaSourceManager.GetMediaStreams(item.Id) ?? item.GetMediaStreams()", StringComparison.Ordinal)
+            && uploadSrc2.IndexOf("_mediaSourceManager.GetMediaStreams(item.Id) ?? item.GetMediaStreams()", StringComparison.Ordinal)
+                 < uploadSrc2.IndexOf("allSubs = ContainerSubtitleStreams(item);", StringComparison.Ordinal),
             "F-M468: the object's own list is only the fallback for a manager that has nothing");
 
         // F-M469 (operator 11.11.2026, "aber wir fassen nur denselben release zusammen"): a pack carries

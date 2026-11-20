@@ -768,7 +768,8 @@ public sealed class SeasonPackCoordinator
         try
         {
             Registry.PackSeasonStore.Put(
-                imdbId, season, SeasonPack.LangTag(lang, hi) + FillTagSuffix, signatur!,
+                imdbId, season, SeasonPack.LangTag(lang, hi) + FillTagSuffix,
+                signatur! + Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.FillSignatureVersion,
                 Registry.PackSeasonStore.NoPack, reason);
             LogUtil.Normal(
                 _logger,
