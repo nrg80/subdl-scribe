@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.12",
-        "changelog": "v12.2.0.12: one extraction pass per file — every dialogue track is kept for all languages of the run (F-M652).",
+        "version": "12.2.0.13",
+        "changelog": "v12.2.0.13: the pack member line stops claiming \"not deletable\" — under F-M429 the singles follow the pack, so their ids cannot exist yet (F-M653).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.12-dev/Jellyfin.Plugin.SubdlSync_12.2.0.12.zip",
-        "checksum": "8f9d0cb937b2703728887a55b1adbdda",
-        "timestamp": "2026-11-20T11:36:59Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.13-dev/Jellyfin.Plugin.SubdlSync_12.2.0.13.zip",
+        "checksum": "00134bcdca76be95f76cd5ccfb9d8f55",
+        "timestamp": "2026-11-20T11:50:47Z"
       }
     ]
   }
