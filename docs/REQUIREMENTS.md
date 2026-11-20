@@ -2971,6 +2971,8 @@ ergibt eine Quelle, die stumm nicht läuft.
 
 Dieses Kapitel regelt, wie eine Untertitelquelle angebunden wird. Die Regeln der beiden Richtungen stehen in Kapitel 3 und 4, der gespeicherte Bestand in Kapitel 14.
 
+**Wie die Quellen als Ganzes zusammenspielen** — was bei einer Quelle erledigt ist und bei der anderen offen, wie Download und Upload mit mehreren Quellen umgehen und welche Messwerte das belegen — steht zusammengezogen in [`MULTI-SOURCE.md`](MULTI-SOURCE.md). Dieses Kapitel bleibt die Quelle der Anforderungen (F-M624…), jenes Blatt ist die Leseansicht derselben Regeln.
+
 **F-M624 [D]:** **Jede Quelle wird über genau einen gemeinsamen Vertrag angebunden** — Suche, Abruf, Upload und Doppelprüfung. Der Ablauf beider Richtungen kennt nur diesen Vertrag, nicht die Quelle dahinter.
 
 **F-M625 [D]:** **Jede Quelle meldet ihre Fähigkeiten selbst**: Suche, Abruf, Upload, Film anlegen, Kontingent. Der Ablauf fragt die Fähigkeit ab; ein Vergleich auf den Quellennamen ist im Ablauf unzulässig. Eine nicht gemeldete Fähigkeit wird für diese Quelle nie aufgerufen — insbesondere entsteht für eine Quelle ohne die Fähigkeit „Film anlegen" nie ein Anlageversuch (Kapitel 9).
