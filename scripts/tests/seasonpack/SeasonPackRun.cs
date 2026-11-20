@@ -769,9 +769,9 @@ internal static class Program
             "F-M442: the skip messages carry the real state of the season, not a guess");
 
         // ── F-M441: der Fill arbeitet über Dateien im Lauf-Ordner, nicht über den Speicher ────────
-        Check(uploadSrc.Contains("_workFiles.TryRead(imdbId, season, episode, lang, hearingImpaired, position, out string? onDisk)"),
+        Check(uploadSrc.Contains("_workFiles.TryReadTrack(imdbId, season, episode, mediaPath, position, out string? onDisk)"),
             "F-M441: the fill reads a text this run already extracted off the disk");
-        Check(uploadSrc.Contains("_workFiles.Write(imdbId, season, episode, lang, hearingImpaired, pair.Key, pair.Value!)"),
+        Check(uploadSrc.Contains("_workFiles.WriteTrack(imdbId, season, episode, mediaPath, pair.Key, pair.Value!)"),
             "F-M441: an extracted text is written to the run's working directory");
         Check(!uploadSrc.Contains("_fillTextCache") && !uploadSrc.Contains("_ownTexts"),
             "F-M441: no in-memory text cache and no persistent store");

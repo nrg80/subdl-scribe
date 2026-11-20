@@ -5375,33 +5375,82 @@ public sealed class UploadPipeline : IPackFiller
         // dictionary is what made a run grow into the hundreds of megabytes (prod 04.11.2026: 689
         // files, ~21.000 texts, ~900 MB); a second pack that asks for the same file reads its text
         // back off the disk instead of calling ffmpeg again.
-        var cachedTexts = new Dictionary<int, string?>();
-        var missing = new List<int>();
-        foreach (int position in fillPositions)
+        // F-M652 (Operator-Konzept 20.11.2026: „Der eine Durchlauf für alles ist als Konzept gesetzt"):
+        // EIN Durchlauf je Datei, nicht einer je Sprache. Bis 12.2.0.11 lagen die entpackten Texte unter
+        // einem Namen mit Sprache und Variante, also entpackte jede Sprache dieselbe Folge erneut —
+        // gemessen am 20.11.2026: 15 s je Folge und Sprache, zehn Folgen = 2:45 je Sprache, bei rund 20
+        // Sprachen knapp eine Stunde für eine Staffel. Jetzt werden beim ersten Anfassen ALLE
+        // Dialogspuren der Datei in einem ffmpeg-Lauf geholt und sprachunabhängig abgelegt
+        // (`WriteTrack`); jede weitere Sprache liest sie von der Platte.
+        var alleSpuren = new List<int>();
+        try
         {
-            if (_workFiles.TryRead(imdbId, season, episode, lang, hearingImpaired, position, out string? onDisk)
+            var spurenDesItems = (_mediaSourceManager.GetMediaStreams(item.Id)
+                                  ?? item.GetMediaStreams())?
+                .Where(s => s.Type == MediaStreamType.Subtitle)
+                .ToList() ?? new List<MediaStream>();
+            for (int i = 0; i < spurenDesItems.Count; i++)
+            {
+                if (!spurenDesItems[i].IsExternal
+                    && Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsDialogueStream(spurenDesItems[i]))
+                {
+                    alleSpuren.Add(i);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogUtil.Detail(
+                _logger,
+                "[Sub Scribe] season pack filler: {File} — stream list for the one-pass extraction unavailable ({Msg}); this language is extracted on its own.",
+                Path.GetFileName(mediaPath), ex.Message);
+        }
+
+        if (alleSpuren.Count == 0)
+        {
+            alleSpuren = fillPositions.ToList();
+        }
+
+        var cachedTexts = new Dictionary<int, string?>();
+        var zuEntpacken = new List<int>();
+        foreach (int position in alleSpuren)
+        {
+            if (_workFiles.TryReadTrack(imdbId, season, episode, mediaPath, position, out string? onDisk)
                 && !string.IsNullOrWhiteSpace(onDisk))
             {
                 cachedTexts[position] = onDisk;
             }
             else
             {
-                missing.Add(position);
+                zuEntpacken.Add(position);
             }
         }
 
-        if (missing.Count > 0)
+        if (zuEntpacken.Count > 0)
         {
             var (extracted, _) = await FfmpegTools
-                .ExtractAllAsync(_ffmpegPath, mediaPath, missing, _logger, _config, ct)
+                .ExtractAllAsync(_ffmpegPath, mediaPath, zuEntpacken, _logger, _config, ct)
                 .ConfigureAwait(false);
             foreach (var pair in extracted)
             {
                 cachedTexts[pair.Key] = pair.Value;
                 if (!string.IsNullOrWhiteSpace(pair.Value))
                 {
-                    _workFiles.Write(imdbId, season, episode, lang, hearingImpaired, pair.Key, pair.Value!);
+                    _workFiles.WriteTrack(imdbId, season, episode, mediaPath, pair.Key, pair.Value!);
                 }
+            }
+
+            LogUtil.Normal(
+                _logger,
+                "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} — one pass over the file: {Count} text track(s) extracted, kept for every language of this run (F-M652).",
+                imdbId, season, episode, extracted.Count(k => !string.IsNullOrWhiteSpace(k.Value)));
+        }
+
+        foreach (int position in fillPositions)
+        {
+            if (!cachedTexts.ContainsKey(position))
+            {
+                cachedTexts[position] = null;
             }
         }
 

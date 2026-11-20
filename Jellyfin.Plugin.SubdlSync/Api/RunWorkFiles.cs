@@ -102,6 +102,87 @@ public sealed class RunWorkFiles
         }
     }
 
+    /// <summary>
+    /// F-M652 (Operator-Konzept 20.11.2026: „Der eine Durchlauf für alles ist als Konzept gesetzt"):
+    /// schreibt den Text EINER SPUR, ohne Sprache und Variante im Namen. Für den Text zählt nur, welche
+    /// Datei und welche Spur — nicht, unter welcher Sprache ihn ein Pack gerade braucht. Bis 12.2.0.11
+    /// hing der Name an Sprache und Variante, also entpackte jede Sprache dieselbe Folge erneut
+    /// (gemessen 20.11.2026: 15 s je Folge und Sprache, zehn Folgen = 2:45 je Sprache, bei rund 20
+    /// Sprachen knapp eine Stunde für eine Staffel).
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="mediaPath">Path of the file the track sits in.</param>
+    /// <param name="subPos">Subtitle stream position.</param>
+    /// <param name="srt">The text.</param>
+    public void WriteTrack(string? imdbId, int season, int episode, string? mediaPath, int subPos, string? srt)
+    {
+        if (string.IsNullOrWhiteSpace(imdbId) || string.IsNullOrWhiteSpace(mediaPath) || string.IsNullOrWhiteSpace(srt))
+        {
+            return;
+        }
+
+        try
+        {
+            System.IO.Directory.CreateDirectory(_directory);
+            File.WriteAllText(
+                Path.Combine(_directory, FileNameForTrack(imdbId!, season, episode, mediaPath!, subPos)),
+                srt!,
+                Encoding.UTF8);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A working file that cannot be written costs one extraction, not the run.
+        }
+    }
+
+    /// <summary>
+    /// F-M652: liest den Text einer Spur, sprachunabhängig — der Gegenpart zu <see cref="WriteTrack"/>.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="episode">Episode number.</param>
+    /// <param name="mediaPath">Path of the file the track sits in.</param>
+    /// <param name="subPos">Subtitle stream position.</param>
+    /// <param name="srt">The text, when it is on disk.</param>
+    /// <returns>True when the text was read back.</returns>
+    public bool TryReadTrack(string? imdbId, int season, int episode, string? mediaPath, int subPos, out string? srt)
+    {
+        srt = null;
+        if (string.IsNullOrWhiteSpace(imdbId) || string.IsNullOrWhiteSpace(mediaPath))
+        {
+            return false;
+        }
+
+        string path = Path.Combine(_directory, FileNameForTrack(imdbId!, season, episode, mediaPath!, subPos));
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            srt = File.ReadAllText(path, Encoding.UTF8);
+            return !string.IsNullOrWhiteSpace(srt);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// F-M652: der sprachunabhängige Dateiname einer Spur — Serie, Staffel, Folge, kurzer Hash des
+    /// Dateipfads (zwei Fassungen derselben Folge tragen andere Spuren) und die Spurposition.
+    /// </summary>
+    private static string FileNameForTrack(string imdbId, int season, int episode, string mediaPath, int subPos)
+    {
+        string pathHash = Convert.ToHexString(
+            System.Security.Cryptography.SHA1.HashData(Encoding.UTF8.GetBytes(mediaPath)))[..8].ToLowerInvariant();
+        return $"{imdbId}-s{season:00}e{episode:00}-{pathHash}-p{subPos:00}.srt";
+    }
+
     /// <summary>Reads back the text of one track of one episode.</summary>
     /// <param name="imdbId">Series IMDb id.</param>
     /// <param name="season">Season number.</param>
