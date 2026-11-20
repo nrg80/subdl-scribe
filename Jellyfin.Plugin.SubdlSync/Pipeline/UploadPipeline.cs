@@ -2506,7 +2506,12 @@ public sealed class UploadPipeline : IPackFiller
                     SourceAllowed(Configuration.SubtitleProvider.TvSubtitles),
                     Registry.GetOrigin(contentHash).Origin,
                     Registry.IsUploadedTo(mediaHash, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.Subdl),
-                    Registry.IsUploadedTo(mediaHash, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.TvSubtitles));
+                    Registry.IsUploadedTo(mediaHash, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.TvSubtitles),
+                    // F-M656: die Filmquelle fehlte hier. Das fruehe Tor antwortete damit fuer einen FILM
+                    // "nichts zu tun", sobald SubDL und tvst nichts wollten — moviesubtitles wurde still
+                    // uebergangen, obwohl es die Sprache nicht hatte (F-M489, F-M509).
+                    SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles) && !isSeries,
+                    !isSeries && Registry.IsUploadedTo(mediaHash, cand.Lang, cand.HearingImpaired, Configuration.SubtitleProvider.MovieSubtitles));
                 if (gateFrueh.SkipReason is not null)
                 {
                     // F-M581: das Tor kann aus drei Gruenden schweigen — Schalter aus, Herkunft bekannt,

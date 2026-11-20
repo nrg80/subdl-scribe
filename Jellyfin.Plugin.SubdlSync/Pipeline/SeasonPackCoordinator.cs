@@ -260,7 +260,9 @@ public sealed class SeasonPackCoordinator
         if (list.Count >= aired.Count)
         {
             _buffers.Remove(key);
-            await UploadAsync(key, list, aired, ct).ConfigureAwait(false);
+            // F-M656: die Quelle des Puffers wird genannt — der Puffer ist der SubDL-Weg,
+            // der tvst-Behaelter geht ueber den Endpunkt (F-M642).
+            await UploadAsync(key, list, aired, ct, PackEntity.SubdlSource).ConfigureAwait(false);
         }
     }
 
@@ -285,7 +287,9 @@ public sealed class SeasonPackCoordinator
             var aired = _complete[(entry.Key.ImdbId, entry.Key.Season)];
             if (entry.Value.Count >= aired.Count)
             {
-                await UploadAsync(entry.Key, entry.Value, aired, ct).ConfigureAwait(false);
+                // F-M656: die Quelle des Puffers wird genannt — der Puffer ist der SubDL-Weg, der
+                // tvst-Behälter geht über den Endpunkt (F-M642).
+                await UploadAsync(entry.Key, entry.Value, aired, ct, PackEntity.SubdlSource).ConfigureAwait(false);
                 continue;
             }
 
@@ -353,7 +357,8 @@ public sealed class SeasonPackCoordinator
         }
 
         LogFilled(key, filled.Count, buffer.Count);
-        await UploadAsync(key, buffer.Concat(filled).ToList(), aired, ct).ConfigureAwait(false);
+        // F-M656: derselbe Puffer, dieselbe Quelle — ausdruecklich, nicht per Vorgabewert.
+        await UploadAsync(key, buffer.Concat(filled).ToList(), aired, ct, PackEntity.SubdlSource).ConfigureAwait(false);
         return true;
     }
 
@@ -1303,8 +1308,8 @@ public sealed class SeasonPackCoordinator
         List<Candidate> group,
         IReadOnlyList<int> aired,
         CancellationToken ct,
-        bool uploadSinglesOnRefusal = true,
-        string source = PackEntity.SubdlSource)
+        string source,
+        bool uploadSinglesOnRefusal = true)
     {
         var ordered = group.OrderBy(c => c.Episode).ToList();
 

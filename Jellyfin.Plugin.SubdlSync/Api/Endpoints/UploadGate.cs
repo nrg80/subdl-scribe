@@ -54,9 +54,11 @@ public static class UploadGate
     /// <param name="movieSubtitlesSwitch">F-M508: is the moviesubtitles.org upload switch on?</param>
     /// <param name="movieSubtitlesAlready">F-M508: does moviesubtitles.org already have it?</param>
     /// <returns>Which sources may run, and why nothing runs when none of them may.</returns>
+    // F-M656: alle drei Quellen sind Pflicht. Mit Vorgabewerten `false` fuer die Filmquelle liess ein
+    // vergessener Aufruf moviesubtitles still aus — genau das war an einer Stelle der Fall.
     public static UploadGateResult Decide(
         bool subdlSwitch, bool tvSubtitlesSwitch, string? origin, bool subdlAlready, bool tvSubtitlesAlready,
-        bool movieSubtitlesSwitch = false, bool movieSubtitlesAlready = false)
+        bool movieSubtitlesSwitch, bool movieSubtitlesAlready)
     {
         var subdlSwitched = subdlSwitch && Provenance.MayUploadTo(origin, SubtitleProvider.Subdl);
         var tvSwitched = tvSubtitlesSwitch && Provenance.MayUploadTo(origin, SubtitleProvider.TvSubtitles);

@@ -450,25 +450,45 @@ internal static class Program
                 .Contains("public string? SourceId { get; init; }", StringComparison.Ordinal));
 
         // ---- 11. Reup und Kreuzkontamination (F-M489) -----------------------------------------
-        var g = UploadGate.Decide(subdlSwitch: true, tvSubtitlesSwitch: true, origin: null, subdlAlready: false, tvSubtitlesAlready: false);
+        // F-M656: keine Vorgabewerte fuer die dritte Quelle. Mit `movieSubtitlesSwitch = false` liess ein
+        // vergessener Aufruf die Filmquelle still aus — im fruehen Tor war genau das der Fall.
+        var gateSrc = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/Endpoints/UploadGate.cs"));
+        Check("F-M656: every source of the gate is required, the film source has no default",
+            !gateSrc.Contains("bool movieSubtitlesSwitch = false", StringComparison.Ordinal)
+            && !gateSrc.Contains("bool movieSubtitlesAlready = false", StringComparison.Ordinal)
+            && gateSrc.Contains("bool movieSubtitlesSwitch, bool movieSubtitlesAlready)"));
+
+        Check("F-M656: the early gate asks the film source too — it used to answer 'nothing to do' for a film",
+            uploadSource.Contains("var gateFrueh = Api.Endpoints.UploadGate.Decide(", StringComparison.Ordinal)
+            && uploadSource.Contains("F-M656: die Filmquelle fehlte hier", StringComparison.Ordinal)
+            && uploadSource.Contains("SourceAllowed(Configuration.SubtitleProvider.MovieSubtitles) && !isSeries", StringComparison.Ordinal));
+
+        Check("F-M656: the pack key and the buffered pack upload name their source too",
+            !ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"))
+                .Contains("string source = PackEntity.SubdlSource", StringComparison.Ordinal)
+            && !ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"))
+                .Contains("string source = PackEntity.SubdlSource", StringComparison.Ordinal));
+
+        var g = UploadGate.Decide(subdlSwitch: true, tvSubtitlesSwitch: true, origin: null, subdlAlready: false, tvSubtitlesAlready: false,
+            movieSubtitlesSwitch: false, movieSubtitlesAlready: false);
         Check("nothing uploaded yet and both switches on: both sources may run", g.Subdl && g.TvSubtitles && g.SkipReason is null);
         Check("no reup on tvsubtitles: that source already has it",
-            UploadGate.Decide(true, true, null, false, true) is { Subdl: true, TvSubtitles: false, SkipReason: null });
+            UploadGate.Decide(true, true, null, false, true, false, false) is { Subdl: true, TvSubtitles: false, SkipReason: null });
         Check("no reup on SubDL: that source already has it",
-            UploadGate.Decide(true, true, null, true, false) is { Subdl: false, TvSubtitles: true, SkipReason: null });
+            UploadGate.Decide(true, true, null, true, false, false, false) is { Subdl: false, TvSubtitles: true, SkipReason: null });
         Check("both already have it: nothing runs, and the reason names both",
-            UploadGate.Decide(true, true, null, true, true) is { Subdl: false, TvSubtitles: false, SkipReason: "already-uploaded:subdl+tvsubtitles" });
+            UploadGate.Decide(true, true, null, true, true, false, false) is { Subdl: false, TvSubtitles: false, SkipReason: "already-uploaded:subdl+tvsubtitles" });
         Check("a SubDL upload does not block tvsubtitles and a tvst upload does not block SubDL",
-            UploadGate.Decide(true, true, origin: null, true, false) is { Subdl: false, TvSubtitles: true, SkipReason: null }
-            && UploadGate.Decide(true, true, origin: null, false, true) is { Subdl: true, TvSubtitles: false, SkipReason: null }
-            && UploadGate.Decide(true, true, origin: null, true, true).SkipReason == "already-uploaded:subdl+tvsubtitles");
+            UploadGate.Decide(true, true, origin: null, true, false, false, false) is { Subdl: false, TvSubtitles: true, SkipReason: null }
+            && UploadGate.Decide(true, true, origin: null, false, true, false, false) is { Subdl: true, TvSubtitles: false, SkipReason: null }
+            && UploadGate.Decide(true, true, origin: null, true, true, false, false).SkipReason == "already-uploaded:subdl+tvsubtitles");
         Check("a known origin is refused at BOTH sources, with the origin named as the reason (F-M500)",
-            UploadGate.Decide(true, true, "tvsubtitles", false, false) is { Subdl: false, TvSubtitles: false } tvTor
+            UploadGate.Decide(true, true, "tvsubtitles", false, false, false, false) is { Subdl: false, TvSubtitles: false } tvTor
             && tvTor.SkipReason == "origin:tvsubtitles — downloaded there, never uploaded"
-            && UploadGate.Decide(true, true, "subdl", false, false) is { Subdl: false, TvSubtitles: false } sdTor
+            && UploadGate.Decide(true, true, "subdl", false, false, false, false) is { Subdl: false, TvSubtitles: false } sdTor
             && sdTor.SkipReason == "origin:subdl — downloaded there, never uploaded");
         Check("switches off mean nothing runs",
-            UploadGate.Decide(false, false, null, false, false).SkipReason == "no-upload-source");
+            UploadGate.Decide(false, false, null, false, false, false, false).SkipReason == "no-upload-source");
         // F-M508: die Film-Adresse der Familie steht im SELBEN Tor — eigener Schalter, eigene Marke,
         // eigene Antwort. Sie ist die dritte Adresse im Tor, aber keine dritte Quelle in der Reihenfolge.
         Check("the film address is decided by the same gate, with its own switch and its own mark (F-M508)",
@@ -1695,7 +1715,7 @@ internal static class Program
                 // Das Herkunftstor steht VOR diesem Weg und wird hier nicht weicher. Drei Faelle, wie
                 // festgelegt (Operator 15.11.2026: "externe Quellen duerfen zu beiden hochgeladen werden"):
                 // unbekannt/extern -> beide, subdl -> nur SubDL, tvsubtitles -> nur tvsubtitles.
-                var torUnbekannt = UploadGate.Decide(true, true, origin: null, false, false);
+                var torUnbekannt = UploadGate.Decide(true, true, origin: null, false, false, false, false);
                 var markenText = "1\n00:00:20,000 --> 00:00:22,000\nZwei Marken.\n\n";
                 string markenHash = Jellyfin.Plugin.SubScribe.Registry.ContentHashRegistry.ComputeHash(markenText);
                 settleReg.EnsureMedia("eeee5555ffff6666", "tt9999999", "/data/movies2/beide.mkv");
@@ -1725,7 +1745,7 @@ internal static class Program
                     origin: Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.Name(SubtitleProvider.Subdl),
                     fileName: "folge.de.srt", path: "/data/movies2/folge.de.srt");
                 string? herkunft = settleReg.GetOrigin(hashHer).Origin;
-                var torSubdl = UploadGate.Decide(true, true, herkunft, false, false);
+                var torSubdl = UploadGate.Decide(true, true, herkunft, false, false, false, false);
                 Check("Herkunft=subdl: weder zu SubDL (kein Reup) noch zu tvsubtitles (F-M487 verschaerft)",
                     herkunft == "subdl"
                     && !torSubdl.Subdl && !torSubdl.TvSubtitles
@@ -1744,7 +1764,7 @@ internal static class Program
                     origin: Jellyfin.Plugin.SubScribe.Api.Endpoints.Provenance.Name(SubtitleProvider.TvSubtitles),
                     fileName: "folge2.de.srt", path: "/data/movies2/folge2.de.srt");
                 string? herkunftTv = settleReg.GetOrigin(hashHer2).Origin;
-                var torTv = UploadGate.Decide(true, true, herkunftTv, false, false);
+                var torTv = UploadGate.Decide(true, true, herkunftTv, false, false, false, false);
                 Check("Herkunft=tvsubtitles: weder zu tvsubtitles (kein Reup) noch zu SubDL (F-M487 verschaerft)",
                     herkunftTv == "tvsubtitles"
                     && !torTv.Subdl && !torTv.TvSubtitles

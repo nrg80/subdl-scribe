@@ -361,7 +361,7 @@ using (var db = new ScribeDbContext(workdir, null))
 {
     db.Packs.Upsert(new PackEntity
     {
-        Id = ScribeDbContext.PackKey("tt26545992", 1, "EN", false),
+        Id = ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.SubdlSource),
         ImdbId = "tt26545992",
         Season = 1,
         Language = "EN",
@@ -373,21 +373,21 @@ using (var db = new ScribeDbContext(workdir, null))
     });
 
     Check(db.Packs.Count() == 1, "the pack row is stored", db.Packs.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
-    var row = db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 1, "EN", false));
+    var row = db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.SubdlSource));
     Check(row != null && row.Episodes == "1,2,3,4,5,6,7,8", "the row carries its member episodes", row?.Episodes ?? "(null)");
     Check(row != null && row.AbsorbedIds == "3753826,3753825", "and the single uploads it absorbed", row?.AbsorbedIds ?? "(null)");
 
     // Keyed by season + language + variant: the HI variant is a DIFFERENT pack of the same season.
-    Check(ScribeDbContext.PackKey("tt26545992", 1, "EN", false) != ScribeDbContext.PackKey("tt26545992", 1, "EN", true),
+    Check(ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.SubdlSource) != ScribeDbContext.PackKey("tt26545992", 1, "EN", true, PackEntity.SubdlSource),
         "the hearing-impaired variant has its own key");
-    Check(ScribeDbContext.PackKey("tt26545992", 1, "EN", false) != ScribeDbContext.PackKey("tt26545992", 1, "DE", false),
+    Check(ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.SubdlSource) != ScribeDbContext.PackKey("tt26545992", 1, "DE", false, PackEntity.SubdlSource),
         "and so has each language");
 
     // An upsert on the same key UPDATE the row instead of adding a second one — the table stores
     // the state, never a history.
     db.Packs.Upsert(new PackEntity
     {
-        Id = ScribeDbContext.PackKey("tt26545992", 1, "EN", false),
+        Id = ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.SubdlSource),
         ImdbId = "tt26545992",
         Season = 1,
         Language = "EN",
@@ -397,19 +397,19 @@ using (var db = new ScribeDbContext(workdir, null))
     });
     Check(db.Packs.Count() == 1, "a second write for the same season replaces, never duplicates",
         db.Packs.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
-    Check(db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 1, "EN", false))?.PackId == "tt26545992.S01.def456.EN",
+    Check(db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.SubdlSource))?.PackId == "tt26545992.S01.def456.EN",
         "and the newer pack id wins");
 
     // F-M642: die QUELLE steht im Schluessel. SubDL und tvst fuehren fuer dieselbe Staffel je eine
     // eigene Zeile mit ihrer eigenen Pack-Kennung — keine Quelle ueberschreibt die andere, und die
     // Zeile ohne Quellenangabe bleibt der Bestand von SubDL.
-    Check(ScribeDbContext.PackKey("tt26545992", 1, "EN", false)
+    Check(ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.SubdlSource)
               != ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.TvSubtitlesSource),
         "the source has its own key",
         ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.TvSubtitlesSource));
-    Check(ScribeDbContext.PackKey("tt26545992", 1, "EN", false).EndsWith("|subdl", StringComparison.Ordinal),
+    Check(ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.SubdlSource).EndsWith("|subdl", StringComparison.Ordinal),
         "a caller that names no source stays on SubDL",
-        ScribeDbContext.PackKey("tt26545992", 1, "EN", false));
+        ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.SubdlSource));
     db.Packs.Upsert(new PackEntity
     {
         Id = ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.TvSubtitlesSource),
@@ -428,7 +428,7 @@ using (var db = new ScribeDbContext(workdir, null))
                   ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.TvSubtitlesSource))?.Source
               == PackEntity.TvSubtitlesSource
           && db.Packs.FindById(
-                  ScribeDbContext.PackKey("tt26545992", 1, "EN", false))?.PackId == "tt26545992.S01.def456.EN",
+                  ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.SubdlSource))?.PackId == "tt26545992.S01.def456.EN",
         "each row keeps its own source and its own pack id");
 }
 
@@ -436,7 +436,7 @@ using (var db = new ScribeDbContext(workdir, null))
 // be rebuilt by the next).
 using (var db = new ScribeDbContext(workdir, null))
 {
-    Check(db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 1, "EN", false)) != null,
+    Check(db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.SubdlSource)) != null,
         "the pack row is still there after a reopen");
     db.Packs.DeleteMany(x => x.ImdbId == "tt26545992");
     Check(db.Packs.Count() == 0, "and deleting by series empties it again",
@@ -462,7 +462,7 @@ using (var db = new ScribeDbContext(workdir, null))
 
 using (var db = new ScribeDbContext(workdir, null))
 {
-    var alteZeile = db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 2, "DE", false));
+    var alteZeile = db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 2, "DE", false, PackEntity.SubdlSource));
     Check(alteZeile != null && alteZeile.Source == PackEntity.SubdlSource
           && alteZeile.PackId == "tt26545992.S02.legacy.DE",
         "a row from before the source column is keyed to SubDL when the file is opened (F-M642)",
@@ -531,7 +531,7 @@ using (var db = new ScribeDbContext(workdir, null))
     string abdruck = Jellyfin.Plugin.SubScribe.Pipeline.SeasonPack.PackHash(new[] { "aaaa", "bbbb", "cccc" });
 
     reg.RecordPackRefusal("tt644", 3, "EN", false, "the source already holds this container (duplicate)", abdruck, PackEntity.SubdlSource);
-    var abgelehnt = db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false));
+    var abgelehnt = db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false, PackEntity.SubdlSource));
     Check(abgelehnt != null
           && abgelehnt!.RefusalReason == "the source already holds this container (duplicate)"
           && abgelehnt.RefusedAt != null
@@ -558,12 +558,12 @@ using (var db = new ScribeDbContext(workdir, null))
     // keine Historie).
     string neuerAbdruck = Jellyfin.Plugin.SubScribe.Pipeline.SeasonPack.PackHash(new[] { "aaaa", "bbbb", "cccc", "dddd" });
     reg.RecordPackRefusal("tt644", 3, "EN", false, "the source already holds this container (duplicate)", neuerAbdruck, PackEntity.SubdlSource);
-    Check(db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false))?.Fingerprint == neuerAbdruck,
+    Check(db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false, PackEntity.SubdlSource))?.Fingerprint == neuerAbdruck,
         "F-M644: a changed content gets its own fingerprint — the verdict follows the content, not the season");
 
     // Der Erfolg: Absage weg, Beleg da.
     reg.RecordPack("tt644", 3, "EN", false, "Show.S03.1080p", "tt644.S03.x.EN", new[] { 1, 2, 3 }, PackEntity.SubdlSource, absorbedIds: null, neuerAbdruck);
-    var durch = db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false));
+    var durch = db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false, PackEntity.SubdlSource));
     Check(durch != null
           && string.IsNullOrEmpty(durch!.RefusalReason)
           && durch.RefusedAt == null,
@@ -579,12 +579,12 @@ using (var db = new ScribeDbContext(workdir, null))
         m.IsSeries = true;
     });
     reg.RecordPackRefusal("tt644", 3, "DE", false, "the source already holds this container (duplicate)", abdruck, PackEntity.SubdlSource);
-    Check(db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "DE", false))?.RefusalReason != null,
+    Check(db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "DE", false, PackEntity.SubdlSource))?.RefusalReason != null,
         "F-M644: a second language of the same season is refused on its own row");
 
     int geoeffnet = reg.ReopenPackRefusals("0123456789abcdef0123456789abcdef");
     Check(geoeffnet == 1
-          && db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "DE", false))?.RefusalReason == null,
+          && db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "DE", false, PackEntity.SubdlSource))?.RefusalReason == null,
         "F-M644: the single-file reset of the GUI clears the season's refusal with it",
         geoeffnet.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
@@ -610,7 +610,7 @@ using (var db = new ScribeDbContext(workdir, null))
 {
     db.Packs.Upsert(new PackEntity
     {
-        Id = ScribeDbContext.PackKey("tt643", 1, "EN", false),
+        Id = ScribeDbContext.PackKey("tt643", 1, "EN", false, PackEntity.SubdlSource),
         Source = PackEntity.SubdlSource,
         ImdbId = "tt643",
         Season = 1,

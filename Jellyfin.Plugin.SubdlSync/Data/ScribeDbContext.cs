@@ -1140,11 +1140,12 @@ public sealed class ScribeDbContext : IDisposable
     /// <param name="season">Season number.</param>
     /// <param name="language">Language code of the pack at its source.</param>
     /// <param name="hearingImpaired">HI/SDH variant flag.</param>
-    /// <param name="source">Source that carries the pack — <see cref="PackEntity.SubdlSource"/> by default.</param>
+    /// <param name="source">Source that carries the pack — must be named explicitly (F-M656); a default would
+    /// build the SubDL key for every forgotten call and silently hit the wrong row.</param>
     /// <returns>The composite key.</returns>
     public static string PackKey(
         string imdbId, int season, string language, bool hearingImpaired,
-        string source = PackEntity.SubdlSource)
+        string source)
         => imdbId + "|S" + season.ToString(System.Globalization.CultureInfo.InvariantCulture)
            + "|" + language + "|" + (hearingImpaired ? "hi" : "plain")
            + "|" + (string.IsNullOrWhiteSpace(source) ? PackEntity.SubdlSource : source);
