@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.4",
-        "changelog": "v12.2.0.4: the release group survives a file extension, and a bitmap-only file says so instead of staying silent (F-M430, F-M640).",
+        "version": "12.2.0.6",
+        "changelog": "v12.2.0.6: tvsubtitles.net season packs are now built in the run by the same collector as the SubDL packs — one zip of episode files into the site's season slot, only in a full run, on the existing pack switch (F-M643); a pack the source refused as a duplicate is remembered in its row with reason, date and content fingerprint and is not offered again until the content changes, while a pack that goes through carries UploadedAt (F-M644).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.4-dev/Jellyfin.Plugin.SubdlSync_12.2.0.4.zip",
-        "checksum": "2bbe15a009ce52be65a1e427b0f335bc",
-        "timestamp": "2026-11-20T04:49:34Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.6-dev/Jellyfin.Plugin.SubdlSync_12.2.0.6.zip",
+        "checksum": "15fb85607842081172acc63e69d1cd0c",
+        "timestamp": "2026-11-20T06:30:06Z"
       }
     ]
   }
