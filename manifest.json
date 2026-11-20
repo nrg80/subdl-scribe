@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.19",
-        "changelog": "v12.2.0.19: a failed ffmpeg pass is not a verdict — the exit code is read, empty positions are retried one by one, and an inconclusive fill stores no memo; three dead extraction methods removed (F-M659).",
+        "version": "12.2.0.20",
+        "changelog": "v12.2.0.20: the file reset can clear the pack-phase season verdicts too, selectable in the dropdown (F-M660).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.19-dev/Jellyfin.Plugin.SubdlSync_12.2.0.19.zip",
-        "checksum": "401366aa4c6c49b935365af7a395f8f2",
-        "timestamp": "2026-11-20T19:27:26Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.20-dev/Jellyfin.Plugin.SubdlSync_12.2.0.20.zip",
+        "checksum": "c33c0488933f4971e0c0501cfb481ed7",
+        "timestamp": "2026-11-20T23:06:04Z"
       }
     ]
   }
