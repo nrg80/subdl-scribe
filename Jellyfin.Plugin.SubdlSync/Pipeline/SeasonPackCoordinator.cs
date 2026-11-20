@@ -657,6 +657,19 @@ public sealed class SeasonPackCoordinator
             {
                 // Half a season is not a pack, and there is nothing to send the single way: the
                 // episode's subtitle is up already or it never was — either way this run is done.
+                // F-M659: war der Durchlauf selbst kaputt (ffmpeg-Exit, auch einzeln), ist das ein
+                // Umstand des Laufs und KEIN Urteil — dann wird kein Merker geschrieben, sonst
+                // sperrt ein einmaliger Extraktionsfehler das Paar fuer alle kuenftigen Laeufe.
+                if (_filler?.LastFillInconclusive == true)
+                {
+                    LogUtil.Normal(
+                        _logger,
+                        "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: episode {Episode} could not be read (the extraction itself failed), no verdict is stored, and {State} (F-M659).",
+                        imdbId, season, SeasonPack.LangTag(lang, hi), episode, stateSentence);
+                    LastRefusal = "the extraction of episode " + episode.ToString(System.Globalization.CultureInfo.InvariantCulture) + " failed";
+                    return null;
+                }
+
                 LogUtil.Normal(
                     _logger,
                     "[Sub Scribe] season pack skipped — {Imdb} S{Season} [{Lang}]: episode {Episode} cannot join, and {State} (F-M442).",

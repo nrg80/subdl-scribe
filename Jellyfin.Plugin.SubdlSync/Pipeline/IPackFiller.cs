@@ -38,6 +38,12 @@ public interface IPackFiller
         string imdbId, int season, int episode, string lang, bool hearingImpaired, CancellationToken ct);
 
     /// <summary>
+    /// F-M659: true when the last fill returned null because the extraction pass itself failed, not
+    /// because the content is missing. Such a null must not become a stored refusal.
+    /// </summary>
+    bool LastFillInconclusive { get; }
+
+    /// <summary>
     /// F-M442 (operator 04.11.2026): the source facts of an aired episode — quality and frame rate,
     /// read WITHOUT extracting anything. The coordinator asks them before the first fill, so a season
     /// of mixed sources is refused without pulling a single text out of a container.

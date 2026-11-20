@@ -1010,6 +1010,24 @@ internal static class Program
             && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"))
                 .Contains("PackSeasonStore.FillSignatureVersion", StringComparison.Ordinal));
 
+        // --- F-M659: ein gescheiterter ffmpeg-Durchlauf ist kein Urteil ---------------------------------
+        var iface659 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/IPackFiller.cs"));
+        Check("F-M659: der Sammler wertet den Exit-Code des Durchlaufs aus und faesst einzeln nach",
+            uploadSource.Contains("var (extracted, exit) = await FfmpegTools", StringComparison.Ordinal)
+            && uploadSource.Contains("if (exit != 0)", StringComparison.Ordinal)
+            && uploadSource.Contains("retried one by one", StringComparison.Ordinal));
+
+        Check("F-M659: ein gescheiterter Durchlauf wird NICHT als Speichermerker geschrieben",
+            iface659.Contains("bool LastFillInconclusive { get; }", StringComparison.Ordinal)
+            && uploadSource.Contains("public bool LastFillInconclusive { get; private set; }", StringComparison.Ordinal)
+            && uploadSource.Contains("LastFillInconclusive = false;", StringComparison.Ordinal)
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"))
+                .Contains("_filler?.LastFillInconclusive == true", StringComparison.Ordinal));
+
+        Check("F-M659: die zwei toten Methoden mit der alten Zaehlweise sind weg",
+            !uploadSource.Contains("ExtractAllStreamsAsync", StringComparison.Ordinal)
+            && !uploadSource.Contains("private List<MediaStream> GetTextSubtitleStreams", StringComparison.Ordinal));
+
         Check("F-M657: Plan UND Sammler fragen beide Namensraeume",
             uploadSource.Contains("PackSeasonStore.StillImpossibleAny(", StringComparison.Ordinal)
             && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"))

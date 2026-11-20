@@ -2910,36 +2910,10 @@ public sealed class UploadPipeline : IPackFiller
         }
     }
 
-    private async Task<UploadResult> ProcessAndUploadAsync(
-        string mediaPath,
-        string? mediaHash,
-        MediaStream stream,
-        int subPos,
-        string lang,
-        string imdbId,
-        int season,
-        int episode,
-        bool isSeries,
-        long runtimeMs,
-        CancellationToken ct)
-    {
-        // NOTE (28.09.2026): this method is UNREFERENCED — dead code kept for reference.
-        // It used to carry an "F-M5/F-M6" marker, which was wrong twice over: F-M5 asks for
-        // ONE ffmpeg call per FILE, and this path calls the single-stream extractor. A
-        // requirement number on the code that violates it is worse than no marker — it makes
-        // the requirement look satisfied in every code review. F-M5 is now implemented in the
-        // item loop (see ExtractAllStreamsAsync); this is the per-stream path only.
-        // F-M6 still applies here: text streams only (bitmap subs are filtered upstream).
-        // (subPos = position among ALL subtitle streams — matches ffmpeg's 0:s:N numbering)
-        string? srt = await ExtractSingleStreamAsync(mediaPath, subPos, ct).ConfigureAwait(false);
-        if (srt == null)
-        {
-            return UploadResult.Failed("extraction failed");
-        }
-
-        // F-M71: forward the SDH detection (embedded stream title) — dead-code path kept consistent.
-        return await UploadSrtContentAsync(null, mediaPath, lang, imdbId, season, episode, isSeries, mediaHash, ct, srt, runtimeMs, hearingImpaired: Jellyfin.Plugin.SubScribe.Registry.SidecarNaming.IsHearingImpairedStream(stream), subPos: subPos).ConfigureAwait(false);
-    }
+    // F-M659: hier stand `ProcessAndUploadAsync` — laut eigenem Kommentar seit 28.09.2026 ohne
+    // Aufrufer, und es trug den Verweis auf die ebenfalls entfernte Ein-Durchlauf-Kopie. Toter Code,
+    // der eine zweite Fassung der Extraktion am Leben hielt, ist eine Falle fuer die naechste
+    // Aenderung: er wird beim Suchen nach dem Pfad gefunden und versehentlich benutzt.
 
     /// <summary>
     /// F-M69: local QA screening WITHOUT any API call — the gates F-M13–M16,
@@ -4245,157 +4219,9 @@ public sealed class UploadPipeline : IPackFiller
         return null;
     }
 
-    /// <summary>
-    /// F-M5: extract EVERY text subtitle stream of one file in a SINGLE ffmpeg call.
-    /// </summary>
-    /// <remarks>
-    /// Why one call and not one per stream: ffmpeg must open and (over CIFS/NAS)
-    /// re-read the container for every invocation. On a 1 GB episode with 83
-    /// subtitle streams that is 83 reads of the same gigabyte — measured on prod
-    /// 28.09.2026 as the only multi-minute stalls in an otherwise 11 s-median run.
-    /// One call with repeated <c>-map 0:s:N</c> + <c>-f srt</c> output pairs reads the
-    /// file once and writes one file per stream, so the container is read a single
-    /// time however many streams it carries.
-    /// <para>
-    /// The mapping uses the SUBTITLE-relative index (<c>0:s:N</c>), never the container
-    /// index: mixing the two lands on video/audio streams (exit 8 / no-stream errors).
-    /// Callers pass positions computed against the unfiltered subtitle list.
-    /// </para>
-    /// </remarks>
-    /// <param name="mediaPath">Container to read.</param>
-    /// <param name="subIndices">Subtitle-relative stream positions to extract.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>
-    /// The extracted texts plus ffmpeg's exit code. A stream that produced no
-    /// text maps to null. The exit code travels with the result because it is
-    /// the difference between "this stream has no text" (0) and "the pass went
-    /// wrong, retry it per stream" (non-zero) — the caller needs that to decide
-    /// whether a null is a verdict or a suspicion.
-    /// </returns>
-    private async Task<(Dictionary<int, string?> Texts, int ExitCode)> ExtractAllStreamsAsync(
-        string mediaPath,
-        IReadOnlyList<int> subIndices,
-        CancellationToken ct)
-    {
-        var result = new Dictionary<int, string?>();
-        if (subIndices.Count == 0)
-        {
-            return (result, 0);
-        }
-
-        string tempDir = Path.Combine(Path.GetTempPath(), "subdl-scribe", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = _ffmpegPath,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            };
-            psi.ArgumentList.Add("-y");
-            psi.ArgumentList.Add("-loglevel");
-            psi.ArgumentList.Add("error");
-            psi.ArgumentList.Add("-i");
-            psi.ArgumentList.Add(mediaPath);
-
-            var outputs = new List<(int Index, string Path)>();
-            foreach (int idx in subIndices)
-            {
-                string outFile = Path.Combine(tempDir, $"stream{idx}.srt");
-                psi.ArgumentList.Add("-map");
-                // NO trailing '?'. It looks like the safe choice — "if this index does not
-                // exist, skip it" — but measured 28.09.2026 it is the opposite:
-                // `-map 0:s:9?` on a file with 3 streams writes the FIRST subtitle stream
-                // (the English one) into the output slot meant for index 9, exits 0 and
-                // says nothing. That is a subtitle of the wrong language, silently
-                // duplicated, exactly what F-M71/F-M85 exist to prevent. Without '?', an
-                // unknown index fails the whole call (exit 234, no output). That is the
-                // honest outcome: the caller sees a non-zero exit, retries the empty
-                // streams one by one and records a real failure instead of uploading a
-                // mislabelled file.
-                psi.ArgumentList.Add($"0:s:{idx}");
-                psi.ArgumentList.Add("-c:s");
-                psi.ArgumentList.Add("srt");
-                psi.ArgumentList.Add("-f");
-                psi.ArgumentList.Add("srt");
-                psi.ArgumentList.Add(outFile);
-                outputs.Add((idx, outFile));
-                result[idx] = null;
-            }
-
-            using var proc = Process.Start(psi);
-            if (proc == null)
-            {
-                _logger.LogError("[Sub Scribe] ffmpeg failed to start for {File}", Path.GetFileName(mediaPath));
-                return (result, -1);
-            }
-
-            string stderr = await proc.StandardError.ReadToEndAsync(ct).ConfigureAwait(false);
-            await proc.WaitForExitAsync(ct).ConfigureAwait(false);
-
-            // ffmpeg keeps going after a bad stream with -y where it can, so a non-zero
-            // exit does NOT mean every output is unusable. Read whatever landed and let
-            // the exit code tell the caller whether the nulls are verdicts or suspicions.
-            if (proc.ExitCode != 0)
-            {
-                LogUtil.PerItem(_config.LogMode, _logger,
-                    "[Sub Scribe] one-pass extraction of {File} exited {Exit}: {Err}",
-                    Path.GetFileName(mediaPath), proc.ExitCode,
-                    stderr.Length <= 300 ? stderr : stderr[..300]);
-            }
-
-            foreach (var (idx, outFile) in outputs)
-            {
-                try
-                {
-                    if (File.Exists(outFile))
-                    {
-                        string text = await File.ReadAllTextAsync(outFile, ct).ConfigureAwait(false);
-                        result[idx] = string.IsNullOrWhiteSpace(text) ? null : text;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError("[Sub Scribe] reading extracted stream {Idx} failed for {File}: {Msg}",
-                        idx, Path.GetFileName(mediaPath), ex.Message);
-                }
-            }
-
-            return (result, proc.ExitCode);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError("[Sub Scribe] one-pass extraction error for {File}: {Msg}",
-                Path.GetFileName(mediaPath), ex.Message);
-            foreach (int idx in subIndices)
-            {
-                result.TryAdd(idx, null);
-            }
-
-            return (result, -1);
-        }
-        finally
-        {
-            // F-M7: always clean temp files (success AND failure)
-            try
-            {
-                if (Directory.Exists(tempDir))
-                {
-                    Directory.Delete(tempDir, recursive: true);
-                }
-            }
-            catch (Exception)
-            {
-                // cleanup best effort
-            }
-        }
-    }
+        // F-M659: entfernt. Diese Methode nahm die externen Beidateien in die Spurenliste auf und
+        // filterte nur nach Text — genau die Zaehlweise, die F-M658 behoben hat. Ohne Aufrufer war sie
+        // nur eine Falle fuer die naechste Aenderung.
 
     private async Task<string?> ExtractSingleStreamAsync(string mediaPath, int subIndex, CancellationToken ct)
     {
@@ -4456,43 +4282,8 @@ public sealed class UploadPipeline : IPackFiller
         }
     }
 
-    private List<MediaStream> GetTextSubtitleStreams(BaseItem item)
-    {
-        // 10.11: streams come from IMediaSourceManager, not from the Video entity
-        var streams = _mediaSourceManager.GetMediaStreams(item.Id);
-        if (streams == null)
-        {
-            return new List<MediaStream>();
-        }
-
-        // F-M3/F-M6: text subs only (SRT/ASS/SSA); bitmap (PGS/VobSub) excluded via IsTextSubtitleStream
-        var textTracks = streams
-            .Where(s => s.Type == MediaStreamType.Subtitle && s.IsTextSubtitleStream)
-            .ToList();
-
-        // F-M640 (Operator-Frage 20.11.2026: „Pierre was not uploaded either single nor pack, why?"):
-        // die Datei trug ausschliesslich PGSSUB — ein Bildformat, aus dem sich keine SRT machen laesst.
-        // Der Lauf schwieg dazu, weil die Filterung oben einfach eine leere Liste ergab. Jetzt sagt er es.
-        if (textTracks.Count == 0)
-        {
-            var bitmap = streams
-                .Where(s => s.Type == MediaStreamType.Subtitle && !s.IsTextSubtitleStream)
-                .Select(s => s.Codec?.ToUpperInvariant())
-                .Where(c => !string.IsNullOrEmpty(c))
-                .Distinct()
-                .ToList();
-            if (bitmap.Count > 0)
-            {
-                LogUtil.PerItem(
-                    _config.LogMode,
-                    _logger,
-                    "[Sub Scribe] bitmap only ({Codecs}) — no text subtitle in this file, nothing to upload from it (F-M3/F-M6).",
-                    string.Join(", ", bitmap!));
-            }
-        }
-
-        return textTracks;
-    }
+    // F-M659: hier stand eine tote Methode, die die Spurenliste MIT den externen
+    // Beidateien und filterte nur nach Text. Ohne Aufrufer war sie eine Falle fuer die naechste Aenderung.
 
     /// <summary>
     /// F-M9/F-M28 raw ID resolution from JF metadata ONLY (no TMDB calls — the key
@@ -5308,10 +5099,19 @@ public sealed class UploadPipeline : IPackFiller
     /// <param name="hearingImpaired">HI/SDH variant the pack is built for.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The candidate, or null when the episode cannot join the pack.</returns>
+    /// <summary>
+    /// F-M659: wahr, wenn der letzte <see cref="FillAsync"/> null geliefert hat, weil der
+    /// Extraktions-Durchlauf selbst gescheitert ist (ffmpeg-Exit ≠ 0, auch nach Einzelnachfrage) —
+    /// nicht, weil die Datei die Sprache nicht traegt. Der Koordinator schreibt daraus KEINEN
+    /// Speichermerker: ein Lauf-Umstand ist kein Urteil ueber den Inhalt.
+    /// </summary>
+    public bool LastFillInconclusive { get; private set; }
+
     public async Task<SeasonPackCoordinator.Candidate?> FillAsync(
         string imdbId, int season, int episode, string lang, bool hearingImpaired, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        LastFillInconclusive = false;
 
         // F-M444 (operator 04.11.2026, "Verbesserungsvorschläge 1 bis 4"): an episode can sit in the
         // library more than once — a second release of the same episode. Until now FirstOrDefault
@@ -5484,9 +5284,41 @@ public sealed class UploadPipeline : IPackFiller
 
         if (zuEntpacken.Count > 0)
         {
-            var (extracted, _) = await FfmpegTools
+            var (extracted, exit) = await FfmpegTools
                 .ExtractAllAsync(_ffmpegPath, mediaPath, zuEntpacken, _logger, _config, ct)
                 .ConfigureAwait(false);
+
+            // F-M659 (Operator-Frage 20.11.2026: „Sicher dass der Extraktionsfehler fuer alle ffmpeg
+            // Aufrufe behoben ist?"): der Exit-Code wurde hier WEGGEWORFEN (`var (extracted, _)`).
+            // ExtractAllAsync sagt ausdruecklich, dass er der Unterschied ist zwischen „diese Spur hat
+            // keinen Text" (0) und „der Durchlauf ist schiefgegangen, einzeln nachfassen" (≠0) — der
+            // Sammler machte aus beidem dasselbe Urteil und schrieb „kein Pack (extraction failed)" in
+            // den Store. Jetzt wird bei ≠0 jede leere Position EINZELN nachgefasst; erst was auch dann
+            // leer bleibt, gilt als Befund — und selbst der wird nicht als Inhaltsurteil gespeichert.
+            if (exit != 0)
+            {
+                var leer = extracted.Where(x => string.IsNullOrWhiteSpace(x.Value)).Select(x => x.Key).ToList();
+                int nachgefasst = 0;
+                foreach (int position in leer)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var (einzeln, exitEinzeln) = await FfmpegTools
+                        .ExtractAllAsync(_ffmpegPath, mediaPath, new[] { position }, _logger, _config, ct)
+                        .ConfigureAwait(false);
+                    nachgefasst++;
+                    if (exitEinzeln == 0)
+                    {
+                        extracted[position] = einzeln.TryGetValue(position, out string? text) ? text : null;
+                    }
+                }
+
+                LogUtil.Normal(
+                    _logger,
+                    "[Sub Scribe] season pack filler: {Imdb} S{Season}E{Episode} — the one-pass extraction exited {Exit}; {Count} empty position(s) retried one by one, {Still} still empty. What stays empty here is no verdict about the content (F-M659).",
+                    imdbId, season, episode, exit, nachgefasst,
+                    extracted.Count(x => string.IsNullOrWhiteSpace(x.Value)));
+            }
+
             foreach (var pair in extracted)
             {
                 cachedTexts[pair.Key] = pair.Value;
@@ -5494,6 +5326,14 @@ public sealed class UploadPipeline : IPackFiller
                 {
                     _workFiles.WriteTrack(imdbId, season, episode, mediaPath, pair.Key, pair.Value!);
                 }
+            }
+
+            if (exit != 0 && extracted.Count > 0 && extracted.Values.All(string.IsNullOrWhiteSpace))
+            {
+                // Der ganze Durchlauf ist gescheitert und die Einzelnachfrage hat nichts gerettet: das ist
+                // ein Umstand des Laufs, kein Befund ueber die Datei. Der Koordinator darf daraus keinen
+                // Speichermerker machen (F-M611/F-M659).
+                LastFillInconclusive = true;
             }
 
             LogUtil.Normal(

@@ -96,6 +96,9 @@ internal static class Program
 
         public List<int> Calls { get; } = new();
 
+        /// <summary>F-M659: der Doppelgaenger extrahiert nichts, also ist sein Ausgang nie unklar.</summary>
+        public bool LastFillInconclusive => false;
+
         /// <summary>F-M433: what the files of a season say they carry.</summary>
         public HashSet<(string Language, bool HearingImpaired)> InFiles { get; } = new()
         {
