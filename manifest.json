@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.7",
-        "changelog": "v12.2.0.7: the tvst pack phase always reports itself — pairs and seasons when it runs, the reason (arrival run or switched-off source) when it does not (F-M645).",
+        "version": "12.2.0.8",
+        "changelog": "v12.2.0.8: every tvst season pack reports itself twice — built (episodes, zip name, target) and sent — and a pair without a container says why (F-M646).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.7-dev/Jellyfin.Plugin.SubdlSync_12.2.0.7.zip",
-        "checksum": "0db67789dd9ae625a94baafb3bba8b98",
-        "timestamp": "2026-11-20T07:21:40Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.8-dev/Jellyfin.Plugin.SubdlSync_12.2.0.8.zip",
+        "checksum": "ab99e9567332cafe15b6b61a285d9270",
+        "timestamp": "2026-11-20T07:33:50Z"
       }
     ]
   }
