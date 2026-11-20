@@ -899,10 +899,16 @@ public sealed class UploadPipeline : IPackFiller
             if (!IsArrivalRun && SourceAllowed(Configuration.SubtitleProvider.TvSubtitles))
             {
                 var tvstPaare = PlanPacksFromStore(completeSeasons, source: PackEntity.TvSubtitlesSource);
-                LogUtil.Detail(
+                // F-M645 (Operator-Anweisung 20.11.2026: „Unbedingt tvst packbildung und Uebermittlung
+                // loggen"): die Phase nennt sich auf der Normal-Stufe, nicht nur auf Detail. Vorher war
+                // sie im Betrieb unsichtbar — am 20.11. stand im ganzen Tageslog keine einzige
+                // tvst-Zeile, und ob gebaut, uebersprungen oder nichts zu bauen war, liess sich nicht
+                // unterscheiden.
+                LogUtil.Normal(
                     _logger,
-                    "[Sub Scribe] PACK — tvst phase: {Count} pair(s) to build (F-M643)",
-                    tvstPaare.Count);
+                    "[Sub Scribe] PACK — tvst phase: {Count} pair(s) to build, {Seasons} complete season(s) in scope (F-M643)",
+                    tvstPaare.Count,
+                    completeSeasons.Count);
 
                 foreach (var (packImdb, packSeason, packLang, packHi) in tvstPaare)
                 {
@@ -923,6 +929,20 @@ public sealed class UploadPipeline : IPackFiller
                             packImdb, packSeason, SeasonPack.LangTag(packLang, packHi), packCoordinator.LastRefusal);
                     }
                 }
+            }
+            else
+            {
+                // F-M645 (Operator-Anweisung 20.11.2026: „Unbedingt tvst packbildung und Uebermittlung
+                // loggen"): auch das Nichteintreten ist ein Befund und bekommt eine Zeile. Vorher gab es
+                // hier kein else — war der Upload-Schalter von tvsubtitles.net aus, schwieg die Phase
+                // vollstaendig, und aus dem Log war nicht zu entscheiden, ob nichts zu packen war oder
+                // die Quelle gar nicht darf.
+                LogUtil.Normal(
+                    _logger,
+                    "[Sub Scribe] PACK — tvst phase not entered: {Reason} (F-M645).",
+                    IsArrivalRun
+                        ? "this is an arrival run — a season pack of the library stays with a full run (F-M424)"
+                        : "the upload switch of tvsubtitles.net is off — nothing is built or sent for this source (F-M495)");
             }
 
             // F-M640: jede vollstaendige Staffel bekommt GENAU eine Zeile. Vorher fiel eine Staffel, fuer

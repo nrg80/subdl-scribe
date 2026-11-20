@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.2.0.6"
+version: "12.2.0.7"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.2.0.7: the tvst pack phase always reports itself — pairs and seasons when it runs, the reason (arrival run or switched-off source) when it does not (F-M645).
   v12.2.0.6: tvsubtitles.net season packs are now built in the run by the same collector as the SubDL packs — one zip of episode files into the site's season slot, only in a full run, on the existing pack switch (F-M643); a pack the source refused as a duplicate is remembered in its row with reason, date and content fingerprint and is not offered again until the content changes, while a pack that goes through carries UploadedAt (F-M644).
   v12.2.0.5: tvsubtitles.net carries season packs — one zip per language and variant into the site's season slot (episode=0), only while the pack switch is on, and a pack row per source so neither source overwrites the other (F-M641, F-M642).
   v12.2.0.4: the release group survives a file extension, and a bitmap-only file says so instead of staying silent (F-M430, F-M640).
